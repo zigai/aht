@@ -34,6 +34,7 @@ type scriptedProvider struct {
 	toolName string
 	toolArgs map[string]any
 	marker   string
+	callID   string
 
 	mu       sync.Mutex
 	requests []providerRequest
@@ -48,7 +49,11 @@ func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName strin
 		toolName: toolName,
 		toolArgs: toolArgs,
 		marker:   marker,
+		callID:   "call_compat",
 		requests: make([]providerRequest, 0, 2),
+	}
+	if protocol == protocolAnthropicMessages {
+		provider.callID = "tool_compat"
 	}
 	provider.server = httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(provider.server.Close)
@@ -126,8 +131,8 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		}
 		provider.writeToolCall(writer, body)
 	case 1:
-		if !requestContainsToolResult(provider.protocol, body, provider.toolCallID(), provider.marker) {
-			provider.fail(fmt.Errorf("%w: tool continuation does not contain valid tool result with marker %q for call %q", errInvalidProviderRequest, provider.marker, provider.toolCallID()))
+		if !requestContainsToolResult(provider.protocol, body, provider.callID, provider.marker) {
+			provider.fail(fmt.Errorf("%w: tool continuation does not contain valid tool result with marker %q for call %q", errInvalidProviderRequest, provider.marker, provider.callID))
 			http.Error(writer, "missing tool result", http.StatusBadRequest)
 			return
 		}
@@ -151,13 +156,6 @@ func (provider *scriptedProvider) validPath(path string) bool {
 	}
 }
 
-func (provider *scriptedProvider) toolCallID() string {
-	if provider.protocol == protocolAnthropicMessages {
-		return "tool_compat"
-	}
-	return "call_compat"
-}
-
 func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body []byte) {
 	arguments := mustJSON(provider.toolArgs)
 	stream := requestWantsStream(body)
@@ -166,7 +164,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 		if stream {
 			writeSSE(writer,
 				`{"type":"message_start","message":{"id":"msg_compat","type":"message","role":"assistant","content":[],"model":"compat","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`,
-				fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_compat","name":%q,"input":{}}}`, provider.toolName),
+				fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":%q,"name":%q,"input":{}}}`, provider.callID, provider.toolName),
 				fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%q}}`, arguments),
 				`{"type":"content_block_stop","index":0}`,
 				`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":1}}`,
@@ -174,9 +172,9 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 			)
 			return
 		}
-		writeJSON(writer, map[string]any{"id": "msg_compat", "type": "message", "role": "assistant", "model": "compat", "content": []any{map[string]any{"type": "tool_use", "id": "tool_compat", "name": provider.toolName, "input": provider.toolArgs}}, "stop_reason": "tool_use", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}})
+		writeJSON(writer, map[string]any{"id": "msg_compat", "type": "message", "role": "assistant", "model": "compat", "content": []any{map[string]any{"type": "tool_use", "id": provider.callID, "name": provider.toolName, "input": provider.toolArgs}}, "stop_reason": "tool_use", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}})
 	case protocolOpenAIChat:
-		call := map[string]any{"index": 0, "id": "call_compat", "type": "function", "function": map[string]any{"name": provider.toolName, "arguments": arguments}}
+		call := map[string]any{"index": 0, "id": provider.callID, "type": "function", "function": map[string]any{"name": provider.toolName, "arguments": arguments}}
 		if stream {
 			writeSSE(writer,
 				fmt.Sprintf(`{"id":"chatcmpl_compat","object":"chat.completion.chunk","created":1,"model":"compat","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[%s]},"finish_reason":null}]}`, mustJSON(call)),
@@ -187,7 +185,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 		}
 		writeJSON(writer, map[string]any{"id": "chatcmpl_compat", "object": "chat.completion", "created": 1, "model": "compat", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
 	case protocolOpenAIResponses:
-		item := map[string]any{"id": "fc_compat", "type": "function_call", "call_id": "call_compat", "name": provider.toolName, "arguments": arguments, "status": "completed"}
+		item := map[string]any{"id": "fc_compat", "type": "function_call", "call_id": provider.callID, "name": provider.toolName, "arguments": arguments, "status": "completed"}
 		if stream {
 			writeSSE(writer,
 				fmt.Sprintf(`{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":%s}`, mustJSON(item)),
@@ -409,7 +407,7 @@ func requestContainsToolResult(protocol providerProtocol, body []byte, callID st
 func containsJSONString(value any, expected string) bool {
 	switch typed := value.(type) {
 	case string:
-		return typed == expected
+		return strings.Contains(typed, expected)
 	case []any:
 		for _, item := range typed {
 			if containsJSONString(item, expected) {
@@ -445,6 +443,12 @@ func writeJSON(writer http.ResponseWriter, value any) {
 func writeSSE(writer http.ResponseWriter, events ...string) {
 	writer.Header().Set("Content-Type", "text/event-stream")
 	for _, event := range events {
+		var payload struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(event), &payload) == nil && payload.Type != "" {
+			_, _ = fmt.Fprintf(writer, "event: %s\n", payload.Type)
+		}
 		_, _ = fmt.Fprintf(writer, "data: %s\n\n", event)
 	}
 }
@@ -531,7 +535,7 @@ func TestScriptedProviderRejectsToolDeclarationInNonToolField(t *testing.T) {
 	}
 }
 
-func postProviderRequest(t *testing.T, url string, body string, wantStatus int) {
+func postProviderRequest(t *testing.T, url string, body string, wantStatus int) string {
 	t.Helper()
 
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
@@ -543,10 +547,15 @@ func postProviderRequest(t *testing.T, url string, body string, wantStatus int) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	data, readErr := io.ReadAll(response.Body)
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	if response.StatusCode != wantStatus {
 		t.Fatalf("response status = %d, want %d", response.StatusCode, wantStatus)
 	}
+	return string(data)
 }

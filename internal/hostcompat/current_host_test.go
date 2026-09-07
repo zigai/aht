@@ -159,9 +159,11 @@ func (host isolatedHost) assertVersion(t *testing.T) {
 	command := exec.Command(host.hostPath, host.contract.VersionArgs...)
 	command.Env = host.env
 	command.Dir = host.work
-	output, err := command.CombinedOutput()
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
 	if err != nil {
-		t.Fatalf("%s version probe failed: %v\n%s", host.contract.ID, err, output)
+		t.Fatalf("%s version probe failed: %v\n%s\n%s", host.contract.ID, err, output, stderr.Bytes())
 	}
 	if len(bytes.TrimSpace(output)) == 0 {
 		t.Fatalf("%s version probe returned no version", host.contract.ID)
@@ -174,6 +176,9 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 
 	toolName := lifecycleToolName(host.contract.ID)
 	host.provider = newScriptedProvider(t, host.contract.Protocol, toolName, lifecycleToolArgs(host.contract.ID), "aht-compat-marker")
+	if host.contract.ID == registry.HarnessOpenClaw {
+		host.provider.callID = "callcompat" // OpenClaw strips punctuation from tool IDs.
+	}
 	host.startTracker(t)
 	command, setup := host.lifecycleCommand(t)
 	for _, setupCommand := range setup {
@@ -232,7 +237,7 @@ func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("%s completed provider lifecycle without native observation evidence\n%s", host.contract.ID, hostOutput)
+			t.Fatalf("%s completed provider lifecycle without matching native session evidence\nsessions: %s\n%s", host.contract.ID, listOutput, hostOutput)
 		case <-ticker.C:
 		}
 	}
@@ -324,6 +329,7 @@ func (host isolatedHost) startTracker(t *testing.T) {
 		}
 	}
 }
+
 func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
 	t.Helper()
 
@@ -444,6 +450,7 @@ func summarizeProviderInput(value any) string {
 	}
 	return summary
 }
+
 func lifecycleToolName(id registry.Harness) string {
 	if id == registry.HarnessClaude {
 		return "Bash"
@@ -608,6 +615,7 @@ func (host isolatedHost) runAHT(t *testing.T, args ...string) []byte {
 	}
 	return output
 }
+
 func (host isolatedHost) configureKimiModel(t *testing.T, baseURL string) {
 	t.Helper()
 
@@ -672,6 +680,7 @@ func (host isolatedHost) configureOpenClawModel(t *testing.T, baseURL string) in
 		}
 	}
 	defaults := mapValue(mapValue(settings, "agents"), "defaults")
+	defaults["workspace"] = host.work
 	defaults["model"] = map[string]any{"primary": "aht-compat/compat"}
 	providers := mapValue(mapValue(settings, "models"), "providers")
 	providers["aht-compat"] = map[string]any{
@@ -710,6 +719,7 @@ func (host isolatedHost) startOpenClawGateway(t *testing.T, port int) {
 	}
 	command := exec.Command(host.hostPath, "gateway", "run", "--bind", "loopback", "--port", fmt.Sprint(port), "--auth", "none")
 	command.Env = host.env
+	command.Dir = host.work
 	command.Stdout = logFile
 	command.Stderr = logFile
 	if err := command.Start(); err != nil {
