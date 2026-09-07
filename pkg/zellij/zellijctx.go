@@ -56,7 +56,7 @@ func CurrentWithEnv(env Env) registry.MultiplexerContext {
 		var empty registry.MultiplexerContext
 		return empty
 	}
-	return registry.MultiplexerContext{ //nolint:exhaustruct // current environment only exposes session and pane identity
+	return registry.MultiplexerContext{ //nolint:exhaustruct_v5 // env exposes only session and pane
 		Kind: registry.MultiplexerZellij, SessionName: env.SessionName, PaneID: normalizePaneID(env.PaneID),
 	}
 }
@@ -152,12 +152,12 @@ func parsePanes(session string, output string) ([]mux.Pane, error) {
 			continue
 		}
 		paneID := "terminal_" + strconv.FormatUint(uint64(record.ID), 10)
-		location := registry.MultiplexerContext{ //nolint:exhaustruct // Zellij pane JSON does not expose process or TTY fields
+		location := registry.MultiplexerContext{ //nolint:exhaustruct_v5 // pane JSON lacks process and TTY
 			Kind: registry.MultiplexerZellij, SessionName: session,
 			TabID: strconv.Itoa(record.TabID), TabIndex: strconv.Itoa(record.TabPosition), TabName: record.TabName,
 			PaneID: paneID, PaneCurrentPath: record.PaneCWD,
 		}
-		panes = append(panes, mux.Pane{ //nolint:exhaustruct // Zellij CLI provides no process references or semantic activity
+		panes = append(panes, mux.Pane{ //nolint:exhaustruct_v5 // CLI lacks process references and activity
 			Location: location, Command: record.PaneCommand, CWD: record.PaneCWD, Title: record.Title,
 		})
 	}

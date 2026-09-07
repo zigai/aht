@@ -229,7 +229,7 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 		return observation, false
 	}
 
-	return registry.Observation{ //nolint:exhaustruct // hook reports only native activity and catalog resume metadata
+	return registry.Observation{ //nolint:exhaustruct_v5 // native activity and resume metadata only
 		Source:   registry.ObservationSourceNative,
 		Evidence: registry.ObservationEvidenceNativeEvent,
 		Harness:  registry.HarnessAgy,

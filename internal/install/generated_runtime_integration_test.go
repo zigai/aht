@@ -15,10 +15,11 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"go.yaml.in/yaml/v3"
+
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
-	"go.yaml.in/yaml/v3"
 )
 
 const generatedRuntimeSensitiveSentinel = "AHT_PHASE3_SENSITIVE_SENTINEL"
@@ -88,7 +89,7 @@ await hooks.afterRun({snapshot: {status: "failed", prompt: "`+generatedRuntimeSe
 		t.Setenv("AHT_CAPTURE", capture.path)
 		module := generatedArtifactContent(t, registry.HarnessOpenClaw, "index.js")
 		extra := map[string]string{
-			"node_modules/openclaw/package.json": `{"name":"openclaw","type":"module","exports":{"./plugin-sdk/plugin-entry":"./plugin-entry.js"}}`,
+			"node_modules/openclaw/package.json":    `{"name":"openclaw","type":"module","exports":{"./plugin-sdk/plugin-entry":"./plugin-entry.js"}}`,
 			"node_modules/openclaw/plugin-entry.js": `export function definePluginEntry(value) { return value; }`,
 		}
 		runNodeRuntime(t, "index.js", module, `

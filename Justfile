@@ -53,6 +53,10 @@ tidy:
 fix:
     {{ golangci_lint }} run --fix
 
+# Format Go source files
+format:
+    {{ golangci_lint }} fmt
+
 # Check code for lint issues
 lint:
     {{ golangci_lint }} run
@@ -62,6 +66,7 @@ vuln:
     go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 # Run all required non-mutating verification
 check: lint test race integration
+    {{ golangci_lint }} fmt --diff
     go mod tidy -diff
     go build -o /dev/null .
     just --fmt --check
@@ -169,3 +174,4 @@ release-major: _release-check _goreleaser-version-check
 alias release := release-patch
 
 alias cov := coverage
+alias fmt := format

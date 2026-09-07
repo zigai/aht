@@ -122,7 +122,7 @@ func CurrentWithEnv(env Env) registry.MultiplexerContext {
 		var empty registry.MultiplexerContext
 		return empty
 	}
-	return registry.MultiplexerContext{ //nolint:exhaustruct // current environment exposes only managed Herdr identity fields
+	return registry.MultiplexerContext{ //nolint:exhaustruct_v5 // env exposes only Herdr identity
 		Kind: registry.MultiplexerHerdr, ServerID: env.SocketPath, SessionName: env.SessionName,
 		WorkspaceID: env.WorkspaceID, TabID: env.TabID, PaneID: env.PaneID,
 	}
@@ -358,7 +358,7 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 		label := cmp.Or(agent.Agent, agent.Name, agent.Label, item.Agent, item.AgentName)
 		title := cmp.Or(item.Title, item.PaneTitle, item.Label, label)
 
-		location := registry.MultiplexerContext{ //nolint:exhaustruct // snapshot omits server, window, TTY, and process fields
+		location := registry.MultiplexerContext{ //nolint:exhaustruct_v5 // snapshot lacks server, window, TTY, and process
 			Kind:            registry.MultiplexerHerdr,
 			SessionName:     session,
 			WorkspaceID:     item.WorkspaceID,
@@ -368,7 +368,7 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 			PaneID:          paneID,
 			PaneCurrentPath: cwd,
 		}
-		panes = append(panes, mux.Pane{ //nolint:exhaustruct // process references are enriched by pane process-info below
+		panes = append(panes, mux.Pane{ //nolint:exhaustruct_v5 // process references populated below
 			Location:    location,
 			CWD:         cwd,
 			Command:     label,

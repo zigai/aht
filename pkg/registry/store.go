@@ -211,9 +211,9 @@ func newSession(id string, harness Harness, now time.Time) Session {
 		CWD:               "",
 		ProjectRoot:       "",
 		Process:           nil,
-		Tmux:              TmuxContext{},        //nolint:exhaustruct // zero-value location is the new session default
-		Multiplexer:       MultiplexerContext{}, //nolint:exhaustruct // zero-value location is the new session default
-		Observations:      Observations{},       //nolint:exhaustruct // no evidence has been observed yet
+		Tmux:              TmuxContext{},        //nolint:exhaustruct_v5 // new sessions have no location
+		Multiplexer:       MultiplexerContext{}, //nolint:exhaustruct_v5 // new sessions have no location
+		Observations:      Observations{},       //nolint:exhaustruct_v5 // no evidence yet
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		PresenceChangedAt: time.Time{},

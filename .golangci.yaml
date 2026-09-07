@@ -36,7 +36,7 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exhaustruct
+    - exhaustruct_v5
     - exptostd
     - fatcontext
     - forcetypeassert
@@ -209,9 +209,9 @@ linters:
         linters: [mnd]
 
       - path: "internal/cli/.*\\.go"
-        linters: [exhaustruct]
+        linters: [exhaustruct_v5]
       - path: "internal/config/.*\\.go"
-        linters: [exhaustruct]
+        linters: [exhaustruct_v5]
       - path: "internal/install/.*\\.go"
         linters: [dupl]
 
@@ -222,7 +222,7 @@ linters:
         linters: [goconst]
 
       - path: "_test\\.go"
-        linters: [exhaustruct]
+        linters: [exhaustruct_v5]
 
       - path: ".*_test\\.go"
         linters: [decorder, funcorder]

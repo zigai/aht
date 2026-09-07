@@ -14,10 +14,10 @@ import (
 	"time"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/tmux"
+	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/pkg/tmux"
 )
 
 //nolint:cyclop,gocognit // end-to-end setup and assertions intentionally cover all four agents in one server
@@ -169,7 +169,6 @@ func activityValue(value *registry.Activity) registry.Activity {
 	}
 	return *value
 }
-
 
 func shortTmuxDirectory() (string, error) {
 	return os.MkdirTemp("/tmp", "aht-observer-tmux-")

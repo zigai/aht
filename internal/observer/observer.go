@@ -357,7 +357,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if entry, ok := catalogByPID[process.PID]; ok && entry.Harness == harnessID {
 			identity = registry.ObservationIdentity{SessionID: entry.SessionID, SessionPath: entry.SessionPath}
 		}
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct // process observations intentionally omit unrelated evidence dimensions
+		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // process evidence only
 			Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
 			Harness: harnessID, Identity: identity, ProcessPresent: &present, Process: processIdentity(process), ObservedAt: at,
 		})
@@ -381,12 +381,12 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		}
 		if location.Kind == registry.MultiplexerTmux {
 			tmuxContext := location.TmuxContext()
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct // tmux observations intentionally omit unrelated evidence dimensions
+			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // tmux location only
 				Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
 				Harness: harnessID, Process: processIdentity(process), Tmux: &tmuxContext, ObservedAt: at,
 			})
 		} else {
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct // multiplexer observations intentionally omit unrelated evidence dimensions
+			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // multiplexer location only
 				Source: registry.ObservationSourceMultiplexer, Evidence: registry.ObservationEvidenceMultiplexerLocation,
 				Harness: harnessID, Process: processIdentity(process), Multiplexer: &location, ObservedAt: at,
 			})
@@ -409,7 +409,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 			continue
 		}
 		metadata := &registry.CatalogMetadata{ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD, ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current}
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct // catalog observations intentionally omit unrelated evidence dimensions
+		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // catalog metadata only
 			Source: registry.ObservationSourceCatalog, Evidence: registry.ObservationEvidenceCatalogMetadata,
 			Harness: entry.Harness, Identity: registry.ObservationIdentity{SessionID: entry.SessionID, SessionPath: entry.SessionPath},
 			Catalog: metadata, ObservedAt: at,
@@ -432,7 +432,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		}
 		if eligible {
 			present := false
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct // absence observations intentionally omit unrelated evidence dimensions
+			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // process absence only
 				Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
 				Harness: key.harness, ProcessPresent: &present, Process: processIdentity(old.process), ObservedAt: at,
 			})
@@ -603,8 +603,8 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 		if !ok {
 			continue
 		}
-		emptyContext := registry.MultiplexerContext{}             //nolint:exhaustruct // zero-value context represents no supported multiplexer pane
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct // location observations intentionally omit unrelated evidence dimensions
+		emptyContext := registry.MultiplexerContext{}             //nolint:exhaustruct_v5 // zero value means no multiplexer pane
+		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // location evidence only
 			Source: registry.ObservationSourceMultiplexer, Evidence: registry.ObservationEvidenceMultiplexerLocation,
 			Harness: harnessID, Process: processIdentity(process), Multiplexer: &emptyContext, ObservedAt: at,
 		})
@@ -645,12 +645,12 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 			return empty, false
 		}
 		present := false
-		return registry.Observation{ //nolint:exhaustruct // absence observations intentionally omit unrelated evidence dimensions
+		return registry.Observation{ //nolint:exhaustruct_v5 // process absence only
 			Source:         registry.ObservationSourceProcess,
 			Evidence:       registry.ObservationEvidenceProcessPresence,
 			Harness:        session.Harness,
 			ProcessPresent: &present,
-			//nolint:exhaustruct // only PID and start identity identify the retired process
+			//nolint:exhaustruct_v5 // PID and start identity suffice
 			Process: &registry.ProcessIdentity{
 				PID:           session.Process.PID,
 				StartIdentity: session.Process.StartIdentity,
@@ -669,7 +669,7 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 		}
 
 		present := false
-		return registry.Observation{ //nolint:exhaustruct // absence observations intentionally omit unrelated evidence dimensions
+		return registry.Observation{ //nolint:exhaustruct_v5 // process absence only
 			Source:         registry.ObservationSourceProcess,
 			Evidence:       registry.ObservationEvidenceProcessPresence,
 			Harness:        session.Harness,
@@ -683,7 +683,7 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 }
 
 func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, identity *registry.ProcessIdentity) registry.Session {
-	session := registry.Session{ //nolint:exhaustruct // synthetic session only carries policy inputs
+	session := registry.Session{ //nolint:exhaustruct_v5 // policy inputs only
 		Harness: harnessID,
 		Process: identity,
 	}
@@ -717,7 +717,7 @@ func unavailableScreenState(manifestLoader agentstate.Loader, sessions []registr
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
 	unknown := registry.ActivityUnknown
 	screen := &registry.ScreenObservation{Activity: unknown, Authority: string(agentstate.AuthorityScreen), Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at}
-	observation := registry.Observation{ //nolint:exhaustruct // unavailable evidence intentionally has no terminal data
+	observation := registry.Observation{ //nolint:exhaustruct_v5 // no terminal data available
 		Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
 		Activity: &unknown, Process: identity, Screen: screen, ObservedAt: at,
 	}
@@ -748,7 +748,7 @@ func (o *Observer) detectScreenState(ctx context.Context, sessions []registry.Se
 			FallbackForIntegration: fallback, FallbackReason: fallbackReason,
 			Process: *identity, ObservedAt: at,
 		}
-		observation := registry.Observation{ //nolint:exhaustruct // semantic multiplexer state contains no terminal contents
+		observation := registry.Observation{ //nolint:exhaustruct_v5 // semantic state omits terminal contents
 			Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
 			Activity: pane.Activity, Process: identity, Screen: screen, ObservedAt: at,
 		}
@@ -1042,7 +1042,7 @@ func (o *Observer) captureScreenState(ctx context.Context, session registry.Sess
 	observedAt := screenObservationTime(at, o.now().UTC())
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
 	screen := &registry.ScreenObservation{Activity: decision.Activity, Authority: string(agentstate.AuthorityScreen), Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
-	observation := registry.Observation{ //nolint:exhaustruct // screen observations intentionally contain no terminal contents
+	observation := registry.Observation{ //nolint:exhaustruct_v5 // screen evidence omits terminal contents
 		Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
 		Activity: &decision.Activity, Process: identity, Screen: screen, ObservedAt: observedAt,
 	}

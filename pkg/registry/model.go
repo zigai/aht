@@ -388,9 +388,9 @@ func (k MultiplexerKind) IsValid() bool {
 	return false
 }
 
-func (c TmuxContext) Empty() bool { return c == (TmuxContext{}) } //nolint:exhaustruct // comparing against the zero value is intentional
+func (c TmuxContext) Empty() bool { return c == (TmuxContext{}) } //nolint:exhaustruct_v5 // zero-value comparison
 
-func (c MultiplexerContext) Empty() bool { return c == (MultiplexerContext{}) } //nolint:exhaustruct // comparing against the zero value is intentional
+func (c MultiplexerContext) Empty() bool { return c == (MultiplexerContext{}) } //nolint:exhaustruct_v5 // zero-value comparison
 
 func MultiplexerFromTmux(c TmuxContext) MultiplexerContext {
 	if c.Empty() {

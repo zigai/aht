@@ -122,7 +122,7 @@ func ContextFromEnv(env Env) registry.TmuxContext {
 }
 
 func ListPanes(ctx context.Context) ([]Pane, error) {
-	return ListPanesWithOptions(ctx, ListOptions{ //nolint:exhaustruct // default options leave Run and ServerProcesses nil
+	return ListPanesWithOptions(ctx, ListOptions{ //nolint:exhaustruct_v5 // nil Run and ServerProcesses use defaults
 		Env: Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
 	})
 }
