@@ -618,15 +618,15 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 	return observations
 }
 
-// absenceObservationsForUnobservedSessions retires live registry sessions whose recorded
+// absenceObservationsForUnobservedSessions retires nonterminal registry sessions whose recorded
 // process identity no longer exists but which the tracked-process sweep cannot observe
 // because they were never matched to a process-presence observation. Such sessions are
 // created purely by harness lifecycle hooks; without this sweep their presence stays
-// "live" forever after the process dies.
+// "live" or "unknown" forever after the process dies.
 func absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
 	observations := make([]registry.Observation, 0)
 	for _, session := range sessions {
-		if session.Presence != registry.PresenceLive || session.Observations.Process != nil {
+		if session.Presence == registry.PresenceGone || session.Observations.Process != nil {
 			continue
 		}
 
