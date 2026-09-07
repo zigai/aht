@@ -67,9 +67,9 @@ jobs:
           - harness: kimi-code
             install: uv tool install kimi-cli
           - harness: grok
-            install: npm install --global @xai/grok-cli
+            install: curl -fsSL https://x.ai/cli/install.sh | bash
           - harness: goose
-            install: curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash
+            install: curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
           - harness: pi
             install: npm install --global @earendil-works/pi-coding-agent
           - harness: omp
@@ -104,6 +104,10 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Set up Bun for OMP
+        if: matrix.harness == 'omp'
+        uses: oven-sh/setup-bun@v2
+
       - name: Install current harness into runner prefix
         shell: bash
         run: |
@@ -112,6 +116,7 @@ jobs:
           ${{ matrix.install }}
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
 
       - name: Exercise installed integration and host
         shell: bash
