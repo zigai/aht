@@ -23,7 +23,7 @@ integration:
         echo "Error: tmux is required to run integration tests. Install tmux and retry." >&2
         exit 1
     fi
-    go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./internal/systemtest ./pkg/tmux
+    go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./internal/systemtest ./internal/testtmux ./pkg/tmux
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:

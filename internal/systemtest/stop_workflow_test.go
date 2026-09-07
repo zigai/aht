@@ -10,13 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/processinfo"
+	"github.com/zigai/aht/internal/testtmux"
 	"github.com/zigai/aht/pkg/registry"
 	"github.com/zigai/aht/pkg/tmux"
 )
@@ -101,9 +100,7 @@ func testStopOwnedProcess(t *testing.T) {
 }
 
 func testStopOwnedTmuxTarget(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
+	testtmux.Executable(t)
 	root, err := shortSystemTestRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -123,18 +120,11 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 	}
 	environment := systemTestEnvironment(filepath.Join(root, "home"), filepath.Join(root, "config"), stateDir)
 
-	socketDirectory, err := os.MkdirTemp("/tmp", "aht-stop-tmux-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
-	targetSocket := filepath.Join(socketDirectory, "target.sock")
-	controlSocket := filepath.Join(socketDirectory, "control.sock")
-	startTmuxAgentSession(t, targetSocket, "target", codexBinary, filepath.Join(stateDir, "target-pane.json"))
-	startTmuxAgentSession(t, controlSocket, "control", codexBinary, filepath.Join(stateDir, "control-pane.json"))
+	targetServer := startTmuxAgentSession(t, "target", codexBinary, filepath.Join(stateDir, "target-pane.json"))
+	controlServer := startTmuxAgentSession(t, "control", codexBinary, filepath.Join(stateDir, "control-pane.json"))
 
-	targetPane := requireTmuxPane(t, targetSocket)
-	controlPane := requireTmuxPane(t, controlSocket)
+	targetPane := requireTmuxPane(t, targetServer.Socket)
+	controlPane := requireTmuxPane(t, controlServer.Socket)
 	if targetPane.Tmux.PaneID != controlPane.Tmux.PaneID {
 		t.Fatalf("tmux fixtures must share a pane id across distinct servers: target=%q control=%q", targetPane.Tmux.PaneID, controlPane.Tmux.PaneID)
 	}
@@ -149,8 +139,8 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Method != "tmux-interrupt" || stopped.Results[0].Target != targetPane.Tmux.PaneID {
 		t.Fatalf("tmux stop result = %#v", stopped)
 	}
-	waitForTmuxSessionExit(t, targetSocket, "target")
-	assertTmuxSessionRunning(t, controlSocket, "control")
+	waitForTmuxSessionExit(t, targetServer, "target")
+	assertTmuxSessionRunning(t, controlServer, "control")
 }
 
 func requireProcessStartIdentity(t *testing.T, pid int) string {
@@ -242,14 +232,10 @@ func waitForSystemTestCommandExit(t *testing.T, process *runningTestCommand) {
 	}
 }
 
-func startTmuxAgentSession(t *testing.T, socket string, session string, binary string, storePath string) {
+func startTmuxAgentSession(t *testing.T, session string, binary string, storePath string) *testtmux.Server {
 	t.Helper()
 	shellCommand := "exec " + harnesspkg.ShellQuote(binary) + " --store " + harnesspkg.ShellQuote(storePath) + " manage tracker run --quiet"
-	command := exec.CommandContext(t.Context(), "tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", session, shellCommand)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start tmux session %q: %v; output=%q", session, err, output)
-	}
-	t.Cleanup(func() { killTmuxServer(socket) })
+	return testtmux.New(t, "-s", session, shellCommand)
 }
 
 func requireTmuxPane(t *testing.T, socket string) tmux.Pane {
@@ -311,41 +297,29 @@ func sessionForTmuxSocket(t *testing.T, sessions []registry.Session, socket stri
 	return registry.Session{}
 }
 
-func waitForTmuxSessionExit(t *testing.T, socket string, session string) {
+func waitForTmuxSessionExit(t *testing.T, server *testtmux.Server, session string) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		command := exec.CommandContext(t.Context(), "tmux", "-S", socket, "has-session", "-t", session)
+		command := server.Command(t.Context(), "has-session", "-t", session)
 		if err := command.Run(); err != nil {
 			return
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("tmux session %q on %q did not exit", session, socket)
+			t.Fatalf("tmux session %q on %q did not exit", session, server.Socket)
 		case <-ticker.C:
 		}
 	}
 }
 
-func assertTmuxSessionRunning(t *testing.T, socket string, session string) {
+func assertTmuxSessionRunning(t *testing.T, server *testtmux.Server, session string) {
 	t.Helper()
-	command := exec.CommandContext(t.Context(), "tmux", "-S", socket, "has-session", "-t", session)
+	command := server.Command(t.Context(), "has-session", "-t", session)
 	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("control tmux session %q on %q exited: %v; output=%q", session, socket, err, output)
-	}
-}
-
-func killTmuxServer(socket string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	pidOut, _ := exec.CommandContext(ctx, "tmux", "-S", socket, "display-message", "-p", "#{pid}").Output()
-	_ = exec.CommandContext(ctx, "tmux", "-S", socket, "kill-server").Run()
-	if pidStr := strings.TrimSpace(string(pidOut)); pidStr != "" {
-		if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
+		t.Fatalf("control tmux session %q on %q exited: %v; output=%q", session, server.Socket, err, output)
 	}
 }

@@ -3,11 +3,9 @@
 package tmux
 
 import (
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
+
+	"github.com/zigai/aht/internal/testtmux"
 )
 
 func TestTmuxFormatQuotesBareVariableNames(t *testing.T) {
@@ -24,50 +22,16 @@ func TestTmuxFormatQuotesBareVariableNames(t *testing.T) {
 }
 
 func TestTmuxFormatWithRealTmuxEscapedFields(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not installed")
-	}
-
-	socketDirectory, err := shortTmuxDirectory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
-	socket := filepath.Join(socketDirectory, "tmux.sock")
+	server := testtmux.New(t, "sleep", "60")
 	weirdValue := "value with spaces 'quote $dollar back\\slash and-more"
-	ctx := context.Background()
-	defer func() {
-		_ = exec.CommandContext(ctx, "tmux", "-S", socket, "kill-server").Run()
-	}()
-
-	if output, err := exec.CommandContext(
-		ctx,
-		"tmux",
-		"-S",
-		socket,
-		"new-session",
-		"-d",
-	).CombinedOutput(); err != nil {
-		t.Fatalf("starting tmux session: %v: %s", err, output)
-	}
-	if output, err := exec.CommandContext(ctx, "tmux", "-S", socket, "set-option", "-gq", "@aht_weird", weirdValue).CombinedOutput(); err != nil {
-		t.Fatalf("setting tmux option: %v: %s", err, output)
-	}
-
-	output, err := exec.CommandContext(
-		ctx,
-		"tmux",
-		"-S",
-		socket,
+	server.Run(t, "set-option", "-gq", "@aht_weird", weirdValue)
+	output := server.Run(t,
 		"display-message",
 		"-p",
 		"-F",
 		tmuxFormat([]string{"@aht_weird"}),
-	).CombinedOutput()
-	if err != nil {
-		t.Fatalf("displaying tmux option: %v: %s", err, output)
-	}
-	fields, err := parseTmuxFields(string(output), 1)
+	)
+	fields, err := parseTmuxFields(output, 1)
 	if err != nil {
 		t.Fatalf("parseTmuxFields returned error: %v; output=%q", err, output)
 	}

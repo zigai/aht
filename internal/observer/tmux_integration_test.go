@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/processinfo"
+	"github.com/zigai/aht/internal/testtmux"
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
 	"github.com/zigai/aht/pkg/tmux"
@@ -25,17 +25,8 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux integration test")
 	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	socketDirectory, err := shortTmuxDirectory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
-	socket := filepath.Join(socketDirectory, "tmux.sock")
+	var server *testtmux.Server
 	ctx := context.Background()
-	defer func() { _ = exec.CommandContext(context.Background(), "tmux", "-S", socket, "kill-server").Run() }()
 
 	tests := []struct {
 		harness registry.Harness
@@ -59,14 +50,14 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		if err := os.Chmod(script, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if output, err := exec.CommandContext(ctx, "tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", sessionName, script).CombinedOutput(); err != nil {
-			t.Fatalf("start tmux session %s: %v: %s", sessionName, err, output)
+		if server == nil {
+			server = testtmux.New(t, "-s", sessionName, script)
+		} else {
+			server.Run(t, "new-session", "-d", "-s", sessionName, script)
 		}
-		output, err := exec.CommandContext(ctx, "tmux", "-S", socket, "display-message", "-p", "-t", sessionName, "-F", "#{pane_id}|#{pane_tty}|#{pane_pid}").Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		fields := strings.Split(strings.TrimSpace(string(output)), "|")
+		socket := server.Socket
+		output := server.Run(t, "display-message", "-p", "-t", sessionName, "-F", "#{pane_id}|#{pane_tty}|#{pane_pid}")
+		fields := strings.Split(strings.TrimSpace(output), "|")
 		if len(fields) != 3 {
 			t.Fatalf("tmux pane fields = %#v", fields)
 		}
@@ -168,8 +159,4 @@ func activityValue(value *registry.Activity) registry.Activity {
 		return ""
 	}
 	return *value
-}
-
-func shortTmuxDirectory() (string, error) {
-	return os.MkdirTemp("/tmp", "aht-observer-tmux-")
 }
