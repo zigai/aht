@@ -218,7 +218,7 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 	}
 }
 
-func TestUpdateCurrentRunningServiceIsIdempotent(t *testing.T) {
+func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
@@ -232,11 +232,37 @@ func TestUpdateCurrentRunningServiceIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Changed || !result.Installed || !result.Current || !result.Running || result.Message != "already enabled" {
-		t.Fatalf("unexpected idempotent update result: %+v", result)
+	if !result.Changed || !result.Installed || !result.Current || !result.Running || result.Message != "restarted" {
+		t.Fatalf("unexpected update result: %+v", result)
 	}
-	if len(executor.calls) != 1 || executor.calls[0][1] != "--user" || executor.calls[0][2] != "is-active" {
-		t.Fatalf("manager calls = %#v, want status only", executor.calls)
+	if len(executor.calls) != 2 || executor.calls[1][2] != "restart" {
+		t.Fatalf("manager calls = %#v, want status and restart", executor.calls)
+	}
+}
+
+func TestUpdateCurrentRunningServiceDryRunAndFailure(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	executor := &recordingExecutor{}
+	manager := New(executor)
+	if _, err := manager.Install(t.Context(), options); err != nil {
+		t.Fatal(err)
+	}
+	executor.calls = nil
+	options.DryRun = true
+	result, err := manager.Update(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed || result.Message != "would restart" || len(executor.calls) != 1 {
+		t.Fatalf("dry run = %+v, calls = %#v", result, executor.calls)
+	}
+	options.DryRun = false
+	executor.calls = nil
+	executor.failAt = 2
+	result, err = manager.Update(t.Context(), options)
+	if !errors.Is(err, errManagerTestFailure) || result.Changed {
+		t.Fatalf("failed restart = %+v, error = %v", result, err)
 	}
 }
 

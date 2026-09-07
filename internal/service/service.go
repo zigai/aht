@@ -197,7 +197,7 @@ func (s *Service) apply(ctx context.Context, options Options, update bool) (Resu
 	result.Installed = installed
 	result.Current = installed && string(content) == backend.content()
 	if installed && result.Current {
-		return s.applyCurrent(ctx, options, backend, result)
+		return s.applyCurrent(ctx, options, backend, result, update)
 	}
 	if installed && !result.Current && !update {
 		result.Message = "stale; run update"
@@ -233,7 +233,7 @@ func (s *Service) apply(ctx context.Context, options Options, update bool) (Resu
 	return result, nil
 }
 
-func (s *Service) applyCurrent(ctx context.Context, options Options, backend backend, result Result) (Result, error) {
+func (s *Service) applyCurrent(ctx context.Context, options Options, backend backend, result Result, update bool) (Result, error) {
 	running, _, err := backend.running(ctx, s.executor)
 	if err != nil {
 		return result, err
@@ -251,6 +251,19 @@ func (s *Service) applyCurrent(ctx context.Context, options Options, backend bac
 	}
 
 	result.Running = true
+	// An unchanged service definition does not imply an unchanged executable.
+	// Explicit updates restart the tracker so an installed replacement takes effect.
+	if update {
+		if options.DryRun {
+			result.Message = "would restart"
+			return result, nil
+		}
+		if err := backend.restart(ctx, s.executor); err != nil {
+			return result, err
+		}
+		result.Changed, result.Message = true, "restarted"
+		return result, nil
+	}
 	result.Message = "already enabled"
 	return result, nil
 }
