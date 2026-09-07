@@ -14,7 +14,6 @@ const heartbeatIntervalMs = 10000;
 // Native consumer seam: https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/extensibility/extensions/types.ts
 type ExtensionContext = {
   readonly cwd?: string | undefined;
-  readonly hasUI?: boolean | undefined;
   readonly isIdle?: () => boolean;
   readonly sessionManager?: {
     readonly getSessionFile?: () => string | undefined;
@@ -318,7 +317,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function activateRoot(ctx: ExtensionContext): boolean {
-    if (ctx?.hasUI !== true || isSubagentSession(ctx)) return false;
+    if (isSubagentSession(ctx)) return false;
     rootSession = true;
     currentContext = ctx;
     return true;

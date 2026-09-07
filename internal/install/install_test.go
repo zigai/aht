@@ -945,7 +945,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 		`retryableErrorPattern`,
 		`entry?.type === "session_init"`,
 		"if (isSubagentSession(ctx)) return Promise.resolve()",
-		"AHT_INTEGRATION_VERSION=13",
+		"AHT_INTEGRATION_VERSION=14",
 	}, "oh-my-pi extension")
 	if strings.Contains(result.Snippet, `on("input"`) {
 		t.Fatalf("OMP extension must not treat local interactive input as agent activity: %q", result.Snippet)
