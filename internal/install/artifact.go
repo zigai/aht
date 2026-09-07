@@ -104,13 +104,13 @@ func readJSONObject(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return map[string]any{"hooks": map[string]any{}}, nil
+			return make(map[string]any), nil
 		}
 
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return map[string]any{"hooks": map[string]any{}}, nil
+		return make(map[string]any), nil
 	}
 
 	var config map[string]any
@@ -118,7 +118,7 @@ func readJSONObject(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	if config == nil {
-		config = map[string]any{"hooks": map[string]any{}}
+		config = make(map[string]any)
 	}
 
 	return config, nil

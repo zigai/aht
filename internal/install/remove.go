@@ -118,17 +118,30 @@ func removePlanAction(ctx context.Context, options Options, harnessID registry.H
 
 func removeJSONCommandHooks(options Options, harnessID registry.Harness, plan harnesspkg.JSONCommandHookInstallPlan) (Result, error) {
 	return removeJSONHooks(options, harnessID, plan.Path, func(config map[string]any) bool {
-		hooks, ok := config["hooks"].(map[string]any)
-		if !ok {
-			return false
-		}
 		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID))
-		changed := false
-		for _, spec := range plan.Hooks {
-			changed = removeManagedJSONHookEvent(hooks, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
+		changed := removeWrappedCommandHooks(config, plan, isManaged)
+		if plan.HooksAtRoot {
+			for _, spec := range plan.Hooks {
+				changed = removeManagedJSONHookEvent(config, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
+			}
 		}
 		return changed
 	})
+}
+
+func removeWrappedCommandHooks(config map[string]any, plan harnesspkg.JSONCommandHookInstallPlan, isManaged func(string) bool) bool {
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, spec := range plan.Hooks {
+		changed = removeManagedJSONHookEvent(hooks, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
+	}
+	if changed && len(hooks) == 0 {
+		delete(config, "hooks")
+	}
+	return changed
 }
 
 func removeCursorJSONHooks(options Options, harnessID registry.Harness, plan harnesspkg.CursorJSONHookInstallPlan) (Result, error) {

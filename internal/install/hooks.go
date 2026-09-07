@@ -33,7 +33,7 @@ func commandHookGroup(command string, matcher string, statusMessage string, time
 }
 
 func upsertManagedCommandHookGroup(
-	config map[string]any,
+	hooks map[string]any,
 	event string,
 	matcher string,
 	command string,
@@ -41,12 +41,6 @@ func upsertManagedCommandHookGroup(
 	timeoutSeconds int,
 	isManaged func(string) bool,
 ) bool {
-	hooks, ok := config["hooks"].(map[string]any)
-	if !ok {
-		hooks = make(map[string]any)
-		config["hooks"] = hooks
-	}
-
 	groups, ok := hooks[event].([]any)
 	if !ok {
 		groups = nil

@@ -55,14 +55,14 @@ func New() droidHarness {
 }
 
 func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{ // Factory's current hooks reference makes hooks.json the primary
-		// user-scope file; settings.json is retained only as a fallback.
+	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
 		Path:              filepath.Join(droidConfigDir(), "hooks.json"),
 		Source:            droidIntegrationSource,
 		Label:             "droid hooks",
 		ConfigLabel:       "factory config",
 		StatusMessage:     "",
 		OmitStatusMessage: true,
+		HooksAtRoot:       true,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,

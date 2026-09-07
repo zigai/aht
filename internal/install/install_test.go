@@ -1279,10 +1279,8 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	initial := `{
   "description": "user hooks",
   "foreign_setting": {"enabled": true},
-  "hooks": {
-    "PreToolUse": [{"matcher": "Execute", "hooks": [{"type": "command", "command": "` + userCommand + `"}]}],
-    "CustomEvent": [{"hooks": [{"type": "command", "command": "/opt/local/bin/custom"}]}]
-  }
+  "PreToolUse": [{"matcher": "Execute", "hooks": [{"type": "command", "command": "` + userCommand + `"}]}],
+  "CustomEvent": [{"hooks": [{"type": "command", "command": "/opt/local/bin/custom"}]}]
 }`
 	if err := os.WriteFile(hooksPath, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
@@ -1308,14 +1306,15 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 
 	data := readTestFile(t, result.Path, "reading droid hooks")
 	config := decodeTestJSONObject(t, data, "droid hooks")
-	hooks := requireTestHooks(t, config)
+	if _, wrapped := config["hooks"]; wrapped {
+		t.Fatal("standalone Droid hooks.json must contain events at the root")
+	}
+	hooks := config
 	if config["description"] != "user hooks" || !strings.Contains(string(data), userCommand) {
 		t.Fatalf("Droid install did not preserve foreign settings/hooks: %s", data)
 	}
-	if _, ok := hooks["CustomEvent"]; !ok {
-		t.Fatalf("Droid install removed a foreign hook event: %#v", hooks)
-	}
 	requireTestHookEvents(t, hooks, []string{
+		"CustomEvent",
 		hookEventSessionStart,
 		"UserPromptSubmit",
 		"PreToolUse",

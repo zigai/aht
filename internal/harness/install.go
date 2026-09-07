@@ -86,6 +86,7 @@ type JSONCommandHookInstallPlan struct {
 	ConfigLabel       string
 	StatusMessage     string
 	OmitStatusMessage bool
+	HooksAtRoot       bool
 	Hooks             []CommandHookInstallSpec
 }
 

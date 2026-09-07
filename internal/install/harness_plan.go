@@ -141,10 +141,21 @@ func applyJSONCommandHooks(
 
 	return func(config map[string]any) bool {
 		changed := false
+		hooks := config
+		if plan.HooksAtRoot {
+			changed = removeWrappedCommandHooks(config, plan, isManaged)
+		} else {
+			var ok bool
+			hooks, ok = config["hooks"].(map[string]any)
+			if !ok {
+				hooks = make(map[string]any)
+				config["hooks"] = hooks
+			}
+		}
 		for _, hook := range plan.Hooks {
 			timeoutSeconds := harnesspkg.HookTimeoutSecondsFor(harness, hook.Event)
 			updated := upsertManagedCommandHookGroup(
-				config,
+				hooks,
 				hook.Event,
 				hook.Matcher,
 				hook.Command,

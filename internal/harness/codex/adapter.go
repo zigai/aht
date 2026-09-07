@@ -58,6 +58,7 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 		ConfigLabel:       "codex config",
 		StatusMessage:     "Recording agent session",
 		OmitStatusMessage: false,
+		HooksAtRoot:       false,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,

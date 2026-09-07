@@ -57,6 +57,7 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 		ConfigLabel:       "claude config",
 		StatusMessage:     "",
 		OmitStatusMessage: false,
+		HooksAtRoot:       false,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
