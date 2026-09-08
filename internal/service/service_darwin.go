@@ -106,7 +106,12 @@ func (b *darwinBackend) unload(ctx context.Context, executor CommandExecutor) er
 func (b *darwinBackend) running(ctx context.Context, executor CommandExecutor) (bool, string, error) {
 	output, err := executor.Run(ctx, "launchctl", "print", b.domain+"/"+darwinLabel)
 	if err == nil {
-		return true, "running", nil
+		for line := range strings.Lines(string(output)) {
+			if state, ok := strings.CutPrefix(strings.TrimSpace(line), "state = "); ok {
+				return state == "running", state, nil
+			}
+		}
+		return false, "", fmt.Errorf("%w: launchctl did not report a state", errInstalledArguments)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false, "", fmt.Errorf("checking launchd service status: %w", err)

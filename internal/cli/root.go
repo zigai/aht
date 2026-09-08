@@ -207,6 +207,7 @@ func (app *application) newManageCommand() *cobra.Command {
 	}}
 	command.AddCommand(
 		app.newSetupCommand(),
+		app.newUpgradeCommand(),
 		app.newIntegrationsCommand(),
 		app.newTrackerCommand(),
 		app.newStateCommand(),

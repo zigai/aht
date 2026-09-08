@@ -211,7 +211,7 @@ func (s *Service) apply(ctx context.Context, options Options, update bool) (Resu
 		}
 		return result, nil
 	}
-	if err := writeAtomic(result.Path, []byte(backend.content()), 0o644); err != nil {
+	if err := writeAtomic(result.Path, []byte(backend.content())); err != nil {
 		return result, s.rollbackDefinition(ctx, backend, result.Path, content, installed, err)
 	}
 	if err := backend.reload(ctx, s.executor); err != nil {
@@ -281,7 +281,7 @@ func (s *Service) rollbackDefinition(
 
 	failures := []error{cause}
 	if previouslyInstalled {
-		if err := writeAtomic(path, previous, 0o644); err != nil {
+		if err := writeAtomic(path, previous); err != nil {
 			return errors.Join(cause, fmt.Errorf("restoring service definition: %w", err))
 		}
 		if err := backend.reload(rollbackCtx, s.executor); err != nil {
@@ -307,7 +307,7 @@ func (s *Service) rollbackDefinition(
 	return errors.Join(failures...)
 }
 
-func writeAtomic(path string, content []byte, mode os.FileMode) error {
+func writeAtomic(path string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), serviceDirectoryMode); err != nil {
 		return fmt.Errorf("create service directory: %w", err)
 	}
@@ -317,7 +317,7 @@ func writeAtomic(path string, content []byte, mode os.FileMode) error {
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
-	if err := tmp.Chmod(mode); err != nil {
+	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("set service mode: %w", err)
 	}

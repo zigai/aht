@@ -76,8 +76,20 @@ check: lint test race integration
 build:
     go build -o aht .
 
-# Install the project
+# Install the binary and refresh existing integrations and background tracking
 install:
+    #!/usr/bin/env sh
+    set -eu
+    go install .
+    aht_install_dir=$(go env GOBIN)
+    if [ -z "$aht_install_dir" ]; then
+        aht_go_path=$(go env GOPATH)
+        aht_install_dir="${aht_go_path%%:*}/bin"
+    fi
+    "$aht_install_dir/aht" manage upgrade
+
+# Install only the executable
+install-binary:
     go install .
 
 # Remove build artifacts
