@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/internal/service"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -909,4 +910,76 @@ func observeTestSession(t *testing.T, store registry.Store, sessionID string, at
 		t.Fatal(err)
 	}
 	return session
+}
+
+func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing.T) {
+	rows := [][]string{
+		{"codex", "false", "/home/user/.codex/hooks.json", "codex hooks already installed"},
+		{"grok", "false", "/home/user/.grok/hooks/aht-state.json", "grok hooks already installed"},
+		{"openclaw", "false", "/home/user/.local/state/aht/integrations/openclaw/aht-state", "OpenClaw plugin already installed; next: restart the harness to load updated plugin code; registration and permissions preserved"},
+	}
+
+	// In standard 120-column terminal, Path must be allocated enough space to fit all paths without truncation/wrapping.
+	cols120 := integrationResultTableColumns(rows, 120)
+	longestPath := len("/home/user/.local/state/aht/integrations/openclaw/aht-state")
+	if cols120[2].width < longestPath {
+		t.Fatalf("Path column width in 120-column terminal = %d, want >= %d", cols120[2].width, longestPath)
+	}
+	if cols120[2].wrap == nil {
+		t.Fatal("Path column wrap function should be set to wrapHumanPath")
+	}
+
+	// In 200-column terminal, Path fits completely and Result gets all remaining space (120 cols).
+	cols200 := integrationResultTableColumns(rows, 200)
+	if cols200[2].width < longestPath {
+		t.Fatalf("Path column width in 200-column terminal = %d, want >= %d", cols200[2].width, longestPath)
+	}
+	if cols200[3].width < 120 {
+		t.Fatalf("Result column width in 200-column terminal = %d, want >= 120", cols200[3].width)
+	}
+
+	// In 220-column terminal, both Path and Result columns fit completely without any wrapping.
+	cols220 := integrationResultTableColumns(rows, 220)
+	if cols220[2].width < longestPath {
+		t.Fatalf("Path column width in 220-column terminal = %d, want >= %d", cols220[2].width, longestPath)
+	}
+	longestResult := len("OpenClaw plugin already installed; next: restart the harness to load updated plugin code; registration and permissions preserved")
+	if cols220[3].width < longestResult {
+		t.Fatalf("Result column width in 220-column terminal = %d, want >= %d", cols220[3].width, longestResult)
+	}
+	colsNarrow := integrationResultTableColumns(rows, 60)
+	if colsNarrow[2].width < 4 {
+		t.Fatalf("Path column width in narrow terminal = %d, want >= 4", colsNarrow[2].width)
+	}
+	if colsNarrow[3].width < 6 {
+		t.Fatalf("Result column width in narrow terminal = %d, want >= 6", colsNarrow[3].width)
+	}
+}
+
+func TestWriteIntegrationResultsRendersFullPathsWithoutWrapping(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &application{stdout: &stdout}
+	results := []install.Result{
+		{Harness: "grok", Changed: false, Path: "/home/user/.grok/hooks/aht-state.json", Message: "grok hooks already installed"},
+		{Harness: "openclaw", Changed: false, Path: "/home/user/.local/state/aht/integrations/openclaw/aht-state", Message: "OpenClaw plugin already installed"},
+	}
+	if err := app.writeIntegrationResults(results, false); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "/home/user/.grok/hooks/aht-state.json") {
+		t.Fatalf("output wrapped or truncated grok path:\n%s", output)
+	}
+	if !strings.Contains(output, "/home/user/.local/state/aht/integrations/openclaw/aht-state") {
+		t.Fatalf("output wrapped or truncated openclaw path:\n%s", output)
+	}
+	if strings.Contains(output, "restart the harness") {
+		t.Fatalf("output unexpectedly contains restart instructions for unchanged plugin:\n%s", output)
+	}
+	for line := range strings.SplitSeq(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "on" || trimmed == "e" || trimmed == "-state.ts" {
+			t.Fatalf("found fragmented path line %q in output:\n%s", trimmed, output)
+		}
+	}
 }

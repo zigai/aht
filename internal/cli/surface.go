@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
@@ -272,12 +273,6 @@ func failedIntegrationResult(harnessID registry.Harness, message string, err err
 }
 
 func (app *application) writeIntegrationResults(results []install.Result, showContent bool) error {
-	const (
-		integrationResultAgentWidth   = 12
-		integrationResultChangedWidth = 7
-		integrationResultPathWidth    = 36
-		integrationResultMessageWidth = 59
-	)
 	rows := make([][]string, 0, len(results))
 	for _, result := range results {
 		message := result.Message
@@ -289,10 +284,8 @@ func (app *application) writeIntegrationResults(results []install.Result, showCo
 		}
 		rows = append(rows, []string{result.Harness, strconv.FormatBool(result.Changed), result.Path, message})
 	}
-	if err := app.writeWrappedHumanTable(
-		[]humanColumn{{heading: "Agent", width: integrationResultAgentWidth}, {heading: "Changed", width: integrationResultChangedWidth}, {heading: "Path", width: integrationResultPathWidth}, {heading: "Result", width: integrationResultMessageWidth}},
-		rows,
-	); err != nil {
+	columns := integrationResultTableColumns(rows, app.maxLineWidth())
+	if err := app.writeWrappedHumanTable(columns, rows); err != nil {
 		return err
 	}
 	if !showContent {
@@ -310,6 +303,77 @@ func (app *application) writeIntegrationResults(results []install.Result, showCo
 		}
 	}
 	return nil
+}
+
+func integrationResultTableColumns(rows [][]string, maxWidth int) []humanColumn {
+	const (
+		integrationResultColumns = 4
+	)
+	if maxWidth <= 0 {
+		maxWidth = humanLineWidth
+	}
+	maxLen := []int{len("Agent"), len("Changed"), len("Path"), len("Result")}
+	for _, row := range rows {
+		for i, cell := range row {
+			if i < len(maxLen) {
+				maxLen[i] = max(maxLen[i], text.StringWidth(cell))
+			}
+		}
+	}
+
+	agentWidth := maxLen[0]
+	changedWidth := maxLen[1]
+	gapsTotal := (integrationResultColumns - 1) * humanColumnGap
+	fixedTotal := agentWidth + changedWidth + gapsTotal
+	available := maxWidth - fixedTotal
+
+	pathWidth, resultWidth := allocateIntegrationResultWidths(maxLen[2], maxLen[3], available)
+
+	return []humanColumn{
+		{heading: "Agent", width: agentWidth},
+		{heading: "Changed", width: changedWidth},
+		{heading: "Path", width: pathWidth, wrap: wrapHumanPath},
+		{heading: "Result", width: resultWidth},
+	}
+}
+
+func allocateIntegrationResultWidths(pathNeeded, resultNeeded, available int) (int, int) {
+	const (
+		minPathWidth   = 36
+		minResultWidth = 30
+	)
+	pathMin := min(pathNeeded, minPathWidth)
+	resultMin := min(resultNeeded, minResultWidth)
+
+	switch {
+	case available >= pathNeeded+resultNeeded:
+		return pathNeeded, resultNeeded
+	case available >= pathNeeded+resultMin:
+		return pathNeeded, available - pathNeeded
+	case available > pathMin+resultMin:
+		extra := available - pathMin - resultMin
+		pathUnmet := pathNeeded - pathMin
+		resultUnmet := resultNeeded - resultMin
+		totalUnmet := pathUnmet + resultUnmet
+		if totalUnmet == 0 {
+			return pathMin, resultMin
+		}
+		pathAdd := min(pathUnmet, extra*pathUnmet/totalUnmet)
+		resultAdd := min(resultUnmet, extra-pathAdd)
+		remaining := extra - pathAdd - resultAdd
+		if remaining > 0 && pathMin+pathAdd < pathNeeded {
+			canAdd := min(remaining, pathNeeded-(pathMin+pathAdd))
+			pathAdd += canAdd
+			remaining -= canAdd
+		}
+		if remaining > 0 && resultMin+resultAdd < resultNeeded {
+			canAdd := min(remaining, resultNeeded-(resultMin+resultAdd))
+			resultAdd += canAdd
+		}
+		return pathMin + pathAdd, resultMin + resultAdd
+	default:
+		return pathMin, resultMin
+	}
 }
 
 func selectedHarnesses(args []string, emptyMeansAll bool) ([]registry.Harness, error) {
