@@ -156,6 +156,18 @@ If no harness names are provided, integrations for all supported harnesses are i
 
 ---
 
+### `aht manage upgrade`
+
+Refresh already-installed AHT integrations and the managed tracker after replacing
+the binary:
+
+```sh
+aht manage upgrade
+aht manage upgrade --dry-run
+```
+
+---
+
 ### `aht manage integrations`
 
 Manage lifecycle hooks and extensions across supported coding-agent harnesses.
