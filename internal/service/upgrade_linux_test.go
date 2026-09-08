@@ -65,7 +65,7 @@ func verifyTrackerUpgrade(t *testing.T, stopped, stale, dryRun bool) {
 	}
 	previous := want
 	if stale {
-		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: 7", "version: 6"), "/tmp/new aht", "/tmp/old aht")
+		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: 8", "version: 7"), "/tmp/new aht", "/tmp/old aht")
 	}
 	path := filepath.Join(dir, "systemd", "user", linuxUnitName)
 	if err := writeAtomic(path, []byte(previous)); err != nil {

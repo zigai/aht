@@ -9,7 +9,141 @@ const ahtBin = {{BINARY}};
 const currentSessionSource = {{SOURCE}};
 const heartbeatIntervalMs = 10000;
 
-{{TYPESCRIPT_QUEUE}}
+// tmux inspection alone has a five-second deadline plus a one-second pipe
+// drain in aht. Allow that budget and the atomic state write to finish before
+// terminating the reporter. Never block Pi's event handlers on disk I/O.
+const commandTimeoutMs = 7000;
+const commandKillGraceMs = 1000;
+const maxPendingReports = 64;
+const pendingCommands: string[][] = [];
+let commandDrain: Promise<void> | undefined;
+let shutdownDeadline: number | undefined;
+let reportingContext: ExtensionContext | undefined;
+let reportingAPI: ExtensionAPI | undefined;
+let lastReportingFailure: string | undefined;
+let reportingDegraded = false;
+
+function warnReporting(reason: string): void {
+  if (reportingDegraded && lastReportingFailure === reason) return;
+  lastReportingFailure = reason;
+  reportingDegraded = true;
+  const message = `aht: ${reason}. Session tracking may be stale. Use /aht-status for details.`;
+  // Native UI owns the terminal. Raw console output is erased by TUI redraws.
+  // Custom entries retain safe diagnostics without adding them to model context.
+  try {
+    reportingAPI?.appendEntry?.("aht-reporting", { at: new Date().toISOString(), reason, message });
+  } catch {
+    // The session file can be on the same full/unavailable disk as AHT's store.
+    // Keep the diagnostic in memory and still show it through the native UI.
+  }
+  if (reportingContext?.hasUI) {
+    reportingContext.ui?.setStatus?.("aht", "aht: tracking degraded (/aht-status)");
+    reportingContext.ui?.notify(message, "warning");
+  }
+}
+
+function reportingRecovered(): void {
+  if (!reportingDegraded) return;
+  reportingDegraded = false;
+  if (reportingContext?.hasUI) reportingContext.ui?.setStatus?.("aht", undefined);
+}
+
+function restoreReportingFailure(ctx: ExtensionContext): void {
+  const entries = ctx.sessionManager?.getEntries?.();
+  if (!entries) return;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== "custom" || entry.customType !== "aht-reporting") continue;
+    const data = entry.data;
+    if (typeof data === "object" && data !== null && "reason" in data &&
+        typeof data.reason === "string" && data.reason.length <= 256) {
+      lastReportingFailure = data.reason;
+      return;
+    }
+  }
+}
+
+function reportExitReason(stderr: string, code: number | null, signal: string | null): string {
+  // Never retain raw stderr: it can contain paths, payloads or terminal escapes.
+  if (/no space left on device|ENOSPC/i.test(stderr)) return "state write failed: disk is full";
+  if (/disk quota exceeded|EDQUOT/i.test(stderr)) return "state write failed: disk quota exceeded";
+  if (/permission denied|EACCES|EPERM/i.test(stderr)) return "state write failed: permission denied";
+  if (/read-only file system|EROFS/i.test(stderr)) return "state write failed: filesystem is read-only";
+  if (/input\/output error|EIO\b/i.test(stderr)) return "state write failed: disk I/O error";
+  if (/locking store|waiting for store lock/i.test(stderr)) return "report could not acquire the state lock";
+  if (/invalid.*store|decoding store|schema.version/i.test(stderr)) return "report failed: invalid state store";
+  return signal ? `report terminated by ${signal}` : `report exited with code ${code}`;
+}
+
+function runCommand(args: string[]): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(ahtBin, args, { stdio: ["ignore", "ignore", "pipe"] });
+      let stderr = "";
+      let failed = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk: string) => {
+        // Drain all output but retain at most 4 KiB for safe classification.
+        stderr += chunk.slice(0, Math.max(0, 4096 - stderr.length));
+      });
+      const timeout = setTimeout(() => {
+        failed = true;
+        warnReporting(`report timed out after ${commandTimeoutMs / 1000}s (disk or state lock may be busy)`);
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => child.kill("SIGKILL"), commandKillGraceMs);
+      }, commandTimeoutMs);
+      child.once("error", (error: NodeJS.ErrnoException) => {
+        failed = true;
+        warnReporting(error.code === "ENOENT" ? "reporter executable is missing; reinstall the Pi integration" :
+          error.code === "EACCES" ? "reporter executable is not executable" : "could not start reporter executable");
+      });
+      child.once("close", (code, signal) => {
+        clearTimeout(timeout);
+        clearTimeout(killTimer);
+        if (!failed) {
+          if (code === 0) reportingRecovered();
+          else warnReporting(reportExitReason(stderr, code, signal));
+        }
+        resolve();
+      });
+    } catch {
+      warnReporting("could not start reporter executable");
+      resolve();
+    }
+  });
+}
+
+// Own one referenced child and a bounded FIFO, preserving enqueue-time identity
+// and the newest state on overload. Always reap before starting another report.
+function enqueueCommand(args: string[]): Promise<void> {
+  if (pendingCommands.length >= maxPendingReports) {
+    pendingCommands.shift();
+    warnReporting("report queue is full; oldest pending state update was dropped");
+  }
+  pendingCommands.push(args);
+  if (!commandDrain) {
+    commandDrain = (async () => {
+      try {
+        let next: string[] | undefined;
+        while ((next = pendingCommands.shift()) !== undefined) {
+          await runCommand(next);
+          // Once shutdown has spent one reporter budget draining, supersede
+          // remaining intermediate states with the final presence observation.
+          // Avoid spending a full reporter timeout on every queued update.
+          if (shutdownDeadline !== undefined && Date.now() >= shutdownDeadline && pendingCommands.length > 1) {
+            pendingCommands.splice(0, pendingCommands.length - 1);
+          }
+        }
+      } catch {
+        warnReporting("report queue failed");
+      } finally {
+        commandDrain = undefined;
+      }
+    })();
+  }
+  return commandDrain;
+}
 
 
 // Native consumer seam: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md
@@ -17,12 +151,17 @@ type ExtensionContext = {
   readonly mode?: "tui" | "rpc" | "json" | "print" | undefined;
   readonly cwd?: string | undefined;
   readonly hasUI?: boolean | undefined;
+  readonly ui?: {
+    readonly notify: (message: string, type: "info" | "warning" | "error") => void;
+    readonly setStatus?: (key: string, text: string | undefined) => void;
+  };
   readonly isIdle?: () => boolean;
   readonly sessionManager?: {
     readonly getSessionFile?: () => string | undefined;
     readonly getSessionId?: () => string | undefined;
     readonly getCwd?: () => string | undefined;
     readonly getBranch?: () => readonly { readonly type: string }[];
+    readonly getEntries?: () => readonly { readonly type: string; readonly customType?: string; readonly data?: unknown }[];
   };
 };
 type NativeEvent = {
@@ -42,6 +181,8 @@ type NativeEvent = {
 };
 type ExtensionAPI = {
   on(name: string, handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>): void;
+  appendEntry?(customType: string, data: { at: string; reason: string; message: string }): void;
+  registerCommand?(name: string, options: { description: string; handler: (args: string, ctx: ExtensionContext) => Promise<void> }): void;
 };
 
 // Native event payloads enter only here; fields not consumed by reporting never
@@ -158,6 +299,7 @@ function resolveActivity(event: NativeEvent, willContinue = false): string {
 function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent): void {
   const observedAt = new Date().toISOString();
   if (ctx) {
+    reportingContext = ctx;
     updateSessionRef(ctx);
   }
 
@@ -185,12 +327,23 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
   enqueueCommand(args);
 }
 export default function (pi: ExtensionAPI) {
+  reportingAPI = pi;
+  pi.registerCommand?.("aht-status", {
+    description: "Show AHT reporting health and the last failure",
+    handler: async (_args, ctx) => {
+      const status = reportingDegraded ? "AHT reporting is degraded" : "AHT reporting has no current failure";
+      const lastFailure = lastReportingFailure ? `\nLast failure: ${lastReportingFailure}.` : "";
+      if (ctx.hasUI) ctx.ui?.notify(`${status}.${lastFailure}\nTracker health: run aht manage doctor in a terminal.`, reportingDegraded ? "warning" : "info");
+    },
+  });
   const on = (name: string, handler: (event: NativeEvent, ctx: ExtensionContext) => void | Promise<void>): void => {
     pi.on(name, (event, ctx) => handler(parseEvent(event), ctx));
   };
   on("session_start", (event: NativeEvent, ctx: ExtensionContext) => {
     stopHeartbeat();
+    shutdownDeadline = undefined;
     lastTurnActivity = undefined;
+    restoreReportingFailure(ctx);
     report("idle", ctx, event);
   });
 
@@ -239,6 +392,7 @@ export default function (pi: ExtensionAPI) {
 
   on("session_shutdown", async (event: NativeEvent, ctx: ExtensionContext) => {
     stopHeartbeat();
+    shutdownDeadline = Date.now() + commandTimeoutMs + commandKillGraceMs;
     report("gone", ctx, event);
     await commandDrain;
   });

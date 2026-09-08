@@ -51,7 +51,7 @@ func TestRenderSystemdUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# aht managed observer service\n# version: 7\n[Unit]\nDescription=AHT observer\n\n[Service]\nExecStart=\"/tmp/agent sessions\" --store /tmp/state.json manage tracker run --interval 3s --grace-period 0s --quiet\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
+	want := "# aht managed observer service\n# version: 8\n[Unit]\nDescription=AHT observer\nStartLimitIntervalSec=0\n\n[Service]\nExecStart=\"/tmp/agent sessions\" --store /tmp/state.json manage tracker run --interval 3s --grace-period 0s --quiet\nRestart=on-failure\nRestartSec=30s\n\n[Install]\nWantedBy=default.target\n"
 	if got != want {
 		t.Fatalf("rendered unit = %q, want %q", got, want)
 	}
@@ -213,7 +213,7 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "# "+ManagedMarker) || !strings.Contains(string(content), "# version: 7") || !strings.Contains(string(content), " manage tracker run ") {
+	if !strings.Contains(string(content), "# "+ManagedMarker) || !strings.Contains(string(content), "# version: 8") || !strings.Contains(string(content), " manage tracker run ") {
 		t.Fatalf("updated service did not migrate command surface: %s", content)
 	}
 }

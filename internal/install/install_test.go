@@ -885,7 +885,7 @@ func TestInstallPiWritesExtension(t *testing.T) {
 		`on("ui_prompt_end"`,
 		`report(ctx.isIdle?.() ? "idle" : "running", ctx, event)`,
 		"AHT_INTEGRATION_ID=pi",
-		"AHT_INTEGRATION_VERSION=13",
+		"AHT_INTEGRATION_VERSION=14",
 		`"report", "pi"`,
 		`"--observed-at", observedAt`,
 		"addEvent(args, event?.type)",

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	ManagedVersion            = 7
+	ManagedVersion            = 8
 	ManagedMarker             = "aht managed observer service"
 	defaultInterval           = 300 * time.Millisecond
 	serviceDirectoryMode      = 0o755
@@ -356,8 +356,8 @@ func isManaged(content string) bool {
 	}
 	for line := range strings.Lines(content) {
 		switch strings.TrimSpace(line) {
-		case "# version: 2", "# version: 3", "# version: 4", "# version: 5", "# version: 6", "# version: 7",
-			"<!-- version: 2 -->", "<!-- version: 3 -->", "<!-- version: 4 -->", "<!-- version: 5 -->", "<!-- version: 6 -->", "<!-- version: 7 -->":
+		case "# version: 2", "# version: 3", "# version: 4", "# version: 5", "# version: 6", "# version: 7", "# version: 8",
+			"<!-- version: 2 -->", "<!-- version: 3 -->", "<!-- version: 4 -->", "<!-- version: 5 -->", "<!-- version: 6 -->", "<!-- version: 7 -->", "<!-- version: 8 -->":
 			return true
 		}
 	}

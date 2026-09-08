@@ -33,10 +33,14 @@ func RenderSystemdUnit(options Options) (string, error) {
 		"# version: " + strconv.Itoa(ManagedVersion),
 		"[Unit]",
 		"Description=AHT observer",
+		// Keep trying after recoverable persistence failures such as a full disk.
+		// RestartSec bounds the retry rate without a permanent start-limit stop.
+		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",
 		"ExecStart=" + systemdArg(normalized.Binary) + " --store " + systemdArg(normalized.StorePath) + " manage tracker run --interval " + normalized.Interval.String() + " --grace-period " + normalized.GracePeriod.String() + " --quiet",
 		"Restart=on-failure",
+		"RestartSec=30s",
 		"",
 		"[Install]",
 		"WantedBy=default.target",
