@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -83,7 +82,7 @@ func TestLaunchAgentArgumentParsing(t *testing.T) {
 			}
 			recovered, err := recoverOptions(args, options.Binary)
 			if err != nil || recovered.StorePath != path {
-				t.Fatal(fmt.Sprintf("options = %+v, %v", recovered, err))
+				t.Fatalf("options = %+v, %v", recovered, err)
 			}
 		})
 	}
