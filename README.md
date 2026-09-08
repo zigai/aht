@@ -18,7 +18,7 @@ Supported harnesses: [`claude`](https://docs.anthropic.com/en/docs/agents-and-to
 [`cline`](https://github.com/cline/cline), [`kimi-code`](https://kimi.moonshot.cn),
 [`goose`](https://github.com/block/goose),
 [`agy`](https://github.com/google-antigravity/antigravity-cli),
-[`kilo`](https://github.com/kilo-org/kilocode), and
+[`kilo`](https://github.com/kilo-org/kilocode),
 [`droid`](https://factory.ai).
 
 ## Installation
