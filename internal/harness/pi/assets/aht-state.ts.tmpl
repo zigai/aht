@@ -14,6 +14,7 @@ const heartbeatIntervalMs = 10000;
 
 // Native consumer seam: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md
 type ExtensionContext = {
+  readonly mode?: "tui" | "rpc" | "json" | "print" | undefined;
   readonly cwd?: string | undefined;
   readonly hasUI?: boolean | undefined;
   readonly isIdle?: () => boolean;
@@ -164,6 +165,9 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
   args.push(transition === "gone" ? "--presence" : "--activity", transition);
   args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
   args.push("--attribute", `aht_integration=${currentSessionSource}`);
+  if (ctx?.mode === "tui" || ctx?.mode === "rpc" || ctx?.mode === "json" || ctx?.mode === "print") {
+    args.push("--attribute", `aht_interaction_mode=${ctx.mode}`);
+  }
   if (currentSessionId) {
     args.push("--session-id", currentSessionId);
   }

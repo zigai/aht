@@ -13,6 +13,7 @@ const heartbeatIntervalMs = 10000;
 
 // Native consumer seam: https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/extensibility/extensions/types.ts
 type ExtensionContext = {
+  readonly mode?: "tui" | "rpc" | "json" | "print" | undefined;
   readonly cwd?: string | undefined;
   readonly isIdle?: () => boolean;
   readonly sessionManager?: {
@@ -174,6 +175,9 @@ function report(
   }
   args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
   args.push("--attribute", `aht_integration=${currentSessionSource}`);
+  if (ctx?.mode === "tui" || ctx?.mode === "rpc" || ctx?.mode === "json" || ctx?.mode === "print") {
+    args.push("--attribute", `aht_interaction_mode=${ctx.mode}`);
+  }
   addAttribute(args, "omp_event", event?.type);
   addAttribute(args, "omp_reason", event?.reason);
   addAttribute(args, "omp_tool_name", event?.toolName);
