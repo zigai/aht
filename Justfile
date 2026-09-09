@@ -67,7 +67,7 @@ lint:
 
 # Scan reachable dependencies for known vulnerabilities
 vuln:
-    go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # Run all required non-mutating verification
 check: lint test race integration
     {{ golangci_lint }} fmt --diff
