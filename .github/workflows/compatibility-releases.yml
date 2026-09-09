@@ -1,0 +1,132 @@
+name: Release compatibility
+
+on:
+  schedule:
+    - cron: "32 * * * *"
+  workflow_dispatch:
+    inputs:
+      harness:
+        description: 'Harness ID to check, or all'
+        default: all
+        type: string
+      force:
+        description: 'Retest the current stable version even if its major/minor was checked'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+# Serialize detection through state publication, including manual retries.
+concurrency:
+  group: compatibility-releases
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Detect new major/minor versions
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AHT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AHT_COMPAT_WORK: ${{ runner.temp }}/release-plan
+          AHT_COMPAT_SELECTION: ${{ inputs.harness || 'all' }}
+          AHT_COMPAT_FORCE: ${{ inputs.force || false }}
+        run: go run ./internal/tools/compatibility detect
+
+      - name: Save release plan
+        uses: actions/upload-artifact@v6
+        with:
+          name: compatibility-release-plan
+          path: ${{ runner.temp }}/release-plan/plan.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+  hosts:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    uses: ./.github/workflows/compatibility-host.yml
+    with:
+      harness: ${{ matrix.harness }}
+      version: ${{ matrix.version }}
+
+  record:
+    if: always() && needs.detect.result == 'success'
+    needs: [detect, hosts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download plan
+        uses: actions/download-artifact@v7
+        with:
+          name: compatibility-release-plan
+          path: ${{ runner.temp }}/release-state
+
+      - name: Download host results
+        if: needs.detect.outputs.changed == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: current-*-diagnostics
+          path: ${{ runner.temp }}/release-state
+          merge-multiple: true
+
+      - name: Merge completed results and summarize
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AHT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AHT_COMPAT_WORK: ${{ runner.temp }}/release-state
+        run: go run ./internal/tools/compatibility finish
+
+      - name: Persist release state
+        uses: actions/upload-artifact@v6
+        with:
+          name: compatibility-release-state-v1
+          path: ${{ runner.temp }}/release-state/state.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+      - name: Require successful detection and selected checks
+        env:
+          FAILED: ${{ steps.record.outputs.failed }}
+          HOSTS_RESULT: ${{ needs.hosts.result }}
+        run: |
+          test "$FAILED" = false
+          test "$HOSTS_RESULT" = success || test "$HOSTS_RESULT" = skipped

@@ -45,47 +45,11 @@ jobs:
           AHT_REQUIRE_MULTIPLEXERS: "1"
         run: go test -count=1 -tags=integration ./internal/observer -run '^TestCurrent(Zellij|Herdr)DiscoveryAndCapture$' -timeout 60s
 
-  current-hosts:
-    name: Current ${{ matrix.harness }}
+  weekly-hosts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        include:
-          - harness: claude
-            install: npm install --global @anthropic-ai/claude-code
-          - harness: codex
-            install: npm install --global @openai/codex
-          - harness: cursor
-            install: curl -fsSL https://cursor.com/install | bash
-          - harness: copilot
-            install: npm install --global @github/copilot
-          - harness: cline
-            install: npm install --global cline
-          - harness: kimi-code
-            install: uv tool install kimi-cli
-          - harness: grok
-            install: curl -fsSL https://x.ai/cli/install.sh | bash
-          - harness: goose
-            install: curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
-          - harness: pi
-            install: npm install --global @earendil-works/pi-coding-agent
-          - harness: omp
-            install: npm install --global @oh-my-pi/pi-coding-agent
-          - harness: opencode
-            install: npm install --global opencode-ai
-          - harness: agy
-            install: curl -fsSL https://antigravity.google/cli/install.sh | bash
-          - harness: kilo
-            install: npm install --global @kilocode/cli
-          - harness: droid
-            install: curl -fsSL https://app.factory.ai/cli | sh
-          - harness: openclaw
-            install: npm install --global openclaw
-          - harness: hermes
-            install: pipx install hermes-agent
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.weekly.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -96,49 +60,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
+      - name: Select weekly-only harnesses
+        id: weekly
+        run: go run ./internal/tools/compatibility weekly
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: false
-
-      - name: Set up Bun for OMP
-        if: matrix.harness == 'omp'
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install current harness into runner prefix
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$HOME/.cursor/bin:$PATH"
-          ${{ matrix.install }}
-          printf '%s\n' "$HOME/.local/bin" "$HOME/.cursor/bin" "$HOME/.grok/bin" >> "$GITHUB_PATH"
-
-      - name: Exercise installed integration and host
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/aht-compat-diagnostics"
-          AHT_COMPAT_HARNESS="${{ matrix.harness }}" go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 90s 2>&1 |
-            tee "$RUNNER_TEMP/aht-compat-diagnostics/${{ matrix.harness }}.log"
-
-      - name: Upload sanitized diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: current-${{ matrix.harness }}-diagnostics
-          path: ${{ runner.temp }}/aht-compat-diagnostics/${{ matrix.harness }}.log
-          if-no-files-found: ignore
-          retention-days: 14
+  current-hosts:
+    needs: weekly-hosts
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.weekly-hosts.outputs.matrix) }}
+    uses: ./.github/workflows/compatibility-host.yml
+    with:
+      harness: ${{ matrix.harness }}
 
   compatibility-summary:
     name: Compatibility summary
     if: always()
-    needs: [current-multiplexers, current-hosts]
+    needs: [current-multiplexers, weekly-hosts, current-hosts]
     runs-on: ubuntu-24.04
     steps:
       - name: Download host diagnostics
@@ -152,18 +91,19 @@ jobs:
       - name: Summarize matrix
         env:
           MULTIPLEXERS_RESULT: ${{ needs.current-multiplexers.result }}
+          WEEKLY_MATRIX: ${{ needs.weekly-hosts.outputs.matrix }}
           HOSTS_RESULT: ${{ needs.current-hosts.result }}
         shell: bash
         run: |
           set -euo pipefail
-          harnesses=(claude codex cursor copilot cline kimi-code grok goose pi omp opencode agy kilo droid openclaw hermes)
+          mapfile -t harnesses < <(jq -r '.include[].harness' <<< "$WEEKLY_MATRIX")
           {
             echo "## Weekly compatibility"
             echo
             echo "| Boundary | Result |"
             echo "| --- | --- |"
             echo "| Current multiplexers | $MULTIPLEXERS_RESULT |"
-            echo "| 16 current harnesses | $HOSTS_RESULT |"
+            echo "| Weekly-only harnesses | $HOSTS_RESULT |"
             echo
             echo "| Harness | Coverage | Observed version |"
             echo "| --- | --- | --- |"

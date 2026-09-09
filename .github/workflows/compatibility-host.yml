@@ -1,0 +1,82 @@
+name: Harness compatibility
+
+on:
+  workflow_call:
+    inputs:
+      harness:
+        required: true
+        type: string
+      version:
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: ${{ inputs.harness }} ${{ inputs.version || 'current' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AHT_COMPAT_HARNESS: ${{ inputs.harness }}
+      AHT_COMPAT_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set diagnostics directory
+        run: echo "AHT_COMPAT_WORK=$RUNNER_TEMP/aht-compat-diagnostics" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
+      - name: Set up Bun for OMP
+        if: inputs.harness == 'omp'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install harness
+        id: install
+        run: go run ./internal/tools/compatibility install
+
+      - name: Exercise installed integration and host
+        id: lifecycle
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 90s 2>&1 |
+            tee "$AHT_COMPAT_WORK/$AHT_COMPAT_HARNESS.log"
+
+      - name: Record result
+        if: always()
+        env:
+          AHT_INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          AHT_TEST_OUTCOME: ${{ steps.lifecycle.outcome }}
+        run: go run ./internal/tools/compatibility result
+
+      - name: Upload sanitized diagnostics and result
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: current-${{ inputs.harness }}-diagnostics
+          path: |
+            ${{ runner.temp }}/aht-compat-diagnostics/${{ inputs.harness }}.log
+            ${{ runner.temp }}/aht-compat-diagnostics/${{ inputs.harness }}-result.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
