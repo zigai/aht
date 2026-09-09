@@ -83,7 +83,8 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		return
 	}
 
-	if request.Method == http.MethodHead {
+	// Grok probes the provider origin before its first model request.
+	if request.Method == http.MethodHead || request.Method == http.MethodGet && request.URL.Path == "/" {
 		writer.WriteHeader(http.StatusOK)
 		return
 	}
@@ -471,6 +472,35 @@ func TestScriptedProviderRequiresToolResult(t *testing.T) {
 	}
 	if provider.Error() == nil {
 		t.Fatal("provider accepted a continuation without the tool marker")
+	}
+}
+
+func TestScriptedProviderRootProbeDoesNotAdvanceConversation(t *testing.T) {
+	provider := newScriptedProvider(t, protocolOpenAIResponses, "run_terminal_command", map[string]any{"command": "printf marker"}, "marker")
+	first := `{"tools":[{"type":"function","name":"run_terminal_command"}]}`
+	second := `{"input":[{"type":"function_call_output","call_id":"call_compat","output":"marker"}]}`
+	for _, body := range []string{first, second} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, provider.URL()+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := provider.server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("probe status = %d, want %d", response.StatusCode, http.StatusOK)
+		}
+		postProviderRequest(t, provider.URL()+"/v1/responses", body, http.StatusOK)
+	}
+	if err := provider.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Requests()) != 2 {
+		t.Fatalf("model request count = %d, want 2", len(provider.Requests()))
 	}
 }
 

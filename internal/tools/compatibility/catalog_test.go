@@ -158,7 +158,12 @@ func TestObservedVersionMatchesPin(t *testing.T) {
 	if !checkedVersion("    test.go:1: current goose: goose version 1.50.0\n", "goose", "v1.50.0") {
 		t.Fatal("rejected goose version")
 	}
-	for _, value := range []string{"0.153.40", "0.153.4-beta", "0.153.4+dev", "0.153.5", "x0.153.4"} {
+	for _, value := range []string{"GitHub Copilot CLI 1.0.83.", "GitHub Copilot CLI 1.0.83. Run 'copilot update' to check for updates."} {
+		if !checkedVersion("    test.go:1: current copilot: "+value+"\n", "copilot", "1.0.83") {
+			t.Errorf("rejected punctuated version %q", value)
+		}
+	}
+	for _, value := range []string{"0.153.40", "0.153.4-beta", "0.153.4+dev", "0.153.4.1", "0.153.4.beta", "0.153.4..", "0.153.5", "x0.153.4"} {
 		if checkedVersion("current codex: "+value, "codex", "0.153.4") {
 			t.Errorf("accepted %s", value)
 		}

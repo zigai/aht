@@ -214,7 +214,10 @@ func checkedVersion(log, id, version string) bool {
 			if start > 0 && versionCharacter(value[start-1]) {
 				continue
 			}
-			if end < len(value) && versionCharacter(value[end]) {
+			// Copilot ends its version sentence with a period. Allow that
+			// punctuation, while rejecting extra version components or suffixes.
+			suffix := strings.TrimPrefix(value[end:], ".")
+			if len(suffix) > 0 && versionCharacter(suffix[0]) {
 				continue
 			}
 			if strings.TrimPrefix(value[start:end], "v") == expected {
