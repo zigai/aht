@@ -25,6 +25,10 @@ integration:
     fi
     go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./internal/systemtest ./internal/testtmux ./pkg/tmux
 
+# Test release detection, state transitions, and workflow wiring
+compatibility-tests:
+    go test ./internal/tools/compatibility
+
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
     AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 90s
@@ -70,7 +74,7 @@ check: lint test race integration
     go mod tidy -diff
     go build -o /dev/null .
     just --fmt --check
-    {{ actionlint }} .github/workflows/ci.yml .github/workflows/compatibility.yml .github/workflows/exploration.yml .github/workflows/release.yml
+    {{ actionlint }} .github/workflows/*.yml
 
 # Build the project
 build:
