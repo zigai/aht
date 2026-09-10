@@ -443,7 +443,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		}
 		nextTracked[key] = old
 	}
-	absences := absenceObservationsForUnobservedSessions(knownSessions, processByPID, at)
+	absences := o.absenceObservationsForUnobservedSessions(knownSessions, processByPID, at)
 	observations = append(observations, absences...)
 	result.Gone += len(absences)
 	o.prunePendingScreenDecisions(current)
@@ -623,10 +623,27 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 // because they were never matched to a process-presence observation. Such sessions are
 // created purely by harness lifecycle hooks; without this sweep their presence stays
 // "live" or "unknown" forever after the process dies.
-func absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
+func (o *Observer) isProcessTracked(session registry.Session) bool {
+	if o == nil || session.Process == nil {
+		return false
+	}
+	for key := range o.tracked {
+		if key.harness == session.Harness && key.pid == session.Process.PID {
+			if key.start == "" || session.Process.StartIdentity == "" || key.start == session.Process.StartIdentity {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
 	observations := make([]registry.Observation, 0)
 	for _, session := range sessions {
-		if session.Presence == registry.PresenceGone || session.Observations.Process != nil {
+		if session.Presence == registry.PresenceGone {
+			continue
+		}
+		if o.isProcessTracked(session) {
 			continue
 		}
 

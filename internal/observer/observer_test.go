@@ -692,6 +692,120 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 	}
 }
 
+func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	at := time.Now().UTC().Add(-time.Minute)
+
+	store := registry.NewFileStore(path)
+	activity := registry.ActivityInterrupted
+	presence := registry.PresenceLive
+	present := false
+	process := processinfo.Process{PID: 2527379, StartIdentity: "boot:dead"}
+
+	start := registry.NativeLifecycleStart
+	// 1. Initial hook observation
+	_, err := store.Observe(context.Background(), registry.Observation{
+		Source:      registry.ObservationSourceNative,
+		Evidence:    registry.ObservationEvidenceNativeEvent,
+		Harness:     registry.HarnessOmp,
+		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
+		NativeEvent: "agent_start",
+		Lifecycle:   &start,
+		Presence:    &presence,
+		Activity:    &activity,
+		Process: &registry.ProcessIdentity{
+			PID:           process.PID,
+			StartIdentity: process.StartIdentity,
+		},
+		Tmux:       &registry.TmuxContext{Inside: true, SessionName: "0", PaneID: "%53"},
+		ObservedAt: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Prior process observation showing process is absent
+	_, err = store.Observe(context.Background(), registry.Observation{
+		Source:         registry.ObservationSourceProcess,
+		Evidence:       registry.ObservationEvidenceProcessPresence,
+		Harness:        registry.HarnessOmp,
+		Identity:       registry.ObservationIdentity{SessionID: "stale-session"},
+		ProcessPresent: &present,
+		Process: &registry.ProcessIdentity{
+			PID:           process.PID,
+			StartIdentity: process.StartIdentity,
+		},
+		ObservedAt: at.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. A subsequent start hook revived presence to live
+	_, err = store.Observe(context.Background(), registry.Observation{
+		Source:      registry.ObservationSourceNative,
+		Evidence:    registry.ObservationEvidenceNativeEvent,
+		Harness:     registry.HarnessOmp,
+		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
+		NativeEvent: "agent_start",
+		Lifecycle:   &start,
+		Presence:    &presence,
+		Activity:    &activity,
+		ObservedAt:  at.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Agent end hook with interrupted activity
+	_, err = store.Observe(context.Background(), registry.Observation{
+		Source:      registry.ObservationSourceNative,
+		Evidence:    registry.ObservationEvidenceNativeEvent,
+		Harness:     registry.HarnessOmp,
+		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
+		NativeEvent: "agent_end",
+		Activity:    &activity,
+		ObservedAt:  at.Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preSessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil || len(preSessions) != 1 || preSessions[0].Presence != registry.PresenceLive || preSessions[0].Observations.Process == nil {
+		t.Fatalf("precondition failed: %#v", preSessions)
+	}
+
+	// Run observer with no live processes
+	at = at.Add(10 * time.Second)
+	options := Options{
+		StorePath: path,
+		Now:       func() time.Time { return at },
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return nil, nil
+		},
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		HealthPath:  path + ".health",
+	}
+
+	result, err := New(options).RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Gone != 1 {
+		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
+	}
+
+	sessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone || sessions[0].Activity != nil {
+		t.Fatalf("session was not retired: %#v", sessions)
+	}
+}
+
 func TestResolveHarnessIgnoresLaterArguments(t *testing.T) {
 	t.Parallel()
 	process := processinfo.Process{Executable: "/usr/bin/tmux", Args: []string{"/usr/bin/tmux", "new-session", "-s", "agent-test", "/tmp/codex"}}
