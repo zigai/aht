@@ -191,7 +191,7 @@ func TestStoreResetRecoversMalformedState(t *testing.T) {
 func TestStoreRejectsSchemaV1(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"sessions":{}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"sessions":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := NewFileStore(path).List(context.Background(), Filter{})
@@ -379,6 +379,7 @@ func TestStoreRejectsCorruptPersistedSessionState(t *testing.T) {
 		{name: "invalid activity", mutate: corruptSnapshotActivity},
 		{name: "incomplete process", mutate: corruptSnapshotProcess},
 		{name: "zero observation timestamp", mutate: corruptSnapshotObservationTime},
+		{name: "stale native revival corruption", mutate: corruptSnapshotStaleNativeRevival},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -388,19 +389,6 @@ func TestStoreRejectsCorruptPersistedSessionState(t *testing.T) {
 				t.Fatalf("List() error = %v, want %v", err, ErrCorruptStore)
 			}
 		})
-	}
-}
-
-func TestStoreRepairsStaleNativeRevival(t *testing.T) {
-	t.Parallel()
-
-	store := writeCorruptTestStore(t, corruptSnapshotStaleNativeRevival)
-	sessions, err := store.List(context.Background(), Filter{})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(sessions) != 1 || sessions[0].Presence != PresenceGone || sessions[0].Activity != nil {
-		t.Fatalf("List() sessions = %#v, want repaired gone session", sessions)
 	}
 }
 

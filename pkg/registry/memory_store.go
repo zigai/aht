@@ -388,7 +388,6 @@ func (s *MemoryStore) signalDirty() {
 func cloneRegistrySnapshotForMutation(source snapshot) snapshot {
 	return snapshot{
 		SchemaVersion: source.SchemaVersion,
-		LegacyVersion: nil,
 		UpdatedAt:     source.UpdatedAt,
 		// The reducer treats Session values as copy-on-write and replaces every
 		// nested pointer or slice it changes, so cloning the map is sufficient
@@ -400,7 +399,6 @@ func cloneRegistrySnapshotForMutation(source snapshot) snapshot {
 func cloneRegistrySnapshot(source snapshot) snapshot {
 	cloned := snapshot{
 		SchemaVersion: source.SchemaVersion,
-		LegacyVersion: nil,
 		UpdatedAt:     source.UpdatedAt,
 		Sessions:      make(map[string]Session, len(source.Sessions)),
 	}

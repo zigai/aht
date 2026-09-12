@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -485,5 +486,153 @@ func TestDelayedProcessPresenceDoesNotReviveNewerNativeGoneState(t *testing.T) {
 	}
 	if session.Presence != PresenceGone || session.Activity != nil || !session.PresenceChangedAt.Equal(at) {
 		t.Fatalf("delayed process presence revived newer gone state: %#v", session)
+	}
+}
+
+//nolint:gocognit,cyclop // multi-step incarnation lifecycle validates sequence, timing, and boundary transitions
+func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testing.T) {
+	t.Parallel()
+	for _, observerFirst := range []bool{false, true} {
+		name := "native_first"
+		if observerFirst {
+			name = "observer_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+			at := time.Now().UTC().Add(-time.Minute)
+			identity := ObservationIdentity{SessionID: "recorded-goose-session"}
+			oldProcess := ProcessIdentity{PID: 91, StartIdentity: "boot:91"}
+			newProcess := ProcessIdentity{PID: 91, StartIdentity: "boot:92"}
+			ended, err := store.Observe(ctx, Observation{
+				Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
+				Harness: HarnessGoose, Identity: identity, Process: &oldProcess,
+				NativeEvent: "SessionEnd", Lifecycle: new(NativeLifecycleEnd),
+				Presence: new(PresenceGone), ObservedAt: at,
+				Catalog: &CatalogMetadata{ResumeCommand: []string{"goose", "session", "--resume", "--session-id", identity.SessionID}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			processObservation := Observation{
+				Source: ObservationSourceProcess, Evidence: ObservationEvidenceProcessPresence,
+				Harness: HarnessGoose, Process: &newProcess, ProcessPresent: new(true),
+				ObservedAt: at.Add(time.Second),
+			}
+			if observerFirst {
+				if _, err = store.Observe(ctx, processObservation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resumed, err := store.Observe(ctx, Observation{
+				Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
+				Harness: HarnessGoose, Identity: identity, Process: &newProcess,
+				NativeEvent: "UserPromptSubmit", Activity: new(ActivityRunning),
+				ObservedAt: at.Add(2 * time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resumed.ID != ended.ID || resumed.SessionID != identity.SessionID ||
+				resumed.Presence != PresenceLive || resumed.Activity == nil || *resumed.Activity != ActivityRunning ||
+				resumed.Process == nil || !resumed.Process.Equal(newProcess) {
+				t.Fatalf("resume lost durable identity or running incarnation: %#v", resumed)
+			}
+			if resumed.Observations.Native.Event != "UserPromptSubmit" || resumed.Observations.Native.Lifecycle != nil ||
+				!resumed.Observations.Native.Process.Equal(newProcess) ||
+				len(resumed.ResumeCommand) != 5 || resumed.ResumeCommand[4] != identity.SessionID {
+				t.Fatalf("resume changed native provenance or recorded resume target: %#v", resumed)
+			}
+			if !observerFirst {
+				processObservation.ObservedAt = at.Add(3 * time.Second)
+				if _, err = store.Observe(ctx, processObservation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The old process's delayed native callback must not rebind the
+			// resumed session, even though it is newer than its original end.
+			_, err = store.Observe(ctx, Observation{
+				Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
+				Harness: HarnessGoose, Identity: identity, Process: &oldProcess,
+				NativeEvent: "Stop", Activity: new(ActivityIdle),
+				ObservedAt: at.Add(time.Second),
+			})
+			if !errors.Is(err, ErrObservationConflict) {
+				t.Fatalf("stale prior-incarnation callback error = %v, want conflict", err)
+			}
+			sessions, err := store.List(ctx, Filter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sessions) != 1 || sessions[0].ID != ended.ID ||
+				sessions[0].Presence != PresenceLive || sessions[0].Activity == nil ||
+				*sessions[0].Activity != ActivityRunning || sessions[0].Process == nil ||
+				!sessions[0].Process.Equal(newProcess) {
+				t.Fatalf("resume left duplicate or stale state: %#v", sessions)
+			}
+		})
+	}
+}
+
+//nolint:gocognit,cyclop // retirement regression validates process termination, timeline, and resurrection rejection
+func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"same_process", "missing_process", "incomplete_process", "pre_end", "terminal"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+			at := time.Now().UTC().Add(-time.Minute)
+			identity := ObservationIdentity{SessionID: "retired-goose-session"}
+			oldProcess := ProcessIdentity{PID: 93, StartIdentity: "boot:93"}
+			ended, err := store.Observe(ctx, Observation{
+				Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
+				Harness: HarnessGoose, Identity: identity, Process: &oldProcess,
+				NativeEvent: "SessionEnd", Lifecycle: new(NativeLifecycleEnd),
+				Presence: new(PresenceGone), ObservedAt: at,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			incoming := Observation{
+				Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
+				Harness: HarnessGoose, Identity: identity,
+				Process:     &ProcessIdentity{PID: 94, StartIdentity: "boot:94"},
+				NativeEvent: "UserPromptSubmit", Activity: new(ActivityRunning),
+				ObservedAt: at.Add(time.Second),
+			}
+			switch name {
+			case "same_process":
+				incoming.Process = &oldProcess
+			case "missing_process":
+				incoming.Process = nil
+			case "incomplete_process":
+				incoming.Process.StartIdentity = ""
+			case "pre_end":
+				incoming.ObservedAt = at.Add(-time.Second)
+			case "terminal":
+				incoming.NativeEvent = "SessionEnd"
+				incoming.Activity = nil
+				incoming.Lifecycle = new(NativeLifecycleEnd)
+				incoming.Presence = new(PresenceGone)
+			}
+			_, err = store.Observe(ctx, incoming)
+			if name == "incomplete_process" && err == nil {
+				t.Fatal("incomplete process identity was accepted")
+			}
+			if name != "incomplete_process" && err != nil {
+				t.Fatal(err)
+			}
+			session, err := store.Get(ctx, ended.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.Presence != PresenceGone || session.Activity != nil ||
+				session.Process == nil || !session.Process.Equal(oldProcess) ||
+				session.Observations.Native.Event != "SessionEnd" || !session.PresenceChangedAt.Equal(at) {
+				t.Fatalf("post-end callback resurrected or changed terminal evidence: %#v", session)
+			}
+		})
 	}
 }

@@ -45,7 +45,6 @@ type UnsupportedSchemaError struct {
 
 type snapshot struct {
 	SchemaVersion int                `json:"schema_version"`
-	LegacyVersion *int               `json:"version,omitempty"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 	Sessions      map[string]Session `json:"sessions"`
 }
@@ -174,12 +173,16 @@ func applyObservationBatch(
 			return nil, sequenceErr
 		}
 		at = sequencedAt
+		resumesIncarnation := resumesNativeIncarnation(session, observation, at)
 		if shouldIgnoreNativeAfterGone(session, observation, at) {
 			saved = append(saved, session)
 			continue
 		}
 		if err := applyObservation(&session, observation, at, receivedAt); err != nil {
 			return nil, err
+		}
+		if resumesIncarnation {
+			reconcileResumedProcessSession(snap.Sessions, &session, observation)
 		}
 
 		snap.Sessions[session.ID] = session
@@ -353,10 +356,64 @@ func shouldIgnoreNativeAfterGone(session Session, observation Observation, at ti
 	if observation.Source != ObservationSourceNative || session.Presence != PresenceGone {
 		return false
 	}
+	if resumesNativeIncarnation(session, observation, at) {
+		return false
+	}
 	if observation.Lifecycle != nil && (*observation.Lifecycle == NativeLifecycleStart || *observation.Lifecycle == NativeLifecycleResume) {
 		return !at.After(session.PresenceChangedAt)
 	}
 	return true
+}
+
+// A durable native session can resume without a lifecycle callback. Only a
+// different complete process incarnation can supply that missing boundary.
+//
+//nolint:cyclop // multi-dimensional incarnation boundary requires complete identity and timing validation
+func resumesNativeIncarnation(session Session, observation Observation, at time.Time) bool {
+	if observation.Source != ObservationSourceNative || session.Presence != PresenceGone ||
+		!observationHasIdentity(observation) || observationIdentityConflicts(session, observation.Identity) ||
+		observation.Process == nil || !observation.Process.Complete() ||
+		!at.After(session.PresenceChangedAt) || at.Before(currentProcessObservationTime(session)) ||
+		(observation.Presence != nil && *observation.Presence == PresenceGone) ||
+		(observation.Lifecycle != nil && *observation.Lifecycle == NativeLifecycleEnd) {
+		return false
+	}
+	if (observation.Identity.SessionID == "" || observation.Identity.SessionID != session.SessionID) &&
+		(observation.Identity.SessionPath == "" || session.SessionPath == "" ||
+			filepath.Clean(observation.Identity.SessionPath) != filepath.Clean(session.SessionPath)) {
+		return false
+	}
+	previous := session.Process
+	if native := session.Observations.Native; native != nil && native.Process.Complete() {
+		previous = &native.Process
+	}
+	return previous != nil && previous.Complete() && !previous.Equal(*observation.Process)
+}
+
+//nolint:cyclop // provisional session reconciliation traverses all candidate entries by source precedence
+func reconcileResumedProcessSession(sessions map[string]Session, session *Session, observation Observation) {
+	for id, provisional := range sessions {
+		if id == session.ID || provisional.Harness != session.Harness ||
+			provisional.SessionID != "" || provisional.SessionPath != "" ||
+			provisional.Observations.Native != nil || provisional.Process == nil ||
+			!provisional.Process.Equal(*observation.Process) {
+			continue
+		}
+		// Carry location and process evidence, not the provisional activity or
+		// presence: the accepted native event owns the incarnation transition.
+		if provisional.Observations.Process != nil {
+			session.Observations.Process = provisional.Observations.Process
+		}
+		if provisional.Observations.Tmux != nil && observation.Tmux == nil {
+			session.Observations.Tmux = provisional.Observations.Tmux
+			session.Tmux = provisional.Tmux
+		}
+		if provisional.Observations.Multiplexer != nil && observation.Multiplexer == nil {
+			session.Observations.Multiplexer = provisional.Observations.Multiplexer
+			session.Multiplexer = provisional.Multiplexer
+		}
+		delete(sessions, id)
+	}
 }
 
 func applyObservation(session *Session, observation Observation, at, receivedAt time.Time) error {
@@ -376,11 +433,16 @@ func applyObservation(session *Session, observation Observation, at, receivedAt 
 	}
 	previousPresence := session.Presence
 	previousActivity := session.Activity
+	resumesIncarnation := resumesNativeIncarnation(*session, observation, at)
 	if err := storeObservation(session, observation, at); err != nil {
 		return err
 	}
 	applyIdentity(session, observation)
 	applyMetadata(session, observation, at)
+	if resumesIncarnation {
+		session.Presence = PresenceLive
+		session.Activity = new(ActivityUnknown)
+	}
 	applyPresenceAndActivity(session, observation, at)
 	session.SchemaVersion = storeSchemaVersion
 	session.UpdatedAt = maxTime(session.UpdatedAt, receivedAt)
@@ -751,9 +813,16 @@ func observationIdentityConflicts(session Session, identity ObservationIdentity)
 	return false
 }
 
+//nolint:cyclop // matching session discovery correlates native and provisional identities
 func findAndReconcileMatchingSession(sessions map[string]Session, observation Observation) string {
 	identityID := findIdentityMatchingSession(sessions, observation)
 	processID := findProcessMatchingSession(sessions, observation)
+	if observation.Source == ObservationSourceNative && identityID != "" && processID != "" &&
+		identityID != processID && sessions[identityID].Process != nil &&
+		sessions[identityID].Presence == PresenceGone && sessions[processID].SessionID == "" &&
+		sessions[processID].SessionPath == "" && sessions[processID].Observations.Native == nil {
+		return identityID
+	}
 	if identityID != "" && processID != "" && identityID != processID {
 		provisional := sessions[identityID]
 		if provisional.Process == nil {
@@ -1224,16 +1293,11 @@ func (s *FileStore) load() (snapshot, error) {
 		return snapshot{}, fmt.Errorf("parsing store %s: %w", s.path, err)
 	}
 	if snap.SchemaVersion != storeSchemaVersion {
-		version := snap.SchemaVersion
-		if version == 0 && snap.LegacyVersion != nil {
-			version = *snap.LegacyVersion
-		}
-		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: version}
+		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: snap.SchemaVersion}
 	}
 	if snap.Sessions == nil {
 		snap.Sessions = make(map[string]Session)
 	}
-	repairStaleNativeRevivals(&snap)
 	if err := validateSnapshot(snap); err != nil {
 		return snapshot{}, err
 	}
@@ -1262,36 +1326,6 @@ func readSnapshotFile(path string) ([]byte, error) {
 		return nil, ErrStoreTooLarge
 	}
 	return data, nil
-}
-
-// repairStaleNativeRevivals normalizes snapshots written by versions that
-// allowed queued native presence evidence older than process-gone evidence to
-// revive the aggregate presence without restoring activity.
-//
-//nolint:cyclop // every field is required to identify this legacy corruption without masking unrelated damage
-func repairStaleNativeRevivals(snap *snapshot) {
-	for id, session := range snap.Sessions {
-		if session.Activity != nil || session.Presence == PresenceGone ||
-			session.Process == nil || session.Observations.Native == nil || session.Observations.Process == nil ||
-			session.ActivityDecision == nil {
-			continue
-		}
-		native := session.Observations.Native
-		process := session.Observations.Process
-		decision := session.ActivityDecision
-		if native.Presence == nil || *native.Presence == PresenceGone ||
-			process.Present || !session.Process.Equal(process.Process) ||
-			decision.Authority != "process" || decision.Reason != "process_gone" || !decision.Process.Equal(process.Process) ||
-			native.ObservedAt.After(process.ObservedAt) ||
-			!session.PresenceChangedAt.Equal(native.ObservedAt) ||
-			!session.ActivityChangedAt.Equal(process.ObservedAt) ||
-			!decision.ObservedAt.Equal(process.ObservedAt) {
-			continue
-		}
-		session.Presence = PresenceGone
-		session.PresenceChangedAt = process.ObservedAt
-		snap.Sessions[id] = session
-	}
 }
 
 func validateSnapshot(snap snapshot) error {
@@ -1446,7 +1480,7 @@ func validStoredProcess(process ProcessIdentity, allowZero bool) bool {
 }
 
 func newSnapshot() snapshot {
-	return snapshot{SchemaVersion: storeSchemaVersion, LegacyVersion: nil, UpdatedAt: time.Time{}, Sessions: make(map[string]Session)}
+	return snapshot{SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session)}
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {
