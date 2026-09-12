@@ -7,6 +7,9 @@ import { spawn } from "node:child_process";
 
 const ahtBin = {{BINARY}};
 const source = {{SOURCE}};
+// Match the OMP producer's cross-process sequence seed so callback ordering
+// survives millisecond timestamp ties, including the final idle notifications.
+let reportSequence = Date.now() * 1000;
 
 {{TYPESCRIPT_QUEUE}}
 
@@ -97,7 +100,10 @@ type PluginContext = {
   readonly worktree?: string | undefined;
   readonly project?: { readonly path?: string | undefined; readonly root?: string };
 };
-type PluginHooks = { event(input: { readonly event: unknown }): Promise<void> };
+type PluginHooks = {
+  event(input: { readonly event: unknown }): Promise<void>;
+  dispose(): Promise<void>;
+};
 async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
   let currentSessionId: string | undefined;
   let currentSessionPath: string | undefined;
@@ -162,7 +168,7 @@ function addEvent(args: string[], value: unknown): void {
     const observedAt = new Date().toISOString();
     refreshSessionRef(event);
 
-    const args = ["report", "opencode", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--quiet"];
+    const args = ["report", "opencode", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
     addEvent(args, valueAt(event, ["type"]));
     args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
     if (currentSessionId) {
@@ -192,6 +198,13 @@ function addEvent(args: string[], value: unknown): void {
   }
 
   return {
+    // OpenCode dispatches event hooks without awaiting their promises, but
+    // awaits dispose before tearing down the instance. Drain only observations
+    // already received from the native bus; disposal is not a session event.
+    // https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/plugin/index.ts
+    dispose: async () => {
+      await commandDrain;
+    },
     event: async ({ event }) => {
       const state = stateForEvent(event);
       if (state === undefined) {

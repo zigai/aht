@@ -146,9 +146,12 @@ export default definePluginEntry({
     api.on("before_agent_run", (_event, ctx) => report("before_agent_run", {}, ctx, { presence: "live", activity: "running" }));
     api.on("agent_end", (event, ctx) => {
       let activity = "idle";
-      if (event?.success === false || event?.reason === "error" || event?.error) {
+      // OpenClaw's embedded runner emits success=false without error on abort;
+      // prompt failures carry error. PluginHookAgentEndEvent has no reason or
+      // aborted field (2026.9.3 builtin-openclaw agent-end side effects).
+      if (typeof event?.error === "string") {
         activity = "failed";
-      } else if (event?.reason === "interrupted" || event?.reason === "cancelled" || event?.reason === "canceled") {
+      } else if (event?.success === false) {
         activity = "interrupted";
       }
       return report("agent_end", event, ctx, { presence: "live", activity });

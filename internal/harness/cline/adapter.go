@@ -18,7 +18,7 @@ const (
 	clinePluginName        = "aht-state"
 	clineMarkerFileName    = ".aht-managed"
 	clineIntegrationSource = "cline-plugin"
-	integrationVersion     = 9
+	integrationVersion     = 10
 )
 
 //go:embed assets/index.js.tmpl
@@ -84,8 +84,6 @@ func (clineHarness) ResumeCommand(sessionID string, _ string) []string {
 	return []string{clineCommand, "--id", sessionID}
 }
 
-// PayloadCompatible retains report-command compatibility with payloads from
-// Cline's retired standalone-hook surface. New installations use AgentPlugin.
 func (clineHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 	return clinePayloadValidator(rawPayload)
 }

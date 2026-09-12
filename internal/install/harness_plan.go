@@ -138,6 +138,19 @@ func applyJSONCommandHooks(
 		statusMessage = managedMarker
 	}
 	isManaged := isManagedSourceHookCommand(source)
+	desiredByEvent := make(map[string][]any)
+	events := make([]string, 0, len(plan.Hooks))
+	for _, hook := range plan.Hooks {
+		if _, exists := desiredByEvent[hook.Event]; !exists {
+			events = append(events, hook.Event)
+		}
+		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], commandHookGroup(
+			hook.Command,
+			hook.Matcher,
+			statusMessage,
+			harnesspkg.HookTimeoutSecondsFor(harness, hook.Event),
+		))
+	}
 
 	return func(config map[string]any) bool {
 		changed := false
@@ -152,15 +165,11 @@ func applyJSONCommandHooks(
 				config["hooks"] = hooks
 			}
 		}
-		for _, hook := range plan.Hooks {
-			timeoutSeconds := harnesspkg.HookTimeoutSecondsFor(harness, hook.Event)
-			updated := upsertManagedCommandHookGroup(
+		for _, event := range events {
+			updated := upsertManagedCommandHookGroups(
 				hooks,
-				hook.Event,
-				hook.Matcher,
-				hook.Command,
-				statusMessage,
-				timeoutSeconds,
+				event,
+				desiredByEvent[event],
 				isManaged,
 			)
 			changed = changed || updated

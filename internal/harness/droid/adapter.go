@@ -86,8 +86,13 @@ func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
 			},
 			{
 				Event:   "Notification",
-				Matcher: "",
+				Matcher: "permission_prompt",
 				Command: droidHookCommand(binary, registry.ActivityWaiting, "Notification"),
+			},
+			{
+				Event:   "Notification",
+				Matcher: "idle_prompt",
+				Command: droidHookCommand(binary, registry.ActivityIdle, "Notification"),
 			},
 			{
 				Event:   harness.HookEventStop,

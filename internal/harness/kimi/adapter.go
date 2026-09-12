@@ -38,9 +38,10 @@ type kimiCodeHookSpec struct {
 
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessKimiCode,
-		Aliases:      []string{"kimi", "kimi_code", "kimicode"},
-		ProcessNames: []string{"kimi", "kimi-code", "kimi_code", "kimicode"},
+		ID:      registry.HarnessKimiCode,
+		Aliases: []string{"kimi", "kimi_code", "kimicode"},
+		// Native startup replaces argv with this title through setproctitle.
+		ProcessNames: []string{"kimi", "kimi-code", "kimi_code", "kimicode", "kimi code"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -49,9 +50,10 @@ func New() kimiCodeHarness {
 			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      true,
-			SessionEnd:        true,
-			RunningIdle:       true,
+			SessionStart: true,
+			SessionEnd:   true,
+			RunningIdle:  true,
+			// Approval waiting is observed through aht wire kimi-code.
 			WaitingPermission: true,
 			NativeCatalog:     true,
 			ProcessIdentity:   false,
@@ -154,12 +156,6 @@ func kimiCodeHookBlock(binary string) string {
 			event:   "PostCompact",
 			matcher: "",
 			command: kimiCodeHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-			timeout: harness.HookTimeoutSeconds,
-		},
-		{
-			event:   "Notification",
-			matcher: "permission_prompt",
-			command: kimiCodeHookCommand(binary, registry.ActivityWaiting, "Notification"),
 			timeout: harness.HookTimeoutSeconds,
 		},
 		{

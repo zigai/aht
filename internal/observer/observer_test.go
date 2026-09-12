@@ -698,6 +698,44 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	at := time.Now().UTC().Add(-time.Minute)
 
 	store := registry.NewFileStore(path)
+	seedStaleSessionHistory(t, store, at)
+	preSessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil || len(preSessions) != 1 || preSessions[0].Presence != registry.PresenceLive || preSessions[0].Observations.Process == nil {
+		t.Fatalf("precondition failed: sessions=%#v, error=%v", preSessions, err)
+	}
+
+	// Run observer with no live processes
+	at = at.Add(10 * time.Second)
+	options := Options{
+		StorePath: path,
+		Now:       func() time.Time { return at },
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return nil, nil
+		},
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		HealthPath:  path + ".health",
+	}
+
+	result, err := New(options).RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Gone != 1 {
+		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
+	}
+
+	sessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone || sessions[0].Activity != nil {
+		t.Fatalf("session was not retired: %#v", sessions)
+	}
+}
+
+func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
+	t.Helper()
 	activity := registry.ActivityInterrupted
 	presence := registry.PresenceLive
 	present := false
@@ -770,39 +808,6 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	preSessions, err := store.List(context.Background(), registry.Filter{})
-	if err != nil || len(preSessions) != 1 || preSessions[0].Presence != registry.PresenceLive || preSessions[0].Observations.Process == nil {
-		t.Fatalf("precondition failed: %#v", preSessions)
-	}
-
-	// Run observer with no live processes
-	at = at.Add(10 * time.Second)
-	options := Options{
-		StorePath: path,
-		Now:       func() time.Time { return at },
-		ProcessList: func(context.Context) ([]processinfo.Process, error) {
-			return nil, nil
-		},
-		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
-		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		HealthPath:  path + ".health",
-	}
-
-	result, err := New(options).RunOnce(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Gone != 1 {
-		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
-	}
-
-	sessions, err := store.List(context.Background(), registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone || sessions[0].Activity != nil {
-		t.Fatalf("session was not retired: %#v", sessions)
 	}
 }
 

@@ -79,8 +79,7 @@ func ompAgentDir() string {
 	if value := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); value != "" {
 		return value
 	}
-
-	configRoot := strings.TrimSpace(os.Getenv("PI_CONFIG_DIR"))
+	configRoot := strings.TrimSpace(os.Getenv("OMP_CONFIG_DIR"))
 	if configRoot == "" {
 		configRoot = ".omp"
 	}
@@ -93,8 +92,6 @@ func ompAgentDir() string {
 	var profile string
 	if value, ok := os.LookupEnv("OMP_PROFILE"); ok {
 		profile = strings.TrimSpace(value)
-	} else {
-		profile = strings.TrimSpace(os.Getenv("PI_PROFILE"))
 	}
 	if profile != "" && profile != "default" {
 		configRoot = filepath.Join(configRoot, "profiles", profile)

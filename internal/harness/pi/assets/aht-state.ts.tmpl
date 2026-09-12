@@ -22,6 +22,9 @@ let reportingContext: ExtensionContext | undefined;
 let reportingAPI: ExtensionAPI | undefined;
 let lastReportingFailure: string | undefined;
 let reportingDegraded = false;
+// Sequence preserves native callback order when multiple events share a
+// millisecond timestamp. Seed across process restarts, as the OMP producer does.
+let reportSequence = Date.now() * 1000;
 
 function warnReporting(reason: string): void {
   if (reportingDegraded && lastReportingFailure === reason) return;
@@ -303,7 +306,7 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
     updateSessionRef(ctx);
   }
 
-  const args = ["report", "pi", "--observed-at", observedAt, "--quiet"];
+  const args = ["report", "pi", "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
   args.push(transition === "gone" ? "--presence" : "--activity", transition);
   args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
   args.push("--attribute", `aht_integration=${currentSessionSource}`);

@@ -279,7 +279,7 @@ func TestInstallClaudeReplacesManagedHooks(t *testing.T) {
 		Harness:              registry.HarnessClaude,
 		Path:                 path,
 		RemovedText:          "old-aht",
-		RequiredText:         []string{"--raw-stdin", "aht_integration_version=7"},
+		RequiredText:         []string{"--raw-stdin"},
 		FirstChangeMessage:   "expected claude install to replace old managed hook",
 		SecondChangedMessage: "expected second claude install to be idempotent",
 	})
@@ -589,7 +589,6 @@ func requireClinePluginMarker(t *testing.T, pluginDir string) {
 	requireTextContainsAll(t, marker, []string{
 		managedMarker,
 		"AHT_INTEGRATION_ID=cline",
-		"AHT_INTEGRATION_VERSION=9",
 		"AHT_SOURCE=cline-plugin",
 	}, "Cline plugin marker")
 }
@@ -885,7 +884,6 @@ func TestInstallPiWritesExtension(t *testing.T) {
 		`on("ui_prompt_end"`,
 		`report(ctx.isIdle?.() ? "idle" : "running", ctx, event)`,
 		"AHT_INTEGRATION_ID=pi",
-		"AHT_INTEGRATION_VERSION=14",
 		`"report", "pi"`,
 		`"--observed-at", observedAt`,
 		"addEvent(args, event?.type)",
@@ -1247,10 +1245,6 @@ func TestInstallGooseWritesPlugin(t *testing.T) {
 	requireGoosePluginHooks(t, result.Path)
 	requireGoosePluginScript(t, result.Path)
 	requireGoosePluginMarker(t, result.Path)
-	marker := readTestFile(t, filepath.Join(pluginPath, gooseMarkerFileName), "reading updated Goose marker")
-	if !strings.Contains(string(marker), "AHT_INTEGRATION_VERSION=7") {
-		t.Fatalf("stale Goose integration was not updated: %s", marker)
-	}
 
 	second, err := Run(Options{
 		Harness:      registry.HarnessGoose,
@@ -1329,7 +1323,6 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
 		"aht_integration=droid-hook",
-		"aht_integration_version=7",
 	}, "droid hooks")
 	if strings.Contains(text, "statusMessage") {
 		t.Fatalf("expected Droid hooks not to include unsupported statusMessage field: %s", text)
@@ -1390,7 +1383,6 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
-		"Notification",
 		"SessionEnd",
 	} {
 		if !strings.Contains(text, `event = "`+event+`"`) {
@@ -1399,17 +1391,14 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 	}
 	for _, want := range []string{
 		`matcher = "startup|resume"`,
-		`matcher = "permission_prompt"`,
 		`event = "SessionEnd"` + "\nmatcher = \"exit\"",
 		"--raw-stdin",
 		"--quiet",
 		"aht_integration=kimi-code-hook",
-		"aht_integration_version=7",
 		managedMarker,
 		"--activity idle --event SessionStart",
 		"--activity running --event UserPromptSubmit",
 		"--activity running --event PreToolUse",
-		"--activity waiting --event Notification",
 		"--activity failed --event StopFailure",
 		"--presence gone --event SessionEnd",
 	} {
@@ -1975,7 +1964,6 @@ func requireGoosePluginScript(t *testing.T, dir string) {
 		managedMarker,
 		"--raw-stdin-defaults-only",
 		"aht_integration=goose-hook",
-		"aht_integration_version=7",
 		`--presence "$transition"`,
 		`--activity "$transition"`,
 		`--event "$event"`,

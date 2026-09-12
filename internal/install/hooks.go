@@ -32,13 +32,10 @@ func commandHookGroup(command string, matcher string, statusMessage string, time
 	return group
 }
 
-func upsertManagedCommandHookGroup(
+func upsertManagedCommandHookGroups(
 	hooks map[string]any,
 	event string,
-	matcher string,
-	command string,
-	statusMessage string,
-	timeoutSeconds int,
+	desiredGroups []any,
 	isManaged func(string) bool,
 ) bool {
 	groups, ok := hooks[event].([]any)
@@ -46,18 +43,17 @@ func upsertManagedCommandHookGroup(
 		groups = nil
 	}
 
-	desiredGroup := commandHookGroup(command, matcher, statusMessage, timeoutSeconds)
-	if managedCommandHookGroupsCurrent(groups, desiredGroup, isManaged) {
+	if managedCommandHookGroupsCurrent(groups, desiredGroups, isManaged) {
 		return false
 	}
 
 	groups, _ = removeManagedCommandHookGroups(groups, isManaged)
-	hooks[event] = append(groups, desiredGroup)
+	hooks[event] = append(groups, desiredGroups...)
 
 	return true
 }
 
-func managedCommandHookGroupsCurrent(groups []any, desiredGroup map[string]any, isManaged func(string) bool) bool {
+func managedCommandHookGroupsCurrent(groups []any, desiredGroups []any, isManaged func(string) bool) bool {
 	managedCount := 0
 	desiredCount := 0
 	for _, groupValue := range groups {
@@ -69,6 +65,7 @@ func managedCommandHookGroupsCurrent(groups []any, desiredGroup map[string]any, 
 		if !ok {
 			continue
 		}
+		groupManagedCount := managedCount
 		for _, hookValue := range hookValues {
 			hook, hookOK := hookValue.(map[string]any)
 			if !hookOK {
@@ -80,12 +77,16 @@ func managedCommandHookGroupsCurrent(groups []any, desiredGroup map[string]any, 
 			}
 			managedCount++
 		}
-		if reflect.DeepEqual(group, desiredGroup) {
-			desiredCount++
+		if managedCount == groupManagedCount {
+			continue
 		}
+		if desiredCount >= len(desiredGroups) || !reflect.DeepEqual(group, desiredGroups[desiredCount]) {
+			return false
+		}
+		desiredCount++
 	}
 
-	return managedCount == 1 && desiredCount == 1
+	return managedCount == len(desiredGroups) && desiredCount == len(desiredGroups)
 }
 
 func removeManagedCommandHookGroups(groups []any, isManaged func(string) bool) ([]any, bool) {
@@ -103,6 +104,7 @@ func removeManagedCommandHookGroups(groups []any, isManaged func(string) bool) (
 			continue
 		}
 
+		groupRemoved := false
 		cleanedHooks := make([]any, 0, len(hookValues))
 		for _, hookValue := range hookValues {
 			hook, hookOK := hookValue.(map[string]any)
@@ -113,12 +115,16 @@ func removeManagedCommandHookGroups(groups []any, isManaged func(string) bool) (
 			hookCommand, commandOK := hook["command"].(string)
 			if commandOK && isManaged(hookCommand) {
 				removed = true
+				groupRemoved = true
 				continue
 			}
 			cleanedHooks = append(cleanedHooks, hookValue)
 		}
+		if !groupRemoved {
+			cleanedGroups = append(cleanedGroups, groupValue)
+			continue
+		}
 		if len(cleanedHooks) == 0 {
-			removed = true
 			continue
 		}
 

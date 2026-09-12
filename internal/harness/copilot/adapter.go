@@ -77,7 +77,8 @@ func (copilotHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDe
 
 func copilotHookConfig(binary string) map[string]any {
 	specs := []copilotHookSpec{
-		{event: "sessionStart", transition: harness.HookActivityIdle, matcher: ""},
+		// A new or resumed session can start after its initial prompt was submitted.
+		{event: "sessionStart", transition: harness.HookPresenceLive, matcher: ""},
 		{event: "userPromptSubmitted", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "preToolUse", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "permissionRequest", transition: harness.HookActivityWaiting, matcher: ""},

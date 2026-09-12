@@ -618,43 +618,6 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 	return observations
 }
 
-// absenceObservationsForUnobservedSessions retires nonterminal registry sessions whose recorded
-// process identity no longer exists but which the tracked-process sweep cannot observe
-// because they were never matched to a process-presence observation. Such sessions are
-// created purely by harness lifecycle hooks; without this sweep their presence stays
-// "live" or "unknown" forever after the process dies.
-func (o *Observer) isProcessTracked(session registry.Session) bool {
-	if o == nil || session.Process == nil {
-		return false
-	}
-	for key := range o.tracked {
-		if key.harness == session.Harness && key.pid == session.Process.PID {
-			if key.start == "" || session.Process.StartIdentity == "" || key.start == session.Process.StartIdentity {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
-	observations := make([]registry.Observation, 0)
-	for _, session := range sessions {
-		if session.Presence == registry.PresenceGone {
-			continue
-		}
-		if o.isProcessTracked(session) {
-			continue
-		}
-
-		if observation, ok := unobservedSessionAbsence(session, processByPID, at); ok {
-			observations = append(observations, observation)
-		}
-	}
-
-	return observations
-}
-
 func unobservedSessionAbsence(session registry.Session, processByPID map[int]processinfo.Process, at time.Time) (registry.Observation, bool) {
 	var empty registry.Observation
 	if session.Process != nil && session.Process.Complete() {
@@ -1037,6 +1000,41 @@ func (o *Observer) Health() Health {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.health
+}
+
+func (o *Observer) isProcessTracked(session registry.Session) bool {
+	if o == nil || session.Process == nil {
+		return false
+	}
+	for key := range o.tracked {
+		if key.harness == session.Harness && key.pid == session.Process.PID {
+			if key.start == "" || session.Process.StartIdentity == "" || key.start == session.Process.StartIdentity {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// absenceObservationsForUnobservedSessions retires nonterminal registry sessions whose
+// recorded process identity no longer exists and is not covered by the tracked-process
+// sweep, including sessions revived by lifecycle hooks after a process absence.
+func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
+	observations := make([]registry.Observation, 0)
+	for _, session := range sessions {
+		if session.Presence == registry.PresenceGone {
+			continue
+		}
+		if o.isProcessTracked(session) {
+			continue
+		}
+
+		if observation, ok := unobservedSessionAbsence(session, processByPID, at); ok {
+			observations = append(observations, observation)
+		}
+	}
+
+	return observations
 }
 
 func (o *Observer) captureScreenState(ctx context.Context, session registry.Session, harnessID registry.Harness, identity *registry.ProcessIdentity, pane mux.Pane, at time.Time) (registry.Observation, bool, error) {

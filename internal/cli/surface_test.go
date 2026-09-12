@@ -852,54 +852,102 @@ func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 }
 
 func TestDoctorIsConciseUnlessVerbose(t *testing.T) {
+	assertDoctorSurface(t)
+}
+
+func TestDoctorFixtureIgnoresInheritedOMPProfile(t *testing.T) {
+	foreignProfile := filepath.Join(t.TempDir(), ".omp", "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", foreignProfile)
+	installed, err := install.RunContext(t.Context(), install.Options{Harness: registry.HarnessOmp, Binary: defaultInstallBinary()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(installed.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := prepareDoctorEnvironment(t)
+	output := executeDoctorSurface(t, "--store", path, "--json", "manage", "doctor")
+	var result doctorResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode isolated doctor result: %v\noutput: %s", err, output)
+	}
+	if !result.OK {
+		t.Fatalf("isolated doctor inspected inherited profile:\n%s", output)
+	}
+
+	after, err := os.ReadFile(installed.Path)
+	if err != nil {
+		t.Fatalf("read foreign OMP integration after doctor: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("doctor fixture modified foreign OMP integration %s", installed.Path)
+	}
+}
+
+func prepareDoctorEnvironment(t *testing.T) string {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
-	path := filepath.Join(home, "sessions.json")
+	// Like the upgrade fixture, redirect every harness override rather than
+	// letting an inherited profile escape the temporary home directory.
+	for _, key := range []string{"XDG_CONFIG_HOME", "AHT_CONFIG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "AGY_CONFIG_HOME", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "KILO_CONFIG_DIR", registry.StateDirEnv} {
+		t.Setenv(key, filepath.Join(home, key))
+	}
+	t.Setenv("OMP_PROFILE", "default")
+	t.Setenv("PI_PROFILE", "default")
+	return filepath.Join(home, "sessions.json")
+}
 
-	normalize := func(s string) string {
-		return strings.Join(strings.Fields(s), " ")
+func assertDoctorSurface(t *testing.T) {
+	t.Helper()
+	path := prepareDoctorEnvironment(t)
+	concise := executeDoctorSurface(t, "--store", path, "manage", "doctor")
+	if strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+		t.Fatalf("concise doctor includes uninstalled integrations:\n%s", concise)
 	}
-
-	var concise bytes.Buffer
-	root := NewRootCommand(&concise, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "doctor"})
-	_ = root.ExecuteContext(context.Background())
-	if strings.Contains(normalize(concise.String()), "Run/Idle") || strings.Contains(concise.String(), "integration.codex") {
-		t.Fatalf("concise doctor contains full matrix:\n%s", concise.String())
-	}
-	installRoot := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-	installRoot.SetArgs([]string{"manage", "integrations", "install", "codex", "--binary", defaultInstallBinary()})
-	if err := installRoot.ExecuteContext(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	concise.Reset()
-	root = NewRootCommand(&concise, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "doctor"})
-	_ = root.ExecuteContext(context.Background())
-	if !strings.Contains(concise.String(), "integration.codex") || strings.Contains(normalize(concise.String()), "Run/Idle") {
-		t.Fatalf("concise doctor omitted installed integration or added matrix:\n%s", concise.String())
+	executeDoctorSurface(t, "manage", "integrations", "install", "codex", "--binary", defaultInstallBinary())
+	concise = executeDoctorSurface(t, "--store", path, "manage", "doctor")
+	if !strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+		t.Fatalf("concise doctor omitted installed integration or included uninstalled integrations:\n%s", concise)
 	}
 
-	var verbose bytes.Buffer
-	root = NewRootCommand(&verbose, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "doctor", "--verbose"})
-	_ = root.ExecuteContext(context.Background())
-	if !strings.Contains(normalize(verbose.String()), "Run/Idle") || !strings.Contains(verbose.String(), "Start") || !strings.Contains(verbose.String(), "integration.codex") {
-		t.Fatalf("verbose doctor omitted details:\n%s", verbose.String())
+	verbose := executeDoctorSurface(t, "--store", path, "manage", "doctor", "--verbose")
+	if !strings.Contains(verbose, "integration.pi") || !strings.Contains(verbose, "integration.codex") {
+		t.Fatalf("verbose doctor omitted integration details:\n%s", verbose)
 	}
+	for _, mode := range []struct {
+		name         string
+		flags        []string
+		capabilities bool
+	}{
+		{name: "concise", flags: nil, capabilities: false},
+		{name: "verbose", flags: []string{"--verbose"}, capabilities: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			args := append([]string{"--store", path, "--json", "manage", "doctor"}, mode.flags...)
+			output := executeDoctorSurface(t, args...)
+			var result doctorResult
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("decode doctor JSON: %v\nstdout:\n%s", err, output)
+			}
+			if !result.OK || (len(result.Capabilities) != 0) != mode.capabilities {
+				t.Fatalf("doctor health or capability visibility mismatch:\n%s", output)
+			}
+		})
+	}
+}
 
-	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "manage", "doctor"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatal(err)
+func executeDoctorSurface(t *testing.T, args ...string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	root := NewRootCommand(&stdout, &stderr)
+	root.SetArgs(args)
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("aht %v: %v\nstdout:\n%s\nstderr:\n%s", args, err, stdout.String(), stderr.String())
 	}
-	var result doctorResult
-	if err := json.Unmarshal(machine.Bytes(), &result); err != nil || len(result.Capabilities) != 0 {
-		t.Fatalf("concise doctor JSON = %q, %v", machine.String(), err)
-	}
+	return stdout.String()
 }
 
 func observeTestSession(t *testing.T, store registry.Store, sessionID string, at time.Time) registry.Session {

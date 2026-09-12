@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	integrationVersion        = 8
+	integrationVersion        = 9
 	openClawCommand           = "openclaw"
 	openClawPluginName        = "aht-state"
 	openClawMarkerFileName    = ".aht-managed"

@@ -5,12 +5,12 @@ import "testing"
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
-	current := `{"command":"aht report codex --attribute aht_integration_version=7 --attribute aht_integration=codex-hook"}`
+	current := `{"command":"aht report codex --attribute aht_integration_version=8 --attribute aht_integration=codex-hook"}`
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current source metadata classified as %q", status)
 	}
 
-	stale := `{"command":"aht report codex --attribute aht_integration_version=6 --attribute aht_integration=codex-hook"}`
+	stale := `{"command":"aht report codex --attribute aht_integration_version=7 --attribute aht_integration=codex-hook"}`
 	if status := classifyArtifactContent(stale); status != ArtifactStale {
 		t.Fatalf("stale source metadata classified as %q", status)
 	}

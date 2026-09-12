@@ -51,6 +51,19 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 	}
 }
 
+func TestClinePluginReportsNativeAbort(t *testing.T) {
+	requireRuntimeTool(t, "node")
+	capture := captureBinary(t)
+	t.Setenv("AHT_CAPTURE", capture.path)
+	module := generatedArtifactContent(t, registry.HarnessCline, "index.js")
+	runNodeRuntime(t, "index.js", module, `
+import plugin from "./index.js";
+await plugin.setup({}, {session: {sessionId: "cline-session"}, workspaceInfo: {rootPath: "/tmp/project"}});
+await plugin.hooks.afterRun({snapshot: {status: "running"}, result: {status: "aborted"}});
+`, nil)
+	requireCapturedArguments(t, capture.path, "report", "cline", "--activity", "interrupted")
+}
+
 func TestGeneratedRuntimeFamilies(t *testing.T) {
 	requireRuntimeTool(t, "node")
 	requireRuntimeTool(t, "python3")
@@ -96,9 +109,19 @@ await hooks.afterRun({snapshot: {status: "failed", prompt: "`+generatedRuntimeSe
 import plugin from "./index.js";
 const hooks = new Map();
 plugin.register({on: (name, callback) => hooks.set(name, callback)});
-await hooks.get("agent_end")({success: false, reason: "error", prompt: "`+generatedRuntimeSensitiveSentinel+`"}, {sessionId: "openclaw-session", workspaceDir: "/tmp/project"});
+		await hooks.get("agent_end")({success: false, error: "native error", prompt: "`+generatedRuntimeSensitiveSentinel+`"}, {sessionId: "openclaw-session", workspaceDir: "/tmp/project"});
 `, extra)
 		requireCapturedArguments(t, capture.path, "report", "openclaw", "--activity", "failed")
+
+		captureAborted := captureBinary(t)
+		t.Setenv("AHT_CAPTURE", captureAborted.path)
+		runNodeRuntime(t, "index.js", module, `
+import plugin from "./index.js";
+const hooks = new Map();
+plugin.register({on: (name, callback) => hooks.set(name, callback)});
+await hooks.get("agent_end")({success: false, prompt: "`+generatedRuntimeSensitiveSentinel+`"}, {sessionId: "openclaw-session", workspaceDir: "/tmp/project"});
+`, extra)
+		requireCapturedArguments(t, captureAborted.path, "report", "openclaw", "--activity", "interrupted")
 	})
 
 	t.Run("hermes-plugin", func(t *testing.T) {

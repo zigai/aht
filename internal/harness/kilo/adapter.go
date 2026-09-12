@@ -33,11 +33,11 @@ func New() kiloHarness {
 		Aliases:      []string{"kilocode", "kilo-code", "kilo_code"},
 		ProcessNames: []string{"kilo", "kilocode", "kilo-code", "kilo_code"},
 		Env: harness.EnvKeys{
-			SessionID:   []string{"KILO_SESSION_ID", "KILOCODE_SESSION_ID"},
-			SessionPath: []string{"KILO_SESSION_PATH", "KILOCODE_SESSION_PATH"},
-			ProjectRoot: []string{"KILO_PROJECT_ROOT", "KILOCODE_PROJECT_ROOT"},
-			PID:         []string{"KILO_PID", "KILOCODE_PID"},
-			Event:       []string{"KILO_EVENT", "KILOCODE_EVENT"},
+			SessionID:   []string{"KILO_SESSION_ID"},
+			SessionPath: []string{"KILO_SESSION_PATH"},
+			ProjectRoot: []string{"KILO_PROJECT_ROOT"},
+			PID:         []string{"KILO_PID"},
+			Event:       []string{"KILO_EVENT"},
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,

@@ -125,7 +125,7 @@ const plugin = {
       let activity = "idle";
       if (status === "error" || status === "failed") {
         activity = "failed";
-      } else if (status === "interrupted" || status === "cancelled" || status === "canceled") {
+      } else if (status === "aborted" || status === "interrupted" || status === "cancelled" || status === "canceled") {
         activity = "interrupted";
       }
       return report("afterRun", { snapshot, resultStatus: result?.status }, { presence: "live", activity });

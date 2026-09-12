@@ -36,7 +36,11 @@ if [ "$1 $2" = "plugins inspect" ]; then
   source=$(cat "$state/source")
   policy=false
   if [ -f "$state/policy" ]; then policy=true; fi
-  printf '[{"plugin":{"id":"aht-state","status":"loaded","source":"path","version":"0.0.8"},"policy":{"allowConversationAccess":%s},"install":{"source":"path","sourcePath":"%s","installPath":"%s","version":"0.0.8"}}]\n' "$policy" "$source" "$source"
+  version="0.0.9"
+  if [ -f "$source/package.json" ]; then
+    version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$source/package.json" | head -n1)
+  fi
+  printf '[{"plugin":{"id":"aht-state","status":"loaded","source":"path","version":"%s"},"policy":{"allowConversationAccess":%s},"install":{"source":"path","sourcePath":"%s","installPath":"%s","version":"%s"}}]\n' "$version" "$policy" "$source" "$source" "$version"
   exit 0
 fi
 if [ "$1 $2" = "plugins install" ]; then

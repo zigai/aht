@@ -290,7 +290,6 @@ func TestEnvNames(t *testing.T) {
 				"PI_SESSION_ID",
 				"OPENCODE_SESSION_ID",
 				"KILO_SESSION_ID",
-				"KILOCODE_SESSION_ID",
 			},
 		},
 		{
@@ -301,7 +300,6 @@ func TestEnvNames(t *testing.T) {
 				"AGENT_EVENT",
 				"GROK_HOOK_EVENT",
 				"KILO_EVENT",
-				"KILOCODE_EVENT",
 			},
 		},
 		{
@@ -316,7 +314,6 @@ func TestEnvNames(t *testing.T) {
 				"PI_SESSION_PATH",
 				"OPENCODE_SESSION_PATH",
 				"KILO_SESSION_PATH",
-				"KILOCODE_SESSION_PATH",
 			},
 		},
 		{
@@ -329,7 +326,6 @@ func TestEnvNames(t *testing.T) {
 				"CLAUDE_PROJECT_DIR",
 				"GROK_WORKSPACE_ROOT",
 				"KILO_PROJECT_ROOT",
-				"KILOCODE_PROJECT_ROOT",
 				"FACTORY_PROJECT_DIR",
 			},
 		},
@@ -364,6 +360,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "agent", want: "", wantOK: false},
 		{command: "claude", want: registry.HarnessClaude, wantOK: true},
 		{command: "kimi", want: registry.HarnessKimiCode, wantOK: true},
+		{command: "Kimi Code", want: registry.HarnessKimiCode, wantOK: true},
 		{command: "grok", want: registry.HarnessGrok, wantOK: true},
 		{command: "grok-build", want: registry.HarnessGrok, wantOK: true},
 		{command: "goose", want: registry.HarnessGoose, wantOK: true},

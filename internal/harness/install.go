@@ -27,6 +27,7 @@ const (
 	HookActivityIdle        HookTransition = "activity:idle"
 	HookActivityFailed      HookTransition = "activity:failed"
 	HookActivityInterrupted HookTransition = "activity:interrupted"
+	HookPresenceLive        HookTransition = "presence:live"
 	HookPresenceGone        HookTransition = "presence:gone"
 )
 
@@ -307,6 +308,8 @@ func storedHookTransitionArgument(value HookTransition) (string, string) {
 		return "--activity", string(registry.ActivityFailed)
 	case HookActivityInterrupted:
 		return "--activity", string(registry.ActivityInterrupted)
+	case HookPresenceLive:
+		return "--presence", string(registry.PresenceLive)
 	case HookPresenceGone:
 		return "--presence", string(registry.PresenceGone)
 	default:
