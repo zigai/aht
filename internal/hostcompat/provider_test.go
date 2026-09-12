@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,21 +37,26 @@ type scriptedProvider struct {
 	marker   string
 	callID   string
 
-	mu       sync.Mutex
-	requests []providerRequest
-	step     int
-	err      error
+	mu                 sync.Mutex
+	requests           []providerRequest
+	step               int
+	err                error
+	checkpoints        chan int
+	release            chan struct{}
+	cancellations      chan int
+	expectRejectedTool bool
 }
 
 func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName string, toolArgs map[string]any, marker string) *scriptedProvider { //nolint:unparam // marker varies across build-tag variants (e.g. compatibility tag in current_host_test.go)
 	t.Helper()
 	provider := &scriptedProvider{
-		protocol: protocol,
-		toolName: toolName,
-		toolArgs: toolArgs,
-		marker:   marker,
-		callID:   "call_compat",
-		requests: make([]providerRequest, 0, 2),
+		protocol:      protocol,
+		toolName:      toolName,
+		toolArgs:      toolArgs,
+		marker:        marker,
+		callID:        "call_compat",
+		requests:      make([]providerRequest, 0, 2),
+		cancellations: make(chan int, 4),
 	}
 	if protocol == protocolAnthropicMessages {
 		provider.callID = "tool_compat"
@@ -76,7 +82,36 @@ func (provider *scriptedProvider) Error() error {
 	return provider.err
 }
 
-func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request *http.Request) { //nolint:cyclop // The cohesive HTTP protocol state machine is clearer as one handler.
+func (provider *scriptedProvider) waitForRelease(request *http.Request, step int) bool {
+	if provider.checkpoints == nil {
+		return true
+	}
+	select {
+	case provider.checkpoints <- step:
+	case <-request.Context().Done():
+		if provider.cancellations != nil {
+			select {
+			case provider.cancellations <- step:
+			default:
+			}
+		}
+		return false
+	}
+	select {
+	case <-provider.release:
+		return true
+	case <-request.Context().Done():
+		if provider.cancellations != nil {
+			select {
+			case provider.cancellations <- step:
+			default:
+			}
+		}
+		return false
+	}
+}
+
+func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request *http.Request) { //nolint:cyclop,gocognit // The cohesive HTTP protocol state machine is clearer as one handler.
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 4<<20))
 	if err != nil {
 		http.Error(writer, "invalid request body", http.StatusBadRequest)
@@ -122,6 +157,9 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		http.Error(writer, "not found", http.StatusNotFound)
 		return
 	}
+	if !provider.waitForRelease(request, step) {
+		return
+	}
 
 	switch step {
 	case 0:
@@ -132,7 +170,7 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		}
 		provider.writeToolCall(writer, body)
 	case 1:
-		if !requestContainsToolResult(provider.protocol, body, provider.callID, provider.marker) {
+		if !provider.validToolContinuation(body) {
 			provider.fail(fmt.Errorf("%w: tool continuation does not contain valid tool result with marker %q for call %q", errInvalidProviderRequest, provider.marker, provider.callID))
 			http.Error(writer, "missing tool result", http.StatusBadRequest)
 			return
@@ -142,6 +180,17 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		provider.fail(fmt.Errorf("%w: unexpected model request %d", errInvalidProviderRequest, step+1))
 		http.Error(writer, "unexpected request", http.StatusConflict)
 	}
+}
+
+func (provider *scriptedProvider) validToolContinuation(body []byte) bool {
+	if !provider.expectRejectedTool {
+		return requestContainsToolResult(provider.protocol, body, provider.callID, provider.marker)
+	}
+	// A rejected call must still have a correlated tool result, but must not
+	// contain the execution marker. The permission fixture independently
+	// verifies the command never created its marker file.
+	return requestContainsToolResult(provider.protocol, body, provider.callID, "") &&
+		!requestContainsToolResult(provider.protocol, body, provider.callID, provider.marker)
 }
 
 func (provider *scriptedProvider) validPath(path string) bool {
@@ -288,7 +337,17 @@ func requestAdvertisesTool(body []byte, toolName string) bool {
 }
 
 func matchesCallID(actual string, expected string) bool {
-	return expected == "" || actual == expected
+	if expected == "" || actual == expected {
+		return true
+	}
+	actualTrimmed := strings.TrimPrefix(actual, "call_")
+	expectedTrimmed := strings.TrimPrefix(expected, "call_")
+	if lastUnder := strings.LastIndex(actualTrimmed, "_"); lastUnder >= 0 {
+		if _, err := strconv.Atoi(actualTrimmed[lastUnder+1:]); err == nil {
+			actualTrimmed = actualTrimmed[:lastUnder]
+		}
+	}
+	return actualTrimmed == expectedTrimmed
 }
 
 func anthropicBlockMatchesToolResult(b any, callID, marker string) bool {

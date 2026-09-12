@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,15 +24,16 @@ import (
 const compatibilityPrompt = "Use the available shell tool exactly once to run printf aht-compat-marker, then reply done."
 
 type isolatedHost struct {
-	root     string
-	home     string
-	work     string
-	store    string
-	aht      string
-	hostPath string
-	env      []string
-	contract hostContract
-	provider *scriptedProvider
+	root      string
+	home      string
+	work      string
+	store     string
+	aht       string
+	hostPath  string
+	env       []string
+	contract  hostContract
+	provider  *scriptedProvider
+	interrupt bool
 }
 
 func TestCurrentHarnessLifecycle(t *testing.T) {
@@ -48,10 +50,17 @@ func TestCurrentHarnessLifecycle(t *testing.T) {
 	host.assertIntegrationCurrent(t)
 	host.assertVersion(t)
 	if contract.Level == compatibilityDiscovery {
-		t.Logf("%s current-host coverage is discovery-only: the documented CLI has no isolated local-provider lifecycle route", contract.ID)
+		t.Logf("%s discovery-only: installation, current integration, and installed version checked; no lifecycle, interruption, permission, or resume claim. Scope: %s", contract.ID, discoveryScope(contract.ID))
 		return
 	}
-	host.runLifecycle(t)
+	t.Run("successful_native_terminal", host.runLifecycle)
+	t.Run("active_interruption", func(t *testing.T) {
+		interrupted := newIsolatedHost(t, contract)
+		interrupted.installIntegration(t)
+		interrupted.interrupt = true
+		interrupted.runLifecycle(t)
+	})
+	runPermissionScenarios(t, contract)
 }
 
 func newIsolatedHost(t *testing.T, contract hostContract) isolatedHost {
@@ -64,7 +73,7 @@ func newIsolatedHost(t *testing.T, contract hostContract) isolatedHost {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	work := filepath.Join(root, "work")
-	for _, directory := range []string{home, work} {
+	for _, directory := range []string{home, work, filepath.Join(root, "tmp")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -74,18 +83,21 @@ func newIsolatedHost(t *testing.T, contract hostContract) isolatedHost {
 		t.Fatal(err)
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(sourceDirectory(), "..", ".."))
-	build := exec.Command("go", "build", "-ldflags", "-X github.com/zigai/aht/internal/cli.version=compat-oracle", "-o", aht, ".")
+	build := exec.Command("go", "build", "-ldflags", "-X github.com/zigai/aht/internal/cli.version=compat-oracle", "-o", aht+".real", ".")
 	build.Dir = repositoryRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building compatibility oracle: %v\n%s", err, output)
 	}
 
-	env := append([]string{}, os.Environ()...)
+	writeObservationLauncher(t, aht, filepath.Join(root, "native-events"))
+	env := isolatedEnvironment()
 	env = append(env,
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
 		"XDG_DATA_HOME="+filepath.Join(root, "data"),
 		"XDG_STATE_HOME="+filepath.Join(root, "state"),
+		"XDG_CACHE_HOME="+filepath.Join(root, "cache"),
+		"TMPDIR="+filepath.Join(root, "tmp"),
 		"AHT_STATE_DIR="+filepath.Join(root, "aht-state"),
 		"CLAUDE_CONFIG_DIR="+filepath.Join(root, "claude"),
 		"CODEX_HOME="+filepath.Join(root, "codex"),
@@ -99,7 +111,8 @@ func newIsolatedHost(t *testing.T, contract hostContract) isolatedHost {
 		"OPENCODE_CONFIG_DIR="+filepath.Join(root, "opencode"),
 		"KILO_CONFIG_DIR="+filepath.Join(root, "kilo"),
 		"AGY_CONFIG_HOME="+filepath.Join(root, "agy"),
-		"FACTORY_CONFIG_DIR="+filepath.Join(root, "droid"),
+		"FACTORY_CONFIG_DIR="+filepath.Join(home, ".factory"),
+		"FACTORY_DROID_AUTO_UPDATE_ENABLED=false",
 		"HERMES_HOME="+filepath.Join(root, "hermes"),
 	)
 
@@ -124,7 +137,7 @@ func (host isolatedHost) installIntegration(t *testing.T) {
 
 func (host isolatedHost) assertIntegrationCurrent(t *testing.T) {
 	t.Helper()
-	output := host.runAHT(t, "--json", "manage", "integrations", "status", string(host.contract.ID))
+	output := host.runAHT(t, "--json", "manage", "integrations", "status", string(host.contract.ID), "--binary", host.aht)
 	var statuses []struct {
 		Status string   `json:"status"`
 		Paths  []string `json:"paths"`
@@ -176,6 +189,9 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 
 	toolName := lifecycleToolName(host.contract.ID)
 	host.provider = newScriptedProvider(t, host.contract.Protocol, toolName, lifecycleToolArgs(host.contract.ID), "aht-compat-marker")
+	host.provider.checkpoints = make(chan int)
+	host.provider.cancellations = make(chan int, 4)
+	host.provider.release = make(chan struct{}, 1)
 	if host.contract.ID == registry.HarnessOpenClaw {
 		host.provider.callID = "callcompat" // OpenClaw strips punctuation from tool IDs.
 	}
@@ -187,6 +203,11 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 			t.Fatalf("%s provider setup failed: %v\n%s", host.contract.ID, err, output)
 		}
 	}
+	if host.interrupt {
+		host.runInterruption(t, command)
+		host.assertInterrupted(t)
+		return
+	}
 	hostOutput := host.runHostCommand(t, command)
 	if providerErr := host.provider.Error(); providerErr != nil {
 		t.Fatalf("%v\nprovider requests: %s", providerErr, providerRequestSummary(host.provider))
@@ -196,6 +217,30 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 	}
 
 	host.waitForSession(t, hostOutput)
+	host.assertNativeEvents(t)
+	t.Run("recorded_resume", func(t *testing.T) { host.runResume(t, command) })
+}
+
+func (host isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
+	t.Helper()
+	switch host.contract.ID {
+	case registry.HarnessDroid:
+		host.runDroidRPC(t, command.Env, nil, true)
+	case registry.HarnessKimiCode:
+		host.runKimiWire(t, command, true)
+	case registry.HarnessOpenCode, registry.HarnessKilo:
+		host.runServerInterruption(t, command.Env)
+	case registry.HarnessPi, registry.HarnessOmp:
+		runRPCInterruption(t, host, command.Env)
+	case registry.HarnessHermes:
+		runPythonInterruption(t, host, command.Env)
+	case registry.HarnessCline:
+		runCLIInterruption(t, host, command.Env)
+	case registry.HarnessGrok:
+		host.runGrokInterruption(t, command)
+	default:
+		host.runHostCommand(t, command)
+	}
 }
 
 func (host isolatedHost) validateSession(session registry.Session) bool {
@@ -214,7 +259,7 @@ func (host isolatedHost) validateSession(session registry.Session) bool {
 	if host.work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.work) {
 		return false
 	}
-	return true
+	return terminalSession(host.contract.ID, session)
 }
 
 func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
@@ -225,11 +270,7 @@ func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		listOutput := host.runAHT(t, "--json", "list", "--agent", string(host.contract.ID))
-		var sessions []registry.Session
-		if err := json.Unmarshal(listOutput, &sessions); err != nil {
-			t.Fatalf("decoding final session list: %v\n%s", err, listOutput)
-		}
+		sessions := host.sessions(t)
 		for _, s := range sessions {
 			if host.validateSession(s) {
 				return
@@ -237,6 +278,10 @@ func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 		}
 		select {
 		case <-deadline.C:
+			listOutput, err := json.MarshalIndent(sessions, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
 			t.Fatalf("%s completed provider lifecycle without matching native session evidence\nsessions: %s\n%s", host.contract.ID, listOutput, hostOutput)
 		case <-ticker.C:
 		}
@@ -269,8 +314,21 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		SessionID: "opencode-1",
 		Event:     "agent_start",
 	}
+	if host.validateSession(withNative) {
+		t.Fatal("oracle accepted start-only stuck-live native session")
+	}
+	withNative.Observations.Native.Event = "session.idle"
+	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
+	withNative.Activity = new(registry.ActivityUnknown)
+	if host.validateSession(withNative) {
+		t.Fatal("oracle accepted unexplained unknown effective activity")
+	}
+	withNative.ActivityDecision = &registry.ActivityDecision{
+		Authority: "screen",
+		Reason:    "screen_not_in_supported_multiplexer",
+	}
 	if !host.validateSession(withNative) {
-		t.Fatal("oracle rejected valid native session")
+		t.Fatal("oracle rejected screen-authoritative headless terminal session")
 	}
 
 	wrongCWD := withNative
@@ -302,12 +360,13 @@ func (host isolatedHost) startTracker(t *testing.T) {
 	command.Dir = host.work
 	command.Stdout = logFile
 	command.Stderr = logFile
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = command.Process.Kill()
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 		_ = command.Wait()
 		_ = logFile.Close()
 	})
@@ -332,6 +391,17 @@ func (host isolatedHost) startTracker(t *testing.T) {
 
 func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
 	t.Helper()
+	if host.contract.ID == registry.HarnessDroid {
+		return host.runDroidRPC(t, command.Env, nil, false)
+	}
+	if host.contract.ID == registry.HarnessKimiCode {
+		host.runKimiWire(t, command, false)
+		return nil
+	}
+	if host.contract.ID == registry.HarnessPi {
+		host.runPiCompletion(t, command)
+		return nil
+	}
 
 	logPath := filepath.Join(host.root, fmt.Sprintf("%s-host.log", host.contract.ID))
 	logFile, err := os.Create(logPath)
@@ -340,6 +410,7 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 	}
 	command.Stdout = logFile
 	command.Stderr = logFile
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
 		t.Fatal(err)
@@ -348,15 +419,42 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 	go func() {
 		wait <- command.Wait()
 	}()
-	var runErr error
-	select {
-	case runErr = <-wait:
-	case <-time.After(30 * time.Second):
-		_ = command.Process.Kill()
-		runErr = <-wait
+	finished := false
+	defer func() {
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		if !finished {
+			<-wait
+		}
 		_ = logFile.Close()
-		output, _ := os.ReadFile(logPath)
-		t.Fatalf("%s lifecycle timed out after 30s: %v\nprovider requests: %s\n%s", host.contract.ID, runErr, providerRequestSummary(host.provider), output)
+		if t.Failed() {
+			output, _ := os.ReadFile(logPath)
+			t.Logf("isolated host output:\n%s\nprovider:\n%s", output, providerRequestSummary(host.provider))
+		}
+	}()
+	var runErr error
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for !finished {
+		select {
+		case runErr = <-wait:
+			finished = true
+		case step := <-host.provider.checkpoints:
+			if step == 0 {
+				host.waitForActiveSession(t)
+			}
+			if host.interrupt {
+				if host.contract.ID == registry.HarnessOpenClaw {
+					host.interruptOpenClaw(t)
+				} else if err := command.Process.Signal(os.Interrupt); err != nil {
+					t.Fatalf("interrupting active host: %v", err)
+				}
+			} else {
+				host.provider.release <- struct{}{}
+			}
+		case <-deadline.C:
+			output, _ := os.ReadFile(logPath)
+			t.Fatalf("%s lifecycle timed out after 30s\nprovider requests: %s\n%s", host.contract.ID, providerRequestSummary(host.provider), output)
+		}
 	}
 	if err := logFile.Close(); err != nil {
 		t.Fatal(err)
@@ -369,7 +467,7 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 		kimiLog, _ := os.ReadFile(filepath.Join(host.root, "kimi", "logs", "kimi.log"))
 		output = append(output, kimiLog...)
 	}
-	if runErr != nil {
+	if runErr != nil && !host.interrupt {
 		t.Fatalf("%s lifecycle command failed: %v\nprovider requests: %s\n%s", host.contract.ID, runErr, providerRequestSummary(host.provider), output)
 	}
 	return output
@@ -501,8 +599,11 @@ func lifecycleToolArgs(id registry.Harness) map[string]any {
 	if id == registry.HarnessCline {
 		return map[string]any{"commands": []any{map[string]any{"command": "printf aht-compat-marker"}}}
 	}
-	if id == registry.HarnessGrok {
+	if id == registry.HarnessGrok || id == registry.HarnessCopilot {
 		return map[string]any{"command": "printf aht-compat-marker", "description": "Print the compatibility marker"}
+	}
+	if id == registry.HarnessDroid {
+		return map[string]any{"command": "printf aht-compat-marker", "timeout": 5, "riskLevel": "low", "riskLevelReason": "Prints only the fixed compatibility marker."}
 	}
 	return map[string]any{"command": "printf aht-compat-marker"}
 }
@@ -522,7 +623,7 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 		config := fmt.Sprintf("model = \"compat\"\nmodel_provider = \"compat\"\n[model_providers.compat]\nname = \"AHT compatibility\"\nbase_url = %q\nenv_key = \"AHT_COMPAT_API_KEY\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n", baseURL)
 		host.writeFile(t, filepath.Join(host.root, "codex", "config.toml"), config)
 		env = append(env, "AHT_COMPAT_API_KEY=compat")
-		args = []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "-C", host.work, compatibilityPrompt}
+		args = []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "-C", host.work, compatibilityPrompt}
 	case registry.HarnessGrok:
 		config := fmt.Sprintf("[model.aht-compat]\nmodel = \"compat\"\nbase_url = %q\nname = \"AHT compatibility\"\nenv_key = \"AHT_COMPAT_API_KEY\"\napi_backend = \"responses\"\n\n[models]\ndefault = \"aht-compat\"\n", baseURL)
 		host.writeFile(t, filepath.Join(host.root, "grok", "config.toml"), config)
@@ -538,10 +639,10 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 		args = []string{"--config", configDir, "--data-dir", dataDir, "--provider", "openai-compatible", "--key", "compat", "--model", "compat", "--auto-approve", "true", compatibilityPrompt}
 	case registry.HarnessPi:
 		host.writeFile(t, filepath.Join(host.root, "pi-agent", "models.json"), piModelsJSON(baseURL))
-		args = []string{"-p", "--provider", "aht-compat", "--model", "compat", "--approve", compatibilityPrompt}
+		args = []string{"--mode", "rpc", "--provider", "aht-compat", "--model", "compat", "--approve"}
 	case registry.HarnessKimiCode:
 		host.configureKimiModel(t, baseURL)
-		args = []string{"--print", "--final-message-only", "--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2", "-p", compatibilityPrompt}
+		return host.kimiWireCommand(t, env, []string{"--yolo", "--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2"}), nil
 	case registry.HarnessOmp:
 		host.writeFile(t, filepath.Join(host.root, "pi-agent", "models.yml"), ompModelsYAML(baseURL))
 		hooks, err := filepath.Glob(filepath.Join(host.root, "pi-agent", "extensions", "*"))
@@ -569,7 +670,7 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 		host.writeFile(t, filepath.Join(configDir, "opencode.json"), openCodeConfigJSON(baseURL))
 		args = []string{"run", "--model", "aht-compat/compat", "--auto", "--dir", host.work, compatibilityPrompt}
 	case registry.HarnessHermes:
-		config := fmt.Sprintf("model:\n  default: compat\n  provider: custom\n  base_url: %q\n  api_key: compat\n  api_mode: chat_completions\nplugins:\n  enabled:\n    - aht-state\n", baseURL)
+		config := fmt.Sprintf("model:\n  default: compat\n  provider: custom\n  base_url: %q\n  api_key: compat\n  api_mode: chat_completions\napprovals:\n  mode: manual\nplugins:\n  enabled:\n    - aht-state\n", baseURL)
 		host.writeFile(t, filepath.Join(host.root, "hermes", "config.yaml"), config)
 		env = append(env, "OPENAI_API_KEY=compat")
 		args = []string{"-z", compatibilityPrompt, "--provider", "custom", "--model", "compat", "--yolo", "--accept-hooks"}
@@ -580,7 +681,7 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 	case registry.HarnessDroid:
 		host.configureDroidModel(t, baseURL)
 		env = append(env, "FACTORY_API_KEY=compat")
-		args = []string{"exec", "--model", "custom:aht-compat-0", "--skip-permissions-unsafe", "--cwd", host.work, compatibilityPrompt}
+		args = droidRPCArguments(host.work)
 	default:
 		t.Fatalf("%s is marked lifecycle without a driver", host.contract.ID)
 	}
@@ -722,12 +823,13 @@ func (host isolatedHost) startOpenClawGateway(t *testing.T, port int) {
 	command.Dir = host.work
 	command.Stdout = logFile
 	command.Stderr = logFile
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = command.Process.Kill()
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 		_ = command.Wait()
 		_ = logFile.Close()
 	})
@@ -765,10 +867,4 @@ func ompModelsYAML(baseURL string) string {
 
 func openCodeConfigJSON(baseURL string) string {
 	return fmt.Sprintf(`{"$schema":"https://opencode.ai/config.json","provider":{"aht-compat":{"npm":"@ai-sdk/openai-compatible","name":"AHT compatibility","options":{"baseURL":%q,"apiKey":"compat"},"models":{"compat":{"name":"AHT compatibility"}}}}}`, baseURL)
-}
-
-func TestCompatibilityTimeoutBudget(t *testing.T) {
-	if deadline, ok := t.Deadline(); ok && time.Until(deadline) < 45*time.Second {
-		t.Fatalf("compatibility test requires at least 45 seconds, remaining %s", time.Until(deadline))
-	}
 }
