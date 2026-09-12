@@ -139,6 +139,7 @@ type Client struct {
 type OperationError struct {
 	Code    string
 	Message string
+	cause   error
 }
 
 // New returns a client for the configured local AHT instance. An unsupported
@@ -352,6 +353,11 @@ func (e *OperationError) Error() string {
 	return e.Code + ": " + e.Message
 }
 
+// Unwrap preserves the broker failure and its registry error classification.
+func (e *OperationError) Unwrap() error {
+	return e.cause
+}
+
 func publicError(err error) error {
 	if err == nil {
 		return nil
@@ -364,7 +370,7 @@ func publicError(err error) error {
 	}
 
 	if remoteError, ok := errors.AsType[*broker.RemoteError](err); ok {
-		return &OperationError{Code: remoteError.Code, Message: remoteError.Message}
+		return &OperationError{Code: remoteError.Code, Message: remoteError.Message, cause: err}
 	}
 	return err
 }

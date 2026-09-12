@@ -380,3 +380,15 @@ func (e *RemoteError) Error() string {
 
 	return e.Code + ": " + e.Message
 }
+
+// Unwrap classifies recognized registry failures without changing the wire error.
+func (e *RemoteError) Unwrap() error {
+	switch e.Code {
+	case "not_found":
+		return registry.ErrSessionNotFound
+	case "observation_conflict":
+		return registry.ErrObservationConflict
+	default:
+		return nil
+	}
+}

@@ -92,6 +92,28 @@ The `client` package provides a unified API supporting three operating modes:
 - `client.ModeRealtimeOnly`: strictly dials the broker socket; returns `client.ErrUnavailable` immediately if the broker is stopped (never touches disk or takes file locks).
 - `client.ModeDurableOnly`: reads and writes directly to the durable registry file, bypassing the broker daemon.
 
+### Error classification
+
+Use `errors.Is(err, registry.ErrSessionNotFound)` for a missing session and
+`errors.Is(err, registry.ErrObservationConflict)` for an observation rejected
+because it conflicts with accepted evidence. These classifications are stable in
+durable, realtime, and auto modes, including when the same auto client switches
+to durable storage after the broker stops. A rejected observation leaves the
+accepted session unchanged.
+
+Broker operation failures also support `errors.As` (or `errors.AsType`) to
+`*client.OperationError`, retaining the broker's `Code` and `Message`.
+Its error chain includes `*broker.RemoteError`, which unwraps wire code
+`not_found` to `registry.ErrSessionNotFound` and `observation_conflict` to
+`registry.ErrObservationConflict`. Direct `pkg/broker` callers can inspect the
+same classifications. Durable failures need not contain either broker error
+type.
+
+Other remote codes remain operation errors without an invented registry
+classification. In particular, the remote `canceled` code does not distinguish
+context cancellation from deadline expiry and does not unwrap to either context
+sentinel. Local context errors retain their existing classification.
+
 ```go
 package main
 
