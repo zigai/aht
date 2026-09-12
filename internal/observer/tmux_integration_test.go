@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/processinfo"
@@ -53,22 +54,37 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		if server == nil {
 			server = testtmux.New(t, "-s", sessionName, script)
 		} else {
-			server.Run(t, "new-session", "-d", "-s", sessionName, script)
+			_, err := server.Tmux.NewSession(ctx, gotmux.NewSessionOptions{ //nolint:exhaustruct_v5 // remaining options default
+				Name:    sessionName,
+				Program: gotmux.Shell(script),
+			})
+			if err != nil {
+				t.Fatalf("create test session %s: %v", sessionName, err)
+			}
 		}
-		socket := server.Socket
-		output := server.Run(t, "display-message", "-p", "-t", sessionName, "-F", "#{pane_id}|#{pane_tty}|#{pane_pid}")
-		fields := strings.Split(strings.TrimSpace(output), "|")
-		if len(fields) != 3 {
-			t.Fatalf("tmux pane fields = %#v", fields)
-		}
-		panePID, err := strconv.Atoi(fields[2])
+		sess, err := server.Tmux.FindSession(ctx, sessionName)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("find session %s: %v", sessionName, err)
 		}
+		links, err := sess.Windows(ctx)
+		if err != nil || len(links) == 0 {
+			t.Fatalf("windows for %s: %v", sessionName, err)
+		}
+		activePane, err := links[0].Window().ActivePane(ctx)
+		if err != nil {
+			t.Fatalf("active pane for %s: %v", sessionName, err)
+		}
+		info, err := activePane.Info(ctx)
+		if err != nil {
+			t.Fatalf("pane info for %s: %v", sessionName, err)
+		}
+		paneID := string(info.ID)
+		paneTTY := info.TTY
+		panePID := info.PID
 		processPID := 5000 + index
-		processes = append(processes, processinfo.Process{PID: processPID, PPID: panePID, ProcessGroupID: processPID, Foreground: true, StartIdentity: "test:" + sessionName, Executable: "/usr/bin/" + sessionName, CWD: "/tmp", TTY: fields[1], Args: []string{sessionName}})
-		tmuxCtx := registry.TmuxContext{Inside: true, ServerSocket: socket, SessionID: "$" + strconv.Itoa(index+1), SessionName: sessionName, WindowID: "@" + strconv.Itoa(index+1), WindowIndex: "0", WindowName: sessionName, PaneID: fields[0], PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: panePID, PaneTTY: fields[1]}
-		pane := tmux.Pane{Tmux: tmuxCtx, ServerIdentity: socket, PanePID: panePID, PaneTTY: fields[1]}
+		processes = append(processes, processinfo.Process{PID: processPID, PPID: panePID, ProcessGroupID: processPID, Foreground: true, StartIdentity: "test:" + sessionName, Executable: "/usr/bin/" + sessionName, CWD: "/tmp", TTY: paneTTY, Args: []string{sessionName}})
+		tmuxCtx := registry.TmuxContext{Inside: true, ServerSocket: server.Socket, SessionID: string(sess.ID()), SessionName: sessionName, WindowID: string(info.WindowID), WindowIndex: "0", WindowName: sessionName, PaneID: paneID, PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: panePID, PaneTTY: paneTTY}
+		pane := tmux.Pane{Tmux: tmuxCtx, ServerIdentity: server.Socket, PanePID: panePID, PaneTTY: paneTTY}
 		panes = append(panes, pane)
 		deadline := time.Now().Add(2 * time.Second)
 		for {
@@ -77,7 +93,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("tmux pane %s did not render fixture %q: snapshot=%#v error=%v", fields[0], test.screen, snapshot, captureErr)
+				t.Fatalf("tmux pane %s did not render fixture %q: snapshot=%#v error=%v", paneID, test.screen, snapshot, captureErr)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}

@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration || compatibility
 
 // Package testtmux owns isolated tmux servers used by integration tests.
 package testtmux
@@ -11,10 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/internal/processinfo"
 )
@@ -27,6 +28,7 @@ const (
 // Server owns a private socket and the process started for a test.
 type Server struct {
 	Socket        string
+	Tmux          *gotmux.Server
 	directory     string
 	executable    string
 	environment   []string
@@ -71,13 +73,18 @@ func newServer(t *testing.T, name string, sessionArgs []string) *Server {
 	executable := Executable(t)
 	// Unix socket paths must stay short. Cleanup owns this directory so a
 	// failed server shutdown retains its socket for inspection and recovery.
-	directory, err := os.MkdirTemp("/tmp", "aht-test-tmux-")
+	directory, err := os.MkdirTemp("/tmp", "aht-test-tmux-") //nolint:usetesting // reason: Unix domain socket paths in /tmp must stay short to prevent sockaddr_un overflow
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := &Server{
-		Socket: filepath.Join(directory, "tmux.sock"), directory: directory,
-		executable: executable, environment: nil, pid: 0, startIdentity: "",
+		Socket:        filepath.Join(directory, "tmux.sock"),
+		Tmux:          nil,
+		directory:     directory,
+		executable:    executable,
+		environment:   nil,
+		pid:           0,
+		startIdentity: "",
 	}
 	for _, value := range os.Environ() {
 		key, _, _ := strings.Cut(value, "=")
@@ -101,15 +108,7 @@ func newServer(t *testing.T, name string, sessionArgs []string) *Server {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start test tmux: %v: %s", err, output)
 	}
-	pidText := server.Run(t, "display-message", "-p", "#{pid}")
-	server.pid, err = strconv.Atoi(strings.TrimSpace(pidText))
-	if err != nil || server.pid <= 0 {
-		t.Fatalf("invalid test tmux server PID: %q", pidText)
-	}
-	server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
-	if server.startIdentity == "" {
-		t.Fatal("test tmux server has no process identity")
-	}
+	server.initGotmuxAndProbe(ctx, t, name)
 	return server
 }
 
@@ -146,8 +145,8 @@ func (server *Server) Close(ctx context.Context) error {
 			return nil
 		}
 	}
-	if output, err := server.Command(ctx, "kill-server").CombinedOutput(); err != nil {
-		return fmt.Errorf("stop test tmux: %w: %s", err, output)
+	if err := server.killTmuxServer(ctx); err != nil {
+		return err
 	}
 	ticker := time.NewTicker(exitPollInterval)
 	defer ticker.Stop()
@@ -166,6 +165,56 @@ func (server *Server) Close(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (server *Server) killTmuxServer(ctx context.Context) error {
+	if server.executable != "" {
+		cfg := gotmux.Config{ //nolint:exhaustruct_v5 // remaining options default
+			Binary:     server.executable,
+			SocketPath: server.Socket,
+			ConfigFile: "/dev/null",
+			Env:        server.environment,
+		}
+		if s, err := gotmux.New(cfg); err == nil {
+			server.Tmux = s
+		}
+	}
+	if err := server.Tmux.Kill(ctx); err != nil {
+		return fmt.Errorf("stop test tmux: %w", err)
+	}
+	return nil
+}
+
+func (server *Server) initGotmuxAndProbe(ctx context.Context, t *testing.T, name string) {
+	t.Helper()
+	gotmuxConfig := gotmux.Config{ //nolint:exhaustruct_v5 // remaining options default
+		Binary:     server.executable,
+		SocketPath: server.Socket,
+		ConfigFile: "/dev/null",
+		Env:        server.environment,
+	}
+	if name != "" {
+		gotmuxConfig.SocketPath = ""
+		gotmuxConfig.SocketName = name
+	}
+	gotmuxServer, err := gotmux.New(gotmuxConfig)
+	if err != nil {
+		t.Fatalf("init gotmux server: %v", err)
+	}
+	server.Tmux = gotmuxServer
+
+	probe, err := server.Tmux.Probe(ctx)
+	if err != nil {
+		t.Fatalf("probe test tmux server: %v", err)
+	}
+	server.pid = probe.Identity.PID
+	if server.pid <= 0 {
+		t.Fatalf("invalid test tmux server PID: %d", server.pid)
+	}
+	server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
+	if server.startIdentity == "" {
+		t.Fatal("test tmux server has no process identity")
+	}
 }
 
 func (server *Server) cleanup(t *testing.T) {

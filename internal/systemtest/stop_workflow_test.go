@@ -6,12 +6,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/processinfo"
@@ -286,17 +289,6 @@ func seedTmuxStopSession(t *testing.T, store *registry.FileStore, sessionID stri
 	return session
 }
 
-func sessionForTmuxSocket(t *testing.T, sessions []registry.Session, socket string) registry.Session {
-	t.Helper()
-	for _, session := range sessions {
-		if session.Tmux.ServerSocket == socket {
-			return session
-		}
-	}
-	t.Fatalf("no observed session for tmux socket %q: %#v", socket, sessions)
-	return registry.Session{}
-}
-
 func waitForTmuxSessionExit(t *testing.T, server *testtmux.Server, session string) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
@@ -304,8 +296,8 @@ func waitForTmuxSessionExit(t *testing.T, server *testtmux.Server, session strin
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		command := server.Command(t.Context(), "has-session", "-t", session)
-		if err := command.Run(); err != nil {
+		_, err := server.Tmux.FindSession(t.Context(), session)
+		if errors.Is(err, gotmux.ErrNotFound) || errors.Is(err, gotmux.ErrNoServer) {
 			return
 		}
 		select {
@@ -318,8 +310,7 @@ func waitForTmuxSessionExit(t *testing.T, server *testtmux.Server, session strin
 
 func assertTmuxSessionRunning(t *testing.T, server *testtmux.Server, session string) {
 	t.Helper()
-	command := server.Command(t.Context(), "has-session", "-t", session)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("control tmux session %q on %q exited: %v; output=%q", session, server.Socket, err, output)
+	if _, err := server.Tmux.FindSession(t.Context(), session); err != nil {
+		t.Fatalf("control tmux session %q on %q exited: %v", session, server.Socket, err)
 	}
 }

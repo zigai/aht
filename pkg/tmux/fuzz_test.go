@@ -22,8 +22,8 @@ func FuzzParseCurrent(f *testing.F) {
 }
 
 func FuzzParseListPanes(f *testing.F) {
-	f.Add("$1\twork\t@2\t3\tapi\t%4\t1\t/home/me/project\t1234\t/dev/pts/5\n")
-	f.Add("tmuxctx:\\$1 tmuxctx:work tmuxctx:@2 tmuxctx:3 tmuxctx:api tmuxctx:%4 tmuxctx:1 tmuxctx:'/tmp/with space' tmuxctx:1234 tmuxctx:/dev/pts/5\n")
+	f.Add("$1\twork\t@2\t3\tapi\t%4\t1\t/home/me/project\t1234\t/dev/pts/5\t/tmp/tmux-1000/default\n")
+	f.Add("tmuxctx:\\$1 tmuxctx:work tmuxctx:@2 tmuxctx:3 tmuxctx:api tmuxctx:%4 tmuxctx:1 tmuxctx:'/tmp/with space' tmuxctx:1234 tmuxctx:/dev/pts/5 tmuxctx:/tmp/tmux-1000/default\n")
 	f.Add("")
 
 	f.Fuzz(func(t *testing.T, output string) {

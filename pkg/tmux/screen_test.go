@@ -4,97 +4,39 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
 )
 
-func TestCapturePaneUsesBoundedBottomBufferAndServer(t *testing.T) {
+func TestCapturePaneRequiresPaneID(t *testing.T) {
 	t.Parallel()
-	var calls [][]string
-	run := func(_ context.Context, _ Env, args ...string) (string, error) {
-		calls = append(calls, append([]string(nil), args...))
-		if len(calls) == 1 {
-			return "bottom screen\n", nil
-		}
-		return "Codex task\n", nil
-	}
-	pane := Pane{Tmux: testTmuxContext("%7"), ServerIdentity: "-L:work", PanePID: 1, PaneTTY: "/dev/pts/1"}
-	snapshot, err := CapturePaneWithOptions(context.Background(), pane, CaptureOptions{Run: run, Lines: 500})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Text != "bottom screen" || snapshot.Title != "Codex task" {
-		t.Fatalf("snapshot = %#v", snapshot)
-	}
-	wantCapture := []string{"-L", "work", "capture-pane", "-p", "-J", "-e", "-S", "-100", "-t", "%7"}
-	if !reflect.DeepEqual(calls[0], wantCapture) {
-		t.Fatalf("capture args = %#v, want %#v", calls[0], wantCapture)
+
+	pane := Pane{Tmux: registry.TmuxContext{Inside: true, PaneID: ""}, ServerIdentity: "default", PanePID: 0, PaneTTY: ""}
+	_, err := CapturePane(context.Background(), pane)
+	if !errors.Is(err, errMissingCapturePane) {
+		t.Fatalf("CapturePane with empty pane ID error = %v, want errMissingCapturePane", err)
 	}
 }
 
-func TestCapturePaneDefaultsToVisibleViewport(t *testing.T) {
+func TestCapturePaneRejectsInvalidServerIdentity(t *testing.T) {
 	t.Parallel()
-	var calls [][]string
-	run := func(_ context.Context, _ Env, args ...string) (string, error) {
-		calls = append(calls, append([]string(nil), args...))
-		return "visible screen", nil
-	}
-	pane := Pane{Tmux: testTmuxContext("%8"), ServerIdentity: "-L:work", PanePID: 1, PaneTTY: "/dev/pts/2"}
 
-	snapshot, err := CapturePaneWithOptions(context.Background(), pane, CaptureOptions{Run: run})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Text != "visible screen" {
-		t.Fatalf("snapshot.Text = %q, want visible screen", snapshot.Text)
-	}
-	wantCapture := []string{"-L", "work", "capture-pane", "-p", "-J", "-e", "-t", "%8"}
-	if !reflect.DeepEqual(calls[0], wantCapture) {
-		t.Fatalf("capture args = %#v, want visible viewport %#v", calls[0], wantCapture)
+	pane := Pane{Tmux: registry.TmuxContext{Inside: true, PaneID: "%1"}, ServerIdentity: "-L:", PanePID: 0, PaneTTY: ""}
+	_, err := CapturePane(context.Background(), pane)
+	if !errors.Is(err, errInvalidServerIdentity) {
+		t.Fatalf("CapturePane with invalid server identity error = %v, want errInvalidServerIdentity", err)
 	}
 }
 
 func TestBoundBottomLinesPreservesBlankRows(t *testing.T) {
 	t.Parallel()
-	input := strings.Join(append([]string{"discard"}, append(make([]string, 99), "last")...), "\n") + "\n\n"
-	pane := Pane{Tmux: testTmuxContext("%8"), ServerIdentity: "-L:work", PanePID: 1, PaneTTY: "/dev/pts/2"}
-	run := func(_ context.Context, _ Env, _ ...string) (string, error) {
-		return input, nil
-	}
-	snapshot, err := CapturePaneWithOptions(context.Background(), pane, CaptureOptions{Run: run, Lines: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(snapshot.Text, "\n")
-	if len(lines) != 100 || lines[0] != "" || lines[len(lines)-2] != "last" || lines[len(lines)-1] != "" {
-		t.Fatalf("bounded lines = %#v", lines)
-	}
-}
 
-var errTestTitleUnavailable = errors.New("title unavailable")
-
-func TestCapturePaneTitleFailureDoesNotDiscardScreen(t *testing.T) {
-	t.Parallel()
-	calls := 0
-	run := func(context.Context, Env, ...string) (string, error) {
-		calls++
-		if calls == 1 {
-			return "screen", nil
-		}
-		return "", errTestTitleUnavailable
+	input := "row 1\n\nrow 3\n\n"
+	got := mux.BoundBottomLines(input, 3)
+	want := []string{"", "row 3", ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BoundBottomLines = %#v, want %#v", got, want)
 	}
-	pane := Pane{Tmux: testTmuxContext("%8"), ServerIdentity: "/tmp/tmux.sock", PanePID: 1, PaneTTY: "/dev/pts/2"}
-	snapshot, err := CapturePaneWithOptions(context.Background(), pane, CaptureOptions{Run: run})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Text != "screen" || snapshot.Title != "" {
-		t.Fatalf("snapshot = %#v", snapshot)
-	}
-}
-
-func testTmuxContext(paneID string) registry.TmuxContext {
-	return registry.TmuxContext{Inside: true, PaneID: paneID}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/zigai/aht/pkg/registry"
 )
 
 func TestContextFromEnvBuildsMinimalContext(t *testing.T) {
@@ -24,29 +26,6 @@ func TestCurrentWithEnvPreservesCancellation(t *testing.T) {
 	_, err := CurrentWithEnv(ctx, Env{TMUX: "/tmp/tmux/default,1,0", TMUXPane: "%1"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("CurrentWithEnv() error = %v, want context.Canceled", err)
-	}
-}
-
-func TestTmuxCommandEnvOverridesProcessTmuxEnv(t *testing.T) {
-	t.Setenv("TMUX", "old")
-	t.Setenv("TMUX_PANE", "%old")
-
-	values := tmuxCommandEnv(Env{TMUX: "new", TMUXPane: "%new"})
-	var tmuxValues []string
-	var paneValues []string
-	for _, value := range values {
-		if strings.HasPrefix(value, "TMUX=") {
-			tmuxValues = append(tmuxValues, value)
-		}
-		if strings.HasPrefix(value, "TMUX_PANE=") {
-			paneValues = append(paneValues, value)
-		}
-	}
-	if len(tmuxValues) != 1 || tmuxValues[0] != "TMUX=new" {
-		t.Fatalf("expected one replacement TMUX value, got %#v", tmuxValues)
-	}
-	if len(paneValues) != 1 || paneValues[0] != "TMUX_PANE=%new" {
-		t.Fatalf("expected one replacement TMUX_PANE value, got %#v", paneValues)
 	}
 }
 
@@ -126,7 +105,7 @@ func TestParseCurrentUnquotedTabInField(t *testing.T) {
 	}
 }
 
-func TestParseTmuxFieldsHandlesCurrentAndLegacyDollarQuoting(t *testing.T) {
+func TestParseTmuxFieldsHandlesQuoting(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -134,10 +113,8 @@ func TestParseTmuxFieldsHandlesCurrentAndLegacyDollarQuoting(t *testing.T) {
 		output string
 		want   string
 	}{
-		{name: "current plain dollar", output: `tmuxctx:value\ $dollar`, want: `value $dollar`},
-		{name: "legacy plain dollar", output: `tmuxctx:value\ \\$dollar`, want: `value $dollar`},
-		{name: "current literal backslash", output: `tmuxctx:value\ \\\$dollar`, want: `value \$dollar`},
-		{name: "legacy literal backslash", output: `tmuxctx:value\ \\\\$dollar`, want: `value \$dollar`},
+		{name: "plain dollar", output: `tmuxctx:value\ $dollar`, want: `value $dollar`},
+		{name: "literal backslash", output: `tmuxctx:value\ \\\$dollar`, want: `value \$dollar`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -153,44 +130,29 @@ func TestParseTmuxFieldsHandlesCurrentAndLegacyDollarQuoting(t *testing.T) {
 	}
 }
 
-func TestCurrentDisplayMessageArgsTargetsTmuxPane(t *testing.T) {
-	got := currentDisplayMessageArgs("format", "%12")
-	want := []string{"display-message", "-p", "-t", "%12", "-F", "format"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("unexpected args: got %#v want %#v", got, want)
-	}
-}
-
-func TestCurrentDisplayMessageArgsWithoutPane(t *testing.T) {
-	got := currentDisplayMessageArgs("format", "")
-	want := []string{"display-message", "-p", "-F", "format"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("unexpected args: got %#v want %#v", got, want)
-	}
-}
-
-func TestSendInterruptTargetsCustomServer(t *testing.T) {
+func TestSendInterruptRequiresPaneID(t *testing.T) {
 	t.Parallel()
 
-	var got []string
-	err := sendInterrupt(context.Background(), "-L:custom", "%12", func(_ context.Context, _ Env, args ...string) (string, error) {
-		got = append([]string(nil), args...)
-		return "", nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	err := SendInterruptTo(context.Background(), "default", "")
+	if !errors.Is(err, errMissingTmuxPaneID) {
+		t.Fatalf("SendInterruptTo with empty pane ID error = %v, want errMissingTmuxPaneID", err)
 	}
-	want := []string{"-L", "custom", "send-keys", "-t", "%12", "C-c"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("interrupt argv = %#v, want %#v", got, want)
+}
+
+func TestSendInterruptRejectsInvalidServerIdentity(t *testing.T) {
+	t.Parallel()
+
+	err := SendInterruptTo(context.Background(), "-L:", "%1")
+	if !errors.Is(err, errInvalidServerIdentity) {
+		t.Fatalf("SendInterruptTo with invalid server identity error = %v, want errInvalidServerIdentity", err)
 	}
 }
 
 func TestParseListPanes(t *testing.T) {
 	t.Parallel()
 
-	panes, err := ParseListPanes("$1\twork\t@2\t3\tapi\t%4\t1\t/home/me/project\t1234\t/dev/pts/5\n" +
-		"$1\twork\t@2\t3\tapi\t%5\t2\t/home/me/project\t1235\t/dev/pts/6\n")
+	panes, err := ParseListPanes("$1\twork\t@2\t3\tapi\t%4\t1\t/home/me/project\t1234\t/dev/pts/5\t/tmp/tmux-1000/default\n" +
+		"$1\twork\t@2\t3\tapi\t%5\t2\t/home/me/project\t1235\t/dev/pts/6\t/tmp/tmux-1000/default\n")
 	if err != nil {
 		t.Fatalf("ParseListPanes returned error: %v", err)
 	}
@@ -199,7 +161,7 @@ func TestParseListPanes(t *testing.T) {
 		t.Fatalf("expected 2 panes, got %d", len(panes))
 	}
 
-	if panes[0].PanePID != 1234 || panes[0].PaneTTY != "/dev/pts/5" {
+	if panes[0].PanePID != 1234 || panes[0].PaneTTY != "/dev/pts/5" || panes[0].ServerIdentity != "/tmp/tmux-1000/default" {
 		t.Fatalf("unexpected first pane identity: %#v", panes[0])
 	}
 
@@ -213,7 +175,7 @@ func TestParseListPanesEscapedFields(t *testing.T) {
 
 	panes, err := ParseListPanes("tmuxctx:\\$1 tmuxctx:work tmuxctx:@2 tmuxctx:3 tmuxctx:api " +
 		"tmuxctx:%4 tmuxctx:1 tmuxctx:'/home/me/dir\twith-tab' " +
-		"tmuxctx:1234 tmuxctx:/dev/pts/5\n")
+		"tmuxctx:1234 tmuxctx:/dev/pts/5 tmuxctx:/tmp/tmux-1000/default\n")
 	if err != nil {
 		t.Fatalf("ParseListPanes returned error: %v", err)
 	}
@@ -221,7 +183,8 @@ func TestParseListPanesEscapedFields(t *testing.T) {
 		t.Fatalf("expected one pane, got %d", len(panes))
 	}
 	if panes[0].Tmux.PaneCurrentPath != "/home/me/dir\twith-tab" ||
-		panes[0].PanePID != 1234 || panes[0].PaneTTY != "/dev/pts/5" {
+		panes[0].PanePID != 1234 || panes[0].PaneTTY != "/dev/pts/5" ||
+		panes[0].ServerIdentity != "/tmp/tmux-1000/default" {
 		t.Fatalf("unexpected escaped pane: %#v", panes[0])
 	}
 }
@@ -256,95 +219,69 @@ func TestServerSpecFromArgs(t *testing.T) {
 	}
 }
 
-func TestListPanesWithOptionsEnumeratesCustomServers(t *testing.T) {
-	t.Parallel()
-	var calls [][]string
-	run := func(_ context.Context, _ Env, args ...string) (string, error) {
-		calls = append(calls, append([]string{}, args...))
-		switch strings.Join(args, "\x00") {
-		case "-L\x00custom\x00list-panes\x00-a\x00-F\x00" + listPanesFormat():
-			return "$2\tcustom\t@2\t0\tmain\t%2\t0\t/tmp\t200\t/dev/pts/2\t/tmp/tmux-1000/custom\n", nil
-		default:
-			t.Fatalf("unexpected argv: %#v", args)
-			return "", nil
-		}
-	}
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Run: run,
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			return []ServerProcess{{PID: 42, Args: []string{"tmux", "-L", "custom", "new-session", "-d"}}}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("ListPanesWithOptions returned error: %v", err)
-	}
-	if len(panes) != 1 || len(calls) != 1 {
-		t.Fatalf("panes = %#v, calls = %#v", panes, calls)
-	}
-	if panes[0].ServerIdentity != "/tmp/tmux-1000/custom" || panes[0].Tmux.ServerSocket != "/tmp/tmux-1000/custom" || panes[0].PanePID != 200 || panes[0].PaneTTY != "/dev/pts/2" {
-		t.Fatalf("custom pane identity = %#v", panes[0])
-	}
-}
-
 func TestListPanesWithOptionsDoesNotProbeMissingDefaultServer(t *testing.T) {
 	t.Parallel()
-	called := false
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Run: func(context.Context, Env, ...string) (string, error) {
-			called = true
-			return "", nil
-		},
+		Env:             Env{TMUX: "", TMUXPane: ""},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
 	})
-	if err != nil || len(panes) != 0 || called {
-		t.Fatalf("no-server discovery = panes %#v, called %t, error %v", panes, called, err)
+	if err != nil || len(panes) != 0 {
+		t.Fatalf("no-server discovery = panes %#v, error %v", panes, err)
 	}
 }
 
 func TestListPanesWithOptionsIgnoresUnreachableDiscoveredServer(t *testing.T) {
 	t.Parallel()
-	called := false
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Run: func(context.Context, Env, ...string) (string, error) {
-			called = true
-			return "", context.Canceled
-		},
+		Env: Env{TMUX: "", TMUXPane: ""},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
 			return []ServerProcess{{PID: 42, Args: []string{"tmux", "-S", "/tmp/stale.sock", "new-session", "-d"}}}, nil
 		},
 	})
-	if err != nil || len(panes) != 0 || !called {
-		t.Fatalf("stale-server discovery = panes %#v, called %t, error %v", panes, called, err)
+	if err != nil || len(panes) != 0 {
+		t.Fatalf("stale-server discovery = panes %#v, error %v", panes, err)
 	}
 }
 
 func TestListPanesWithOptionsReportsUnreachableCurrentServer(t *testing.T) {
 	t.Parallel()
-	const socket = "/tmp/current.sock"
+	const socket = "/tmp/current-unreachable.sock"
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Env: Env{TMUX: socket + ",123,0", TMUXPane: "%1"},
-		Run: func(context.Context, Env, ...string) (string, error) {
-			return "", context.Canceled
-		},
+		Env:             Env{TMUX: socket + ",123,0", TMUXPane: "%1"},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
 	})
-	if !errors.Is(err, context.Canceled) || len(panes) != 0 {
+	if err == nil || len(panes) != 0 {
 		t.Fatalf("current-server discovery = panes %#v, error %v", panes, err)
 	}
 }
 
-func TestListPanesWithOptionsDeduplicatesCanonicalSocketIdentity(t *testing.T) {
+func TestAppendCanonicalPanesDeduplicates(t *testing.T) {
 	t.Parallel()
 	const socket = "/tmp/tmux-1000/default"
-	output := "$1\twork\t@1\t0\tmain\t%1\t0\t/tmp\t100\t/dev/pts/1\t" + socket + "\n"
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Env: Env{TMUX: socket + ",100,0", TMUXPane: "%1"},
-		Run: func(context.Context, Env, ...string) (string, error) { return output, nil },
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			return []ServerProcess{{PID: 42, Args: []string{"tmux", "new-session", "-d"}}}, nil
+	seen := make(map[string]struct{})
+	pane := Pane{
+		Tmux: registry.TmuxContext{
+			Inside:          true,
+			ServerSocket:    socket,
+			SessionID:       "",
+			SessionName:     "",
+			WindowID:        "",
+			WindowIndex:     "",
+			WindowName:      "",
+			PaneID:          "%1",
+			PaneIndex:       "",
+			PaneCurrentPath: "",
+			PanePID:         100,
+			PaneTTY:         "/dev/pts/1",
+			ClientTTY:       "",
 		},
-	})
-	if err != nil || len(panes) != 1 || panes[0].ServerIdentity != socket {
-		t.Fatalf("deduplicated panes = %#v, error %v", panes, err)
+		ServerIdentity: socket,
+		PanePID:        100,
+		PaneTTY:        "/dev/pts/1",
+	}
+	panes := appendCanonicalPanes(nil, []Pane{pane}, socket, seen)
+	panes = appendCanonicalPanes(panes, []Pane{pane}, socket, seen)
+	if len(panes) != 1 {
+		t.Fatalf("expected 1 deduplicated pane, got %d", len(panes))
 	}
 }

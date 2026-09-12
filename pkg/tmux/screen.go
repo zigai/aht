@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/pkg/mux"
 )
@@ -23,60 +24,61 @@ type ScreenSnapshot struct {
 }
 
 type CaptureOptions struct {
-	Env   Env
-	Run   CommandRunner
 	Lines int
 }
 
 func CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error) {
-	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Env: Env{TMUX: "", TMUXPane: ""}, Run: nil, Lines: 0})
+	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Lines: 0})
 }
 
 func CapturePaneWithOptions(ctx context.Context, pane Pane, options CaptureOptions) (ScreenSnapshot, error) {
 	if strings.TrimSpace(pane.Tmux.PaneID) == "" {
 		return ScreenSnapshot{}, errMissingCapturePane
 	}
-	run := options.Run
-	if run == nil {
-		run = runTmuxWithEnv
-	}
-	lines := min(options.Lines, defaultCaptureLines)
-	serverArgs, err := serverArgsForIdentity(pane.ServerIdentity)
+	cfg, err := gotmuxConfigForIdentity(pane.ServerIdentity)
 	if err != nil {
 		return ScreenSnapshot{}, err
 	}
-	captureArgs := append(append([]string{}, serverArgs...), "capture-pane", "-p", "-J", "-e")
-	if lines > 0 {
-		captureArgs = append(captureArgs, "-S", "-"+strconv.Itoa(lines))
+	server, err := gotmux.New(cfg)
+	if err != nil {
+		return ScreenSnapshot{}, fmt.Errorf("init tmux client: %w", err)
 	}
-	captureArgs = append(captureArgs, "-t", pane.Tmux.PaneID)
-	text, err := run(ctx, options.Env, captureArgs...)
+	paneHandle, err := server.PaneHandle(gotmux.PaneID(pane.Tmux.PaneID))
+	if err != nil {
+		return ScreenSnapshot{}, fmt.Errorf("resolve tmux pane %s: %w", pane.Tmux.PaneID, err)
+	}
+	lines := min(options.Lines, defaultCaptureLines)
+	captureOpts := gotmux.CaptureOptions{ //nolint:exhaustruct_v5 // remaining options default to empty
+		JoinWrapped:    true,
+		IncludeEscapes: true,
+	}
+	if lines > 0 {
+		start := -lines
+		captureOpts.Start = &start
+	}
+	res, err := paneHandle.CaptureWithTitle(ctx, captureOpts)
 	if err != nil {
 		return ScreenSnapshot{}, fmt.Errorf("capturing pane %s: %w", pane.Tmux.PaneID, err)
 	}
-	titleArgs := append(append([]string{}, serverArgs...), "display-message", "-p", "-t", pane.Tmux.PaneID, "-F", "#{pane_title}")
-	title, titleErr := run(ctx, options.Env, titleArgs...)
-	if titleErr != nil {
-		title = ""
-	}
+	text := string(res.Output)
 	if lines > 0 {
 		text = strings.Join(mux.BoundBottomLines(text, lines), "\n")
 	}
-	return ScreenSnapshot{Text: text, Title: strings.TrimRight(title, "\r\n")}, nil
+	return ScreenSnapshot{Text: text, Title: strings.TrimRight(res.Title, "\r\n")}, nil
 }
 
-func serverArgsForIdentity(identity string) ([]string, error) {
+func gotmuxConfigForIdentity(identity string) (gotmux.Config, error) {
 	identity = strings.TrimSpace(identity)
 	switch {
 	case identity == "", identity == "default":
-		return nil, nil
+		return gotmux.Config{}, nil //nolint:exhaustruct_v5 // zero values for default endpoint
 	case strings.HasPrefix(identity, "-L:"):
 		name := strings.TrimPrefix(identity, "-L:")
 		if name == "" {
-			return nil, fmt.Errorf("%w: %q", errInvalidServerIdentity, identity)
+			return gotmux.Config{}, fmt.Errorf("%w: %q", errInvalidServerIdentity, identity)
 		}
-		return []string{"-L", name}, nil
+		return gotmux.Config{SocketName: name}, nil //nolint:exhaustruct_v5 // zero values for named socket
 	default:
-		return []string{"-S", identity}, nil
+		return gotmux.Config{SocketPath: identity}, nil //nolint:exhaustruct_v5 // zero values for path socket
 	}
 }

@@ -3,23 +3,14 @@
 package tmux
 
 import (
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/internal/testtmux"
+	"github.com/zigai/aht/pkg/registry"
 )
-
-func TestTmuxFormatQuotesBareVariableNames(t *testing.T) {
-	t.Parallel()
-
-	got := currentFormat()
-	want := "tmuxctx:#{q:session_id} tmuxctx:#{q:session_name} tmuxctx:#{q:window_id} " +
-		"tmuxctx:#{q:window_index} tmuxctx:#{q:window_name} tmuxctx:#{q:pane_id} " +
-		"tmuxctx:#{q:pane_index} tmuxctx:#{q:pane_current_path} tmuxctx:#{q:pane_pid} " +
-		"tmuxctx:#{q:pane_tty} tmuxctx:#{q:client_tty}"
-	if got != want {
-		t.Fatalf("tmux format = %q, want %q", got, want)
-	}
-}
 
 func TestTmuxFormatWithRealTmuxEscapedFields(t *testing.T) {
 	server := testtmux.New(t, "sleep", "60")
@@ -40,5 +31,61 @@ func TestTmuxFormatWithRealTmuxEscapedFields(t *testing.T) {
 	}
 	if fields[0] != weirdValue {
 		t.Fatalf("field = %q, want %q", fields[0], weirdValue)
+	}
+}
+
+func tmuxFormat(fields []string) string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		parts = append(parts, escapedFieldPrefix+"#{q:"+field+"}")
+	}
+	return strings.Join(parts, " ")
+}
+
+func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
+	server := testtmux.New(t, "-s", "gotmux-test", "sh", "-c", "echo 'hello gotmux'; sleep 60")
+	server.Run(t, "new-window", "-d", "sleep", "60")
+	panes, err := server.Tmux.Panes(t.Context())
+	if err != nil || len(panes) == 0 {
+		t.Fatalf("server.Tmux.Panes error = %v, len = %d", err, len(panes))
+	}
+	paneID := string(panes[0].ID)
+	pid := strconv.Itoa(panes[0].PID)
+
+	pane := Pane{
+		Tmux: registry.TmuxContext{
+			Inside:       true,
+			ServerSocket: server.Socket,
+			SessionName:  "gotmux-test",
+			PaneID:       paneID,
+		},
+		ServerIdentity: server.Socket,
+		PanePID:        0,
+		PaneTTY:        "",
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		snapshot, err := CapturePane(t.Context(), pane)
+		if err == nil && strings.Contains(snapshot.Text, "hello gotmux") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for pane capture, last text: %q", snapshot.Text)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	tmuxEnv := server.Socket + "," + pid + ",0"
+	current, err := CurrentWithEnv(t.Context(), Env{TMUX: tmuxEnv, TMUXPane: paneID})
+	if err != nil {
+		t.Fatalf("CurrentWithEnv failed: %v", err)
+	}
+	if current.PaneID != paneID || current.SessionName != "gotmux-test" {
+		t.Fatalf("unexpected current context: %#v", current)
+	}
+
+	if err := SendInterruptTo(t.Context(), server.Socket, paneID); err != nil {
+		t.Fatalf("SendInterruptTo failed: %v", err)
 	}
 }
