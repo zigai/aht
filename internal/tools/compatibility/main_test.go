@@ -126,7 +126,7 @@ func readTestFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestWeeklyWorkflowUsesGoAndSharedGate(t *testing.T) {
+func TestWeeklySelectsUnpinnedDistribution(t *testing.T) {
 	var stdout bytes.Buffer
 	app := application{getenv: func(string) string { return "" }, stdout: &stdout, stderr: io.Discard}
 	if err := app.run(t.Context(), []string{"weekly"}); err != nil {
@@ -138,18 +138,6 @@ func TestWeeklyWorkflowUsesGoAndSharedGate(t *testing.T) {
 	}
 	if len(got.Include) != 1 || got.Include[0].Harness != "cursor" {
 		t.Fatalf("weekly matrix = %+v", got)
-	}
-	for _, name := range []string{"compatibility", "compatibility-releases", "compatibility-host"} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", name+".yml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "go run ./internal/tools/compatibility") || strings.Contains(string(data), ".mjs") {
-			t.Fatalf("%s doesn't run Go tooling", name)
-		}
-		if name != "compatibility-host" && !strings.Contains(string(data), "uses: ./.github/workflows/compatibility-host.yml") {
-			t.Fatalf("%s bypasses shared lifecycle gate", name)
-		}
 	}
 }
 

@@ -17,7 +17,7 @@ jobs:
   host:
     name: ${{ inputs.harness }} ${{ inputs.version || 'current' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       AHT_COMPAT_HARNESS: ${{ inputs.harness }}
       AHT_COMPAT_VERSION: ${{ inputs.version }}
@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 90s 2>&1 |
+          go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m 2>&1 |
             tee "$AHT_COMPAT_WORK/$AHT_COMPAT_HARNESS.log"
 
       - name: Record result

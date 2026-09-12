@@ -15,6 +15,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  affected-hosts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      selected: ${{ steps.select.outputs.selected }}
+    steps:
+      - name: Checkout comparison history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Select affected hosts and resolve distributions
+        id: select
+        env:
+          AHT_COMPAT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          AHT_COMPAT_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: go run ./internal/tools/compatibility changes
+
+  changed-hosts:
+    needs: affected-hosts
+    if: needs.affected-hosts.outputs.selected == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.affected-hosts.outputs.matrix) }}
+    uses: ./.github/workflows/compatibility-host.yml
+    with:
+      harness: ${{ matrix.harness }}
+      version: ${{ matrix.version }}
+
+  change-compatibility:
+    name: change-compatibility
+    if: ${{ always() }}
+    needs: [affected-hosts, changed-hosts]
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
+    steps:
+      - name: Require complete change compatibility
+        env:
+          SELECTOR_RESULT: ${{ needs.affected-hosts.result }}
+          SELECTED: ${{ needs.affected-hosts.outputs.selected }}
+          HOSTS_RESULT: ${{ needs.changed-hosts.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SELECTOR_RESULT" = success
+          case "$SELECTED:$HOSTS_RESULT" in
+            false:skipped) echo "No affected harnesses." ;;
+            true:success) echo "All affected harnesses passed." ;;
+            *) echo "Compatibility selection or host jobs failed or are incomplete." >&2; exit 1 ;;
+          esac
+
   verify-linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

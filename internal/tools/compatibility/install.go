@@ -77,7 +77,11 @@ func installationCommands(spec harnessSpec, version, work, bin string) ([]instal
 	case "npm":
 		return []installCommand{{Name: "npm", Args: []string{"install", "--global", spec.Package + "@" + version}, Env: nil}}, nil
 	case "pypi":
-		return []installCommand{{Name: "uv", Args: []string{"tool", "install", spec.Package + "==" + version}, Env: nil}}, nil
+		packageName := spec.Package
+		if spec.ID == "hermes" {
+			packageName += "[acp]"
+		}
+		return []installCommand{{Name: "uv", Args: []string{"tool", "install", packageName + "==" + version}, Env: nil}}, nil
 	case "github":
 		return githubInstallation(spec, version, work, bin)
 	case "channel":

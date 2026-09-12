@@ -39,11 +39,13 @@ func runCommandLine() error {
 
 func (a application) run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("%w: usage: compatibility probe|detect|weekly|install|result|finish", errCompatibility)
+		return fmt.Errorf("%w: usage: compatibility probe|changes|detect|weekly|install|result|finish", errCompatibility)
 	}
 	switch args[0] {
 	case "probe":
 		return a.detectReleases(ctx, false)
+	case "changes":
+		return a.changes(ctx)
 	case "detect":
 		return a.detectReleases(ctx, true)
 	case "weekly":

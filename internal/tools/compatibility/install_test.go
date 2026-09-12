@@ -30,6 +30,9 @@ func assertVersionPin(t *testing.T, spec harnessSpec) {
 		expected = spec.Package + "@" + version
 	case "pypi":
 		expected = spec.Package + "==" + version
+		if spec.ID == "hermes" {
+			expected = spec.Package + "[acp]==" + version
+		}
 	case "github":
 		expected = "/releases/download/" + version + "/" + spec.Asset
 	}
