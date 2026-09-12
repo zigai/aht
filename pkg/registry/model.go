@@ -319,8 +319,6 @@ type Summary struct {
 	ActivityUnknown        int             `json:"activity_unknown"`
 }
 
-type SummaryOptions struct{ Filter Filter }
-
 func (h Harness) IsValid() bool {
 	switch h {
 	case HarnessClaude, HarnessCodex, HarnessCursor, HarnessCopilot, HarnessCline,

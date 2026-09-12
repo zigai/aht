@@ -114,8 +114,7 @@ type Config struct {
 	Mode       Mode
 }
 
-// stateStore is the routing client's operational contract. Public compatibility
-// aliases on registry.Store are not requirements for an internal backend.
+// stateStore is the routing client's operational contract.
 type stateStore interface {
 	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
 	ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error)
@@ -279,11 +278,6 @@ func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registr
 // SummaryByTmuxSession implements registry.Store.
 func (c *Client) SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
 	return c.Summary(ctx, filter)
-}
-
-// SummaryByTmuxSessionWithOptions implements registry.Store.
-func (c *Client) SummaryByTmuxSessionWithOptions(ctx context.Context, options registry.SummaryOptions) ([]registry.Summary, error) {
-	return c.Summary(ctx, options.Filter)
 }
 
 // GC removes gone-session tombstones at least deleteAfter old.

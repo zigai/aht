@@ -109,13 +109,6 @@ func (s *Store) SummaryByTmuxSession(
 	return summaries, nil
 }
 
-func (s *Store) SummaryByTmuxSessionWithOptions(
-	ctx context.Context,
-	options registry.SummaryOptions,
-) ([]registry.Summary, error) {
-	return s.SummaryByTmuxSession(ctx, options.Filter)
-}
-
 func (s *Store) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCResult, error) {
 	result, err := s.client.GC(ctx, deleteAfter)
 	if !IsUnavailable(err) {

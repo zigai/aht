@@ -174,14 +174,6 @@ func (s *MemoryStore) SummaryByTmuxSession(ctx context.Context, filter Filter) (
 	return summariesForSessions(sessions), nil
 }
 
-// SummaryByTmuxSessionWithOptions returns summaries for the supplied filter.
-func (s *MemoryStore) SummaryByTmuxSessionWithOptions(
-	ctx context.Context,
-	options SummaryOptions,
-) ([]Summary, error) {
-	return s.SummaryByTmuxSession(ctx, options.Filter)
-}
-
 // GC removes expired gone-session tombstones from memory.
 func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error) {
 	if err := ctx.Err(); err != nil {

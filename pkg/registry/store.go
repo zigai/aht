@@ -995,10 +995,6 @@ func populateMultiplexerProjection(session *Session) {
 }
 
 func (s *FileStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
-	return s.SummaryByTmuxSessionWithOptions(ctx, SummaryOptions{Filter: filter})
-}
-
-func (s *FileStore) SummaryByTmuxSessionWithOptions(ctx context.Context, options SummaryOptions) ([]Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
 	}
@@ -1011,7 +1007,7 @@ func (s *FileStore) SummaryByTmuxSessionWithOptions(ctx context.Context, options
 		populateMultiplexerProjection(&session)
 		sessions = append(sessions, session)
 	}
-	return summariesForSessions(filterSessions(sessions, options.Filter)), nil
+	return summariesForSessions(filterSessions(sessions, filter)), nil
 }
 
 func summariesForSessions(sessions []Session) []Summary {

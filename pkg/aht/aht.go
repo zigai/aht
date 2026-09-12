@@ -121,9 +121,6 @@ type (
 	// Summary represents aggregate session counts for a terminal session.
 	Summary = registry.Summary
 
-	// SummaryOptions controls grouping and filtering for session summaries.
-	SummaryOptions = registry.SummaryOptions
-
 	// Subscription streams immutable state snapshots from the realtime broker.
 	Subscription = broker.Subscription
 
