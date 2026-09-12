@@ -40,6 +40,7 @@ const (
 	listCommandName                  = "list"
 	statusCommandName                = "status"
 	installCommandName               = "install"
+	sigpipeExitCode                  = 141
 	integrationsCommand              = "integrations"
 	trackerCommand                   = "tracker"
 	stateCommandName                 = "state"
@@ -195,6 +196,7 @@ func (app *application) newRootCommand() *cobra.Command {
 		app.newInfoCommand(),
 		app.newStopCommand(),
 		app.newManageCommand(),
+		app.newWireCommand(),
 		app.newHookCommand(),
 		app.newReportCommand(),
 	)
@@ -223,6 +225,13 @@ func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, std
 	root.SetArgs(args)
 	root.SetIn(stdin)
 	if err := root.ExecuteContext(ctx); err != nil {
+		var status interface{ ExitCode() int }
+		if errors.As(err, &status) {
+			if status.ExitCode() != sigpipeExitCode {
+				_, _ = fmt.Fprintln(stderr, err)
+			}
+			return status.ExitCode()
+		}
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
