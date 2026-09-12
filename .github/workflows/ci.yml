@@ -97,7 +97,15 @@ jobs:
         uses: extractions/setup-just@v3
 
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install --yes tmux
+        run: |
+          sudo apt-get update && sudo apt-get install --yes libevent-dev ncurses-dev build-essential bison pkg-config
+          curl -fsSL https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz | tar -xz
+          cd tmux-3.6
+          ./configure
+          make -j$(nproc)
+          sudo make install
+          cd ..
+          rm -rf tmux-3.6
 
       - name: Verify source
         run: just check
