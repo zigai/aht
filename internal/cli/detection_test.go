@@ -33,9 +33,7 @@ func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "info", "--pane", "%99", "--explain"})
-	if err := root.Execute(); !errors.Is(err, errTmuxPaneNotLive) {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "info", "--pane", "%99", "--explain"}, &stdout, &bytes.Buffer{}); !errors.Is(err, errTmuxPaneNotLive) {
 		t.Fatalf("info explanation missing pane error = %v", err)
 	}
 	var result explainedInfoResult
@@ -63,9 +61,7 @@ func TestInfoExplainWithoutLivePaneReportsUnavailableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "info", session.ID, "--explain"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "info", session.ID, "--explain"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result explainedInfoResult
@@ -97,9 +93,7 @@ func TestInfoExplainReportsActiveHookAuthorityByPane(t *testing.T) {
 	t.Parallel()
 	path := createActivePiInfoSession(t)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "info", "--pane", "%3", "--explain"})
-	if err := root.Execute(); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "info", "--pane", "%3", "--explain"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result explainedInfoResult
@@ -123,9 +117,7 @@ func TestInfoExplainUsesHumanOutputByDefault(t *testing.T) {
 	t.Parallel()
 	path := createActivePiInfoSession(t)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "info", "--pane", "%3", "--explain"})
-	if err := root.Execute(); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "info", "--pane", "%3", "--explain"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"Session ID:", "Activity diagnosis:", "Registry activity:", "Effective activity:"} {

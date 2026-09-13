@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,7 +20,9 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
+
+	urfavehelp "github.com/zigai/urfave-help"
 
 	"github.com/zigai/aht/internal/agentstate"
 	"github.com/zigai/aht/internal/config"
@@ -41,6 +44,9 @@ const (
 	statusCommandName                = "status"
 	installCommandName               = "install"
 	sigpipeExitCode                  = 141
+	exitCodeGeneral                  = 1
+	exitCodeUsage                    = 2
+	exitCodeInterrupted              = 130
 	integrationsCommand              = "integrations"
 	trackerCommand                   = "tracker"
 	stateCommandName                 = "state"
@@ -53,7 +59,6 @@ var (
 	version                      = "dev"
 	commit                       = "none"
 	date                         = "unknown"
-	configureCobraOnce           sync.Once
 	errInvalidAttribute          = errors.New("invalid attribute")
 	errInvalidListSort           = errors.New("invalid list sort")
 	errUnexpectedReportArg       = errors.New("unexpected report argument")
@@ -70,18 +75,29 @@ var (
 	errManagedHookJSONRequired   = errors.New("hook commands require --json for their protocol response")
 	errListSummaryFlag           = errors.New("--sort, --desc, and --absolute-time are not valid with --summary")
 	errListAbsoluteJSON          = errors.New("--absolute-time cannot be used with --json")
+	errUnexpectedArgument        = errors.New("unexpected argument")
+	errUnknownCommand            = errors.New("unknown command")
+	setupCLIFlagsOnce            sync.Once
 )
 
 type application struct {
 	storePath          string
 	configPath         string
+	configExplicit     bool
+	noConfig           bool
 	cfgLoaded          bool
 	cfg                config.Config
 	resolvedConfigPath string
 	cfgErr             error
 	outputJSON         bool
+	stdin              io.Reader
 	stdout             io.Writer
 	stderr             io.Writer
+}
+
+type exitCoderError struct {
+	err  error
+	code int
 }
 
 type reportOptions struct {
@@ -133,24 +149,16 @@ type listOptions struct {
 
 type sessionCompareFunc func(registry.Session, registry.Session) int
 
-func (app *application) loadConfig() (config.Config, error) {
-	if app.cfgLoaded {
-		return app.cfg, app.cfgErr
-	}
-	if app.configPath == "" {
-		targetPath := config.DefaultPath()
-		if _, statErr := os.Stat(targetPath); errors.Is(statErr, os.ErrNotExist) {
-			// Best-effort auto-creation on first run. If this fails (e.g. read-only filesystem),
-			// proceed without failing startup; config.Load will use built-in defaults.
-			_, _ = config.EnsureConfigFile(targetPath)
-		}
-	}
-	cfg, resolved, err := config.Load(app.configPath)
-	app.cfg = cfg
-	app.resolvedConfigPath = resolved
-	app.cfgErr = err
-	app.cfgLoaded = true
-	return app.cfg, app.cfgErr
+func (e *exitCoderError) Error() string {
+	return e.err.Error()
+}
+
+func (e *exitCoderError) Unwrap() error {
+	return e.err
+}
+
+func (e *exitCoderError) ExitCode() int {
+	return e.code
 }
 
 func Execute() {
@@ -162,80 +170,201 @@ func Execute() {
 	}
 }
 
-func NewRootCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
-	configureCobra()
+func NewRootCommand(stdout io.Writer, stderr io.Writer) *cli.Command {
+	setupGlobalCLIDefaults()
 	return (&application{stdout: stdout, stderr: stderr}).newRootCommand()
 }
 
-func configureCobra() {
-	configureCobraOnce.Do(func() {
-		cobra.EnableCommandSorting = false
+func setupGlobalCLIDefaults() {
+	setupCLIFlagsOnce.Do(func() {
+		cli.VersionFlag = &cli.BoolFlag{
+			Name:    "version",
+			Aliases: []string{"V"},
+			Usage:   "print version",
+		}
+		cli.HelpFlag = &cli.BoolFlag{
+			Name:  "help",
+			Usage: "show help",
+		}
+		urfavehelp.Install()
+		cli.VersionPrinter = func(cmd *cli.Command) {
+			root := cmd.Root()
+			if root.Bool("json") {
+				data, err := json.MarshalIndent(map[string]string{
+					"version": version,
+					"commit":  commit,
+					"built":   date,
+				}, "", jsonIndent)
+				if err != nil {
+					return
+				}
+				_, _ = fmt.Fprintln(root.Writer, string(data))
+				return
+			}
+			_, _ = fmt.Fprintf(root.Writer, "aht %s (commit: %s, built: %s)\n", version, commit, date)
+		}
 	})
 }
 
-func (app *application) newRootCommand() *cobra.Command {
-	var showVersion bool
-	root := &cobra.Command{Use: "aht", Short: "Track local coding-agent sessions and where they are running", SilenceErrors: true, SilenceUsage: true, RunE: func(cmd *cobra.Command, _ []string) error {
-		if showVersion {
-			if app.outputJSON {
-				return app.writeJSON(map[string]string{"version": version, "commit": commit, "built": date})
-			}
-			return app.writef("aht %s (commit: %s, built: %s)\n", version, commit, date)
+func exitCode(err error, code int) error {
+	if err == nil {
+		return nil
+	}
+	return &exitCoderError{err: err, code: code}
+}
+
+func unexpectedArgsError(args []string) error {
+	return exitCode(fmt.Errorf("%w: %s", errUnexpectedArgument, strings.Join(args, " ")), exitCodeUsage)
+}
+
+func (app *application) loadConfig() (config.Config, error) {
+	if app.cfgLoaded {
+		return app.cfg, app.cfgErr
+	}
+	app.configExplicit = app.configPath != ""
+	targetPath := app.configPath
+	if targetPath == "" {
+		targetPath = config.DefaultPath()
+	}
+	if !app.configExplicit && !app.noConfig && targetPath != "-" {
+		if _, statErr := os.Stat(targetPath); errors.Is(statErr, os.ErrNotExist) {
+			_, _ = config.EnsureConfigFile(targetPath)
 		}
-		return cmd.Help()
-	}, CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true}}
-	root.SetOut(app.stdout)
-	root.SetErr(app.stderr)
-	root.PersistentFlags().StringVar(&app.storePath, "store", "", "registry state file path")
-	root.PersistentFlags().StringVar(&app.configPath, "config", "", "config file path")
-	root.PersistentFlags().BoolVar(&app.outputJSON, "json", false, "emit JSON (JSON Lines for streams)")
-	root.Flags().BoolVarP(&showVersion, "version", "v", false, "print version")
-	root.AddCommand(
-		app.newListCommand(),
-		app.newWatchCommand(),
-		app.newInfoCommand(),
-		app.newStopCommand(),
-		app.newManageCommand(),
-		app.newWireCommand(),
-		app.newHookCommand(),
-		app.newReportCommand(),
-	)
+	}
+	cfg, resolved, err := config.LoadWithOptions(config.Options{
+		Path:     app.configPath,
+		Explicit: app.configExplicit,
+		NoConfig: app.noConfig,
+		Stdin:    app.stdin,
+	})
+	app.cfg = cfg
+	app.resolvedConfigPath = resolved
+	app.cfgErr = err
+	app.cfgLoaded = true
+	return app.cfg, app.cfgErr
+}
+
+func (app *application) newRootCommand() *cli.Command {
+	setupGlobalCLIDefaults()
+	root := &cli.Command{
+		Name:            "aht",
+		Usage:           "Track local coding-agent sessions and where they are running",
+		Version:         version,
+		HideHelpCommand: true,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "store",
+				Destination: &app.storePath,
+				Usage:       "Registry state `path`",
+			},
+			&cli.StringFlag{
+				Name:        "config",
+				Destination: &app.configPath,
+				Usage:       "Config file `path`",
+			},
+			&cli.BoolFlag{
+				Name:        "no-config",
+				Destination: &app.noConfig,
+				Usage:       "bypass all configuration files",
+			},
+			&cli.BoolFlag{
+				Name:        "json",
+				Destination: &app.outputJSON,
+				Usage:       "emit JSON (JSON Lines for streams)",
+			},
+		},
+		Commands: []*cli.Command{
+			app.newListCommand(),
+			app.newWatchCommand(),
+			app.newInfoCommand(),
+			app.newStopCommand(),
+			app.newManageCommand(),
+			app.newHookCommand(),
+			app.newReportCommand(),
+		},
+		EnableShellCompletion: true,
+		ConfigureShellCompletionCommand: func(cmd *cli.Command) {
+			cmd.Hidden = false
+			cmd.Metadata = map[string]any{
+				helpArgumentsKey: []HelpArg{
+					{Name: "<shell>", Desc: "Shell type: bash, zsh, fish, or powershell"},
+				},
+			}
+			for _, sub := range cmd.Commands {
+				if sub.Name == "pwsh" {
+					sub.Name = "powershell"
+					sub.Usage = "Output powershell completion script"
+				}
+			}
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			app.configExplicit = cmd.IsSet("config")
+			return ctx, nil
+		},
+		OnUsageError: func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+			return exitCode(err, exitCodeUsage)
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return exitCode(fmt.Errorf("%w %q for %q", errUnknownCommand, cmd.Args().First(), cmd.Name), exitCodeUsage)
+			}
+			return cli.ShowAppHelp(cmd)
+		},
+		ExitErrHandler: func(ctx context.Context, cmd *cli.Command, err error) {
+			// Return error to executeCLI without printing or exiting
+		},
+	}
+	_ = root.Walk(func(sub *cli.Command) error {
+		if sub.OnUsageError == nil {
+			sub.OnUsageError = func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+				return exitCode(err, exitCodeUsage)
+			}
+		}
+		return nil
+	})
+	root.Reader = app.stdin
+	root.Writer = app.stdout
+	root.ErrWriter = app.stderr
 	return root
 }
 
-func (app *application) newManageCommand() *cobra.Command {
-	command := &cobra.Command{Use: "manage", Short: "Manage setup, integrations, tracking, and state", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return cmd.Help()
-	}}
-	command.AddCommand(
-		app.newSetupCommand(),
-		app.newUpgradeCommand(),
-		app.newIntegrationsCommand(),
-		app.newTrackerCommand(),
-		app.newStateCommand(),
-		app.newDoctorCommand(),
-		app.newManageConfigCommand(),
-	)
-	return command
-}
-
 func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	//nolint:contextcheck // Cobra propagates ExecuteContext to every command operation.
-	root := NewRootCommand(stdout, stderr)
-	root.SetArgs(args)
-	root.SetIn(stdin)
-	if err := root.ExecuteContext(ctx); err != nil {
-		var status interface{ ExitCode() int }
-		if errors.As(err, &status) {
-			if status.ExitCode() != sigpipeExitCode {
-				_, _ = fmt.Fprintln(stderr, err)
-			}
-			return status.ExitCode()
-		}
-		_, _ = fmt.Fprintln(stderr, err)
-		return 1
+	app := &application{
+		stdin:  stdin,
+		stdout: stdout,
+		stderr: stderr,
+	}
+	root := app.newRootCommand()
+	osArgs := append([]string{"aht"}, args...)
+	err := root.Run(ctx, osArgs)
+	if err != nil {
+		return app.handleError(err)
 	}
 	return 0
+}
+
+func (app *application) handleError(err error) int {
+	if errors.Is(err, syscall.EPIPE) {
+		return sigpipeExitCode
+	}
+	if exitCoder, ok := errors.AsType[cli.ExitCoder](err); ok {
+		code := exitCoder.ExitCode()
+		if code == sigpipeExitCode {
+			return sigpipeExitCode
+		}
+		if errors.Is(err, context.Canceled) || code == exitCodeInterrupted {
+			return exitCodeInterrupted
+		}
+		if err.Error() != "" {
+			_, _ = fmt.Fprintln(app.stderr, err.Error())
+		}
+		return code
+	}
+	if errors.Is(err, context.Canceled) {
+		return exitCodeInterrupted
+	}
+	_, _ = fmt.Fprintln(app.stderr, err.Error())
+	return exitCodeGeneral
 }
 
 func (app *application) resolvedStorePath() string {
@@ -290,59 +419,85 @@ func (app *application) warnf(format string, args ...any) {
 	}
 }
 
-func (app *application) newRegistryPathCommand() *cobra.Command {
-	return &cobra.Command{Use: "path", Short: "Print the registry state file path", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
-		if app.outputJSON {
-			return app.writeJSON(map[string]string{"path": app.resolvedStorePath()})
-		}
-		return app.writeln(app.resolvedStorePath())
-	}}
+func (app *application) newRegistryPathCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "path",
+		Usage: "Print the registry state file path",
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			if app.outputJSON {
+				return app.writeJSON(map[string]string{"path": app.resolvedStorePath()})
+			}
+			return app.writeln(app.resolvedStorePath())
+		},
+	}
 }
 
-func (app *application) newReportCommand() *cobra.Command {
+func (app *application) newReportCommand() *cli.Command {
 	options := defaultReportOptionsFromEnv()
-	cmd := &cobra.Command{Use: "report [harness]", Short: "Record a harness observation", Hidden: true, SilenceUsage: true, Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 1 {
-			if options.harness != "" {
-				return fmt.Errorf("%w: harness already set", errUnexpectedReportArg)
+	return &cli.Command{
+		Name:                      "report",
+		Usage:                     "Record a harness observation",
+		ArgsUsage:                 "[harness]",
+		Hidden:                    true,
+		Description:               "Record a harness observation",
+		DisableSliceFlagSeparator: true,
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "[harness]", Desc: "Target harness to record observation for"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "presence", Value: options.presence, Destination: &options.presence, Usage: "presence: live, gone, unknown"},
+			&cli.StringFlag{Name: "activity", Value: options.activity, Destination: &options.activity, Usage: "reported activity hint: running, waiting, idle, unknown"},
+			&cli.StringFlag{Name: "lifecycle", Value: options.lifecycle, Destination: &options.lifecycle, Usage: "native lifecycle: start, resume, end", Hidden: true},
+			&cli.StringFlag{Name: "session-id", Value: options.sessionID, Destination: &options.sessionID, Usage: "harness session id"},
+			&cli.StringFlag{Name: "session-path", Value: options.sessionPath, Destination: &options.sessionPath, Usage: "harness session file path"},
+			&cli.StringFlag{Name: "cwd", Value: options.cwd, Destination: &options.cwd, Usage: "agent current working directory"},
+			&cli.StringFlag{Name: "project-root", Value: options.projectRoot, Destination: &options.projectRoot, Usage: "project root"},
+			&cli.IntFlag{Name: "pid", Value: options.pid, Destination: &options.pid, Usage: "agent process id"},
+			&cli.IntFlag{Name: "ppid", Value: options.ppid, Destination: &options.ppid, Usage: "agent parent process id"},
+			&cli.IntFlag{Name: "process-group-id", Value: options.processGroupID, Destination: &options.processGroupID, Usage: "agent process group id"},
+			&cli.StringFlag{Name: "start-identity", Value: options.startIdentity, Destination: &options.startIdentity, Usage: "process start identity"},
+			&cli.StringFlag{Name: "executable", Value: options.executable, Destination: &options.executable, Usage: "resolved executable path"},
+			&cli.StringFlag{Name: "tty", Value: options.tty, Destination: &options.tty, Usage: "agent tty"},
+			&cli.StringFlag{Name: "event", Value: options.event, Destination: &options.event, Usage: "native harness event name"},
+			&cli.StringFlag{Name: "observed-at", Value: options.observedAt, Destination: &options.observedAt, Usage: "RFC3339 timestamp"},
+			&cli.StringFlag{Name: "sequence", Value: options.sequence, Destination: &options.sequence, Usage: "strictly increasing integration report sequence"},
+			&cli.StringSliceFlag{Name: "attribute", Destination: &options.attributes, Usage: "extra key=value attribute"},
+			&cli.StringSliceFlag{Name: "resume-command", Destination: &options.resumeCommand, Usage: "resume command argv item, repeatable"},
+			&cli.StringFlag{Name: "evidence", Value: options.evidence, Destination: &options.evidence, Usage: "evidence kind (managed shims)", Hidden: true},
+			&cli.BoolFlag{Name: "raw-stdin", Destination: &options.rawStdin, Usage: "store stdin as raw hook payload"},
+			&cli.BoolFlag{Name: "raw-stdin-defaults-only", Destination: &options.rawDefaultsOnly, Usage: "read stdin for defaults without storing raw payload"},
+			&cli.BoolFlag{Name: "no-tmux", Destination: &options.noTmux, Usage: "do not collect tmux context"},
+			&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Destination: &options.quiet, Usage: "suppress human-readable output"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			args := cmd.Args().Slice()
+			if len(args) > 1 {
+				return unexpectedArgsError(args[1:])
 			}
-			options.harness = args[0]
-		}
-		if cmd.Flags().Changed("cwd") {
-			options.cwdAuto = false
-		}
-		if cmd.Flags().Changed("project-root") {
-			options.projectRootAuto = false
-		}
-		return app.runReport(cmd.Context(), cmd.InOrStdin(), options)
-	}}
-	f := cmd.Flags()
-	f.StringVar(&options.presence, "presence", options.presence, "presence: live, gone, unknown")
-	f.StringVar(&options.activity, "activity", options.activity, "reported activity hint: running, waiting, idle, unknown; screen-authority agents derive effective activity from their pane")
-	f.StringVar(&options.lifecycle, "lifecycle", options.lifecycle, "native lifecycle: start, resume, end")
-	_ = f.MarkHidden("lifecycle")
-	f.StringVar(&options.sessionID, "session-id", options.sessionID, "harness session id")
-	f.StringVar(&options.sessionPath, "session-path", options.sessionPath, "harness session file path")
-	f.StringVar(&options.cwd, "cwd", options.cwd, "agent current working directory")
-	f.StringVar(&options.projectRoot, "project-root", options.projectRoot, "project root")
-	f.IntVar(&options.pid, "pid", options.pid, "agent process id")
-	f.IntVar(&options.ppid, "ppid", options.ppid, "agent parent process id")
-	f.IntVar(&options.processGroupID, "process-group-id", options.processGroupID, "agent process group id")
-	f.StringVar(&options.startIdentity, "start-identity", options.startIdentity, "process start identity")
-	f.StringVar(&options.executable, "executable", options.executable, "resolved executable path")
-	f.StringVar(&options.tty, "tty", options.tty, "agent tty")
-	f.StringVar(&options.event, "event", options.event, "native harness event name")
-	f.StringVar(&options.observedAt, "observed-at", options.observedAt, "RFC3339 timestamp")
-	f.StringVar(&options.sequence, "sequence", options.sequence, "strictly increasing integration report sequence")
-	f.StringArrayVar(&options.attributes, "attribute", nil, "extra key=value attribute")
-	f.StringArrayVar(&options.resumeCommand, "resume-command", nil, "resume command argv item, repeatable")
-	f.StringVar(&options.evidence, "evidence", options.evidence, "evidence kind (managed shims)")
-	f.BoolVar(&options.rawStdin, "raw-stdin", false, "store stdin as raw hook payload")
-	f.BoolVar(&options.rawDefaultsOnly, "raw-stdin-defaults-only", false, "read stdin for defaults without storing raw payload")
-	f.BoolVar(&options.noTmux, "no-tmux", false, "do not collect tmux context")
-	_ = f.MarkHidden("evidence")
-	f.BoolVar(&options.quiet, "quiet", false, "suppress human-readable output")
-	return cmd
+			if len(args) == 1 {
+				if options.harness != "" {
+					return fmt.Errorf("%w: harness already set", errUnexpectedReportArg)
+				}
+				options.harness = args[0]
+			}
+			if cmd.IsSet("cwd") {
+				options.cwdAuto = false
+			}
+			if cmd.IsSet("project-root") {
+				options.projectRootAuto = false
+			}
+			stdin := app.stdin
+			if stdin == nil {
+				stdin = os.Stdin
+			}
+			return app.runReport(ctx, stdin, options)
+		},
+	}
 }
 
 func defaultReportOptionsFromEnv() reportOptions {
@@ -811,50 +966,56 @@ func psProcessArgs(ctx context.Context, pid int) []string {
 	return strings.Fields(strings.TrimSpace(string(out)))
 }
 
-func (app *application) newListCommand() *cobra.Command {
+func (app *application) newListCommand() *cli.Command {
 	o := listOptions{}
-	cmd := &cobra.Command{Use: listCommandName, Short: "Show known sessions", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		cfg, err := app.loadConfig()
-		if err != nil {
-			return err
-		}
-		applyListConfig(&o, c, cfg)
-		return app.runList(c.Context(), o)
-	}}
-	f := cmd.Flags()
-	f.StringVar(&o.harness, "agent", "", "filter by agent")
-	f.StringVar(&o.presence, "presence", "", "filter by presence")
-	f.StringVar(&o.activity, "activity", "", "filter by activity")
-	f.StringVar(&o.tmuxSession, "tmux-session", "", "filter by tmux session")
-	f.StringVar(&o.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session")
-	f.StringVar(&o.sortBy, "sort", "", "sort by: multiplexer, tmux, updated, presence-changed, activity-changed, created, harness, presence, activity, cwd, id")
-	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
-	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
-	f.BoolVar(&o.desc, "desc", false, "sort descending")
-	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
-	return cmd
+	return &cli.Command{
+		Name:     listCommandName,
+		Usage:    "Show known sessions",
+		Category: "Sessions",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "agent", Destination: &o.harness, Usage: "Filter by agent `name`"},
+			&cli.StringFlag{Name: "presence", Destination: &o.presence, Usage: "Filter by presence (live, gone, unknown, all)"},
+			&cli.StringFlag{Name: "activity", Destination: &o.activity, Usage: "Filter by reported activity (running, waiting, idle, unknown)"},
+			&cli.StringFlag{Name: "tmux-session", Destination: &o.tmuxSession, Usage: "Filter by tmux session `name`"},
+			&cli.StringFlag{Name: "multiplexer-session", Destination: &o.multiplexerSession, Usage: "Filter by multiplexer session `name`"},
+			&cli.StringFlag{Name: "sort", Destination: &o.sortBy, Usage: "Sort by: updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed"},
+			&cli.BoolFlag{Name: "summary", Destination: &o.summary, Usage: "summarize agent counts by multiplexer session"},
+			&cli.BoolFlag{Name: "absolute-time", Destination: &o.absoluteTime, Usage: "show full timestamps"},
+			&cli.BoolFlag{Name: "desc", Destination: &o.desc, Usage: "sort descending"},
+			&cli.BoolFlag{Name: "full", Destination: &o.full, Usage: "show complete values using an adaptive layout"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			cfg, err := app.loadConfig()
+			if err != nil {
+				return err
+			}
+			applyListConfig(&o, cmd, cfg)
+			return app.runList(ctx, o)
+		},
+	}
 }
 
-func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
-	f := cmd.Flags()
-	if !f.Changed("presence") && cfg.UI.DefaultPresence != "" {
+func applyListConfig(o *listOptions, cmd *cli.Command, cfg config.Config) {
+	if !cmd.IsSet("presence") && cfg.UI.DefaultPresence != "" {
 		o.presence = cfg.UI.DefaultPresence
 	}
-	if !f.Changed("sort") && cfg.UI.Sort != "" {
+	o.sortSet = cmd.IsSet("sort")
+	if !o.sortSet && cfg.UI.Sort != "" {
 		o.sortBy = cfg.UI.Sort
 	}
-	o.sortSet = f.Changed("sort")
-	if !f.Changed("desc") && cfg.UI.SortDesc != nil {
+	o.descSet = cmd.IsSet("desc")
+	if !o.descSet && cfg.UI.SortDesc != nil {
 		o.desc = *cfg.UI.SortDesc
 	}
-	o.descSet = f.Changed("desc")
-	if !f.Changed("absolute-time") {
+	o.absoluteSet = cmd.IsSet("absolute-time")
+	if !o.absoluteSet {
 		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
 			cfg.UI.TimeFormat == "absolute" || cfg.UI.TimeFormat == "iso8601" {
 			o.absoluteTime = true
 		}
-	} else {
-		o.absoluteSet = f.Changed("absolute-time")
 	}
 }
 
@@ -1189,39 +1350,55 @@ func shortRegistryID(id string) string {
 	return id[:separator+1] + id[separator+1:separator+1+registryIDShortLength]
 }
 
+//nolint:gocognit // prefix grouping and neighbor common prefix calculation
 func abbreviatedRegistryIDs(sessions []registry.Session) map[string]string {
-	type idParts struct {
-		prefix string
+	if len(sessions) == 0 {
+		return nil
+	}
+	type item struct {
+		id     string
 		suffix string
 	}
-	parts := make(map[string]idParts, len(sessions))
+	byPrefix := make(map[string][]item)
 	for _, session := range sessions {
 		p, s := splitRegistryID(session.ID)
-		parts[session.ID] = idParts{prefix: p, suffix: s}
+		byPrefix[p] = append(byPrefix[p], item{id: session.ID, suffix: s})
 	}
 
 	result := make(map[string]string, len(sessions))
-	for _, session := range sessions {
-		part := parts[session.ID]
-		if len(part.suffix) <= registryIDShortLength {
-			result[session.ID] = session.ID
+	for prefix, items := range byPrefix {
+		if len(items) == 1 {
+			it := items[0]
+			if len(it.suffix) <= registryIDShortLength {
+				result[it.id] = it.id
+			} else {
+				result[it.id] = prefix + it.suffix[:registryIDShortLength]
+			}
 			continue
 		}
-		length := registryIDShortLength
-		for _, other := range sessions {
-			if session.ID == other.ID {
+		slices.SortFunc(items, func(a, b item) int {
+			return strings.Compare(a.suffix, b.suffix)
+		})
+		for i, it := range items {
+			if len(it.suffix) <= registryIDShortLength {
+				result[it.id] = it.id
 				continue
 			}
-			otherPart := parts[other.ID]
-			if part.prefix != otherPart.prefix {
-				continue
+			length := registryIDShortLength
+			if i > 0 {
+				common := commonPrefixLength(it.suffix, items[i-1].suffix)
+				if common >= length {
+					length = min(common+1, len(it.suffix))
+				}
 			}
-			common := commonPrefixLength(part.suffix, otherPart.suffix)
-			if common >= length {
-				length = min(common+1, len(part.suffix))
+			if i+1 < len(items) {
+				common := commonPrefixLength(it.suffix, items[i+1].suffix)
+				if common >= length {
+					length = min(common+1, len(it.suffix))
+				}
 			}
+			result[it.id] = prefix + it.suffix[:length]
 		}
-		result[session.ID] = part.prefix + part.suffix[:length]
 	}
 	return result
 }

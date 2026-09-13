@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zigai/aht/internal/harness/kimi"
@@ -12,16 +13,14 @@ import (
 func TestWireRejectsUnsupportedInvocationBeforeSideEffects(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
-		{"wire", "codex", "--"},
-		{"wire", "kimi-code"},
-		{"wire", "kimi-code", "--", "--print"},
-		{"wire", "kimi-code", "--", "--session", "native-session", "web"},
+		{"hook", "wire", "codex", "--"},
+		{"hook", "wire", "kimi-code"},
+		{"hook", "wire", "kimi-code", "--", "--print"},
+		{"hook", "wire", "kimi-code", "--", "--session", "native-session", "web"},
 	} {
 		store := filepath.Join(t.TempDir(), "state.json")
 		var stdout, stderr bytes.Buffer
-		root := NewRootCommand(&stdout, &stderr)
-		root.SetArgs(append([]string{"--store", store}, args...))
-		if err := root.ExecuteContext(t.Context()); err == nil {
+		if err := runTestCLI(t.Context(), append([]string{"--store", store}, args...), &stdout, &stderr); err == nil {
 			t.Fatalf("accepted unsupported invocation: %v", args)
 		}
 		if _, err := os.Stat(store); !os.IsNotExist(err) {
@@ -38,5 +37,14 @@ func TestWireNativeValuesAreNotReinterpretedAsModes(t *testing.T) {
 	args := []string{"--prompt", "--print", "--model=web", "--session", "native-session"}
 	if err := kimi.ValidateArgs(args); err != nil {
 		t.Fatalf("native option value was reinterpreted: %v", err)
+	}
+}
+
+func TestWireAtRootIsUnknownCommand(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	err := runTestCLI(t.Context(), []string{"wire", "kimi-code", "--"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("expected unknown command error for root wire command, got: %v", err)
 	}
 }

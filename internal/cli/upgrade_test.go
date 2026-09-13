@@ -19,9 +19,7 @@ import (
 func TestUpgradeReportsPartialFailureAndStillRestartsTracker(t *testing.T) {
 	calls := prepareUpgradeFailure(t)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "upgrade", "--binary", "/bin/new-aht", "--json"})
-	if err := root.ExecuteContext(t.Context()); err == nil {
+	if err := runTestCLI(t.Context(), []string{"manage", "upgrade", "--binary", "/bin/new-aht", "--json"}, &stdout, &bytes.Buffer{}); err == nil {
 		t.Fatal("partial failure returned success")
 	}
 	var result upgradeResult

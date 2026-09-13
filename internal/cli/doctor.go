@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/zigai/aht/internal/agentstate"
 	"github.com/zigai/aht/internal/config"
@@ -60,14 +60,24 @@ type observerHealth struct {
 	LastEnumerationError string    `json:"last_enumeration_error"`
 }
 
-func (app *application) newDoctorCommand() *cobra.Command {
+func (app *application) newDoctorCommand() *cli.Command {
 	var verbose bool
-	command := &cobra.Command{
-		Use:   "doctor",
-		Short: "Check whether aht is set up and working",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			result := app.runDoctor(cmd.Context(), verbose)
+	return &cli.Command{
+		Name:  "doctor",
+		Usage: "Check whether aht is set up and working",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "verbose",
+				Aliases:     []string{"v"},
+				Destination: &verbose,
+				Usage:       "include all integrations and capability details",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			result := app.runDoctor(ctx, verbose)
 			if err := app.writeDoctorResult(result); err != nil {
 				return err
 			}
@@ -77,8 +87,6 @@ func (app *application) newDoctorCommand() *cobra.Command {
 			return nil
 		},
 	}
-	command.Flags().BoolVarP(&verbose, "verbose", "v", false, "include all integrations and capability details")
-	return command
 }
 
 func (app *application) writeDoctorResult(result doctorResult) error {
@@ -196,7 +204,7 @@ func (app *application) runDoctor(ctx context.Context, includeAll bool) doctorRe
 }
 
 func (app *application) doctorServiceStatus(ctx context.Context) (service.Result, error) {
-	options, err := app.configuredServiceOptions(&cobra.Command{}, serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval})
+	options, err := app.configuredServiceOptions(&cli.Command{}, serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval})
 	if err != nil {
 		return service.Result{}, err
 	}

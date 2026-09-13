@@ -15,7 +15,7 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-//nolint:cyclop // integration test verifying flag precedence over config defaults
+//nolint:cyclop // integration test verifying full flag precedence matrix
 func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
@@ -24,49 +24,48 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	store := registry.NewFileStore(storePath)
 	ctx := context.Background()
 
-	t1 := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	t3 := time.Date(2026, 9, 1, 14, 0, 0, 0, time.UTC)
+	// Seed 3 sessions with different harnesses, presence, and created timestamps
+	now := time.Now().UTC()
+	presentTrue := true
+	presentFalse := false
 
-	// Session 1: Live, created at t1
-	presentLive := true
+	// Session 1: created earlier, live, claude
 	_, err := store.Observe(ctx, registry.Observation{
 		Harness:        registry.HarnessClaude,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
 		Identity:       registry.ObservationIdentity{SessionID: "s1"},
-		ProcessPresent: &presentLive,
+		ProcessPresent: &presentTrue,
 		Process:        &registry.ProcessIdentity{PID: 101, StartIdentity: "pid101"},
-		ObservedAt:     t1,
+		ObservedAt:     now.Add(-10 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Session 2: Live, created at t2
+	// Session 2: created later, live, codex
 	_, err = store.Observe(ctx, registry.Observation{
 		Harness:        registry.HarnessCodex,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
 		Identity:       registry.ObservationIdentity{SessionID: "s2"},
-		ProcessPresent: &presentLive,
+		ProcessPresent: &presentTrue,
 		Process:        &registry.ProcessIdentity{PID: 102, StartIdentity: "pid102"},
-		ObservedAt:     t2,
+		ObservedAt:     now.Add(-5 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Session 3: Gone, created at t3
-	presentGone := false
+	// Session 3: gone, pi
 	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessGoose,
+		Harness:        registry.HarnessPi,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
 		Identity:       registry.ObservationIdentity{SessionID: "s3"},
-		ProcessPresent: &presentGone,
+		ProcessPresent: &presentFalse,
 		Process:        &registry.ProcessIdentity{PID: 103, StartIdentity: "pid103"},
-		ObservedAt:     t3,
+		ObservedAt:     now.Add(-2 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,9 +84,7 @@ sort_desc = true
 
 	// 1. Run aht list without presence/sort flags -> should show only live, sorted by created desc (s2 then s1)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "list"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
 
@@ -110,9 +107,7 @@ sort_desc = true
 
 	// 2. Explicit flags override config defaults: --presence all --sort created --desc=false
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "list", "--presence", "all", "--sort", "created", "--desc=false"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "list", "--presence", "all", "--sort", "created", "--desc=false"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("list override failed: %v", err)
 	}
 
@@ -137,55 +132,55 @@ func TestCLIConfigFiltering(t *testing.T) {
 
 	store := registry.NewFileStore(storePath)
 	ctx := context.Background()
-	present := true
+	presentTrue := true
 
-	// Session 1: Copilot in /home/user/proj
+	// Session 1: copilot harness (to be ignored)
 	_, err := store.Observe(ctx, registry.Observation{
 		Harness:        registry.HarnessCopilot,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
 		Identity:       registry.ObservationIdentity{SessionID: "copilot-sess"},
-		ProcessPresent: &present,
-		Process:        &registry.ProcessIdentity{PID: 201, StartIdentity: "pid201", CWD: "/home/user/proj"},
-		ObservedAt:     time.Now(),
+		ProcessPresent: &presentTrue,
+		Process:        &registry.ProcessIdentity{PID: 201, StartIdentity: "pid201", CWD: "/home/user/project"},
+		ObservedAt:     time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Session 2: Codex in /tmp/scratch
+	// Session 2: ignored path (/tmp/scratch)
 	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessCodex,
+		Harness:        registry.HarnessClaude,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "codex-temp"},
-		ProcessPresent: &present,
+		Identity:       registry.ObservationIdentity{SessionID: "scratch-sess"},
+		ProcessPresent: &presentTrue,
 		Process:        &registry.ProcessIdentity{PID: 202, StartIdentity: "pid202", CWD: "/tmp/scratch"},
-		ObservedAt:     time.Now(),
+		ObservedAt:     time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Session 3: Claude in /home/user/proj
+	// Session 3: normal session
 	_, err = store.Observe(ctx, registry.Observation{
 		Harness:        registry.HarnessClaude,
 		Source:         registry.ObservationSourceProcess,
 		Evidence:       registry.ObservationEvidenceProcessPresence,
 		Identity:       registry.ObservationIdentity{SessionID: "claude-proj"},
-		ProcessPresent: &present,
-		Process:        &registry.ProcessIdentity{PID: 203, StartIdentity: "pid203", CWD: "/home/user/proj"},
-		ObservedAt:     time.Now(),
+		ProcessPresent: &presentTrue,
+		Process:        &registry.ProcessIdentity{PID: 203, StartIdentity: "pid203", CWD: "/home/user/project"},
+		ObservedAt:     time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Config: ignore copilot and /tmp/*
+	// Config: ignore copilot and /tmp/scratch
 	cfgContent := `
 [filter]
 ignore_harnesses = ["copilot"]
-ignore_paths = ["/tmp/*"]
+ignore_paths = ["/tmp/scratch"]
 `
 	if err := os.WriteFile(configPath, []byte(cfgContent), 0o600); err != nil {
 		t.Fatal(err)
@@ -193,9 +188,7 @@ ignore_paths = ["/tmp/*"]
 
 	// 1. Without --agent: copilot is filtered out; /tmp/scratch is filtered out. Only claude remains.
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "list"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
 
@@ -210,9 +203,7 @@ ignore_paths = ["/tmp/*"]
 
 	// 2. With explicit --agent copilot: copilot is unhidden despite config ignore
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "list", "--agent", "copilot"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "list", "--agent", "copilot"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("list with --agent failed: %v", err)
 	}
 
@@ -275,9 +266,7 @@ max_gone_age = "24h"
 
 	// Run clean without --all or --older-than -> should use 24h from config
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "manage", "state", "clean"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "manage", "state", "clean"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("manage state clean failed: %v", err)
 	}
 
@@ -295,11 +284,11 @@ max_gone_age = "24h"
 		t.Fatal(err)
 	}
 	if len(remaining) != 1 || remaining[0].SessionID != "recent-gone" {
-		t.Fatalf("expected recent-gone remaining, got %+v", remaining)
+		t.Fatalf("expected only recent-gone to remain, got %+v", remaining)
 	}
 }
 
-//nolint:cyclop // integration test verifying manage config and doctor commands
+//nolint:cyclop // integration test verifying doctor checks and config commands
 func TestCLIConfigDoctorAndManageConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
@@ -321,9 +310,7 @@ interval = "5s"
 
 	// 1. aht manage config path
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "manage", "config", "path"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "path"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("config path failed: %v", err)
 	}
 	if strings.TrimSpace(stdout.String()) != configPath {
@@ -332,9 +319,7 @@ interval = "5s"
 
 	// 2. aht manage config path --json
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--json", "manage", "config", "path"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--json", "manage", "config", "path"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("config path --json failed: %v", err)
 	}
 	var pathMap map[string]string
@@ -344,9 +329,7 @@ interval = "5s"
 
 	// 3. aht manage config show --json
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--json", "manage", "config", "show"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--json", "manage", "config", "show"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("config show --json failed: %v", err)
 	}
 	var loadedCfg config.Config
@@ -359,9 +342,7 @@ interval = "5s"
 
 	// 4. aht manage config show (TOML)
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "manage", "config", "show"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "show"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("config show TOML failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "sort = 'created'") && !strings.Contains(stdout.String(), `sort = "created"`) {
@@ -370,9 +351,7 @@ interval = "5s"
 
 	// 5. aht manage doctor with valid config
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", configPath, "--store", storePath, "--json", "manage", "doctor"})
-	_ = root.ExecuteContext(ctx) // doctor might fail overall if observer isn't running, but config check should be ok
+	_ = runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "manage", "doctor"}, &stdout, &bytes.Buffer{})
 	var docRes doctorResult
 	if err := json.Unmarshal(stdout.Bytes(), &docRes); err != nil {
 		t.Fatalf("unmarshal doctor result: %v", err)
@@ -411,9 +390,7 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 	t.Setenv(config.ConfigEnv, filepath.Join(readOnlyDir, "does-not-exist.toml"))
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "--json", "manage", "doctor"})
-	_ = root.ExecuteContext(context.Background())
+	_ = runTestCLI(context.Background(), []string{"--store", storePath, "--json", "manage", "doctor"}, &stdout, &bytes.Buffer{})
 
 	var docRes doctorResult
 	if err := json.Unmarshal(stdout.Bytes(), &docRes); err != nil {
@@ -454,16 +431,13 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 
 	// 1. Verify that 'aht report' executes successfully and records the observation
 	var stderr bytes.Buffer
-	root := NewRootCommand(&bytes.Buffer{}, &stderr)
-	root.SetArgs([]string{
+	if err := runTestCLI(ctx, []string{
 		"--store", storePath,
 		"report", "codex",
 		"--session-id", "broken-cfg-test",
 		"--event", "start",
 		"--quiet",
-	})
-
-	if err := root.ExecuteContext(ctx); err != nil {
+	}, &bytes.Buffer{}, &stderr); err != nil {
 		t.Fatalf("aht report failed with broken config: %v; stderr=%s", err, stderr.String())
 	}
 
@@ -486,14 +460,12 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 
 	// 2. Verify that 'aht hook codex' succeeds even with broken config
 	var hookStdout bytes.Buffer
-	root = NewRootCommand(&hookStdout, &bytes.Buffer{})
-	root.SetArgs([]string{
+	err = runTestCLI(ctx, []string{
 		"--store", storePath,
 		"--json",
 		"hook", "codex",
-	})
+	}, &hookStdout, &bytes.Buffer{})
 	// Hook without stdin payload may error on missing payload, but MUST NOT fail on config loading
-	err = root.ExecuteContext(ctx)
 	if err != nil && strings.Contains(err.Error(), "broken-config.toml") {
 		t.Fatalf("aht hook failed due to broken config: %v", err)
 	}
@@ -509,9 +481,7 @@ func TestCLIFirstRunConfigAutoCreation(t *testing.T) {
 
 	// 1. Run 'aht list' when no config file exists
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "list"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--store", storePath, "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("first run aht list failed: %v", err)
 	}
 
@@ -547,9 +517,7 @@ sort = "created"
 
 	// 2. Run 'aht list' again
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "list"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--store", storePath, "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("second run aht list failed: %v", err)
 	}
 
@@ -569,10 +537,7 @@ func TestCLIExplicitConfigNonCreation(t *testing.T) {
 	nonExistentPath := filepath.Join(tempDir, "missing", "explicit-config.toml")
 
 	var stdout, stderr bytes.Buffer
-	root := NewRootCommand(&stdout, &stderr)
-	root.SetArgs([]string{"--config", nonExistentPath, "--store", storePath, "list"})
-
-	err := root.ExecuteContext(context.Background())
+	err := runTestCLI(context.Background(), []string{"--config", nonExistentPath, "--store", storePath, "list"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error with nonexistent explicit --config, got nil")
 	}
@@ -594,9 +559,7 @@ func TestCLIManageConfigInit(t *testing.T) {
 
 	// 1. aht manage config init --json in clean directory
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", targetPath, "--json", "manage", "config", "init"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "--json", "manage", "config", "init"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("manage config init --json failed: %v", err)
 	}
 
@@ -616,22 +579,19 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatal("created config content does not match template")
 	}
 
-	// 2. Run again without --force (human mode): should inform user file exists
+	// 2. Run again without --force (human mode): should inform user on stderr that file exists (F10)
+	var stderr bytes.Buffer
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", targetPath, "manage", "config", "init"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "manage", "config", "init"}, &stdout, &stderr); err != nil {
 		t.Fatalf("manage config init without force failed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "already exists") || !strings.Contains(stdout.String(), "--force") {
-		t.Fatalf("expected output to mention file already exists and --force, got: %q", stdout.String())
+	if !strings.Contains(stderr.String(), "already exists") || !strings.Contains(stderr.String(), "--force") {
+		t.Fatalf("expected stderr to mention file already exists and --force, got: %q", stderr.String())
 	}
 
 	// 3. Run again without --force (--json mode)
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", targetPath, "--json", "manage", "config", "init"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "--json", "manage", "config", "init"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("manage config init --json without force failed: %v", err)
 	}
 	initRes = nil
@@ -646,14 +606,13 @@ func TestCLIManageConfigInit(t *testing.T) {
 	if err := os.WriteFile(targetPath, []byte("# custom"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stderr.Reset()
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", targetPath, "manage", "config", "init", "--force"})
-	if err := root.ExecuteContext(ctx); err != nil {
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "manage", "config", "init", "--force"}, &stdout, &stderr); err != nil {
 		t.Fatalf("manage config init --force failed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "created") {
-		t.Fatalf("expected output to mention created, got: %q", stdout.String())
+	if !strings.Contains(stderr.String(), "created") {
+		t.Fatalf("expected stderr to mention created, got: %q", stderr.String())
 	}
 	reRead, err := os.ReadFile(targetPath)
 	if err != nil {

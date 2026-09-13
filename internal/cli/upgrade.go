@@ -1,10 +1,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/internal/service"
@@ -16,16 +17,32 @@ type upgradeResult struct {
 	TrackerError string           `json:"tracker_error,omitempty"`
 }
 
-func (app *application) newUpgradeCommand() *cobra.Command {
+func (app *application) newUpgradeCommand() *cli.Command {
 	binary := defaultInstallBinary()
 	var dryRun bool
-	command := &cobra.Command{
-		Use:   "upgrade",
-		Short: "Refresh installed integrations and tracker, preserving settings and running state",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			integrations, integrationErr := install.Upgrade(cmd.Context(), binary, dryRun)
-			tracker, trackerErr := service.Upgrade(cmd.Context(), binary, dryRun)
+	return &cli.Command{
+		Name:  "upgrade",
+		Usage: "Refresh installed integrations and tracker, preserving settings and running state",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       binary,
+				Destination: &binary,
+				Usage:       "new aht binary used by integrations and tracker",
+			},
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &dryRun,
+				Usage:       "preview upgrades without writing or restarting",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			integrations, integrationErr := install.Upgrade(ctx, binary, dryRun)
+			tracker, trackerErr := service.Upgrade(ctx, binary, dryRun)
 			if errors.Is(trackerErr, service.ErrUnsupported) {
 				tracker.Message = "unsupported platform; skipped"
 				trackerErr = nil
@@ -55,7 +72,4 @@ func (app *application) newUpgradeCommand() *cobra.Command {
 			return errors.Join(integrationErr, trackerErr, writeErr)
 		},
 	}
-	command.Flags().StringVar(&binary, "binary", binary, "new aht binary used by integrations and tracker")
-	command.Flags().BoolVar(&dryRun, "dry-run", false, "preview upgrades without writing or restarting")
-	return command
 }

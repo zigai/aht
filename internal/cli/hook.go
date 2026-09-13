@@ -5,15 +5,16 @@ package cli
 // {"decision":"allow"} while recording session state, so they cannot use the
 // one-way `aht report` command directly. Keep this file as CLI
 // transport glue; harness protocol rules belong in internal/harness packages.
-//
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/zigai/aht/internal/harness"
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
@@ -21,7 +22,10 @@ import (
 	"github.com/zigai/aht/pkg/tmux"
 )
 
-var errUnsupportedManagedHook = errors.New("harness does not support managed hooks")
+var (
+	errUnsupportedManagedHook = errors.New("harness does not support managed hooks")
+	errHookHarnessRequired    = errors.New("hook requires exactly one harness argument")
+)
 
 type managedHookOptions struct {
 	event string
@@ -31,21 +35,41 @@ type observationSink interface {
 	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
 }
 
-func (app *application) newHookCommand() *cobra.Command {
+func (app *application) newHookCommand() *cli.Command {
 	options := managedHookOptions{}
 
-	cmd := &cobra.Command{
-		Use:   hookCommandName + " <harness>",
-		Short: "Integration protocol endpoint; not intended for manual use",
-		Long:  "Integration protocol endpoint; not intended for manual use. Hook stdout is a JSON protocol response, so --json is required.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.runManagedHook(cmd.Context(), cmd.InOrStdin(), args[0], options)
+	return &cli.Command{
+		Name:        hookCommandName,
+		Usage:       "Integration protocol endpoint; not intended for manual use",
+		ArgsUsage:   "<harness>",
+		Description: "Integration protocol endpoint; not intended for manual use. Hook stdout is a JSON protocol response, so --json is required.",
+		Hidden:      true,
+		Commands: []*cli.Command{
+			app.newWireCommand(),
+		},
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "<harness>", Desc: "Target harness for the protocol hook"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "event",
+				Destination: &options.event,
+				Usage:       "Native hook event `name`",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() != 1 {
+				return exitCode(errHookHarnessRequired, exitCodeUsage)
+			}
+			stdin := app.stdin
+			if stdin == nil {
+				stdin = os.Stdin
+			}
+			return app.runManagedHook(ctx, stdin, cmd.Args().Get(0), options)
 		},
 	}
-	cmd.Flags().StringVar(&options.event, "event", "", "native hook event name")
-
-	return cmd
 }
 
 func (app *application) runManagedHook(
@@ -55,7 +79,7 @@ func (app *application) runManagedHook(
 	options managedHookOptions,
 ) error {
 	if !app.outputJSON {
-		return errManagedHookJSONRequired
+		return exitCode(errManagedHookJSONRequired, exitCodeUsage)
 	}
 	harness, err := harnesspkg.Normalize(harnessName)
 	if err != nil {

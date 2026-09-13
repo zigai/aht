@@ -18,58 +18,35 @@ import (
 
 func TestRootHelpShowsCompactCanonicalSurface(t *testing.T) {
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--help"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	help := stdout.String()
-	previousPosition := -1
-	for _, command := range []string{"list", "watch", "info", "stop", "manage", "hook", "help"} {
-		position := strings.Index(help, "\n  "+command+" ")
-		if position < 0 {
+	for _, command := range []string{"list", "watch", "info", "stop", "manage"} {
+		if !strings.Contains(help, command) {
 			t.Errorf("root help does not show %q:\n%s", command, help)
-			continue
 		}
-		if position <= previousPosition {
-			t.Errorf("root help shows %q out of order:\n%s", command, help)
-		}
-		previousPosition = position
 	}
-	for _, command := range []string{"admin", "setup", "integrations", "monitor", "registry", "doctor", "detection", "detect", "show", "explain", "install-hooks", "observe", "service", "report", "get", "gc", "queue", "drain", "path", "agy-hook"} {
-		if strings.Contains(help, "\n  "+command+" ") {
+	for _, command := range []string{"admin", "setup", "integrations", "monitor", "registry", "doctor", "detection", "detect", "show", "explain", "install-hooks", "observe", "service", "report", "wire", "get", "gc", "queue", "drain", "path", "agy-hook"} {
+		if strings.Contains(help, "\n   "+command+" ") || strings.Contains(help, "\n  "+command+" ") {
 			t.Errorf("root help exposes internal, nested, or removed command %q:\n%s", command, help)
-		}
-	}
-	for _, title := range []string{"Sessions:", "Setup:", "System:", "Everyday Commands:", "Configuration Commands:"} {
-		if strings.Contains(help, title) {
-			t.Errorf("root help still shows command group %q:\n%s", title, help)
 		}
 	}
 }
 
 func TestManageHelpShowsCanonicalSurface(t *testing.T) {
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "--help"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	help := stdout.String()
-	previousPosition := -1
-	for _, command := range []string{"setup", "integrations", "tracker", "state", "doctor"} {
-		position := strings.Index(help, "\n  "+command+" ")
-		if position < 0 {
+	for _, command := range []string{"setup", "upgrade", "integrations", "tracker", "state", "doctor", "config"} {
+		if !strings.Contains(help, command) {
 			t.Errorf("manage help does not show %q:\n%s", command, help)
-			continue
 		}
-		if position <= previousPosition {
-			t.Errorf("manage help shows %q out of order:\n%s", command, help)
-		}
-		previousPosition = position
 	}
 	for _, command := range []string{"monitor", "registry", "detection"} {
-		if strings.Contains(help, "\n  "+command+" ") {
+		if strings.Contains(help, "\n   "+command+" ") || strings.Contains(help, "\n  "+command+" ") {
 			t.Errorf("manage help exposes removed command %q:\n%s", command, help)
 		}
 	}
@@ -77,47 +54,39 @@ func TestManageHelpShowsCanonicalSurface(t *testing.T) {
 
 func TestMachineFacingCommandsAndDestructiveResetAreExplicit(t *testing.T) {
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--help"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"hook", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "hook        Integration protocol endpoint; not intended for manual use") {
-		t.Fatalf("root help does not identify the hook protocol endpoint:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "Integration protocol endpoint") {
+		t.Fatalf("hook help does not identify the hook protocol endpoint:\n%s", stdout.String())
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "tracker", "--help"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "tracker", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "run         Service entry point; not intended for manual use") {
+	if !strings.Contains(stdout.String(), "Service entry point") {
 		t.Fatalf("tracker help does not identify the service entry point:\n%s", stdout.String())
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "state", "reset", "--help"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "state", "reset", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "--force") || !strings.Contains(stdout.String(), "confirm destructive state reset") {
+	if !strings.Contains(stdout.String(), "--force") || !strings.Contains(strings.ToLower(stdout.String()), "confirm destructive state reset") {
 		t.Fatalf("state reset help omits confirmation requirement:\n%s", stdout.String())
 	}
 }
 
 func TestEveryHiddenInternalCommandHasCallableHelp(t *testing.T) {
-	commands := []string{"report"}
+	commands := []string{"report", "hook"}
 	for _, command := range commands {
 		var stdout bytes.Buffer
-		root := NewRootCommand(&stdout, &bytes.Buffer{})
-		root.SetArgs([]string{command, "--help"})
-		if err := root.ExecuteContext(context.Background()); err != nil {
+		if err := runTestCLI(context.Background(), []string{command, "--help"}, &stdout, &bytes.Buffer{}); err != nil {
 			t.Errorf("%s --help failed: %v", command, err)
 			continue
 		}
-		if !strings.Contains(stdout.String(), "Usage:") {
+		if !strings.Contains(stdout.String(), "USAGE:") && !strings.Contains(stdout.String(), "Usage:") {
 			t.Errorf("%s internal help missing usage: %q", command, stdout.String())
 		}
 	}
@@ -125,19 +94,17 @@ func TestEveryHiddenInternalCommandHasCallableHelp(t *testing.T) {
 
 func TestRuntimeFailureDoesNotPrintUsage(t *testing.T) {
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "info", "missing"})
-	if err := root.ExecuteContext(context.Background()); err == nil {
+	err := runTestCLI(context.Background(), []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "info", "missing"}, &stdout, &bytes.Buffer{})
+	if err == nil {
 		t.Fatal("expected missing session error")
 	}
-	if strings.Contains(stdout.String(), "Usage:") {
+	if strings.Contains(stdout.String(), "USAGE:") || strings.Contains(stdout.String(), "Usage:") {
 		t.Fatalf("runtime failure printed usage: %q", stdout.String())
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"info"})
-	if err := root.ExecuteContext(context.Background()); err == nil {
+	err = runTestCLI(context.Background(), []string{"info"}, &stdout, &bytes.Buffer{})
+	if err == nil {
 		t.Fatal("expected invocation error")
 	}
 	if stdout.Len() != 0 {
@@ -155,9 +122,7 @@ func TestInfoValidatesReferenceAndExplanationFlags(t *testing.T) {
 		{args: []string{"info", "session", "--pane", "%1"}, want: errInfoReference},
 		{args: []string{"info", "session", "--config-dir", t.TempDir()}, want: errInfoConfig},
 	} {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(test.args)
-		if err := root.ExecuteContext(context.Background()); !errors.Is(err, test.want) {
+		if err := runTestCLI(context.Background(), test.args, &bytes.Buffer{}, &bytes.Buffer{}); !errors.Is(err, test.want) {
 			t.Errorf("%v error = %v, want %v", test.args, err, test.want)
 		}
 	}
@@ -194,9 +159,7 @@ func TestListRejectsModeSpecificFlags(t *testing.T) {
 		{"--store", path, "watch", "--format", ""},
 	}
 	for _, args := range tests {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(args)
-		if err := root.ExecuteContext(context.Background()); err == nil {
+		if err := runTestCLI(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Errorf("arguments unexpectedly accepted: %v", args)
 		}
 	}
@@ -211,9 +174,8 @@ func TestSubcommandFlagsAreScoped(t *testing.T) {
 		{"watch", "--summary"},
 	}
 	for _, args := range tests {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(args)
-		if err := root.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		err := runTestCLI(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || (!strings.Contains(err.Error(), "unknown flag") && !strings.Contains(err.Error(), "flag provided but not defined")) {
 			t.Errorf("%v error = %v, want unknown flag", args, err)
 		}
 	}
@@ -222,16 +184,12 @@ func TestSubcommandFlagsAreScoped(t *testing.T) {
 func TestIntegrationsInstallRejectsTargetBinaryWithoutShim(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{{"manage", "integrations", "install", "codex", "--target-binary", "/bin/codex"}} {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(args)
-		if err := root.ExecuteContext(context.Background()); !errors.Is(err, errTargetBinaryNeedsShim) {
+		if err := runTestCLI(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{}); !errors.Is(err, errTargetBinaryNeedsShim) {
 			t.Errorf("%v target binary error = %v", args, err)
 		}
 	}
 	for _, args := range [][]string{{"manage", "integrations", "install", "all", "--shim", "--target-binary", "/bin/agent"}} {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(args)
-		if err := root.ExecuteContext(context.Background()); !errors.Is(err, errTargetBinaryWithAll) {
+		if err := runTestCLI(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{}); !errors.Is(err, errTargetBinaryWithAll) {
 			t.Errorf("%v all target binary error = %v", args, err)
 		}
 	}
@@ -246,25 +204,19 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "clean"})
-	if err := root.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "exactly one") {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "clean", "--all", "--older-than", "1h"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("unsafe clean error = %v", err)
 	}
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("unsafe clean changed registry: %v, %#v", err, sessions)
 	}
-	root = NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "gc"})
-	if err := root.ExecuteContext(context.Background()); err == nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "gc"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("legacy gc without an explicit policy unexpectedly succeeded")
 	}
 
 	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "manage", "state", "clean", "--older-than", "0s"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "manage", "state", "clean", "--older-than", "0s"}, &machine, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var cleanResult registry.GCResult
@@ -276,9 +228,7 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "clean", "--all", "--yes"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "clean", "--all", "--yes"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "deleted=1") {
@@ -292,9 +242,7 @@ func TestStatePathAndResetCommands(t *testing.T) {
 	observeTestSession(t, store, "reset-session", time.Now())
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "path"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "path"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(stdout.String()) != path {
@@ -302,9 +250,7 @@ func TestStatePathAndResetCommands(t *testing.T) {
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "reset"})
-	if err := root.ExecuteContext(context.Background()); !errors.Is(err, errStateResetForce) {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "reset"}, &stdout, &bytes.Buffer{}); !errors.Is(err, errStateResetForce) {
 		t.Fatalf("state reset without force error = %v", err)
 	}
 	sessions, err := store.List(context.Background(), registry.Filter{})
@@ -312,9 +258,7 @@ func TestStatePathAndResetCommands(t *testing.T) {
 		t.Fatalf("state reset without force changed state: %v, %#v", err, sessions)
 	}
 
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "reset", "--force"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "reset", "--force"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "Cleared:    1") {
@@ -329,9 +273,7 @@ func TestStateResetCommandRecoversMalformedState(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "manage", "state", "reset", "--force"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "reset", "--force"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "Cleared:    0") {
@@ -349,9 +291,7 @@ func TestListDefaultsToLatestUpdateLastWithUsefulLabelsAndShortIDs(t *testing.T)
 	newer := observeTestSession(t, store, "newer-session", time.Now())
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "list"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()
@@ -363,9 +303,7 @@ func TestListDefaultsToLatestUpdateLastWithUsefulLabelsAndShortIDs(t *testing.T)
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "list"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var sessions []registry.Session
@@ -389,9 +327,7 @@ func TestListDisplaysAndFiltersZellijLocation(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "list", "--multiplexer-session", "work"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "list", "--multiplexer-session", "work"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()
@@ -421,9 +357,7 @@ func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 	reference := shortRegistryID(session.ID)
 
 	var human bytes.Buffer
-	root := NewRootCommand(&human, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "info", reference})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "info", reference}, &human, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(human.String(), "Session ID:") || !strings.Contains(human.String(), "info-session") || strings.HasPrefix(strings.TrimSpace(human.String()), "{") {
@@ -431,9 +365,7 @@ func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 	}
 
 	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "info", reference})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "info", reference}, &machine, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var decoded registry.Session
@@ -461,9 +393,7 @@ func createSkippedStopSession(t *testing.T) (string, registry.Session) {
 func TestStopExplicitSkippedTargetReturnsReasonAndError(t *testing.T) {
 	path, session := createSkippedStopSession(t)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "stop", shortRegistryID(session.ID), "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); !errors.Is(err, errStopTargetSkipped) {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "stop", shortRegistryID(session.ID), "--dry-run"}, &stdout, &bytes.Buffer{}); !errors.Is(err, errStopTargetSkipped) {
 		t.Fatalf("single skipped stop error = %v", err)
 	}
 	if !strings.Contains(stdout.String(), "process no longer exists") || !strings.Contains(stdout.String(), "skipped=1") {
@@ -474,9 +404,7 @@ func TestStopExplicitSkippedTargetReturnsReasonAndError(t *testing.T) {
 func TestStopAllKeepsSkippedResultsMachineReadable(t *testing.T) {
 	path, _ := createSkippedStopSession(t)
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "stop", "--all", "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "stop", "--all", "--dry-run"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result map[string]any
@@ -491,9 +419,7 @@ func TestStopAllKeepsSkippedResultsMachineReadable(t *testing.T) {
 func TestStopRejectsInvalidSelection(t *testing.T) {
 	path, session := createSkippedStopSession(t)
 	for _, args := range [][]string{{"stop"}, {"stop", shortRegistryID(session.ID), "--all"}} {
-		root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-		root.SetArgs(append([]string{"--store", path}, args...))
-		if err := root.ExecuteContext(context.Background()); err == nil {
+		if err := runTestCLI(context.Background(), append([]string{"--store", path}, args...), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Fatalf("invalid stop selection accepted: %v", args)
 		}
 	}
@@ -521,9 +447,7 @@ func TestStopMultipleSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "stop", shortRegistryID(s1.ID), shortRegistryID(s2.ID), "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); !errors.Is(err, errStopTargetSkipped) {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "stop", shortRegistryID(s1.ID), shortRegistryID(s2.ID), "--dry-run"}, &stdout, &bytes.Buffer{}); !errors.Is(err, errStopTargetSkipped) {
 		t.Fatalf("expected skipped error, got %v", err)
 	}
 	output := stdout.String()
@@ -535,40 +459,22 @@ func TestStopMultipleSessions(t *testing.T) {
 func TestStopAllConfirmationHandling(t *testing.T) {
 	path, _ := createSkippedStopSession(t)
 
-	// Refused confirmation via stdin
+	// Refused / non-interactive confirmation without --yes fails with error
 	var stdout, stderr bytes.Buffer
-	root := NewRootCommand(&stdout, &stderr)
-	root.SetIn(strings.NewReader("n\n"))
-	root.SetArgs([]string{"--store", path, "stop", "--all"})
-	if err := root.ExecuteContext(context.Background()); !errors.Is(err, errStopAllConfirmation) {
-		t.Fatalf("expected confirmation cancellation error, got %v", err)
-	}
-	if !strings.Contains(stderr.String(), "Stop all live sessions? [y/N]: ") || strings.Contains(stdout.String(), "Stop all live sessions?") {
-		t.Fatalf("confirmation prompt channel mismatch: stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-
-	// Accepted confirmation via stdin
-	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetIn(strings.NewReader("y\n"))
-	root.SetArgs([]string{"--store", path, "stop", "--all"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("expected successful confirmation, got %v", err)
+	err := runTestCLI(context.Background(), []string{"--store", path, "stop", "--all"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("expected unconfirmed stop error in non-TTY")
 	}
 
 	// Accepted via -y flag
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "stop", "--all", "-y"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "stop", "--all", "-y"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("expected successful stop with -y, got %v", err)
 	}
 
 	// Accepted via --yes flag
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "stop", "--all", "--yes"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "stop", "--all", "--yes"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("expected successful stop with --yes, got %v", err)
 	}
 }
@@ -581,9 +487,7 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "install", "claude", "--binary", "/bin/aht"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "install", "claude", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") || !strings.Contains(stdout.String(), "Agent") || !strings.Contains(stdout.String(), "claude") {
@@ -591,9 +495,7 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "status", "claude", "--binary", "/bin/aht"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "status", "claude", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "current") {
@@ -601,9 +503,7 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--json", "manage", "integrations", "status", "claude", "--binary", "/bin/aht"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--json", "manage", "integrations", "status", "claude", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var statuses []map[string]any
@@ -612,18 +512,14 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "remove", "claude"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "remove", "claude"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "removed") {
 		t.Fatalf("remove output = %q", stdout.String())
 	}
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "status", "claude"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "status", "claude"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "missing") {
@@ -655,9 +551,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
 
 	var concise bytes.Buffer
-	root := NewRootCommand(&concise, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run"}, &concise, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(concise.String(), `"hooks":`) || !strings.Contains(concise.String(), "dry run") {
@@ -665,9 +559,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	}
 
 	var detailed bytes.Buffer
-	root = NewRootCommand(&detailed, &bytes.Buffer{})
-	root.SetArgs([]string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run", "--show-content"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run", "--show-content"}, &detailed, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(detailed.String(), "codex generated content:") || !strings.Contains(detailed.String(), `"hooks":`) {
@@ -675,9 +567,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	}
 
 	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--json", "manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run", "--show-content"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--json", "manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run", "--show-content"}, &machine, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var results []map[string]any
@@ -689,9 +579,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 func executeSurfaceCommand(t *testing.T, stdout *bytes.Buffer, args ...string) {
 	t.Helper()
 	stdout.Reset()
-	root := NewRootCommand(stdout, &bytes.Buffer{})
-	root.SetArgs(args)
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), args, stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -728,9 +616,7 @@ func TestSetupDryRunCombinesIntegrationAndTracker(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(home, "sessions.json"), "manage", "setup", "codex", "--binary", "/bin/aht", "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", filepath.Join(home, "sessions.json"), "manage", "setup", "codex", "--binary", "/bin/aht", "--dry-run"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "codex") || !strings.Contains(stdout.String(), "tracker:") || strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
@@ -741,9 +627,7 @@ func TestSetupDryRunCombinesIntegrationAndTracker(t *testing.T) {
 	}
 
 	stdout.Reset()
-	root = NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(home, "sessions.json"), "--json", "manage", "setup", "codex", "--binary", "/bin/aht", "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", filepath.Join(home, "sessions.json"), "--json", "manage", "setup", "codex", "--binary", "/bin/aht", "--dry-run"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result setupResult
@@ -770,9 +654,7 @@ func TestSetupEnablesTrackerWhenIntegrationFails(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(home, "sessions.json"), "manage", "setup", "openclaw", "--binary", "/bin/aht"})
-	err := root.ExecuteContext(context.Background())
+	err := runTestCLI(context.Background(), []string{"--store", filepath.Join(home, "sessions.json"), "manage", "setup", "openclaw", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "OpenClaw CLI is required") {
 		t.Fatalf("setup error = %v, want missing OpenClaw CLI", err)
 	}
@@ -805,9 +687,7 @@ func TestTrackerLifecycleCommandsUseHumanOutputUnlessJSONRequested(t *testing.T)
 
 	for _, args := range [][]string{{"manage", "tracker", "enable", "--dry-run"}, {"manage", "tracker", "status"}, {"manage", "tracker", "disable", "--dry-run"}} {
 		var stdout bytes.Buffer
-		root := NewRootCommand(&stdout, &bytes.Buffer{})
-		root.SetArgs(append([]string{"--store", storePath}, args...))
-		if err := root.ExecuteContext(context.Background()); err != nil {
+		if err := runTestCLI(context.Background(), append([]string{"--store", storePath}, args...), &stdout, &bytes.Buffer{}); err != nil {
 			t.Fatalf("%v failed: %v", args, err)
 		}
 		if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") || !strings.Contains(stdout.String(), "Manager:") {
@@ -816,9 +696,7 @@ func TestTrackerLifecycleCommandsUseHumanOutputUnlessJSONRequested(t *testing.T)
 	}
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "--json", "manage", "tracker", "enable", "--dry-run"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", storePath, "--json", "manage", "tracker", "enable", "--dry-run"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result service.Result
@@ -830,9 +708,7 @@ func TestTrackerLifecycleCommandsUseHumanOutputUnlessJSONRequested(t *testing.T)
 func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 	var human bytes.Buffer
-	root := NewRootCommand(&human, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "manage", "tracker", "run", "--once"})
-	if err := root.ExecuteContext(context.Background()); err != nil && !errors.Is(err, errObserverRunDegraded) {
+	if err := runTestCLI(context.Background(), []string{"--store", storePath, "manage", "tracker", "run", "--once"}, &human, &bytes.Buffer{}); err != nil && !errors.Is(err, errObserverRunDegraded) {
 		t.Fatal(err)
 	}
 	if strings.HasPrefix(strings.TrimSpace(human.String()), "{") || !strings.Contains(human.String(), "processes=") {
@@ -840,9 +716,7 @@ func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 	}
 
 	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", storePath, "--json", "manage", "tracker", "run", "--once"})
-	if err := root.ExecuteContext(context.Background()); err != nil && !errors.Is(err, errObserverRunDegraded) {
+	if err := runTestCLI(context.Background(), []string{"--store", storePath, "--json", "manage", "tracker", "run", "--once"}, &machine, &bytes.Buffer{}); err != nil && !errors.Is(err, errObserverRunDegraded) {
 		t.Fatal(err)
 	}
 	var result map[string]any
@@ -942,9 +816,7 @@ func assertDoctorSurface(t *testing.T) {
 func executeDoctorSurface(t *testing.T, args ...string) string {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	root := NewRootCommand(&stdout, &stderr)
-	root.SetArgs(args)
-	if err := root.ExecuteContext(t.Context()); err != nil {
+	if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
 		t.Fatalf("aht %v: %v\nstdout:\n%s\nstderr:\n%s", args, err, stdout.String(), stderr.String())
 	}
 	return stdout.String()

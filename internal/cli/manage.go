@@ -12,10 +12,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
+	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
@@ -23,13 +26,18 @@ import (
 	"github.com/zigai/aht/pkg/tmux"
 )
 
-const stopTargetMaxAge = 30 * time.Minute
+const (
+	stopTargetMaxAge         = 30 * time.Minute
+	stopSummaryMaxRuleWidth  = 100
+	stopSummaryFallbackWidth = 80
+)
 
 var (
 	errManageStopAllFailed = errors.New("one or more sessions failed to stop")
 	errStateResetForce     = errors.New("--force is required to reset stored session state")
 	errStopTargetSkipped   = errors.New("session was not stopped")
 	errUnknownStopMethod   = errors.New("unknown stop method")
+	errTerminalRequired    = errors.New("confirmation requires a terminal")
 )
 
 type manageResetResult struct {
@@ -117,29 +125,42 @@ func (defaultSessionStopSignaler) SendProcessInterrupt(pid int) error {
 	return nil
 }
 
-func (app *application) newRegistryResetCommand() *cobra.Command {
+func (app *application) newRegistryResetCommand() *cli.Command {
 	force := false
-	command := &cobra.Command{Use: "reset", Short: "Reset stored session state", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if !force {
-			return errStateResetForce
-		}
-		s := app.store()
-		r, e := s.Reset(cmd.Context())
-		if e != nil {
-			return fmt.Errorf("resetting store: %w", e)
-		}
-		o := manageResetResult{ResetResult: r, Path: s.Path()}
-		if app.outputJSON {
-			return app.writeJSON(o)
-		}
-		return app.writeHumanDetails([]humanDetail{
-			{label: "Cleared", value: strconv.Itoa(o.Cleared)},
-			{label: "Remaining", value: strconv.Itoa(o.Remaining)},
-			{label: "Path", value: o.Path},
-		})
-	}}
-	command.Flags().BoolVar(&force, "force", false, "confirm destructive state reset")
-	return command
+	return &cli.Command{
+		Name:  "reset",
+		Usage: "Reset stored session state",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "force",
+				Aliases:     []string{"f"},
+				Destination: &force,
+				Usage:       "confirm destructive state reset",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			if !force {
+				return exitCode(errStateResetForce, exitCodeUsage)
+			}
+			s := app.store()
+			r, e := s.Reset(ctx)
+			if e != nil {
+				return fmt.Errorf("resetting store: %w", e)
+			}
+			o := manageResetResult{ResetResult: r, Path: s.Path()}
+			if app.outputJSON {
+				return app.writeJSON(o)
+			}
+			return app.writeHumanDetails([]humanDetail{
+				{label: "Cleared", value: strconv.Itoa(o.Cleared)},
+				{label: "Remaining", value: strconv.Itoa(o.Remaining)},
+				{label: "Path", value: o.Path},
+			})
+		},
+	}
 }
 
 func (app *application) resolveStopSessions(ctx context.Context, args []string, all bool) ([]registry.Session, error) {
@@ -184,24 +205,73 @@ func (app *application) runStop(ctx context.Context, args []string, all bool, dr
 	return err
 }
 
-func (app *application) confirmStopAll(in io.Reader) (bool, error) {
-	return app.confirmAction(in, "Stop all live sessions? [y/N]: ")
+func (app *application) confirmStopAll(ctx context.Context, in io.Reader) (bool, error) {
+	return app.confirmAction(ctx, in, "Stop all live sessions? [y/N]: ", "--yes")
 }
 
-func (app *application) confirmAction(in io.Reader, prompt string) (bool, error) {
+func (app *application) confirmAction(ctx context.Context, in io.Reader, prompt string, correctiveFlag string) (bool, error) {
+	if in == nil {
+		in = app.stdin
+	}
 	if in == nil {
 		in = os.Stdin
 	}
+	file, isFile := in.(*os.File)
+	if !isFile || !term.IsTerminal(int(file.Fd())) {
+		return false, exitCode(fmt.Errorf("%w; use %s to confirm non-interactively", errTerminalRequired, correctiveFlag), exitCodeUsage)
+	}
 	out := app.stderr
 	if out == nil {
-		out = io.Discard
+		out = os.Stderr
 	}
 	if _, err := fmt.Fprint(out, prompt); err != nil {
 		return false, fmt.Errorf("writing confirmation prompt: %w", err)
 	}
-	reader := bufio.NewReader(in)
+	return readConfirmationLine(ctx, file)
+}
+
+func readConfirmationLine(ctx context.Context, file *os.File) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, exitCode(err, exitCodeInterrupted)
+	}
+	rPipe, wPipe, err := os.Pipe()
+	if err != nil {
+		return false, fmt.Errorf("pipe for confirmation: %w", err)
+	}
+	defer func() {
+		_ = rPipe.Close()
+		_ = wPipe.Close()
+	}()
+
+	stop := context.AfterFunc(ctx, func() {
+		_, _ = wPipe.Write([]byte{1})
+	})
+	defer stop()
+
+	pollFds := []unix.PollFd{
+		{Fd: int32(file.Fd()), Events: unix.POLLIN},  //nolint:gosec // terminal file descriptor fits in int32
+		{Fd: int32(rPipe.Fd()), Events: unix.POLLIN}, //nolint:gosec // pipe file descriptor fits in int32
+	}
+	for {
+		_, err := unix.Poll(pollFds, -1)
+		if err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			return false, fmt.Errorf("polling confirmation: %w", err)
+		}
+		break
+	}
+	if pollFds[1].Revents&unix.POLLIN != 0 || ctx.Err() != nil {
+		return false, exitCode(context.Canceled, exitCodeInterrupted)
+	}
+
+	reader := bufio.NewReader(file)
 	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
 		return false, fmt.Errorf("reading confirmation: %w", err)
 	}
 	ans := strings.ToLower(strings.TrimSpace(line))
@@ -399,6 +469,13 @@ func (app *application) writeManageStopAllResult(r manageStopAllResult) error {
 		[]humanColumn{{heading: "ID", width: idWidth, wrap: wrapHumanIdentifier}, {heading: "Agent", width: stopAgentWidth}, {heading: "Presence", width: stopPresenceWidth}, {heading: "Activity", width: stopActivityWidth}, {heading: "Status", width: stopStatusWidth}, {heading: "Method", width: stopMethodWidth}, {heading: "Target", width: targetWidth, wrap: wrapHumanIdentifier}, {heading: "Detail", width: stopDetailWidth}},
 		rows,
 	); err != nil {
+		return err
+	}
+	ruleWidth := min(app.maxLineWidth(), stopSummaryMaxRuleWidth)
+	if ruleWidth <= 0 {
+		ruleWidth = stopSummaryFallbackWidth
+	}
+	if err := app.writeln(strings.Repeat("─", ruleWidth)); err != nil {
 		return err
 	}
 	return app.writef("Summary: stoppable=%d stopped=%d skipped=%d failed=%d\n", r.Stoppable, r.Stopped, r.Skipped, r.Failed)

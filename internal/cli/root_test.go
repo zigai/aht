@@ -480,11 +480,8 @@ func TestPrepareReportAcceptsLargeCodexPostToolUseDefaults(t *testing.T) {
 
 func TestReportQuietSuppressesHumanOutput(t *testing.T) {
 	t.Parallel()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	root := NewRootCommand(&stdout, &stderr)
-	root.SetArgs([]string{"--store", t.TempDir() + "/sessions.json", "report", "codex", "--session-id", "json", "--event", "start", "--quiet"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	var stdout, stderr bytes.Buffer
+	if err := runTestCLI(context.Background(), []string{"--store", t.TempDir() + "/sessions.json", "report", "codex", "--session-id", "json", "--event", "start", "--quiet"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	if stdout.Len() != 0 {
@@ -495,9 +492,7 @@ func TestReportQuietSuppressesHumanOutput(t *testing.T) {
 func TestReportCommandDefaultsToHumanOutput(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "report", "codex", "--session-id", "human", "--event", "start", "--no-tmux"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "report", "codex", "--session-id", "human", "--event", "start", "--no-tmux"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") || !strings.Contains(stdout.String(), "codex") {
@@ -508,9 +503,7 @@ func TestReportCommandDefaultsToHumanOutput(t *testing.T) {
 func TestReportHumanOutputDistinguishesReportedAndEffectiveActivity(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "report", "codex", "--session-id", "activity", "--event", "turn_complete", "--activity", "waiting", "--no-tmux"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "report", "codex", "--session-id", "activity", "--event", "turn_complete", "--activity", "waiting", "--no-tmux"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()
@@ -524,9 +517,7 @@ func TestReportHumanOutputDistinguishesReportedAndEffectiveActivity(t *testing.T
 func TestReportCommandEmitsJSONOnlyWhenRequested(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "--json", "report", "codex", "--session-id", "machine", "--event", "start", "--no-tmux"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "--json", "report", "codex", "--session-id", "machine", "--event", "start", "--no-tmux"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var session registry.Session
@@ -538,13 +529,11 @@ func TestReportCommandEmitsJSONOnlyWhenRequested(t *testing.T) {
 func TestReportJSONCoversIgnoredResult(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetIn(strings.NewReader(`{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/rollout.jsonl","hook_event_name":"Stop","model":"gpt-5-codex"}`))
-	root.SetArgs([]string{
+	stdin := strings.NewReader(`{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/rollout.jsonl","hook_event_name":"Stop","model":"gpt-5-codex"}`)
+	if err := runTestCLIWithStdin(context.Background(), []string{
 		"--store", filepath.Join(t.TempDir(), "sessions.json"),
 		"--json", "report", "claude", "--raw-stdin-defaults-only", "--no-tmux",
-	})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	}, stdin, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result map[string]string
@@ -569,9 +558,7 @@ func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 	}
 
 	var human bytes.Buffer
-	root := NewRootCommand(&human, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "info", session.ID})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "info", session.ID}, &human, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(human.String(), "Session ID:") || strings.HasPrefix(strings.TrimSpace(human.String()), "{") {
@@ -579,9 +566,7 @@ func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 	}
 
 	var machine bytes.Buffer
-	root = NewRootCommand(&machine, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "--json", "info", session.ID})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "--json", "info", session.ID}, &machine, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var decoded registry.Session
@@ -596,9 +581,7 @@ func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 func TestVersionHonorsJSONFlag(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--json", "--version"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--json", "--version"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var result map[string]string
@@ -613,9 +596,7 @@ func TestVersionHonorsJSONFlag(t *testing.T) {
 func TestVersionDefaultsToHumanOutput(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--version"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--version"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") || !strings.HasPrefix(stdout.String(), "aht ") {
@@ -670,9 +651,7 @@ func TestListFullFlagRendersCompleteValues(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	root := NewRootCommand(&stdout, &bytes.Buffer{})
-	root.SetArgs([]string{"--store", path, "list", "--full"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := runTestCLI(context.Background(), []string{"--store", path, "list", "--full"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()

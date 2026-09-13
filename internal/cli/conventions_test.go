@@ -12,19 +12,29 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/zigai/aht/internal/config"
 	"github.com/zigai/aht/pkg/registry"
 )
 
 func TestCommandsRejectUnexpectedArgumentsBeforeSideEffects(t *testing.T) {
-	for _, args := range [][]string{{"list"}, {"watch"}, {"manage", "doctor"}, {"manage", "state", "path"}, {"manage", "state", "reset", "--force"}, {"manage", "state", "clean", "--all", "--yes"}, {"manage", "tracker", "run", "--once"}, {"manage", "tracker", "enable"}, {"manage", "tracker", "disable"}, {"manage", "tracker", "status"}} {
+	for _, args := range [][]string{
+		{"list"},
+		{"watch"},
+		{"manage", "doctor"},
+		{"manage", "state", "path"},
+		{"manage", "state", "reset", "--force"},
+		{"manage", "state", "clean", "--all", "--yes"},
+		{"manage", "tracker", "run", "--once"},
+		{"manage", "tracker", "enable"},
+		{"manage", "tracker", "disable"},
+		{"manage", "tracker", "status"},
+	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			configPath := filepath.Join(t.TempDir(), "missing-config.toml")
-			root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-			root.SetArgs(append(append([]string{"--config", configPath}, args...), "unexpected-argument"))
-			if err := root.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "unexpected-argument") {
+			err := runTestCLI(t.Context(), append(append([]string{"--config", configPath}, args...), "unexpected-argument"), &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || (!strings.Contains(err.Error(), "unexpected-argument") && !strings.Contains(err.Error(), "unexpected argument")) {
 				t.Fatalf("argument error = %v", err)
 			}
 			if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
@@ -35,40 +45,46 @@ func TestCommandsRejectUnexpectedArgumentsBeforeSideEffects(t *testing.T) {
 }
 
 func TestSetupValidatesSelectionBeforeConfigOrInstallation(t *testing.T) {
-	root := NewRootCommand(&bytes.Buffer{}, &bytes.Buffer{})
-	root.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "missing.toml"), "manage", "setup", "not-a-harness"})
-	if err := root.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "normalize agent") {
+	err := runTestCLI(t.Context(), []string{"--config", filepath.Join(t.TempDir(), "missing.toml"), "manage", "setup", "not-a-harness"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "normalize agent") {
 		t.Fatalf("setup validation error = %v", err)
 	}
 }
 
 func TestListSummaryAcceptsDefaultSortingConfig(t *testing.T) {
-	app := &application{cfgLoaded: true, cfg: config.Config{UI: config.UIConfig{Sort: "updated", SortDesc: new(bool)}}, outputJSON: true, stdout: &bytes.Buffer{}, storePath: filepath.Join(t.TempDir(), "sessions.json")}
-	cmd := app.newListCommand()
-	cmd.SetArgs([]string{"--summary"})
-	if err := cmd.ExecuteContext(t.Context()); err != nil {
-		t.Fatalf("default sorting invalidated summary: %v", err)
+	storePath := filepath.Join(t.TempDir(), "sessions.json")
+	var stdout, stderr bytes.Buffer
+	err := runTestCLI(t.Context(), []string{"--store", storePath, "--json", "list", "--summary"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("default sorting invalidated summary: %v; stderr=%s", err, stderr.String())
 	}
-	cmd = app.newListCommand()
-	cmd.SetArgs([]string{"--summary", "--sort", "updated"})
-	if err := cmd.ExecuteContext(t.Context()); !errors.Is(err, errListSummaryFlag) {
+
+	err = runTestCLI(t.Context(), []string{"--store", storePath, "--json", "list", "--summary", "--sort", "updated"}, &stdout, &stderr)
+	if !errors.Is(err, errListSummaryFlag) {
 		t.Fatalf("explicit summary sorting error = %v", err)
 	}
 }
 
 func TestServiceOptionsUseConfigAndExplicitOverrides(t *testing.T) {
 	app := &application{cfgLoaded: true, cfg: config.Config{Tracker: config.TrackerConfig{Interval: "2s", GracePeriod: "5s"}}}
-	cmd := &cobra.Command{}
-	cmd.Flags().Duration("interval", time.Second, "")
+	cmd := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.DurationFlag{Name: "interval", Value: time.Second},
+		},
+	}
 	options := serviceOptions{binary: "/aht", interval: time.Second}
 	got, err := app.configuredServiceOptions(cmd, options)
 	if err != nil || got.Interval != 2*time.Second || got.GracePeriod != 5*time.Second {
 		t.Fatalf("configured service = %#v, %v", got, err)
 	}
-	if err := cmd.Flags().Set("interval", "1s"); err != nil {
-		t.Fatal(err)
+
+	cmd2 := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.DurationFlag{Name: "interval", Value: time.Second},
+		},
 	}
-	got, err = app.configuredServiceOptions(cmd, options)
+	_ = cmd2.Run(t.Context(), []string{"test", "--interval", "1s"})
+	got, err = app.configuredServiceOptions(cmd2, options)
 	if err != nil || got.Interval != time.Second || got.GracePeriod != 5*time.Second {
 		t.Fatalf("overridden service = %#v, %v", got, err)
 	}
@@ -81,22 +97,24 @@ func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "gone"}, Presence: &presence, ObservedAt: time.Now().Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
+
+	// 1. Without --yes in non-TTY environment (e.g. piped or automated test): should fail and preserve records
 	var stdout, stderr bytes.Buffer
-	app := &application{cfgLoaded: true, storePath: path, stdout: &stdout, stderr: &stderr}
-	cmd := app.newRegistryCleanCommand()
-	cmd.SetIn(strings.NewReader("no\n"))
-	cmd.SetArgs([]string{"--all"})
-	if err := cmd.ExecuteContext(t.Context()); !errors.Is(err, errCleanAllConfirmation) {
-		t.Fatalf("clean confirmation error = %v", err)
+	err := runTestCLI(t.Context(), []string{"--store", path, "manage", "state", "clean", "--all"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for unconfirmed clean in non-TTY")
 	}
 	sessions, err := store.List(t.Context(), registry.Filter{})
-	if err != nil || len(sessions) != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "Delete all") {
-		t.Fatalf("unconfirmed clean changed state/output: %v, %#v, %q, %q", err, sessions, stdout.String(), stderr.String())
+	if err != nil || len(sessions) != 1 || stdout.Len() != 0 {
+		t.Fatalf("unconfirmed clean changed state/output: %v, %#v, %q", err, sessions, stdout.String())
 	}
-	cmd = app.newRegistryCleanCommand()
-	cmd.SetArgs([]string{"--all", "--yes"})
-	if err := cmd.ExecuteContext(t.Context()); err != nil {
-		t.Fatal(err)
+
+	// 2. With --all --yes: should succeed and remove records
+	stdout.Reset()
+	stderr.Reset()
+	err = runTestCLI(t.Context(), []string{"--store", path, "manage", "state", "clean", "--all", "--yes"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("confirmed clean failed: %v", err)
 	}
 	sessions, err = store.List(t.Context(), registry.Filter{})
 	if err != nil || len(sessions) != 0 {

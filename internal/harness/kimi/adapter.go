@@ -53,7 +53,7 @@ func New() kimiCodeHarness {
 			SessionStart: true,
 			SessionEnd:   true,
 			RunningIdle:  true,
-			// Approval waiting is observed through aht wire kimi-code.
+			// Approval waiting is observed through aht hook wire kimi-code.
 			WaitingPermission: true,
 			NativeCatalog:     true,
 			ProcessIdentity:   false,

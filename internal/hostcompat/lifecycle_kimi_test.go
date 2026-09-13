@@ -13,7 +13,7 @@ import (
 
 func (host isolatedHost) kimiWireCommand(t *testing.T, env, nativeArgs []string) *exec.Cmd {
 	t.Helper()
-	args := append([]string{"wire", "kimi-code", "--"}, nativeArgs...)
+	args := append([]string{"hook", "wire", "kimi-code", "--"}, nativeArgs...)
 	command := exec.CommandContext(t.Context(), host.aht, args...)
 	command.Dir = host.work
 	command.Env = env

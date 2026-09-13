@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,6 +45,7 @@ func (app *application) writeWrappedHumanTable(columns []humanColumn, rows [][]s
 	return app.writeHumanTableRows(columns, rows, true)
 }
 
+//nolint:cyclop // standard human table formatting with validation and wrapping branches
 func (app *application) writeHumanTableRows(columns []humanColumn, rows [][]string, wrap bool) error {
 	for _, row := range rows {
 		if len(row) != len(columns) {
@@ -60,6 +62,9 @@ func (app *application) writeHumanTableRows(columns []humanColumn, rows [][]stri
 			}
 		}
 		return app.writeStackedHumanRows(columns, rows)
+	}
+	if !wrap {
+		return app.writeDirectHumanTable(columns, rows)
 	}
 	writer := prettytable.NewWriter()
 	style := prettytable.StyleDefault
@@ -96,6 +101,74 @@ func (app *application) writeHumanTableRows(columns []humanColumn, rows [][]stri
 	}
 	if _, err := fmt.Fprintln(app.stdout, normalizeHumanTableLayout(rendered)); err != nil {
 		return fmt.Errorf("write human table: %w", err)
+	}
+	return nil
+}
+
+//nolint:gocognit,cyclop // fast-path direct table streaming without intermediate DOM allocations
+func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]string) error {
+	bw := bufio.NewWriter(app.stdout)
+	defer func() { _ = bw.Flush() }()
+
+	var headerBuf strings.Builder
+	for i, col := range columns {
+		if i > 0 {
+			headerBuf.WriteString("  ")
+		}
+		w := col.width
+		sw := text.StringWidth(col.heading)
+		if sw < w {
+			if col.align == text.AlignRight {
+				headerBuf.WriteString(strings.Repeat(" ", w-sw))
+				headerBuf.WriteString(col.heading)
+			} else {
+				headerBuf.WriteString(col.heading)
+				headerBuf.WriteString(strings.Repeat(" ", w-sw))
+			}
+		} else {
+			headerBuf.WriteString(col.heading)
+		}
+	}
+	headerLine := strings.TrimRight(headerBuf.String(), " ")
+	if _, err := bw.WriteString(headerLine + "\n"); err != nil {
+		return fmt.Errorf("write table header: %w", err)
+	}
+
+	headerWidth := text.StringWidth(headerLine)
+	sep := strings.Repeat("─", headerWidth)
+	if _, err := bw.WriteString(sep + "\n"); err != nil {
+		return fmt.Errorf("write table separator: %w", err)
+	}
+
+	var rowBuf strings.Builder
+	for _, row := range rows {
+		rowBuf.Reset()
+		for i, cell := range row {
+			if i > 0 {
+				rowBuf.WriteString("  ")
+			}
+			col := columns[i]
+			textVal := truncateHumanText(sanitizeHumanText(cell), col.width)
+			sw := text.StringWidth(textVal)
+			if sw < col.width {
+				if col.align == text.AlignRight {
+					rowBuf.WriteString(strings.Repeat(" ", col.width-sw))
+					rowBuf.WriteString(textVal)
+				} else {
+					rowBuf.WriteString(textVal)
+					rowBuf.WriteString(strings.Repeat(" ", col.width-sw))
+				}
+			} else {
+				rowBuf.WriteString(textVal)
+			}
+		}
+		rowLine := strings.TrimRight(rowBuf.String(), " ")
+		if _, err := bw.WriteString(rowLine + "\n"); err != nil {
+			return fmt.Errorf("write table row: %w", err)
+		}
+	}
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush table output: %w", err)
 	}
 	return nil
 }

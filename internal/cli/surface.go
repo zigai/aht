@@ -11,10 +11,9 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/zigai/aht/internal/config"
-
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/internal/service"
@@ -22,19 +21,24 @@ import (
 )
 
 var (
-	errAllWithAgents         = errors.New("all cannot be combined with agent names")
-	errAgentRequired         = errors.New("at least one agent or all is required")
-	errCleanSelection        = errors.New("choose exactly one of --all or --older-than")
-	errNegativeCleanAge      = errors.New("older-than must be nonnegative")
-	errSessionReference      = errors.New("session reference is ambiguous")
-	errInfoReference         = errors.New("provide one session reference or --pane")
-	errInfoConfig            = errors.New("--config-dir requires --explain")
-	errStopSelection         = errors.New("provide one or more sessions, or --all")
-	errStopAllConfirmation   = errors.New("stopping all sessions was not confirmed (pass -y to confirm)")
-	errCleanAllConfirmation  = errors.New("cleaning all gone sessions was not confirmed (pass -y to confirm)")
-	errIntegrationStatusFail = errors.New("one or more integrations could not be inspected")
-	errTargetBinaryNeedsShim = errors.New("--target-binary requires --shim")
-	errTargetBinaryWithAll   = errors.New("--target-binary cannot be used with all")
+	errAllWithAgents            = errors.New("all cannot be combined with agent names")
+	errAgentRequired            = errors.New("at least one agent or all is required")
+	errCleanSelection           = errors.New("choose exactly one of --all or --older-than")
+	errNegativeCleanAge         = errors.New("older-than must be nonnegative")
+	errSessionReference         = errors.New("session reference is ambiguous")
+	errInfoReference            = errors.New("provide one session reference or --pane")
+	errInfoConfig               = errors.New("--config-dir requires --explain")
+	errStopSelection            = errors.New("provide one or more sessions, or --all")
+	errStopAllConfirmation      = errors.New("stopping all sessions was not confirmed (pass -y to confirm)")
+	errCleanAllConfirmation     = errors.New("cleaning all gone sessions was not confirmed (pass -y to confirm)")
+	errIntegrationStatusFail    = errors.New("one or more integrations could not be inspected")
+	errTargetBinaryNeedsShim    = errors.New("--target-binary requires --shim")
+	errTargetBinaryWithAll      = errors.New("--target-binary cannot be used with all")
+	errSetupHarnessRequired     = errors.New("setup requires at least one harness or 'all'")
+	errInstallHarnessRequired   = errors.New("install requires at least one harness or 'all'")
+	errRemoveHarnessRequired    = errors.New("remove requires at least one harness or 'all'")
+	errNoConfigDisallowsInit    = errors.New("cannot initialize config when --no-config is set")
+	errInitJSONTemplateConflict = errors.New("cannot output JSON when writing template to stdout")
 )
 
 type integrationCommandOptions struct {
@@ -66,16 +70,45 @@ type explainedInfoResult struct {
 	Explanation explainResult    `json:"explanation"`
 }
 
-func (app *application) newSetupCommand() *cobra.Command {
+func (app *application) newSetupCommand() *cli.Command {
 	options := integrationCommandOptions{binary: defaultInstallBinary()}
 	serviceConfig := serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval}
-	command := &cobra.Command{
-		Use:   "setup <agent...|all>",
-		Short: "Set up harness integrations and start background tracking",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+	return &cli.Command{
+		Name:      "setup",
+		Usage:     "Set up harness integrations and start background tracking",
+		ArgsUsage: "<agent... | all>",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "<agent... | all>", Desc: "One or more harness names (e.g. claude, codex, pi) or 'all'"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       options.binary,
+				Destination: &options.binary,
+				Usage:       "AHT binary `path` used by integrations and tracker",
+			},
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &options.dryRun,
+				Usage:       "show changes without writing",
+			},
+			&cli.BoolFlag{
+				Name:        "force",
+				Aliases:     []string{"f"},
+				Destination: &options.force,
+				Usage:       "replace foreign integration files",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() == 0 {
+				return exitCode(errSetupHarnessRequired, exitCodeUsage)
+			}
+			args := cmd.Args().Slice()
 			if _, err := selectedHarnesses(args, false); err != nil {
-				return err
+				return exitCode(err, exitCodeUsage)
 			}
 			serviceConfig.binary = options.binary
 			serviceConfig.dryRun = options.dryRun
@@ -83,8 +116,8 @@ func (app *application) newSetupCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			integrations, integrationErr := installIntegrations(cmd.Context(), args, options)
-			tracker, trackerErr := runServiceOperation(cmd.Context(), "update", serviceOptions)
+			integrations, integrationErr := installIntegrations(ctx, args, options)
+			tracker, trackerErr := runServiceOperation(ctx, "update", serviceOptions)
 			if trackerErr != nil {
 				trackerErr = fmt.Errorf("enable tracker: %w", trackerErr)
 			}
@@ -104,85 +137,162 @@ func (app *application) newSetupCommand() *cobra.Command {
 			return errors.Join(integrationErr, trackerErr)
 		},
 	}
-	flags := command.Flags()
-	flags.StringVar(&options.binary, "binary", options.binary, "aht binary used by integrations and tracker")
-	flags.BoolVar(&options.dryRun, "dry-run", false, "show changes without writing")
-	flags.BoolVar(&options.force, "force", false, "replace foreign integration files")
-	return command
 }
 
-func (app *application) newIntegrationsCommand() *cobra.Command {
-	command := &cobra.Command{Use: integrationsCommand, Short: "Install, remove, and inspect agent integrations"}
-	command.AddCommand(app.newIntegrationsInstallCommand(), app.newIntegrationsRemoveCommand(), app.newIntegrationsStatusCommand())
-	return command
+func (app *application) newIntegrationsCommand() *cli.Command {
+	return &cli.Command{
+		Name:  integrationsCommand,
+		Usage: "Install, remove, and inspect agent integrations",
+		Commands: []*cli.Command{
+			app.newIntegrationsInstallCommand(),
+			app.newIntegrationsRemoveCommand(),
+			app.newIntegrationsStatusCommand(),
+		},
+	}
 }
 
-func (app *application) newIntegrationsInstallCommand() *cobra.Command {
+func (app *application) newIntegrationsInstallCommand() *cli.Command {
 	options := integrationCommandOptions{binary: defaultInstallBinary()}
-	command := &cobra.Command{Use: installCommandName + " <agent...|all>", Short: "Install or update agent integrations", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if cmd.Flags().Changed("target-binary") && !options.shim {
-			return errTargetBinaryNeedsShim
-		}
-		if cmd.Flags().Changed("target-binary") && len(args) == 1 && strings.EqualFold(args[0], "all") {
-			return errTargetBinaryWithAll
-		}
-		results, err := installIntegrations(cmd.Context(), args, options)
-		if app.outputJSON {
-			if writeErr := app.writeJSON(results); writeErr != nil {
+	return &cli.Command{
+		Name:      installCommandName,
+		Usage:     "Install or update agent integrations",
+		ArgsUsage: "<agent... | all>",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "<agent... | all>", Desc: "One or more harness names or 'all'"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       options.binary,
+				Destination: &options.binary,
+				Usage:       "AHT binary `path` used by installed integrations",
+			},
+			&cli.StringFlag{
+				Name:        "target-binary",
+				Destination: &options.targetBinary,
+				Usage:       "Real agent binary `path` for shim installs",
+			},
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &options.dryRun,
+				Usage:       "show changes without writing",
+			},
+			&cli.BoolFlag{
+				Name:        "force",
+				Aliases:     []string{"f"},
+				Destination: &options.force,
+				Usage:       "replace foreign integration files",
+			},
+			&cli.BoolFlag{
+				Name:        "shim",
+				Destination: &options.shim,
+				Usage:       "install PATH shim instead of native hooks",
+			},
+			&cli.BoolFlag{
+				Name:        "show-content",
+				Destination: &options.showContent,
+				Usage:       "show generated file content",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() == 0 {
+				return exitCode(errInstallHarnessRequired, exitCodeUsage)
+			}
+			args := cmd.Args().Slice()
+			if cmd.IsSet("target-binary") && !options.shim {
+				return exitCode(errTargetBinaryNeedsShim, exitCodeUsage)
+			}
+			if cmd.IsSet("target-binary") && len(args) == 1 && strings.EqualFold(args[0], "all") {
+				return exitCode(errTargetBinaryWithAll, exitCodeUsage)
+			}
+			results, err := installIntegrations(ctx, args, options)
+			if app.outputJSON {
+				if writeErr := app.writeJSON(results); writeErr != nil {
+					return writeErr
+				}
+			} else if writeErr := app.writeIntegrationResults(results, options.showContent); writeErr != nil {
 				return writeErr
 			}
-		} else if writeErr := app.writeIntegrationResults(results, options.showContent); writeErr != nil {
-			return writeErr
-		}
-		return err
-	}}
-	flags := command.Flags()
-	flags.StringVar(&options.binary, "binary", options.binary, "aht binary used by installed integrations")
-	flags.StringVar(&options.targetBinary, "target-binary", "", "real agent binary path for shim installs")
-	flags.BoolVar(&options.dryRun, "dry-run", false, "show changes without writing")
-	flags.BoolVar(&options.force, "force", false, "replace a foreign integration file")
-	flags.BoolVar(&options.shim, "shim", false, "install the documented process-lifetime fallback")
-	flags.BoolVar(&options.showContent, "show-content", false, "print generated integration content")
-	return command
-}
-
-func (app *application) newIntegrationsRemoveCommand() *cobra.Command {
-	options := integrationCommandOptions{}
-	command := &cobra.Command{Use: "remove <agent...|all>", Short: "Remove aht-owned integrations", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		harnesses, err := selectedHarnesses(args, false)
-		if err != nil {
 			return err
-		}
-		results := make([]install.Result, 0, len(harnesses))
-		var failures []error
-		for _, harnessID := range harnesses {
-			result, removeErr := install.RemoveContext(cmd.Context(), install.Options{Harness: harnessID, Binary: options.binary, DryRun: options.dryRun})
-			if removeErr != nil {
-				result = failedIntegrationResult(harnessID, "remove failed", removeErr)
-				failures = append(failures, removeErr)
-			}
-			results = append(results, result)
-		}
-		if app.outputJSON {
-			if writeErr := app.writeJSON(results); writeErr != nil {
-				return writeErr
-			}
-		} else if writeErr := app.writeIntegrationResults(results, false); writeErr != nil {
-			return writeErr
-		}
-		return errors.Join(failures...)
-	}}
-	command.Flags().BoolVar(&options.dryRun, "dry-run", false, "show changes without writing")
-	return command
+		},
+	}
 }
 
-func (app *application) newIntegrationsStatusCommand() *cobra.Command {
+func (app *application) newIntegrationsRemoveCommand() *cli.Command {
+	options := integrationCommandOptions{}
+	return &cli.Command{
+		Name:      "remove",
+		Usage:     "Remove aht-owned integrations",
+		ArgsUsage: "<agent... | all>",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "<agent... | all>", Desc: "One or more harness names or 'all'"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &options.dryRun,
+				Usage:       "show changes without writing",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() == 0 {
+				return exitCode(errRemoveHarnessRequired, exitCodeUsage)
+			}
+			harnesses, err := selectedHarnesses(cmd.Args().Slice(), false)
+			if err != nil {
+				return exitCode(err, exitCodeUsage)
+			}
+			results := make([]install.Result, 0, len(harnesses))
+			var failures []error
+			for _, harnessID := range harnesses {
+				result, removeErr := install.RemoveContext(ctx, install.Options{Harness: harnessID, Binary: options.binary, DryRun: options.dryRun})
+				if removeErr != nil {
+					result = failedIntegrationResult(harnessID, "remove failed", removeErr)
+					failures = append(failures, removeErr)
+				}
+				results = append(results, result)
+			}
+			if app.outputJSON {
+				if writeErr := app.writeJSON(results); writeErr != nil {
+					return writeErr
+				}
+			} else if writeErr := app.writeIntegrationResults(results, false); writeErr != nil {
+				return writeErr
+			}
+			return errors.Join(failures...)
+		},
+	}
+}
+
+func (app *application) newIntegrationsStatusCommand() *cli.Command {
 	binary := defaultInstallBinary()
-	command := &cobra.Command{Use: "status [agent...]", Short: "Show integration installation state", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		return app.runIntegrationsStatus(cmd.Context(), args, binary)
-	}}
-	command.Flags().StringVar(&binary, "binary", binary, "expected aht binary")
-	return command
+	return &cli.Command{
+		Name:      statusCommandName,
+		Usage:     "Show integration installation state",
+		ArgsUsage: "[agent...]",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "[agent...]", Desc: "Optional harness names to inspect (inspects all if omitted)"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       binary,
+				Destination: &binary,
+				Usage:       "Expected aht binary `path`",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return app.runIntegrationsStatus(ctx, cmd.Args().Slice(), binary)
+		},
+	}
 }
 
 func (app *application) runIntegrationsStatus(ctx context.Context, args []string, binary string) error {
@@ -407,70 +517,143 @@ func selectedHarnesses(args []string, emptyMeansAll bool) ([]registry.Harness, e
 	return result, nil
 }
 
-func (app *application) newTrackerCommand() *cobra.Command {
-	command := &cobra.Command{Use: trackerCommand, Short: "Manage background session tracking"}
+func (app *application) newTrackerCommand() *cli.Command {
 	run := app.newTrackerRunCommand()
-	run.Short = "Service entry point; not intended for manual use"
-	command.AddCommand(run, app.newTrackerEnableCommand(), app.newTrackerDisableCommand(), app.newTrackerStatusCommand())
-	return command
+	run.Usage = "Service entry point; not intended for manual use"
+	return &cli.Command{
+		Name:  trackerCommand,
+		Usage: "Manage background session tracking",
+		Commands: []*cli.Command{
+			run,
+			app.newTrackerEnableCommand(),
+			app.newTrackerDisableCommand(),
+			app.newTrackerStatusCommand(),
+		},
+	}
 }
 
-func (app *application) newTrackerEnableCommand() *cobra.Command {
+func (app *application) newTrackerEnableCommand() *cli.Command {
 	options := serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval}
-	command := &cobra.Command{Use: "enable", Short: "Install, update, and start background tracking", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		parsed, err := app.configuredServiceOptions(cmd, options)
-		if err != nil {
-			return err
-		}
-		result, err := runServiceOperation(cmd.Context(), "update", parsed)
-		if err != nil {
-			return fmt.Errorf("enable tracker: %w", err)
-		}
-		return app.writeServiceResult(result)
-	}}
-	flags := command.Flags()
-	flags.StringVar(&options.binary, "binary", options.binary, "aht binary run by the tracker")
-	flags.DurationVar(&options.interval, "interval", options.interval, "reconciliation interval")
-	flags.DurationVar(&options.grace, "grace-period", options.grace, "absence grace period")
-	flags.BoolVar(&options.dryRun, "dry-run", false, "show changes without writing")
-	return command
+	return &cli.Command{
+		Name:  "enable",
+		Usage: "Install, update, and start background tracking",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       options.binary,
+				Destination: &options.binary,
+				Usage:       "AHT binary `path` run by the tracker",
+			},
+			&cli.DurationFlag{
+				Name:        "interval",
+				Value:       options.interval,
+				Destination: &options.interval,
+				Usage:       "Reconciliation `duration`",
+			},
+			&cli.DurationFlag{
+				Name:        "grace-period",
+				Value:       options.grace,
+				Destination: &options.grace,
+				Usage:       "Absence grace `duration`",
+			},
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &options.dryRun,
+				Usage:       "show changes without writing",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			parsed, err := app.configuredServiceOptions(cmd, options)
+			if err != nil {
+				return err
+			}
+			result, err := runServiceOperation(ctx, "update", parsed)
+			if err != nil {
+				return fmt.Errorf("enable tracker: %w", err)
+			}
+			return app.writeServiceResult(result)
+		},
+	}
 }
 
-func (app *application) newTrackerDisableCommand() *cobra.Command {
+func (app *application) newTrackerDisableCommand() *cli.Command {
 	dryRun := false
-	command := &cobra.Command{Use: "disable", Short: "Stop and remove background tracking", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		options, err := app.parseServiceOptions(serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval, dryRun: dryRun})
-		if err != nil {
-			return err
-		}
-		result, err := runServiceOperation(cmd.Context(), "uninstall", options)
-		if err != nil {
-			return fmt.Errorf("disable tracker: %w", err)
-		}
-		return app.writeServiceResult(result)
-	}}
-	command.Flags().BoolVar(&dryRun, "dry-run", false, "show changes without writing")
-	return command
+	return &cli.Command{
+		Name:  "disable",
+		Usage: "Stop and remove background tracking",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &dryRun,
+				Usage:       "show changes without writing",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			options, err := app.parseServiceOptions(serviceOptions{
+				binary:   defaultInstallBinary(),
+				interval: serviceDefaultInterval,
+				dryRun:   dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			result, err := runServiceOperation(ctx, "uninstall", options)
+			if err != nil {
+				return fmt.Errorf("disable tracker: %w", err)
+			}
+			return app.writeServiceResult(result)
+		},
+	}
 }
 
-func (app *application) newTrackerStatusCommand() *cobra.Command {
+func (app *application) newTrackerStatusCommand() *cli.Command {
 	serviceConfig := serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval}
-	command := &cobra.Command{Use: statusCommandName, Short: "Show background tracking state", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		options, err := app.configuredServiceOptions(cmd, serviceConfig)
-		if err != nil {
-			return err
-		}
-		result, err := runServiceOperation(cmd.Context(), statusCommandName, options)
-		if err != nil {
-			return fmt.Errorf("tracker status: %w", err)
-		}
-		return app.writeServiceResult(result)
-	}}
-	flags := command.Flags()
-	flags.StringVar(&serviceConfig.binary, "binary", serviceConfig.binary, "expected aht binary")
-	flags.DurationVar(&serviceConfig.interval, "interval", serviceConfig.interval, "expected reconciliation interval")
-	flags.DurationVar(&serviceConfig.grace, "grace-period", serviceConfig.grace, "expected absence grace period")
-	return command
+	return &cli.Command{
+		Name:  statusCommandName,
+		Usage: "Show background tracking state",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "binary",
+				Value:       serviceConfig.binary,
+				Destination: &serviceConfig.binary,
+				Usage:       "Expected aht binary `path`",
+			},
+			&cli.DurationFlag{
+				Name:        "interval",
+				Value:       serviceConfig.interval,
+				Destination: &serviceConfig.interval,
+				Usage:       "Expected reconciliation `duration`",
+			},
+			&cli.DurationFlag{
+				Name:        "grace-period",
+				Value:       serviceConfig.grace,
+				Destination: &serviceConfig.grace,
+				Usage:       "Expected absence grace `duration`",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			options, err := app.configuredServiceOptions(cmd, serviceConfig)
+			if err != nil {
+				return err
+			}
+			result, err := runServiceOperation(ctx, statusCommandName, options)
+			if err != nil {
+				return fmt.Errorf("tracker status: %w", err)
+			}
+			return app.writeServiceResult(result)
+		},
+	}
 }
 
 func (app *application) writeServiceResult(result service.Result) error {
@@ -493,55 +676,88 @@ func (app *application) writeServiceResult(result service.Result) error {
 	})
 }
 
-func (app *application) newStateCommand() *cobra.Command {
-	command := &cobra.Command{Use: stateCommandName, Short: "Inspect or clean stored session state"}
-	command.AddCommand(app.newRegistryPathCommand(), app.newRegistryResetCommand(), app.newRegistryCleanCommand())
-	return command
+func (app *application) newStateCommand() *cli.Command {
+	return &cli.Command{
+		Name:  stateCommandName,
+		Usage: "Inspect or clean stored session state",
+		Commands: []*cli.Command{
+			app.newRegistryPathCommand(),
+			app.newRegistryResetCommand(),
+			app.newRegistryCleanCommand(),
+		},
+	}
 }
 
-func (app *application) newRegistryCleanCommand() *cobra.Command {
+//nolint:gocognit,cyclop // clean selection validation, age calculations, confirmation, and garbage collection
+func (app *application) newRegistryCleanCommand() *cli.Command {
 	options := cleanOptions{}
 	var yes bool
-	command := &cobra.Command{Use: "clean", Short: "Delete gone session records", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		cfg, err := app.loadConfig()
-		if err != nil {
-			return err
-		}
-		options.ageSet = cmd.Flags().Changed("older-than")
-		if options.all && options.ageSet {
-			return errCleanSelection
-		}
-		if !options.all && !options.ageSet && cfg.Retention.MaxGoneAge != "" {
-			d, err := config.ParseDuration(cfg.Retention.MaxGoneAge)
-			if err != nil {
-				return fmt.Errorf("parsing max gone age: %w", err)
+	return &cli.Command{
+		Name:  "clean",
+		Usage: "Delete gone session records",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "all",
+				Aliases:     []string{"a"},
+				Destination: &options.all,
+				Usage:       "delete every gone session record",
+			},
+			&cli.BoolFlag{
+				Name:        "yes",
+				Aliases:     []string{"y"},
+				Destination: &yes,
+				Usage:       "confirm deleting all gone records without prompting",
+			},
+			&cli.DurationFlag{
+				Name:        "older-than",
+				Destination: &options.olderThan,
+				Usage:       "Delete gone records older than this `duration`",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
 			}
-			options.olderThan = d
-			options.ageSet = true
-		}
-		if options.all && !yes {
-			confirmed, err := app.confirmAction(cmd.InOrStdin(), "Delete all gone session records? [y/N]: ")
+			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
 			}
-			if !confirmed {
-				return errCleanAllConfirmation
+			options.ageSet = cmd.IsSet("older-than")
+			if options.all && options.ageSet {
+				return exitCode(errCleanSelection, exitCodeUsage)
 			}
-		}
-		return app.runRegistryClean(cmd.Context(), options)
-	}}
-	command.Flags().BoolVar(&options.all, "all", false, "delete every gone session record")
-	command.Flags().BoolVarP(&yes, "yes", "y", false, "confirm deleting all gone records without prompting")
-	command.Flags().DurationVar(&options.olderThan, "older-than", 0, "delete gone records older than this age")
-	return command
+			if !options.all && !options.ageSet && cfg.Retention.MaxGoneAge != "" {
+				d, err := config.ParseDuration(cfg.Retention.MaxGoneAge)
+				if err != nil {
+					return fmt.Errorf("parsing max gone age: %w", err)
+				}
+				options.olderThan = d
+				options.ageSet = true
+			}
+			if options.all && !yes {
+				stdin := app.stdin
+				if stdin == nil {
+					stdin = os.Stdin
+				}
+				confirmed, err := app.confirmAction(ctx, stdin, "Delete all gone session records? [y/N]: ", "--yes")
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					return exitCode(errCleanAllConfirmation, exitCodeGeneral)
+				}
+			}
+			return app.runRegistryClean(ctx, options)
+		},
+	}
 }
 
 func (app *application) runRegistryClean(ctx context.Context, options cleanOptions) error {
 	if options.all == options.ageSet {
-		return errCleanSelection
+		return exitCode(errCleanSelection, exitCodeUsage)
 	}
 	if options.olderThan < 0 {
-		return errNegativeCleanAge
+		return exitCode(errNegativeCleanAge, exitCodeUsage)
 	}
 	age := options.olderThan
 	if options.all {
@@ -557,38 +773,79 @@ func (app *application) runRegistryClean(ctx context.Context, options cleanOptio
 	return app.writef("deleted=%d remaining=%d\n", result.Deleted, result.Remaining)
 }
 
-func (app *application) newInfoCommand() *cobra.Command {
+//nolint:gocognit,cyclop // info session/pane resolution, config dir, screen inspection, and explanation
+func (app *application) newInfoCommand() *cli.Command {
 	options := infoOptions{}
-	command := &cobra.Command{Use: "info [session]", Short: "Show session details and optionally explain activity", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := app.loadConfig()
-		if err != nil {
-			return err
-		}
-		if !cmd.Flags().Changed("config-dir") && cfg.Detection.ManifestsDir != "" {
-			options.configDir = cfg.Detection.ManifestsDir
-		}
-		options.disableScreenInspection = cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection
-		if (len(args) == 0) == (options.paneID == "") {
-			return errInfoReference
-		}
-		if cmd.Flags().Changed("config-dir") && !options.explain {
-			return errInfoConfig
-		}
-		var session registry.Session
-		if options.paneID != "" {
-			session, err = app.resolvePaneSession(cmd.Context(), options.paneID)
-		} else {
-			session, err = app.resolveSession(cmd.Context(), args[0])
-		}
-		if err != nil {
-			return err
-		}
-		return app.writeInfo(cmd.Context(), session, options)
-	}}
-	command.Flags().BoolVar(&options.explain, "explain", false, "explain how the activity state was selected")
-	command.Flags().StringVar(&options.paneID, "pane", "", "multiplexer pane id")
-	command.Flags().StringVar(&options.configDir, "config-dir", "", "detection manifest override directory")
-	return command
+	screenInspection := true
+	return &cli.Command{
+		Name:      "info",
+		Usage:     "Show session details and optionally explain activity",
+		ArgsUsage: "[session]",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "[session]", Desc: "Session ID, short ID prefix, name, or transcript path (optional if --pane is passed)"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "explain",
+				Destination: &options.explain,
+				Usage:       "explain how the activity state was selected",
+			},
+			&cli.StringFlag{
+				Name:        "pane",
+				Destination: &options.paneID,
+				Usage:       "Multiplexer pane `id`",
+			},
+			&cli.StringFlag{
+				Name:        "config-dir",
+				Destination: &options.configDir,
+				Usage:       "Detection manifest override `dir`",
+			},
+			&cli.BoolFlag{
+				Name:        "screen-inspection",
+				Value:       true,
+				Destination: &screenInspection,
+				Usage:       "enable terminal multiplexer screen inspection",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			args := cmd.Args().Slice()
+			if len(args) > 1 {
+				return unexpectedArgsError(args[1:])
+			}
+			cfg, err := app.loadConfig()
+			if err != nil {
+				return err
+			}
+			if !cmd.IsSet("config-dir") && cfg.Detection.ManifestsDir != "" {
+				options.configDir = cfg.Detection.ManifestsDir
+			}
+			options.disableScreenInspection = false
+			if cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection {
+				options.disableScreenInspection = true
+			}
+			if cmd.IsSet("screen-inspection") {
+				options.disableScreenInspection = !screenInspection
+			}
+			if (len(args) == 0) == (options.paneID == "") {
+				return exitCode(errInfoReference, exitCodeUsage)
+			}
+			if cmd.IsSet("config-dir") && !options.explain {
+				return exitCode(errInfoConfig, exitCodeUsage)
+			}
+			var session registry.Session
+			if options.paneID != "" {
+				session, err = app.resolvePaneSession(ctx, options.paneID)
+			} else {
+				session, err = app.resolveSession(ctx, args[0])
+			}
+			if err != nil {
+				return err
+			}
+			return app.writeInfo(ctx, session, options)
+		},
+	}
 }
 
 func (app *application) writeInfo(ctx context.Context, session registry.Session, options infoOptions) error {
@@ -640,97 +897,171 @@ func (app *application) resolveSession(ctx context.Context, reference string) (r
 	return matches[0], nil
 }
 
-func (app *application) newWatchCommand() *cobra.Command {
+func (app *application) newWatchCommand() *cli.Command {
 	options := listOptions{}
 	var noSnapshot bool
 	var watchFormat string
-	command := &cobra.Command{Use: "watch", Short: "Stream session changes", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		cfg, err := app.loadConfig()
-		if err != nil {
-			return err
-		}
-		if !cmd.Flags().Changed("presence") && cfg.UI.DefaultPresence != "" {
-			options.presence = cfg.UI.DefaultPresence
-		}
-		filter, err := buildFilter(options)
-		if err != nil {
-			return err
-		}
-		return app.runWatch(cmd.Context(), watchOptions{
-			filter:     filter,
-			agent:      options.harness,
-			noSnapshot: noSnapshot,
-			format:     watchFormat,
-			formatSet:  cmd.Flags().Changed("format"),
-		})
-	}}
-	flags := command.Flags()
-	flags.StringVar(&options.harness, "agent", "", "filter by agent")
-	flags.StringVar(&options.presence, "presence", "", "filter by presence")
-	flags.StringVar(&options.activity, "activity", "", "filter by activity")
-	flags.StringVar(&options.tmuxSession, "tmux-session", "", "filter by tmux session")
-	flags.StringVar(&options.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session")
-	flags.BoolVar(&noSnapshot, "no-snapshot", false, "start with future changes only")
-	flags.StringVar(&watchFormat, "format", "", "output format: table or plain")
-	return command
+	return &cli.Command{
+		Name:  "watch",
+		Usage: "Stream session changes",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "agent",
+				Destination: &options.harness,
+				Usage:       "Filter by agent `name`",
+			},
+			&cli.StringFlag{
+				Name:        "presence",
+				Destination: &options.presence,
+				Usage:       "Filter by presence (live, gone, unknown, all)",
+			},
+			&cli.StringFlag{
+				Name:        "activity",
+				Destination: &options.activity,
+				Usage:       "Filter by reported activity (running, waiting, idle, unknown)",
+			},
+			&cli.StringFlag{
+				Name:        "tmux-session",
+				Destination: &options.tmuxSession,
+				Usage:       "Filter by tmux session `name`",
+			},
+			&cli.StringFlag{
+				Name:        "multiplexer-session",
+				Destination: &options.multiplexerSession,
+				Usage:       "Filter by multiplexer session `name`",
+			},
+			&cli.BoolFlag{
+				Name:        "no-snapshot",
+				Destination: &noSnapshot,
+				Usage:       "start with future changes only",
+			},
+			&cli.StringFlag{
+				Name:        "format",
+				Destination: &watchFormat,
+				Usage:       "Output format: `table|plain`",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			cfg, err := app.loadConfig()
+			if err != nil {
+				return err
+			}
+			if !cmd.IsSet("presence") && cfg.UI.DefaultPresence != "" {
+				options.presence = cfg.UI.DefaultPresence
+			}
+			filter, err := buildFilter(options)
+			if err != nil {
+				return err
+			}
+			return app.runWatch(ctx, watchOptions{
+				filter:     filter,
+				agent:      options.harness,
+				noSnapshot: noSnapshot,
+				format:     watchFormat,
+				formatSet:  cmd.IsSet("format"),
+			})
+		},
+	}
 }
 
-func (app *application) newStopCommand() *cobra.Command {
+func (app *application) newStopCommand() *cli.Command {
 	all := false
 	dryRun := false
 	yes := false
-	command := &cobra.Command{
-		Use:   "stop [session...]",
-		Short: "Gracefully stop sessions",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+	return &cli.Command{
+		Name:      "stop",
+		Usage:     "Gracefully stop sessions",
+		ArgsUsage: "[session...]",
+		Metadata: map[string]any{
+			helpArgumentsKey: []HelpArg{
+				{Name: "[session...]", Desc: "One or more session IDs, prefixes, or names to stop (or omit if using --all)"},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "all",
+				Aliases:     []string{"a"},
+				Destination: &all,
+				Usage:       "stop every live session",
+			},
+			&cli.BoolFlag{
+				Name:        "dry-run",
+				Aliases:     []string{"n"},
+				Destination: &dryRun,
+				Usage:       "show targets without sending signals",
+			},
+			&cli.BoolFlag{
+				Name:        "yes",
+				Aliases:     []string{"y"},
+				Destination: &yes,
+				Usage:       "confirm stopping all sessions without prompting",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			args := cmd.Args().Slice()
 			if all && len(args) > 0 {
-				return errStopSelection
+				return exitCode(errStopSelection, exitCodeUsage)
 			}
 			if !all && len(args) == 0 {
-				return errStopSelection
+				return exitCode(errStopSelection, exitCodeUsage)
 			}
 			if all && !yes && !dryRun {
-				confirmed, err := app.confirmStopAll(cmd.InOrStdin())
+				stdin := app.stdin
+				if stdin == nil {
+					stdin = os.Stdin
+				}
+				confirmed, err := app.confirmStopAll(ctx, stdin)
 				if err != nil {
 					return err
 				}
 				if !confirmed {
-					return errStopAllConfirmation
+					return exitCode(errStopAllConfirmation, exitCodeGeneral)
 				}
 			}
-			return app.runStop(cmd.Context(), args, all, dryRun)
+			return app.runStop(ctx, args, all, dryRun)
 		},
 	}
-	command.Flags().BoolVar(&all, "all", false, "stop every live session")
-	command.Flags().BoolVar(&dryRun, "dry-run", false, "show targets without sending signals")
-	command.Flags().BoolVarP(&yes, "yes", "y", false, "confirm stopping all sessions without prompting")
-	return command
 }
 
-func (app *application) newManageConfigCommand() *cobra.Command {
-	command := &cobra.Command{
-		Use:   "config",
-		Short: "Inspect configuration path and effective settings",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
+func (app *application) newManageCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "manage",
+		Usage: "Manage setup, integrations, tracking, and state",
+		Commands: []*cli.Command{
+			app.newSetupCommand(),
+			app.newUpgradeCommand(),
+			app.newIntegrationsCommand(),
+			app.newTrackerCommand(),
+			app.newStateCommand(),
+			app.newDoctorCommand(),
+			app.newManageConfigCommand(),
 		},
 	}
-	command.AddCommand(
-		app.newManageConfigPathCommand(),
-		app.newManageConfigShowCommand(),
-		app.newManageConfigInitCommand(),
-	)
-	return command
 }
 
-func (app *application) newManageConfigPathCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "path",
-		Short: "Print resolved configuration file path",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+func (app *application) newManageConfigCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "config",
+		Usage: "Inspect configuration path and effective settings",
+		Commands: []*cli.Command{
+			app.newManageConfigPathCommand(),
+			app.newManageConfigShowCommand(),
+			app.newManageConfigInitCommand(),
+		},
+	}
+}
+
+func (app *application) newManageConfigPathCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "path",
+		Usage: "Print resolved configuration file path",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
 			_, err := app.loadConfig()
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
@@ -747,12 +1078,14 @@ func (app *application) newManageConfigPathCommand() *cobra.Command {
 	}
 }
 
-func (app *application) newManageConfigShowCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show",
-		Short: "Print effective configuration",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+func (app *application) newManageConfigShowCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "show",
+		Usage: "Print effective configuration",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -769,14 +1102,34 @@ func (app *application) newManageConfigShowCommand() *cobra.Command {
 	}
 }
 
-func (app *application) newManageConfigInitCommand() *cobra.Command {
+//nolint:gocognit,cyclop // manage config init path, stdin template output, directory checks, and publication
+func (app *application) newManageConfigInitCommand() *cli.Command {
 	var force bool
-	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Initialize default configuration file",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+	return &cli.Command{
+		Name:  "init",
+		Usage: "Initialize default configuration file",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "force",
+				Aliases:     []string{"f"},
+				Destination: &force,
+				Usage:       "overwrite existing configuration file",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() > 0 {
+				return unexpectedArgsError(cmd.Args().Slice())
+			}
+			if app.noConfig {
+				return exitCode(errNoConfigDisallowsInit, exitCodeUsage)
+			}
 			path := app.configPath
+			if path == "-" {
+				if app.outputJSON {
+					return exitCode(errInitJSONTemplateConflict, exitCodeUsage)
+				}
+				return app.writef("%s", config.DefaultConfigTemplate())
+			}
 			if path == "" {
 				path = config.DefaultPath()
 			}
@@ -796,7 +1149,9 @@ func (app *application) newManageConfigInitCommand() *cobra.Command {
 						"message": "config file already exists (use --force to overwrite)",
 					})
 				}
-				return app.writef("config file already exists at %s (use --force to overwrite)\n", path)
+				// F10: Notice goes to stderr
+				app.warnf("config file already exists at %s (use --force to overwrite)\n", path)
+				return nil
 			}
 
 			if err := config.WriteConfigFile(path); err != nil {
@@ -808,9 +1163,9 @@ func (app *application) newManageConfigInitCommand() *cobra.Command {
 					"path":    path,
 				})
 			}
-			return app.writef("created %s\n", path)
+			// F10: Notice goes to stderr
+			app.warnf("created %s\n", path)
+			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing configuration file")
-	return cmd
 }
