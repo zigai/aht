@@ -4,15 +4,28 @@ The `aht` command-line tool tracks, inspects, and manages local coding-agent ses
 
 ## Global Flags
 
-These flags apply to all commands:
+These flags apply across commands:
 
 | Flag | Type | Description |
 |---|---|---|
-| `--config <path>` | `string` | Explicit configuration file path (skips auto-creation) |
-| `--store <path>` | `string` | Registry state file path (defaults to `~/.local/state/aht/sessions.json`) |
+| `--config <path>` | `string` | Configuration file path (replaces disk tiers; `-` reads from stdin) |
+| `--no-config` | `bool` | Bypass all configuration files and stdin, retaining env and defaults |
+| `--store <path>` | `string` | Registry state file path (defaults to `~/.local/state/aht/state.json`) |
 | `--json` | `bool` | Emit JSON output (JSON Lines for streaming commands) |
-| `-v, --version` | `bool` | Print version, commit hash, and build timestamp |
-| `-h, --help` | `bool` | Help for `aht` or any subcommand |
+| `-V, --version` | `bool` | Print version, commit hash, and build timestamp |
+| `--help` | `bool` | Help for `aht` or any subcommand (`-h` is not reserved) |
+
+## Exit Codes
+
+AHT emits standard semantic exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Domain error (action failed, missing target) |
+| `2` | Parse, usage, operand, or configuration error |
+| `130` | Interrupted by user (`SIGINT` / Ctrl-C) |
+| `141` | Broken pipe (`SIGPIPE`, silent exit) |
 
 ---
 
@@ -30,12 +43,15 @@ aht list [flags]
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `-p, --presence` | `string` | `"all"` | Filter sessions by presence: `live`, `gone`, `unknown`, `all` |
-| `-s, --sort` | `string` | `"updated"` | Sort by: `updated`, `created`, `harness`, `presence`, `activity`, `cwd`, `id`, `multiplexer`, `tmux` |
+| `--presence <val>` | `string` | `"all"` | Filter sessions by presence: `live`, `gone`, `unknown`, `all` |
+| `--activity <val>` | `string` | `""` | Filter sessions by reported activity: `running`, `waiting`, `idle`, `unknown` |
+| `--agent <name>` | `string` | `""` | Filter by harness name (un-hides harnesses in `ignore_harnesses`) |
+| `--tmux-session <name>` | `string` | `""` | Filter by tmux session name |
+| `--multiplexer-session <name>` | `string` | `""` | Filter by multiplexer session name |
+| `--sort <field>` | `string` | `"updated"` | Sort by: `updated`, `created`, `harness`, `presence`, `activity`, `cwd`, `id`, `multiplexer`, `tmux`, `presence-changed`, `activity-changed` |
 | `--desc` | `bool` | `false` | Sort in descending order |
-| `-a, --agent` | `string` | `""` | Filter by harness name (un-hides harnesses in `ignore_harnesses`) |
 | `--full` | `bool` | `false` | Show complete values using an adaptive terminal layout |
-| `--summary` | `bool` | `false` | Output aggregated session counts by harness and presence |
+| `--summary` | `bool` | `false` | Output aggregated session counts by multiplexer session |
 | `--absolute-time` | `bool` | `false` | Display absolute timestamps rather than relative times |
 
 **Examples:**
@@ -68,10 +84,13 @@ aht watch [flags]
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `-p, --presence` | `string` | `"live"` | Filter sessions by presence (`live`, `gone`, `unknown`, `all`) |
-| `-a, --agent` | `string` | `""` | Filter by harness name |
-| `--plain` | `bool` | `false` | Use plain appended lines instead of a redrawn terminal table |
-| `--debounce` | `duration` | `100ms` | Event batching debounce interval |
+| `--presence <val>` | `string` | `"live"` | Filter sessions by presence (`live`, `gone`, `unknown`, `all`) |
+| `--activity <val>` | `string` | `""` | Filter by reported activity |
+| `--agent <name>` | `string` | `""` | Filter by harness name |
+| `--tmux-session <name>` | `string` | `""` | Filter by tmux session |
+| `--multiplexer-session <name>` | `string` | `""` | Filter by multiplexer session |
+| `--no-snapshot` | `bool` | `false` | Start with future changes only |
+| `--format <type>` | `string` | `"table"` | Output format: `table` or `plain` |
 
 When paired with `--json`, `aht watch` emits JSON Lines containing incremental state snapshots.
 
@@ -90,9 +109,10 @@ aht info --pane <pane-id> [flags]
 
 | Flag | Type | Description |
 |---|---|---|
-| `-e, --explain` | `bool` | Explain screen inspection heuristics and activity state derivation |
+| `--explain` | `bool` | Explain screen inspection heuristics and activity state derivation |
 | `--pane <id>` | `string` | Look up session by terminal multiplexer pane ID (e.g. `%0` in tmux) |
 | `--config-dir <path>` | `string` | Custom directory containing detection manifest files (requires `--explain`) |
+| `--screen-inspection` | `bool` | Enable/disable terminal multiplexer screen inspection (default: true) |
 
 **Examples:**
 
@@ -121,9 +141,9 @@ aht stop [session-id...] [flags]
 
 | Flag | Type | Description |
 |---|---|---|
-| `--all` | `bool` | Target every currently live session |
-| `-y, --yes` | `bool` | Skip interactive confirmation when stopping all sessions |
-| `--dry-run` | `bool` | Preview targeted sessions and signals without sending them |
+| `-a, --all` | `bool` | Target every currently live session |
+| `-n, --dry-run` | `bool` | Preview targeted sessions and signals without sending them |
+| `-y, --yes` | `bool` | Confirm stopping all sessions without interactive prompt |
 
 **Examples:**
 
@@ -131,14 +151,16 @@ aht stop [session-id...] [flags]
 # Stop a specific session
 aht stop codex-session-abc
 
-# Stop all running sessions with confirmation prompt
+# Stop all running sessions with confirmation prompt (requires TTY)
 aht stop --all
+
+# Non-interactive stop in scripts / CI
+aht stop --all --yes
 
 # Preview sessions that would be stopped
 aht stop --all --dry-run
 ```
 
----
 
 ## Management Commands (`aht manage`)
 
@@ -146,24 +168,28 @@ Subcommands under `aht manage` configure integrations, the background tracker se
 
 ### `aht manage setup`
 
-Convenience command to install integrations and enable the background tracker in one step.
+Install integrations and enable the background tracker in one step. Requires at least one harness name or `all`.
 
 ```sh
-aht manage setup [harness...]
+aht manage setup <agent... | all> [flags]
 ```
 
-If no harness names are provided, integrations for all supported harnesses are installed.
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--binary <path>` | `string` | Custom `aht` executable path to bind |
+| `-n, --dry-run` | `bool` | Show intended operations without writing changes |
+| `-f, --force` | `bool` | Overwrite existing foreign integration files |
 
 ---
 
 ### `aht manage upgrade`
 
-Refresh already-installed AHT integrations and the managed tracker after replacing
-the binary:
+Refresh already-installed AHT integrations and the managed tracker after replacing the binary:
 
 ```sh
-aht manage upgrade
-aht manage upgrade --dry-run
+aht manage upgrade [-n, --dry-run]
 ```
 
 ---
@@ -173,24 +199,22 @@ aht manage upgrade --dry-run
 Manage lifecycle hooks and extensions across supported coding-agent harnesses.
 
 ```sh
-aht manage integrations [command]
+aht manage integrations <command>
 ```
 
 **Subcommands:**
 
-- `install [harness... | all]`: Install hooks and extensions.
-- `remove [harness... | all]`: Remove installed hooks and extensions.
-- `status [harness... | all]`: Inspect current installation health and versions.
-
-**Flags for `install`:**
-
-| Flag | Type | Description |
-|---|---|---|
-| `--dry-run` | `bool` | Show intended file operations without making changes |
-| `--show-content` | `bool` | Display generated hook/extension code during dry run |
-| `--target-binary <path>` | `string` | Target binary path for PATH shims (requires `--shim`) |
-| `--shim` | `bool` | Install a PATH wrapper shim instead of native hooks |
-| `-f, --force` | `bool` | Reinstall and overwrite existing integrations |
+- `install <agent... | all>`: Install hooks and extensions.
+  - `--binary <path>`: Executable path bound to integrations.
+  - `--target-binary <path>`: Real agent binary path for wrapper shims (requires `--shim`).
+  - `--shim`: Install PATH shim instead of native hooks.
+  - `-n, --dry-run`: Show intended changes without writing.
+  - `-f, --force`: Overwrite existing files.
+  - `--show-content`: Display generated file content during dry-run.
+- `remove <agent... | all>`: Remove installed hooks and extensions.
+  - `-n, --dry-run`: Preview removals.
+- `status [agent...]`: Inspect current installation health and versions.
+  - `--binary <path>`: Expected binary path to verify.
 
 ---
 
@@ -199,42 +223,44 @@ aht manage integrations [command]
 Control the background reconciliation observer daemon.
 
 ```sh
-aht manage tracker [command]
+aht manage tracker <command>
 ```
 
 **Subcommands:**
 
-- `enable`: Install and enable the system background service (`systemd` on Linux, `launchd` on macOS).
-- `disable`: Stop and disable the background service.
+- `enable`: Install, configure, and start the background service (`systemd` on Linux, `launchd` on macOS).
+  - `--interval <duration>`: Reconciliation interval (default: 300ms).
+  - `--grace-period <duration>`: Absence grace period (default: 0s).
+  - `-n, --dry-run`: Preview service registration without writing.
+- `disable`: Stop and disable the background service (`-n, --dry-run` supported).
 - `status`: Check if the background tracker service is active and healthy.
-- `run`: Run the reconciliation tracker in the foreground (useful for containers or debugging).
-
-**Flags for `tracker run`:**
-
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--interval` | `duration` | `300ms` | Polling and reconciliation interval |
-| `--grace-period` | `duration` | `0s` | Absence grace window before marking missing processes gone |
-| `-q, --quiet` | `bool` | `false` | Suppress routine cycle logs |
+- `run`: Run reconciliation in the foreground (for containers or debugging).
+  - `--interval <duration>`: Reconciliation interval.
+  - `--grace-period <duration>`: Absence grace period.
+  - `-q, --quiet`: Suppress routine cycle output.
+  - `--once`: Run one reconciliation cycle and exit.
+  - `--auto-clean`: Automatically clean expired gone sessions.
+  - `--screen-inspection`: Enable/disable multiplexer screen inspection.
 
 ---
 
 ### `aht manage state`
 
-Inspect and maintain the durable registry state file.
+Inspect and maintain the durable registry state file (`state.json`).
 
 ```sh
-aht manage state [command]
+aht manage state <command>
 ```
 
 **Subcommands:**
 
-- `path`: Print the path to the active `sessions.json` registry file.
+- `path`: Print the path to the active `state.json` registry file.
 - `clean`: Garbage-collect expired session tombstones.
-  - `--all`: Purge all gone session records immediately.
+  - `-a, --all`: Purge all gone session records immediately (requires `-y, --yes` in non-interactive environments).
   - `--older-than <duration>`: Purge gone sessions older than the specified age (e.g. `24h`, `7d`).
-  - *If neither flag is passed, the `retention.max_gone_age` setting from `config.toml` is used.*
+  - *If neither flag is passed, the `retention.max_gone_age` setting from `config.toml` (default `7d`) is used.*
 - `reset`: Reset and clear the session registry.
+  - `-f, --force`: Required flag to confirm destructive state reset.
 
 ---
 
@@ -246,6 +272,12 @@ Run comprehensive diagnostic checks to validate harness integrations, configurat
 aht manage doctor [flags]
 ```
 
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `-v, --verbose` | `bool` | Include details for uninstalled integrations and all harness capabilities |
+
 Supports `--json` for automated health auditing.
 
 ---
@@ -255,14 +287,60 @@ Supports `--json` for automated health auditing.
 Inspect and manage configuration settings.
 
 ```sh
-aht manage config [command]
+aht manage config <command>
 ```
 
 **Subcommands:**
 
 - `path`: Print the resolved path to the active configuration file.
-- `show`: Print the effective configuration (merging defaults, `config.toml`, and environment variables).
+- `show`: Print the effective configuration (merging defaults, discovered files, and environment variables).
   - Supports `--json` to output parsed JSON instead of TOML.
 - `init`: Generate the default configuration file if missing.
-  - `--force`: Overwrite existing configuration file with the default template.
+  - `-f, --force`: Overwrite existing configuration file with the default template.
   - `--json`: Output result as JSON (`{"created": true, "path": "..."}`).
+  - When `--config -` is supplied, writes the default template directly to stdout.
+
+---
+
+## Shell Completion (`aht completion`)
+
+AHT provides native shell completion generation:
+
+```sh
+# Bash (.bashrc)
+source <(aht completion bash)
+
+# Zsh (.zshrc)
+source <(aht completion zsh)
+
+# Fish
+aht completion fish > ~/.config/fish/completions/aht.fish
+
+# PowerShell
+aht completion powershell >> $PROFILE
+```
+
+---
+
+## Integration Protocol Endpoints
+
+These endpoints are machine protocol interfaces used by lifecycle hooks, IDEs, and external integrations; they are not intended for interactive manual use.
+
+### `aht hook`
+
+Integration protocol endpoint for native request/response hooks and streaming proxies:
+
+- `aht hook <harness> --event <name>`: Respond to two-way native lifecycle hooks (requires `--json`).
+- `aht hook wire kimi-code -- [native Kimi options]`: Run an owned Kimi Code process using its native Wire protocol with tracked approval waiting over stdio.
+
+All arguments following the `--` delimiter in `aht hook wire` are forwarded byte-for-byte to the Kimi Wire process.
+
+### `aht report`
+
+Record a one-way harness observation (presence, activity, lifecycle, identity) directly to the registry:
+
+```sh
+aht report <harness> [flags]
+```
+
+Invoked by managed shell hooks and integration scripts on lifecycle state transitions.

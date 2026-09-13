@@ -2,37 +2,42 @@
 
 AHT can be configured via a TOML configuration file, environment variables, or command-line flags.
 
-## Configuration File Path
+## Configuration Resolution & Precedence
 
-AHT searches for its configuration file in the following order:
+AHT applies a strict 6-tier precedence ladder when resolving configuration settings (highest priority wins):
 
-1. Explicit CLI flag: `--config <path>`
-2. Environment variable: `$AHT_CONFIG`
-3. User configuration directory: `~/.config/aht/config.toml` (or `$XDG_CONFIG_HOME/aht/config.toml`)
+1. **Command-Line Flags** (e.g. `--sort`, `--presence`, `--desc`, `--auto-clean`, `--screen-inspection`)
+2. **Environment Variables** (`AHT_<SECTION>_<FIELD>`, e.g. `AHT_UI_SORT`)
+3. **Project Configuration File**: `./.aht.toml` (in the current working directory)
+4. **User Configuration File**: `~/.config/aht/config.toml` (or `$XDG_CONFIG_HOME/aht/config.toml`)
+5. **System Configuration File**: `/etc/xdg/aht/config.toml` (or `$XDG_CONFIG_DIRS/aht/config.toml`; `%ProgramData%/aht/config.toml` on Windows)
+6. **Hardcoded Defaults**
+
+### Explicit File & Stdin Override
+
+- Supplying `--config <path>` (or the `$AHT_CONFIG` environment variable) selects **one explicit configuration file** that replaces tiers 3–5 (project, user, and system files).
+- If `--config -` is specified, AHT reads a single bounded TOML document (up to 1 MiB) from standard input.
+- Missing explicitly specified configuration files fail immediately with an error.
+
+### Disk Bypass (`--no-config`)
+
+- Passing `--no-config` bypasses all disk configuration files and stdin entirely, resolving settings using only explicit flags, environment variables, and built-in defaults.
 
 ### Automatic First-Run Creation
 
-When AHT runs without an existing configuration file, it automatically creates a default `config.toml` populated with all options and helpful descriptions at the default path (or `$AHT_CONFIG` if set).
+When an ordinary configured command (such as `aht list`) is executed and no user configuration file exists, AHT automatically generates a clean, commented default configuration file at `~/.config/aht/config.toml` (or `$AHT_CONFIG` if specified).
 
-Explicit paths provided via `--config <path>` are not automatically created; if an explicitly requested configuration file is missing, AHT halts with an error.
+- Machine protocol commands (`aht hook`, `aht report`), help, version, completion, dry-runs, and invalid commands never trigger file creation.
+- Default settings in the generated file are commented examples, ensuring that creating the file does not mask system or project configuration on subsequent runs.
 
-Machine-to-machine protocol commands (`aht hook` and `aht report`) never create or load configuration files, guaranteeing zero-overhead and protocol isolation.
-
-## Precedence Rules
-
-When a setting is defined in multiple locations, AHT applies the following precedence (highest priority wins):
-
-1. **Command-Line Flags** (e.g. `--sort`, `--presence`, `--desc`)
-2. **Environment Variables** (`AHT_<SECTION>_<FIELD>`, e.g. `AHT_UI_SORT`)
-3. **Configuration File** (`config.toml`)
-4. **Built-in Defaults**
+---
 
 ## Configuration Options
 
 | Section | Option | Type | Default | Description | Environment Variable |
 |---|---|---|---|---|---|
 | `ui` | `default_presence` | `string` | `"all"` | Default session presence filter (`live`, `gone`, `unknown`, `all`) | `AHT_UI_DEFAULT_PRESENCE` |
-| `ui` | `sort` | `string` | `"updated"` | Field to sort sessions by (`updated`, `created`, `harness`, `presence`, `activity`, `cwd`, `id`, `multiplexer`, `tmux`) | `AHT_UI_SORT` |
+| `ui` | `sort` | `string` | `"updated"` | Field to sort sessions by (`updated`, `created`, `harness`, `presence`, `activity`, `cwd`, `id`, `multiplexer`, `tmux`, `presence-changed`, `activity-changed`) | `AHT_UI_SORT` |
 | `ui` | `sort_desc` | `bool` | `false` | Sort in descending order | `AHT_UI_SORT_DESC` |
 | `ui` | `absolute_time` | `bool` | `false` | Render absolute rather than relative timestamps | `AHT_UI_ABSOLUTE_TIME` |
 | `ui` | `time_format` | `string` | `"relative"` | Timestamp display format (`relative`, `absolute`, `iso8601`) | `AHT_UI_TIME_FORMAT` |
@@ -45,6 +50,8 @@ When a setting is defined in multiple locations, AHT applies the following prece
 | `tracker` | `quiet` | `bool` | `false` | Suppress human cycle output and diagnostics from tracker | `AHT_TRACKER_QUIET` |
 | `detection` | `manifests_dir` | `string` | `""` | Directory of custom agent screen detection TOML manifests | `AHT_DETECTION_MANIFESTS_DIR` |
 | `detection` | `screen_inspection` | `bool` | `true` | Enable terminal multiplexer screen inspection for state derivation | `AHT_DETECTION_SCREEN_INSPECTION` |
+
+---
 
 ## Environment Variable Overrides
 
@@ -70,6 +77,10 @@ Array options (such as `AHT_FILTER_IGNORE_HARNESSES` and `AHT_FILTER_IGNORE_PATH
 ```sh
 export AHT_FILTER_IGNORE_HARNESSES="copilot,cline"
 ```
+
+An empty string (`export AHT_FILTER_IGNORE_HARNESSES=""`) explicitly clears the list.
+
+---
 
 ## Managing Configuration via CLI
 
@@ -114,7 +125,12 @@ aht manage config init --force
 
 # JSON output
 aht manage config init --json
+
+# Print default template directly to stdout
+aht --config - manage config init
 ```
+
+---
 
 ## Default Configuration Template
 
