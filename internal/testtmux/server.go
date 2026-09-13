@@ -47,7 +47,7 @@ func Executable(t *testing.T) string {
 		}
 		return path
 	}
-	for _, candidate := range []string{"/usr/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "tmux"} {
+	for _, candidate := range []string{"/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux", "tmux"} {
 		if path, err := exec.LookPath(candidate); err == nil {
 			return path
 		}
