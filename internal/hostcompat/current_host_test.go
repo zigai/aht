@@ -445,7 +445,7 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 			if host.interrupt {
 				if host.contract.ID == registry.HarnessOpenClaw {
 					host.interruptOpenClaw(t)
-				} else if err := command.Process.Signal(os.Interrupt); err != nil {
+				} else if err := syscall.Kill(-command.Process.Pid, syscall.SIGINT); err != nil {
 					t.Fatalf("interrupting active host: %v", err)
 				}
 			} else {

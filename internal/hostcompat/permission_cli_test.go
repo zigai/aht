@@ -371,13 +371,15 @@ func runCopilotPermission(t *testing.T, host isolatedHost, env []string, allow b
 				if waiting.SessionID != sessionID {
 					t.Fatalf("Copilot waiting session %q does not match RPC session %q", waiting.SessionID, sessionID)
 				}
+				allowKind := "approve-once"
 				rejectKind := "reject"
 				if out, err := exec.Command(host.hostPath, "--version").Output(); err == nil && strings.Contains(string(out), "1.0.2") {
+					allowKind = "approved"
 					rejectKind = "denied-interactively-by-user"
 				}
 				decision := map[string]any{"kind": rejectKind, "feedback": "User denied this action"}
 				if allow {
-					decision = map[string]any{"kind": "approved"}
+					decision = map[string]any{"kind": allowKind}
 				}
 				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": 4, "method": "session.permissions.handlePendingPermissionRequest", "params": map[string]any{"sessionId": sessionID, "requestId": permission.RequestID, "result": decision}})
 				permissionRequested = true
