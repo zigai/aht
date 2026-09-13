@@ -62,8 +62,8 @@ func TestLoadMissingDefaultFile(t *testing.T) {
 	if resolved != nonExistentPath {
 		t.Fatalf("expected resolved path %q, got %q", nonExistentPath, resolved)
 	}
-	if cfg.UI.DefaultPresence != "" || cfg.UI.Sort != "" {
-		t.Fatalf("expected empty config, got %+v", cfg)
+	if cfg.UI.DefaultPresence != "all" || cfg.UI.Sort != "updated" {
+		t.Fatalf("expected default config with presence 'all' and sort 'updated', got %+v", cfg)
 	}
 }
 
@@ -493,5 +493,159 @@ func TestEnsureConfigFile(t *testing.T) {
 	}
 	if _, err := os.Stat(envPath); err != nil {
 		t.Fatalf("file at envPath %s does not exist: %v", envPath, err)
+	}
+}
+
+func TestSparseConfigPreservesDefaults(t *testing.T) {
+	tempDir := t.TempDir()
+	sparseConfig := filepath.Join(tempDir, "sparse.toml")
+	content := `
+[ui]
+sort = "created"
+`
+	if err := os.WriteFile(sparseConfig, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(sparseConfig)
+	if err != nil {
+		t.Fatalf("Load sparse config failed: %v", err)
+	}
+
+	// Specified field updated
+	if cfg.UI.Sort != "created" {
+		t.Errorf("expected UI.Sort='created', got %q", cfg.UI.Sort)
+	}
+	// Untouched fields must preserve true defaults
+	if cfg.UI.DefaultPresence != "all" {
+		t.Errorf("expected UI.DefaultPresence='all', got %q", cfg.UI.DefaultPresence)
+	}
+	if cfg.Retention.MaxGoneAge != "7d" {
+		t.Errorf("expected Retention.MaxGoneAge='7d', got %q", cfg.Retention.MaxGoneAge)
+	}
+	if cfg.Tracker.Interval != "300ms" {
+		t.Errorf("expected Tracker.Interval='300ms', got %q", cfg.Tracker.Interval)
+	}
+	if cfg.Detection.ScreenInspection == nil || !*cfg.Detection.ScreenInspection {
+		t.Errorf("expected Detection.ScreenInspection=true, got %v", cfg.Detection.ScreenInspection)
+	}
+}
+
+func TestLoadWithOptionsSixTiers(t *testing.T) {
+	tempDir := t.TempDir()
+	sysDir := filepath.Join(tempDir, "sys")
+	userDir := filepath.Join(tempDir, "user")
+	projectDir := filepath.Join(tempDir, "project")
+
+	for _, d := range []string{filepath.Join(sysDir, "aht"), filepath.Join(userDir, "aht"), projectDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// System tier: sets time_format = "iso8601"
+	if err := os.WriteFile(filepath.Join(sysDir, "aht", "config.toml"), []byte("[ui]\ntime_format = \"iso8601\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// User tier: sets sort = "cwd"
+	if err := os.WriteFile(filepath.Join(userDir, "aht", "config.toml"), []byte("[ui]\nsort = \"cwd\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Project tier: sets default_presence = "live"
+	if err := os.WriteFile(filepath.Join(projectDir, ".aht.toml"), []byte("[ui]\ndefault_presence = \"live\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Environment override: sets sort = "id" (overriding user tier sort = "cwd")
+	t.Setenv("AHT_UI_SORT", "id")
+
+	cfg, resolved, err := LoadWithOptions(Options{
+		CWD:           projectDir,
+		UserConfigDir: userDir,
+		SystemDirs:    []string{sysDir},
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOptions failed: %v", err)
+	}
+	if resolved != filepath.Join(projectDir, ".aht.toml") {
+		t.Errorf("expected resolved path %s, got %s", filepath.Join(projectDir, ".aht.toml"), resolved)
+	}
+
+	// Check precedence:
+	// Env wins for sort
+	if cfg.UI.Sort != "id" {
+		t.Errorf("expected sort='id' from env, got %q", cfg.UI.Sort)
+	}
+	// Project tier wins for default_presence
+	if cfg.UI.DefaultPresence != "live" {
+		t.Errorf("expected default_presence='live' from project, got %q", cfg.UI.DefaultPresence)
+	}
+	// System tier provides time_format
+	if cfg.UI.TimeFormat != "iso8601" {
+		t.Errorf("expected time_format='iso8601' from system, got %q", cfg.UI.TimeFormat)
+	}
+	// Untouched field retains hardcoded default
+	if cfg.Retention.MaxGoneAge != "7d" {
+		t.Errorf("expected max_gone_age='7d' from defaults, got %q", cfg.Retention.MaxGoneAge)
+	}
+}
+
+func TestLoadWithOptionsNoConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".aht.toml"), []byte("[ui]\nsort = \"harness\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AHT_UI_DEFAULT_PRESENCE", "live")
+
+	cfg, resolved, err := LoadWithOptions(Options{
+		NoConfig: true,
+		CWD:      projectDir,
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOptions NoConfig failed: %v", err)
+	}
+	if resolved != "" {
+		t.Errorf("expected resolved path '', got %q", resolved)
+	}
+	// Disk project config was skipped
+	if cfg.UI.Sort != "updated" {
+		t.Errorf("expected default sort='updated', got %q", cfg.UI.Sort)
+	}
+	// Env is still honored
+	if cfg.UI.DefaultPresence != "live" {
+		t.Errorf("expected default_presence='live' from env, got %q", cfg.UI.DefaultPresence)
+	}
+}
+
+func TestLoadWithOptionsStdin(t *testing.T) {
+	stdinContent := `
+[ui]
+sort = "activity"
+default_presence = "unknown"
+`
+	cfg, resolved, err := LoadWithOptions(Options{
+		Path:  "-",
+		Stdin: strings.NewReader(stdinContent),
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOptions stdin failed: %v", err)
+	}
+	if resolved != "-" {
+		t.Errorf("expected resolved '-', got %q", resolved)
+	}
+	if cfg.UI.Sort != "activity" {
+		t.Errorf("expected sort='activity', got %q", cfg.UI.Sort)
+	}
+	if cfg.UI.DefaultPresence != "unknown" {
+		t.Errorf("expected default_presence='unknown', got %q", cfg.UI.DefaultPresence)
+	}
+	// Untouched defaults preserved
+	if cfg.Tracker.Interval != "300ms" {
+		t.Errorf("expected tracker.interval='300ms', got %q", cfg.Tracker.Interval)
 	}
 }

@@ -3,18 +3,15 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-viper/mapstructure/v2"
-	"github.com/knadh/koanf/parsers/toml/v2"
-	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
 
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -28,8 +25,6 @@ const (
 
 	defaultDirMode  = 0o700
 	defaultFileMode = 0o600
-
-	envSplitParts = 2
 )
 
 // Sentinel configuration errors.
@@ -75,45 +70,86 @@ var (
 )
 
 type Config struct {
-	UI        UIConfig        `json:"ui"        koanf:"ui"        toml:"ui"`
-	Retention RetentionConfig `json:"retention" koanf:"retention" toml:"retention"`
-	Filter    FilterConfig    `json:"filter"    koanf:"filter"    toml:"filter"`
-	Tracker   TrackerConfig   `json:"tracker"   koanf:"tracker"   toml:"tracker"`
-	Detection DetectionConfig `json:"detection" koanf:"detection" toml:"detection"`
+	UI        UIConfig        `json:"ui"        toml:"ui"`
+	Retention RetentionConfig `json:"retention" toml:"retention"`
+	Filter    FilterConfig    `json:"filter"    toml:"filter"`
+	Tracker   TrackerConfig   `json:"tracker"   toml:"tracker"`
+	Detection DetectionConfig `json:"detection" toml:"detection"`
 }
 
 // UIConfig controls terminal and table display defaults.
 type UIConfig struct {
-	DefaultPresence string `json:"default_presence,omitempty" koanf:"default_presence" toml:"default_presence"`
-	Sort            string `json:"sort,omitempty"             koanf:"sort"             toml:"sort"`
-	SortDesc        *bool  `json:"sort_desc,omitempty"        koanf:"sort_desc"        toml:"sort_desc"`
-	AbsoluteTime    *bool  `json:"absolute_time,omitempty"    koanf:"absolute_time"    toml:"absolute_time"`
-	TimeFormat      string `json:"time_format,omitempty"      koanf:"time_format"      toml:"time_format"`
+	DefaultPresence string `json:"default_presence,omitempty" toml:"default_presence"`
+	Sort            string `json:"sort,omitempty"             toml:"sort"`
+	SortDesc        *bool  `json:"sort_desc,omitempty"        toml:"sort_desc"`
+	AbsoluteTime    *bool  `json:"absolute_time,omitempty"    toml:"absolute_time"`
+	TimeFormat      string `json:"time_format,omitempty"      toml:"time_format"`
 }
 
 // RetentionConfig controls state retention and tombstone cleanup defaults.
 type RetentionConfig struct {
-	AutoClean  *bool  `json:"auto_clean,omitempty"   koanf:"auto_clean"   toml:"auto_clean"`
-	MaxGoneAge string `json:"max_gone_age,omitempty" koanf:"max_gone_age" toml:"max_gone_age"`
+	AutoClean  *bool  `json:"auto_clean,omitempty"   toml:"auto_clean"`
+	MaxGoneAge string `json:"max_gone_age,omitempty" toml:"max_gone_age"`
 }
 
 // FilterConfig controls default session visibility exclusions.
 type FilterConfig struct {
-	IgnoreHarnesses []string `json:"ignore_harnesses,omitempty" koanf:"ignore_harnesses" toml:"ignore_harnesses"`
-	IgnorePaths     []string `json:"ignore_paths,omitempty"     koanf:"ignore_paths"     toml:"ignore_paths"`
+	IgnoreHarnesses []string `json:"ignore_harnesses,omitempty" toml:"ignore_harnesses"`
+	IgnorePaths     []string `json:"ignore_paths,omitempty"     toml:"ignore_paths"`
 }
 
 // TrackerConfig controls background observer behavior.
 type TrackerConfig struct {
-	Interval    string `json:"interval,omitempty"     koanf:"interval"     toml:"interval"`
-	GracePeriod string `json:"grace_period,omitempty" koanf:"grace_period" toml:"grace_period"`
-	Quiet       *bool  `json:"quiet,omitempty"        koanf:"quiet"        toml:"quiet"`
+	Interval    string `json:"interval,omitempty"     toml:"interval"`
+	GracePeriod string `json:"grace_period,omitempty" toml:"grace_period"`
+	Quiet       *bool  `json:"quiet,omitempty"        toml:"quiet"`
 }
 
 // DetectionConfig controls agent and screen inspection defaults.
 type DetectionConfig struct {
-	ManifestsDir     string `json:"manifests_dir,omitempty"     koanf:"manifests_dir"     toml:"manifests_dir"`
-	ScreenInspection *bool  `json:"screen_inspection,omitempty" koanf:"screen_inspection" toml:"screen_inspection"`
+	ManifestsDir     string `json:"manifests_dir,omitempty"     toml:"manifests_dir"`
+	ScreenInspection *bool  `json:"screen_inspection,omitempty" toml:"screen_inspection"`
+}
+
+// Options controls layered configuration resolution.
+type Options struct {
+	Path          string
+	Explicit      bool
+	NoConfig      bool
+	Stdin         io.Reader
+	CWD           string
+	UserConfigDir string
+	SystemDirs    []string
+}
+
+// Defaults returns a complete typed configuration with all base defaults populated.
+func Defaults() Config {
+	return Config{
+		UI: UIConfig{
+			DefaultPresence: "all",
+			Sort:            "updated",
+			SortDesc:        new(false),
+			AbsoluteTime:    new(false),
+			TimeFormat:      "relative",
+		},
+		Retention: RetentionConfig{
+			AutoClean:  new(false),
+			MaxGoneAge: "7d",
+		},
+		Filter: FilterConfig{
+			IgnoreHarnesses: []string{},
+			IgnorePaths:     []string{},
+		},
+		Tracker: TrackerConfig{
+			Interval:    "300ms",
+			GracePeriod: "0s",
+			Quiet:       new(false),
+		},
+		Detection: DetectionConfig{
+			ManifestsDir:     "",
+			ScreenInspection: new(true),
+		},
+	}
 }
 
 // DefaultPath returns the default path to the user's config file.
@@ -331,63 +367,270 @@ func (c Config) validateTracker() error {
 // If path is empty, DefaultPath() is used.
 // A missing default config file is silently skipped; a missing explicitly specified path is an error.
 func Load(path string) (Config, string, error) {
-	explicit := path != ""
-	resolvedPath := path
-	if !explicit {
-		resolvedPath = DefaultPath()
+	return LoadWithOptions(Options{Path: path, Explicit: path != ""})
+}
+
+// LoadWithOptions resolves configuration across all tiers per the given options.
+//
+//nolint:gocognit,cyclop,nestif // layered configuration resolution across 6 tiers
+func LoadWithOptions(opts Options) (Config, string, error) {
+	cfg := Defaults()
+	var resolvedPath string
+
+	if opts.NoConfig {
+		if err := applyEnvOverrides(&cfg); err != nil {
+			return Config{}, "", fmt.Errorf("%w: %w", ErrLoadEnv, err)
+		}
+		norm, err := normalizeConfig(cfg)
+		return norm, "", err
 	}
 
-	k := koanf.New(".")
-
-	// Layer 1: Base defaults
-	if err := k.Load(structs.Provider(Config{}, "koanf"), nil); err != nil {
-		return Config{}, resolvedPath, fmt.Errorf("%w: %w", ErrLoadDefaults, err)
+	explicit := opts.Explicit
+	targetPath := opts.Path
+	if targetPath == "" {
+		targetPath = strings.TrimSpace(os.Getenv(ConfigEnv))
 	}
 
-	// Layer 2: TOML file
-	info, err := os.Stat(resolvedPath)
-	switch {
-	case err == nil:
-		if info.IsDir() {
-			return Config{}, resolvedPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, resolvedPath)
+	if targetPath != "" {
+		switch {
+		case targetPath == "-":
+			r := opts.Stdin
+			if r == nil {
+				r = os.Stdin
+			}
+			contents, err := readBounded(r, maxConfigFileSize)
+			if err != nil {
+				if errors.Is(err, ErrConfigFileTooLarge) {
+					return Config{}, "-", fmt.Errorf("%w: stdin", ErrConfigFileTooLarge)
+				}
+				return Config{}, "-", err
+			}
+			if err := decodeTOML(contents, &cfg); err != nil {
+				return Config{}, "-", fmt.Errorf("%w stdin: %w", ErrParseConfig, err)
+			}
+			resolvedPath = "-"
+		case explicit:
+			cleanTarget := filepath.Clean(targetPath)
+			info, err := os.Stat(cleanTarget)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, err)
+				}
+				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, err)
+			}
+			if info.IsDir() {
+				return Config{}, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
+			}
+			if info.Size() > maxConfigFileSize {
+				return Config{}, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
+			}
+			contents, err := readBoundedFile(cleanTarget)
+			if err != nil {
+				return Config{}, targetPath, err
+			}
+			if err := decodeTOML(contents, &cfg); err != nil {
+				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
+			}
+			resolvedPath = targetPath
+		default:
+			resolvedPath = targetPath
+			cleanTarget := filepath.Clean(targetPath)
+			info, err := os.Stat(cleanTarget)
+			if err == nil {
+				if info.IsDir() {
+					return Config{}, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
+				}
+				if info.Size() > maxConfigFileSize {
+					return Config{}, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
+				}
+				contents, err := readBoundedFile(cleanTarget)
+				if err != nil {
+					return Config{}, targetPath, err
+				}
+				if err := decodeTOML(contents, &cfg); err != nil {
+					return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, err)
+			}
 		}
-		if info.Size() > maxConfigFileSize {
-			return Config{}, resolvedPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), resolvedPath)
+	} else {
+		// Discovered mode across 3 disk tiers: System -> User -> Project
+		// 1. System tier (earlier entries in systemDirs take precedence)
+		systemDirs := opts.SystemDirs
+		if len(systemDirs) == 0 {
+			systemDirs = defaultSystemConfigDirs()
 		}
-		if err := k.Load(boundedConfigFile(resolvedPath), toml.Parser()); err != nil {
-			return Config{}, resolvedPath, fmt.Errorf("%w %s: %w", ErrParseConfig, resolvedPath, err)
+		for _, baseDir := range slices.Backward(systemDirs) {
+			sysPath := filepath.Join(baseDir, "aht", "config.toml")
+			if err := loadDiskOverlay(sysPath, &cfg); err != nil {
+				return Config{}, sysPath, err
+			}
 		}
-	case explicit && errors.Is(err, os.ErrNotExist):
-		return Config{}, resolvedPath, fmt.Errorf("%w %s: %w", ErrConfigNotFound, resolvedPath, err)
-	case !errors.Is(err, os.ErrNotExist):
-		return Config{}, resolvedPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, resolvedPath, err)
+
+		// 2. User tier
+		userPath := opts.UserConfigDir
+		if userPath == "" {
+			userPath = DefaultPath()
+		} else if !strings.HasSuffix(userPath, ".toml") {
+			userPath = filepath.Join(userPath, "aht", "config.toml")
+		}
+		resolvedPath = userPath
+		if err := loadDiskOverlay(userPath, &cfg); err != nil {
+			return Config{}, userPath, err
+		}
+
+		// 3. Project tier (.aht.toml in CWD)
+		cwd := opts.CWD
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		if cwd != "" {
+			projectPath := filepath.Join(cwd, ".aht.toml")
+			cleanProj := filepath.Clean(projectPath)
+			info, err := os.Stat(cleanProj)
+			if err == nil && !info.IsDir() {
+				if err := loadDiskOverlay(projectPath, &cfg); err != nil {
+					return Config{}, projectPath, err
+				}
+				resolvedPath = projectPath
+			}
+		}
 	}
 
-	// Layer 3: Environment overrides
-	if err := k.Load(env.Provider(".", env.Opt{
-		Prefix:        "AHT_",
-		TransformFunc: envTransform,
-	}), nil); err != nil {
+	// Layer 2: Environment variable overrides
+	if err := applyEnvOverrides(&cfg); err != nil {
 		return Config{}, resolvedPath, fmt.Errorf("%w: %w", ErrLoadEnv, err)
 	}
 
-	// Layer 4: Unmarshal & Validate
-	var cfg Config
-	decoderConfig := &mapstructure.DecoderConfig{
-		ErrorUnused:      true,
-		WeaklyTypedInput: true,
-		TagName:          "koanf",
-		Result:           &cfg,
-	}
-	if err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag:           "koanf",
-		DecoderConfig: decoderConfig,
-	}); err != nil {
-		return Config{}, resolvedPath, fmt.Errorf("%w: %w", ErrUnmarshalConfig, err)
-	}
+	norm, err := normalizeConfig(cfg)
+	return norm, resolvedPath, err
+}
 
-	cfg, err = normalizeConfig(cfg)
-	return cfg, resolvedPath, err
+func loadDiskOverlay(path string, target *Config) error {
+	cleanPath := filepath.Clean(path)
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("%w %s: %w", ErrAccessConfig, path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%w: %s", ErrConfigIsDirectory, path)
+	}
+	if info.Size() > maxConfigFileSize {
+		return fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), path)
+	}
+	contents, err := readBoundedFile(cleanPath)
+	if err != nil {
+		return err
+	}
+	if err := decodeTOML(contents, target); err != nil {
+		return fmt.Errorf("%w %s: %w", ErrParseConfig, path, err)
+	}
+	return nil
+}
+
+func defaultSystemConfigDirs() []string {
+	if runtime.GOOS == "windows" {
+		if progData := os.Getenv("ProgramData"); progData != "" {
+			return []string{progData}
+		}
+		return nil
+	}
+	xdgDirs := os.Getenv("XDG_CONFIG_DIRS")
+	if xdgDirs == "" {
+		return []string{"/etc/xdg"}
+	}
+	var clean []string
+	for d := range strings.SplitSeq(xdgDirs, ":") {
+		if trimmed := strings.TrimSpace(d); trimmed != "" {
+			clean = append(clean, trimmed)
+		}
+	}
+	return clean
+}
+
+//nolint:gocognit,cyclop // straightforward mapping of environment variables to config fields
+func applyEnvOverrides(cfg *Config) error {
+	if v, ok := os.LookupEnv("AHT_UI_DEFAULT_PRESENCE"); ok {
+		cfg.UI.DefaultPresence = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_UI_SORT"); ok {
+		cfg.UI.Sort = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_UI_SORT_DESC"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("invalid AHT_UI_SORT_DESC %q: %w", v, err)
+		}
+		cfg.UI.SortDesc = new(b)
+	}
+	if v, ok := os.LookupEnv("AHT_UI_ABSOLUTE_TIME"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("invalid AHT_UI_ABSOLUTE_TIME %q: %w", v, err)
+		}
+		cfg.UI.AbsoluteTime = new(b)
+	}
+	if v, ok := os.LookupEnv("AHT_UI_TIME_FORMAT"); ok {
+		cfg.UI.TimeFormat = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_RETENTION_AUTO_CLEAN"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("invalid AHT_RETENTION_AUTO_CLEAN %q: %w", v, err)
+		}
+		cfg.Retention.AutoClean = new(b)
+	}
+	if v, ok := os.LookupEnv("AHT_RETENTION_MAX_GONE_AGE"); ok {
+		cfg.Retention.MaxGoneAge = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_FILTER_IGNORE_HARNESSES"); ok {
+		cfg.Filter.IgnoreHarnesses = parseEnvList(v)
+	}
+	if v, ok := os.LookupEnv("AHT_FILTER_IGNORE_PATHS"); ok {
+		cfg.Filter.IgnorePaths = parseEnvList(v)
+	}
+	if v, ok := os.LookupEnv("AHT_TRACKER_INTERVAL"); ok {
+		cfg.Tracker.Interval = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_TRACKER_GRACE_PERIOD"); ok {
+		cfg.Tracker.GracePeriod = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_TRACKER_QUIET"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("invalid AHT_TRACKER_QUIET %q: %w", v, err)
+		}
+		cfg.Tracker.Quiet = new(b)
+	}
+	if v, ok := os.LookupEnv("AHT_DETECTION_MANIFESTS_DIR"); ok {
+		cfg.Detection.ManifestsDir = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("AHT_DETECTION_SCREEN_INSPECTION"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("invalid AHT_DETECTION_SCREEN_INSPECTION %q: %w", v, err)
+		}
+		cfg.Detection.ScreenInspection = new(b)
+	}
+	return nil
+}
+
+func parseEnvList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return []string{}
+	}
+	parts := strings.Split(v, ",")
+	clean := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			clean = append(clean, t)
+		}
+	}
+	return clean
 }
 
 func normalizeConfig(cfg Config) (Config, error) {
@@ -405,39 +648,4 @@ func normalizeConfig(cfg Config) (Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func envTransform(k, v string) (string, any) {
-	trimmed := strings.TrimPrefix(k, "AHT_")
-	parts := strings.SplitN(trimmed, "_", envSplitParts)
-	section := strings.ToLower(parts[0])
-
-	switch section {
-	case "ui", "retention", "filter", "tracker", "detection":
-	default:
-		return "", nil
-	}
-
-	if len(parts) < envSplitParts {
-		return section, v
-	}
-
-	field := strings.ToLower(parts[1])
-	key := section + "." + field
-
-	if key == "filter.ignore_harnesses" || key == "filter.ignore_paths" {
-		if strings.TrimSpace(v) == "" {
-			return key, []string{}
-		}
-		items := strings.Split(v, ",")
-		var clean []string
-		for _, item := range items {
-			if t := strings.TrimSpace(item); t != "" {
-				clean = append(clean, t)
-			}
-		}
-		return key, clean
-	}
-
-	return key, v
 }

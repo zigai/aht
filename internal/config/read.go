@@ -1,42 +1,70 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
-	"github.com/knadh/koanf/parsers/toml/v2"
+	"github.com/pelletier/go-toml/v2"
 )
 
-// boundedConfigFile implements Koanf's provider contract without trusting an
-// earlier Stat: the file may have grown or been replaced before it is opened.
+var errUnknownFieldInConfig = errors.New("unknown field in config")
+
+// boundedConfigFile wraps a path for bounded reading.
 type boundedConfigFile string
 
-func (path boundedConfigFile) ReadBytes() ([]byte, error) {
-	file, err := os.Open(string(path))
-	if err != nil {
-		return nil, fmt.Errorf("open config: %w", err)
-	}
-	// Read-only close cannot lose configuration data.
-	defer func() { _ = file.Close() }()
-	contents, err := io.ReadAll(io.LimitReader(file, maxConfigFileSize+1))
+// readBounded reads up to limit bytes from r. If more than limit bytes are
+// available, it returns ErrConfigFileTooLarge.
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	contents, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	if len(contents) > maxConfigFileSize {
-		return nil, fmt.Errorf("%w: %s", ErrConfigFileTooLarge, path)
+	if int64(len(contents)) > limit {
+		return nil, ErrConfigFileTooLarge
 	}
 	return contents, nil
 }
 
-func (path boundedConfigFile) Read() (map[string]any, error) {
-	contents, err := path.ReadBytes()
+// readBoundedFile reads a file bounded by maxConfigFileSize.
+func readBoundedFile(path string) ([]byte, error) {
+	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
+		return nil, fmt.Errorf("open config: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	contents, err := readBounded(file, maxConfigFileSize)
+	if err != nil {
+		if errors.Is(err, ErrConfigFileTooLarge) {
+			return nil, fmt.Errorf("%w: %s", ErrConfigFileTooLarge, path)
+		}
 		return nil, err
 	}
-	values, err := toml.Parser().Unmarshal(contents)
-	if err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	return contents, nil
+}
+
+func (path boundedConfigFile) ReadBytes() ([]byte, error) {
+	return readBoundedFile(string(path))
+}
+
+// decodeTOML decodes TOML bytes into target with strict unknown field rejection.
+func decodeTOML(data []byte, target any) error {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
 	}
-	return values, nil
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if strictErr, ok := errors.AsType[*toml.StrictMissingError](err); ok {
+			return fmt.Errorf("%w: %s", errUnknownFieldInConfig, strictErr.String())
+		}
+		return fmt.Errorf("decode toml: %w", err)
+	}
+	return nil
 }
