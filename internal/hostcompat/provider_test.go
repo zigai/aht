@@ -136,7 +136,7 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		return
 	}
 
-	if request.Method == http.MethodPost && provider.validPath(request.URL.Path) && (strings.Contains(string(body), "You are a title generator") || strings.Contains(string(body), "ultra-short dashboard line") || requestAdvertisesTool(body, "session_title")) {
+	if request.Method == http.MethodPost && provider.validPath(request.URL.Path) && (strings.Contains(string(body), "You are a title generator") || strings.Contains(string(body), "ultra-short dashboard line") || strings.Contains(string(body), "generate_session_title") || strings.Contains(string(body), "Write the title in the predominant language") || requestAdvertisesTool(body, "session_title")) {
 		provider.writeFinal(writer, body)
 		return
 	}
