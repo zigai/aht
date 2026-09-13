@@ -108,7 +108,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 
 	listOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", storePath, "--json", "list")
 	transcript.Write(listOutput)
-	listed := decodeSingleSession(t, "list", listOutput)
+	listed := decodeSessionByID(t, "list", listOutput, reported.SessionID)
 	infoOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", storePath, "--json", "info", reported.SessionID)
 	transcript.Write(infoOutput)
 	var info registry.Session
@@ -131,7 +131,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	waitForBrokerSocket(t, restartedTracker, storePath)
 	restartedListOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", storePath, "--json", "list")
 	transcript.Write(restartedListOutput)
-	restarted := decodeSingleSession(t, "restarted list", restartedListOutput)
+	restarted := decodeSessionByID(t, "restarted list", restartedListOutput, reported.SessionID)
 	assertSamePhaseOneSession(t, reported, restarted)
 	if restarted.UpdatedAt.Before(reported.UpdatedAt) {
 		t.Fatalf("restarted session updated_at = %s, before reported %s", restarted.UpdatedAt, reported.UpdatedAt)
@@ -361,6 +361,21 @@ func decodeSingleSession(t *testing.T, source string, data []byte) registry.Sess
 		t.Fatalf("%s session count = %d, want 1; output=%q", source, len(sessions), data)
 	}
 	return sessions[0]
+}
+
+func decodeSessionByID(t *testing.T, source string, data []byte, sessionID string) registry.Session {
+	t.Helper()
+	var sessions []registry.Session
+	if err := json.Unmarshal(data, &sessions); err != nil {
+		t.Fatalf("decode %s output: %v", source, err)
+	}
+	for _, session := range sessions {
+		if session.SessionID == sessionID {
+			return session
+		}
+	}
+	t.Fatalf("%s: session %q not found among %d listed sessions", source, sessionID, len(sessions))
+	return registry.Session{}
 }
 
 func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
