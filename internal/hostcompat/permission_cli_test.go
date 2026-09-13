@@ -245,6 +245,8 @@ func runClaudePermission(t *testing.T, host isolatedHost, env []string, allow bo
 			process.wait(t)
 			assertPermissionOutcome(t, host, waiting, allow)
 			return
+		case `"assistant"`, `"system"`, `"progress"`, `"ping"`:
+			continue
 		}
 	}
 }
@@ -369,7 +371,7 @@ func runCopilotPermission(t *testing.T, host isolatedHost, env []string, allow b
 				if waiting.SessionID != sessionID {
 					t.Fatalf("Copilot waiting session %q does not match RPC session %q", waiting.SessionID, sessionID)
 				}
-				decision := map[string]any{"kind": "denied-interactively-by-user", "feedback": "User denied this action"}
+				decision := map[string]any{"kind": "reject", "feedback": "User denied this action"}
 				if allow {
 					decision = map[string]any{"kind": "approved"}
 				}
