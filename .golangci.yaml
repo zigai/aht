@@ -200,7 +200,12 @@ linters:
         - G301 # directory perms
         - G302 # file perms
         - G304 # file path from variable
-
+    exhaustruct_v5:
+      ignore-patterns:
+        - "github.com/urfave/cli/v3\\..*"
+        - "github.com/urfave/cli\\..*"
+        - "github.com/spf13/cobra\\..*"
+        - "github.com/spf13/pflag\\..*"
   exclusions:
     warn-unused: false
     presets: []
