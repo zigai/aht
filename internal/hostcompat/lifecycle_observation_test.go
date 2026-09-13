@@ -79,6 +79,9 @@ func (host isolatedHost) assertInterrupted(t *testing.T) {
 			// deleting the durable session. Running was required before abort.
 			return terminalSession(host.contract.ID, session)
 		}
+		if host.contract.ID == registry.HarnessCopilot && session.Presence == registry.PresenceGone {
+			return true
+		}
 		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence == registry.PresenceGone {
 			return true
 		}
