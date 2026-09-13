@@ -586,7 +586,7 @@ func isAgentWrapper(process processinfo.Process) bool {
 		command = filepath.Base(process.Args[0])
 	}
 	switch command {
-	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv":
+	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv", "node", "bun", "python", "python3", "sh", "bash":
 		return true
 	default:
 		return false
