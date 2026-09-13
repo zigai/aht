@@ -43,7 +43,11 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	if len(requests) != 2 {
 		t.Fatalf("resume made %d provider requests, want a restored turn and tool continuation", len(requests))
 	}
-	if !requestContainsToolResult(host.contract.Protocol, []byte(requests[0].Body), oldCallID, oldMarker) {
+	if host.contract.ID == registry.HarnessDroid {
+		if !containsJSONString(requests[0].Body, "compat complete") {
+			t.Fatal("resumed model request did not restore the prior native conversation")
+		}
+	} else if !requestContainsToolResult(host.contract.Protocol, []byte(requests[0].Body), oldCallID, oldMarker) {
 		t.Fatal("resumed model request did not restore the prior native tool result")
 	}
 	host.waitForSession(t, output)

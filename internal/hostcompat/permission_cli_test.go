@@ -371,7 +371,11 @@ func runCopilotPermission(t *testing.T, host isolatedHost, env []string, allow b
 				if waiting.SessionID != sessionID {
 					t.Fatalf("Copilot waiting session %q does not match RPC session %q", waiting.SessionID, sessionID)
 				}
-				decision := map[string]any{"kind": "reject", "feedback": "User denied this action"}
+				rejectKind := "reject"
+				if out, err := exec.Command(host.hostPath, "--version").Output(); err == nil && strings.Contains(string(out), "1.0.2") {
+					rejectKind = "denied-interactively-by-user"
+				}
+				decision := map[string]any{"kind": rejectKind, "feedback": "User denied this action"}
 				if allow {
 					decision = map[string]any{"kind": "approved"}
 				}
