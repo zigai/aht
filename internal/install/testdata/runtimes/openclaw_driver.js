@@ -1,0 +1,11 @@
+import plugin from "./index.js";
+import { createInterface } from "node:readline";
+const lines = createInterface({input: process.stdin})[Symbol.asyncIterator]();
+const hooks = new Map();
+plugin.register({on: (name, callback) => hooks.set(name, callback)});
+const ctx = {sessionId: "session"};
+hooks.get("session_start")({}, ctx);
+await lines.next();
+for (let index = 0; index < 200; index++) hooks.get("before_agent_run")({}, {...ctx, runId: String(index)});
+await hooks.get("session_end")({}, ctx);
+await lines.next();

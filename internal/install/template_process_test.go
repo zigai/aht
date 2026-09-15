@@ -5,6 +5,7 @@ package install
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -19,6 +20,15 @@ import (
 
 	"github.com/zigai/aht/pkg/registry"
 )
+
+//go:embed testdata/runtimes/cline_driver.js
+var clineDriverScript string
+
+//go:embed testdata/runtimes/openclaw_driver.js
+var openclawDriverScript string
+
+//go:embed testdata/runtimes/hermes_driver.py
+var hermesDriverScript string
 
 type reportingRecord struct {
 	PID     int      `json:"pid"`
@@ -251,47 +261,10 @@ func runReportingDriver(t *testing.T, tool, dir, driver, capture, terminal strin
 func reportingDriver(name registry.Harness) (string, string, string, string) {
 	switch name {
 	case registry.HarnessCline:
-		return "index.js", "node", "afterRun", `
-import plugin from "./index.js";
-import { createInterface } from "node:readline";
-const lines = createInterface({input: process.stdin})[Symbol.asyncIterator]();
-plugin.setup({}, {session: {sessionId: "session"}});
-await lines.next();
-for (let index = 0; index < 200; index++) plugin.hooks.beforeRun({snapshot: {runId: String(index)}});
-const final = plugin.hooks.afterRun({snapshot: {}, result: {status: "failed"}});
-await final;
-await lines.next();
-`
+		return "index.js", "node", "afterRun", clineDriverScript
 	case registry.HarnessOpenClaw:
-		return "index.js", "node", "session_end", `
-import plugin from "./index.js";
-import { createInterface } from "node:readline";
-const lines = createInterface({input: process.stdin})[Symbol.asyncIterator]();
-const hooks = new Map();
-plugin.register({on: (name, callback) => hooks.set(name, callback)});
-const ctx = {sessionId: "session"};
-hooks.get("session_start")({}, ctx);
-await lines.next();
-for (let index = 0; index < 200; index++) hooks.get("before_agent_run")({}, {...ctx, runId: String(index)});
-await hooks.get("session_end")({}, ctx);
-await lines.next();
-`
+		return "index.js", "node", "session_end", openclawDriverScript
 	default:
-		return "__init__.py", "python3", "on_session_finalize", `
-import __init__ as plugin
-class Context:
-    def __init__(self):
-        self.hooks = {}
-    def register_hook(self, name, callback):
-        self.hooks[name] = callback
-ctx = Context()
-plugin.register(ctx)
-ctx.hooks["on_session_start"](session_id="session")
-input()
-for index in range(200):
-    ctx.hooks["pre_llm_call"](session_id="session", turn_id=str(index))
-ctx.hooks["on_session_finalize"](session_id="session")
-input()
-`
+		return "__init__.py", "python3", "on_session_finalize", hermesDriverScript
 	}
 }
