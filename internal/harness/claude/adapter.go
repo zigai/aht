@@ -46,6 +46,9 @@ func New() claudeHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  claudeIntegrationSource,
+		StateAuthority:     harness.AuthorityScreen,
+		ScreenFallback:     false,
 	})}
 }
 

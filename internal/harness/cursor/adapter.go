@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -47,6 +49,9 @@ func New() cursorHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  cursorIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 
@@ -91,6 +96,13 @@ func (cursorHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (cursorHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	return cursorPayloadDefaults(payload), nil
+}
+
+func (cursorHarness) ObservableProcess(process processinfo.Process) bool {
+	if process.TTY == "" && process.MultiplexerPane == "" && !slices.Contains(process.Args, "agent") {
+		return false
+	}
+	return true
 }
 
 func cursorHookCommand[T harness.Transition](binary string, transition T, event string, hookOutput string) string {

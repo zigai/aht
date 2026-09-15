@@ -53,6 +53,9 @@ func New() gooseHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  gooseIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 

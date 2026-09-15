@@ -1,14 +1,20 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"slices"
 
+	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/registry"
 )
 
 const (
 	IntegrationVersion = 8
+
+	AuthorityHook   StateAuthority = "hook"
+	AuthorityScreen StateAuthority = "screen"
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
@@ -17,7 +23,10 @@ const (
 	EnvEvent       EnvField = "event"
 )
 
-type EnvField string
+type (
+	StateAuthority string
+	EnvField       string
+)
 
 type EnvKeys struct {
 	SessionID   []string
@@ -53,6 +62,9 @@ type Definition struct {
 	Env                EnvKeys
 	Capabilities       Capabilities
 	IntegrationVersion int
+	IntegrationSource  string
+	StateAuthority     StateAuthority
+	ScreenFallback     bool
 }
 
 type Adapter interface {
@@ -80,6 +92,22 @@ type PayloadAdapter interface {
 	PayloadDefaults(payload map[string]any) (PayloadDefaults, error)
 }
 
+type ProcessFilter interface {
+	ObservableProcess(process processinfo.Process) bool
+}
+
+type WireRunner interface {
+	ValidateWireArgs(args []string) error
+	RunWire(ctx context.Context, options WireOptions) error
+}
+
+type WireOptions struct {
+	Args      []string
+	StorePath string
+	Stdin     *os.File
+	Stdout    *os.File
+	Stderr    *os.File
+}
 type BaseAdapter struct {
 	definition Definition
 }
@@ -100,6 +128,9 @@ func cloneDefinition(definition Definition) Definition {
 		Env:                cloneEnvKeys(definition.Env),
 		Capabilities:       definition.Capabilities,
 		IntegrationVersion: definition.IntegrationVersion,
+		IntegrationSource:  definition.IntegrationSource,
+		StateAuthority:     definition.StateAuthority,
+		ScreenFallback:     definition.ScreenFallback,
 	}
 }
 

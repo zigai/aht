@@ -45,6 +45,9 @@ func New() piHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  piIntegrationSourceID,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
 

@@ -3,6 +3,7 @@ package agentstate
 import (
 	"time"
 
+	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -35,35 +36,16 @@ func (a Authority) IsValid() bool {
 }
 
 func PolicyFor(harness registry.Harness) Policy {
-	switch harness {
-	case registry.HarnessCodex, registry.HarnessClaude:
-		return Policy{Primary: AuthorityScreen, ScreenFallback: false, IntegrationValue: ""}
-	case registry.HarnessOpenCode:
-		return Policy{Primary: AuthorityHook, ScreenFallback: true, IntegrationValue: "opencode-plugin"}
-	case registry.HarnessPi:
-		return Policy{Primary: AuthorityHook, ScreenFallback: true, IntegrationValue: "pi-extension"}
-	case registry.HarnessOmp:
-		return Policy{Primary: AuthorityHook, ScreenFallback: true, IntegrationValue: "omp-extension"}
-	case registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessCline, registry.HarnessKimiCode,
-		registry.HarnessGrok, registry.HarnessGoose, registry.HarnessAgy,
-		registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes:
-		return Policy{Primary: AuthorityHook, ScreenFallback: false, IntegrationValue: ""}
-	default:
-		return Policy{Primary: AuthorityHook, ScreenFallback: false, IntegrationValue: ""}
+	auth, fallback, source := harnesscatalog.PolicyFor(harness)
+	return Policy{
+		Primary:          Authority(auth),
+		ScreenFallback:   fallback,
+		IntegrationValue: source,
 	}
 }
 
 func SupportsScreen(harness registry.Harness) bool {
-	switch harness {
-	case registry.HarnessCodex, registry.HarnessClaude, registry.HarnessOpenCode, registry.HarnessPi, registry.HarnessOmp:
-		return true
-	case registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessCline, registry.HarnessKimiCode,
-		registry.HarnessGrok, registry.HarnessGoose, registry.HarnessAgy,
-		registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes:
-		return false
-	default:
-		return false
-	}
+	return harnesscatalog.SupportsScreen(harness)
 }
 
 func EvaluateHook(session registry.Session, now time.Time) HookEvaluation {

@@ -1,6 +1,7 @@
 package kimi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +61,9 @@ func New() kimiCodeHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  kimiCodeIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 
@@ -88,6 +92,20 @@ func (kimiCodeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	return kimiCodePayloadDefaults(payload)
+}
+
+func (kimiCodeHarness) ValidateWireArgs(args []string) error {
+	return ValidateArgs(args)
+}
+
+func (kimiCodeHarness) RunWire(ctx context.Context, options harness.WireOptions) error {
+	return Run(ctx, Options{
+		Args:      options.Args,
+		StorePath: options.StorePath,
+		Stdin:     options.Stdin,
+		Stdout:    options.Stdout,
+		Stderr:    options.Stderr,
+	})
 }
 
 func kimiCodeHookBlock(binary string) string {

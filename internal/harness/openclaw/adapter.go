@@ -28,7 +28,7 @@ func New() openClawHarness {
 	return openClawHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ID:           registry.HarnessOpenClaw,
 		Aliases:      nil,
-		ProcessNames: nil,
+		ProcessNames: []string{"openclaw"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -46,6 +46,9 @@ func New() openClawHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  openClawIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 

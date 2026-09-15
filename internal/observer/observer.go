@@ -529,15 +529,8 @@ func observableHarness(process processinfo.Process, harnessID registry.Harness) 
 			return "", false
 		}
 	}
-	if harnessID == registry.HarnessOmp {
-		for _, arg := range process.Args {
-			if strings.HasPrefix(filepath.Base(arg), "__omp_worker_") {
-				return "", false
-			}
-		}
-	}
-	if harnessID == registry.HarnessCursor {
-		if process.TTY == "" && process.MultiplexerPane == "" && !slices.Contains(process.Args, "agent") {
+	if filter, ok := harness.ProcessFilterFor(harnessID); ok {
+		if !filter.ObservableProcess(process) {
 			return "", false
 		}
 	}

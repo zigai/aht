@@ -45,6 +45,9 @@ func New() openCodeHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  openCodeIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
 

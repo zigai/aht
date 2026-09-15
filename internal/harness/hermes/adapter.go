@@ -29,7 +29,7 @@ func New() hermesHarness {
 	return hermesHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ID:           registry.HarnessHermes,
 		Aliases:      []string{"hermes-agent", "hermes_agent"},
-		ProcessNames: nil,
+		ProcessNames: []string{"hermes", "hermes-agent"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -47,6 +47,9 @@ func New() hermesHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  hermesIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 

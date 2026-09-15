@@ -48,6 +48,9 @@ func New() clineHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  clineIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 

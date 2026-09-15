@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/zigai/aht/internal/harness"
@@ -30,6 +29,17 @@ import (
 var (
 	emptyPayloadDefaults harness.PayloadDefaults
 	emptyHookResult      harness.HookResult
+
+	// tokenPunctuation strips separators so that names and aliases match without
+	// punctuation, mirroring the documented contract of harness.Parse.
+	tokenPunctuation = strings.NewReplacer(
+		" ", "",
+		".", "",
+		"-", "",
+		"_", "",
+		":", "",
+		"!", "",
+	)
 )
 
 var adapters = []harness.Adapter{
@@ -64,6 +74,46 @@ func Find(harnessID registry.Harness) (harness.Adapter, bool) {
 	return nil, false
 }
 
+func PolicyFor(harnessID registry.Harness) (harness.StateAuthority, bool, string) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return harness.AuthorityHook, false, ""
+	}
+	def := adapter.Definition()
+	auth := def.StateAuthority
+	if auth == "" {
+		auth = harness.AuthorityHook
+	}
+	return auth, def.ScreenFallback, def.IntegrationSource
+}
+
+func SupportsScreen(harnessID registry.Harness) bool {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return false
+	}
+	provider, ok := adapter.(harness.ScreenManifestProvider)
+	return ok && provider.ScreenManifest() != ""
+}
+
+func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return nil, false
+	}
+	filter, ok := adapter.(harness.ProcessFilter)
+	return filter, ok
+}
+
+func WireRunnerFor(harnessID registry.Harness) (harness.WireRunner, bool) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return nil, false
+	}
+	runner, ok := adapter.(harness.WireRunner)
+	return runner, ok
+}
+
 func IntegrationVersionFor(harnessID registry.Harness) int {
 	adapter, ok := Find(harnessID)
 	if !ok {
@@ -76,10 +126,10 @@ func Normalize(value string) (registry.Harness, error) {
 	normalized := normalizeToken(value)
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
-		if normalized == string(definition.ID) {
+		if normalized == normalizeToken(string(definition.ID)) {
 			return definition.ID, nil
 		}
-		if slices.Contains(definition.Aliases, normalized) {
+		if containsNormalizedToken(definition.Aliases, normalized) {
 			return definition.ID, nil
 		}
 	}
@@ -106,7 +156,7 @@ func FromCommand(command string) (registry.Harness, bool) {
 	normalized := normalizeToken(filepath.Base(command))
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
-		if slices.Contains(definition.ProcessNames, normalized) {
+		if containsNormalizedToken(definition.ProcessNames, normalized) {
 			return definition.ID, true
 		}
 	}
@@ -269,5 +319,14 @@ func appendUnique(values []string, next ...string) []string {
 }
 
 func normalizeToken(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return tokenPunctuation.Replace(strings.ToLower(strings.TrimSpace(value)))
+}
+
+func containsNormalizedToken(values []string, normalized string) bool {
+	for _, value := range values {
+		if normalizeToken(value) == normalized {
+			return true
+		}
+	}
+	return false
 }

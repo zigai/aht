@@ -46,6 +46,9 @@ func New() copilotHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  copilotIntegrationSource,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     false,
 	})}
 }
 

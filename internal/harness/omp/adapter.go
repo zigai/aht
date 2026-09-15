@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -45,6 +46,9 @@ func New() ompHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
+		IntegrationSource:  ompIntegrationSourceID,
+		StateAuthority:     harness.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
 
@@ -73,6 +77,15 @@ func (ompHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 	}
 
 	return nil
+}
+
+func (ompHarness) ObservableProcess(process processinfo.Process) bool {
+	for _, arg := range process.Args {
+		if strings.HasPrefix(filepath.Base(arg), "__omp_worker_") {
+			return false
+		}
+	}
+	return true
 }
 
 func ompAgentDir() string {

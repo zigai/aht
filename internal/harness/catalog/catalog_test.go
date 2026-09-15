@@ -372,8 +372,9 @@ func TestFromCommand(t *testing.T) {
 		{command: "kilo-code", want: registry.HarnessKilo, wantOK: true},
 		{command: "kilo_code", want: registry.HarnessKilo, wantOK: true},
 		{command: "droid", want: registry.HarnessDroid, wantOK: true},
-		{command: "openclaw", want: "", wantOK: false},
-		{command: "hermes", want: "", wantOK: false},
+		{command: "openclaw", want: registry.HarnessOpenClaw, wantOK: true},
+		{command: "hermes", want: registry.HarnessHermes, wantOK: true},
+		{command: "hermes-agent", want: registry.HarnessHermes, wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 

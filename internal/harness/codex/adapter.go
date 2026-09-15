@@ -47,6 +47,9 @@ func New() codexHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationSource:  codexIntegrationSource,
+		StateAuthority:     harness.AuthorityScreen,
+		ScreenFallback:     false,
 	})}
 }
 
