@@ -277,6 +277,9 @@ function addEvent(args: string[], value: unknown): void {
   }
 }
 function resolveActivity(event: NativeEvent, willContinue = false): string {
+  if (willContinue) {
+    return "running";
+  }
   const assistant = lastAssistantMessage(event?.messages);
   if (
     event?.error ||
@@ -296,7 +299,7 @@ function resolveActivity(event: NativeEvent, willContinue = false): string {
   ) {
     return "interrupted";
   }
-  return willContinue ? "running" : "idle";
+  return "idle";
 }
 
 function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent): void {

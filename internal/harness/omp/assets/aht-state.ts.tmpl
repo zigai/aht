@@ -274,8 +274,8 @@ export default function (pi: ExtensionAPI) {
 
   function desiredState(): { activity: Activity; message?: string | undefined } {
     if (blockedCount > 0) return { activity: "waiting", message: blockedMessage };
-    if (failureActive) return { activity: "failed", message: failureMessage };
     if (agentActive || retryHoldActive) return { activity: "running" };
+    if (failureActive) return { activity: "failed", message: failureMessage };
     return { activity: "idle" };
   }
 
@@ -356,13 +356,6 @@ export default function (pi: ExtensionAPI) {
     failureActive = false;
     failureMessage = message;
     publishDesired(event);
-    retryTimer = setTimeout(() => {
-      retryTimer = undefined;
-      retryHoldActive = false;
-      failureActive = true;
-      publishDesired(event);
-    }, retryGraceMs);
-    retryTimer.unref?.();
   }
 
   function scheduleIdle(event?: NativeEvent): void {
@@ -434,7 +427,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   on("agent_end", (event: NativeEvent, ctx: ExtensionContext) => {
-    if (!rootSession || !agentActive || event?.willContinue === true) return;
+    if (!rootSession || event?.willContinue === true) return;
     currentContext = ctx ?? currentContext;
     agentActive = false;
     stopHeartbeat();
@@ -472,13 +465,13 @@ export default function (pi: ExtensionAPI) {
   on("agent_error", (event: NativeEvent, ctx: ExtensionContext) => {
     if (!rootSession && !activateRoot(ctx)) return;
     currentContext = ctx;
-    agentActive = false;
-    stopHeartbeat();
     const retryable = retryableErrorMessage(event);
     if (retryable) {
       holdRetry(retryable, event);
       return;
     }
+    agentActive = false;
+    stopHeartbeat();
     failureActive = true;
     failureMessage = String((typeof event?.error === "object" ? event.error.message : event?.error) ?? event?.error ?? event?.message ?? "agent failed");
     publishDesired(event);

@@ -84,7 +84,7 @@ func copilotHookConfig(binary string) map[string]any {
 		{event: "permissionRequest", transition: harness.HookActivityWaiting, matcher: ""},
 		{event: "notification", transition: harness.HookActivityWaiting, matcher: "permission_prompt"},
 		{event: "postToolUse", transition: harness.HookActivityRunning, matcher: ""},
-		{event: "postToolUseFailure", transition: harness.HookActivityFailed, matcher: ""},
+		{event: "postToolUseFailure", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "preCompact", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "subagentStart", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "subagentStop", transition: harness.HookActivityIdle, matcher: ""},
