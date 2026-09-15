@@ -151,7 +151,7 @@ func applyObservationBatch(
 
 		at := observationTime(observation.ObservedAt, receivedAt)
 		retireConflictingProcessSessions(snap.Sessions, observation, at, receivedAt)
-		id := findAndReconcileMatchingSession(snap.Sessions, observation)
+		id := findAndReconcileMatchingSession(snap.Sessions, observation, at)
 		if id == "" &&
 			observation.Source == ObservationSourceCatalog &&
 			(observation.Harness != HarnessClaude || observation.Catalog == nil || !observation.Catalog.Current) {
@@ -664,6 +664,11 @@ func applyPresenceAndActivity(session *Session, observation Observation, at time
 		if screenFallbackSuperseded(*session, *screen) {
 			return
 		}
+		// Screen fallback must not regress a newer native activity decision: the
+		// older observation is still recorded, but the effective decision stays.
+		if session.ActivityDecision != nil && at.Before(session.ActivityDecision.ObservedAt) {
+			return
+		}
 		session.Activity = new(screen.Activity)
 		session.ActivityDecision = &ActivityDecision{Authority: screen.Authority, Reason: screen.Reason, RuleID: screen.RuleID, ManifestSource: screen.ManifestSource, ManifestVersion: screen.ManifestVersion, FallbackReason: screen.FallbackReason, Process: screen.Process, ObservedAt: at}
 	case ObservationSourceTmux, ObservationSourceMultiplexer, ObservationSourceCatalog:
@@ -814,7 +819,7 @@ func observationIdentityConflicts(session Session, identity ObservationIdentity)
 }
 
 //nolint:cyclop // matching session discovery correlates native and provisional identities
-func findAndReconcileMatchingSession(sessions map[string]Session, observation Observation) string {
+func findAndReconcileMatchingSession(sessions map[string]Session, observation Observation, at time.Time) string {
 	identityID := findIdentityMatchingSession(sessions, observation)
 	processID := findProcessMatchingSession(sessions, observation)
 	if observation.Source == ObservationSourceNative && identityID != "" && processID != "" &&
@@ -824,6 +829,14 @@ func findAndReconcileMatchingSession(sessions map[string]Session, observation Ob
 		return identityID
 	}
 	if identityID != "" && processID != "" && identityID != processID {
+		if prior := sessions[identityID]; prior.Process != nil && !prior.Process.Equal(*observation.Process) {
+			// The prior process terminated and the same session is being resumed
+			// or restarted under a new process. Retire the stale incarnation so
+			// the registry never retains two live sessions for one session_id.
+			setGone(&prior, at)
+			prior.UpdatedAt = maxTime(prior.UpdatedAt, at)
+			sessions[identityID] = prior
+		}
 		provisional := sessions[identityID]
 		if provisional.Process == nil {
 			target := mergeProvisionalSession(sessions[processID], provisional)

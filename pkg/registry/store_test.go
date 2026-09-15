@@ -501,6 +501,103 @@ func corruptSnapshotStaleNativeRevival(snap *snapshot) {
 	snap.Sessions[id] = session
 }
 
+func TestScreenObservationDoesNotRegressNewerNativeActivity(t *testing.T) {
+	t.Parallel()
+
+	store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	base := time.Now().UTC().Add(-time.Minute)
+	process := &ProcessIdentity{PID: 4242, PPID: 1, ProcessGroupID: 4242, StartIdentity: "boot:4242", Executable: "/usr/bin/codex", CWD: "/repo"}
+	live := PresenceLive
+	start := NativeLifecycleStart
+	idle := ActivityIdle
+	if _, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex,
+		Identity: ObservationIdentity{SessionID: "screen-regression"}, Process: process,
+		Lifecycle: &start, Presence: &live, Activity: &idle, NativeEvent: "start", ObservedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nativeDecisionAt := base.Add(10 * time.Second)
+	authoritative := true
+	if _, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex,
+		Identity: ObservationIdentity{SessionID: "screen-regression"}, Process: process,
+		Activity: &idle, ActivityAuthoritative: &authoritative, NativeEvent: "hook", ObservedAt: nativeDecisionAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waiting := ActivityWaiting
+	session, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceScreen, Evidence: ObservationEvidenceScreenState, Harness: HarnessCodex,
+		Identity: ObservationIdentity{SessionID: "screen-regression"}, Process: process, Activity: &waiting,
+		Screen:     &ScreenObservation{Activity: waiting, Authority: "screen", Reason: "prompt", Process: *process},
+		ObservedAt: base.Add(5 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Activity == nil || *session.Activity != ActivityIdle {
+		t.Fatalf("screen observation at T=5s regressed native decision at T=10s: activity = %v", session.Activity)
+	}
+	if session.ActivityDecision == nil || !session.ActivityDecision.ObservedAt.Equal(nativeDecisionAt) {
+		t.Fatalf("activity decision = %#v, want observed at %s", session.ActivityDecision, nativeDecisionAt)
+	}
+	if session.Observations.Screen == nil || session.Observations.Screen.ObservedAt.IsZero() {
+		t.Fatalf("older screen observation was not recorded: %#v", session.Observations.Screen)
+	}
+}
+
+func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
+	t.Parallel()
+
+	store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	base := time.Now().UTC().Add(-time.Minute)
+	oldProcess := &ProcessIdentity{PID: 100, PPID: 1, ProcessGroupID: 100, StartIdentity: "boot:100", Executable: "/usr/bin/codex", CWD: "/repo"}
+	newProcess := &ProcessIdentity{PID: 200, PPID: 1, ProcessGroupID: 200, StartIdentity: "boot:200", Executable: "/usr/bin/codex", CWD: "/repo"}
+	live := PresenceLive
+	start := NativeLifecycleStart
+	idle := ActivityIdle
+	if _, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex,
+		Identity: ObservationIdentity{SessionID: "restart"}, Process: oldProcess,
+		Lifecycle: &start, Presence: &live, Activity: &idle, NativeEvent: "start", ObservedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	present := true
+	if _, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceProcess, Evidence: ObservationEvidenceProcessPresence, Harness: HarnessCodex,
+		ProcessPresent: &present, Process: newProcess, ObservedAt: base.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resume := NativeLifecycleResume
+	if _, err := store.Observe(context.Background(), Observation{
+		Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex,
+		Identity: ObservationIdentity{SessionID: "restart"}, Process: newProcess,
+		Lifecycle: &resume, Presence: &live, Activity: &idle, NativeEvent: "resume", ObservedAt: base.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := store.List(context.Background(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveTotal, liveWithIdentity := 0, 0
+	for _, session := range sessions {
+		if session.Presence != PresenceLive {
+			continue
+		}
+		liveTotal++
+		if session.SessionID == "restart" {
+			liveWithIdentity++
+		}
+	}
+	if liveTotal != 1 || liveWithIdentity != 1 {
+		t.Fatalf("live sessions = %d (session_id=restart: %d), want exactly one: %#v", liveTotal, liveWithIdentity, sessions)
+	}
+}
+
 func onlyStoredSession(sessions map[string]Session) (string, Session) {
 	for id, session := range sessions {
 		return id, session
