@@ -418,9 +418,20 @@ func tmuxServerSocket(tmuxEnv string) string {
 		return ""
 	}
 
-	socket, _, _ := strings.Cut(tmuxEnv, ",")
+	// $TMUX is "socket,pid,session". Strip the trailing session and pid fields
+	// from the right so socket directories containing commas are preserved.
+	end := strings.LastIndexByte(tmuxEnv, ',')
+	if end < 0 {
+		return tmuxEnv
+	}
 
-	return socket
+	start := strings.LastIndexByte(tmuxEnv[:end], ',')
+
+	if start < 0 {
+		return tmuxEnv[:end]
+	}
+
+	return tmuxEnv[:start]
 }
 
 func parseTmuxFields(output string, expectedFields int) ([]string, error) {

@@ -1,4 +1,4 @@
-package zellij
+package zellij_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/pkg/zellij"
 )
 
 var (
@@ -18,11 +19,11 @@ var (
 
 func TestCurrentWithEnvNormalizesTerminalPaneID(t *testing.T) {
 	t.Parallel()
-	context := CurrentWithEnv(Env{SessionName: "work", PaneID: "7"})
+	context := zellij.CurrentWithEnv(zellij.Env{SessionName: "work", PaneID: "7"})
 	if context.Kind != registry.MultiplexerZellij || context.SessionName != "work" || context.PaneID != "terminal_7" {
 		t.Fatalf("CurrentWithEnv() = %#v", context)
 	}
-	if got := CurrentWithEnv(Env{SessionName: "work"}); !got.Empty() {
+	if got := zellij.CurrentWithEnv(zellij.Env{SessionName: "work"}); !got.Empty() {
 		t.Fatalf("incomplete environment produced context: %#v", got)
 	}
 }
@@ -46,7 +47,7 @@ func TestListPanesUsesNativeJSONInventory(t *testing.T) {
 			return "", errUnexpectedCommand
 		}
 	}
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{Run: run})
+	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{Run: run})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +66,21 @@ func TestListPanesUsesNativeJSONInventory(t *testing.T) {
 
 func TestListPanesSkipsWhenZellijIsNotInstalled(t *testing.T) {
 	t.Parallel()
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{LookPath: func(string) (string, error) {
+	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{LookPath: func(string) (string, error) {
 		return "", errBinaryNotFound
+	}})
+	if err != nil || panes != nil {
+		t.Fatalf("ListPanesWithOptions() = %#v, %v", panes, err)
+	}
+}
+
+func TestListPanesSkipsWhenNoZellijSessionsAreActive(t *testing.T) {
+	t.Parallel()
+	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{Run: func(_ context.Context, args ...string) (string, error) {
+		if strings.Join(args, " ") != "list-sessions --no-formatting" {
+			return "", errUnexpectedCommand
+		}
+		return "No active zellij sessions found.\n", nil
 	}})
 	if err != nil || panes != nil {
 		t.Fatalf("ListPanesWithOptions() = %#v, %v", panes, err)
@@ -80,10 +94,10 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	for index := range lines {
 		lines[index] = "line"
 	}
-	snapshot, err := CapturePaneWithOptions(context.Background(), mux.Pane{
+	snapshot, err := zellij.CapturePaneWithOptions(context.Background(), mux.Pane{
 		Location: registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
 		Title:    "Codex",
-	}, CaptureOptions{Run: func(_ context.Context, args ...string) (string, error) {
+	}, zellij.CaptureOptions{Run: func(_ context.Context, args ...string) (string, error) {
 		got = append([]string(nil), args...)
 		return strings.Join(lines, "\n") + "\n", nil
 	}})

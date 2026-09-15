@@ -18,6 +18,14 @@ func TestContextFromEnvBuildsMinimalContext(t *testing.T) {
 	}
 }
 
+func TestTmuxServerSocketPreservesCommasInDirectory(t *testing.T) {
+	t.Parallel()
+
+	if got := tmuxServerSocket("/tmp/path,with,commas/default,1234,0"); got != "/tmp/path,with,commas/default" {
+		t.Fatalf("tmuxServerSocket() = %q, want %q", got, "/tmp/path,with,commas/default")
+	}
+}
+
 func TestCurrentWithEnvPreservesCancellation(t *testing.T) {
 	t.Parallel()
 

@@ -251,12 +251,15 @@ func parseContainerSessions(output string) ([]string, bool) {
 	if err := json.Unmarshal([]byte(output), &container); err != nil {
 		return nil, false
 	}
+	if container.Sessions == nil && container.Result == nil {
+		return nil, false
+	}
 	list := container.Sessions
 	if container.Result != nil {
 		list = container.Result.Sessions
 	}
 	if len(list) == 0 {
-		return nil, false
+		return []string{}, true
 	}
 	var sessions []string
 	for _, s := range list {

@@ -1,4 +1,4 @@
-package herdr
+package herdr_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/pkg/herdr"
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -18,11 +19,11 @@ var (
 
 func TestCurrentWithEnvUsesManagedPaneIdentity(t *testing.T) {
 	t.Parallel()
-	context := CurrentWithEnv(Env{Enabled: "1", SessionName: "work", SocketPath: "/tmp/herdr.sock", WorkspaceID: "w1", TabID: "w1:t1", PaneID: "w1:p1"})
+	context := herdr.CurrentWithEnv(herdr.Env{Enabled: "1", SessionName: "work", SocketPath: "/tmp/herdr.sock", WorkspaceID: "w1", TabID: "w1:t1", PaneID: "w1:p1"})
 	if context.Kind != registry.MultiplexerHerdr || context.ServerID != "/tmp/herdr.sock" || context.SessionName != "work" || context.WorkspaceID != "w1" || context.TabID != "w1:t1" || context.PaneID != "w1:p1" {
 		t.Fatalf("CurrentWithEnv() = %#v", context)
 	}
-	if got := CurrentWithEnv(Env{PaneID: "w1:p1"}); !got.Empty() {
+	if got := herdr.CurrentWithEnv(herdr.Env{PaneID: "w1:p1"}); !got.Empty() {
 		t.Fatalf("unmanaged environment produced context: %#v", got)
 	}
 }
@@ -48,7 +49,7 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 			return "", errUnexpectedCommand
 		}
 	}
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{Run: run})
+	panes, err := herdr.ListPanesWithOptions(context.Background(), herdr.ListOptions{Run: run})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestListPanesSkipsStoppedSessions(t *testing.T) {
 		return "", errUnexpectedCommand
 	}
 
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{Run: run})
+	panes, err := herdr.ListPanesWithOptions(context.Background(), herdr.ListOptions{Run: run})
 	if err != nil || len(panes) != 0 {
 		t.Fatalf("ListPanesWithOptions() = %#v, %v", panes, err)
 	}
@@ -91,11 +92,23 @@ func TestListPanesSkipsStoppedSessions(t *testing.T) {
 }
 
 func TestListPanesSkipsWhenHerdrIsNotInstalled(t *testing.T) {
-	t.Parallel()
-	panes, err := ListPanesWithOptions(context.Background(), ListOptions{LookPath: func(string) (string, error) {
+	panes, err := herdr.ListPanesWithOptions(context.Background(), herdr.ListOptions{LookPath: func(string) (string, error) {
 		return "", errBinaryNotFound
 	}})
 	if err != nil || panes != nil {
+		t.Fatalf("ListPanesWithOptions() = %#v, %v", panes, err)
+	}
+}
+
+func TestListPanesAcceptsEmptySessionContainer(t *testing.T) {
+	t.Parallel()
+	panes, err := herdr.ListPanesWithOptions(context.Background(), herdr.ListOptions{Run: func(_ context.Context, _ map[string]string, args ...string) (string, error) {
+		if strings.Join(args, " ") != "session list --json" {
+			return "", errUnexpectedCommand
+		}
+		return `{"sessions":[]}`, nil
+	}})
+	if err != nil || len(panes) != 0 {
 		t.Fatalf("ListPanesWithOptions() = %#v, %v", panes, err)
 	}
 }
@@ -104,10 +117,10 @@ func TestCapturePaneUsesDetectionBuffer(t *testing.T) {
 	t.Parallel()
 	var gotEnv map[string]string
 	var gotArgs []string
-	snapshot, err := CapturePaneWithOptions(context.Background(), mux.Pane{
+	snapshot, err := herdr.CapturePaneWithOptions(context.Background(), mux.Pane{
 		Location: registry.MultiplexerContext{Kind: registry.MultiplexerHerdr, ServerID: "/tmp/herdr.sock", SessionName: "work", PaneID: "w1:p1"},
 		Title:    "Codex",
-	}, CaptureOptions{Run: func(_ context.Context, env map[string]string, args ...string) (string, error) {
+	}, herdr.CaptureOptions{Run: func(_ context.Context, env map[string]string, args ...string) (string, error) {
 		gotEnv = env
 		gotArgs = append([]string(nil), args...)
 		return `{"result":{"text":"permission prompt"}}`, nil

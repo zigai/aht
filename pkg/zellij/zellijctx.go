@@ -87,6 +87,9 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane,
 		}
 		return nil, fmt.Errorf("list zellij sessions: %w", err)
 	}
+	if strings.Contains(strings.ToLower(sessionOutput), "no active zellij sessions") {
+		return nil, nil
+	}
 	sessions := parseSessions(sessionOutput)
 	panes := make([]mux.Pane, 0)
 	var listErrors []error
