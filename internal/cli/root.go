@@ -20,9 +20,8 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/urfave/cli/v3"
-
-	urfavehelp "github.com/zigai/urfave-help"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/zigai/aht/internal/agentstate"
 	"github.com/zigai/aht/internal/config"
@@ -75,9 +74,10 @@ var (
 	errManagedHookJSONRequired   = errors.New("hook commands require --json for their protocol response")
 	errListSummaryFlag           = errors.New("--sort, --desc, and --absolute-time are not valid with --summary")
 	errListAbsoluteJSON          = errors.New("--absolute-time cannot be used with --json")
-	errUnexpectedArgument        = errors.New("unexpected argument")
 	errUnknownCommand            = errors.New("unknown command")
-	setupCLIFlagsOnce            sync.Once
+	errUnknownHelpShorthand      = errors.New("unknown shorthand flag: 'h' in -h")
+	errSilentUsageError          = errors.New("")
+	configureCobraOnce           sync.Once
 )
 
 type application struct {
@@ -161,62 +161,6 @@ func (e *exitCoderError) ExitCode() int {
 	return e.code
 }
 
-func Execute() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := executeCLI(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
-	stop()
-	if code != 0 {
-		os.Exit(code)
-	}
-}
-
-func NewRootCommand(stdout io.Writer, stderr io.Writer) *cli.Command {
-	setupGlobalCLIDefaults()
-	return (&application{stdout: stdout, stderr: stderr}).newRootCommand()
-}
-
-func setupGlobalCLIDefaults() {
-	setupCLIFlagsOnce.Do(func() {
-		cli.VersionFlag = &cli.BoolFlag{
-			Name:    "version",
-			Aliases: []string{"V"},
-			Usage:   "print version",
-		}
-		cli.HelpFlag = &cli.BoolFlag{
-			Name:  "help",
-			Usage: "show help",
-		}
-		urfavehelp.Install()
-		cli.VersionPrinter = func(cmd *cli.Command) {
-			root := cmd.Root()
-			if root.Bool("json") {
-				data, err := json.MarshalIndent(map[string]string{
-					"version": version,
-					"commit":  commit,
-					"built":   date,
-				}, "", jsonIndent)
-				if err != nil {
-					return
-				}
-				_, _ = fmt.Fprintln(root.Writer, string(data))
-				return
-			}
-			_, _ = fmt.Fprintf(root.Writer, "aht %s (commit: %s, built: %s)\n", version, commit, date)
-		}
-	})
-}
-
-func exitCode(err error, code int) error {
-	if err == nil {
-		return nil
-	}
-	return &exitCoderError{err: err, code: code}
-}
-
-func unexpectedArgsError(args []string) error {
-	return exitCode(fmt.Errorf("%w: %s", errUnexpectedArgument, strings.Join(args, " ")), exitCodeUsage)
-}
-
 func (app *application) loadConfig() (config.Config, error) {
 	if app.cfgLoaded {
 		return app.cfg, app.cfgErr
@@ -244,88 +188,130 @@ func (app *application) loadConfig() (config.Config, error) {
 	return app.cfg, app.cfgErr
 }
 
-func (app *application) newRootCommand() *cli.Command {
-	setupGlobalCLIDefaults()
-	root := &cli.Command{
-		Name:            "aht",
-		Usage:           "Track local coding-agent sessions and where they are running",
-		Version:         version,
-		HideHelpCommand: true,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "store",
-				Destination: &app.storePath,
-				Usage:       "Registry state `path`",
-			},
-			&cli.StringFlag{
-				Name:        "config",
-				Destination: &app.configPath,
-				Usage:       "Config file `path`",
-			},
-			&cli.BoolFlag{
-				Name:        "no-config",
-				Destination: &app.noConfig,
-				Usage:       "bypass all configuration files",
-			},
-			&cli.BoolFlag{
-				Name:        "json",
-				Destination: &app.outputJSON,
-				Usage:       "emit JSON (JSON Lines for streams)",
-			},
+func Execute() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := executeCLI(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	stop()
+	if code != 0 {
+		os.Exit(code)
+	}
+}
+
+func NewRootCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	configureCobra()
+	return (&application{stdout: stdout, stderr: stderr}).newRootCommand()
+}
+
+func exitCode(err error, code int) error {
+	if err == nil {
+		return nil
+	}
+	return &exitCoderError{err: err, code: code}
+}
+
+func configureCommandTree(cmd *cobra.Command) {
+	if f := cmd.Flags().Lookup("help"); f != nil {
+		f.Shorthand = ""
+	} else {
+		cmd.Flags().Bool("help", false, "show help")
+	}
+	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if errors.Is(err, pflag.ErrHelp) || strings.Contains(err.Error(), "unknown shorthand flag: 'h'") {
+			return exitCode(errUnknownHelpShorthand, exitCodeUsage)
+		}
+		return err
+	})
+	for _, sub := range cmd.Commands() {
+		configureCommandTree(sub)
+	}
+}
+
+func configureCobra() {
+	configureCobraOnce.Do(func() {
+		cobra.EnableCommandSorting = false
+	})
+}
+
+func (app *application) newRootCommand() *cobra.Command {
+	configureCobra()
+	var showVersion bool
+	root := &cobra.Command{
+		Use:           "aht",
+		Short:         "Track local coding-agent sessions and where they are running",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			app.configExplicit = cmd.Flags().Changed("config")
+			return nil
 		},
-		Commands: []*cli.Command{
-			app.newListCommand(),
-			app.newWatchCommand(),
-			app.newInfoCommand(),
-			app.newStopCommand(),
-			app.newManageCommand(),
-			app.newHookCommand(),
-			app.newReportCommand(),
-		},
-		EnableShellCompletion: true,
-		ConfigureShellCompletionCommand: func(cmd *cli.Command) {
-			cmd.Hidden = false
-			cmd.Metadata = map[string]any{
-				helpArgumentsKey: []HelpArg{
-					{Name: "<shell>", Desc: "Shell type: bash, zsh, fish, or powershell"},
-				},
-			}
-			for _, sub := range cmd.Commands {
-				if sub.Name == "pwsh" {
-					sub.Name = "powershell"
-					sub.Usage = "Output powershell completion script"
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				if app.outputJSON {
+					return app.writeJSON(map[string]string{
+						"version": version,
+						"commit":  commit,
+						"built":   date,
+					})
 				}
+				return app.writef("aht %s (commit: %s, built: %s)\n", version, commit, date)
 			}
-		},
-		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			app.configExplicit = cmd.IsSet("config")
-			return ctx, nil
-		},
-		OnUsageError: func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
-			return exitCode(err, exitCodeUsage)
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return exitCode(fmt.Errorf("%w %q for %q", errUnknownCommand, cmd.Args().First(), cmd.Name), exitCodeUsage)
+			if len(args) > 0 {
+				return exitCode(fmt.Errorf("%w %q for %q", errUnknownCommand, args[0], cmd.Name()), exitCodeUsage)
 			}
-			return cli.ShowAppHelp(cmd)
+			_ = cmd.Help()
+			return exitCode(errSilentUsageError, exitCodeUsage)
 		},
-		ExitErrHandler: func(ctx context.Context, cmd *cli.Command, err error) {
-			// Return error to executeCLI without printing or exiting
+		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: false},
+	}
+	root.SetOut(app.stdout)
+	root.SetErr(app.stderr)
+	if app.stdin != nil {
+		root.SetIn(app.stdin)
+	}
+	root.PersistentFlags().StringVar(&app.storePath, "store", "", "registry state `<path>`")
+	root.PersistentFlags().StringVar(&app.configPath, "config", "", "config file `<path>`")
+	root.PersistentFlags().BoolVar(&app.noConfig, "no-config", false, "bypass all configuration files")
+	root.PersistentFlags().BoolVar(&app.outputJSON, "json", false, "emit JSON (JSON Lines for streams)")
+	root.PersistentFlags().Bool("help", false, "show help")
+	root.Flags().BoolVarP(&showVersion, "version", "V", false, "print version")
+
+	root.AddCommand(
+		app.newListCommand(),
+		app.newWatchCommand(),
+		app.newInfoCommand(),
+		app.newStopCommand(),
+		app.newManageCommand(),
+		app.newHookCommand(),
+		app.newReportCommand(),
+	)
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	configureCommandTree(root)
+	return root
+}
+
+func (app *application) newManageCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:           "manage",
+		Short:         "Manage setup, integrations, tracking, and state",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = cmd.Help()
+			return exitCode(errSilentUsageError, exitCodeUsage)
 		},
 	}
-	_ = root.Walk(func(sub *cli.Command) error {
-		if sub.OnUsageError == nil {
-			sub.OnUsageError = func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
-				return exitCode(err, exitCodeUsage)
-			}
-		}
-		return nil
-	})
-	root.Reader = app.stdin
-	root.Writer = app.stdout
-	root.ErrWriter = app.stderr
-	return root
+	command.AddCommand(
+		app.newSetupCommand(),
+		app.newUpgradeCommand(),
+		app.newIntegrationsCommand(),
+		app.newTrackerCommand(),
+		app.newStateCommand(),
+		app.newDoctorCommand(),
+		app.newManageConfigCommand(),
+	)
+	return command
 }
 
 func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -334,10 +320,15 @@ func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		stdout: stdout,
 		stderr: stderr,
 	}
+	//nolint:contextcheck // Command tree is built before ExecuteContext receives the context.
 	root := app.newRootCommand()
-	osArgs := append([]string{"aht"}, args...)
-	err := root.Run(ctx, osArgs)
-	if err != nil {
+	root.SetArgs(args)
+	if stdin != nil {
+		root.SetIn(stdin)
+	}
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if err := root.ExecuteContext(ctx); err != nil {
 		return app.handleError(err)
 	}
 	return 0
@@ -347,7 +338,8 @@ func (app *application) handleError(err error) int {
 	if errors.Is(err, syscall.EPIPE) {
 		return sigpipeExitCode
 	}
-	if exitCoder, ok := errors.AsType[cli.ExitCoder](err); ok {
+	var exitCoder interface{ ExitCode() int }
+	if errors.As(err, &exitCoder) {
 		code := exitCoder.ExitCode()
 		if code == sigpipeExitCode {
 			return sigpipeExitCode
@@ -363,8 +355,27 @@ func (app *application) handleError(err error) int {
 	if errors.Is(err, context.Canceled) {
 		return exitCodeInterrupted
 	}
-	_, _ = fmt.Fprintln(app.stderr, err.Error())
+	if err.Error() != "" {
+		_, _ = fmt.Fprintln(app.stderr, err.Error())
+	}
+	if isUsageError(err) {
+		return exitCodeUsage
+	}
 	return exitCodeGeneral
+}
+
+func isUsageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.HasPrefix(msg, "unknown flag") ||
+		strings.HasPrefix(msg, "unknown shorthand flag") ||
+		strings.HasPrefix(msg, "flag needs an argument") ||
+		strings.HasPrefix(msg, "invalid argument") ||
+		strings.HasPrefix(msg, "unknown command") ||
+		strings.Contains(msg, "accepts ") ||
+		strings.Contains(msg, "requires at least")
 }
 
 func (app *application) resolvedStorePath() string {
@@ -419,14 +430,14 @@ func (app *application) warnf(format string, args ...any) {
 	}
 }
 
-func (app *application) newRegistryPathCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "path",
-		Usage: "Print the registry state file path",
-		Action: func(_ context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return unexpectedArgsError(cmd.Args().Slice())
-			}
+func (app *application) newRegistryPathCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:           "path",
+		Short:         "Print the registry state file path",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(_ *cobra.Command, _ []string) error {
 			if app.outputJSON {
 				return app.writeJSON(map[string]string{"path": app.resolvedStorePath()})
 			}
@@ -435,69 +446,62 @@ func (app *application) newRegistryPathCommand() *cli.Command {
 	}
 }
 
-func (app *application) newReportCommand() *cli.Command {
+func (app *application) newReportCommand() *cobra.Command {
 	options := defaultReportOptionsFromEnv()
-	return &cli.Command{
-		Name:                      "report",
-		Usage:                     "Record a harness observation",
-		ArgsUsage:                 "[harness]",
-		Hidden:                    true,
-		Description:               "Record a harness observation",
-		DisableSliceFlagSeparator: true,
-		Metadata: map[string]any{
-			helpArgumentsKey: []HelpArg{
-				{Name: "[harness]", Desc: "Target harness to record observation for"},
-			},
-		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "presence", Value: options.presence, Destination: &options.presence, Usage: "presence: live, gone, unknown"},
-			&cli.StringFlag{Name: "activity", Value: options.activity, Destination: &options.activity, Usage: "reported activity hint: running, waiting, idle, unknown"},
-			&cli.StringFlag{Name: "lifecycle", Value: options.lifecycle, Destination: &options.lifecycle, Usage: "native lifecycle: start, resume, end", Hidden: true},
-			&cli.StringFlag{Name: "session-id", Value: options.sessionID, Destination: &options.sessionID, Usage: "harness session id"},
-			&cli.StringFlag{Name: "session-path", Value: options.sessionPath, Destination: &options.sessionPath, Usage: "harness session file path"},
-			&cli.StringFlag{Name: "cwd", Value: options.cwd, Destination: &options.cwd, Usage: "agent current working directory"},
-			&cli.StringFlag{Name: "project-root", Value: options.projectRoot, Destination: &options.projectRoot, Usage: "project root"},
-			&cli.IntFlag{Name: "pid", Value: options.pid, Destination: &options.pid, Usage: "agent process id"},
-			&cli.IntFlag{Name: "ppid", Value: options.ppid, Destination: &options.ppid, Usage: "agent parent process id"},
-			&cli.IntFlag{Name: "process-group-id", Value: options.processGroupID, Destination: &options.processGroupID, Usage: "agent process group id"},
-			&cli.StringFlag{Name: "start-identity", Value: options.startIdentity, Destination: &options.startIdentity, Usage: "process start identity"},
-			&cli.StringFlag{Name: "executable", Value: options.executable, Destination: &options.executable, Usage: "resolved executable path"},
-			&cli.StringFlag{Name: "tty", Value: options.tty, Destination: &options.tty, Usage: "agent tty"},
-			&cli.StringFlag{Name: "event", Value: options.event, Destination: &options.event, Usage: "native harness event name"},
-			&cli.StringFlag{Name: "observed-at", Value: options.observedAt, Destination: &options.observedAt, Usage: "RFC3339 timestamp"},
-			&cli.StringFlag{Name: "sequence", Value: options.sequence, Destination: &options.sequence, Usage: "strictly increasing integration report sequence"},
-			&cli.StringSliceFlag{Name: "attribute", Destination: &options.attributes, Usage: "extra key=value attribute"},
-			&cli.StringSliceFlag{Name: "resume-command", Destination: &options.resumeCommand, Usage: "resume command argv item, repeatable"},
-			&cli.StringFlag{Name: "evidence", Value: options.evidence, Destination: &options.evidence, Usage: "evidence kind (managed shims)", Hidden: true},
-			&cli.BoolFlag{Name: "raw-stdin", Destination: &options.rawStdin, Usage: "store stdin as raw hook payload"},
-			&cli.BoolFlag{Name: "raw-stdin-defaults-only", Destination: &options.rawDefaultsOnly, Usage: "read stdin for defaults without storing raw payload"},
-			&cli.BoolFlag{Name: "no-tmux", Destination: &options.noTmux, Usage: "do not collect tmux context"},
-			&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Destination: &options.quiet, Usage: "suppress human-readable output"},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			args := cmd.Args().Slice()
-			if len(args) > 1 {
-				return unexpectedArgsError(args[1:])
-			}
+	cmd := &cobra.Command{
+		Use:           "report [harness]",
+		Short:         "Record a harness observation",
+		Hidden:        true,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				if options.harness != "" {
-					return fmt.Errorf("%w: harness already set", errUnexpectedReportArg)
+					return exitCode(fmt.Errorf("%w: harness already set", errUnexpectedReportArg), exitCodeUsage)
 				}
 				options.harness = args[0]
 			}
-			if cmd.IsSet("cwd") {
+			if cmd.Flags().Changed("cwd") {
 				options.cwdAuto = false
 			}
-			if cmd.IsSet("project-root") {
+			if cmd.Flags().Changed("project-root") {
 				options.projectRootAuto = false
 			}
 			stdin := app.stdin
 			if stdin == nil {
 				stdin = os.Stdin
 			}
-			return app.runReport(ctx, stdin, options)
+			return app.runReport(cmd.Context(), stdin, options)
 		},
 	}
+	f := cmd.Flags()
+	f.StringVar(&options.presence, "presence", options.presence, "presence: `<val>` (live, gone, unknown)")
+	f.StringVar(&options.activity, "activity", options.activity, "reported activity hint: `<val>` (running, waiting, idle, unknown)")
+	f.StringVar(&options.lifecycle, "lifecycle", options.lifecycle, "native lifecycle: `<val>` (start, resume, end)")
+	_ = f.MarkHidden("lifecycle")
+	f.StringVar(&options.sessionID, "session-id", options.sessionID, "harness session `<id>`")
+	f.StringVar(&options.sessionPath, "session-path", options.sessionPath, "harness session file `<path>`")
+	f.StringVar(&options.cwd, "cwd", options.cwd, "agent current working `<dir>`")
+	f.StringVar(&options.projectRoot, "project-root", options.projectRoot, "project `<root>`")
+	f.IntVar(&options.pid, "pid", options.pid, "agent process `<id>`")
+	f.IntVar(&options.ppid, "ppid", options.ppid, "agent parent process `<id>`")
+	f.IntVar(&options.processGroupID, "process-group-id", options.processGroupID, "agent process group `<id>`")
+	f.StringVar(&options.startIdentity, "start-identity", options.startIdentity, "process start `<identity>`")
+	f.StringVar(&options.executable, "executable", options.executable, "resolved executable `<path>`")
+	f.StringVar(&options.tty, "tty", options.tty, "agent `<tty>`")
+	f.StringVar(&options.event, "event", options.event, "native harness event `<name>`")
+	f.StringVar(&options.observedAt, "observed-at", options.observedAt, "RFC3339 `<timestamp>`")
+	f.StringVar(&options.sequence, "sequence", options.sequence, "strictly increasing integration report `<seq>`")
+	f.StringArrayVar(&options.attributes, "attribute", nil, "extra `<key=value>` attribute")
+	f.StringArrayVar(&options.resumeCommand, "resume-command", nil, "resume command argv `<item>`, repeatable")
+	f.StringVar(&options.evidence, "evidence", options.evidence, "evidence `<kind>` (managed shims)")
+	f.BoolVar(&options.rawStdin, "raw-stdin", false, "store stdin as raw hook payload")
+	f.BoolVar(&options.rawDefaultsOnly, "raw-stdin-defaults-only", false, "read stdin for defaults without storing raw payload")
+	f.BoolVar(&options.noTmux, "no-tmux", false, "do not collect tmux context")
+	_ = f.MarkHidden("evidence")
+	f.BoolVarP(&options.quiet, "quiet", "q", false, "suppress human-readable output")
+	return cmd
 }
 
 func defaultReportOptionsFromEnv() reportOptions {
@@ -557,18 +561,18 @@ func (app *application) runReport(ctx context.Context, stdin io.Reader, options 
 //nolint:gocognit,cyclop,nestif // report preparation validates independent evidence dimensions in order
 func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntimeContext) (preparedReport, error) {
 	if options.rawStdin && options.rawDefaultsOnly {
-		return preparedReport{}, errConflictingReportStdin
+		return preparedReport{}, exitCode(errConflictingReportStdin, exitCodeUsage)
 	}
 	if strings.TrimSpace(options.harness) == "" {
-		return preparedReport{}, errMissingReportHarness
+		return preparedReport{}, exitCode(errMissingReportHarness, exitCodeUsage)
 	}
 	harness, err := harnesspkg.Normalize(options.harness)
 	if err != nil {
-		return preparedReport{}, fmt.Errorf("normalizing harness: %w", err)
+		return preparedReport{}, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
 	}
 	attrs, err := parseAttributes(options.attributes)
 	if err != nil {
-		return preparedReport{}, err
+		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
 	rawPayload, defaultsPayload, err := readStdinPayloadData(stdin, options.rawStdin, options.rawDefaultsOnly)
 	if err != nil {
@@ -586,25 +590,25 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	applyNativeLifecycleDefaults(&options, attrs)
 	presence, err := registry.NormalizePresence(options.presence)
 	if err != nil {
-		return preparedReport{}, fmt.Errorf("normalize presence: %w", err)
+		return preparedReport{}, exitCode(fmt.Errorf("normalize presence: %w", err), exitCodeUsage)
 	}
 	activity, err := registry.NormalizeActivity(options.activity)
 	if err != nil {
-		return preparedReport{}, fmt.Errorf("normalize activity: %w", err)
+		return preparedReport{}, exitCode(fmt.Errorf("normalize activity: %w", err), exitCodeUsage)
 	}
 	if presence == registry.PresenceGone && activity != "" {
-		return preparedReport{}, errGonePresenceActivity
+		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
 	lifecycle, err := normalizeReportLifecycle(options.lifecycle)
 	if err != nil {
-		return preparedReport{}, err
+		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
 	if lifecycle == registry.NativeLifecycleEnd && activity != "" {
-		return preparedReport{}, errGonePresenceActivity
+		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
 	observedAt, err := parseObservedAt(options.observedAt)
 	if err != nil {
-		return preparedReport{}, err
+		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
 	if observedAt.IsZero() {
 		observedAt = runtime.defaultObservedAt
@@ -614,26 +618,26 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	}
 	sequence, sequenceSet, err := parseReportSequence(options.sequence)
 	if err != nil {
-		return preparedReport{}, err
+		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
 	if presence == "" && activity == "" && lifecycle == "" && options.event == "" && options.sessionID == "" && options.sessionPath == "" {
-		return preparedReport{}, errMissingReportIdentity
+		return preparedReport{}, exitCode(errMissingReportIdentity, exitCodeUsage)
 	}
 	identity := registry.ObservationIdentity{SessionID: options.sessionID, SessionPath: options.sessionPath}
 	var observation registry.Observation
 	if strings.EqualFold(options.evidence, "process") {
 		if options.pid <= 0 {
-			return preparedReport{}, errProcessEvidenceIdentity
+			return preparedReport{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
 		}
 		if activity != "" {
-			return preparedReport{}, errProcessEvidenceActivity
+			return preparedReport{}, exitCode(errProcessEvidenceActivity, exitCodeUsage)
 		}
 		if sequenceSet {
-			return preparedReport{}, errProcessEvidenceSequence
+			return preparedReport{}, exitCode(errProcessEvidenceSequence, exitCodeUsage)
 		}
 		process := processEvidenceIdentity(options, runtime.processes)
 		if process == nil || !process.Complete() {
-			return preparedReport{}, errProcessEvidenceIdentity
+			return preparedReport{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
 		}
 		present := presence != registry.PresenceGone
 		observation = registry.Observation{
@@ -966,62 +970,63 @@ func psProcessArgs(ctx context.Context, pid int) []string {
 	return strings.Fields(strings.TrimSpace(string(out)))
 }
 
-func (app *application) newListCommand() *cli.Command {
+func (app *application) newListCommand() *cobra.Command {
 	o := listOptions{}
-	return &cli.Command{
-		Name:     listCommandName,
-		Usage:    "Show known sessions",
-		Category: "Sessions",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "agent", Destination: &o.harness, Usage: "Filter by agent `name`"},
-			&cli.StringFlag{Name: "presence", Destination: &o.presence, Usage: "Filter by presence (live, gone, unknown, all)"},
-			&cli.StringFlag{Name: "activity", Destination: &o.activity, Usage: "Filter by reported activity (running, waiting, idle, unknown)"},
-			&cli.StringFlag{Name: "tmux-session", Destination: &o.tmuxSession, Usage: "Filter by tmux session `name`"},
-			&cli.StringFlag{Name: "multiplexer-session", Destination: &o.multiplexerSession, Usage: "Filter by multiplexer session `name`"},
-			&cli.StringFlag{Name: "sort", Destination: &o.sortBy, Usage: "Sort by: updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed"},
-			&cli.BoolFlag{Name: "summary", Destination: &o.summary, Usage: "summarize agent counts by multiplexer session"},
-			&cli.BoolFlag{Name: "absolute-time", Destination: &o.absoluteTime, Usage: "show full timestamps"},
-			&cli.BoolFlag{Name: "desc", Destination: &o.desc, Usage: "sort descending"},
-			&cli.BoolFlag{Name: "full", Destination: &o.full, Usage: "show complete values using an adaptive layout"},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return unexpectedArgsError(cmd.Args().Slice())
-			}
+	cmd := &cobra.Command{
+		Use:           listCommandName,
+		Short:         "Show known sessions",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
 			}
-			applyListConfig(&o, cmd, cfg)
-			return app.runList(ctx, o)
+			applyListConfig(&o, c, cfg)
+			return app.runList(c.Context(), o)
 		},
 	}
+	f := cmd.Flags()
+	f.StringVar(&o.harness, "agent", "", "filter by agent `<name>`")
+	f.StringVar(&o.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
+	f.StringVar(&o.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
+	f.StringVar(&o.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
+	f.StringVar(&o.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
+	f.StringVar(&o.sortBy, "sort", "", "sort by: `<field>` (updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed)")
+	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
+	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
+	f.BoolVar(&o.desc, "desc", false, "sort descending")
+	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
+	return cmd
 }
 
-func applyListConfig(o *listOptions, cmd *cli.Command, cfg config.Config) {
-	if !cmd.IsSet("presence") && cfg.UI.DefaultPresence != "" {
+func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
+	f := cmd.Flags()
+	if !f.Changed("presence") && cfg.UI.DefaultPresence != "" {
 		o.presence = cfg.UI.DefaultPresence
 	}
-	o.sortSet = cmd.IsSet("sort")
-	if !o.sortSet && cfg.UI.Sort != "" {
+	if !f.Changed("sort") && cfg.UI.Sort != "" {
 		o.sortBy = cfg.UI.Sort
 	}
-	o.descSet = cmd.IsSet("desc")
-	if !o.descSet && cfg.UI.SortDesc != nil {
+	o.sortSet = f.Changed("sort")
+	if !f.Changed("desc") && cfg.UI.SortDesc != nil {
 		o.desc = *cfg.UI.SortDesc
 	}
-	o.absoluteSet = cmd.IsSet("absolute-time")
-	if !o.absoluteSet {
+	o.descSet = f.Changed("desc")
+	if !f.Changed("absolute-time") {
 		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
 			cfg.UI.TimeFormat == "absolute" || cfg.UI.TimeFormat == "iso8601" {
 			o.absoluteTime = true
 		}
+	} else {
+		o.absoluteSet = f.Changed("absolute-time")
 	}
 }
 
 func (app *application) runList(ctx context.Context, o listOptions) error {
 	if err := app.validateListOptions(o); err != nil {
-		return err
+		return exitCode(err, exitCodeUsage)
 	}
 	if o.summary {
 		return app.runListSummary(ctx, o)
@@ -1073,11 +1078,11 @@ func (app *application) runListSessions(ctx context.Context, o listOptions) erro
 	var err error
 	o, err = normalizedListOptions(o)
 	if err != nil {
-		return err
+		return exitCode(err, exitCodeUsage)
 	}
 	f, e := buildFilter(o)
 	if e != nil {
-		return e
+		return exitCode(e, exitCodeUsage)
 	}
 	ss, e := app.registryStore().List(ctx, f)
 	if e != nil {
@@ -1085,7 +1090,7 @@ func (app *application) runListSessions(ctx context.Context, o listOptions) erro
 	}
 	ss = applyConfigFilter(ss, app.cfg.Filter, o.harness)
 	if e = sortListSessions(ss, o); e != nil {
-		return e
+		return exitCode(e, exitCodeUsage)
 	}
 	if app.outputJSON {
 		return app.writeJSON(ss)
@@ -1458,7 +1463,7 @@ func formatSessionPathLabel(path string) string {
 func (app *application) runListSummary(ctx context.Context, o listOptions) error {
 	f, e := buildFilter(o)
 	if e != nil {
-		return e
+		return exitCode(e, exitCodeUsage)
 	}
 	s, e := app.registryStore().SummaryByTmuxSession(ctx, f)
 	if e != nil {

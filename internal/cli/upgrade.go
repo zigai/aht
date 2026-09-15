@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"context"
 	"errors"
-	"fmt"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/internal/service"
@@ -17,32 +15,21 @@ type upgradeResult struct {
 	TrackerError string           `json:"tracker_error,omitempty"`
 }
 
-func (app *application) newUpgradeCommand() *cli.Command {
-	binary := defaultInstallBinary()
+func (app *application) newUpgradeCommand() *cobra.Command {
+	var binary string
 	var dryRun bool
-	return &cli.Command{
-		Name:  "upgrade",
-		Usage: "Refresh installed integrations and tracker, preserving settings and running state",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "binary",
-				Value:       binary,
-				Destination: &binary,
-				Usage:       "new aht binary used by integrations and tracker",
-			},
-			&cli.BoolFlag{
-				Name:        "dry-run",
-				Aliases:     []string{"n"},
-				Destination: &dryRun,
-				Usage:       "preview upgrades without writing or restarting",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return unexpectedArgsError(cmd.Args().Slice())
+	command := &cobra.Command{
+		Use:           "upgrade",
+		Short:         "Refresh installed integrations and tracker, preserving settings and running state",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if binary == "" {
+				binary = defaultInstallBinary()
 			}
-			integrations, integrationErr := install.Upgrade(ctx, binary, dryRun)
-			tracker, trackerErr := service.Upgrade(ctx, binary, dryRun)
+			integrations, integrationErr := install.Upgrade(cmd.Context(), binary, dryRun)
+			tracker, trackerErr := service.Upgrade(cmd.Context(), binary, dryRun)
 			if errors.Is(trackerErr, service.ErrUnsupported) {
 				tracker.Message = "unsupported platform; skipped"
 				trackerErr = nil
@@ -62,14 +49,17 @@ func (app *application) newUpgradeCommand() *cli.Command {
 				}
 				message := tracker.Message
 				if trackerErr != nil {
-					message = result.TrackerError
+					message = trackerErr.Error()
 				}
 				writeErr = errors.Join(writeErr, app.writef("tracker: %s\n", message))
 			}
-			if trackerErr != nil {
-				trackerErr = fmt.Errorf("upgrade tracker: %w", trackerErr)
+			if integrationErr != nil || trackerErr != nil {
+				return exitCode(errors.Join(integrationErr, trackerErr, writeErr), exitCodeGeneral)
 			}
 			return errors.Join(integrationErr, trackerErr, writeErr)
 		},
 	}
+	command.Flags().StringVar(&binary, "binary", "", "new AHT binary `<path>` used by integrations and tracker")
+	command.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "preview upgrades without writing or restarting")
+	return command
 }

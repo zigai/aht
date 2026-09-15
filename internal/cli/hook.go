@@ -14,7 +14,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/internal/harness"
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
@@ -35,41 +35,33 @@ type observationSink interface {
 	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
 }
 
-func (app *application) newHookCommand() *cli.Command {
+func (app *application) newHookCommand() *cobra.Command {
 	options := managedHookOptions{}
 
-	return &cli.Command{
-		Name:        hookCommandName,
-		Usage:       "Integration protocol endpoint; not intended for manual use",
-		ArgsUsage:   "<harness>",
-		Description: "Integration protocol endpoint; not intended for manual use. Hook stdout is a JSON protocol response, so --json is required.",
-		Hidden:      true,
-		Commands: []*cli.Command{
-			app.newWireCommand(),
-		},
-		Metadata: map[string]any{
-			helpArgumentsKey: []HelpArg{
-				{Name: "<harness>", Desc: "Target harness for the protocol hook"},
-			},
-		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "event",
-				Destination: &options.event,
-				Usage:       "Native hook event `name`",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() != 1 {
+	cmd := &cobra.Command{
+		Use:           hookCommandName + " <harness>",
+		Short:         "Integration protocol endpoint; not intended for manual use",
+		Long:          "Integration protocol endpoint; not intended for manual use. Hook stdout is a JSON protocol response, so --json is required.",
+		Hidden:        true,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
 				return exitCode(errHookHarnessRequired, exitCodeUsage)
 			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 			stdin := app.stdin
 			if stdin == nil {
 				stdin = os.Stdin
 			}
-			return app.runManagedHook(ctx, stdin, cmd.Args().Get(0), options)
+			return app.runManagedHook(cmd.Context(), stdin, args[0], options)
 		},
 	}
+	cmd.AddCommand(app.newWireCommand())
+	cmd.Flags().StringVar(&options.event, "event", "", "native hook event `<name>`")
+	return cmd
 }
 
 func (app *application) runManagedHook(

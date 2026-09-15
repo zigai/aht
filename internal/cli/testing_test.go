@@ -16,8 +16,15 @@ func runTestCLIWithStdin(ctx context.Context, args []string, stdin io.Reader, st
 		stdout: stdout,
 		stderr: stderr,
 	}
+	//nolint:contextcheck // Command tree is built before ExecuteContext receives the context.
 	cmd := app.newRootCommand()
-	if err := cmd.Run(ctx, append([]string{"aht"}, args...)); err != nil {
+	cmd.SetArgs(args)
+	if stdin != nil {
+		cmd.SetIn(stdin)
+	}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if err := cmd.ExecuteContext(ctx); err != nil {
 		return fmt.Errorf("run test cli: %w", err)
 	}
 	return nil

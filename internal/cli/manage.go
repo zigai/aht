@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
@@ -125,28 +125,20 @@ func (defaultSessionStopSignaler) SendProcessInterrupt(pid int) error {
 	return nil
 }
 
-func (app *application) newRegistryResetCommand() *cli.Command {
-	force := false
-	return &cli.Command{
-		Name:  "reset",
-		Usage: "Reset stored session state",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:        "force",
-				Aliases:     []string{"f"},
-				Destination: &force,
-				Usage:       "confirm destructive state reset",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return unexpectedArgsError(cmd.Args().Slice())
-			}
+func (app *application) newRegistryResetCommand() *cobra.Command {
+	var force bool
+	command := &cobra.Command{
+		Use:           "reset",
+		Short:         "Reset stored session state",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !force {
 				return exitCode(errStateResetForce, exitCodeUsage)
 			}
 			s := app.store()
-			r, e := s.Reset(ctx)
+			r, e := s.Reset(cmd.Context())
 			if e != nil {
 				return fmt.Errorf("resetting store: %w", e)
 			}
@@ -161,6 +153,8 @@ func (app *application) newRegistryResetCommand() *cli.Command {
 			})
 		},
 	}
+	command.Flags().BoolVarP(&force, "force", "f", false, "confirm destructive state reset")
+	return command
 }
 
 func (app *application) resolveStopSessions(ctx context.Context, args []string, all bool) ([]registry.Session, error) {
@@ -178,10 +172,11 @@ func (app *application) resolveStopSessions(ctx context.Context, args []string, 
 		if err != nil {
 			return nil, err
 		}
-		if !seen[session.ID] {
-			seen[session.ID] = true
-			sessions = append(sessions, session)
+		if seen[session.ID] {
+			continue
 		}
+		seen[session.ID] = true
+		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }

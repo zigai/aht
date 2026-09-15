@@ -1,13 +1,15 @@
 package cli
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/harness/kimi"
+	"github.com/zigai/aht/internal/harness"
+	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/pkg/registry"
 )
 
 const wireHelp = `Run an owned Kimi Code process using its native Wire protocol.
@@ -35,54 +37,67 @@ var (
 	errWireRequiresOSStreams   = errors.New("wire requires OS-backed stdin, stdout and stderr; connect the aht executable to your Wire client")
 )
 
-//nolint:cyclop // raw argument parsing, OS stream verification, and process startup
-func (app *application) newWireCommand() *cli.Command {
-	return &cli.Command{
-		Name:            "wire",
-		Usage:           "Connect a native Kimi Wire client with tracked approval waiting",
-		ArgsUsage:       "kimi-code -- [native Kimi options]",
-		Description:     wireHelp,
-		SkipFlagParsing: true,
-		Metadata: map[string]any{
-			helpArgumentsKey: []HelpArg{
-				{Name: "kimi-code", Desc: "Target harness (kimi-code is currently the only supported Wire harness)"},
-				{Name: "--", Desc: "Boundary delimiter separating AHT options from native Kimi options"},
-				{Name: "[options]", Desc: "Native Kimi Code options forwarded to the owned process"},
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			args := cmd.Args().Slice()
-			if len(args) == 1 && (args[0] == "--help" || args[0] == "help") {
-				cli.HelpPrinter(cmd.Root().Writer, "", cmd)
-				return nil
-			}
-			if len(args) == 0 || args[0] != "kimi-code" {
-				return exitCode(errWireUnsupportedHarness, exitCodeUsage)
-			}
-			if len(args) < 2 || args[1] != "--" {
-				return exitCode(errWireMissingDashBoundary, exitCodeUsage)
-			}
-			nativeArgs := args[2:]
-			if err := kimi.ValidateArgs(nativeArgs); err != nil {
-				return exitCode(err, exitCodeUsage)
-			}
-			stdin := app.stdin
-			if stdin == nil {
-				stdin = os.Stdin
-			}
-			inputFile, inputOK := stdin.(*os.File)
-			stdout, outputOK := app.stdout.(*os.File)
-			stderr, errorOK := app.stderr.(*os.File)
-			if !inputOK || !outputOK || !errorOK {
-				return errWireRequiresOSStreams
-			}
-			return kimi.Run(ctx, kimi.Options{
-				Args:      nativeArgs,
-				StorePath: app.resolvedStorePath(),
-				Stdin:     inputFile,
-				Stdout:    stdout,
-				Stderr:    stderr,
-			})
-		},
+func (app *application) newWireCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:           "wire kimi-code -- [native Kimi options]",
+		Short:         "Connect a native Kimi Wire client with tracked approval waiting",
+		Long:          wireHelp,
+		Hidden:        true,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          app.validateWireArgs,
+		RunE:          app.runWire,
 	}
+}
+
+func (app *application) validateWireArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
+	}
+	harnessID, err := harnesscatalog.Normalize(args[0])
+	if err != nil || harnessID != registry.HarnessKimiCode {
+		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
+	}
+	if cmd.ArgsLenAtDash() != 1 {
+		return exitCode(errWireMissingDashBoundary, exitCodeUsage)
+	}
+	runner, ok := harnesscatalog.WireRunnerFor(harnessID)
+	if !ok {
+		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
+	}
+	if err := runner.ValidateWireArgs(args[1:]); err != nil {
+		return exitCode(err, exitCodeUsage)
+	}
+	return nil
+}
+
+func (app *application) runWire(cmd *cobra.Command, args []string) error {
+	stdin := app.stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	inputFile, inputOK := stdin.(*os.File)
+	stdout, outputOK := app.stdout.(*os.File)
+	stderr, errorOK := app.stderr.(*os.File)
+	if !inputOK || !outputOK || !errorOK {
+		return errWireRequiresOSStreams
+	}
+	harnessID, err := harnesscatalog.Normalize(args[0])
+	if err != nil {
+		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
+	}
+	runner, ok := harnesscatalog.WireRunnerFor(harnessID)
+	if !ok {
+		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
+	}
+	if err := runner.RunWire(cmd.Context(), harness.WireOptions{
+		Args:      args[1:],
+		StorePath: app.resolvedStorePath(),
+		Stdin:     inputFile,
+		Stdout:    stdout,
+		Stderr:    stderr,
+	}); err != nil {
+		return fmt.Errorf("run wire: %w", err)
+	}
+	return nil
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/internal/brokerserver"
 	"github.com/zigai/aht/internal/config"
@@ -51,52 +51,17 @@ type serviceOptions struct {
 	dryRun          bool
 }
 
-func (app *application) newTrackerRunCommand() *cli.Command {
+func (app *application) newTrackerRunCommand() *cobra.Command {
 	o := observeOptions{interval: observeDefaultInterval}
 	var autoClean bool
 	screenInspection := true
-	return &cli.Command{
-		Name:  "run",
-		Usage: "Observe agent processes and native sessions",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:        "once",
-				Destination: &o.once,
-				Usage:       "run one reconciliation cycle",
-			},
-			&cli.DurationFlag{
-				Name:        "interval",
-				Value:       o.interval,
-				Destination: &o.interval,
-				Usage:       "Reconciliation `duration`",
-			},
-			&cli.DurationFlag{
-				Name:        "grace-period",
-				Destination: &o.grace,
-				Usage:       "Absence grace `duration`",
-			},
-			&cli.BoolFlag{
-				Name:        "quiet",
-				Aliases:     []string{"q"},
-				Destination: &o.quiet,
-				Usage:       "suppress human cycle output and diagnostics",
-			},
-			&cli.BoolFlag{
-				Name:        "auto-clean",
-				Destination: &autoClean,
-				Usage:       "automatically clean expired gone sessions",
-			},
-			&cli.BoolFlag{
-				Name:        "screen-inspection",
-				Value:       true,
-				Destination: &screenInspection,
-				Usage:       "enable terminal multiplexer screen inspection",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if cmd.NArg() > 0 {
-				return unexpectedArgsError(cmd.Args().Slice())
-			}
+	command := &cobra.Command{
+		Use:           "run",
+		Short:         "Observe agent processes and native sessions",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -104,11 +69,11 @@ func (app *application) newTrackerRunCommand() *cli.Command {
 			if err := applyTrackerConfig(&o, cmd, cfg); err != nil {
 				return err
 			}
-			if cmd.IsSet("auto-clean") {
+			if cmd.Flags().Changed("auto-clean") {
 				o.autoClean = autoClean
 			}
 			disableScreenInspection := cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection
-			if cmd.IsSet("screen-inspection") {
+			if cmd.Flags().Changed("screen-inspection") {
 				disableScreenInspection = !screenInspection
 			}
 			if o.interval <= 0 {
@@ -128,7 +93,7 @@ func (app *application) newTrackerRunCommand() *cli.Command {
 					DisableScreenInspection: disableScreenInspection,
 				})
 				o.store = app.store()
-				return app.runObserver(ctx, o, watcher)
+				return app.runObserver(cmd.Context(), o, watcher)
 			}
 
 			store, err := registry.OpenMemoryStore(app.resolvedStorePath())
@@ -150,34 +115,42 @@ func (app *application) newTrackerRunCommand() *cli.Command {
 				SocketPath: broker.SocketPath(store.Path()),
 			})
 			o.store = store
-			return app.runRealtimeObserver(ctx, o, watcher, store, server)
+			return app.runRealtimeObserver(cmd.Context(), o, watcher, store, server)
 		},
 	}
+	flags := command.Flags()
+	flags.BoolVar(&o.once, "once", false, "run one reconciliation cycle")
+	flags.DurationVar(&o.interval, "interval", o.interval, "reconciliation `<duration>`")
+	flags.DurationVar(&o.grace, "grace-period", o.grace, "absence grace `<duration>`")
+	flags.BoolVarP(&o.quiet, "quiet", "q", false, "suppress human cycle output and diagnostics")
+	flags.BoolVar(&autoClean, "auto-clean", false, "automatically clean expired gone sessions")
+	flags.BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
+	return command
 }
 
-func applyTrackerConfig(o *observeOptions, cmd *cli.Command, cfg config.Config) error {
+func applyTrackerConfig(o *observeOptions, cmd *cobra.Command, cfg config.Config) error {
 	if err := applyTrackerIntervals(o, cmd, cfg); err != nil {
 		return err
 	}
-	if !cmd.IsSet("quiet") && cfg.Tracker.Quiet != nil {
+	if !cmd.Flags().Changed("quiet") && cfg.Tracker.Quiet != nil {
 		o.quiet = *cfg.Tracker.Quiet
 	}
 	applyTrackerAutoClean(o, cfg)
 	return nil
 }
 
-func applyTrackerIntervals(o *observeOptions, cmd *cli.Command, cfg config.Config) error {
-	if !cmd.IsSet("interval") && cfg.Tracker.Interval != "" {
+func applyTrackerIntervals(o *observeOptions, cmd *cobra.Command, cfg config.Config) error {
+	if !cmd.Flags().Changed("interval") && cfg.Tracker.Interval != "" {
 		d, err := config.ParseDuration(cfg.Tracker.Interval)
 		if err != nil {
-			return fmt.Errorf("parsing tracker interval: %w", err)
+			return exitCode(fmt.Errorf("parsing tracker interval: %w", err), exitCodeUsage)
 		}
 		o.interval = d
 	}
-	if !cmd.IsSet("grace-period") && cfg.Tracker.GracePeriod != "" {
+	if !cmd.Flags().Changed("grace-period") && cfg.Tracker.GracePeriod != "" {
 		d, err := config.ParseDuration(cfg.Tracker.GracePeriod)
 		if err != nil {
-			return fmt.Errorf("parsing tracker grace period: %w", err)
+			return exitCode(fmt.Errorf("parsing tracker grace period: %w", err), exitCodeUsage)
 		}
 		o.grace = d
 	}
@@ -341,16 +314,19 @@ func runServiceOperation(ctx context.Context, operation string, options service.
 }
 
 func (app *application) parseServiceOptions(options serviceOptions) (service.Options, error) {
+	if options.binary == "" {
+		options.binary = defaultInstallBinary()
+	}
 	if options.interval <= 0 {
-		return service.Options{}, errInvalidObserveInterval
+		return service.Options{}, exitCode(errInvalidObserveInterval, exitCodeUsage)
 	}
 	if options.grace < 0 {
-		return service.Options{}, errInvalidObserveGracePeriod
+		return service.Options{}, exitCode(errInvalidObserveGracePeriod, exitCodeUsage)
 	}
 	return service.Options{Binary: options.binary, StorePath: app.resolvedStorePath(), Interval: options.interval, GracePeriod: options.grace, DryRun: options.dryRun}, nil
 }
 
-func (app *application) configuredServiceOptions(cmd *cli.Command, options serviceOptions) (service.Options, error) {
+func (app *application) configuredServiceOptions(cmd *cobra.Command, options serviceOptions) (service.Options, error) {
 	cfg, err := app.loadConfig()
 	if err != nil {
 		return service.Options{}, err

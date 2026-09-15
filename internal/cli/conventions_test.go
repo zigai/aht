@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/internal/config"
 	"github.com/zigai/aht/pkg/registry"
@@ -67,23 +67,17 @@ func TestListSummaryAcceptsDefaultSortingConfig(t *testing.T) {
 
 func TestServiceOptionsUseConfigAndExplicitOverrides(t *testing.T) {
 	app := &application{cfgLoaded: true, cfg: config.Config{Tracker: config.TrackerConfig{Interval: "2s", GracePeriod: "5s"}}}
-	cmd := &cli.Command{
-		Flags: []cli.Flag{
-			&cli.DurationFlag{Name: "interval", Value: time.Second},
-		},
-	}
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("interval", time.Second, "")
 	options := serviceOptions{binary: "/aht", interval: time.Second}
 	got, err := app.configuredServiceOptions(cmd, options)
 	if err != nil || got.Interval != 2*time.Second || got.GracePeriod != 5*time.Second {
 		t.Fatalf("configured service = %#v, %v", got, err)
 	}
 
-	cmd2 := &cli.Command{
-		Flags: []cli.Flag{
-			&cli.DurationFlag{Name: "interval", Value: time.Second},
-		},
-	}
-	_ = cmd2.Run(t.Context(), []string{"test", "--interval", "1s"})
+	cmd2 := &cobra.Command{}
+	cmd2.Flags().Duration("interval", time.Second, "")
+	_ = cmd2.Flags().Set("interval", "1s")
 	got, err = app.configuredServiceOptions(cmd2, options)
 	if err != nil || got.Interval != time.Second || got.GracePeriod != 5*time.Second {
 		t.Fatalf("overridden service = %#v, %v", got, err)
@@ -209,6 +203,144 @@ func TestSummaryIncludesFailureStatesAndServerIdentity(t *testing.T) {
 	for _, value := range []string{"server-one", "$0", "Failed", "Interrupted", "2", "3"} {
 		if !strings.Contains(stdout.String(), value) {
 			t.Errorf("summary missing %q: %q", value, stdout.String())
+		}
+	}
+}
+
+func TestHelpFlagInvariantAcrossAllCommands(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"-h"},
+		{"manage", "-h"},
+		{"completion", "-h"},
+		{"completion", "bash", "-h"},
+		{"help", "-h"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != exitCodeUsage {
+				t.Fatalf("%v exit code = %d, want %d", args, code, exitCodeUsage)
+			}
+			if !strings.Contains(stderr.String(), "unknown shorthand flag: 'h' in -h") {
+				t.Fatalf("%v stderr = %q, want unknown shorthand error", args, stderr.String())
+			}
+		})
+	}
+}
+
+func assertOrderedSubcommands(t *testing.T, helpText string, commands ...string) {
+	t.Helper()
+	lastIdx := -1
+	for _, cmd := range commands {
+		idx := strings.Index(helpText, "  "+cmd+" ")
+		if idx == -1 || idx <= lastIdx {
+			t.Fatalf("subcommands not ordered by operational frequency (failed at %q):\n%s", cmd, helpText)
+		}
+		lastIdx = idx
+	}
+}
+
+func TestSubcommandOrdering(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	code := executeCLI(context.Background(), []string{"--help"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("root --help code = %d", code)
+	}
+	assertOrderedSubcommands(t, stdout.String(), "list", "watch", "info", "stop", "manage")
+
+	stdout.Reset()
+	code = executeCLI(context.Background(), []string{"manage", "--help"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("manage --help code = %d", code)
+	}
+	assertOrderedSubcommands(t, stdout.String(), "setup", "upgrade", "integrations", "tracker", "state", "doctor", "config")
+}
+
+func TestZeroArgParentCommandsExitUsage(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{},
+		{"manage"},
+		{"manage", "integrations"},
+		{"manage", "tracker"},
+		{"manage", "state"},
+		{"manage", "config"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != exitCodeUsage {
+				t.Fatalf("%v exit code = %d, want %d", args, code, exitCodeUsage)
+			}
+			helpOutput := stdout.String() + stderr.String()
+			if !strings.Contains(helpOutput, "Usage:") {
+				t.Fatalf("%v omitted usage/help output:\n%s", args, helpOutput)
+			}
+		})
+	}
+}
+
+func TestDynamicBinaryPathNotLeakedInHelp(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"manage", "tracker", "enable", "--help"},
+		{"manage", "setup", "--help"},
+		{"manage", "upgrade", "--help"},
+		{"manage", "integrations", "install", "--help"},
+		{"manage", "integrations", "status", "--help"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("%v exit code = %d", args, code)
+			}
+			if strings.Contains(stdout.String(), `(default "/`) {
+				t.Fatalf("%v leaked machine binary path in help:\n%s", args, stdout.String())
+			}
+		})
+	}
+}
+
+func TestReportValidationErrorsExitUsage(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"report"},
+		{"report", "codex", "--presence", "invalid"},
+		{"report", "codex", "--activity", "invalid"},
+		{"report", "codex", "--raw-stdin", "--raw-stdin-defaults-only"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != exitCodeUsage {
+				t.Fatalf("%v exit code = %d, want %d", args, code, exitCodeUsage)
+			}
+			if stderr.Len() == 0 {
+				t.Fatalf("%v omitted stderr diagnostic", args)
+			}
+		})
+	}
+}
+
+func TestReportFlagsHaveMetavariablePlaceholders(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	code := executeCLI(context.Background(), []string{"report", "--help"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("report --help code = %d", code)
+	}
+	help := stdout.String()
+	for _, forbidden := range []string{"--presence string", "--activity string", "--cwd string", "--pid int", "--attribute stringArray"} {
+		if strings.Contains(help, forbidden) {
+			t.Fatalf("report --help contains bare Go type placeholder %q:\n%s", forbidden, help)
+		}
+	}
+	for _, required := range []string{"--presence <val>", "--activity <val>", "--cwd <dir>", "--pid <id>", "--attribute <key=value>"} {
+		if !strings.Contains(help, required) {
+			t.Fatalf("report --help missing metavariable placeholder %q:\n%s", required, help)
 		}
 	}
 }
