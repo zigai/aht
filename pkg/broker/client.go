@@ -94,7 +94,9 @@ func (c *Client) ObserveBatch(
 	if err != nil {
 		return nil, err
 	}
-
+	if response.Sessions == nil {
+		return []registry.Session{}, nil
+	}
 	return response.Sessions, nil
 }
 
@@ -106,7 +108,9 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 	if err != nil {
 		return nil, err
 	}
-
+	if response.Sessions == nil {
+		return []registry.Session{}, nil
+	}
 	return response.Sessions, nil
 }
 
@@ -133,7 +137,9 @@ func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registr
 	if err != nil {
 		return nil, err
 	}
-
+	if response.Summaries == nil {
+		return []registry.Summary{}, nil
+	}
 	return response.Summaries, nil
 }
 
@@ -227,8 +233,11 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	return &Subscription{Snapshots: snapshots, Errors: errorsChannel, cancel: cancel, done: done}, nil
 }
 
-// IsUnavailable reports whether err means no broker accepted the connection.
-func IsUnavailable(err error) bool { return errors.Is(err, ErrUnavailable) }
+// IsUnavailable reports whether err means no broker accepted the connection or
+// the broker closed it before delivering a response.
+func IsUnavailable(err error) bool {
+	return errors.Is(err, ErrUnavailable) || errors.Is(err, io.EOF)
+}
 
 func runSubscription(
 	ctx context.Context,
