@@ -69,7 +69,7 @@ func readLinuxServerProcess(pid int, uid uint32) (*ServerProcess, error) {
 	}
 	args := strings.Split(trimmed, "\x00")
 	commData, commErr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-	if commErr == nil && strings.HasPrefix(strings.TrimSpace(string(commData)), "tmux: server") {
+	if commErr == nil && isTmuxServerComm(strings.TrimSpace(string(commData))) {
 		return &ServerProcess{PID: pid, Args: args}, nil
 	}
 	if !isTmuxServerArgs(args) {
@@ -87,12 +87,22 @@ func isTmuxServerArgs(args []string) bool {
 		if strings.HasPrefix(base, "tmux: server") {
 			return true
 		}
-		if index != 0 || (base != "tmux" && base != "tmux:") {
+		if index != 0 || !isTmuxBinaryName(base) {
 			continue
 		}
-		if slices.Contains(args[1:], "server") {
+		if slices.Contains(args[1:], "server") || slices.Contains(args[1:], "-D") || slices.Contains(args[1:], "-d") {
 			return true
 		}
+	}
+	return false
+}
+
+func isTmuxServerComm(comm string) bool {
+	if strings.HasPrefix(comm, "tmux: server") {
+		return true
+	}
+	if strings.HasPrefix(comm, "tmux") && (strings.Contains(comm, "serve") || strings.HasSuffix(comm, ":")) {
+		return true
 	}
 	return false
 }

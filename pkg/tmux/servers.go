@@ -50,7 +50,7 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 		return serverSpec{Identity: "", Args: nil}, false
 	}
 	base := filepath.Base(args[0])
-	if base != "tmux" && base != "tmux:" && !strings.HasPrefix(base, "tmux: server") {
+	if !isTmuxBinaryName(base) {
 		return serverSpec{Identity: "", Args: nil}, false
 	}
 	for index, arg := range args {
@@ -70,4 +70,13 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 		}
 	}
 	return serverSpec{Identity: "default", Args: nil}, true
+}
+
+func isTmuxBinaryName(name string) bool {
+	base := filepath.Base(name)
+	if base == "tmux" || base == "tmux:" || strings.HasPrefix(base, "tmux: server") {
+		return true
+	}
+	clean := strings.TrimSuffix(strings.TrimSuffix(base, ".bin"), ".real")
+	return clean == "tmux" || clean == "tmux:"
 }

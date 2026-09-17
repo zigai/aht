@@ -41,3 +41,31 @@ func TestParseDarwinProcArgsRejectsTruncation(t *testing.T) {
 		t.Fatalf("truncated arguments error = %v", err)
 	}
 }
+
+func TestServerSpecFromArgsSupportsBinarySuffixAndFlags(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name         string
+		args         []string
+		wantOK       bool
+		wantIdentity string
+	}{
+		{name: "tmux daemon flag", args: []string{"/home/user/.local/bin/tmux.bin", "-D"}, wantOK: true, wantIdentity: "default"},
+		{name: "tmux named socket", args: []string{"/usr/bin/tmux", "-L", "popup"}, wantOK: true, wantIdentity: "-L:popup"},
+		{name: "tmux.bin custom socket", args: []string{"/usr/local/bin/tmux.bin", "-S", "/tmp/custom.sock"}, wantOK: true, wantIdentity: "/tmp/custom.sock"},
+		{name: "tmux.real binary", args: []string{"/usr/bin/tmux.real", "-d"}, wantOK: true, wantIdentity: "default"},
+		{name: "unrelated binary", args: []string{"/usr/bin/bash", "-c", "echo"}, wantOK: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server, ok := serverSpecFromArgs(tc.args)
+			if ok != tc.wantOK {
+				t.Fatalf("serverSpecFromArgs(%v) ok = %t, want %t", tc.args, ok, tc.wantOK)
+			}
+			if ok && server.Identity != tc.wantIdentity {
+				t.Fatalf("serverSpecFromArgs(%v) identity = %q, want %q", tc.args, server.Identity, tc.wantIdentity)
+			}
+		})
+	}
+}
