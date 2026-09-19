@@ -164,14 +164,21 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 	return session, nil
 }
 
-// SummaryByTmuxSession returns summaries computed from one in-memory snapshot.
-func (s *MemoryStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
+// SummaryWithOptions returns summaries computed from one in-memory snapshot with options.
+func (s *MemoryStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
+	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
+	}
 	sessions, err := s.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
+	return SummariesWithOptions(sessions, opts), nil
+}
 
-	return summariesForSessions(sessions), nil
+// SummaryByTmuxSession returns summaries computed from one in-memory snapshot.
+func (s *MemoryStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
 }
 
 // GC removes expired gone-session tombstones from memory.

@@ -30,3 +30,19 @@ func ExampleClient_List() {
 	}
 	// Output: AHT broker is offline
 }
+
+func ExampleClient_Wait() {
+	client := aht.New(aht.Config{
+		SocketPath: filepath.Join("/nonexistent", "offline.sock"),
+		Mode:       aht.ModeRealtimeOnly,
+	})
+
+	_, err := client.Wait(context.Background(), aht.WaitOptions{
+		ID:       "session-id",
+		Activity: aht.ActivityIdle,
+	})
+	if aht.IsUnavailable(err) {
+		fmt.Println("AHT broker is offline")
+	}
+	// Output: AHT broker is offline
+}

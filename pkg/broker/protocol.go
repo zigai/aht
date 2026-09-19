@@ -36,14 +36,15 @@ var (
 // Request is one broker RPC. Subscribe keeps the connection open after the
 // initial response and streams Snapshot frames.
 type Request struct {
-	Version      int                    `json:"version"`
-	ID           string                 `json:"id,omitempty"`
-	Method       string                 `json:"method"`
-	Observation  *registry.Observation  `json:"observation,omitempty"`
-	Observations []registry.Observation `json:"observations,omitempty"`
-	Filter       registry.Filter        `json:"filter,omitzero"`
-	SessionID    string                 `json:"session_id,omitempty"`
-	DeleteAfter  time.Duration          `json:"delete_after,omitempty"`
+	Version        int                     `json:"version"`
+	ID             string                  `json:"id,omitempty"`
+	Method         string                  `json:"method"`
+	Observation    *registry.Observation   `json:"observation,omitempty"`
+	Observations   []registry.Observation  `json:"observations,omitempty"`
+	Filter         registry.Filter         `json:"filter,omitzero"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	DeleteAfter    time.Duration           `json:"delete_after,omitempty"`
+	SummaryOptions registry.SummaryOptions `json:"summary_options,omitzero"`
 }
 
 // Response is one broker result or subscription frame.

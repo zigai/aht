@@ -206,3 +206,143 @@ func shortStatePath() (string, error) {
 	}
 	return path, nil
 }
+
+func TestClientSummaryModesParity(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	storePath, err := shortStatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(storePath) })
+	socketPath := broker.SocketPath(storePath)
+
+	fileStore := registry.NewFileStore(storePath)
+	running := registry.ActivityRunning
+
+	obs1 := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessClaude,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
+		Presence:   new(registry.PresenceLive),
+		Activity:   &running,
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/a"},
+		Tmux:       &registry.TmuxContext{SessionName: "alpha"},
+		ObservedAt: time.Now().UTC(),
+	}
+	obs2 := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessCodex,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-2"},
+		Presence:   new(registry.PresenceLive),
+		Activity:   &running,
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/b"},
+		Tmux:       &registry.TmuxContext{SessionName: "beta"},
+		ObservedAt: time.Now().UTC(),
+	}
+	obs3 := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessClaude,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-3"},
+		Presence:   new(registry.PresenceGone),
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/a"},
+		Tmux:       &registry.TmuxContext{SessionName: "alpha"},
+		ObservedAt: time.Now().UTC(),
+	}
+
+	if _, err := fileStore.ObserveBatch(ctx, []registry.Observation{obs1, obs2, obs3}); err != nil {
+		t.Fatal(err)
+	}
+
+	memStore, err := registry.OpenMemoryStore(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ready := make(chan struct{})
+	server := brokerserver.New(brokerserver.Options{
+		Store:      memStore,
+		SocketPath: socketPath,
+		Ready:      ready,
+	})
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.Serve(ctx) }()
+	<-ready
+
+	clientDurable := client.New(client.Config{StorePath: storePath, Mode: client.ModeDurableOnly})
+	clientRealtime := client.New(client.Config{StorePath: storePath, SocketPath: socketPath, Mode: client.ModeRealtimeOnly})
+	clientAuto := client.New(client.Config{StorePath: storePath, SocketPath: socketPath, Mode: client.ModeAuto})
+
+	for _, groupBy := range []registry.SummaryGroupBy{
+		registry.SummaryGroupByMultiplexerSession,
+		registry.SummaryGroupByProject,
+		registry.SummaryGroupByHarness,
+	} {
+		opts := registry.SummaryOptions{GroupBy: groupBy}
+		durableSum, err := clientDurable.SummaryWithOptions(ctx, registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("durable error for %s: %v", groupBy, err)
+		}
+		realtimeSum, err := clientRealtime.SummaryWithOptions(ctx, registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("realtime error for %s: %v", groupBy, err)
+		}
+		autoSum, err := clientAuto.SummaryWithOptions(ctx, registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("auto error for %s: %v", groupBy, err)
+		}
+
+		assertSummaryParityForGroup(t, groupBy, durableSum, realtimeSum, autoSum)
+	}
+
+	assertUnsupportedGroupByModes(t, ctx, clientDurable, clientRealtime, clientAuto)
+
+	cancel()
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertSummaryParityForGroup(t *testing.T, groupBy registry.SummaryGroupBy, durableSum, realtimeSum, autoSum []registry.Summary) {
+	t.Helper()
+	if len(durableSum) != len(realtimeSum) || len(realtimeSum) != len(autoSum) {
+		t.Fatalf("len mismatch for %s: durable=%d, realtime=%d, auto=%d",
+			groupBy, len(durableSum), len(realtimeSum), len(autoSum))
+	}
+
+	for i := range durableSum {
+		d, r, a := durableSum[i], realtimeSum[i], autoSum[i]
+		if d.GroupKey != r.GroupKey || r.GroupKey != a.GroupKey {
+			t.Fatalf("group %s key mismatch: durable=%q, realtime=%q, auto=%q", groupBy, d.GroupKey, r.GroupKey, a.GroupKey)
+		}
+		if d.Total != r.Total || r.Total != a.Total {
+			t.Fatalf("group %s total mismatch: durable=%d, realtime=%d, auto=%d", groupBy, d.Total, r.Total, a.Total)
+		}
+		if d.Live != r.Live || r.Live != a.Live {
+			t.Fatalf("group %s live mismatch: durable=%d, realtime=%d, auto=%d", groupBy, d.Live, r.Live, a.Live)
+		}
+		if d.Gone != r.Gone || r.Gone != a.Gone {
+			t.Fatalf("group %s gone mismatch: durable=%d, realtime=%d, auto=%d", groupBy, d.Gone, r.Gone, a.Gone)
+		}
+	}
+}
+
+func assertUnsupportedGroupByModes(t *testing.T, ctx context.Context, d, r, a *client.Client) {
+	t.Helper()
+	badOpts := registry.SummaryOptions{GroupBy: "invalid"}
+	if _, err := d.SummaryWithOptions(ctx, registry.Filter{}, badOpts); !errors.Is(err, client.ErrUnsupportedGroupBy) {
+		t.Fatalf("durable error = %v, want ErrUnsupportedGroupBy", err)
+	}
+	if _, err := r.SummaryWithOptions(ctx, registry.Filter{}, badOpts); err == nil {
+		t.Fatal("realtime error = nil, want error")
+	}
+	if _, err := a.SummaryWithOptions(ctx, registry.Filter{}, badOpts); err == nil {
+		t.Fatal("auto error = nil, want error")
+	}
+}

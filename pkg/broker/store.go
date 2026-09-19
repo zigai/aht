@@ -8,7 +8,10 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-var _ registry.Store = (*Store)(nil)
+var (
+	_ registry.Store             = (*Store)(nil)
+	_ registry.GroupedSummarizer = (*Store)(nil)
+)
 
 // Store routes operations through the realtime broker and falls back to the
 // durable snapshot when the broker is offline. The fallback keeps one-shot CLI
@@ -92,21 +95,30 @@ func (s *Store) Get(ctx context.Context, id string) (registry.Session, error) {
 	return session, nil
 }
 
-func (s *Store) SummaryByTmuxSession(
+// SummaryWithOptions returns filtered summaries with options from broker or fallback.
+func (s *Store) SummaryWithOptions(
 	ctx context.Context,
 	filter registry.Filter,
+	opts registry.SummaryOptions,
 ) ([]registry.Summary, error) {
-	summaries, err := s.client.Summary(ctx, filter)
+	summaries, err := s.client.SummaryWithOptions(ctx, filter, opts)
 	if !IsUnavailable(err) {
 		return summaries, err
 	}
-
-	summaries, err = s.fallback.SummaryByTmuxSession(ctx, filter)
+	summaries, err = s.fallback.SummaryWithOptions(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("summarizing fallback registry: %w", err)
 	}
 
 	return summaries, nil
+}
+
+// SummaryByTmuxSession implements registry.Store.
+func (s *Store) SummaryByTmuxSession(
+	ctx context.Context,
+	filter registry.Filter,
+) ([]registry.Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
 func (s *Store) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCResult, error) {

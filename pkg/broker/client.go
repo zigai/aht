@@ -103,7 +103,7 @@ func (c *Client) ObserveBatch(
 // List returns the broker's current filtered sessions.
 func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.Session, error) {
 	request := newRequest(MethodList)
-	request.Filter = filter
+	request.Filter = filter.NormalizePaths()
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 	if response.Sessions == nil {
 		return []registry.Session{}, nil
 	}
-	return response.Sessions, nil
+	return registry.FilterSessions(response.Sessions, request.Filter), nil
 }
 
 // Get returns one broker-owned session.
@@ -129,10 +129,17 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	return *response.Session, nil
 }
 
-// Summary returns filtered multiplexer-session summaries.
-func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
+// SummaryWithOptions returns filtered summaries with options.
+func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
+	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+		return nil, fmt.Errorf("%w: %q", registry.ErrUnsupportedGroupBy, opts.GroupBy)
+	}
+	if needsSnapshotFiltering(filter) {
+		return c.summarizeLocally(ctx, filter, opts)
+	}
 	request := newRequest(MethodSummary)
-	request.Filter = filter
+	request.Filter = filter.NormalizePaths()
+	request.SummaryOptions = opts
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return nil, err
@@ -140,7 +147,17 @@ func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registr
 	if response.Summaries == nil {
 		return []registry.Summary{}, nil
 	}
+	for _, summary := range response.Summaries {
+		if opts.GroupBy != "" && opts.GroupBy != registry.SummaryGroupByMultiplexerSession && summary.GroupBy != opts.GroupBy {
+			return c.summarizeLocally(ctx, filter, opts)
+		}
+	}
 	return response.Summaries, nil
+}
+
+// Summary returns filtered multiplexer-session summaries.
+func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
+	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
 // SummaryByTmuxSession implements registry.Store.
@@ -198,9 +215,8 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	}()
 
 	request := newRequest(MethodSubscribe)
-	request.Filter = filter
+	request.Filter = filter.NormalizePaths()
 	request = request.prepare()
-	//nolint:musttag // Request defines the complete public JSON protocol schema.
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
 		return nil, fmt.Errorf("sending subscribe request: %w", contextError(subscriptionContext, err))
 	}
@@ -219,6 +235,7 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 
 	snapshots := make(chan registry.StateSnapshot, 1)
 	errorsChannel := make(chan error, 1)
+	first.Snapshot.Sessions = registry.FilterSessions(first.Snapshot.Sessions, request.Filter)
 	snapshots <- *first.Snapshot
 
 	done := make(chan struct{})
@@ -265,12 +282,23 @@ func runSubscription(
 			continue
 		}
 
+		response.Snapshot.Sessions = registry.FilterSessions(response.Snapshot.Sessions, request.Filter)
 		select {
 		case <-ctx.Done():
 			return
 		case snapshots <- *response.Snapshot:
 		}
 	}
+}
+
+// Older brokers ignore additive filter and grouping fields. Aggregate their
+// snapshots locally when a summary cannot prove it honored the requested group.
+func (c *Client) summarizeLocally(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
+	sessions, err := c.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return registry.SummariesWithOptions(sessions, opts), nil
 }
 
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
@@ -281,7 +309,6 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 	defer cancelclose.OnCancel(ctx, connection)()
 
 	request = request.prepare()
-	//nolint:musttag // Request defines the complete public JSON protocol schema.
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
 		return Response{}, fmt.Errorf("sending broker request: %w", contextError(ctx, err))
 	}
@@ -353,9 +380,16 @@ func newRequest(method string) Request {
 			Activity:           "",
 			TmuxSession:        "",
 			MultiplexerSession: "",
+			Project:            "",
+			ProjectSubtree:     false,
+			CWD:                "",
+			MultiplexerKind:    "",
+			MultiplexerServer:  "",
+			MultiplexerPane:    "",
 		},
-		SessionID:   "",
-		DeleteAfter: 0,
+		SessionID:      "",
+		DeleteAfter:    0,
+		SummaryOptions: registry.SummaryOptions{GroupBy: ""},
 	}
 }
 
@@ -400,4 +434,8 @@ func (e *RemoteError) Unwrap() error {
 	default:
 		return nil
 	}
+}
+
+func needsSnapshotFiltering(filter registry.Filter) bool {
+	return filter.Project != "" || filter.CWD != "" || filter.MultiplexerKind != "" || filter.MultiplexerServer != "" || filter.MultiplexerPane != ""
 }

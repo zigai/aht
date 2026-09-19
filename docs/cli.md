@@ -51,7 +51,14 @@ aht list [flags]
 | `--sort <field>` | `string` | `"updated"` | Sort by: `updated`, `created`, `harness`, `presence`, `activity`, `cwd`, `id`, `multiplexer`, `tmux`, `presence-changed`, `activity-changed` |
 | `--desc` | `bool` | `false` | Sort in descending order |
 | `--full` | `bool` | `false` | Show complete values using an adaptive terminal layout |
-| `--summary` | `bool` | `false` | Output aggregated session counts by multiplexer session |
+| `--summary` | `bool` | `false` | Output aggregated session counts |
+| `--group-by <field>` | `string` | `""` | Group summaries by: `multiplexer-session`, `project`, `harness` (requires `--summary`) |
+| `--project <path>` | `string` | `""` | Match project root |
+| `--project-subtree` | `bool` | `false` | Include project roots or working directories below `--project` |
+| `--cwd <path>` | `string` | `""` | Match working directory |
+| `--multiplexer <kind>` | `string` | `""` | Filter by `tmux`, `zellij`, or `herdr` |
+| `--server <id>` | `string` | `""` | Qualify the multiplexer server/socket |
+| `--pane <id>` | `string` | `""` | Filter by pane ID |
 | `--absolute-time` | `bool` | `false` | Display absolute timestamps rather than relative times |
 
 **Examples:**
@@ -66,8 +73,14 @@ aht list --sort created --desc
 # Output active sessions in JSON format
 aht list --presence live --json
 
-# Show aggregate session count summary
+# Show aggregate session count summary (defaults to multiplexer session)
 aht list --summary
+
+# Show aggregate session count summary by project
+aht list --summary --group-by project
+
+# Show aggregate session count summary by harness
+aht list --summary --group-by harness
 ```
 
 ---
@@ -92,9 +105,38 @@ aht watch [flags]
 | `--no-snapshot` | `bool` | `false` | Start with future changes only |
 | `--format <type>` | `string` | `"table"` | Output format: `table` or `plain` |
 
+The project, working-directory, multiplexer, server, and pane filters from `list`
+are also available on `watch`.
+
 When paired with `--json`, `aht watch` emits JSON Lines containing incremental state snapshots.
 
 ---
+
+### `aht wait`
+
+Wait for an observed session condition without controlling the agent:
+
+```sh
+aht wait <session> --activity idle --timeout 2m --stable-for 1s
+aht wait <session> --presence gone --timeout 30s
+```
+
+Specify `--activity`, `--presence`, or both. Conditions are combined; `gone` and
+`unknown` presence cannot be combined with activity. A zero `--timeout` waits
+until cancellation. `--stable-for` requires the condition to persist across
+observed snapshots and resets if the process incarnation changes. It cannot
+prove that an unobserved transition did not occur.
+
+Success prints the matching session (`--json` returns the session object).
+Timeout, missing session, premature disappearance, unknown presence, and broker
+errors fail with exit code 1; invalid conditions or durations use exit code 2.
+Auto mode can fall back from a broker subscription to watching the durable file.
+
+### `aht current`
+
+Resolve the session containing the calling process, using verified process ancestry
+and terminal evidence. `--json` returns the session object. Missing, stale, or
+ambiguous evidence produces an error rather than guessing.
 
 ### `aht info`
 
@@ -111,6 +153,8 @@ aht info --pane <pane-id> [flags]
 |---|---|---|
 | `--explain` | `bool` | Explain screen inspection heuristics and activity state derivation |
 | `--pane <id>` | `string` | Look up session by terminal multiplexer pane ID (e.g. `%0` in tmux) |
+| `--server <id>` | `string` | Qualify `--pane` by server/socket |
+| `--multiplexer <kind>` | `string` | Qualify `--pane` by multiplexer kind |
 | `--config-dir <path>` | `string` | Custom directory containing detection manifest files (requires `--explain`) |
 | `--screen-inspection` | `bool` | Enable/disable terminal multiplexer screen inspection (default: true) |
 
@@ -299,6 +343,129 @@ aht manage config <command>
   - `-f, --force`: Overwrite existing configuration file with the default template.
   - `--json`: Output result as JSON (`{"created": true, "path": "..."}`).
   - When `--config -` is supplied, writes the default template directly to stdout.
+
+---
+
+### `aht manage capabilities`
+
+List the static capabilities of all supported harnesses, or inspect one:
+
+```sh
+aht manage capabilities
+aht manage capabilities --harness codex --json
+```
+
+Capabilities describe what an adapter supports, including lifecycle evidence,
+screen detection, authority, and resume metadata. They do not indicate whether
+an integration is installed or currently reporting. Use `manage integrations
+status` and `manage doctor` for local installation and tracker health.
+
+### `aht manage detection`
+
+Inspect and test agent state detection rules offline against saved terminal screen fixtures without requiring a running agent, tracker daemon, tmux session, or installed harness.
+
+```sh
+aht manage detection <command>
+```
+
+**Subcommands:**
+
+- `test <harness>`: Test detection manifests and explain rule decisions against a screen fixture.
+
+#### `aht manage detection test`
+
+```sh
+aht manage detection test <harness> --screen <path|-> [flags]
+```
+
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--screen <path>` | `string` | Saved terminal screen fixture `<path>` or `-` for stdin (**required**) |
+| `--manifest <path>` | `string` | Explicit detection manifest `<path>` (fails on any error without fallback) |
+| `--config-dir <dir>` | `string` | Detection manifest override directory (preserves ambient fallback behavior) |
+| `--title <string>` | `string` | Terminal window or pane `<title>` |
+| `--show-screen` | `bool` | Include normalized screen text in output (default `false`) |
+
+Supports global `--json` for structured automated verification.
+
+**Fixture-Driven Rule Authoring Example:**
+
+1. **Capture a terminal screen fixture**:
+   Capture an actual terminal state from a tmux pane or save sample output to a fixture file:
+
+   ```sh
+   # Save live pane text to a fixture file
+   tmux capture-pane -p -t %0 > fixtures/waiting_approval.txt
+   ```
+
+2. **Draft or customize a detection manifest** (`custom-codex.toml`):
+
+   ```toml
+   version = 1
+   agent = "codex"
+
+   [[rules]]
+   id = "permission_prompt"
+   state = "waiting"
+   priority = 90
+   region = "bottom:5"
+   any = [
+     "Would you like to run the following command?",
+     "Do you want to proceed?",
+   ]
+
+   [[rules]]
+   id = "working_interruptible"
+   state = "running"
+   priority = 80
+   region = "bottom:2"
+   regex_any = [
+     "Thinking… esc to interrupt",
+     "Running command · esc to interrupt",
+   ]
+   ```
+
+3. **Test offline against the saved fixture**:
+
+   ```sh
+   aht manage detection test codex \
+     --manifest custom-codex.toml \
+     --screen fixtures/waiting_approval.txt
+   ```
+
+   **Human Output Example:**
+
+   ```text
+   Harness:             codex
+   Manifest source:     custom-codex.toml
+   Manifest version:    1
+   Lines evaluated:     15
+   Effective activity:  waiting
+   Reason:              manifest_rule
+   Winning rule:        permission_prompt
+
+   Rule                   State     Priority  Region    Match   Reason
+   ───────────────────────────────────────────────────────────────────────────────────────
+   permission_prompt      waiting         90  bottom:5  winner  matched
+   working_interruptible  running         80  bottom:2  no      regex_any: none of 2 regular expressions matched
+   ```
+
+4. **Verify machine-readable output in CI or test suites**:
+
+   ```sh
+   aht manage detection test codex \
+     --manifest custom-codex.toml \
+     --screen fixtures/waiting_approval.txt \
+     --json
+   ```
+
+   Pipe directly from stdin:
+
+   ```sh
+   cat fixtures/waiting_approval.txt | aht manage detection test codex --screen - --json
+   ```
 
 ---
 

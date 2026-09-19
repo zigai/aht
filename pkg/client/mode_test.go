@@ -21,12 +21,14 @@ func TestInvalidModeRejectsOperations(t *testing.T) {
 	_, observeErr := c.Observe(ctx, registry.Observation{})
 	_, batchErr := c.ObserveBatch(ctx, nil)
 	_, summaryErr := c.Summary(ctx, registry.Filter{})
+	_, summaryOptsErr := c.SummaryWithOptions(ctx, registry.Filter{}, registry.SummaryOptions{})
 	_, gcErr := c.GC(ctx, 0)
 	_, subscribeErr := c.Subscribe(ctx, registry.Filter{})
 	for operation, err := range map[string]error{
 		"list": listErr, "get": getErr, "observe": observeErr,
-		"batch": batchErr, "summary": summaryErr, "gc": gcErr,
-		"subscribe": subscribeErr, "ping": c.Ping(ctx),
+		"batch": batchErr, "summary": summaryErr,
+		"summary_opts": summaryOptsErr,
+		"gc":           gcErr, "subscribe": subscribeErr, "ping": c.Ping(ctx),
 	} {
 		if !errors.Is(err, client.ErrInvalidMode) {
 			t.Errorf("%s error = %v, want ErrInvalidMode", operation, err)

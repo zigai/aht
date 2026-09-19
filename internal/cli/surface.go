@@ -17,6 +17,7 @@ import (
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/internal/service"
+	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -25,7 +26,6 @@ var (
 	errAgentRequired            = errors.New("at least one agent or all is required")
 	errCleanSelection           = errors.New("choose exactly one of --all or --older-than")
 	errNegativeCleanAge         = errors.New("older-than must be nonnegative")
-	errSessionReference         = errors.New("session reference is ambiguous")
 	errInfoReference            = errors.New("provide one session reference or --pane")
 	errInfoConfig               = errors.New("--config-dir requires --explain")
 	errStopSelection            = errors.New("provide one or more sessions, or --all")
@@ -61,6 +61,8 @@ type cleanOptions struct {
 type infoOptions struct {
 	explain                 bool
 	paneID                  string
+	serverID                string
+	multiplexerKind         string
 	configDir               string
 	disableScreenInspection bool
 }
@@ -707,7 +709,7 @@ func (app *application) newInfoCommand() *cobra.Command {
 			}
 			var session registry.Session
 			if options.paneID != "" {
-				session, err = app.resolvePaneSession(cmd.Context(), options.paneID)
+				session, err = app.resolvePaneSession(cmd.Context(), options.paneID, options.serverID, options.multiplexerKind)
 			} else {
 				session, err = app.resolveSession(cmd.Context(), args[0])
 			}
@@ -719,6 +721,8 @@ func (app *application) newInfoCommand() *cobra.Command {
 	}
 	command.Flags().BoolVar(&options.explain, "explain", false, "explain how the activity state was selected")
 	command.Flags().StringVar(&options.paneID, "pane", "", "multiplexer pane `<id>`")
+	command.Flags().StringVar(&options.serverID, "server", "", "multiplexer server `<id>`")
+	command.Flags().StringVar(&options.multiplexerKind, "multiplexer", "", "multiplexer `<kind>`: tmux, zellij, herdr")
 	command.Flags().StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
 	command.Flags().BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
 	return command
@@ -751,26 +755,21 @@ func (app *application) writeInfo(ctx context.Context, session registry.Session,
 }
 
 func (app *application) resolveSession(ctx context.Context, reference string) (registry.Session, error) {
-	sessions, err := app.registryStore().List(ctx, registry.Filter{})
+	session, err := app.registryStore().Resolve(ctx, client.Selector{
+		ID:                "",
+		Reference:         reference,
+		Harness:           "",
+		MultiplexerKind:   "",
+		MultiplexerServer: "",
+		MultiplexerPane:   "",
+		Project:           "",
+		ProjectSubtree:    false,
+		CWD:               "",
+	})
 	if err != nil {
-		return registry.Session{}, fmt.Errorf("list sessions: %w", err)
+		return registry.Session{}, fmt.Errorf("resolve session: %w", err)
 	}
-	matches := make([]registry.Session, 0, 1)
-	for _, session := range sessions {
-		if session.ID == reference {
-			return session, nil
-		}
-		if strings.HasPrefix(session.ID, reference) || session.SessionID == reference || session.SessionPath == reference {
-			matches = append(matches, session)
-		}
-	}
-	if len(matches) == 0 {
-		return registry.Session{}, registry.ErrSessionNotFound
-	}
-	if len(matches) > 1 {
-		return registry.Session{}, fmt.Errorf("%w: %q matches %d sessions", errSessionReference, reference, len(matches))
-	}
-	return matches[0], nil
+	return session, nil
 }
 
 func (app *application) newWatchCommand() *cobra.Command {
@@ -810,6 +809,12 @@ func (app *application) newWatchCommand() *cobra.Command {
 	flags.StringVar(&options.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
 	flags.StringVar(&options.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
 	flags.StringVar(&options.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
+	flags.StringVar(&options.project, "project", "", "filter by project `<dir>`")
+	flags.BoolVar(&options.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
+	flags.StringVar(&options.cwd, "cwd", "", "filter by session working directory `<dir>`")
+	flags.StringVar(&options.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
+	flags.StringVar(&options.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
+	flags.StringVar(&options.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
 	flags.BoolVar(&noSnapshot, "no-snapshot", false, "start with future changes only")
 	flags.StringVar(&watchFormat, "format", "", "output format: `<table|plain>`")
 	return command

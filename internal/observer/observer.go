@@ -297,7 +297,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		result.Error = catalogErr.Error()
 	}
 	result.Catalog = len(catalog)
-	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", TmuxSession: "", MultiplexerSession: ""})
+	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", TmuxSession: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if sessionErr != nil {
 		return o.failCycle(at, "registry", sessionErr, "listing sessions for state detection", result)
 	}
@@ -848,7 +848,7 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 	if o.initialized {
 		return nil
 	}
-	sessions, err := o.store.List(ctx, registry.Filter{Harness: "", Presence: registry.PresenceLive, Activity: "", TmuxSession: "", MultiplexerSession: ""})
+	sessions, err := o.store.List(ctx, registry.Filter{Harness: "", Presence: registry.PresenceLive, Activity: "", TmuxSession: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if err != nil {
 		return fmt.Errorf("listing live sessions: %w", err)
 	}

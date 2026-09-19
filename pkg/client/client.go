@@ -52,6 +52,13 @@ const (
 	HarnessDroid    Harness = registry.HarnessDroid
 	HarnessOpenClaw Harness = registry.HarnessOpenClaw
 	HarnessHermes   Harness = registry.HarnessHermes
+
+	MultiplexerTmux                  MultiplexerKind = registry.MultiplexerTmux
+	MultiplexerZellij                MultiplexerKind = registry.MultiplexerZellij
+	MultiplexerHerdr                 MultiplexerKind = registry.MultiplexerHerdr
+	SummaryGroupByMultiplexerSession                 = registry.SummaryGroupByMultiplexerSession
+	SummaryGroupByProject                            = registry.SummaryGroupByProject
+	SummaryGroupByHarness                            = registry.SummaryGroupByHarness
 )
 
 var (
@@ -62,9 +69,11 @@ var (
 	errHandlerRequired  = errors.New("watch handler is required")
 	ErrRealtimeRequired = errors.New("operation requires a realtime broker connection")
 	// ErrInvalidMode means a client was configured with an unsupported Mode.
-	ErrInvalidMode = errors.New("invalid aht client mode")
+	ErrInvalidMode        = errors.New("invalid aht client mode")
+	ErrUnsupportedGroupBy = registry.ErrUnsupportedGroupBy
 
-	_ registry.Store = (*Client)(nil)
+	_ registry.Store             = (*Client)(nil)
+	_ registry.GroupedSummarizer = (*Client)(nil)
 )
 
 // Mode controls how a Client routes operations between the realtime broker
@@ -96,11 +105,20 @@ type (
 	// MultiplexerContext represents the unified multiplexer location of a session.
 	MultiplexerContext = registry.MultiplexerContext
 
+	// MultiplexerKind identifies a supported terminal multiplexer.
+	MultiplexerKind = registry.MultiplexerKind
+
 	// Observation represents an observation recorded for a session.
 	Observation = registry.Observation
 
 	// Summary represents aggregate session counts for a terminal session.
 	Summary = registry.Summary
+
+	// SummaryGroupBy represents the grouping dimension for aggregate session summaries.
+	SummaryGroupBy = registry.SummaryGroupBy
+
+	// SummaryOptions configures grouping for aggregate session summaries.
+	SummaryOptions = registry.SummaryOptions
 
 	// Subscription streams independently owned snapshots from the realtime broker.
 	Subscription = broker.Subscription
@@ -121,6 +139,7 @@ type stateStore interface {
 	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
 	Get(ctx context.Context, id string) (registry.Session, error)
 	SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error)
+	SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error)
 	GC(ctx context.Context, maxAge time.Duration) (registry.GCResult, error)
 }
 
@@ -128,11 +147,12 @@ type stateStore interface {
 // Depending on [Mode], operations route to the realtime broker socket, durable
 // disk storage, or auto-fallback between the two.
 type Client struct {
-	mode      Mode
-	storePath string
-	store     stateStore
-	realtime  *broker.Client
-	configErr error
+	mode       Mode
+	storePath  string
+	store      stateStore
+	realtime   *broker.Client
+	configErr  error
+	newWatcher func(ctx context.Context, filter registry.Filter) (sessionWatcher, error)
 }
 
 // OperationError is a machine-readable failure returned by the AHT broker.
@@ -176,11 +196,12 @@ func New(config Config) *Client {
 	}
 
 	return &Client{
-		mode:      mode,
-		storePath: storePath,
-		store:     store,
-		realtime:  realtime,
-		configErr: configErr,
+		mode:       mode,
+		storePath:  storePath,
+		store:      store,
+		realtime:   realtime,
+		configErr:  configErr,
+		newWatcher: nil,
 	}
 }
 
@@ -255,7 +276,10 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 		return nil, c.configErr
 	}
 	sessions, err := c.store.List(ctx, filter)
-	return sessions, publicError(err)
+	if err != nil {
+		return nil, publicError(err)
+	}
+	return registry.FilterSessions(sessions, filter), nil
 }
 
 // Get returns the session identified by id.
@@ -267,13 +291,18 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	return session, publicError(err)
 }
 
-// Summary returns aggregate session counts grouped by terminal-multiplexer session.
-func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
+// SummaryWithOptions returns aggregate session counts with the given options.
+func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
-	summaries, err := c.store.SummaryByTmuxSession(ctx, filter)
+	summaries, err := c.store.SummaryWithOptions(ctx, filter, opts)
 	return summaries, publicError(err)
+}
+
+// Summary returns aggregate session counts grouped by terminal-multiplexer session.
+func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
+	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
 // SummaryByTmuxSession implements registry.Store.

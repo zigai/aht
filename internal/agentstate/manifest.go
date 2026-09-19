@@ -24,12 +24,16 @@ import (
 const (
 	manifestSchemaVersion = 1
 	maxManifestBytes      = 1 << 20
+	MaxScreenBytes        = 2 << 20
 )
 
 var (
 	errManifestInvalid         = errors.New("invalid detection manifest")
 	errInvalidRegion           = errors.New("invalid manifest region")
 	errManifestTooLarge        = errors.New("detection manifest exceeds 1 MiB")
+	ErrScreenTooLarge          = errors.New("screen fixture exceeds 2 MiB")
+	errScreenPathRequired      = errors.New("screen fixture path is required")
+	errStdinUnavailable        = errors.New("stdin is unavailable")
 	errBundledManifestNotFound = errors.New("bundled detection manifest not found")
 	manifestCache              sync.Map
 )
@@ -138,6 +142,50 @@ func ParseManifest(data []byte, harness registry.Harness) (Manifest, error) {
 	}
 
 	return manifest, nil
+}
+
+// LoadExplicitManifest loads, bounds, and parses an explicit manifest file from path for harness.
+// Unlike ambient override loading, any read or parse failure returns an error without fallback.
+func LoadExplicitManifest(path string, harness registry.Harness) (Manifest, error) {
+	data, err := readManifestFile(path)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("reading detection manifest: %w", err)
+	}
+	manifest, err := ParseManifest(data, harness)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("parsing detection manifest: %w", err)
+	}
+	manifest.Source = path
+	return manifest, nil
+}
+
+// ReadScreenInput reads screen fixture content from path (or stdin if path is "-") bounded by MaxScreenBytes.
+func ReadScreenInput(source string, stdin io.Reader) (string, error) {
+	if source == "" {
+		return "", errScreenPathRequired
+	}
+	var reader io.Reader
+	if source == "-" {
+		if stdin == nil {
+			return "", errStdinUnavailable
+		}
+		reader = stdin
+	} else {
+		file, err := os.Open(source)
+		if err != nil {
+			return "", fmt.Errorf("open screen fixture: %w", err)
+		}
+		defer func() { _ = file.Close() }()
+		reader = file
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, MaxScreenBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read screen fixture: %w", err)
+	}
+	if len(data) > MaxScreenBytes {
+		return "", ErrScreenTooLarge
+	}
+	return string(data), nil
 }
 
 func loadUncached(harness registry.Harness, path string) (Manifest, error) {

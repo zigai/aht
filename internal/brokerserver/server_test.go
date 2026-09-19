@@ -556,7 +556,6 @@ func stopBrokerAdversityFixture(t *testing.T, fixture brokerAdversityFixture) {
 
 func marshalBrokerRequest(t *testing.T, request broker.Request) []byte {
 	t.Helper()
-	//nolint:musttag // Request defines the complete public JSON protocol schema.
 	payload, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -637,5 +636,118 @@ func BenchmarkBrokerObserveRoundTrip(b *testing.B) {
 	cancel()
 	if err := <-serverErrors; err != nil {
 		b.Fatal(err)
+	}
+}
+
+func TestServerSummaryGroupingAndParity(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	path, err := shortStatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	store, err := registry.OpenMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ready := make(chan struct{})
+	server := New(Options{
+		Store:      store,
+		SocketPath: broker.SocketPath(path),
+		Ready:      ready,
+	})
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.Serve(ctx) }()
+	<-ready
+
+	client := broker.NewClient(path)
+	running := registry.ActivityRunning
+
+	obs1 := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessClaude,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
+		Presence:   new(registry.PresenceLive),
+		Activity:   &running,
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/repo/one"},
+		Tmux:       &registry.TmuxContext{SessionName: "main"},
+		ObservedAt: time.Now().UTC(),
+	}
+	obs2 := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessCodex,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-2"},
+		Presence:   new(registry.PresenceLive),
+		Activity:   &running,
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/repo/two"},
+		Tmux:       &registry.TmuxContext{SessionName: "other"},
+		ObservedAt: time.Now().UTC(),
+	}
+
+	if _, err := client.ObserveBatch(ctx, []registry.Observation{obs1, obs2}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, groupBy := range []registry.SummaryGroupBy{
+		registry.SummaryGroupByMultiplexerSession,
+		registry.SummaryGroupByProject,
+		registry.SummaryGroupByHarness,
+	} {
+		opts := registry.SummaryOptions{GroupBy: groupBy}
+		brokerSummaries, err := client.SummaryWithOptions(ctx, registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("client summary error for %s: %v", groupBy, err)
+		}
+		memSummaries, err := store.SummaryWithOptions(ctx, registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("store summary error for %s: %v", groupBy, err)
+		}
+		assertBrokerParity(t, groupBy, brokerSummaries, memSummaries)
+	}
+
+	// Test default Summary call (without options) defaults to multiplexer session
+	defaultSum, err := client.Summary(ctx, registry.Filter{})
+	if err != nil {
+		t.Fatalf("default summary error: %v", err)
+	}
+	muxSum, err := client.SummaryWithOptions(ctx, registry.Filter{}, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
+	if err != nil {
+		t.Fatalf("mux summary error: %v", err)
+	}
+	if len(defaultSum) != len(muxSum) {
+		t.Fatalf("default summary len %d != mux summary len %d", len(defaultSum), len(muxSum))
+	}
+
+	// Test invalid group by returns error
+	_, err = client.SummaryWithOptions(ctx, registry.Filter{}, registry.SummaryOptions{GroupBy: "invalid"})
+	if err == nil {
+		t.Fatal("expected error for invalid group by, got nil")
+	}
+
+	cancel()
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertBrokerParity(t *testing.T, groupBy registry.SummaryGroupBy, brokerSummaries, memSummaries []registry.Summary) {
+	t.Helper()
+	if len(brokerSummaries) != len(memSummaries) {
+		t.Fatalf("len mismatch for %s: broker=%d mem=%d", groupBy, len(brokerSummaries), len(memSummaries))
+	}
+	for i := range brokerSummaries {
+		if brokerSummaries[i].GroupKey != memSummaries[i].GroupKey ||
+			brokerSummaries[i].GroupLabel != memSummaries[i].GroupLabel ||
+			brokerSummaries[i].Total != memSummaries[i].Total {
+			t.Fatalf("mismatch for %s item %d: broker=%+v mem=%+v", groupBy, i, brokerSummaries[i], memSummaries[i])
+		}
 	}
 }

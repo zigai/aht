@@ -14,3 +14,8 @@ type Store interface {
 	SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error)
 	GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error)
 }
+
+// GroupedSummarizer extends a Store with configurable grouping options.
+type GroupedSummarizer interface {
+	SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error)
+}

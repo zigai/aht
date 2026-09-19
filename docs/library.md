@@ -2,6 +2,8 @@
 
 AHT exposes public Go packages for integrating agent tracking, realtime IPC, multiplexer discovery, registry storage, and harness management into Go tools and applications.
 
+See [project boundaries](project-boundaries.md) for how sesh and agent consume AHT.
+
 ## Packages Overview
 
 | Package | Import Path | Description |
@@ -14,6 +16,7 @@ AHT exposes public Go packages for integrating agent tracking, realtime IPC, mul
 | [`zellij`](https://pkg.go.dev/github.com/zigai/aht/pkg/zellij) | `github.com/zigai/aht/pkg/zellij` | Inspect and discover Zellij sessions, panes, and screen snapshots. |
 | [`mux`](https://pkg.go.dev/github.com/zigai/aht/pkg/mux) | `github.com/zigai/aht/pkg/mux` | Common polymorphic types and helpers for terminal multiplexers. |
 | [`manage`](https://pkg.go.dev/github.com/zigai/aht/pkg/manage) | `github.com/zigai/aht/pkg/manage` | Programmatic hook installation, removal, and background tracker daemon service control. |
+| [`detection`](https://pkg.go.dev/github.com/zigai/aht/pkg/detection) | `github.com/zigai/aht/pkg/detection` | Evaluate saved terminal screens and inspect detection rules without live capture. |
 | [`harness`](https://pkg.go.dev/github.com/zigai/aht/pkg/harness) | `github.com/zigai/aht/pkg/harness` | Supported harness catalog, alias normalization, and process-to-harness command matching. |
 
 ---
@@ -80,6 +83,70 @@ for snapshot := range sub.Snapshots {
 for err := range sub.Errors {
 	log.Printf("subscription ended: %v", err)
 }
+```
+
+### Selectors and current session
+
+Use `client.Resolve(ctx, aht.Selector{Reference: ref})` for an exact registry ID,
+an unambiguous ID prefix, native session ID, or session path. Add harness,
+project, working-directory, and multiplexer kind/server/pane qualifiers to narrow
+matches. Ambiguity returns `aht.ErrAmbiguousSession`; it never selects an arbitrary
+match. `aht.ResolveSessions` applies the same rules to an existing snapshot.
+
+`client.Current(ctx)` resolves the calling process through verified process
+ancestry, then terminal evidence. `CurrentWithOptions` accepts a PID. Missing or
+stale evidence returns `aht.ErrNoCurrentSession`; environment variables alone do
+not prove a session is current.
+
+`aht.Filter` supports `Project`, `ProjectSubtree`, `CWD`, `MultiplexerKind`,
+`MultiplexerServer`, and `MultiplexerPane` across lists, subscriptions, and
+summaries. Relative query paths are resolved by the caller before broker RPC.
+
+### Waiting for observed state
+
+```go
+result, err := client.Wait(ctx, aht.WaitOptions{
+    ID: session.ID,
+    Activity: aht.ActivityIdle,
+    Timeout: 2 * time.Minute,
+    StableFor: time.Second,
+})
+```
+
+Use a canonical registry ID. Activity and presence conditions are combined when
+both are set; `gone` or `unknown` presence cannot be combined with activity.
+`Timeout` includes subscription setup. Cancellation closes the watcher.
+`StableFor` measures stability across received snapshots, resets on condition
+changes, process replacement, or broker fallback, and cannot prove that an
+unobserved transition did not occur.
+
+Auto mode prefers broker subscriptions and falls back to a durable file watch
+when the broker is unavailable; durable mode watches only the file. Realtime mode
+never falls back. Missing sessions, disappearance, unknown presence, and timeout
+have inspectable errors. `ErrWaitTimeout` also wraps `context.DeadlineExceeded`.
+A zero timeout waits until success, a terminal error, or context cancellation.
+
+### Grouped Session Summaries
+
+Aggregate session metrics can be grouped by terminal multiplexer session (default), project, or harness:
+
+```go
+// Summary grouped by project root
+summaries, err := client.SummaryWithOptions(ctx, aht.Filter{}, aht.SummaryOptions{
+	GroupBy: aht.SummaryGroupByProject,
+})
+if err != nil {
+	log.Fatal(err)
+}
+for _, s := range summaries {
+	fmt.Printf("Project %s (%s): %d total, %d live, %d running\n",
+		s.Project, s.ProjectRoot, s.Total, s.Live, s.Running)
+}
+
+// Or by harness
+harnessSummaries, err := client.SummaryWithOptions(ctx, aht.Filter{}, aht.SummaryOptions{
+	GroupBy: aht.SummaryGroupByHarness,
+})
 ```
 
 ---
@@ -376,3 +443,32 @@ func main() {
 	}
 }
 ```
+
+## Diagnostics and detection
+
+`harness.CapabilitiesFor` and `harness.AllCapabilities` describe supported
+features independently of local installation. `harness.InspectRuntime` reports
+managed installation status; it does not certify that hooks are currently firing.
+`manage.Manager.Doctor` returns structured checks, and `TrackerHealth` evaluates
+the tracker's bounded health sidecar, including freshness and error classification.
+
+Use `manage.ExplainSession(ctx, session, manage.ExplainOptions{})` to inspect an
+already-read session and its stored decision without capturing a screen. This
+preserves the routing mode used to obtain that session. `LiveScreen: true`
+explicitly requests a fresh screen evaluation, which can differ from stored state
+and does not update the registry. `Manager.Explain` obtains a session through the
+broker with durable fallback before explaining it.
+
+Saved screen fixtures use the same normalizer and effective detector as tracking:
+
+```go
+inspection, err := detection.Inspect(ctx, aht.HarnessCodex, screen,
+    detection.Options{ManifestPath: "./codex.toml", Title: "Codex"})
+```
+
+Import `github.com/zigai/aht/pkg/detection`. Input is bounded to 2 MiB and detection
+evaluates the last 100 normalized lines. The result includes the winning rule,
+all candidates, and matcher diagnostics. Screen content is returned only with
+`IncludeScreen: true`. An explicit manifest must be valid and match the harness;
+ambient overrides retain the tracker's warning-and-bundled-fallback behavior.
+`ManifestPath` and `ConfigDir` are mutually exclusive.

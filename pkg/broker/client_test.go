@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ func TestClientMissingResponsePayloadFailsWithProtocol(t *testing.T) {
 	}
 }
 
-func TestClientEmptyListAndSummaryReturnsEmptySlice(t *testing.T) {
+func TestClientEmptyListReturnsEmptySlice(t *testing.T) {
 	t.Parallel()
 
 	client := responseServer(t, func(id string) broker.Response {
@@ -114,6 +115,108 @@ func TestClientEmptyListAndSummaryReturnsEmptySlice(t *testing.T) {
 	}
 	if len(sessions) != 0 {
 		t.Fatalf("List len = %d, want 0", len(sessions))
+	}
+}
+
+func TestClientEmptySummaryReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	client := responseServer(t, func(id string) broker.Response {
+		return broker.Response{Version: broker.ProtocolVersion, ID: id, Type: "result"}
+	})
+
+	summaries, err := client.SummaryWithOptions(t.Context(), registry.Filter{}, registry.SummaryOptions{GroupBy: registry.SummaryGroupByProject})
+	if err != nil {
+		t.Fatalf("SummaryWithOptions error = %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("SummaryWithOptions len = %d, want 0", len(summaries))
+	}
+}
+
+func TestBrokerStoreFallbackParity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "sessions.json")
+	fileStore := registry.NewFileStore(storePath)
+
+	running := registry.ActivityRunning
+	obs := registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessClaude,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-fallback"},
+		Presence:   new(registry.PresenceLive),
+		Activity:   &running,
+		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/fallback/project"},
+		Tmux:       &registry.TmuxContext{SessionName: "fallback-tmux"},
+		ObservedAt: time.Now().UTC(),
+	}
+	if _, err := fileStore.Observe(t.Context(), obs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nonexistent socket forces fallback to durable file store
+	socketPath := filepath.Join(dir, "nonexistent.sock")
+	bStore := broker.NewStoreForSocket(storePath, socketPath)
+
+	for _, groupBy := range []registry.SummaryGroupBy{
+		registry.SummaryGroupByMultiplexerSession,
+		registry.SummaryGroupByProject,
+		registry.SummaryGroupByHarness,
+	} {
+		opts := registry.SummaryOptions{GroupBy: groupBy}
+		bSum, err := bStore.SummaryWithOptions(t.Context(), registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("fallback summary error for %s: %v", groupBy, err)
+		}
+		fSum, err := fileStore.SummaryWithOptions(t.Context(), registry.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("filestore summary error for %s: %v", groupBy, err)
+		}
+		if len(bSum) != len(fSum) {
+			t.Fatalf("len mismatch: fallback=%d fileStore=%d", len(bSum), len(fSum))
+		}
+		for i := range bSum {
+			if bSum[i].GroupKey != fSum[i].GroupKey || bSum[i].Total != fSum[i].Total {
+				t.Fatalf("mismatch at %d: fallback=%+v file=%+v", i, bSum[i], fSum[i])
+			}
+		}
+	}
+}
+
+func TestBrokerOldJSONRequestDefaultsToMultiplexer(t *testing.T) {
+	t.Parallel()
+
+	type legacySummaryRequest struct {
+		Version        int                     `json:"version"`
+		ID             string                  `json:"id"`
+		Method         string                  `json:"method"`
+		GroupBy        registry.SummaryGroupBy `json:"group_by"`
+		SummaryOptions registry.SummaryOptions `json:"summary_options"`
+	}
+
+	legacyJSON := `{"version":0,"id":"req-legacy","method":"summary"}`
+	var req legacySummaryRequest
+	if err := json.NewDecoder(strings.NewReader(legacyJSON)).Decode(&req); err != nil {
+		t.Fatal(err)
+	}
+
+	if req.GroupBy != "" {
+		t.Fatalf("unmarshaled GroupBy = %q, want empty string", req.GroupBy)
+	}
+	if req.SummaryOptions.GroupBy != "" {
+		t.Fatalf("unmarshaled SummaryOptions.GroupBy = %q, want empty string", req.SummaryOptions.GroupBy)
+	}
+
+	// In server execution, empty GroupBy defaults to SummaryGroupByMultiplexerSession
+	opts := req.SummaryOptions
+	if opts.GroupBy == "" {
+		opts.GroupBy = registry.SummaryGroupByMultiplexerSession
+	}
+	if opts.GroupBy != registry.SummaryGroupByMultiplexerSession {
+		t.Fatalf("defaulted opts.GroupBy = %q, want multiplexer-session", opts.GroupBy)
 	}
 }
 
@@ -166,4 +269,48 @@ func responseServer(t *testing.T, respond func(id string) broker.Response) *brok
 	}()
 
 	return broker.NewClientForSocket(socketPath)
+}
+
+func TestClientAppliesNewFiltersToOlderBrokerSnapshots(t *testing.T) {
+	t.Parallel()
+	sessions := []registry.Session{
+		{ID: "wanted", Harness: registry.HarnessCodex, ProjectRoot: "/project/one"},
+		{ID: "excluded", Harness: registry.HarnessClaude, ProjectRoot: "/project/two"},
+	}
+	filter := registry.Filter{Project: "/project/one"}
+	t.Run("list", func(t *testing.T) {
+		t.Parallel()
+		c := responseServer(t, func(id string) broker.Response {
+			return broker.Response{Version: broker.ProtocolVersion, ID: id, Type: "result", Sessions: sessions}
+		})
+		got, err := c.List(t.Context(), filter)
+		if err != nil || len(got) != 1 || got[0].ID != "wanted" {
+			t.Fatalf("filtered list = %+v, err = %v", got, err)
+		}
+	})
+	t.Run("subscribe", func(t *testing.T) {
+		t.Parallel()
+		c := responseServer(t, func(id string) broker.Response {
+			return broker.Response{Version: broker.ProtocolVersion, ID: id, Type: "snapshot", Snapshot: &registry.StateSnapshot{Sessions: sessions}}
+		})
+		sub, err := c.Subscribe(t.Context(), filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sub.Close()
+		got := <-sub.Snapshots
+		if len(got.Sessions) != 1 || got.Sessions[0].ID != "wanted" {
+			t.Fatalf("filtered snapshot = %+v", got)
+		}
+	})
+	t.Run("summary", func(t *testing.T) {
+		t.Parallel()
+		c := responseServer(t, func(id string) broker.Response {
+			return broker.Response{Version: broker.ProtocolVersion, ID: id, Type: "result", Sessions: sessions}
+		})
+		got, err := c.SummaryWithOptions(t.Context(), filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByHarness})
+		if err != nil || len(got) != 1 || got[0].Harness != registry.HarnessCodex || got[0].Total != 1 {
+			t.Fatalf("filtered summary = %+v, err = %v", got, err)
+		}
+	})
 }

@@ -74,9 +74,12 @@ var (
 	errManagedHookJSONRequired   = errors.New("hook commands require --json for their protocol response")
 	errListSummaryFlag           = errors.New("--sort, --desc, and --absolute-time are not valid with --summary")
 	errListAbsoluteJSON          = errors.New("--absolute-time cannot be used with --json")
+	errListGroupByWithoutSummary = errors.New("--group-by requires --summary")
+	errUnsupportedGroupBy        = registry.ErrUnsupportedGroupBy
 	errUnknownCommand            = errors.New("unknown command")
 	errUnknownHelpShorthand      = errors.New("unknown shorthand flag: 'h' in -h")
 	errSilentUsageError          = errors.New("")
+	errInvalidMultiplexerKind    = errors.New("invalid multiplexer kind")
 	configureCobraOnce           sync.Once
 )
 
@@ -136,15 +139,18 @@ type preparedReport struct {
 }
 
 type reportRuntimeContext struct {
-	tmux              registry.TmuxContext
-	multiplexer       registry.MultiplexerContext
-	processes         []processinfo.Process
+	tmux        registry.TmuxContext
+	multiplexer registry.MultiplexerContext
+	processes   []processinfo.Process
+
 	defaultObservedAt time.Time
 }
 
 type listOptions struct {
-	harness, presence, activity, tmuxSession, multiplexerSession, sortBy string
-	summary, absoluteTime, absoluteSet, sortSet, desc, descSet, full     bool
+	harness, presence, activity, tmuxSession, multiplexerSession, sortBy, groupBy string
+	project, cwd, multiplexerKind, multiplexerServer, multiplexerPane             string
+	projectSubtree                                                                bool
+	summary, absoluteTime, absoluteSet, sortSet, desc, descSet, full, groupBySet  bool
 }
 
 type sessionCompareFunc func(registry.Session, registry.Session) int
@@ -278,7 +284,9 @@ func (app *application) newRootCommand() *cobra.Command {
 	root.AddCommand(
 		app.newListCommand(),
 		app.newWatchCommand(),
+		app.newWaitCommand(),
 		app.newInfoCommand(),
+		app.newCurrentCommand(),
 		app.newStopCommand(),
 		app.newManageCommand(),
 		app.newHookCommand(),
@@ -309,7 +317,9 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newTrackerCommand(),
 		app.newStateCommand(),
 		app.newDoctorCommand(),
+		app.newCapabilitiesCommand(),
 		app.newManageConfigCommand(),
+		app.newDetectionCommand(),
 	)
 	return command
 }
@@ -993,8 +1003,15 @@ func (app *application) newListCommand() *cobra.Command {
 	f.StringVar(&o.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
 	f.StringVar(&o.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
 	f.StringVar(&o.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
+	f.StringVar(&o.project, "project", "", "filter by project `<dir>`")
+	f.BoolVar(&o.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
+	f.StringVar(&o.cwd, "cwd", "", "filter by session working directory `<dir>`")
+	f.StringVar(&o.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
+	f.StringVar(&o.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
+	f.StringVar(&o.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
 	f.StringVar(&o.sortBy, "sort", "", "sort by: `<field>` (updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed)")
 	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
+	f.StringVar(&o.groupBy, "group-by", "", "group summaries by: `<field>` (multiplexer-session, project, harness)")
 	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
 	f.BoolVar(&o.desc, "desc", false, "sort descending")
 	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
@@ -1014,6 +1031,7 @@ func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
 		o.desc = *cfg.UI.SortDesc
 	}
 	o.descSet = f.Changed("desc")
+	o.groupBySet = f.Changed("group-by")
 	if !f.Changed("absolute-time") {
 		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
 			cfg.UI.TimeFormat == "absolute" || cfg.UI.TimeFormat == "iso8601" {
@@ -1038,14 +1056,50 @@ func (app *application) validateListOptions(options listOptions) error {
 	if app.outputJSON && options.absoluteSet {
 		return errListAbsoluteJSON
 	}
+	return validateListSummaryOptions(options)
+}
+
+func validateListSummaryOptions(options listOptions) error {
 	if options.summary && (options.absoluteSet || options.sortSet || options.descSet) {
 		return errListSummaryFlag
+	}
+	if (options.groupBySet || options.groupBy != "") && !options.summary {
+		return errListGroupByWithoutSummary
+	}
+	if options.groupBySet || options.groupBy != "" {
+		switch options.groupBy {
+		case "multiplexer-session", "project", "harness":
+			// valid
+		default:
+			return fmt.Errorf("%w: %q (expected multiplexer-session, project, or harness)", errUnsupportedGroupBy, options.groupBy)
+		}
 	}
 	return nil
 }
 
 func buildFilter(o listOptions) (registry.Filter, error) {
-	f := registry.Filter{TmuxSession: o.tmuxSession, MultiplexerSession: o.multiplexerSession}
+	f := registry.Filter{
+		Harness:            "",
+		Presence:           "",
+		Activity:           "",
+		TmuxSession:        o.tmuxSession,
+		MultiplexerSession: o.multiplexerSession,
+		Project:            o.project,
+		ProjectSubtree:     o.projectSubtree,
+		CWD:                o.cwd,
+		MultiplexerKind:    "",
+		MultiplexerServer:  o.multiplexerServer,
+		MultiplexerPane:    o.multiplexerPane,
+	}
+	if o.multiplexerKind != "" {
+		kind := registry.MultiplexerKind(strings.ToLower(strings.TrimSpace(o.multiplexerKind)))
+		switch kind {
+		case registry.MultiplexerTmux, registry.MultiplexerZellij, registry.MultiplexerHerdr:
+			f.MultiplexerKind = kind
+		default:
+			return f, fmt.Errorf("%w: %q", errInvalidMultiplexerKind, o.multiplexerKind)
+		}
+	}
 	if o.harness != "" {
 		h, e := harnesspkg.Normalize(o.harness)
 		if e != nil {
@@ -1465,29 +1519,146 @@ func (app *application) runListSummary(ctx context.Context, o listOptions) error
 	if e != nil {
 		return exitCode(e, exitCodeUsage)
 	}
-	s, e := app.registryStore().SummaryByTmuxSession(ctx, f)
+	groupBy := registry.SummaryGroupBy(o.groupBy)
+	if groupBy == "" {
+		groupBy = registry.SummaryGroupByMultiplexerSession
+	}
+	s, e := app.registryStore().SummaryWithOptions(ctx, f, registry.SummaryOptions{GroupBy: groupBy})
 	if e != nil {
 		return fmt.Errorf("summarize sessions: %w", e)
 	}
 	if app.outputJSON {
 		return app.writeJSON(s)
 	}
-	return app.writeSummaryTable(s, o.full)
+	return app.writeSummaryTableForGroup(s, groupBy, o.full)
 }
 
 func (app *application) writeSummaryTable(ss []registry.Summary, full bool) error {
+	groupBy := registry.SummaryGroupByMultiplexerSession
+	if len(ss) > 0 && ss[0].GroupBy != "" {
+		groupBy = ss[0].GroupBy
+	}
+	return app.writeSummaryTableForGroup(ss, groupBy, full)
+}
+
+func (app *application) writeSummaryTableForGroup(ss []registry.Summary, groupBy registry.SummaryGroupBy, full bool) error {
+	switch groupBy {
+	case registry.SummaryGroupByProject:
+		return app.writeProjectSummaryTable(ss, full)
+	case registry.SummaryGroupByHarness:
+		return app.writeHarnessSummaryTable(ss, full)
+	case registry.SummaryGroupByMultiplexerSession:
+		fallthrough
+	default:
+		return app.writeMultiplexerSummaryTable(ss, full)
+	}
+}
+
+func (app *application) writeMultiplexerSummaryTable(ss []registry.Summary, full bool) error {
 	const (
 		summaryMuxWidth     = 10
 		summarySessionWidth = 20
-		summaryCountWidth   = 5
 		summaryUnknownWidth = 6
 	)
 	labels := summaryTableLabels(ss)
 	rows := make([][]string, 0, len(ss))
 	for i, s := range ss {
-		rows = append(rows, []string{multiplexerSummaryKind(s), labels[i], s.MultiplexerServerID, strconv.Itoa(s.Total), strconv.Itoa(s.Live), strconv.Itoa(s.Gone), strconv.Itoa(s.PresenceUnknown), strconv.Itoa(s.Running), strconv.Itoa(s.Waiting), strconv.Itoa(s.Idle), strconv.Itoa(s.Failed), strconv.Itoa(s.Interrupted), strconv.Itoa(s.ActivityUnknown)})
+		row := append([]string{multiplexerSummaryKind(s), labels[i], s.MultiplexerServerID}, summaryCountCells(s)...)
+		rows = append(rows, row)
 	}
-	columns := []humanColumn{{heading: "MUX", width: summaryMuxWidth}, {heading: "Session", width: summarySessionWidth, wrap: wrapHumanSession}, {heading: "Server", width: summaryUnknownWidth, wrap: wrapHumanIdentifier}, {heading: "Total", width: summaryCountWidth, align: text.AlignRight}, {heading: "Live", width: summaryCountWidth, align: text.AlignRight}, {heading: "Gone", width: summaryCountWidth, align: text.AlignRight}, {heading: "Pres?", width: summaryUnknownWidth, align: text.AlignRight}, {heading: "Run", width: summaryCountWidth, align: text.AlignRight}, {heading: "Wait", width: summaryCountWidth, align: text.AlignRight}, {heading: "Idle", width: summaryCountWidth, align: text.AlignRight}, {heading: "Failed", width: summaryUnknownWidth, align: text.AlignRight}, {heading: "Interrupted", width: len("Interrupted"), align: text.AlignRight}, {heading: "Act?", width: summaryCountWidth, align: text.AlignRight}}
+	columns := append([]humanColumn{
+		{heading: "MUX", width: summaryMuxWidth},
+		{heading: "Session", width: summarySessionWidth, wrap: wrapHumanSession},
+		{heading: "Server", width: summaryUnknownWidth, wrap: wrapHumanIdentifier},
+	}, summaryCountColumns()...)
+	return app.renderSummaryColumnsAndRows(columns, rows, full)
+}
+
+func (app *application) writeProjectSummaryTable(ss []registry.Summary, full bool) error {
+	const (
+		summaryProjectWidth = 16
+		summaryPathWidth    = 24
+	)
+	rows := make([][]string, 0, len(ss))
+	for _, s := range ss {
+		projectLabel := s.GroupLabel
+		if projectLabel == "" {
+			projectLabel = s.Project
+		}
+		if projectLabel == "" {
+			projectLabel = "unknown"
+		}
+		projectPath := s.ProjectRoot
+		if projectPath == "" {
+			projectPath = "-"
+		}
+		row := append([]string{projectLabel, projectPath}, summaryCountCells(s)...)
+		rows = append(rows, row)
+	}
+	columns := append([]humanColumn{
+		{heading: "Project", width: summaryProjectWidth, wrap: wrapHumanSession},
+		{heading: "Root", width: summaryPathWidth, wrap: wrapHumanPath},
+	}, summaryCountColumns()...)
+	return app.renderSummaryColumnsAndRows(columns, rows, full)
+}
+
+func (app *application) writeHarnessSummaryTable(ss []registry.Summary, full bool) error {
+	const (
+		summaryAgentWidth = 12
+	)
+	rows := make([][]string, 0, len(ss))
+	for _, s := range ss {
+		agentLabel := s.GroupLabel
+		if agentLabel == "" {
+			agentLabel = string(s.Harness)
+		}
+		if agentLabel == "" {
+			agentLabel = "unknown"
+		}
+		row := append([]string{agentLabel}, summaryCountCells(s)...)
+		rows = append(rows, row)
+	}
+	columns := append([]humanColumn{
+		{heading: "Agent", width: summaryAgentWidth},
+	}, summaryCountColumns()...)
+	return app.renderSummaryColumnsAndRows(columns, rows, full)
+}
+
+func summaryCountCells(s registry.Summary) []string {
+	return []string{
+		strconv.Itoa(s.Total),
+		strconv.Itoa(s.Live),
+		strconv.Itoa(s.Gone),
+		strconv.Itoa(s.PresenceUnknown),
+		strconv.Itoa(s.Running),
+		strconv.Itoa(s.Waiting),
+		strconv.Itoa(s.Idle),
+		strconv.Itoa(s.Failed),
+		strconv.Itoa(s.Interrupted),
+		strconv.Itoa(s.ActivityUnknown),
+	}
+}
+
+func summaryCountColumns() []humanColumn {
+	const (
+		summaryCountWidth   = 5
+		summaryUnknownWidth = 6
+	)
+	return []humanColumn{
+		{heading: "Total", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Live", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Gone", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Pres?", width: summaryUnknownWidth, align: text.AlignRight},
+		{heading: "Run", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Wait", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Idle", width: summaryCountWidth, align: text.AlignRight},
+		{heading: "Failed", width: summaryUnknownWidth, align: text.AlignRight},
+		{heading: "Interrupted", width: len("Interrupted"), align: text.AlignRight},
+		{heading: "Act?", width: summaryCountWidth, align: text.AlignRight},
+	}
+}
+
+func (app *application) renderSummaryColumnsAndRows(columns []humanColumn, rows [][]string, full bool) error {
 	for columnIndex := range columns {
 		for _, row := range rows {
 			columns[columnIndex].width = max(columns[columnIndex].width, text.StringWidth(row[columnIndex]))

@@ -164,7 +164,6 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	}
 
 	var request broker.Request
-	//nolint:musttag // Request defines the complete public JSON protocol schema.
 	if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
 		_ = s.writeResponse(connection, errorResponse(request.ID, "invalid_json", err))
 		return
@@ -245,7 +244,11 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 		session, err = s.store.Get(ctx, request.SessionID)
 		response.Session = &session
 	case broker.MethodSummary:
-		response.Summaries, err = s.store.SummaryByTmuxSession(ctx, request.Filter)
+		opts := request.SummaryOptions
+		if opts.GroupBy == "" {
+			opts.GroupBy = registry.SummaryGroupByMultiplexerSession
+		}
+		response.Summaries, err = s.store.SummaryWithOptions(ctx, request.Filter, opts)
 	case broker.MethodGC:
 		var result registry.GCResult
 		result, err = s.store.GC(ctx, request.DeleteAfter)

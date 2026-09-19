@@ -65,13 +65,6 @@ type FileStore struct {
 	onLockContention func()
 }
 
-type summaryKey struct {
-	kind   MultiplexerKind
-	server string
-	id     string
-	name   string
-}
-
 func (e *UnsupportedSchemaError) Error() string {
 	version := "missing"
 	if e.Version != 0 {
@@ -1076,9 +1069,12 @@ func populateMultiplexerProjection(session *Session) {
 	}
 }
 
-func (s *FileStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
+func (s *FileStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
+	}
+	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 	snap, err := s.load()
 	if err != nil {
@@ -1089,75 +1085,11 @@ func (s *FileStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]
 		populateMultiplexerProjection(&session)
 		sessions = append(sessions, session)
 	}
-	return summariesForSessions(filterSessions(sessions, filter)), nil
+	return SummariesWithOptions(filterSessions(sessions, filter), opts), nil
 }
 
-func summariesForSessions(sessions []Session) []Summary {
-	byKey := make(map[summaryKey]*Summary)
-	order := make([]summaryKey, 0)
-	for _, session := range sessions {
-		populateMultiplexerProjection(&session)
-		key := summaryKeyForSession(session)
-		summary := byKey[key]
-		if summary == nil {
-			summary = &Summary{
-				MultiplexerKind: session.Multiplexer.Kind, MultiplexerSessionID: session.Multiplexer.SessionID,
-				MultiplexerServerID:    session.Multiplexer.ServerID,
-				MultiplexerSessionName: session.Multiplexer.SessionName,
-				TmuxSessionID:          session.Tmux.SessionID, TmuxSessionName: session.Tmux.SessionName,
-				Total: 0, Live: 0, Gone: 0, PresenceUnknown: 0,
-				Running: 0, Waiting: 0, Idle: 0, Failed: 0, Interrupted: 0, ActivityUnknown: 0,
-			}
-			byKey[key] = summary
-			order = append(order, key)
-		}
-		summary.addSession(session)
-	}
-	result := make([]Summary, 0, len(order))
-	for _, key := range order {
-		result = append(result, *byKey[key])
-	}
-	return result
-}
-
-func (s *Summary) addSession(session Session) {
-	s.Total++
-	switch session.Presence {
-	case PresenceLive:
-		s.Live++
-	case PresenceGone:
-		s.Gone++
-	case PresenceUnknown:
-		s.PresenceUnknown++
-	}
-	if session.Presence == PresenceGone {
-		return
-	}
-	switch {
-	case session.Activity == nil, *session.Activity == ActivityUnknown:
-		s.ActivityUnknown++
-	case *session.Activity == ActivityRunning:
-		s.Running++
-	case *session.Activity == ActivityWaiting:
-		s.Waiting++
-	case *session.Activity == ActivityIdle:
-		s.Idle++
-	case *session.Activity == ActivityFailed:
-		s.Failed++
-	case *session.Activity == ActivityInterrupted:
-		s.Interrupted++
-	}
-}
-
-func summaryKeyForSession(session Session) summaryKey {
-	populateMultiplexerProjection(&session)
-	key := summaryKey{kind: session.Multiplexer.Kind, server: session.Multiplexer.ServerID, id: "", name: ""}
-	if session.Multiplexer.SessionID != "" {
-		key.id = session.Multiplexer.SessionID
-		return key
-	}
-	key.name = session.Multiplexer.SessionName
-	return key
+func (s *FileStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
 }
 
 func (s *FileStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error) {

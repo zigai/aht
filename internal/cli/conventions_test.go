@@ -255,7 +255,7 @@ func TestSubcommandOrdering(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("manage --help code = %d", code)
 	}
-	assertOrderedSubcommands(t, stdout.String(), "setup", "upgrade", "integrations", "tracker", "state", "doctor", "config")
+	assertOrderedSubcommands(t, stdout.String(), "setup", "upgrade", "integrations", "tracker", "state", "doctor", "config", "detection")
 }
 
 func TestZeroArgParentCommandsExitUsage(t *testing.T) {
@@ -267,6 +267,7 @@ func TestZeroArgParentCommandsExitUsage(t *testing.T) {
 		{"manage", "tracker"},
 		{"manage", "state"},
 		{"manage", "config"},
+		{"manage", "detection"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer

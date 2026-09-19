@@ -40,12 +40,12 @@ func TestManageHelpShowsCanonicalSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := stdout.String()
-	for _, command := range []string{"setup", "upgrade", "integrations", "tracker", "state", "doctor", "config"} {
+	for _, command := range []string{"setup", "upgrade", "integrations", "tracker", "state", "doctor", "config", "detection"} {
 		if !strings.Contains(help, command) {
 			t.Errorf("manage help does not show %q:\n%s", command, help)
 		}
 	}
-	for _, command := range []string{"monitor", "registry", "detection"} {
+	for _, command := range []string{"monitor", "registry"} {
 		if strings.Contains(help, "\n   "+command+" ") || strings.Contains(help, "\n  "+command+" ") {
 			t.Errorf("manage help exposes removed command %q:\n%s", command, help)
 		}
@@ -519,6 +519,11 @@ func prepareDoctorEnvironment(t *testing.T) string {
 	}
 	t.Setenv("OMP_PROFILE", "default")
 	t.Setenv("PI_PROFILE", "default")
+	fakeBin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
 	return filepath.Join(home, "sessions.json")
 }
 
