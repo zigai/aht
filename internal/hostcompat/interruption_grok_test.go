@@ -8,9 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/internal/testtmux"
 )
@@ -50,15 +51,22 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		t.Fatal(closeErr)
 	}
 
-	server := testtmux.New(t, "-s", "grok", "-x", "160", "-y", "45", "/bin/sh")
-	server.Run(t, "set-option", "-w", "-t", "grok:0.0", "remain-on-exit", "on")
-	args := []string{"respawn-pane", "-k", "-t", "grok:0.0", "-c", host.work, "env", "-i"}
-	args = append(args, command.Env...)
-	args = append(args, nativePath, "--model", "aht-compat", "--always-approve", "--disable-web-search", "--no-memory", compatibilityPrompt)
-	server.Run(t, args...)
+	pane := host.startGrokPane(t, command, nativePath)
+	capture := func() string {
+		out, err := pane.Capture(t.Context(), gotmux.CaptureOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
 	t.Cleanup(func() {
 		if t.Failed() {
-			out, _ := server.Command(context.Background(), "capture-pane", "-p", "-t", "grok:0.0").CombinedOutput()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			out, err := pane.Capture(ctx, gotmux.CaptureOptions{})
+			if err != nil {
+				t.Logf("capture native Grok failure screen: %v", err)
+			}
 			t.Logf("native Grok presented screen:\n%s", out)
 		}
 	})
@@ -71,26 +79,36 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		t.Fatal("native Grok did not reach its first active provider request")
 	}
 	host.waitForActiveSession(t)
-	server.Run(t, "send-keys", "-t", "grok:0.0", "Escape")
+	if err := pane.SendKeys(t.Context(), gotmux.KeyEscape); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
-	beforeQuit := server.Run(t, "capture-pane", "-p", "-t", "grok:0.0")
-	server.Run(t, "send-keys", "-t", "grok:0.0", "C-q")
+	beforeQuit := capture()
+	if err := pane.SendKeys(t.Context(), gotmux.Key("C-q")); err != nil {
+		t.Fatal(err)
+	}
 	confirmationDeadline := time.Now().Add(800 * time.Millisecond)
-	for server.Run(t, "capture-pane", "-p", "-t", "grok:0.0") == beforeQuit {
+	for capture() == beforeQuit {
 		if time.Now().After(confirmationDeadline) {
 			t.Fatal("native Grok did not present quit confirmation")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	server.Run(t, "send-keys", "-t", "grok:0.0", "C-q")
+	if err := pane.SendKeys(t.Context(), gotmux.Key("C-q")); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		state := strings.TrimSpace(server.Run(t, "display-message", "-p", "-t", "grok:0.0", "#{pane_dead}:#{pane_dead_status}"))
-		if state == "1:0" {
+		state, err := pane.Info(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, known := state.DeadStatus.Get()
+		if state.Dead && known && status == 0 {
 			break
 		}
-		if strings.HasPrefix(state, "1:") || time.Now().After(deadline) {
-			t.Fatalf("native Grok did not quit successfully: pane state %q", state)
+		if state.Dead || time.Now().After(deadline) {
+			t.Fatalf("native Grok did not quit successfully: dead=%t status=%v", state.Dead, state.DeadStatus)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -99,4 +117,27 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	}
 	// Process exit is only cleanup evidence; the shared caller still requires
 	// SessionEnd from the installed native hook integration.
+}
+
+func (host isolatedHost) startGrokPane(t *testing.T, command *exec.Cmd, nativePath string) gotmux.Pane {
+	t.Helper()
+	server := testtmux.New(t, gotmux.NewSessionOptions{
+		Name: "grok", Size: gotmux.Size{Width: 160, Height: 45}, Program: gotmux.Exec("/bin/sh"),
+	})
+	panes, err := server.Tmux.Panes(t.Context())
+	if err != nil || len(panes) != 1 {
+		t.Fatalf("native Grok initial pane: count=%d error=%v", len(panes), err)
+	}
+	pane := panes[0].Handle()
+	if err := pane.Options().SetRemainOnExit(t.Context(), gotmux.RemainOn); err != nil {
+		t.Fatal(err)
+	}
+	args := append([]string{"-i"}, command.Env...)
+	args = append(args, nativePath, "--model", "aht-compat", "--always-approve", "--disable-web-search", "--no-memory", compatibilityPrompt)
+	if err := pane.Respawn(t.Context(), gotmux.RespawnOptions{
+		Dir: host.work, Program: gotmux.Exec("env", args...), KillRunning: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return pane
 }

@@ -40,8 +40,8 @@ type Env struct {
 	TMUXPane string
 }
 
-// ServerProcess is the current-user process snapshot used to discover custom
-// tmux servers.
+// ServerProcess is the current-user process snapshot used as a fallback to
+// discover custom tmux sockets outside gotmux's standard directories.
 type ServerProcess struct {
 	PID  int
 	Args []string
@@ -55,6 +55,9 @@ type ServerProcessLister func(context.Context) ([]ServerProcess, error)
 type ListOptions struct {
 	Env             Env
 	ServerProcesses ServerProcessLister
+	// SocketPaths overrides gotmux's standard socket discovery when non-nil.
+	// An empty slice disables it for deterministic tests or explicit discovery.
+	SocketPaths []string
 }
 
 func Current(ctx context.Context) (registry.TmuxContext, error) {
@@ -90,16 +93,9 @@ func ContextFromEnv(env Env) registry.TmuxContext {
 		return tmux
 	}
 
-	var serverSocket string
-	if hints, err := gotmux.ParseEnvironment(gotmux.Environment{TMUX: env.TMUX, TMUXPane: env.TMUXPane}); err == nil {
-		serverSocket = hints.SocketPath
-	} else {
-		serverSocket = tmuxServerSocket(env.TMUX)
-	}
-
 	return registry.TmuxContext{
 		Inside:          true,
-		ServerSocket:    serverSocket,
+		ServerSocket:    tmuxServerSocket(env.TMUX),
 		SessionID:       "",
 		SessionName:     "",
 		WindowID:        "",
@@ -115,7 +111,7 @@ func ContextFromEnv(env Env) registry.TmuxContext {
 }
 
 func ListPanes(ctx context.Context) ([]Pane, error) {
-	return ListPanesWithOptions(ctx, ListOptions{ //nolint:exhaustruct_v5 // nil Run and ServerProcesses use defaults
+	return ListPanesWithOptions(ctx, ListOptions{ //nolint:exhaustruct_v5 // nil discovery options use defaults
 		Env: Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
 	})
 }
@@ -127,7 +123,7 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]Pane, err
 		options.ServerProcesses = listCurrentUserTmuxServers
 	}
 
-	servers, err := discoverServers(ctx, env, options.ServerProcesses)
+	servers, err := discoverServers(ctx, options)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +131,14 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]Pane, err
 	var firstErr error
 	seenPanes := make(map[string]struct{})
 	for _, server := range servers {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("list tmux panes: %w", err)
+		}
 		serverPanes, queryErr := queryServerPanesGotmux(ctx, server)
 		if queryErr != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("list tmux panes: %w", err)
+			}
 			if server.Identity == currentServerSocket && firstErr == nil {
 				firstErr = queryErr
 			}
@@ -174,6 +176,7 @@ func SendInterruptTo(ctx context.Context, serverIdentity, paneID string) error {
 	return nil
 }
 
+// ParseCurrent decodes legacy aht tmux records. Live queries use gotmux.
 func ParseCurrent(output string) (registry.TmuxContext, error) {
 	const expectedFields = 11
 	fields, err := parseTmuxFields(output, expectedFields)
@@ -201,6 +204,7 @@ func ParseCurrent(output string) (registry.TmuxContext, error) {
 	}, nil
 }
 
+// ParseListPanes decodes legacy aht tmux records. Live queries use gotmux.
 func ParseListPanes(output string) ([]Pane, error) {
 	trimmed := strings.TrimRight(output, "\r\n")
 	if trimmed == "" {
@@ -417,9 +421,13 @@ func tmuxServerSocket(tmuxEnv string) string {
 	if tmuxEnv == "" {
 		return ""
 	}
+	if hints, err := gotmux.ParseEnvironment(gotmux.Environment{TMUX: tmuxEnv, TMUXPane: ""}); err == nil {
+		return hints.SocketPath
+	}
 
-	// $TMUX is "socket,pid,session". Strip the trailing session and pid fields
-	// from the right so socket directories containing commas are preserved.
+	// Preserve the public environment-only fallback for incomplete or invalid
+	// $TMUX values that gotmux cannot verify. Strip suffixes from the right to
+	// retain commas in socket paths.
 	end := strings.LastIndexByte(tmuxEnv, ',')
 	if end < 0 {
 		return tmuxEnv

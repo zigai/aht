@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -230,6 +231,7 @@ func TestServerSpecFromArgs(t *testing.T) {
 func TestListPanesWithOptionsDoesNotProbeMissingDefaultServer(t *testing.T) {
 	t.Parallel()
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
+		SocketPaths:     []string{},
 		Env:             Env{TMUX: "", TMUXPane: ""},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
 	})
@@ -241,7 +243,8 @@ func TestListPanesWithOptionsDoesNotProbeMissingDefaultServer(t *testing.T) {
 func TestListPanesWithOptionsIgnoresUnreachableDiscoveredServer(t *testing.T) {
 	t.Parallel()
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		Env: Env{TMUX: "", TMUXPane: ""},
+		SocketPaths: []string{},
+		Env:         Env{TMUX: "", TMUXPane: ""},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
 			return []ServerProcess{{PID: 42, Args: []string{"tmux", "-S", "/tmp/stale.sock", "new-session", "-d"}}}, nil
 		},
@@ -255,6 +258,7 @@ func TestListPanesWithOptionsReportsUnreachableCurrentServer(t *testing.T) {
 	t.Parallel()
 	const socket = "/tmp/current-unreachable.sock"
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
+		SocketPaths:     []string{},
 		Env:             Env{TMUX: socket + ",123,0", TMUXPane: "%1"},
 		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
 	})
@@ -291,5 +295,46 @@ func TestAppendCanonicalPanesDeduplicates(t *testing.T) {
 	panes = appendCanonicalPanes(panes, []Pane{pane}, socket, seen)
 	if len(panes) != 1 {
 		t.Fatalf("expected 1 deduplicated pane, got %d", len(panes))
+	}
+}
+
+func TestDiscoverServersCombinesSocketAndProcessCandidates(t *testing.T) {
+	t.Parallel()
+	servers, err := discoverServers(t.Context(), ListOptions{
+		Env:         Env{TMUX: "/tmp/current.sock,123,0"},
+		SocketPaths: []string{"/tmp/current.sock", "/tmp/named.sock", "/tmp/named.sock"},
+		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
+			return []ServerProcess{
+				{Args: []string{"tmux", "-S", "/tmp/current.sock"}},
+				{Args: []string{"tmux", "-S/tmp/custom.sock"}},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := make([]string, 0, len(servers))
+	for _, server := range servers {
+		identities = append(identities, server.Identity)
+	}
+	want := []string{"/tmp/current.sock", "/tmp/named.sock", "/tmp/custom.sock"}
+	if !slices.Equal(identities, want) {
+		t.Fatalf("discovered servers = %q, want %q", identities, want)
+	}
+}
+
+func TestListPanesPreservesDiscoveryCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	_, err := ListPanesWithOptions(ctx, ListOptions{
+		SocketPaths: []string{},
+		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
+			cancel()
+			return nil, nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled discovery = %v, want cancellation", err)
 	}
 }

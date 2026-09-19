@@ -2,8 +2,11 @@ package tmux
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+
+	gotmux "github.com/zigai/gotmux/tmux"
 )
 
 type serverSpec struct {
@@ -11,28 +14,46 @@ type serverSpec struct {
 	Args     []string
 }
 
-func discoverServers(ctx context.Context, env Env, lister ServerProcessLister) ([]serverSpec, error) {
-	processes, err := lister(ctx)
+func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("discover tmux servers: %w", err)
+	}
+	sockets := options.SocketPaths
+	if sockets == nil {
+		var err error
+		sockets, err = gotmux.DiscoverSockets()
+		if err != nil {
+			return nil, fmt.Errorf("discover tmux sockets: %w", err)
+		}
+	}
+	// gotmux discovers standard socket directories. Process inspection remains
+	// a fallback for custom -S paths outside those directories; it can only
+	// recover paths that the OS exposes in the server's process arguments.
+	processes, err := options.ServerProcesses(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("discover tmux servers: %w", err)
+	}
 
-	servers := make([]serverSpec, 0, len(processes)+1)
-	seen := make(map[string]struct{}, len(processes)+1)
+	servers := make([]serverSpec, 0, len(processes)+len(sockets)+1)
+	seen := make(map[string]struct{}, len(processes)+len(sockets)+1)
 	add := func(server serverSpec) {
-		key := server.Identity
-		if key == "" {
-			key = "default"
-		}
-		if _, exists := seen[key]; exists {
+		if _, exists := seen[server.Identity]; exists {
 			return
 		}
-		seen[key] = struct{}{}
+		seen[server.Identity] = struct{}{}
 		servers = append(servers, server)
 	}
 
-	if socket := tmuxServerSocket(env.TMUX); socket != "" {
+	if socket := tmuxServerSocket(options.Env.TMUX); socket != "" {
 		add(serverSpec{Identity: socket, Args: []string{"-S", socket}})
+	}
+	for _, socket := range sockets {
+		if socket != "" {
+			add(serverSpec{Identity: socket, Args: []string{"-S", socket}})
+		}
 	}
 
 	for _, process := range processes {
@@ -53,21 +74,20 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if !isTmuxBinaryName(base) {
 		return serverSpec{Identity: "", Args: nil}, false
 	}
-	for index, arg := range args {
-		switch arg {
-		case "-S":
-			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
-				return serverSpec{Identity: "", Args: nil}, false
-			}
-			socket := args[index+1]
-			return serverSpec{Identity: socket, Args: []string{"-S", socket}}, true
-		case "-L":
-			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
-				return serverSpec{Identity: "", Args: nil}, false
-			}
-			name := args[index+1]
-			return serverSpec{Identity: "-L:" + name, Args: []string{"-L", name}}, true
-		}
+	// Some tmux builds expose a bare -d daemon process marker rather than a
+	// native root flag. It carries no endpoint, so retain the default fallback.
+	if len(args) == 2 && args[1] == "-d" {
+		return serverSpec{Identity: "default", Args: nil}, true
+	}
+	parsed, err := gotmux.ParseCommandLine(args[1:])
+	if err != nil {
+		return serverSpec{Identity: "", Args: nil}, false
+	}
+	if socket := parsed.Config.SocketPath; socket != "" {
+		return serverSpec{Identity: socket, Args: []string{"-S", socket}}, true
+	}
+	if name := parsed.Config.SocketName; name != "" {
+		return serverSpec{Identity: "-L:" + name, Args: []string{"-L", name}}, true
 	}
 	return serverSpec{Identity: "default", Args: nil}, true
 }

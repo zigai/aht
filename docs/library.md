@@ -198,6 +198,14 @@ func main() {
 
 The `tmux` package discovers tmux environment variables and pane metadata for terminal integrations.
 
+Live tmux operations use gotmux v0.3.0, including current context, pane queries,
+screen capture, interrupts, and standard socket discovery. Discovery also checks
+the current `$TMUX` socket. On Linux and macOS, process arguments provide a
+fallback for custom `-S` sockets outside standard directories; this fallback
+cannot recover a socket path that the server no longer exposes in its arguments.
+`ListOptions.SocketPaths` can supply explicit socket candidates; a nil slice uses
+gotmux discovery, and an empty slice disables that part of discovery.
+
 ```go
 package main
 

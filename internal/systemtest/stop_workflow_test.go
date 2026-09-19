@@ -238,7 +238,7 @@ func waitForSystemTestCommandExit(t *testing.T, process *runningTestCommand) {
 func startTmuxAgentSession(t *testing.T, session string, binary string, storePath string) *testtmux.Server {
 	t.Helper()
 	shellCommand := "exec " + harnesspkg.ShellQuote(binary) + " --store " + harnesspkg.ShellQuote(storePath) + " manage tracker run --quiet"
-	return testtmux.New(t, "-s", session, shellCommand)
+	return testtmux.New(t, gotmux.NewSessionOptions{Name: session, Program: gotmux.Shell(shellCommand)})
 }
 
 func requireTmuxPane(t *testing.T, socket string) tmux.Pane {

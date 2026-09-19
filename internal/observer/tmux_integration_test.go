@@ -52,7 +52,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 			t.Fatal(err)
 		}
 		if server == nil {
-			server = testtmux.New(t, "-s", sessionName, script)
+			server = testtmux.New(t, gotmux.NewSessionOptions{Name: sessionName, Program: gotmux.Exec(script)})
 		} else {
 			_, err := server.Tmux.NewSession(ctx, gotmux.NewSessionOptions{ //nolint:exhaustruct_v5 // remaining options default
 				Name:    sessionName,

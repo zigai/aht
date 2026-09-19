@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	gotmux "github.com/zigai/gotmux/tmux"
+
 	"github.com/zigai/aht/internal/processinfo"
 )
 
@@ -27,11 +29,19 @@ func TestServerCleanupAndIsolation(t *testing.T) {
 
 	var server *Server
 	t.Run("owned server", func(t *testing.T) {
-		server = New(t, "sleep", "60")
-		if got := server.Run(t, "show-option", "-gqv", "@aht-user-config"); got != "" {
+		server = New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
+		option, err := server.Tmux.GlobalSessionOptions().User(t.Context(), "@aht-user-config")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, present := option.Effective.Get(); present {
 			t.Fatalf("test server loaded personal configuration: %q", got)
 		}
-		if got := server.Run(t, "show-option", "-gv", "default-shell"); got != "/bin/sh\n" {
+		shell, err := server.Session.Options().DefaultShell(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := shell.Effective.Get(); got != "/bin/sh" {
 			t.Fatalf("default shell = %q, want isolated /bin/sh", got)
 		}
 	})
@@ -47,7 +57,7 @@ func TestServerCleanupAndIsolation(t *testing.T) {
 }
 
 func TestCloseReportsBlockedCleanup(t *testing.T) {
-	server := New(t, "sleep", "60")
+	server := New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
 	executable := server.executable
 	wrapper := filepath.Join(t.TempDir(), "blocked-tmux")
 	writeRejectingWrapper(t, wrapper)
@@ -66,7 +76,7 @@ func TestCloseReportsBlockedCleanup(t *testing.T) {
 }
 
 func TestCloseDoesNotTreatCanceledInspectionAsExit(t *testing.T) {
-	server := New(t, "sleep", "60")
+	server := New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := server.Close(ctx); !errors.Is(err, context.Canceled) {

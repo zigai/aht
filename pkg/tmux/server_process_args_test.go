@@ -55,6 +55,10 @@ func TestServerSpecFromArgsSupportsBinarySuffixAndFlags(t *testing.T) {
 		{name: "tmux named socket", args: []string{"/usr/bin/tmux", "-L", "popup"}, wantOK: true, wantIdentity: "-L:popup"},
 		{name: "tmux.bin custom socket", args: []string{"/usr/local/bin/tmux.bin", "-S", "/tmp/custom.sock"}, wantOK: true, wantIdentity: "/tmp/custom.sock"},
 		{name: "tmux.real binary", args: []string{"/usr/bin/tmux.real", "-d"}, wantOK: true, wantIdentity: "default"},
+		{name: "attached named socket", args: []string{"tmux", "-Lpopup"}, wantOK: true, wantIdentity: "-L:popup"},
+		{name: "bundled socket flags", args: []string{"tmux", "-uS/tmp/agent sessions.sock", "server"}, wantOK: true, wantIdentity: "/tmp/agent sessions.sock"},
+		{name: "child command flag is not a socket", args: []string{"tmux", "new-session", "sh", "-c", "script", "-S", "/tmp/child.sock"}, wantOK: true, wantIdentity: "default"},
+		{name: "missing socket value", args: []string{"tmux", "-S"}, wantOK: false},
 		{name: "unrelated binary", args: []string{"/usr/bin/bash", "-c", "echo"}, wantOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

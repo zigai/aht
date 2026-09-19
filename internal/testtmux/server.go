@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,11 +28,13 @@ const (
 type Server struct {
 	Socket        string
 	Tmux          *gotmux.Server
+	Session       gotmux.Session
 	directory     string
 	executable    string
 	environment   []string
 	pid           int
 	startIdentity string
+	identity      gotmux.ServerIdentity
 }
 
 // Executable bypasses personal PATH wrappers for test server lifecycle commands.
@@ -57,18 +58,18 @@ func Executable(t *testing.T) string {
 }
 
 // New starts a detached session without loading personal tmux or shell config.
-func New(t *testing.T, sessionArgs ...string) *Server {
+func New(t *testing.T, options gotmux.NewSessionOptions) *Server {
 	t.Helper()
-	return newServer(t, "", sessionArgs)
+	return newServer(t, "", options)
 }
 
 // NewNamed starts through -L so tests can exercise named-server discovery.
-func NewNamed(t *testing.T, name string, sessionArgs ...string) *Server {
+func NewNamed(t *testing.T, name string, options gotmux.NewSessionOptions) *Server {
 	t.Helper()
-	return newServer(t, name, sessionArgs)
+	return newServer(t, name, options)
 }
 
-func newServer(t *testing.T, name string, sessionArgs []string) *Server {
+func newServer(t *testing.T, name string, options gotmux.NewSessionOptions) *Server {
 	t.Helper()
 	executable := Executable(t)
 	// Unix socket paths must stay short. Cleanup owns this directory so a
@@ -77,7 +78,7 @@ func newServer(t *testing.T, name string, sessionArgs []string) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{
+	server := &Server{ //nolint:exhaustruct_v5 // handles and identities are populated after startup
 		Socket:        filepath.Join(directory, "tmux.sock"),
 		Tmux:          nil,
 		directory:     directory,
@@ -93,42 +94,15 @@ func newServer(t *testing.T, name string, sessionArgs []string) *Server {
 		}
 	}
 	server.environment = append(server.environment, "SHELL=/bin/sh", "TMUX_TMPDIR="+directory)
-	socketFlag, socketTarget := "-S", server.Socket
 	if name != "" {
 		server.Socket = filepath.Join(directory, fmt.Sprintf("tmux-%d", os.Getuid()), name)
-		socketFlag, socketTarget = "-L", name
 		t.Setenv("TMUX_TMPDIR", directory)
 	}
 	t.Cleanup(func() { server.cleanup(t) })
-	startArgs := slices.Concat([]string{socketFlag, socketTarget, "-f", "/dev/null", "new-session", "-d"}, sessionArgs)
 	ctx, cancel := context.WithTimeout(t.Context(), commandTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, executable, startArgs...)
-	command.Env = server.environment
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start test tmux: %v: %s", err, output)
-	}
-	server.initGotmuxAndProbe(ctx, t, name)
+	server.start(ctx, t, name, options)
 	return server
-}
-
-// Command targets only this fixture's socket with the selected executable.
-func (server *Server) Command(ctx context.Context, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, server.executable, append([]string{"-S", server.Socket, "-f", "/dev/null"}, args...)...)
-	command.Env = server.environment
-	return command
-}
-
-// Run executes a bounded command and fails the test on error.
-func (server *Server) Run(t *testing.T, args ...string) string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), commandTimeout)
-	defer cancel()
-	output, err := server.Command(ctx, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("test tmux command %q: %v: %s", args, err, output)
-	}
-	return string(output)
 }
 
 // Close stops the owned server and verifies its process exited before returning.
@@ -175,17 +149,38 @@ func (server *Server) killTmuxServer(ctx context.Context) error {
 			ConfigFile: "/dev/null",
 			Env:        server.environment,
 		}
-		if s, err := gotmux.New(cfg); err == nil {
-			server.Tmux = s
+		if server.Tmux != nil {
+			endpoint := server.Tmux.Endpoint()
+			cfg.SocketPath = endpoint.SocketPath
+			cfg.SocketName = endpoint.SocketName
 		}
+		s, err := gotmux.New(cfg)
+		if err != nil {
+			return fmt.Errorf("init test tmux cleanup: %w", err)
+		}
+		server.Tmux = s
 	}
-	if err := server.Tmux.Kill(ctx); err != nil {
+	// Startup may have failed before returning a verified handle. Probe only
+	// our private socket in that case so partial startup is still cleaned up.
+	if server.identity.PID == 0 {
+		probe, err := server.Tmux.Probe(ctx)
+		if errors.Is(err, gotmux.ErrNoServer) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("probe test tmux cleanup: %w", err)
+		}
+		server.identity = probe.Identity
+		server.pid = server.identity.PID
+		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
+	}
+	if err := server.Tmux.KillIfIdentity(ctx, server.identity); err != nil && !errors.Is(err, gotmux.ErrNoServer) {
 		return fmt.Errorf("stop test tmux: %w", err)
 	}
 	return nil
 }
 
-func (server *Server) initGotmuxAndProbe(ctx context.Context, t *testing.T, name string) {
+func (server *Server) start(ctx context.Context, t *testing.T, name string, options gotmux.NewSessionOptions) {
 	t.Helper()
 	gotmuxConfig := gotmux.Config{ //nolint:exhaustruct_v5 // remaining options default
 		Binary:     server.executable,
@@ -203,15 +198,20 @@ func (server *Server) initGotmuxAndProbe(ctx context.Context, t *testing.T, name
 	}
 	server.Tmux = gotmuxServer
 
-	probe, err := server.Tmux.Probe(ctx)
-	if err != nil {
-		t.Fatalf("probe test tmux server: %v", err)
+	options.Start = gotmux.AllowStart
+	session, err := server.Tmux.NewSession(ctx, options)
+	if session.Valid() {
+		server.Session = session
+		server.identity = session.Identity()
+		server.pid = server.identity.PID
+		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	}
-	server.pid = probe.Identity.PID
+	if err != nil {
+		t.Fatalf("start test tmux: %v", err)
+	}
 	if server.pid <= 0 {
 		t.Fatalf("invalid test tmux server PID: %d", server.pid)
 	}
-	server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	if server.startIdentity == "" {
 		t.Fatal("test tmux server has no process identity")
 	}
