@@ -109,7 +109,8 @@ func (watch *fileStoreWatch) scan() error {
 	}
 	initial := !watch.haveBaseline
 	unchanged := watch.haveBaseline && watchSessionsEqual(watch.baseline, sessions)
-	watch.baseline = cloneWatchSessions(sessions)
+	// The fresh file snapshot is private; only callback values need cloning.
+	watch.baseline = sessions
 	watch.baselineUpdatedAt = updatedAt
 	watch.haveBaseline = true
 	if unchanged {
@@ -304,5 +305,5 @@ func (s *FileStore) watchSnapshot(filter Filter) ([]Session, time.Time, error) {
 		populateMultiplexerProjection(&session)
 		sessions = append(sessions, session)
 	}
-	return filterSessions(sessions, filter), snap.UpdatedAt, nil
+	return FilterSessions(sessions, filter), snap.UpdatedAt, nil
 }

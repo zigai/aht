@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -110,6 +111,10 @@ func (s *MemoryStore) ObserveBatch(ctx context.Context, observations []Observati
 			s.mu.Unlock()
 			return nil, fmt.Errorf("%w: session %q: %s", ErrCorruptStore, session.ID, reason)
 		}
+	}
+	if err := validateNativePayloadChanges(s.snapshot, candidate); err != nil {
+		s.mu.Unlock()
+		return nil, err
 	}
 
 	stateChanged := !materialSnapshotsEqual(s.snapshot, candidate)
@@ -272,7 +277,7 @@ func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
 	return StateSnapshot{
 		Revision:  s.revision,
 		UpdatedAt: s.snapshot.UpdatedAt,
-		Sessions:  filterSessions(sessions, filter),
+		Sessions:  FilterSessions(sessions, filter),
 	}
 }
 
@@ -358,6 +363,22 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 			return fmt.Errorf("persisting registry snapshot: %w", err)
 		}
 	}
+}
+
+func validateNativePayloadChanges(previous, candidate snapshot) error {
+	for id, session := range candidate.Sessions {
+		native := session.Observations.Native
+		// The reducer replaces native observations on change. Unchanged pointers
+		// belong to already validated state; only final retained payloads matter.
+		if native == nil || native == previous.Sessions[id].Observations.Native || len(native.RawPayload) == 0 || json.Valid(native.RawPayload) {
+			continue
+		}
+		// Ask the same codec used by persistence to construct its MarshalerError.
+		// Valid payloads require no serialization or encoded copy on this path.
+		_, err := json.Marshal(native.RawPayload)
+		return fmt.Errorf("encoding store: %w", err)
+	}
+	return nil
 }
 
 func normalizePersistenceOptions(settle, maximumDelay time.Duration) (time.Duration, time.Duration) {

@@ -147,7 +147,7 @@ func applyObservationBatch(
 		id := findAndReconcileMatchingSession(snap.Sessions, observation, at)
 		if id == "" &&
 			observation.Source == ObservationSourceCatalog &&
-			(observation.Harness != HarnessClaude || observation.Catalog == nil || !observation.Catalog.Current) {
+			(observation.Harness != HarnessClaude || !observation.Catalog.Current) {
 			continue
 		}
 		if id == "" {
@@ -219,9 +219,6 @@ func newSession(id string, harness Harness, now time.Time) Session {
 }
 
 func observationTime(observedAt, receivedAt time.Time) time.Time {
-	if observedAt.IsZero() {
-		return receivedAt
-	}
 	observedAt = observedAt.UTC()
 	if observedAt.After(receivedAt.Add(maxObservedAtFutureSkew)) {
 		return receivedAt
@@ -427,9 +424,7 @@ func applyObservation(session *Session, observation Observation, at, receivedAt 
 	previousPresence := session.Presence
 	previousActivity := session.Activity
 	resumesIncarnation := resumesNativeIncarnation(*session, observation, at)
-	if err := storeObservation(session, observation, at); err != nil {
-		return err
-	}
+	storeObservation(session, observation, at)
 	applyIdentity(session, observation)
 	applyMetadata(session, observation, at)
 	if resumesIncarnation {
@@ -461,30 +456,27 @@ func validateIncomingProcessTime(session Session, observation Observation, at ti
 
 func observationEquivalent(session Session, observation Observation, at time.Time) bool {
 	candidate := session
-	if err := storeObservation(&candidate, observation, at); err != nil {
-		return false
-	}
+	storeObservation(&candidate, observation, at)
 	return reflect.DeepEqual(existingSlot(session, observation), existingSlot(candidate, observation))
 }
 
-func storeObservation(session *Session, observation Observation, at time.Time) error {
+// storeObservation records an observation in the appropriate slot.
+// Precondition: observation has been validated via Observation.Validate.
+func storeObservation(session *Session, observation Observation, at time.Time) {
 	switch observation.Source {
 	case ObservationSourceNative:
 		storeNativeObservation(session, observation, at)
 	case ObservationSourceProcess:
 		storeProcessObservation(session, observation, at)
 	case ObservationSourceTmux:
-		return storeTmuxObservation(session, observation, at)
+		storeTmuxObservation(session, observation, at)
 	case ObservationSourceMultiplexer:
-		return storeMultiplexerObservation(session, observation, at)
+		storeMultiplexerObservation(session, observation, at)
 	case ObservationSourceCatalog:
-		return storeCatalogObservation(session, observation, at)
+		storeCatalogObservation(session, observation, at)
 	case ObservationSourceScreen:
-		return storeScreenObservation(session, observation, at)
-	default:
-		return ErrUnknownSource
+		storeScreenObservation(session, observation, at)
 	}
-	return nil
 }
 
 func storeNativeObservation(session *Session, observation Observation, at time.Time) {
@@ -504,40 +496,24 @@ func storeProcessObservation(session *Session, observation Observation, at time.
 	session.Observations.Process = &ProcessObservation{Present: present, Process: process, ObservedAt: at}
 }
 
-func storeTmuxObservation(session *Session, observation Observation, at time.Time) error {
-	if observation.Tmux == nil || observation.Process == nil {
-		return ErrInvalidObservation
-	}
+func storeTmuxObservation(session *Session, observation Observation, at time.Time) {
 	session.Observations.Tmux = &TmuxObservation{Process: *observation.Process, Context: *observation.Tmux, ObservedAt: at}
-	return nil
 }
 
-func storeMultiplexerObservation(session *Session, observation Observation, at time.Time) error {
-	if observation.Multiplexer == nil || observation.Process == nil {
-		return ErrInvalidObservation
-	}
+func storeMultiplexerObservation(session *Session, observation Observation, at time.Time) {
 	session.Observations.Multiplexer = &MultiplexerObservation{Process: *observation.Process, Context: *observation.Multiplexer, ObservedAt: at}
-	return nil
 }
 
-func storeCatalogObservation(session *Session, observation Observation, at time.Time) error {
-	if observation.Catalog == nil {
-		return ErrInvalidObservation
-	}
+func storeCatalogObservation(session *Session, observation Observation, at time.Time) {
 	session.Observations.Catalog = &CatalogObservation{SessionID: observation.Identity.SessionID, SessionPath: observation.Identity.SessionPath, ResumeCommand: append([]string(nil), observation.Catalog.ResumeCommand...), CWD: observation.Catalog.CWD, ProjectRoot: observation.Catalog.ProjectRoot, ProcessPID: observation.Catalog.ProcessPID, ObservedAt: at}
-	return nil
 }
 
-func storeScreenObservation(session *Session, observation Observation, at time.Time) error {
-	if observation.Screen == nil || observation.Process == nil || observation.Activity == nil {
-		return ErrInvalidObservation
-	}
+func storeScreenObservation(session *Session, observation Observation, at time.Time) {
 	screen := *observation.Screen
 	screen.Activity = *observation.Activity
 	screen.Process = *observation.Process
 	screen.ObservedAt = at
 	session.Observations.Screen = &screen
-	return nil
 }
 
 func applyIdentity(session *Session, observation Observation) {
@@ -1076,16 +1052,11 @@ func (s *FileStore) SummaryWithOptions(ctx context.Context, filter Filter, opts 
 	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
-	snap, err := s.load()
+	sessions, _, err := s.watchSnapshot(filter)
 	if err != nil {
 		return nil, err
 	}
-	sessions := make([]Session, 0, len(snap.Sessions))
-	for _, session := range snap.Sessions {
-		populateMultiplexerProjection(&session)
-		sessions = append(sessions, session)
-	}
-	return SummariesWithOptions(filterSessions(sessions, filter), opts), nil
+	return SummariesWithOptions(sessions, opts), nil
 }
 
 func (s *FileStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {

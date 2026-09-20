@@ -804,10 +804,6 @@ func sessionIDForObservation(observation Observation) string {
 	return string(observation.Harness) + "-" + hex.EncodeToString(sum[:8])
 }
 
-func filterSessions(sessions []Session, filter Filter) []Session {
-	return FilterSessions(sessions, filter)
-}
-
 func matchesFilterLocation(session Session, filter Filter) bool {
 	populateMultiplexerProjection(&session)
 	if filter.MultiplexerKind != "" && session.Multiplexer.Kind != filter.MultiplexerKind {
@@ -830,8 +826,8 @@ func sortSessions(sessions []Session) {
 			cmp.Compare(left.Multiplexer.Kind, right.Multiplexer.Kind),
 			cmp.Compare(left.Multiplexer.SessionName, right.Multiplexer.SessionName),
 			compareNumericStrings(
-				firstNonEmptyString(left.Multiplexer.WindowIndex, left.Multiplexer.TabIndex),
-				firstNonEmptyString(right.Multiplexer.WindowIndex, right.Multiplexer.TabIndex),
+				cmp.Or(left.Multiplexer.WindowIndex, left.Multiplexer.TabIndex),
+				cmp.Or(right.Multiplexer.WindowIndex, right.Multiplexer.TabIndex),
 			),
 			compareNumericStrings(left.Multiplexer.PaneIndex, right.Multiplexer.PaneIndex),
 			cmp.Compare(left.Harness, right.Harness),
@@ -839,15 +835,6 @@ func sortSessions(sessions []Session) {
 			left.UpdatedAt.Compare(right.UpdatedAt),
 		)
 	})
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func compareNumericStrings(left, right string) int {
