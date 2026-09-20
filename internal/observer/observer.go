@@ -521,7 +521,7 @@ func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
 }
 
 func observableHarness(process processinfo.Process, harnessID registry.Harness) (registry.Harness, bool) {
-	if isTestFixtureProcess(process) {
+	if isTestFixtureProcess(process) || isReportCommand(process.Args, harnessID) {
 		return "", false
 	}
 	for _, arg := range process.Args {
@@ -537,27 +537,28 @@ func observableHarness(process processinfo.Process, harnessID registry.Harness) 
 	return harnessID, true
 }
 
-func isTestPath(path string) bool {
-	return strings.Contains(path, "/aht-systest-") || strings.Contains(path, "/Test") || strings.Contains(path, "testdata")
-}
-
-func hasTestFixtureArgs(args []string) bool {
+func isReportCommand(args []string, harnessID registry.Harness) bool {
 	for i, arg := range args {
-		if isTestPath(arg) || strings.Contains(arg, "-test.") {
-			return true
-		}
-		if arg == "report" && i+1 < len(args) {
+		if arg == "report" && slices.Contains(args[i+1:], string(harnessID)) {
 			return true
 		}
 	}
-	return slices.Contains(args, "manage") && (slices.Contains(args, "tracker") || slices.Contains(args, "run"))
+	return false
 }
 
 func isTestFixtureProcess(process processinfo.Process) bool {
-	if isTestPath(process.Executable) || isTestPath(process.CWD) || strings.HasSuffix(process.Executable, ".test") {
+	if strings.Contains(process.Executable, "/aht-systest-") || strings.Contains(process.CWD, "/aht-systest-") {
 		return true
 	}
-	return hasTestFixtureArgs(process.Args)
+	for _, arg := range process.Args {
+		if strings.Contains(arg, "/aht-systest-") {
+			return true
+		}
+	}
+	if slices.Contains(process.Args, "manage") && (slices.Contains(process.Args, "tracker") || slices.Contains(process.Args, "run")) {
+		return true
+	}
+	return false
 }
 
 func hasAncestorHarness(pid int, harnessID registry.Harness, processByPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness) bool {
