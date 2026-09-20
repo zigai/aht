@@ -168,6 +168,9 @@ func (s *search) scanFile(ctx context.Context, source Source, path string, statu
 		s.scanDatabase(ctx, source, path)
 		return
 	}
+	if s.index != nil && s.index.unchanged(ctx, s, source, path, info) {
+		return
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		s.issue(source, path, err)
@@ -198,6 +201,13 @@ func (s *search) scanEntry(ctx context.Context, source Source, path string, root
 	if isDatabase(path) {
 		s.scanFile(ctx, source, absolute, status)
 		return
+	}
+	if s.index != nil {
+		// Stat through the walk's root to retain its containment guarantees.
+		if info, err := root.Stat(path); err == nil && s.index.unchanged(ctx, s, source, absolute, info) {
+			status.Files++
+			return
+		}
 	}
 	file, openErr := root.Open(path)
 	if openErr != nil {

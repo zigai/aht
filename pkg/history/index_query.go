@@ -98,12 +98,18 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	// excerpts.
 	folded := fold(s.query.Text)
 	filter, args := directorySQL(s.query.Dir)
-	// For a small selected directory, reading its few parts is cheaper than
+	filter += " AND " + index.sourceFilter
+	args = append(args, index.sourceArgs...)
+	// For a small selected project or source, reading its few parts is cheaper than
 	// enumerating a common trigram across the entire index. CROSS JOIN keeps
 	// SQLite's metadata selection ahead of reading message bodies in this path.
-	small, err := index.smallDirectory(ctx, s.query.Dir, filter, args)
-	if err != nil {
-		return "", nil, err
+	var small bool
+	if fileID == 0 {
+		var err error
+		small, err = index.smallSelection(ctx, filter, args)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	// Tool parts are stored for opt-in searches only, so a default query must
 	// exclude them from candidate plans in both the trigram and instr branches.
@@ -134,15 +140,12 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	return query, args, nil
 }
 
-func (index *historyIndex) smallDirectory(ctx context.Context, dir, filter string, args []any) (bool, error) {
-	if dir == "" {
-		return false, nil
-	}
+func (index *historyIndex) smallSelection(ctx context.Context, filter string, args []any) (bool, error) {
 	var count int
-	query := "SELECT count(*) FROM (SELECT c.id FROM conversations c WHERE " + filter + " LIMIT ?)"
+	query := "SELECT count(*) FROM (SELECT c.id FROM conversations c JOIN files f ON f.id=c.file_id WHERE " + filter + " LIMIT ?)"
 	values := append(append([]any{}, args...), directoryScanThreshold+1)
 	if err := index.conn.QueryRowContext(ctx, query, values...).Scan(&count); err != nil {
-		return false, index.contention(fmt.Errorf("select indexed directories: %w", err))
+		return false, index.contention(fmt.Errorf("select indexed conversations: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
 }
@@ -183,6 +186,11 @@ func (index *historyIndex) collectMatches(ctx context.Context, s *search, rows *
 		}
 		var match Match
 		match.Conversation = conversation
+		if s.query.Limit > 0 {
+			match.MatchingParts = index.plans[id].count
+			s.keep(match, id)
+			continue
+		}
 		if err := index.readExcerpts(ctx, s, id, &match); err != nil {
 			return err
 		}
@@ -190,6 +198,25 @@ func (index *historyIndex) collectMatches(ctx context.Context, s *search, rows *
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("scan indexed conversations: %w", err)
+	}
+	return nil
+}
+
+// readRetained hydrates only the final heap after every selected history has
+// been checked. Failed or canceled reads cannot expose metadata-only matches.
+func (index *historyIndex) readRetained(ctx context.Context, s *search) error {
+	retained := s.recent
+	s.recent = nil
+	for _, match := range retained {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read retained excerpts: %w", err)
+		}
+		if err := index.readExcerpts(ctx, s, match.indexID, &match.Match); err != nil {
+			// Re-run native discovery to preserve source coverage and diagnostics
+			// if the deferred index read fails after the source walk has finished.
+			return indexUnavailable(err)
+		}
+		s.recent = append(s.recent, match)
 	}
 	return nil
 }

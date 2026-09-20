@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -56,12 +58,7 @@ func stampPath(path string) string {
 	return stampFile(info)
 }
 
-func (index *historyIndex) transcript(ctx context.Context, s *search, source Source, path string, file *os.File) error {
-	info, err := file.Stat()
-	if err != nil {
-		s.issue(source, path, err)
-		return nil
-	}
+func transcriptExtra(s *search, source Source, path string) string {
 	extra := ""
 	switch source.Harness {
 	case registry.HarnessKimiCode:
@@ -71,6 +68,36 @@ func (index *historyIndex) transcript(ctx context.Context, s *search, source Sou
 	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes:
 		// Other supported transcripts carry metadata in the history itself.
 	}
+	return extra
+}
+
+// unchanged uses the same identity, ctime, size, mtime, mode and sidecar stamp as
+// an opened transcript. Check effective read access as well: cached content must
+// not hide permission failures, including ACLs or changed process credentials.
+// A miss follows the normal open path, which rechecks the opened file's identity.
+func (index *historyIndex) unchanged(ctx context.Context, s *search, source Source, path string, info os.FileInfo) bool {
+	file, exists := index.files[string(source.Harness)+"\x00"+path]
+	if !exists || !info.Mode().IsRegular() || (s.query.IncludeTools && !file.tools) {
+		return false
+	}
+	stamp := stampFile(info) + "|" + transcriptExtra(s, source, path)
+	if stamp != file.stamp || unix.Faccessat(unix.AT_FDCWD, path, unix.R_OK, unix.AT_EACCESS) != nil {
+		return false
+	}
+	// The matching stamp guarantees visit will not invoke a refresh callback.
+	if err := index.visit(ctx, s, source, path, stamp, nil); errors.Is(err, errIndexUnavailable) {
+		s.indexErr = err
+	}
+	return true
+}
+
+func (index *historyIndex) transcript(ctx context.Context, s *search, source Source, path string, file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		s.issue(source, path, err)
+		return nil
+	}
+	extra := transcriptExtra(s, source, path)
 
 	stamp := stampFile(info) + "|" + extra
 	return index.visit(ctx, s, source, path, stamp, func(writer *indexWriter, reader *search, previous indexedFile) error {

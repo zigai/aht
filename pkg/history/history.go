@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -155,23 +156,29 @@ type search struct {
 	result          Result
 }
 
+type retainedMatch struct {
+	Match
+
+	indexID int64
+}
+
 // matchHeap holds the newest Limit matches. The root is the least preferred
 // match under the result ordering, so a full heap drops it in O(log limit) and
 // memory stays O(limit) however many conversations match.
-type matchHeap []Match
+type matchHeap []retainedMatch
 
 func (h *matchHeap) Len() int { return len(*h) }
 
 // Less orders the root at the least preferred match: [heap.Pop] yields the match
 // a result limit would drop first.
-func (h *matchHeap) Less(i, j int) bool { return compareMatches((*h)[j], (*h)[i]) < 0 }
+func (h *matchHeap) Less(i, j int) bool { return compareMatches((*h)[j].Match, (*h)[i].Match) < 0 }
 
 func (h *matchHeap) Swap(i, j int) { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
 
 func (h *matchHeap) Push(value any) {
-	match, ok := value.(Match)
+	match, ok := value.(retainedMatch)
 	if !ok {
-		panic("history: matchHeap holds only Match values")
+		panic("history: matchHeap holds only retainedMatch values")
 	}
 	*h = append(*h, match)
 }
@@ -249,7 +256,7 @@ func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) 
 // refreshing a source. A failed attempt is discarded before the fallback so
 // partially indexed matches cannot be reported twice.
 func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source) error {
-	index, err := openHistoryIndex(ctx, c.IndexPath)
+	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
 	if err != nil {
 		if !errors.Is(err, errIndexUnavailable) {
 			return err
@@ -294,13 +301,31 @@ func (c Catalog) begin(ctx context.Context, query Query, s *search) ([]Source, e
 }
 
 func (s *search) runIndexed(ctx context.Context, sources []Source) error {
-	if err := s.forEachSource(ctx, sources); err != nil {
-		return err
+	scanErr := s.forEachSource(ctx, sources)
+	var commitErr error
+	if scanErr == nil {
+		commitErr = s.index.commit(ctx)
 	}
-	if err := errors.Join(s.indexErr, s.index.commit(ctx)); err != nil {
-		return err
+	excerptErr := s.index.readRetained(ctx, s)
+	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, s.resultError())
+}
+
+// indexSources mirrors native discovery's path spelling: directory walks keep
+// their selected root, whereas explicit files resolve symlinks before indexing.
+func (s *search) indexSources(sources []Source) []Source {
+	selected := make([]Source, 0, len(sources))
+	for _, source := range sources {
+		if _, ok := s.selectSource(source); !ok || source.Path == "" {
+			continue
+		}
+		selected = append(selected, source)
+		if info, err := os.Stat(source.Path); err == nil && !info.IsDir() {
+			if resolved, err := filepath.EvalSymlinks(source.Path); err == nil && resolved != source.Path {
+				selected = append(selected, Source{Harness: source.Harness, Path: resolved})
+			}
+		}
 	}
-	return s.resultError()
+	return selected
 }
 
 func (s *search) runDirect(ctx context.Context, sources []Source) error {
@@ -427,19 +452,24 @@ func (s *search) add(ctx context.Context, m Match) {
 		s.writer.finish(ctx, m.Conversation)
 		return
 	}
+	s.keep(m, 0)
+}
+
+// keep ranks metadata before indexed excerpts are loaded. Direct scans pass a
+// zero index ID because they already have their excerpts.
+func (s *search) keep(m Match, indexID int64) {
 	if m.Conversation.SessionID == "" || m.MatchingParts == 0 || !s.accepts(m.Conversation) {
 		return
 	}
-	m.Live = liveMatches(m.Conversation, s.query.Registry)
 	s.matched++
 	if s.query.Limit == 0 {
 		s.result.Matches = append(s.result.Matches, m)
 		return
 	}
 	if len(s.recent) < s.query.Limit {
-		heap.Push(&s.recent, m)
-	} else if compareMatches(m, s.recent[0]) < 0 {
-		s.recent[0] = m
+		heap.Push(&s.recent, retainedMatch{Match: m, indexID: indexID})
+	} else if compareMatches(m, s.recent[0].Match) < 0 {
+		s.recent[0] = retainedMatch{Match: m, indexID: indexID}
 		heap.Fix(&s.recent, 0)
 	}
 	if s.matched > s.query.Limit {
@@ -450,13 +480,20 @@ func (s *search) add(ctx context.Context, m Match) {
 // finalize orders the accepted matches and returns the result. Call it once per
 // search on every path that returns a result; Matches is always non-nil.
 func (s *search) finalize() Result {
-	matches := s.result.Matches
+	var ordered []Match
 	if s.query.Limit > 0 {
-		matches = s.recent
+		ordered = make([]Match, len(s.recent))
+		for i := range s.recent {
+			ordered[i] = s.recent[i].Match
+		}
+	} else {
+		ordered = make([]Match, len(s.result.Matches))
+		copy(ordered, s.result.Matches)
 	}
-	ordered := make([]Match, len(matches))
-	copy(ordered, matches)
 	slices.SortStableFunc(ordered, compareMatches)
+	for i := range ordered {
+		ordered[i].Live = liveMatches(ordered[i].Conversation, s.query.Registry)
+	}
 	s.result.Matches = ordered
 	return s.result
 }

@@ -70,16 +70,18 @@ type indexedFile struct {
 }
 
 type historyIndex struct {
-	db          *sql.DB
-	conn        *sql.Conn
-	tx          *sql.Tx
-	unavailable error
-	files       map[string]indexedFile
-	paths       map[string]Source
-	candidates  map[int64]bool
-	plans       map[int64]indexedMatches
-	queries     *indexQueries
-	seen        map[string]bool
+	db           *sql.DB
+	conn         *sql.Conn
+	tx           *sql.Tx
+	unavailable  error
+	files        map[string]indexedFile
+	paths        map[string]Source
+	candidates   map[int64]bool
+	plans        map[int64]indexedMatches
+	queries      *indexQueries
+	seen         map[string]bool
+	sourceFilter string
+	sourceArgs   []any
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
@@ -87,7 +89,7 @@ type historyIndex struct {
 // history-v1.sqlite.invalid and rebuilt once. An explicit path is never moved
 // aside and reports a database it does not recognize as a hard error. Any other
 // setup failure, and lock contention on any path, returns errIndexUnavailable.
-func openHistoryIndex(ctx context.Context, path string) (*historyIndex, error) {
+func openHistoryIndex(ctx context.Context, path string, sources []Source) (*historyIndex, error) {
 	cached := path == ""
 	if cached {
 		root, err := os.UserCacheDir()
@@ -100,7 +102,7 @@ func openHistoryIndex(ctx context.Context, path string) (*historyIndex, error) {
 	if err != nil {
 		return nil, indexUnavailable(fmt.Errorf("resolve history index: %w", err))
 	}
-	index, err := openIndexDatabase(ctx, path)
+	index, err := openIndexDatabase(ctx, path, sources)
 	if err == nil {
 		return index, nil
 	}
@@ -121,7 +123,7 @@ func openHistoryIndex(ctx context.Context, path string) (*historyIndex, error) {
 	if healErr := replaceInvalidIndex(path, invalid); healErr != nil {
 		return nil, errors.Join(indexUnavailable(err), fmt.Errorf("replace invalid history index: %w", healErr))
 	}
-	if index, err = openIndexDatabase(ctx, path); err != nil {
+	if index, err = openIndexDatabase(ctx, path, sources); err != nil {
 		return nil, indexUnavailable(fmt.Errorf("rebuild history index: %w", err))
 	}
 	return index, nil
@@ -129,7 +131,7 @@ func openHistoryIndex(ctx context.Context, path string) (*historyIndex, error) {
 
 // openIndexDatabase opens an existing index database, creating an empty one when
 // the file holds no tables yet.
-func openIndexDatabase(ctx context.Context, path string) (*historyIndex, error) {
+func openIndexDatabase(ctx context.Context, path string, sources []Source) (*historyIndex, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create history index directory: %w", err)
 	}
@@ -155,6 +157,7 @@ func openIndexDatabase(ctx context.Context, path string) (*historyIndex, error) 
 	db.SetMaxOpenConns(1)
 	index := new(historyIndex)
 	index.db = db
+	index.sourceFilter, index.sourceArgs = sourceSQL(sources)
 	index.files, index.paths, index.seen = map[string]indexedFile{}, map[string]Source{}, map[string]bool{}
 	index.candidates, index.plans = map[int64]bool{}, map[int64]indexedMatches{}
 	if err = index.connect(ctx); err != nil {
@@ -272,7 +275,8 @@ func (index *historyIndex) enableWAL(ctx context.Context) error {
 }
 
 func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
-	rows, err := index.conn.QueryContext(ctx, "SELECT id,harness,path,stamp,checkpoint,issues,omitted,tools FROM files")
+	//nolint:gosec // G202: sourceSQL emits only fixed predicates, binds every source value, and uses 0 for empty selections; TestIndexScopesFileMetadataAndCandidates exercises the SQLite queries.
+	rows, err := index.conn.QueryContext(ctx, "SELECT id,harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
 	if err != nil {
 		return fmt.Errorf("read indexed histories: %w", err)
 	}
@@ -491,4 +495,25 @@ func directorySQL(dir string) (string, []any) {
 	prefix := strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator)
 	upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
 	return "(c.cwd=? OR (c.cwd>=? AND c.cwd<?) OR c.root=? OR (c.root>=? AND c.root<?))", []any{dir, prefix, upper, dir, prefix, upper}
+}
+
+// sourceSQL restricts both cached file metadata and candidate conversations to
+// the selected native sources. Nil is reserved for internal unscoped index use;
+// an empty selection must not load or clean up unrelated histories.
+func sourceSQL(sources []Source) (string, []any) {
+	if sources == nil {
+		return "1", nil
+	}
+	if len(sources) == 0 {
+		return "0", nil
+	}
+	filters := make([]string, 0, len(sources))
+	var args []any
+	for _, source := range sources {
+		prefix := strings.TrimRight(source.Path, string(filepath.Separator)) + string(filepath.Separator)
+		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
+		filters = append(filters, "(f.harness=? AND (f.path=? OR (f.path>=? AND f.path<?)))")
+		args = append(args, source.Harness, source.Path, prefix, upper)
+	}
+	return "(" + strings.Join(filters, " OR ") + ")", args
 }

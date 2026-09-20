@@ -78,6 +78,7 @@ func BenchmarkHistorySearch(b *testing.B) {
 		matches int
 	}{
 		{"all", Query{Text: "needle"}, 1000},
+		{"limited", Query{Text: "needle", Limit: 10}, 10},
 		{"directory", Query{Text: "needle", Dir: "/work/selected"}, 10},
 		{"missing", Query{Text: "absent-token", Dir: "/work/selected"}, 0},
 	}
@@ -131,7 +132,7 @@ func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	index, err := openHistoryIndex(ctx, c.IndexPath)
+	index, err := openHistoryIndex(ctx, c.IndexPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
