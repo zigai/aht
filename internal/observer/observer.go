@@ -1,6 +1,7 @@
 package observer
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -287,11 +287,11 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		result.Error = paneErr.Error()
 	}
 	result.Panes = len(panes)
-	sort.SliceStable(panes, func(left, right int) bool {
-		return multiplexerPriority(panes[left].Location.Kind) > multiplexerPriority(panes[right].Location.Kind)
+	slices.SortStableFunc(panes, func(left, right mux.Pane) int {
+		return cmp.Compare(multiplexerPriority(right.Location.Kind), multiplexerPriority(left.Location.Kind))
 	})
 	paneCommandCounts := commandPaneCounts(panes)
-	catalog, catalogErr := o.listCatalog(ctx)
+	catalog, catalogErr := o.catalogList(ctx)
 	if catalogErr != nil {
 		result.Degraded = true
 		result.Error = catalogErr.Error()
@@ -592,10 +592,8 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 		if locationPIDs[pid] {
 			continue
 		}
-		process, ok := processByPID[pid]
-		if !ok {
-			continue
-		}
+		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
+		process := processByPID[pid]
 		emptyContext := registry.MultiplexerContext{}             //nolint:exhaustruct_v5 // zero value means no multiplexer pane
 		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // location evidence only
 			Source: registry.ObservationSourceMultiplexer, Evidence: registry.ObservationEvidenceMultiplexerLocation,
@@ -879,14 +877,6 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 	}
 	o.initialized = true
 	return nil
-}
-
-//nolint:funcorder // private helpers are grouped with lock and reconciliation internals
-func (o *Observer) listCatalog(ctx context.Context) ([]CatalogEntry, error) {
-	if o.catalogList == nil {
-		return nil, nil
-	}
-	return o.catalogList(ctx)
 }
 
 //nolint:funcorder // private helpers are grouped with lock and reconciliation internals

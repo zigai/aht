@@ -31,6 +31,10 @@ var (
 	errInvalidProcessStartTime = errors.New("invalid process start time")
 )
 
+type linuxEnvironmentHints struct {
+	agent, herdrPane, herdrServer, herdrSession, zellijPane, zellijSession string
+}
+
 // List returns a complete best-effort snapshot of processes owned by the
 // effective user. Processes which exit while being read are skipped.
 //
@@ -204,17 +208,18 @@ func readLinuxProcess(dir string, pid int, boot string) (Process, error) {
 		info.Args = splitLinuxArgs(args)
 	}
 	if environ, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
-		info.AgentHint = linuxEnvironmentValue(environ, "AHT_AGENT")
+		hints := parseLinuxEnvironmentHints(environ)
+		info.AgentHint = hints.agent
 		switch {
-		case linuxEnvironmentValue(environ, "HERDR_PANE_ID") != "":
+		case hints.herdrPane != "":
 			info.MultiplexerKind = "herdr"
-			info.MultiplexerServer = linuxEnvironmentValue(environ, "HERDR_SOCKET_PATH")
-			info.MultiplexerSession = linuxEnvironmentValue(environ, "HERDR_SESSION")
-			info.MultiplexerPane = linuxEnvironmentValue(environ, "HERDR_PANE_ID")
-		case linuxEnvironmentValue(environ, "ZELLIJ_PANE_ID") != "":
+			info.MultiplexerServer = hints.herdrServer
+			info.MultiplexerSession = hints.herdrSession
+			info.MultiplexerPane = hints.herdrPane
+		case hints.zellijPane != "":
 			info.MultiplexerKind = "zellij"
-			info.MultiplexerSession = linuxEnvironmentValue(environ, "ZELLIJ_SESSION_NAME")
-			info.MultiplexerPane = linuxEnvironmentValue(environ, "ZELLIJ_PANE_ID")
+			info.MultiplexerSession = hints.zellijSession
+			info.MultiplexerPane = hints.zellijPane
 		}
 	}
 	return info, nil
@@ -232,14 +237,26 @@ func isLinuxTTY(path string) bool {
 	return path == "/dev/tty" || strings.HasPrefix(path, "/dev/pts/") || strings.HasPrefix(path, "/dev/tty")
 }
 
-func linuxEnvironmentValue(data []byte, key string) string {
-	prefix := key + "="
+func parseLinuxEnvironmentHints(data []byte) linuxEnvironmentHints {
+	var hints linuxEnvironmentHints
+	remaining := map[string]*string{
+		"AHT_AGENT":           &hints.agent,
+		"HERDR_PANE_ID":       &hints.herdrPane,
+		"HERDR_SOCKET_PATH":   &hints.herdrServer,
+		"HERDR_SESSION":       &hints.herdrSession,
+		"ZELLIJ_PANE_ID":      &hints.zellijPane,
+		"ZELLIJ_SESSION_NAME": &hints.zellijSession,
+	}
 	for entry := range strings.SplitSeq(string(data), "\x00") {
-		if after, ok := strings.CutPrefix(entry, prefix); ok {
-			return strings.TrimSpace(after)
+		key, value, ok := strings.Cut(entry, "=")
+		if target := remaining[key]; ok && target != nil {
+			// Retain only recognized values, not the entire environment buffer.
+			*target = strings.Clone(strings.TrimSpace(value))
+			// The first occurrence wins, including an explicitly empty value.
+			delete(remaining, key)
 		}
 	}
-	return ""
+	return hints
 }
 
 func splitLinuxArgs(data []byte) []string {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/zigai/aht/pkg/registry"
@@ -201,15 +200,16 @@ func TestParseListPanesEscapedFields(t *testing.T) {
 func TestServerSpecFromArgs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		args     []string
-		identity string
-		tmuxArgs []string
-		ok       bool
+		name       string
+		args       []string
+		identity   string
+		wantSocket string
+		wantName   string
+		ok         bool
 	}{
-		{name: "socket", args: []string{"tmux: server", "-S", "/tmp/custom"}, identity: "/tmp/custom", tmuxArgs: []string{"-S", "/tmp/custom"}, ok: true},
-		{name: "named", args: []string{"tmux: server", "-L", "other"}, identity: "-L:other", tmuxArgs: []string{"-L", "other"}, ok: true},
-		{name: "listed named server", args: []string{"tmux", "-L", "other", "new-session", "-d"}, identity: "-L:other", tmuxArgs: []string{"-L", "other"}, ok: true},
+		{name: "socket", args: []string{"tmux: server", "-S", "/tmp/custom"}, identity: "/tmp/custom", wantSocket: "/tmp/custom", ok: true},
+		{name: "named", args: []string{"tmux: server", "-L", "other"}, identity: "-L:other", wantName: "other", ok: true},
+		{name: "listed named server", args: []string{"tmux", "-L", "other", "new-session", "-d"}, identity: "-L:other", wantName: "other", ok: true},
 		{name: "other", args: []string{"bash"}, ok: false},
 	}
 	for _, test := range tests {
@@ -221,8 +221,15 @@ func TestServerSpecFromArgs(t *testing.T) {
 			if !ok {
 				return
 			}
-			if got.Identity != test.identity || strings.Join(got.Args, "\x00") != strings.Join(test.tmuxArgs, "\x00") {
-				t.Fatalf("server = %#v, want identity %q args %#v", got, test.identity, test.tmuxArgs)
+			if got.Identity != test.identity {
+				t.Fatalf("server = %#v, want identity %q", got, test.identity)
+			}
+			cfg, err := gotmuxConfigForIdentity(got.Identity)
+			if err != nil {
+				t.Fatalf("gotmuxConfigForIdentity(%q) failed: %v", got.Identity, err)
+			}
+			if cfg.SocketPath != test.wantSocket || cfg.SocketName != test.wantName {
+				t.Fatalf("config = %#v, want socket %q name %q", cfg, test.wantSocket, test.wantName)
 			}
 		})
 	}

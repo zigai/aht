@@ -57,7 +57,7 @@ func CurrentWithEnv(env Env) registry.MultiplexerContext {
 		return empty
 	}
 	return registry.MultiplexerContext{ //nolint:exhaustruct_v5 // env exposes only session and pane
-		Kind: registry.MultiplexerZellij, SessionName: env.SessionName, PaneID: normalizePaneID(env.PaneID),
+		Kind: registry.MultiplexerZellij, SessionName: env.SessionName, PaneID: mux.NormalizePaneID(registry.MultiplexerZellij, env.PaneID),
 	}
 }
 
@@ -165,14 +165,6 @@ func parsePanes(session string, output string) ([]mux.Pane, error) {
 		})
 	}
 	return panes, nil
-}
-
-func normalizePaneID(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "terminal_") || strings.HasPrefix(value, "plugin_") {
-		return value
-	}
-	return "terminal_" + value
 }
 
 func runZellij(ctx context.Context, args ...string) (string, error) {

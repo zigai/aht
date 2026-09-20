@@ -11,7 +11,6 @@ import (
 
 type serverSpec struct {
 	Identity string
-	Args     []string
 }
 
 func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, error) {
@@ -48,11 +47,11 @@ func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, er
 	}
 
 	if socket := tmuxServerSocket(options.Env.TMUX); socket != "" {
-		add(serverSpec{Identity: socket, Args: []string{"-S", socket}})
+		add(serverSpec{Identity: socket})
 	}
 	for _, socket := range sockets {
 		if socket != "" {
-			add(serverSpec{Identity: socket, Args: []string{"-S", socket}})
+			add(serverSpec{Identity: socket})
 		}
 	}
 
@@ -68,28 +67,28 @@ func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, er
 
 func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if len(args) == 0 {
-		return serverSpec{Identity: "", Args: nil}, false
+		return serverSpec{Identity: ""}, false
 	}
 	base := filepath.Base(args[0])
 	if !isTmuxBinaryName(base) {
-		return serverSpec{Identity: "", Args: nil}, false
+		return serverSpec{Identity: ""}, false
 	}
 	// Some tmux builds expose a bare -d daemon process marker rather than a
 	// native root flag. It carries no endpoint, so retain the default fallback.
 	if len(args) == 2 && args[1] == "-d" {
-		return serverSpec{Identity: "default", Args: nil}, true
+		return serverSpec{Identity: "default"}, true
 	}
 	parsed, err := gotmux.ParseCommandLine(args[1:])
 	if err != nil {
-		return serverSpec{Identity: "", Args: nil}, false
+		return serverSpec{Identity: ""}, false
 	}
 	if socket := parsed.Config.SocketPath; socket != "" {
-		return serverSpec{Identity: socket, Args: []string{"-S", socket}}, true
+		return serverSpec{Identity: socket}, true
 	}
 	if name := parsed.Config.SocketName; name != "" {
-		return serverSpec{Identity: "-L:" + name, Args: []string{"-L", name}}, true
+		return serverSpec{Identity: "-L:" + name}, true
 	}
-	return serverSpec{Identity: "default", Args: nil}, true
+	return serverSpec{Identity: "default"}, true
 }
 
 func isTmuxBinaryName(name string) bool {

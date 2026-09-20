@@ -27,8 +27,12 @@ func TestParseDarwinProcArgsPreservesArgumentBoundaries(t *testing.T) {
 		t.Fatalf("parsed arguments = %#v, want %#v", got, want)
 	}
 	server, ok := serverSpecFromArgs(got)
-	if !ok || server.Identity != "/tmp/agent sessions.sock" || !slices.Equal(server.Args, []string{"-S", "/tmp/agent sessions.sock"}) {
+	if !ok || server.Identity != "/tmp/agent sessions.sock" {
 		t.Fatalf("server spec lost socket argument boundary: %#v, %t", server, ok)
+	}
+	cfg, err := gotmuxConfigForIdentity(server.Identity)
+	if err != nil || cfg.SocketPath != "/tmp/agent sessions.sock" {
+		t.Fatalf("gotmux config = %#v, %v, want SocketPath /tmp/agent sessions.sock", cfg, err)
 	}
 }
 

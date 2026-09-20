@@ -18,10 +18,7 @@ var (
 	errInvalidServerIdentity = errors.New("invalid tmux server identity")
 )
 
-type ScreenSnapshot struct {
-	Text  string
-	Title string
-}
+type ScreenSnapshot = mux.ScreenSnapshot
 
 type CaptureOptions struct {
 	Lines int

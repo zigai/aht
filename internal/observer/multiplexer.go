@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,23 +22,24 @@ const (
 	multiplexerPriorityHerdr  = 3
 )
 
-var errUnsupportedMultiplexerPane = errors.New("unsupported multiplexer pane")
+var (
+	errUnsupportedMultiplexerPane = errors.New("unsupported multiplexer pane")
+
+	defaultMultiplexerDrivers = []mux.Driver{
+		tmux.NewDriver(),
+		zellij.NewDriver(),
+		herdr.NewDriver(),
+	}
+)
 
 func listMultiplexerPanes(ctx context.Context) ([]mux.Pane, error) {
 	panes := make([]mux.Pane, 0)
 	var listErrors []error
-	if _, err := exec.LookPath("tmux"); err == nil {
-		tmuxPanes, listErr := tmux.ListPanes(ctx)
+	for _, driver := range defaultMultiplexerDrivers {
+		listed, listErr := driver.ListPanes(ctx)
 		if listErr != nil {
 			listErrors = append(listErrors, listErr)
-		} else {
-			panes = append(panes, multiplexerPanesFromTmux(tmuxPanes)...)
-		}
-	}
-	for _, list := range []mux.PaneLister{zellij.ListPanes, herdr.ListPanes} {
-		listed, listErr := list(ctx)
-		if listErr != nil {
-			listErrors = append(listErrors, listErr)
+			continue
 		}
 		panes = append(panes, listed...)
 	}
@@ -49,51 +49,22 @@ func listMultiplexerPanes(ctx context.Context) ([]mux.Pane, error) {
 func multiplexerPanesFromTmux(panes []tmux.Pane) []mux.Pane {
 	result := make([]mux.Pane, 0, len(panes))
 	for _, pane := range panes {
-		location := registry.MultiplexerFromTmux(pane.Tmux)
-		if location.ServerID == "" {
-			location.ServerID = pane.ServerIdentity
-		}
-		location.PanePID = pane.PanePID
-		location.PaneTTY = pane.PaneTTY
-		processes := make([]mux.ProcessRef, 0, 1)
-		if pane.PanePID > 0 {
-			processes = append(processes, mux.ProcessRef{PID: pane.PanePID, ProcessGroupID: 0, Command: "", CWD: ""})
-		}
-		result = append(result, mux.Pane{
-			Location: location, Processes: processes, ProcessTTY: pane.PaneTTY,
-			Command: "", CWD: location.PaneCurrentPath, Title: "", Activity: nil, StateReason: "",
-		})
+		result = append(result, pane.ToMuxPane())
 	}
 	return result
 }
 
 func captureMultiplexerPane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	switch pane.Location.Kind {
-	case registry.MultiplexerTmux:
-		tmuxPane := tmux.Pane{
-			Tmux: pane.Location.TmuxContext(), ServerIdentity: pane.Location.ServerID,
-			PanePID: pane.Location.PanePID, PaneTTY: pane.Location.PaneTTY,
+	for _, driver := range defaultMultiplexerDrivers {
+		if driver.Kind() == pane.Location.Kind {
+			snapshot, err := driver.CapturePane(ctx, pane)
+			if err != nil {
+				return mux.ScreenSnapshot{}, fmt.Errorf("capture %s pane: %w", pane.Location.Kind, err)
+			}
+			return snapshot, nil
 		}
-		snapshot, err := tmux.CapturePane(ctx, tmuxPane)
-		if err != nil {
-			return mux.ScreenSnapshot{}, fmt.Errorf("capture tmux pane: %w", err)
-		}
-		return mux.ScreenSnapshot{Text: snapshot.Text, Title: snapshot.Title}, nil
-	case registry.MultiplexerZellij:
-		snapshot, err := zellij.CapturePane(ctx, pane)
-		if err != nil {
-			return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
-		}
-		return snapshot, nil
-	case registry.MultiplexerHerdr:
-		snapshot, err := herdr.CapturePane(ctx, pane)
-		if err != nil {
-			return mux.ScreenSnapshot{}, fmt.Errorf("capture herdr pane: %w", err)
-		}
-		return snapshot, nil
-	default:
-		return mux.ScreenSnapshot{}, errUnsupportedMultiplexerPane
 	}
+	return mux.ScreenSnapshot{}, errUnsupportedMultiplexerPane
 }
 
 func multiplexerPaneProcess(pane mux.Pane, processes []processinfo.Process, byPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness, paneCommandCounts map[string]int) (processinfo.Process, registry.Harness, bool) {
@@ -154,15 +125,7 @@ func multiplexerIdentityMatches(process processinfo.Process, location registry.M
 	case registry.MultiplexerTmux:
 		return false
 	}
-	return normalizeMultiplexerPaneID(location.Kind, process.MultiplexerPane) == normalizeMultiplexerPaneID(location.Kind, location.PaneID)
-}
-
-func normalizeMultiplexerPaneID(kind registry.MultiplexerKind, paneID string) string {
-	paneID = strings.TrimSpace(paneID)
-	if kind == registry.MultiplexerZellij && paneID != "" && !strings.HasPrefix(paneID, "terminal_") && !strings.HasPrefix(paneID, "plugin_") {
-		return "terminal_" + paneID
-	}
-	return paneID
+	return mux.NormalizePaneID(location.Kind, process.MultiplexerPane) == mux.NormalizePaneID(location.Kind, location.PaneID)
 }
 
 func foregroundPaneProcess(pane mux.Pane, processes []processinfo.Process, harnessByPID map[int]registry.Harness) (processinfo.Process, registry.Harness, bool) {

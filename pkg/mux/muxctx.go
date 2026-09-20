@@ -7,6 +7,31 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
+// Driver represents a terminal multiplexer capable of discovering and capturing panes.
+//
+// Behavioral contract:
+//   - Kind returns the canonical multiplexer identifier.
+//   - Current returns the enclosing multiplexer context for the caller.
+//     If the caller is not running inside this multiplexer, it returns an empty
+//     [registry.MultiplexerContext] and nil error. A non-nil error indicates an
+//     operational inspection failure or context cancellation.
+//   - ListPanes enumerates live panes for this multiplexer.
+//     If the multiplexer binary is not installed or no active server/session exists,
+//     it returns nil, nil. A non-nil error indicates an operational failure.
+//   - CapturePane captures the visible terminal screen and title of the given pane.
+type Driver interface {
+	Kind() registry.MultiplexerKind
+	Current(ctx context.Context) (registry.MultiplexerContext, error)
+	ListPanes(ctx context.Context) ([]Pane, error)
+	CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error)
+}
+
+// Interrupter is an optional capability interface for multiplexers that
+// support sending interrupt signals directly to a multiplexer pane.
+type Interrupter interface {
+	SendInterrupt(ctx context.Context, serverIdentity, paneID string) error
+}
+
 // ProcessRef identifies a process reported by a multiplexer for one pane.
 // Start identity is resolved from the observer's own process snapshot.
 type ProcessRef struct {
@@ -50,4 +75,14 @@ func BoundBottomLines(text string, limit int) []string {
 		lines = lines[len(lines)-limit:]
 	}
 	return lines
+}
+
+// NormalizePaneID normalizes pane identifiers across multiplexers.
+// For Zellij, bare numeric IDs gain a "terminal_" prefix.
+func NormalizePaneID(kind registry.MultiplexerKind, paneID string) string {
+	paneID = strings.TrimSpace(paneID)
+	if kind == registry.MultiplexerZellij && paneID != "" && !strings.HasPrefix(paneID, "terminal_") && !strings.HasPrefix(paneID, "plugin_") {
+		return "terminal_" + paneID
+	}
+	return paneID
 }

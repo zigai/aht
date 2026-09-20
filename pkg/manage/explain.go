@@ -339,8 +339,7 @@ func evaluateNonTmuxLiveScreen(
 	}
 	var text string
 	var title string
-	switch session.Multiplexer.Kind {
-	case registry.MultiplexerTmux:
+	if session.Multiplexer.Kind == registry.MultiplexerTmux {
 		return ScreenDecision{
 			Activity:        registry.ActivityUnknown,
 			Reason:          "",
@@ -350,35 +349,15 @@ func evaluateNonTmuxLiveScreen(
 			Warning:         "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Multiplexer.PaneID)
-	case registry.MultiplexerZellij:
-		snapshot, err := zellij.CapturePane(ctx, pane)
-		if err != nil {
-			return ScreenDecision{
-				Activity:        registry.ActivityUnknown,
-				Reason:          "",
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				Warning:         "",
-				Evidence:        nil,
-			}, false, fmt.Errorf("capture %s pane: %w", session.Multiplexer.Kind, err)
+	}
+	var driver mux.Driver
+	for _, d := range []mux.Driver{zellij.NewDriver(), herdr.NewDriver()} {
+		if d.Kind() == session.Multiplexer.Kind {
+			driver = d
+			break
 		}
-		text, title = snapshot.Text, snapshot.Title
-	case registry.MultiplexerHerdr:
-		snapshot, err := herdr.CapturePane(ctx, pane)
-		if err != nil {
-			return ScreenDecision{
-				Activity:        registry.ActivityUnknown,
-				Reason:          "",
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				Warning:         "",
-				Evidence:        nil,
-			}, false, fmt.Errorf("capture %s pane: %w", session.Multiplexer.Kind, err)
-		}
-		text, title = snapshot.Text, snapshot.Title
-	default:
+	}
+	if driver == nil {
 		return ScreenDecision{
 			Activity:        registry.ActivityUnknown,
 			Reason:          "",
@@ -389,6 +368,19 @@ func evaluateNonTmuxLiveScreen(
 			Evidence:        nil,
 		}, false, fmt.Errorf("%w: %s", ErrUnsupportedMultiplexer, session.Multiplexer.Kind)
 	}
+	snapshot, err := driver.CapturePane(ctx, pane)
+	if err != nil {
+		return ScreenDecision{
+			Activity:        registry.ActivityUnknown,
+			Reason:          "",
+			RuleID:          "",
+			ManifestSource:  "",
+			ManifestVersion: 0,
+			Warning:         "",
+			Evidence:        nil,
+		}, false, fmt.Errorf("capture %s pane: %w", session.Multiplexer.Kind, err)
+	}
+	text, title = snapshot.Text, snapshot.Title
 	return evaluateSnapshotText(session.Harness, text, title, configDir)
 }
 

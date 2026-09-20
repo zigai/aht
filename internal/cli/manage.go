@@ -22,6 +22,7 @@ import (
 
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
+	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
 	"github.com/zigai/aht/pkg/tmux"
 )
@@ -51,7 +52,7 @@ type manageStopAllOptions struct {
 }
 type sessionStopSignaler interface {
 	ValidateStopTarget(ctx context.Context, session registry.Session, target stopTarget) (stopTargetValidation, error)
-	SendTmuxInterrupt(ctx context.Context, serverIdentity, paneID string) error
+	SendMultiplexerInterrupt(ctx context.Context, serverIdentity, paneID string) error
 	SendProcessInterrupt(pid int) error
 }
 type (
@@ -107,9 +108,10 @@ func (defaultSessionStopSignaler) ValidateStopTarget(ctx context.Context, s regi
 	}
 }
 
-func (defaultSessionStopSignaler) SendTmuxInterrupt(ctx context.Context, serverIdentity, paneID string) error {
-	if err := tmux.SendInterruptTo(ctx, serverIdentity, paneID); err != nil {
-		return fmt.Errorf("send tmux interrupt: %w", err)
+func (defaultSessionStopSignaler) SendMultiplexerInterrupt(ctx context.Context, serverIdentity, paneID string) error {
+	var interrupter mux.Interrupter = tmux.NewDriver()
+	if err := interrupter.SendInterrupt(ctx, serverIdentity, paneID); err != nil {
+		return fmt.Errorf("send multiplexer interrupt: %w", err)
 	}
 	return nil
 }
@@ -421,7 +423,7 @@ func stopTargetForSession(s registry.Session) (stopTarget, bool) {
 func sendStopSignal(ctx context.Context, s sessionStopSignaler, t stopTarget) error {
 	switch t.Method {
 	case "tmux-interrupt":
-		if err := s.SendTmuxInterrupt(ctx, t.ServerIdentity, t.Target); err != nil {
+		if err := s.SendMultiplexerInterrupt(ctx, t.ServerIdentity, t.Target); err != nil {
 			return fmt.Errorf("send tmux interrupt: %w", err)
 		}
 		return nil

@@ -3,6 +3,7 @@ package zellij_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,7 +93,7 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	var got []string
 	lines := make([]string, 101)
 	for index := range lines {
-		lines[index] = "line"
+		lines[index] = fmt.Sprintf("line-%03d", index)
 	}
 	snapshot, err := zellij.CapturePaneWithOptions(context.Background(), mux.Pane{
 		Location: registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
@@ -107,7 +108,8 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	if want := []string{"--session", "work", "action", "dump-screen", "--pane-id", "terminal_7"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("capture args = %#v, want %#v", got, want)
 	}
-	if strings.Count(snapshot.Text, "\n") != 99 || snapshot.Title != "Codex" {
-		t.Fatalf("snapshot = %#v", snapshot)
+	wantText := strings.Join(lines[1:], "\n")
+	if snapshot.Text != wantText || snapshot.Title != "Codex" {
+		t.Fatalf("snapshot text = %q, want %q; title = %q", snapshot.Text, wantText, snapshot.Title)
 	}
 }

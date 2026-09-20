@@ -11,6 +11,7 @@ import (
 	"github.com/google/shlex"
 	gotmux "github.com/zigai/gotmux/tmux"
 
+	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -58,6 +59,30 @@ type ListOptions struct {
 	// SocketPaths overrides gotmux's standard socket discovery when non-nil.
 	// An empty slice disables it for deterministic tests or explicit discovery.
 	SocketPaths []string
+}
+
+// ToMuxPane converts a native tmux Pane to a unified mux.Pane.
+func (p Pane) ToMuxPane() mux.Pane {
+	location := registry.MultiplexerFromTmux(p.Tmux)
+	if location.ServerID == "" {
+		location.ServerID = p.ServerIdentity
+	}
+	location.PanePID = p.PanePID
+	location.PaneTTY = p.PaneTTY
+	processes := make([]mux.ProcessRef, 0, 1)
+	if p.PanePID > 0 {
+		processes = append(processes, mux.ProcessRef{PID: p.PanePID, ProcessGroupID: 0, Command: "", CWD: ""})
+	}
+	return mux.Pane{
+		Location:    location,
+		Processes:   processes,
+		ProcessTTY:  p.PaneTTY,
+		Command:     "",
+		CWD:         location.PaneCurrentPath,
+		Title:       "",
+		Activity:    nil,
+		StateReason: "",
+	}
 }
 
 func Current(ctx context.Context) (registry.TmuxContext, error) {
