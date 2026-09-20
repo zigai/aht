@@ -23,7 +23,7 @@ integration:
         echo "Error: tmux is required to run integration tests. Install tmux and retry." >&2
         exit 1
     fi
-    go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./internal/systemtest ./internal/testtmux ./pkg/tmux
+    go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
 
 # Test release detection, state transitions, and workflow wiring
 compatibility-tests:
@@ -31,11 +31,11 @@ compatibility-tests:
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
-    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./internal/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m
+    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m
 
 # Validate built release artifacts and optional published copies
 artifacts artifact_dir="dist" published_dir="":
-    AHT_ARTIFACT_DIR="{{ artifact_dir }}" AHT_PUBLISHED_ARTIFACT_DIR="{{ published_dir }}" go test -count=1 -tags=integration ./internal/systemtest -run '^TestReleaseArtifacts$'
+    AHT_ARTIFACT_DIR="{{ artifact_dir }}" AHT_PUBLISHED_ARTIFACT_DIR="{{ published_dir }}" go test -count=1 -tags=integration ./test/systemtest -run '^TestReleaseArtifacts$'
 # Run tests and display coverage
 coverage:
     #!/usr/bin/env sh
