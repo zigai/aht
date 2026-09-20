@@ -49,11 +49,7 @@ func RenderSystemdUnit(options Options) (string, error) {
 }
 
 func platformBackend(options Options) (backend, error) {
-	normalized, err := normalizeOptions(options)
-	if err != nil {
-		return nil, err
-	}
-	rendered, err := RenderSystemdUnit(normalized)
+	rendered, err := RenderSystemdUnit(options)
 	if err != nil {
 		return nil, err
 	}

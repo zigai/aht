@@ -69,7 +69,13 @@ func verifyLaunchAgentUpgrade(t *testing.T, state string) {
 
 func TestLaunchAgentArgumentParsing(t *testing.T) {
 	t.Parallel()
-	for _, path := range []string{"/tmp/plain", "/tmp/space & <xml> \"quotes\""} {
+	for _, path := range []string{
+		"/tmp/plain",
+		"/tmp/space & <xml> \"quotes\" 'apostrophes'",
+		"/tmp/with\ttab",
+		"/tmp/with\r\nnewlines",
+		"/tmp/with\rampersand&",
+	} {
 		t.Run(path, func(t *testing.T) {
 			options := Options{Binary: "/bin/aht", StorePath: path, Interval: time.Second}
 			content, err := RenderLaunchAgent(options)
@@ -82,8 +88,23 @@ func TestLaunchAgentArgumentParsing(t *testing.T) {
 			}
 			recovered, err := recoverOptions(args, options.Binary)
 			if err != nil || recovered.StorePath != path {
-				t.Fatalf("options = %+v, %v", recovered, err)
+				t.Fatalf("options = %+v, %v; want StorePath = %q", recovered, err, path)
 			}
 		})
+	}
+}
+
+func TestLaunchAgentRejectsInvalidXMLText(t *testing.T) {
+	t.Parallel()
+	invalidPaths := []string{
+		"/tmp/invalid\x01byte",
+		"/tmp/invalid\xfffe",
+		"/tmp/not-utf8\xff\xfe",
+	}
+	for _, path := range invalidPaths {
+		options := Options{Binary: "/bin/aht", StorePath: path, Interval: time.Second}
+		if _, err := RenderLaunchAgent(options); err == nil {
+			t.Errorf("expected error for invalid XML path %q, got nil", path)
+		}
 	}
 }

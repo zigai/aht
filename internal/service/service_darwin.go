@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -38,10 +40,15 @@ func RenderLaunchAgent(options Options) (string, error) {
 	b.WriteString("<!-- " + ManagedMarker + " -->\n<!-- version: " + strconv.Itoa(ManagedVersion) + " -->\n")
 	b.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
 	b.WriteString("<plist version=\"1.0\"><dict>\n")
-	b.WriteString("<key>Label</key><string>" + xmlEscape(darwinLabel) + "</string>\n")
+	b.WriteString("<key>Label</key>")
+	if err := writePlistString(&b, darwinLabel); err != nil {
+		return "", fmt.Errorf("render launch agent label: %w", err)
+	}
 	b.WriteString("<key>ProgramArguments</key><array>\n")
 	for _, arg := range args {
-		b.WriteString("<string>" + xmlEscape(arg) + "</string>\n")
+		if err := writePlistString(&b, arg); err != nil {
+			return "", fmt.Errorf("render launch agent argument: %w", err)
+		}
 	}
 	b.WriteString("</array>\n<key>RunAtLoad</key><true/>\n")
 	b.WriteString("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n")
@@ -50,11 +57,7 @@ func RenderLaunchAgent(options Options) (string, error) {
 }
 
 func platformBackend(options Options) (backend, error) {
-	normalized, err := normalizeOptions(options)
-	if err != nil {
-		return nil, err
-	}
-	rendered, err := RenderLaunchAgent(normalized)
+	rendered, err := RenderLaunchAgent(options)
 	if err != nil {
 		return nil, err
 	}
@@ -124,10 +127,19 @@ func (b *darwinBackend) running(ctx context.Context, executor CommandExecutor) (
 	return false, "", wrapManagerError("checking launchd service status", output, err)
 }
 
-func xmlEscape(value string) string {
-	value = strings.ReplaceAll(value, "&", "&amp;")
-	value = strings.ReplaceAll(value, "<", "&lt;")
-	value = strings.ReplaceAll(value, ">", "&gt;")
-	value = strings.ReplaceAll(value, "\"", "&quot;")
-	return strings.ReplaceAll(value, "'", "&apos;")
+var errInvalidPlistText = errors.New("invalid XML text for launch agent plist")
+
+func writePlistString(b *strings.Builder, value string) error {
+	if !utf8.ValidString(value) || strings.ContainsFunc(value, func(r rune) bool {
+		return r != '\t' && r != '\n' && r != '\r' &&
+			(r < 0x20 || r == 0xfffe || r == 0xffff)
+	}) {
+		return errInvalidPlistText
+	}
+	b.WriteString("<string>")
+	if err := xml.EscapeText(b, []byte(value)); err != nil {
+		return fmt.Errorf("encode plist text: %w", err)
+	}
+	b.WriteString("</string>\n")
+	return nil
 }
