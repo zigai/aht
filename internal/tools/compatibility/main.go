@@ -125,7 +125,7 @@ func planHasErrors(plan releasePlan) bool {
 
 func (a application) weekly() error {
 	entries := matrix{Include: []candidate{}}
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if spec.Source == "weekly" {
 			entries.Include = append(entries.Include, candidate{Harness: spec.ID, Version: ""})
 		}
@@ -243,7 +243,7 @@ func releaseSummary(plan releasePlan, state releaseState, incomplete []string) s
 	var report strings.Builder
 	fmt.Fprintf(&report, "## Release compatibility\n\n%d harness(es) selected; major/minor changes only.\n\n", len(plan.Matrix.Include))
 	report.WriteString("| Harness | Latest observed | Last checked | Result |\n| --- | --- | --- | --- |\n")
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if spec.Source == "weekly" {
 			continue
 		}

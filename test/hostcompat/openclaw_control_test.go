@@ -41,10 +41,10 @@ func (host isolatedHost) openClawRPC(t *testing.T, method string, params map[str
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, host.hostPath, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
+	command := exec.Command(host.hostPath, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
 	command.Env = host.env
 	command.Dir = host.work
-	output, err := command.CombinedOutput()
+	output, err := compatibilityOutput(ctx, command)
 	if err != nil {
 		t.Fatalf("gateway %s: %v\n%s", method, err, output)
 	}

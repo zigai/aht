@@ -4,6 +4,7 @@ package hostcompat
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +18,7 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-func runCLIPermissionScenarios(t *testing.T, contract hostContract) {
+func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	for _, allow := range []bool{true, false} {
 		name := "deny"
@@ -25,7 +26,7 @@ func runCLIPermissionScenarios(t *testing.T, contract hostContract) {
 			name = "allow"
 		}
 		t.Run(name, func(t *testing.T) {
-			host := newPermissionHost(t, contract, allow)
+			host := newPermissionHost(t, contract, oracle, allow)
 			configured, setup := host.lifecycleCommand(t)
 			if len(setup) != 0 {
 				t.Fatal("unexpected CLI provider setup commands")
@@ -373,7 +374,13 @@ func runCopilotPermission(t *testing.T, host isolatedHost, env []string, allow b
 				}
 				allowKind := "approve-once"
 				rejectKind := "reject"
-				if out, err := exec.Command(host.hostPath, "--version").Output(); err == nil && strings.Contains(string(out), "1.0.2") {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				out, versionErr := compatibilityOutput(ctx, host.command(host.env, "--version"))
+				cancel()
+				if versionErr != nil {
+					t.Fatalf("Copilot permission version probe: %v\n%s", versionErr, out)
+				}
+				if strings.Contains(string(out), "1.0.2") {
 					allowKind = "approved"
 					rejectKind = "denied-interactively-by-user"
 				}

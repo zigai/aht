@@ -351,18 +351,6 @@ func runSystemTestCommand(t *testing.T, binary string, directory string, environ
 	return stdout.Bytes()
 }
 
-func decodeSingleSession(t *testing.T, source string, data []byte) registry.Session {
-	t.Helper()
-	var sessions []registry.Session
-	if err := json.Unmarshal(data, &sessions); err != nil {
-		t.Fatalf("decode %s output %q: %v", source, data, err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("%s session count = %d, want 1; output=%q", source, len(sessions), data)
-	}
-	return sessions[0]
-}
-
 func decodeSessionByID(t *testing.T, source string, data []byte, sessionID string) registry.Session {
 	t.Helper()
 	var sessions []registry.Session

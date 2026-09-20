@@ -12,6 +12,85 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
+func (host isolatedHost) validateSession(session registry.Session) bool {
+	if host.contract.Level == compatibilityDiscovery {
+		return true
+	}
+	if session.Observations.Native == nil {
+		return false
+	}
+	if session.Observations.Native.SessionID == "" {
+		return false
+	}
+	if session.SessionID != "" && session.SessionID != session.Observations.Native.SessionID {
+		return false
+	}
+	if host.work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.work) {
+		return false
+	}
+	return terminalSession(host.contract.ID, session)
+}
+
+func TestSessionOracleRequiresNativeObservation(t *testing.T) {
+	t.Parallel()
+
+	workDir := "/tmp/project"
+	processOnly := registry.Session{
+		ID:       "s1",
+		Harness:  registry.HarnessOpenCode,
+		Presence: registry.PresenceLive,
+		CWD:      workDir,
+		Observations: registry.Observations{
+			Process: &registry.ProcessObservation{
+				Present: true,
+			},
+		},
+	}
+	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.HarnessOpenCode, Level: compatibilityLifecycle}}
+	if host.validateSession(processOnly) {
+		t.Fatal("oracle accepted process-only session for non-exempt harness")
+	}
+
+	withNative := processOnly
+	withNative.SessionID = "opencode-1"
+	withNative.Observations.Native = &registry.NativeObservation{
+		SessionID: "opencode-1",
+		Event:     "agent_start",
+	}
+	if host.validateSession(withNative) {
+		t.Fatal("oracle accepted start-only stuck-live native session")
+	}
+	withNative.Observations.Native.Event = "session.idle"
+	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
+	withNative.Activity = new(registry.ActivityUnknown)
+	if host.validateSession(withNative) {
+		t.Fatal("oracle accepted unexplained unknown effective activity")
+	}
+	withNative.ActivityDecision = &registry.ActivityDecision{
+		Authority: "screen",
+		Reason:    "screen_not_in_supported_multiplexer",
+	}
+	if !host.validateSession(withNative) {
+		t.Fatal("oracle rejected screen-authoritative headless terminal session")
+	}
+
+	wrongCWD := withNative
+	wrongCWD.CWD = "/tmp/other"
+	if host.validateSession(wrongCWD) {
+		t.Fatal("oracle accepted session with mismatched CWD")
+	}
+	mismatchedID := withNative
+	mismatchedID.SessionID = "different-session"
+	if host.validateSession(mismatchedID) {
+		t.Fatal("oracle accepted session with mismatched native session ID")
+	}
+
+	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.HarnessCursor, Level: compatibilityDiscovery}}
+	if !cursorHost.validateSession(processOnly) {
+		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
+	}
+}
+
 // Only execution prerequisites cross the profile boundary. In particular no
 // credentials, provider URLs, plugin paths, tmux identity or shell startup files
 // are inherited from the developer running the compatibility suite.

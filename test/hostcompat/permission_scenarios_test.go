@@ -3,6 +3,7 @@
 package hostcompat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -17,26 +18,26 @@ import (
 
 const permissionMarker = ".aht-permission-marker"
 
-func runPermissionScenarios(t *testing.T, contract hostContract) {
+func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	switch contract.ID {
 	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCopilot:
-		runCLIPermissionScenarios(t, contract)
+		runCLIPermissionScenarios(t, contract, oracle)
 	case registry.HarnessPi, registry.HarnessOmp:
-		runRPCPermissionScenarios(t, contract)
+		runRPCPermissionScenarios(t, contract, oracle)
 	case registry.HarnessKimiCode, registry.HarnessHermes:
-		runPythonPermissionScenarios(t, contract)
+		runPythonPermissionScenarios(t, contract, oracle)
 	case registry.HarnessOpenCode, registry.HarnessKilo:
-		runServerPermissionScenarios(t, contract)
+		runServerPermissionScenarios(t, contract, oracle)
 	default:
 		// These lifecycle adapters do not advertise permission-wait coverage.
 		// Cursor and Antigravity are separately tested as discovery-only hosts.
 	}
 }
 
-func newPermissionHost(t *testing.T, contract hostContract, allow bool) isolatedHost {
+func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow bool) isolatedHost {
 	t.Helper()
-	host := newIsolatedHost(t, contract)
+	host := newIsolatedHost(t, contract, oracle)
 	host.installIntegration(t)
 	args := lifecycleToolArgs(contract.ID)
 	command := "printf aht-compat-marker > " + permissionMarker + "; cat " + permissionMarker
@@ -130,6 +131,7 @@ func startPermissionProcess(t *testing.T, host isolatedHost, command *exec.Cmd) 
 	if command.SysProcAttr == nil {
 		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
+	command.WaitDelay = compatibilityWaitDelay
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
 		t.Fatalf("start permission host: %v", err)
@@ -163,8 +165,13 @@ func startPermissionProcess(t *testing.T, host isolatedHost, command *exec.Cmd) 
 			log, _ := os.ReadFile(logFile.Name())
 			events, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
 			t.Logf("isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s", log, events, providerRequestSummary(host.provider))
-			sessions, _ := json.MarshalIndent(host.sessions(t), "", "  ")
-			t.Logf("owned launcher PID=%d; isolated native session state:\n%s", command.Process.Pid, sessions)
+			// Cleanup runs after t.Context is canceled. This diagnostic owns a
+			// fresh, short budget and must never replace the scenario failure.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
+			observed, probeErr := host.sessions(ctx)
+			cancel()
+			sessions, _ := json.MarshalIndent(observed, "", "  ")
+			t.Logf("owned launcher PID=%d; isolated native session state (probe error: %v):\n%s", command.Process.Pid, probeErr, sessions)
 		}
 	})
 	return process

@@ -518,23 +518,7 @@ func verifyReleaseBinaryBehavior(binary string, metadata releaseMetadata) error 
 }
 
 func isolatedEnvironment(home string, configHome string, stateDir string) []string {
-	replacements := map[string]string{
-		"HOME":            home,
-		"XDG_CONFIG_HOME": configHome,
-		"AHT_STATE_DIR":   stateDir,
-	}
-	environment := make([]string, 0, len(os.Environ())+len(replacements))
-	for _, entry := range os.Environ() {
-		key, _, found := strings.Cut(entry, "=")
-		if _, replaced := replacements[key]; found && replaced {
-			continue
-		}
-		environment = append(environment, entry)
-	}
-	for key, value := range replacements {
-		environment = append(environment, key+"="+value)
-	}
-	return environment
+	return systemTestEnvironment(home, configHome, stateDir)
 }
 
 func releaseDatesEqual(binaryDate string, metadataDate string) bool {

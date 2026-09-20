@@ -21,7 +21,7 @@ import (
 
 // Both hosts publish these HTTP operations in their native SDK. Polling the
 // pending-permission resource avoids losing permission.asked during SSE setup.
-func runServerPermissionScenarios(t *testing.T, contract hostContract) {
+func runServerPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	for _, allow := range []bool{true, false} {
 		name := "deny"
@@ -29,7 +29,7 @@ func runServerPermissionScenarios(t *testing.T, contract hostContract) {
 			name = "allow"
 		}
 		t.Run(name, func(t *testing.T) {
-			host := newPermissionHost(t, contract, allow)
+			host := newPermissionHost(t, contract, oracle, allow)
 			configured, setup := host.lifecycleCommand(t)
 			if len(setup) != 0 {
 				t.Fatal("server permission driver does not expect setup commands")

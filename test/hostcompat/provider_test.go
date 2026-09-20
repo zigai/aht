@@ -45,20 +45,18 @@ type scriptedProvider struct {
 	err                error
 	checkpoints        chan int
 	release            chan struct{}
-	cancellations      chan int
 	expectRejectedTool bool
 }
 
 func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName string, toolArgs map[string]any, marker string) *scriptedProvider { //nolint:unparam // marker varies across build-tag variants (e.g. compatibility tag in current_host_test.go)
 	t.Helper()
 	provider := &scriptedProvider{
-		protocol:      protocol,
-		toolName:      toolName,
-		toolArgs:      toolArgs,
-		marker:        marker,
-		callID:        "call_compat",
-		requests:      make([]providerRequest, 0, 2),
-		cancellations: make(chan int, 4),
+		protocol: protocol,
+		toolName: toolName,
+		toolArgs: toolArgs,
+		marker:   marker,
+		callID:   "call_compat",
+		requests: make([]providerRequest, 0, 2),
 	}
 	if protocol == protocolAnthropicMessages {
 		provider.callID = "tool_compat"
@@ -91,24 +89,12 @@ func (provider *scriptedProvider) waitForRelease(request *http.Request, step int
 	select {
 	case provider.checkpoints <- step:
 	case <-request.Context().Done():
-		if provider.cancellations != nil {
-			select {
-			case provider.cancellations <- step:
-			default:
-			}
-		}
 		return false
 	}
 	select {
 	case <-provider.release:
 		return true
 	case <-request.Context().Done():
-		if provider.cancellations != nil {
-			select {
-			case provider.cancellations <- step:
-			default:
-			}
-		}
 		return false
 	}
 }

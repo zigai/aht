@@ -18,7 +18,7 @@ import (
 )
 
 func TestAffectedHosts(t *testing.T) {
-	specs := catalog()
+	specs := defaultCatalog
 	all := make([]string, len(specs))
 	for index, spec := range specs {
 		all[index] = spec.ID
@@ -41,7 +41,7 @@ func TestAffectedHosts(t *testing.T) {
 		{name: "shared template", paths: []string{"internal/harness/assets/typescript_queue.ts.tmpl"}, want: all},
 		{name: "unknown adapter", paths: []string{"internal/harness/newhost/adapter.go"}, want: all},
 	}
-	for _, path := range []string{"internal/install/harness_plan.go", "pkg/registry/registry.go", "internal/brokerserver/server.go", "internal/observer/observer.go", "internal/cli/hook.go", "pkg/client/client.go", "go.mod", "go.sum", "Justfile", ".github/workflows/ci.yml", ".github/workflows/compatibility-host.yml", "internal/tools/compatibility/catalog.go", "internal/hostcompat/current_host_test.go", "docs/compatibility.md"} {
+	for _, path := range []string{"internal/install/harness_plan.go", "pkg/registry/registry.go", "internal/brokerserver/server.go", "internal/observer/observer.go", "internal/cli/hook.go", "pkg/client/client.go", "go.mod", "go.sum", "Justfile", ".github/workflows/ci.yml", ".github/workflows/compatibility-host.yml", "internal/tools/compatibility/catalog.go", "test/hostcompat/current_host_test.go"} {
 		t.Run(path, func(t *testing.T) {
 			if got := affectedHosts([]string{path}); !slices.Equal(got, all) {
 				t.Fatalf("affected hosts = %v, want %v", got, all)

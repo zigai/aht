@@ -16,7 +16,7 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-func runRPCPermissionScenarios(t *testing.T, contract hostContract) {
+func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	for _, allow := range []bool{true, false} {
 		name := "deny"
@@ -24,7 +24,7 @@ func runRPCPermissionScenarios(t *testing.T, contract hostContract) {
 			name = "allow"
 		}
 		t.Run(name, func(t *testing.T) {
-			host := newPermissionHost(t, contract, allow)
+			host := newPermissionHost(t, contract, oracle, allow)
 			switch contract.ID {
 			case registry.HarnessPi:
 				runPiPermission(t, host, allow)

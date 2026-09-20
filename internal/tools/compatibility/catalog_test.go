@@ -70,7 +70,7 @@ func TestDetectionIsolatesSourceFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Matrix.Include) != len(catalog())-2 {
+	if len(plan.Matrix.Include) != len(defaultCatalog)-2 {
 		t.Fatalf("matrix = %+v", plan.Matrix)
 	}
 	if !planHasErrors(plan) {
@@ -176,7 +176,7 @@ func TestObservedVersionMatchesPin(t *testing.T) {
 func TestCatalogPartition(t *testing.T) {
 	weekly, releases := []string{}, []string{}
 	seen := map[string]bool{}
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if seen[spec.ID] {
 			t.Fatalf("duplicate %s", spec.ID)
 		}

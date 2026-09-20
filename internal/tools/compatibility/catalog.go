@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -90,11 +91,6 @@ type hostResult struct {
 	Outcome string `json:"outcome"`
 }
 
-func catalog() []harnessSpec {
-	// Public release and installation contracts are documented in docs/compatibility.md.
-	return defaultCatalog
-}
-
 func findHarness(id string) (harnessSpec, error) {
 	for _, spec := range defaultCatalog {
 		if spec.ID == id {
@@ -105,16 +101,7 @@ func findHarness(id string) (harnessSpec, error) {
 }
 
 func (h harnessSpec) sourceKey() string {
-	target := h.Package
-	if target == "" {
-		target = h.Repo
-	}
-	if target == "" {
-		target = h.URL
-	}
-	if target == "" {
-		target = h.ID
-	}
+	target := cmp.Or(h.Package, h.Repo, h.URL, h.ID)
 	if target != "" {
 		return h.Source + ":" + target
 	}
@@ -164,7 +151,7 @@ func detect(ctx context.Context, state releaseState, selection string, force boo
 		}
 	}
 	var entries []harnessSpec
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if spec.Source != "weekly" && (selection == "all" || selection == spec.ID) {
 			entries = append(entries, spec)
 		}

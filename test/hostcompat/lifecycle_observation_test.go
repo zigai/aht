@@ -3,7 +3,9 @@
 package hostcompat
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,12 +14,14 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-func (host isolatedHost) sessions(t *testing.T) []registry.Session {
-	t.Helper()
-	output := host.runAHT(t, "--json", "list", "--agent", string(host.contract.ID))
+func (host isolatedHost) sessions(ctx context.Context) ([]registry.Session, error) {
+	output, err := host.runAHT(ctx, "--json", "list", "--agent", string(host.contract.ID))
+	if err != nil {
+		return nil, err
+	}
 	var sessions []registry.Session
 	if err := json.Unmarshal(output, &sessions); err != nil {
-		t.Fatalf("decoding session observations: %v", err)
+		return nil, fmt.Errorf("decode session observations: %w", err)
 	}
 	matching := sessions[:0]
 	for _, session := range sessions {
@@ -29,7 +33,7 @@ func (host isolatedHost) sessions(t *testing.T) []registry.Session {
 			matching = append(matching, session)
 		}
 	}
-	return matching
+	return matching, nil
 }
 
 func (host isolatedHost) waitForActiveSession(t *testing.T) {
@@ -44,21 +48,32 @@ func (host isolatedHost) waitForActiveSession(t *testing.T) {
 
 func (host isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
 	t.Helper()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
+	var latest []registry.Session
 	for {
-		for _, session := range host.sessions(t) {
+		sessions, err := host.sessions(ctx)
+		if err != nil && ctx.Err() == nil {
+			t.Fatalf("reading session observations: %v", err)
+		}
+		if err == nil {
+			latest = sessions
+		}
+		for _, session := range sessions {
 			if matches(session) {
 				return session
 			}
 		}
 		select {
-		case <-deadline.C:
+		case <-ctx.Done():
 			data, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
-			current, _ := json.MarshalIndent(host.sessions(t), "", "  ")
-			t.Fatalf("missing %s; sanitized callbacks:\n%s\nisolated session state:\n%s", description, data, current)
+			current, encodeErr := json.MarshalIndent(latest, "", "  ")
+			if encodeErr != nil {
+				t.Logf("encoding last isolated session state: %v", encodeErr)
+			}
+			t.Fatalf("missing %s; last probe error: %v; sanitized callbacks:\n%s\nlast isolated session state:\n%s", description, err, data, current)
 		case <-ticker.C:
 		}
 	}

@@ -15,7 +15,7 @@ import (
 
 // Both protocols expose the host's real approval gate over stdio; neither print
 // mode nor a test-generated lifecycle hook is involved.
-func runPythonPermissionScenarios(t *testing.T, contract hostContract) {
+func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	for _, allow := range []bool{true, false} {
 		name := "deny"
@@ -23,7 +23,7 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract) {
 			name = "allow"
 		}
 		t.Run(name, func(t *testing.T) {
-			host := newPermissionHost(t, contract, allow)
+			host := newPermissionHost(t, contract, oracle, allow)
 			configured, setup := host.lifecycleCommand(t)
 			if len(setup) != 0 {
 				t.Fatal("unexpected Python host setup commands")
@@ -154,7 +154,6 @@ type pythonPermissionMessage struct {
 
 type pythonPermissionWire struct {
 	input   *os.File
-	output  *os.File
 	scanner *bufio.Scanner
 }
 
@@ -187,7 +186,7 @@ func newPythonPermissionWire(t *testing.T, command *exec.Cmd) *pythonPermissionW
 	}
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
-	return &pythonPermissionWire{input: inputFile, output: outputFile, scanner: scanner}
+	return &pythonPermissionWire{input: inputFile, scanner: scanner}
 }
 
 func (wire *pythonPermissionWire) send(t *testing.T, message any) {

@@ -19,7 +19,7 @@ func affectedHosts(paths []string) []string {
 		}
 		id := adapterForPath(path)
 		if id == "" {
-			for _, spec := range catalog() {
+			for _, spec := range defaultCatalog {
 				selected[spec.ID] = true
 			}
 			break
@@ -33,7 +33,7 @@ func affectedHosts(paths []string) []string {
 		}
 	}
 	ids := []string{}
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if selected[spec.ID] {
 			ids = append(ids, spec.ID)
 		}
@@ -42,9 +42,6 @@ func affectedHosts(paths []string) []string {
 }
 
 func unrelatedDocumentation(path string) bool {
-	if path == "docs/compatibility.md" {
-		return false
-	}
 	return strings.HasPrefix(path, "docs/") || path == "README.md" || path == "LICENSE" || path == "CHANGELOG.md"
 }
 
@@ -60,7 +57,7 @@ func adapterForPath(path string) string {
 	if directory == "kimi" {
 		return "kimi-code"
 	}
-	for _, spec := range catalog() {
+	for _, spec := range defaultCatalog {
 		if directory == spec.ID {
 			return spec.ID
 		}

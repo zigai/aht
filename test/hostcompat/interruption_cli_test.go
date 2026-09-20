@@ -41,11 +41,9 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 	if sessionID == "" {
 		t.Fatal("native ACP session has no identity")
 	}
-	if host.contract.ID == registry.HarnessCline {
-		// ACP model defaults are catalog-scoped; explicitly select our fake
-		// model through the native model setter even if absent from a catalog.
-		cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": sessionID, "modelId": "compat"})
-	}
+	// ACP model defaults are catalog-scoped; explicitly select our fake
+	// model through the native model setter even if absent from a catalog.
+	cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": sessionID, "modelId": "compat"})
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt", "params": map[string]any{
 		"sessionId": sessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": compatibilityPrompt}},
