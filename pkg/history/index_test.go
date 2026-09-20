@@ -256,8 +256,13 @@ func TestIndexSearchesWhileWriteLocked(t *testing.T) {
 }
 
 func TestIndexHealsUnusableDefaultCache(t *testing.T) {
-	cache := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cache)
+	temp := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	writeHistory(t, root, "session.jsonl", treeHistory)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}}

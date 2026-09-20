@@ -687,10 +687,7 @@ func CanonicalPath(p string) string {
 	if abs, err := filepath.Abs(cleaned); err == nil {
 		cleaned = abs
 	}
-	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return filepath.Clean(resolved)
-	}
-	return cleaned
+	return canonicalizeExistingOrParent(cleaned)
 }
 
 // PathsEqual reports whether p1 and p2 resolve to the same canonical path.
@@ -854,4 +851,16 @@ func maxTime(values ...time.Time) time.Time {
 		}
 	}
 	return latest
+}
+
+func canonicalizeExistingOrParent(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	parent := filepath.Dir(path)
+	if parent == path || parent == "." || parent == "/" || parent == string(filepath.Separator) {
+		return path
+	}
+	resolvedParent := canonicalizeExistingOrParent(parent)
+	return filepath.Join(resolvedParent, filepath.Base(path))
 }
