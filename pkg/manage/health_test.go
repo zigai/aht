@@ -3,6 +3,7 @@ package manage_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -226,14 +227,16 @@ func TestManagerTrackerHealth(t *testing.T) {
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "sessions.json")
 	healthPath := storePath + ".observer-health.json"
-	data := `{
+	now := time.Now().UTC()
+	staleTime := now.Add(-time.Hour).Format(time.RFC3339Nano)
+	data := fmt.Sprintf(`{
 		"pid": 5678,
 		"interval": 300000000,
-		"started_at": "2026-09-19T20:00:00Z",
-		"last_attempt_at": "2026-09-19T20:00:01Z",
-		"last_success_at": "2026-09-19T20:00:01Z",
+		"started_at": %q,
+		"last_attempt_at": %q,
+		"last_success_at": %q,
 		"degraded": false
-	}`
+	}`, staleTime, staleTime, staleTime)
 	if err := os.WriteFile(healthPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -250,9 +253,8 @@ func TestManagerTrackerHealth(t *testing.T) {
 	}
 
 	health, err := m.TrackerHealth(t.Context())
-	// With time.Now() >> 2026-09-19, this should be classified as stale
 	if !errors.Is(err, manage.ErrHealthStale) {
-		t.Fatalf("expected ErrHealthStale for 2026-09-19 file against current time, got %v", err)
+		t.Fatalf("expected ErrHealthStale for stale file against current time, got %v", err)
 	}
 	if health.PID != 5678 {
 		t.Fatalf("health.PID = %d, want 5678", health.PID)
