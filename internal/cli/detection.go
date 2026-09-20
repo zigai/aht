@@ -67,16 +67,6 @@ func (app *application) writeExplanationDetails(result explainResult) error {
 	})
 }
 
-func sameTmuxServer(left string, right string) bool {
-	if left == "" {
-		left = "default"
-	}
-	if right == "" {
-		right = "default"
-	}
-	return left == right
-}
-
 func activityString(activity *registry.Activity) string {
 	if activity == nil {
 		return "none"

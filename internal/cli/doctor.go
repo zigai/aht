@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,14 +31,30 @@ type doctorResult struct {
 
 func (app *application) newDoctorCommand() *cobra.Command {
 	var verbose bool
+	var manager *manage.Manager
+	var result doctorResult
 	command := &cobra.Command{
 		Use:           "doctor",
 		Short:         "Check whether aht is set up and working",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		PreRun: func(cmd *cobra.Command, _ []string) {
+			opts, err := app.configuredServiceOptions(cmd, serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval})
+			if err != nil {
+				// Configuration failures are diagnostic results, so doctor keeps
+				// its structured output and ordinary failure exit code.
+				manager = nil
+				result = doctorResult{OK: false, Checks: []doctorCheck{{Name: "tracker configuration", Status: doctorError, Message: err.Error()}}, Capabilities: nil}
+				return
+			}
+			manager = manage.New(manage.Config{Binary: opts.Binary, StorePath: opts.StorePath, TrackerInterval: opts.Interval, TrackerGracePeriod: opts.GracePeriod})
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result := app.runDoctor(cmd.Context(), verbose)
+			if manager != nil {
+				res := manager.Doctor(cmd.Context(), manage.DoctorOptions{IncludeAll: verbose, ConfigPath: app.resolvedConfigPath, MaxHealthAge: 0})
+				result = doctorResult{OK: res.OK, Checks: res.Checks, Capabilities: res.Capabilities}
+			}
 			if err := app.writeDoctorResult(result); err != nil {
 				return err
 			}
@@ -94,40 +109,6 @@ func (app *application) writeDoctorCapabilities(capabilities []doctorCapability)
 		[]humanColumn{{heading: "Agent", width: doctorCapabilityAgentWidth}, {heading: "Start", width: doctorCapabilityEventWidth}, {heading: "End", width: doctorCapabilityEventWidth}, {heading: "Run/Idle", width: doctorCapabilityRunningWidth}, {heading: "Wait", width: doctorCapabilityWaitingWidth}, {heading: "Process", width: doctorCapabilitySignalWidth}, {heading: "Catalog", width: doctorCapabilitySignalWidth}, {heading: "TTY/MUX", width: doctorCapabilitySignalWidth}},
 		rows,
 	)
-}
-
-func (app *application) runDoctor(ctx context.Context, includeAll bool) doctorResult {
-	opts, err := app.configuredServiceOptions(&cobra.Command{}, serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval})
-	if err != nil {
-		return doctorResult{OK: false, Checks: []doctorCheck{{Name: "tracker configuration", Status: doctorError, Message: err.Error()}}, Capabilities: nil}
-	}
-	m := manage.New(manage.Config{Binary: opts.Binary, StorePath: opts.StorePath, TrackerInterval: opts.Interval, TrackerGracePeriod: opts.GracePeriod})
-	res := m.Doctor(ctx, manage.DoctorOptions{
-		IncludeAll:   includeAll,
-		ConfigPath:   app.resolvedConfigPath,
-		MaxHealthAge: 0,
-	})
-	return doctorResult{
-		OK:           res.OK,
-		Checks:       res.Checks,
-		Capabilities: res.Capabilities,
-	}
-}
-
-func (result *doctorResult) addDetectionManifestCheck() {
-	m := manage.New(manage.Config{
-		Binary:             defaultInstallBinary(),
-		StorePath:          "",
-		TrackerInterval:    0,
-		TrackerGracePeriod: 0,
-	})
-	m.CheckManifests(func(name string, status manage.DoctorStatus, message string) {
-		result.Checks = append(result.Checks, doctorCheck{
-			Name:    name,
-			Status:  status,
-			Message: message,
-		})
-	})
 }
 
 func yesNo(value bool) string {

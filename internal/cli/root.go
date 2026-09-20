@@ -27,6 +27,7 @@ import (
 	"github.com/zigai/aht/internal/config"
 	"github.com/zigai/aht/internal/harness"
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/internal/pathmatch"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/herdr"
@@ -172,15 +173,6 @@ func (app *application) loadConfig() (config.Config, error) {
 		return app.cfg, app.cfgErr
 	}
 	app.configExplicit = app.configPath != ""
-	targetPath := app.configPath
-	if targetPath == "" {
-		targetPath = config.DefaultPath()
-	}
-	if !app.configExplicit && !app.noConfig && targetPath != "-" {
-		if _, statErr := os.Stat(targetPath); errors.Is(statErr, os.ErrNotExist) {
-			_, _ = config.EnsureConfigFile(targetPath)
-		}
-	}
 	cfg, resolved, err := config.LoadWithOptions(config.Options{
 		Path:     app.configPath,
 		Explicit: app.configExplicit,
@@ -189,9 +181,27 @@ func (app *application) loadConfig() (config.Config, error) {
 	})
 	app.cfg = cfg
 	app.resolvedConfigPath = resolved
-	app.cfgErr = err
+	app.cfgErr = exitCode(err, exitCodeUsage)
 	app.cfgLoaded = true
 	return app.cfg, app.cfgErr
+}
+
+// publishConfig runs at the command boundary, after preparation and Cobra's
+// argument/flag validation. Loading effective settings never creates files.
+func (app *application) publishConfig(cmd *cobra.Command) {
+	if !app.cfgLoaded || app.cfgErr != nil || app.configExplicit || app.noConfig {
+		return
+	}
+	if flag := cmd.Flags().Lookup("dry-run"); flag != nil && flag.Value.String() == "true" {
+		return
+	}
+	path := config.DefaultPath()
+	if path == "-" {
+		return
+	}
+	// First-run publication is best effort; resolved settings remain usable when
+	// the default location is not writable. Existing files are preserved.
+	_, _ = config.EnsureConfigFile(path)
 }
 
 func Execute() {
@@ -215,7 +225,7 @@ func exitCode(err error, code int) error {
 	return &exitCoderError{err: err, code: code}
 }
 
-func configureCommandTree(cmd *cobra.Command) {
+func (app *application) configureCommandTree(cmd *cobra.Command) {
 	if f := cmd.Flags().Lookup("help"); f != nil {
 		f.Shorthand = ""
 	} else {
@@ -227,8 +237,16 @@ func configureCommandTree(cmd *cobra.Command) {
 		}
 		return err
 	})
+	// Configured commands resolve and validate options in a PreRun hook. Cobra
+	// checks required flags and flag groups before reaching this RunE boundary.
+	if run := cmd.RunE; run != nil && (cmd.PreRunE != nil || cmd.PreRun != nil) {
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			app.publishConfig(c)
+			return run(c, args)
+		}
+	}
 	for _, sub := range cmd.Commands() {
-		configureCommandTree(sub)
+		app.configureCommandTree(sub)
 	}
 }
 
@@ -243,7 +261,7 @@ func (app *application) newRootCommand() *cobra.Command {
 	var showVersion bool
 	root := &cobra.Command{
 		Use:           "aht",
-		Short:         "Track local coding-agent sessions and where they are running",
+		Short:         "Discover, track, and search local coding-agent sessions",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -283,6 +301,7 @@ func (app *application) newRootCommand() *cobra.Command {
 
 	root.AddCommand(
 		app.newListCommand(),
+		app.newSearchCommand(),
 		app.newWatchCommand(),
 		app.newWaitCommand(),
 		app.newInfoCommand(),
@@ -294,7 +313,7 @@ func (app *application) newRootCommand() *cobra.Command {
 	)
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
-	configureCommandTree(root)
+	app.configureCommandTree(root)
 	return root
 }
 
@@ -982,22 +1001,44 @@ func psProcessArgs(ctx context.Context, pid int) []string {
 
 func (app *application) newListCommand() *cobra.Command {
 	o := listOptions{}
+	var filter registry.Filter
 	cmd := &cobra.Command{
 		Use:           listCommandName,
 		Short:         "Show known sessions",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(c *cobra.Command, _ []string) error {
+		PreRunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
 			}
 			applyListConfig(&o, c, cfg)
-			return app.runList(c.Context(), o)
+			if err := app.validateListOptions(o); err != nil {
+				return exitCode(err, exitCodeUsage)
+			}
+			filter, err = buildFilter(o)
+			return exitCode(err, exitCodeUsage)
+		},
+		RunE: func(c *cobra.Command, _ []string) error {
+			if o.summary {
+				return app.runListSummary(c.Context(), o, filter)
+			}
+			return app.runListSessions(c.Context(), o, filter)
 		},
 	}
 	f := cmd.Flags()
+	configureSessionFilterFlags(f, &o)
+	f.StringVar(&o.sortBy, "sort", "", "sort by: `<field>` (updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed)")
+	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
+	f.StringVar(&o.groupBy, "group-by", "", "group summaries by: `<field>` (multiplexer-session, project, harness)")
+	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
+	f.BoolVar(&o.desc, "desc", false, "sort descending")
+	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
+	return cmd
+}
+
+func configureSessionFilterFlags(f *pflag.FlagSet, o *listOptions) {
 	f.StringVar(&o.harness, "agent", "", "filter by agent `<name>`")
 	f.StringVar(&o.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
 	f.StringVar(&o.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
@@ -1009,13 +1050,6 @@ func (app *application) newListCommand() *cobra.Command {
 	f.StringVar(&o.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
 	f.StringVar(&o.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
 	f.StringVar(&o.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
-	f.StringVar(&o.sortBy, "sort", "", "sort by: `<field>` (updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed)")
-	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
-	f.StringVar(&o.groupBy, "group-by", "", "group summaries by: `<field>` (multiplexer-session, project, harness)")
-	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
-	f.BoolVar(&o.desc, "desc", false, "sort descending")
-	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
-	return cmd
 }
 
 func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
@@ -1042,21 +1076,21 @@ func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
 	}
 }
 
-func (app *application) runList(ctx context.Context, o listOptions) error {
-	if err := app.validateListOptions(o); err != nil {
-		return exitCode(err, exitCodeUsage)
-	}
-	if o.summary {
-		return app.runListSummary(ctx, o)
-	}
-	return app.runListSessions(ctx, o)
-}
-
 func (app *application) validateListOptions(options listOptions) error {
 	if app.outputJSON && options.absoluteSet {
 		return errListAbsoluteJSON
 	}
-	return validateListSummaryOptions(options)
+	if err := validateListSummaryOptions(options); err != nil {
+		return err
+	}
+	if options.summary {
+		return nil
+	}
+	if options.sortSet && strings.TrimSpace(options.sortBy) == "" {
+		return fmt.Errorf("%w: empty value", errInvalidListSort)
+	}
+	_, err := listSortLess(normalizeListSort(options.sortBy))
+	return err
 }
 
 func validateListSummaryOptions(options listOptions) error {
@@ -1128,16 +1162,7 @@ func buildFilter(o listOptions) (registry.Filter, error) {
 	return f, nil
 }
 
-func (app *application) runListSessions(ctx context.Context, o listOptions) error {
-	var err error
-	o, err = normalizedListOptions(o)
-	if err != nil {
-		return exitCode(err, exitCodeUsage)
-	}
-	f, e := buildFilter(o)
-	if e != nil {
-		return exitCode(e, exitCodeUsage)
-	}
+func (app *application) runListSessions(ctx context.Context, o listOptions, f registry.Filter) error {
 	ss, e := app.registryStore().List(ctx, f)
 	if e != nil {
 		return fmt.Errorf("listing sessions: %w", e)
@@ -1176,54 +1201,12 @@ func (app *application) runListSessions(ctx context.Context, o listOptions) erro
 	return app.writeHumanTable(listTableColumns(rows, maxWidth), rows)
 }
 
-func matchPathPattern(path, pattern string) bool {
-	if pattern == "" || path == "" {
-		return false
-	}
-	cleanPath := filepath.Clean(path)
-	cleanPattern := filepath.Clean(pattern)
-	if cleanPath == cleanPattern {
-		return true
-	}
-	if matchGlobPattern(cleanPath, cleanPattern, pattern) {
-		return true
-	}
-	return matchPrefixOrWildcard(cleanPath, pattern)
-}
-
-func matchGlobPattern(cleanPath, cleanPattern, pattern string) bool {
-	if matched, err := filepath.Match(pattern, cleanPath); err == nil && matched {
-		return true
-	}
-	if matched, err := filepath.Match(cleanPattern, cleanPath); err == nil && matched {
-		return true
-	}
-	return false
-}
-
-func matchPrefixOrWildcard(cleanPath, pattern string) bool {
-	trimmed := strings.TrimSuffix(strings.TrimSuffix(pattern, "/*"), "/")
-	if cleanPath == trimmed || strings.HasPrefix(cleanPath, trimmed+string(filepath.Separator)) {
-		return true
-	}
-	if strings.Contains(pattern, "**") {
-		sub := strings.Trim(strings.Trim(pattern, "*"), string(filepath.Separator))
-		if sub != "" && (strings.Contains(cleanPath, string(filepath.Separator)+sub+string(filepath.Separator)) ||
-			strings.HasSuffix(cleanPath, string(filepath.Separator)+sub) ||
-			strings.HasPrefix(cleanPath, sub+string(filepath.Separator)) ||
-			cleanPath == sub) {
-			return true
-		}
-	}
-	return false
-}
-
 func sessionMatchesIgnorePaths(s registry.Session, paths []string) bool {
 	if s.CWD == "" || len(paths) == 0 {
 		return false
 	}
 	for _, pat := range paths {
-		if matchPathPattern(s.CWD, pat) {
+		if pathmatch.Match(s.CWD, pat) {
 			return true
 		}
 	}
@@ -1387,13 +1370,6 @@ func allocateFullListWidths(
 	return sessionWidth + sessionAdd, cwdWidth + cwdAdd
 }
 
-func normalizedListOptions(options listOptions) (listOptions, error) {
-	if options.sortSet && strings.TrimSpace(options.sortBy) == "" {
-		return options, fmt.Errorf("%w: empty value", errInvalidListSort)
-	}
-	return options, nil
-}
-
 func listActivity(session registry.Session) string {
 	if session.Presence == registry.PresenceGone {
 		return "-"
@@ -1514,11 +1490,7 @@ func formatSessionPathLabel(path string) string {
 	return base
 }
 
-func (app *application) runListSummary(ctx context.Context, o listOptions) error {
-	f, e := buildFilter(o)
-	if e != nil {
-		return exitCode(e, exitCodeUsage)
-	}
+func (app *application) runListSummary(ctx context.Context, o listOptions, f registry.Filter) error {
 	groupBy := registry.SummaryGroupBy(o.groupBy)
 	if groupBy == "" {
 		groupBy = registry.SummaryGroupByMultiplexerSession
@@ -1531,14 +1503,6 @@ func (app *application) runListSummary(ctx context.Context, o listOptions) error
 		return app.writeJSON(s)
 	}
 	return app.writeSummaryTableForGroup(s, groupBy, o.full)
-}
-
-func (app *application) writeSummaryTable(ss []registry.Summary, full bool) error {
-	groupBy := registry.SummaryGroupByMultiplexerSession
-	if len(ss) > 0 && ss[0].GroupBy != "" {
-		groupBy = ss[0].GroupBy
-	}
-	return app.writeSummaryTableForGroup(ss, groupBy, full)
 }
 
 func (app *application) writeSummaryTableForGroup(ss []registry.Summary, groupBy registry.SummaryGroupBy, full bool) error {

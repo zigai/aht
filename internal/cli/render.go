@@ -81,7 +81,7 @@ func (app *application) writeHumanTableRows(columns []humanColumn, rows [][]stri
 	colConfigs := make([]prettytable.ColumnConfig, len(columns))
 	for i, col := range columns {
 		header[i] = col.heading
-		colConfigs[i] = col.tableConfig(i+1, wrap)
+		colConfigs[i] = col.tableConfig(i + 1)
 	}
 	writer.SetColumnConfigs(colConfigs)
 	writer.AppendHeader(header)
@@ -148,7 +148,7 @@ func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]st
 				rowBuf.WriteString("  ")
 			}
 			col := columns[i]
-			textVal := truncateHumanText(sanitizeHumanText(cell), col.width)
+			textVal := truncateHumanText(cell, col.width)
 			sw := text.StringWidth(textVal)
 			if sw < col.width {
 				if col.align == text.AlignRight {
@@ -191,25 +191,20 @@ func normalizeHumanTableLayout(rendered string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (col humanColumn) tableConfig(number int, wrap bool) prettytable.ColumnConfig {
-	config := prettytable.ColumnConfig{
-		Number:           number,
-		WidthMax:         col.width,
-		Align:            col.align,
-		AlignHeader:      col.align,
-		WidthMaxEnforcer: truncateHumanText,
-	}
-	if !wrap {
-		return config
-	}
+func (col humanColumn) tableConfig(number int) prettytable.ColumnConfig {
 	wrapCell := col.wrap
 	if wrapCell == nil {
 		wrapCell = wrapHumanText
 	}
-	config.WidthMaxEnforcer = func(value string, maxLen int) string {
-		return strings.Join(wrapCell(value, maxLen), "\n")
+	return prettytable.ColumnConfig{
+		Number:      number,
+		WidthMax:    col.width,
+		Align:       col.align,
+		AlignHeader: col.align,
+		WidthMaxEnforcer: func(value string, maxLen int) string {
+			return strings.Join(wrapCell(value, maxLen), "\n")
+		},
 	}
-	return config
 }
 
 func (app *application) writeStackedHumanRows(columns []humanColumn, rows [][]string) error {
@@ -332,10 +327,6 @@ func truncateHumanText(value string, width int) string {
 }
 
 func wrapHumanText(value string, width int) []string {
-	value = sanitizeHumanText(value)
-	if value == "" {
-		return []string{"-"}
-	}
 	return wrapDelimitedHumanText(value, width, " ")
 }
 

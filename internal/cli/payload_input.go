@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 )
 
 const (
@@ -73,7 +72,7 @@ func readPayloadInputWithLimit(reader io.Reader, limit int, limitErr error) ([]b
 }
 
 func normalizeRawPayloadBytes(data []byte) (json.RawMessage, error) {
-	data = []byte(strings.TrimSpace(string(data)))
+	data = bytes.Clone(bytes.TrimSpace(data))
 	if len(data) == 0 {
 		return nil, nil
 	}

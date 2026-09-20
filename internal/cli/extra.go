@@ -55,13 +55,14 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	o := observeOptions{interval: observeDefaultInterval}
 	var autoClean bool
 	screenInspection := true
+	var disableScreenInspection bool
 	command := &cobra.Command{
 		Use:           "run",
 		Short:         "Observe agent processes and native sessions",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -72,7 +73,7 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 			if cmd.Flags().Changed("auto-clean") {
 				o.autoClean = autoClean
 			}
-			disableScreenInspection := cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection
+			disableScreenInspection = cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection
 			if cmd.Flags().Changed("screen-inspection") {
 				disableScreenInspection = !screenInspection
 			}
@@ -82,6 +83,10 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 			if o.grace < 0 {
 				return exitCode(errInvalidObserveGracePeriod, exitCodeUsage)
 			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg := app.cfg
 			if o.once {
 				watcher := observer.New(observer.Options{
 					StorePath:               app.resolvedStorePath(),

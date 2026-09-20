@@ -56,6 +56,7 @@ func (app *application) newDetectionCommand() *cobra.Command {
 
 func (app *application) newDetectionTestCommand() *cobra.Command {
 	options := detectionTestOptions{}
+	var harnessID registry.Harness
 	command := &cobra.Command{
 		Use:           "test <harness>",
 		Short:         "Test detection rules against a saved screen fixture",
@@ -67,7 +68,7 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if options.screenPath == "" {
 				return exitCode(errDetectionScreenRequired, exitCodeUsage)
 			}
@@ -81,13 +82,16 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 			if options.manifestPath == "" && !cmd.Flags().Changed("config-dir") {
 				options.configDir = cfg.Detection.ManifestsDir
 			}
-			harnessID, err := harnesspkg.Normalize(args[0])
+			harnessID, err = harnesspkg.Normalize(args[0])
 			if err != nil {
 				if options.manifestPath == "" {
 					return exitCode(err, exitCodeUsage)
 				}
 				harnessID = registry.Harness(strings.TrimSpace(args[0]))
 			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return app.runDetectionTest(cmd.Context(), harnessID, options)
 		},
 	}

@@ -75,6 +75,7 @@ type explainedInfoResult struct {
 func (app *application) newSetupCommand() *cobra.Command {
 	options := integrationCommandOptions{}
 	serviceConfig := serviceOptions{interval: serviceDefaultInterval}
+	var serviceOptions service.Options
 	command := &cobra.Command{
 		Use:           "setup <agent... | all>",
 		Short:         "Set up harness integrations and start background tracking",
@@ -86,7 +87,7 @@ func (app *application) newSetupCommand() *cobra.Command {
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := selectedHarnesses(args, false); err != nil {
 				return exitCode(err, exitCodeUsage)
 			}
@@ -95,10 +96,11 @@ func (app *application) newSetupCommand() *cobra.Command {
 			}
 			serviceConfig.binary = options.binary
 			serviceConfig.dryRun = options.dryRun
-			serviceOptions, err := app.configuredServiceOptions(cmd, serviceConfig)
-			if err != nil {
-				return err
-			}
+			var err error
+			serviceOptions, err = app.configuredServiceOptions(cmd, serviceConfig)
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 			integrations, integrationErr := installIntegrations(cmd.Context(), args, options)
 			tracker, trackerErr := runServiceOperation(cmd.Context(), "update", serviceOptions)
 			if trackerErr != nil {
@@ -494,17 +496,19 @@ func (app *application) newTrackerCommand() *cobra.Command {
 
 func (app *application) newTrackerEnableCommand() *cobra.Command {
 	options := serviceOptions{interval: serviceDefaultInterval}
+	var parsed service.Options
 	command := &cobra.Command{
 		Use:           "enable",
 		Short:         "Install, update, and start background tracking",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			parsed, err = app.configuredServiceOptions(cmd, options)
+			return err
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			parsed, err := app.configuredServiceOptions(cmd, options)
-			if err != nil {
-				return err
-			}
 			result, err := runServiceOperation(cmd.Context(), "update", parsed)
 			if err != nil {
 				return fmt.Errorf("enable tracker: %w", err)
@@ -546,17 +550,19 @@ func (app *application) newTrackerDisableCommand() *cobra.Command {
 
 func (app *application) newTrackerStatusCommand() *cobra.Command {
 	serviceConfig := serviceOptions{interval: serviceDefaultInterval}
+	var options service.Options
 	command := &cobra.Command{
 		Use:           statusCommandName,
 		Short:         "Show background tracking state",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			options, err = app.configuredServiceOptions(cmd, serviceConfig)
+			return err
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options, err := app.configuredServiceOptions(cmd, serviceConfig)
-			if err != nil {
-				return err
-			}
 			result, err := runServiceOperation(cmd.Context(), statusCommandName, options)
 			if err != nil {
 				return fmt.Errorf("tracker status: %w", err)
@@ -617,7 +623,7 @@ func (app *application) newRegistryCleanCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -634,6 +640,15 @@ func (app *application) newRegistryCleanCommand() *cobra.Command {
 				options.olderThan = d
 				options.ageSet = true
 			}
+			if options.all == options.ageSet {
+				return exitCode(errCleanSelection, exitCodeUsage)
+			}
+			if options.olderThan < 0 {
+				return exitCode(errNegativeCleanAge, exitCodeUsage)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if options.all && !yes {
 				stdin := app.stdin
 				if stdin == nil {
@@ -657,12 +672,6 @@ func (app *application) newRegistryCleanCommand() *cobra.Command {
 }
 
 func (app *application) runRegistryClean(ctx context.Context, options cleanOptions) error {
-	if options.all == options.ageSet {
-		return exitCode(errCleanSelection, exitCodeUsage)
-	}
-	if options.olderThan < 0 {
-		return exitCode(errNegativeCleanAge, exitCodeUsage)
-	}
 	age := options.olderThan
 	if options.all {
 		age = 0
@@ -686,7 +695,13 @@ func (app *application) newInfoCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if (len(args) == 0) == (options.paneID == "") {
+				return exitCode(errInfoReference, exitCodeUsage)
+			}
+			if cmd.Flags().Changed("config-dir") && !options.explain {
+				return exitCode(errInfoConfig, exitCodeUsage)
+			}
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -701,13 +716,11 @@ func (app *application) newInfoCommand() *cobra.Command {
 			if cmd.Flags().Changed("screen-inspection") {
 				options.disableScreenInspection = !screenInspection
 			}
-			if (len(args) == 0) == (options.paneID == "") {
-				return exitCode(errInfoReference, exitCodeUsage)
-			}
-			if cmd.Flags().Changed("config-dir") && !options.explain {
-				return exitCode(errInfoConfig, exitCodeUsage)
-			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 			var session registry.Session
+			var err error
 			if options.paneID != "" {
 				session, err = app.resolvePaneSession(cmd.Context(), options.paneID, options.serverID, options.multiplexerKind)
 			} else {
@@ -776,13 +789,14 @@ func (app *application) newWatchCommand() *cobra.Command {
 	options := listOptions{}
 	var noSnapshot bool
 	var watchFormat string
+	var prepared watchOptions
 	command := &cobra.Command{
 		Use:           "watch",
 		Short:         "Stream session changes",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
@@ -794,27 +808,21 @@ func (app *application) newWatchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.runWatch(cmd.Context(), watchOptions{
+			prepared, err = app.prepareWatch(watchOptions{
 				filter:     filter,
 				agent:      options.harness,
 				noSnapshot: noSnapshot,
 				format:     watchFormat,
 				formatSet:  cmd.Flags().Changed("format"),
 			})
+			return err
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return app.runWatch(cmd.Context(), prepared)
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&options.harness, "agent", "", "filter by agent `<name>`")
-	flags.StringVar(&options.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
-	flags.StringVar(&options.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
-	flags.StringVar(&options.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
-	flags.StringVar(&options.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
-	flags.StringVar(&options.project, "project", "", "filter by project `<dir>`")
-	flags.BoolVar(&options.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
-	flags.StringVar(&options.cwd, "cwd", "", "filter by session working directory `<dir>`")
-	flags.StringVar(&options.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
-	flags.StringVar(&options.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
-	flags.StringVar(&options.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
+	configureSessionFilterFlags(flags, &options)
 	flags.BoolVar(&noSnapshot, "no-snapshot", false, "start with future changes only")
 	flags.StringVar(&watchFormat, "format", "", "output format: `<table|plain>`")
 	return command
@@ -886,11 +894,14 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		PreRunE: func(_ *cobra.Command, _ []string) error {
 			_, err := app.loadConfig()
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, _ []string) error {
 			path := app.resolvedConfigPath
 			if path == "" {
 				path = config.DefaultPath()
@@ -910,11 +921,12 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := app.loadConfig()
-			if err != nil {
-				return err
-			}
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			_, err := app.loadConfig()
+			return err
+		},
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cfg := app.cfg
 			if app.outputJSON {
 				return app.writeJSON(cfg)
 			}

@@ -90,21 +90,24 @@ type watchEventWriter struct {
 	headerWritten bool
 }
 
-func (app *application) runWatch(ctx context.Context, o watchOptions) error {
+func (app *application) prepareWatch(o watchOptions) (watchOptions, error) {
 	if o.formatSet && strings.TrimSpace(o.format) == "" {
-		return fmt.Errorf("%w: empty value", errInvalidWatchFormat)
+		return o, fmt.Errorf("%w: empty value", errInvalidWatchFormat)
 	}
 	o = normalizeWatchOptions(o)
 	if app.outputJSON {
 		if o.formatSet {
-			return errWatchFormatJSONConflict
+			return o, errWatchFormatJSONConflict
 		}
 		o.format = watchFormatJSON
 	}
 	if !app.outputJSON && o.format != watchFormatTable && o.format != watchFormatPlain {
-		return fmt.Errorf("%w: %q", errInvalidWatchFormat, o.format)
+		return o, fmt.Errorf("%w: %q", errInvalidWatchFormat, o.format)
 	}
+	return o, nil
+}
 
+func (app *application) runWatch(ctx context.Context, o watchOptions) error {
 	ahtClient := client.New(client.Config{StorePath: app.resolvedStorePath()})
 	err := app.runBrokerWatch(ctx, o, ahtClient)
 	if err == nil {

@@ -13,10 +13,11 @@ func (app *application) newCurrentCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			_, err := app.loadConfig()
+			return err
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := app.loadConfig(); err != nil {
-				return err
-			}
 			session, err := app.registryStore().Current(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("current session: %w", err)
