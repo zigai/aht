@@ -204,6 +204,9 @@ type (
 	// Selector specifies criteria for selecting and resolving a single session.
 	Selector = client.Selector
 
+	// SessionLister captures the session query capability required to resolve selectors.
+	SessionLister = client.SessionLister
+
 	// CurrentContextOptions identifies the process whose enclosing session is requested.
 	CurrentContextOptions = client.CurrentContextOptions
 
@@ -313,9 +316,9 @@ func IsUnavailable(err error) bool {
 	return client.IsUnavailable(err)
 }
 
-// Resolve finds a single session matching selector using the provided client.
-func Resolve(ctx context.Context, c *Client, selector Selector) (Session, error) {
-	return c.Resolve(ctx, selector) //nolint:wrapcheck // facade forwards client error unchanged
+// Resolve finds a single session matching selector using the provided session lister.
+func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Session, error) {
+	return client.Resolve(ctx, lister, selector) //nolint:wrapcheck // facade forwards client error unchanged
 }
 
 // ResolveSessions resolves a selector against an existing session snapshot.

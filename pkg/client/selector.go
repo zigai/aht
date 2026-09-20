@@ -19,6 +19,8 @@ var (
 
 	// ErrNoCurrentSession indicates that no agent session was found for the current context.
 	ErrNoCurrentSession = errors.New("no current agent session found")
+
+	errSessionListerRequired = errors.New("session lister is required")
 )
 
 // AmbiguousSessionError provides detailed information about ambiguous session matches.
@@ -61,6 +63,11 @@ type Selector struct {
 	CWD string
 }
 
+// SessionLister captures the session query capability required to resolve selectors.
+type SessionLister interface {
+	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
+}
+
 func (e *AmbiguousSessionError) Error() string {
 	if e.Message != "" {
 		return e.Message
@@ -98,16 +105,19 @@ func (c *Client) Resolve(ctx context.Context, selector Selector) (registry.Sessi
 	if c.configErr != nil {
 		return registry.Session{}, c.configErr
 	}
-	sessions, err := c.List(ctx, selector.Filter())
-	if err != nil {
-		return registry.Session{}, publicError(err)
-	}
-	return ResolveSessions(sessions, selector)
+	return Resolve(ctx, c, selector)
 }
 
-// Resolve finds a single session matching selector using the provided client.
-func Resolve(ctx context.Context, c *Client, selector Selector) (registry.Session, error) {
-	return c.Resolve(ctx, selector)
+// Resolve finds a single session matching selector using the provided session lister.
+func Resolve(ctx context.Context, lister SessionLister, selector Selector) (registry.Session, error) {
+	if lister == nil {
+		return registry.Session{}, errSessionListerRequired
+	}
+	sessions, err := lister.List(ctx, selector.Filter())
+	if err != nil {
+		return registry.Session{}, fmt.Errorf("list sessions: %w", err)
+	}
+	return ResolveSessions(sessions, selector)
 }
 
 // ResolveSessions resolves a single session from a slice of candidate sessions

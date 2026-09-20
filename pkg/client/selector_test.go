@@ -88,10 +88,14 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 	}
 
 	// Match by session path with normalization
-	normalizedPath := filepath.Join(tempDir, ".", "agent-session.json")
+	sep := string(filepath.Separator)
+	dirtySessionPath := tempDir + sep + "." + sep + "agent-session.json"
+	if dirtySessionPath == sessions[1].SessionPath {
+		t.Fatalf("dirtySessionPath %q was unexpectedly equal to stored %q", dirtySessionPath, sessions[1].SessionPath)
+	}
 	resolved, err = client.ResolveSessions(sessions, client.Selector{
 		ID:                "",
-		Reference:         normalizedPath,
+		Reference:         dirtySessionPath,
 		Harness:           "",
 		MultiplexerKind:   "",
 		MultiplexerServer: "",
@@ -267,7 +271,11 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 	sessions := []registry.Session{session}
 
 	// Exact project root match with dirty path
-	dirtyProj := filepath.Join(projRoot, ".", "sub", "..")
+	sep := string(filepath.Separator)
+	dirtyProj := projRoot + sep + "." + sep + "sub" + sep + ".."
+	if dirtyProj == session.ProjectRoot {
+		t.Fatalf("dirtyProj %q was unexpectedly equal to stored %q", dirtyProj, session.ProjectRoot)
+	}
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
 		ID:                "",
 		Reference:         "",
@@ -548,4 +556,43 @@ func testSessionWithPaths(id, projectRoot, cwd string) registry.Session {
 	s.ProjectRoot = projectRoot
 	s.CWD = cwd
 	return s
+}
+
+func TestResolveWithSessionLister(t *testing.T) {
+	t.Parallel()
+
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := registry.PresenceLive
+	session, err := store.Observe(t.Context(), registry.Observation{
+		Source:     registry.ObservationSourceNative,
+		Evidence:   registry.ObservationEvidenceNativeEvent,
+		Harness:    registry.HarnessCodex,
+		Identity:   registry.ObservationIdentity{SessionID: "sess-custom-store"},
+		Presence:   &live,
+		ObservedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with a direct SessionLister (MemoryStore), bypassing *Client
+	var lister client.SessionLister = store
+	resolved, err := client.Resolve(t.Context(), lister, client.Selector{
+		Reference: session.ID,
+	})
+	if err != nil {
+		t.Fatalf("Resolve with SessionLister failed: %v", err)
+	}
+	if resolved.ID != session.ID {
+		t.Fatalf("Resolve ID = %q, want %q", resolved.ID, session.ID)
+	}
+
+	// Test nil lister
+	_, err = client.Resolve(t.Context(), nil, client.Selector{Reference: session.ID})
+	if err == nil {
+		t.Fatal("expected error with nil SessionLister")
+	}
 }

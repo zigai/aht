@@ -173,7 +173,7 @@ func lookupProcess(
 	find func(context.Context, int) (processinfo.Process, bool, error),
 ) (processinfo.Process, bool) {
 	proc, ok := byPID[pid]
-	if !ok && find != nil {
+	if !ok {
 		if foundProc, found, _ := find(ctx, pid); found {
 			return foundProc, true
 		}
@@ -227,9 +227,6 @@ func resolveCurrentTmux(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	if opts.TmuxCurrent == nil {
-		return zero, false, nil
-	}
 	tmuxCtx, err := opts.TmuxCurrent(ctx)
 	if err != nil {
 		return zero, false, nil //nolint:nilerr // tmux discovery errors fall back to other multiplexer detection
@@ -246,9 +243,6 @@ func resolveCurrentZellij(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	if opts.ZellijCurrent == nil {
-		return zero, false, nil
-	}
 	zCtx := opts.ZellijCurrent()
 	if zCtx.Empty() || zCtx.PaneID == "" || zCtx.SessionName == "" {
 		return zero, false, nil
@@ -262,9 +256,6 @@ func resolveCurrentHerdr(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	if opts.HerdrCurrent == nil {
-		return zero, false, nil
-	}
 	hCtx := opts.HerdrCurrent()
 	if hCtx.Empty() || hCtx.PaneID == "" {
 		return zero, false, nil
