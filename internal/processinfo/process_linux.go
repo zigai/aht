@@ -72,7 +72,7 @@ func List(ctx context.Context) ([]Process, error) {
 		dir := filepath.Join(procRoot, entry.Name())
 		info, err := os.Stat(dir)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if isLinuxNotExist(err) {
 				continue
 			}
 			return nil, classifyProcessError(dir, err)
@@ -84,7 +84,7 @@ func List(ctx context.Context) ([]Process, error) {
 
 		process, err := readLinuxProcess(dir, pid, boot)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if isLinuxProcessExited(dir, pid, err) {
 				continue
 			}
 			return nil, err
@@ -112,7 +112,7 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 	dir := filepath.Join(procRoot, strconv.Itoa(pid))
 	info, err := os.Stat(dir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if isLinuxNotExist(err) {
 			return zero, false, nil
 		}
 		return zero, false, classifyProcessError(dir, err)
@@ -124,7 +124,7 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 
 	process, err := readLinuxProcess(dir, pid, boot)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if isLinuxProcessExited(dir, pid, err) {
 			return zero, false, nil
 		}
 		return zero, false, err
@@ -344,4 +344,18 @@ func linuxStartTimeFromStat(stat string) string {
 		return ""
 	}
 	return fields[startTimeFieldIndexAfterComm]
+}
+
+func isLinuxNotExist(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
+}
+
+func isLinuxProcessExited(dir string, pid int, err error) bool {
+	if isLinuxNotExist(err) {
+		return true
+	}
+	if _, statErr := os.Stat(dir); statErr != nil && isLinuxNotExist(statErr) {
+		return true
+	}
+	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }

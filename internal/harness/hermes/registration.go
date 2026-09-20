@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	inspectTimeout  = 5 * time.Second
+	inspectTimeout  = 30 * time.Second
 	mutationTimeout = 30 * time.Second
 	outputLimit     = 64 * 1024
 )

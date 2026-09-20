@@ -20,7 +20,11 @@ const (
 	darwinPlistName = "dev.zigai.aht.observer.plist"
 )
 
-var _ backend = (*darwinBackend)(nil)
+var (
+	_ backend = (*darwinBackend)(nil)
+
+	errInvalidPlistText = errors.New("invalid XML text for launch agent plist")
+)
 
 type darwinBackend struct {
 	path     string
@@ -126,8 +130,6 @@ func (b *darwinBackend) running(ctx context.Context, executor CommandExecutor) (
 	}
 	return false, "", wrapManagerError("checking launchd service status", output, err)
 }
-
-var errInvalidPlistText = errors.New("invalid XML text for launch agent plist")
 
 func writePlistString(b *strings.Builder, value string) error {
 	if !utf8.ValidString(value) || strings.ContainsFunc(value, func(r rune) bool {

@@ -112,15 +112,12 @@ func resolveCurrentFromAncestors(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	procs, err := opts.ProcessList(ctx)
-	if err != nil {
-		return zero, false, nil //nolint:nilerr // process listing failure falls back to terminal inspection
+	var byPID map[int]processinfo.Process
+	if opts.ProcessList != nil {
+		if procs, err := opts.ProcessList(ctx); err == nil && len(procs) > 0 {
+			byPID = buildProcessIndex(procs)
+		}
 	}
-	if len(procs) == 0 {
-		return zero, false, nil
-	}
-
-	byPID := buildProcessIndex(procs)
 	sessionsByPID := indexSessionsByPID(sessions)
 
 	currPID := opts.PID
@@ -172,13 +169,16 @@ func lookupProcess(
 	byPID map[int]processinfo.Process,
 	find func(context.Context, int) (processinfo.Process, bool, error),
 ) (processinfo.Process, bool) {
-	proc, ok := byPID[pid]
-	if !ok {
+	var zero processinfo.Process
+	if proc, ok := byPID[pid]; ok {
+		return proc, true
+	}
+	if find != nil {
 		if foundProc, found, _ := find(ctx, pid); found {
 			return foundProc, true
 		}
 	}
-	return proc, ok
+	return zero, false
 }
 
 func matchAncestorSession(
