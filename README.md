@@ -1,21 +1,26 @@
 # AHT
 
-[![CI](https://github.com/zigai/aht/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/aht/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/zigai/aht/pkg/client.svg)](https://pkg.go.dev/github.com/zigai/aht/pkg/client)
+AHT (Agent Harness Tracker) gives you one local view of your coding-agent
+sessions. See what agents are doing, find their terminal panes, and search
+retained conversations across harnesses.
+
+[![CI](https://github.com/zigai/aht/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/zigai/aht/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/zigai/aht?color=blue)](https://github.com/zigai/aht/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zigai/aht/pkg/aht.svg)](https://pkg.go.dev/github.com/zigai/aht/pkg/aht)
 [![Go version](https://img.shields.io/github/go-mod/go-version/zigai/aht)](https://github.com/zigai/aht/blob/master/go.mod)
-[![Release](https://img.shields.io/github/v/release/zigai/aht)](https://github.com/zigai/aht/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/zigai/aht)](https://github.com/zigai/aht/blob/master/LICENSE)
 
-AHT (Agent Harness Tracker) tracks coding-agent sessions, activity, processes,
-and terminal-multiplexer locations through a local realtime broker.
+- **Live tracking:** Follow session activity and locations across tmux, Zellij, and herdr.
+- **Conversation search:** Find retained discussions, including sessions created before AHT was installed.
+- **Go API and JSON output:** Build tools that query session state and subscribe to changes.
 
-Supported harnesses: [`claude`](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview),
+Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 [`codex`](https://github.com/openai/codex), [`pi`](https://github.com/earendil-works/pi),
 [`opencode`](https://github.com/anomalyco/opencode), [`omp`](https://github.com/can1357/oh-my-pi),
 [`hermes`](https://github.com/NousResearch/hermes-agent),
-[`openclaw`](https://github.com/openclaw/openclaw), [`grok`](https://x.ai),
+[`openclaw`](https://github.com/openclaw/openclaw), [`grok`](https://github.com/superagent-ai/grok-cli),
 [`cursor`](https://cursor.com), [`copilot`](https://github.com/features/copilot),
-[`cline`](https://github.com/cline/cline), [`kimi-code`](https://kimi.moonshot.cn),
+[`cline`](https://github.com/cline/cline), [`kimi-code`](https://github.com/MoonshotAI/kimi-cli),
 [`goose`](https://github.com/block/goose),
 [`agy`](https://github.com/google-antigravity/antigravity-cli),
 [`kilo`](https://github.com/kilo-org/kilocode),
@@ -27,37 +32,33 @@ Supported harnesses: [`claude`](https://docs.anthropic.com/en/docs/agents-and-to
 go install github.com/zigai/aht@latest
 ```
 
-Prebuilt archives and Linux packages are available from
-[GitHub Releases](https://github.com/zigai/aht/releases/latest).
+Supports Linux and macOS. Building from source requires Go 1.27.1 or newer.
 
 ## Quick start
 
-Set up harness integrations and start background tracking:
+Install your chosen harnesses, then set up tracking:
 
 ```sh
 aht manage setup claude codex
 ```
 
-View sessions:
+Start a harness session, then list sessions or follow changes:
 
 ```sh
 aht list
 aht watch
-aht info <session>
-aht info <session> --explain
 ```
 
-Check the installation:
+Search retained conversations, including sessions created before AHT was installed:
 
 ```sh
-aht manage doctor
+aht search "refresh token" --dir /work/app
 ```
 
 ## Documentation
 
-- [Configuration](docs/configuration.md) — Configuration file (`config.toml`), options reference, and environment overrides
-- [CLI Reference](docs/cli.md) — Command-line interface usage, commands, and flags
-- [Go Library](docs/library.md) — Package guide, client API, and Go integration examples
+- [Configuration](docs/configuration.md)
+- [Go library](docs/library.md)
 
 ## Hook Installation
 
@@ -71,4 +72,4 @@ aht manage integrations install codex --dry-run --show-content
 
 ## License
 
-[MIT](https://github.com/zigai/aht/blob/master/LICENSE)
+[MIT](LICENSE)
