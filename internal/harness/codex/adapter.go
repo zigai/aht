@@ -130,10 +130,6 @@ func (codexHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (codexHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return codexPayloadDefaults(payload), nil
-}
-
-func codexPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "codex_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "codex_start_source", harness.PayloadString(payload, "source"))
@@ -149,7 +145,7 @@ func codexPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
-	}
+	}, nil
 }
 
 func codexHome() string {

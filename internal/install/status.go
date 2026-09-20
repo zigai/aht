@@ -163,16 +163,6 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 		return inspectSharedFile(value.Plan.Path)
 	case harnesspkg.RenderedFileAction:
 		return inspectOwnedPath(value.Plan.Path)
-	case harnesspkg.RenderedFilesAction:
-		result := make([]inspectedArtifact, 0, len(value.Plan.Files))
-		for _, file := range value.Plan.Files {
-			items, err := inspectOwnedPath(filepath.Join(value.Plan.Dir, file.Name))
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, items...)
-		}
-		return result, nil
 	case harnesspkg.PluginDirectoryAction:
 		return inspectPluginAction(ctx, value.Plan)
 	default:
@@ -261,10 +251,6 @@ func planPaths(plan harnesspkg.InstallPlan) []string {
 			paths = append(paths, value.Plan.Path)
 		case harnesspkg.RenderedFileAction:
 			paths = append(paths, value.Plan.Path)
-		case harnesspkg.RenderedFilesAction:
-			for _, file := range value.Plan.Files {
-				paths = append(paths, filepath.Join(value.Plan.Dir, file.Name))
-			}
 		case harnesspkg.PluginDirectoryAction:
 			paths = append(paths, value.Plan.Dir)
 			if value.Plan.ImportManifest != nil {

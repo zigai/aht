@@ -8,7 +8,6 @@ import { spawn } from "node:child_process";
 const ahtBin = {{BINARY}};
 const currentSessionSource = {{SOURCE}};
 const idleDebounceMs = 150;
-const retryGraceMs = 2500;
 const heartbeatIntervalMs = 10000;
 
 // Native consumer seam: https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/extensibility/extensions/types.ts
@@ -88,12 +87,21 @@ type SessionRef = {
   path?: string | undefined;
   cwd?: string | undefined;
 };
-type PendingState = {
-  activity: Activity;
-  message?: string | undefined;
-  ctx?: ExtensionContext | undefined;
-  event?: NativeEvent | undefined;
-  sequence: number;
+type ReportState = {
+  readonly activity?: Activity | undefined;
+  readonly presence?: "live" | "gone" | undefined;
+  readonly lifecycle?: "start" | "resume" | "end" | undefined;
+  readonly message?: string | undefined;
+};
+type ReportSnapshot = ReportState & {
+  readonly session: Readonly<SessionRef>;
+  readonly mode: ExtensionContext["mode"];
+  readonly eventType: string | undefined;
+  readonly reason: string | undefined;
+  readonly toolName: string | undefined;
+  readonly approvalMode: string | undefined;
+  readonly approved: boolean | undefined;
+  readonly sequence: number;
 };
 
 let reportSequence = Date.now() * 1000;
@@ -147,17 +155,26 @@ function addResumeCommand(args: string[], ref: SessionRef): void {
 
 {{TYPESCRIPT_QUEUE}}
 
-function report(
-  activity: Activity | undefined,
-  presence: string | undefined,
-  ctx?: ExtensionContext,
-  event?: NativeEvent,
-  lifecycle?: string,
-  sequence = nextSequence(),
-  message?: string,
-): Promise<void> {
-  if (isSubagentSession(ctx)) return Promise.resolve();
-  const ref = sessionRef(ctx);
+// Capture only report values while the native context still belongs to this event.
+// Neither the state queue nor lifecycle delivery retains host getters or payloads.
+function captureReport(state: ReportState, ctx: ExtensionContext | undefined, event?: NativeEvent): ReportSnapshot | undefined {
+  if (isSubagentSession(ctx)) return undefined;
+  return {
+    ...state,
+    session: sessionRef(ctx),
+    mode: ctx?.mode,
+    eventType: event?.type,
+    reason: event?.reason,
+    toolName: event?.toolName,
+    approvalMode: event?.approvalMode,
+    approved: event?.approved,
+    sequence: nextSequence(),
+  };
+}
+
+function report(snapshot: ReportSnapshot | undefined): Promise<void> {
+  if (!snapshot) return Promise.resolve();
+  const { activity, presence, lifecycle, message, session: ref, sequence, mode } = snapshot;
   const args = [
     "report",
     "omp",
@@ -170,22 +187,22 @@ function report(
   if (presence) args.push("--presence", presence);
   if (activity) args.push("--activity", activity);
   if (lifecycle) args.push("--lifecycle", lifecycle);
-  if (typeof event?.type === "string" && event.type.length > 0) {
-    args.push("--event", event.type);
+  if (snapshot.eventType) {
+    args.push("--event", snapshot.eventType);
   }
   args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
   args.push("--attribute", `aht_integration=${currentSessionSource}`);
-  if (ctx?.mode === "tui" || ctx?.mode === "rpc" || ctx?.mode === "json" || ctx?.mode === "print") {
-    args.push("--attribute", `aht_interaction_mode=${ctx.mode}`);
+  if (mode === "tui" || mode === "rpc" || mode === "json" || mode === "print") {
+    args.push("--attribute", `aht_interaction_mode=${mode}`);
   }
-  addAttribute(args, "omp_event", event?.type);
-  addAttribute(args, "omp_reason", event?.reason);
-  addAttribute(args, "omp_tool_name", event?.toolName);
-  addAttribute(args, "omp_approval_mode", event?.approvalMode);
-  addAttribute(args, "omp_approval_reason", event?.reason);
+  addAttribute(args, "omp_event", snapshot.eventType);
+  addAttribute(args, "omp_reason", snapshot.reason);
+  addAttribute(args, "omp_tool_name", snapshot.toolName);
+  addAttribute(args, "omp_approval_mode", snapshot.approvalMode);
+  addAttribute(args, "omp_approval_reason", snapshot.reason);
   addAttribute(args, "agent_state_message", message);
-  if (typeof event?.approved === "boolean") {
-    addAttribute(args, "omp_approved", String(event.approved));
+  if (typeof snapshot.approved === "boolean") {
+    addAttribute(args, "omp_approved", String(snapshot.approved));
   }
   if (ref.id) {
     args.push("--session-id", ref.id);
@@ -235,10 +252,9 @@ export default function (pi: ExtensionAPI) {
   let lastMessage: string | undefined;
   let currentContext: ExtensionContext | undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let stateSendInFlight = false;
   let stateDrain: Promise<void> | undefined;
-  let pendingState: PendingState | undefined;
+  let pendingState: ReportSnapshot | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
   function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
@@ -247,10 +263,8 @@ export default function (pi: ExtensionAPI) {
 
   function clearTimers(): void {
     clearTimer(idleTimer);
-    clearTimer(retryTimer);
     stopHeartbeat();
     idleTimer = undefined;
-    retryTimer = undefined;
   }
 
   function startHeartbeat(): void {
@@ -281,22 +295,11 @@ export default function (pi: ExtensionAPI) {
 
   function queueState(activity: Activity, message?: string, event?: NativeEvent, force = false): void {
     if (!force && activity === lastActivity && message === lastMessage) return;
+    const snapshot = captureReport({ activity, message }, currentContext, event);
+    if (!snapshot) return;
     lastActivity = activity;
     lastMessage = message;
-    const ref = sessionRef(currentContext);
-    pendingState = {
-      activity,
-      message,
-      ctx: {
-        cwd: ref.cwd,
-        sessionManager: {
-          getSessionId: () => ref.id,
-          getSessionFile: () => ref.path,
-        },
-      },
-      event,
-      sequence: nextSequence(),
-    };
+    pendingState = snapshot;
     if (!stateSendInFlight) stateDrain = drainStateQueue().catch(warnReporting);
   }
 
@@ -307,7 +310,7 @@ export default function (pi: ExtensionAPI) {
       while (pendingState) {
         const next = pendingState;
         pendingState = undefined;
-        await report(next.activity, undefined, next.ctx, next.event, undefined, next.sequence, next.message);
+        await report(next);
       }
     } finally {
       stateSendInFlight = false;
@@ -373,7 +376,7 @@ export default function (pi: ExtensionAPI) {
   on("session_start", (event: NativeEvent, ctx: ExtensionContext) => {
     if (!activateRoot(ctx)) return;
     resetState();
-    report("idle", "live", ctx, event, "start");
+    report(captureReport({ activity: "idle", presence: "live", lifecycle: "start" }, ctx, event));
     lastActivity = "idle";
   });
 
@@ -381,7 +384,7 @@ export default function (pi: ExtensionAPI) {
     on(eventName, (event: NativeEvent, ctx: ExtensionContext) => {
       if (!activateRoot(ctx)) return;
       resetState();
-      report("idle", "live", ctx, event, "resume");
+      report(captureReport({ activity: "idle", presence: "live", lifecycle: "resume" }, ctx, event));
       lastActivity = "idle";
     });
   }
@@ -489,7 +492,8 @@ export default function (pi: ExtensionAPI) {
     clearTimers();
     currentContext = ctx ?? currentContext;
     rootSession = false;
+    const snapshot = captureReport({ presence: "gone", lifecycle: "end" }, currentContext, event);
     await stateDrain;
-    await report(undefined, "gone", currentContext, event, "end");
+    await report(snapshot);
   });
 }

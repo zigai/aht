@@ -24,7 +24,6 @@ type gooseHarness struct{ harness.BaseAdapter }
 type gooseHookSpec struct {
 	event      string
 	transition harness.HookTransition
-	matcher    string
 }
 
 type goosePayload struct {
@@ -110,7 +109,22 @@ func (gooseHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (gooseHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return goosePayloadDefaults(payload), nil
+	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "goose_event", harness.PayloadString(payload, "event"))
+	harness.AddAttributeString(attributes, "goose_start_source", harness.PayloadString(payload, "source"))
+	harness.AddAttributeString(attributes, "goose_tool_name", harness.PayloadString(payload, "tool_name"))
+	harness.AddAttributeString(attributes, "goose_matcher_context", harness.PayloadString(payload, "matcher_context"))
+
+	cwd := harness.PayloadString(payload, "working_dir")
+
+	return harness.PayloadDefaults{
+		SessionID:   harness.PayloadString(payload, "session_id"),
+		SessionPath: "",
+		CWD:         cwd,
+		ProjectRoot: cwd,
+		Event:       harness.PayloadString(payload, "event"),
+		Attributes:  attributes,
+	}, nil
 }
 
 func gooseHookConfig() map[string]any {
@@ -124,31 +138,26 @@ func gooseHookConfig() map[string]any {
 
 func gooseHookSpecs() []gooseHookSpec {
 	return []gooseHookSpec{
-		{event: harness.HookEventSessionStart, transition: harness.HookActivityIdle, matcher: ""},
-		{event: harness.HookEventUserPromptSubmit, transition: harness.HookActivityRunning, matcher: ""},
-		{event: harness.HookEventPreToolUse, transition: harness.HookActivityRunning, matcher: ""},
-		{event: harness.HookEventPostToolUse, transition: harness.HookActivityRunning, matcher: ""},
-		{event: harness.HookEventPostToolUseFailure, transition: harness.HookActivityRunning, matcher: ""},
-		{event: "BeforeReadFile", transition: harness.HookActivityRunning, matcher: ""},
-		{event: "AfterFileEdit", transition: harness.HookActivityRunning, matcher: ""},
-		{event: "BeforeShellExecution", transition: harness.HookActivityRunning, matcher: ""},
-		{event: "AfterShellExecution", transition: harness.HookActivityRunning, matcher: ""},
-		{event: harness.HookEventStop, transition: harness.HookActivityIdle, matcher: ""},
-		{event: "SessionEnd", transition: harness.HookPresenceGone, matcher: ""},
+		{event: harness.HookEventSessionStart, transition: harness.HookActivityIdle},
+		{event: harness.HookEventUserPromptSubmit, transition: harness.HookActivityRunning},
+		{event: harness.HookEventPreToolUse, transition: harness.HookActivityRunning},
+		{event: harness.HookEventPostToolUse, transition: harness.HookActivityRunning},
+		{event: harness.HookEventPostToolUseFailure, transition: harness.HookActivityRunning},
+		{event: "BeforeReadFile", transition: harness.HookActivityRunning},
+		{event: "AfterFileEdit", transition: harness.HookActivityRunning},
+		{event: "BeforeShellExecution", transition: harness.HookActivityRunning},
+		{event: "AfterShellExecution", transition: harness.HookActivityRunning},
+		{event: harness.HookEventStop, transition: harness.HookActivityIdle},
+		{event: "SessionEnd", transition: harness.HookPresenceGone},
 	}
 }
 
 func gooseHookRule(spec gooseHookSpec) map[string]any {
-	rule := map[string]any{
+	return map[string]any{
 		"hooks": []any{
 			gooseCommandHook(spec),
 		},
 	}
-	if spec.matcher != "" {
-		rule["matcher"] = spec.matcher
-	}
-
-	return rule
 }
 
 func gooseCommandHook(spec gooseHookSpec) map[string]any {
@@ -197,25 +206,6 @@ func gooseMarkerContent() string {
 		"AHT_SOURCE=" + gooseIntegrationSource,
 		"",
 	}, "\n")
-}
-
-func goosePayloadDefaults(payload map[string]any) harness.PayloadDefaults {
-	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "goose_event", harness.PayloadString(payload, "event"))
-	harness.AddAttributeString(attributes, "goose_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "goose_tool_name", harness.PayloadString(payload, "tool_name"))
-	harness.AddAttributeString(attributes, "goose_matcher_context", harness.PayloadString(payload, "matcher_context"))
-
-	cwd := harness.PayloadString(payload, "working_dir")
-
-	return harness.PayloadDefaults{
-		SessionID:   harness.PayloadString(payload, "session_id"),
-		SessionPath: "",
-		CWD:         cwd,
-		ProjectRoot: cwd,
-		Event:       harness.PayloadString(payload, "event"),
-		Attributes:  attributes,
-	}
 }
 
 func goosePluginsDir() string {

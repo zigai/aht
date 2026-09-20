@@ -70,10 +70,6 @@ type RenderedFileAction struct {
 	Plan RenderedFileInstallPlan
 }
 
-type RenderedFilesAction struct {
-	Plan RenderedFilesInstallPlan
-}
-
 type PluginDirectoryAction struct {
 	Plan PluginDirectoryInstallPlan
 }
@@ -127,14 +123,6 @@ type RenderedFileInstallPlan struct {
 	JSONContent any
 }
 
-type RenderedFilesInstallPlan struct {
-	Dir          string
-	Label        string
-	ConfigLabel  string
-	Files        []RenderedFileInstallSpec
-	SnippetOrder []string
-}
-
 type RenderedFileInstallSpec struct {
 	Name        string
 	Content     string
@@ -177,8 +165,6 @@ func (CursorJSONHooksAction) installAction() {}
 func (ManagedTextBlockAction) installAction() {}
 
 func (RenderedFileAction) installAction() {}
-
-func (RenderedFilesAction) installAction() {}
 
 func (PluginDirectoryAction) installAction() {}
 
@@ -234,6 +220,7 @@ func RenderScriptTemplate(template string, integrationID string, binary string, 
 		"{{BINARY}}", strconv.Quote(binary),
 		"{{SOURCE}}", strconv.Quote(source),
 		"{{TYPESCRIPT_QUEUE}}", typeScriptQueueTemplate,
+		"{{TYPESCRIPT_EVENT_PARSER}}", typeScriptEventParserTemplate,
 	).Replace(template)
 }
 

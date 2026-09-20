@@ -75,7 +75,22 @@ func (copilotHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (copilotHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return copilotPayloadDefaults(payload), nil
+	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "copilot_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"))
+	harness.AddAttributeString(attributes, "copilot_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
+	harness.AddAttributeString(attributes, "copilot_start_source", harness.PayloadString(payload, "source"))
+	harness.AddAttributeString(attributes, "copilot_reason", harness.PayloadString(payload, "reason"))
+	harness.AddAttributeString(attributes, "copilot_stop_reason", harness.PayloadStringAny(payload, "stopReason", "stop_reason"))
+	harness.AddAttributeString(attributes, "copilot_error", harness.PayloadString(payload, "error"))
+
+	return harness.PayloadDefaults{
+		SessionID:   harness.PayloadStringAny(payload, "sessionId", "session_id"),
+		SessionPath: harness.PayloadStringAny(payload, "transcriptPath", "transcript_path"),
+		CWD:         harness.PayloadString(payload, "cwd"),
+		ProjectRoot: "",
+		Event:       harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"),
+		Attributes:  attributes,
+	}, nil
 }
 
 func copilotHookConfig(binary string) map[string]any {
@@ -127,25 +142,6 @@ func copilotHookCommand(binary string, transition harness.HookTransition, event 
 	return harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCopilot, transition, event, copilotIntegrationSource) +
 		" --attribute " + harness.ShellQuote("copilot_hook_event="+event) +
 		" >/dev/null 2>&1 || true"
-}
-
-func copilotPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
-	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "copilot_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"))
-	harness.AddAttributeString(attributes, "copilot_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
-	harness.AddAttributeString(attributes, "copilot_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "copilot_reason", harness.PayloadString(payload, "reason"))
-	harness.AddAttributeString(attributes, "copilot_stop_reason", harness.PayloadStringAny(payload, "stopReason", "stop_reason"))
-	harness.AddAttributeString(attributes, "copilot_error", harness.PayloadString(payload, "error"))
-
-	return harness.PayloadDefaults{
-		SessionID:   harness.PayloadStringAny(payload, "sessionId", "session_id"),
-		SessionPath: harness.PayloadStringAny(payload, "transcriptPath", "transcript_path"),
-		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
-		Event:       harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"),
-		Attributes:  attributes,
-	}
 }
 
 func copilotPayloadValidator(rawPayload json.RawMessage) bool {

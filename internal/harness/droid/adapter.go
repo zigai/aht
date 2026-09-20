@@ -134,14 +134,6 @@ func (droidHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (droidHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return droidPayloadDefaults(payload), nil
-}
-
-func droidHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessDroid, transition, event, droidIntegrationSource)
-}
-
-func droidPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "droid_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "droid_tool_name", harness.PayloadString(payload, "tool_name"))
@@ -157,7 +149,11 @@ func droidPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
-	}
+	}, nil
+}
+
+func droidHookCommand[T harness.Transition](binary string, transition T, event string) string {
+	return harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessDroid, transition, event, droidIntegrationSource)
 }
 
 func droidConfigDir() string {

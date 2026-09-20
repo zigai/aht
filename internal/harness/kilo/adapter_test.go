@@ -1,6 +1,7 @@
 package kilo
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,8 +24,9 @@ func TestPluginTemplateRendersCleanly(t *testing.T) {
 	if strings.TrimSpace(rendered) == "" {
 		t.Fatal("rendered kilo template is empty")
 	}
-	if strings.Contains(rendered, "{{") || strings.Contains(rendered, "}}") {
-		t.Fatalf("rendered kilo template contains unresolved placeholders:\n%s", rendered)
+	placeholderPattern := regexp.MustCompile(`\{\{[A-Z0-9_]+\}\}`)
+	if match := placeholderPattern.FindString(rendered); match != "" {
+		t.Fatalf("rendered kilo template contains unresolved placeholder %q:\n%s", match, rendered)
 	}
 }
 

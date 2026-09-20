@@ -19,7 +19,6 @@ type grokHarness struct{ harness.BaseAdapter }
 
 type grokHookSpec struct {
 	event   string
-	matcher string
 	command string
 }
 
@@ -85,113 +84,6 @@ func grokPayloadValidator(rawPayload json.RawMessage) bool {
 }
 
 func (grokHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return grokPayloadDefaults(payload), nil
-}
-
-func grokHookConfig(binary string) map[string]any {
-	specs := []grokHookSpec{
-		{
-			event:   harness.HookEventSessionStart,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
-		},
-		{
-			event:   harness.HookEventUserPromptSubmit,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
-		},
-		{
-			event:   harness.HookEventPreToolUse,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
-		},
-		{
-			event:   harness.HookEventPostToolUse,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
-		},
-		{
-			event:   harness.HookEventPostToolUseFailure,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
-		},
-		{
-			event:   "PermissionDenied",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, "PermissionDenied"),
-		},
-		{
-			event:   "SubagentStart",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, "SubagentStart"),
-		},
-		{
-			event:   "SubagentStop",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
-		},
-		{
-			event:   "PreCompact",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-		},
-		{
-			event:   "PostCompact",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-		},
-		{
-			event:   harness.HookEventStop,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
-		},
-		{
-			event:   "StopFailure",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityFailed, "StopFailure"),
-		},
-		{
-			event:   "SessionEnd",
-			matcher: "",
-			command: grokHookCommand(binary, registry.PresenceGone, "SessionEnd"),
-		},
-	}
-
-	hooks := make(map[string]any)
-	for _, spec := range specs {
-		existing, ok := hooks[spec.event].([]any)
-		if !ok {
-			existing = nil
-		}
-		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.command, spec.matcher))
-	}
-
-	return map[string]any{"hooks": hooks}
-}
-
-func grokCommandHookGroup(command string, matcher string) map[string]any {
-	group := map[string]any{
-		"hooks": []any{
-			map[string]any{
-				"type":          harness.HookTypeCommand,
-				"command":       command,
-				"timeout":       float64(harness.HookTimeoutSeconds),
-				"statusMessage": harness.ManagedMarker,
-			},
-		},
-	}
-	if matcher != "" {
-		group["matcher"] = matcher
-	}
-
-	return group
-}
-
-func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.HarnessGrok, transition, event, grokIntegrationSource)
-}
-
-func grokPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "grok_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name"))
 	harness.AddAttributeString(attributes, "grok_start_source", harness.PayloadString(payload, "source"))
@@ -210,7 +102,92 @@ func grokPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: harness.PayloadStringAny(payload, "workspaceRoot", "workspace_root"),
 		Event:       harness.PayloadStringAny(payload, "hookEventName", "hook_event_name"),
 		Attributes:  attributes,
+	}, nil
+}
+
+func grokHookConfig(binary string) map[string]any {
+	specs := []grokHookSpec{
+		{
+			event:   harness.HookEventSessionStart,
+			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
+		},
+		{
+			event:   harness.HookEventUserPromptSubmit,
+			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
+		},
+		{
+			event:   harness.HookEventPreToolUse,
+			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
+		},
+		{
+			event:   harness.HookEventPostToolUse,
+			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
+		},
+		{
+			event:   harness.HookEventPostToolUseFailure,
+			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
+		},
+		{
+			event:   "PermissionDenied",
+			command: grokHookCommand(binary, registry.ActivityIdle, "PermissionDenied"),
+		},
+		{
+			event:   "SubagentStart",
+			command: grokHookCommand(binary, registry.ActivityRunning, "SubagentStart"),
+		},
+		{
+			event:   "SubagentStop",
+			command: grokHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
+		},
+		{
+			event:   "PreCompact",
+			command: grokHookCommand(binary, registry.ActivityRunning, "PreCompact"),
+		},
+		{
+			event:   "PostCompact",
+			command: grokHookCommand(binary, registry.ActivityIdle, "PostCompact"),
+		},
+		{
+			event:   harness.HookEventStop,
+			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
+		},
+		{
+			event:   "StopFailure",
+			command: grokHookCommand(binary, registry.ActivityFailed, "StopFailure"),
+		},
+		{
+			event:   "SessionEnd",
+			command: grokHookCommand(binary, registry.PresenceGone, "SessionEnd"),
+		},
 	}
+
+	hooks := make(map[string]any)
+	for _, spec := range specs {
+		existing, ok := hooks[spec.event].([]any)
+		if !ok {
+			existing = nil
+		}
+		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.command))
+	}
+
+	return map[string]any{"hooks": hooks}
+}
+
+func grokCommandHookGroup(command string) map[string]any {
+	return map[string]any{
+		"hooks": []any{
+			map[string]any{
+				"type":          harness.HookTypeCommand,
+				"command":       command,
+				"timeout":       float64(harness.HookTimeoutSeconds),
+				"statusMessage": harness.ManagedMarker,
+			},
+		},
+	}
+}
+
+func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
+	return harness.ReportHookCommand(binary, registry.HarnessGrok, transition, event, grokIntegrationSource)
 }
 
 func grokHome() string {

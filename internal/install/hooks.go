@@ -1,6 +1,7 @@
 package install
 
 import (
+	"encoding/json"
 	"maps"
 	"reflect"
 
@@ -65,28 +66,129 @@ func managedCommandHookGroupsCurrent(groups []any, desiredGroups []any, isManage
 		if !ok {
 			continue
 		}
-		groupManagedCount := managedCount
-		for _, hookValue := range hookValues {
-			hook, hookOK := hookValue.(map[string]any)
-			if !hookOK {
-				continue
-			}
-			hookCommand, commandOK := hook["command"].(string)
-			if !commandOK || !isManaged(hookCommand) {
-				continue
-			}
-			managedCount++
-		}
-		if managedCount == groupManagedCount {
+		managedInGroup := countManagedHooks(hookValues, isManaged)
+		if managedInGroup == 0 {
 			continue
 		}
-		if desiredCount >= len(desiredGroups) || !reflect.DeepEqual(group, desiredGroups[desiredCount]) {
+		managedCount += managedInGroup
+		if desiredCount >= len(desiredGroups) {
+			return false
+		}
+		desiredGroup, ok := desiredGroups[desiredCount].(map[string]any)
+		if !ok || !commandHookGroupEqual(group, desiredGroup) {
 			return false
 		}
 		desiredCount++
 	}
 
 	return managedCount == len(desiredGroups) && desiredCount == len(desiredGroups)
+}
+
+func countManagedHooks(hookValues []any, isManaged func(string) bool) int {
+	count := 0
+	for _, hookValue := range hookValues {
+		hook, hookOK := hookValue.(map[string]any)
+		if !hookOK {
+			continue
+		}
+		hookCommand, commandOK := hook["command"].(string)
+		if !commandOK || !isManaged(hookCommand) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func numbersEqual(a, b any) bool {
+	fa, oka := toFloat64(a)
+	fb, okb := toFloat64(b)
+	if oka && okb {
+		return fa == fb
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+func commandHookEqual(actual, desired map[string]any) bool {
+	if len(actual) != len(desired) {
+		return false
+	}
+	for k, dv := range desired {
+		av, ok := actual[k]
+		if !ok {
+			return false
+		}
+		if k == "timeout" || k == "timeoutSec" {
+			if !numbersEqual(av, dv) {
+				return false
+			}
+		} else if !reflect.DeepEqual(av, dv) {
+			return false
+		}
+	}
+	return true
+}
+
+func commandHookGroupEqual(actual, desired map[string]any) bool {
+	if len(actual) != len(desired) {
+		return false
+	}
+	for k, dv := range desired {
+		av, ok := actual[k]
+		if !ok {
+			return false
+		}
+		if k == "hooks" {
+			if !hookSlicesEqual(av, dv) {
+				return false
+			}
+		} else if !reflect.DeepEqual(av, dv) {
+			return false
+		}
+	}
+	return true
+}
+
+func hookSlicesEqual(actual, desired any) bool {
+	ah, aOK := actual.([]any)
+	dh, dOK := desired.([]any)
+	if !aOK || !dOK || len(ah) != len(dh) {
+		return false
+	}
+	for i := range ah {
+		ahm, aOK := ah[i].(map[string]any)
+		dhm, dOK := dh[i].(map[string]any)
+		if aOK && dOK {
+			if !commandHookEqual(ahm, dhm) {
+				return false
+			}
+			continue
+		}
+		if !reflect.DeepEqual(ah[i], dh[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func removeManagedCommandHookGroups(groups []any, isManaged func(string) bool) ([]any, bool) {
@@ -128,8 +230,7 @@ func removeManagedCommandHookGroups(groups []any, isManaged func(string) bool) (
 			continue
 		}
 
-		cleanedGroup := make(map[string]any, len(group))
-		maps.Copy(cleanedGroup, group)
+		cleanedGroup := maps.Clone(group)
 		cleanedGroup["hooks"] = cleanedHooks
 		cleanedGroups = append(cleanedGroups, cleanedGroup)
 	}

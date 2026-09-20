@@ -13,7 +13,6 @@ import (
 	"time"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -29,28 +28,22 @@ type importEntry struct {
 }
 
 func installHarnessAdapter(ctx context.Context, options Options) (Result, error) {
-	adapter, ok := harnesscatalog.Find(options.Harness)
-	if !ok {
-		return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
-	}
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
+	plan, advisor, err := installPlanForHarness(options.Harness, options.Binary)
+	if err != nil {
+		return Result{}, err
 	}
 
-	definition := adapter.Definition()
-	plan := installer.InstallPlan(options.Binary)
 	if options.UseShim && installPlanHasShim(plan) {
-		return installShim(options, definition.ID)
+		return installShim(options, options.Harness)
 	}
 
 	for _, action := range plan.Actions {
-		result, handled, err := installPlanAction(ctx, options, definition.ID, action)
+		result, handled, err := installPlanAction(ctx, options, options.Harness, action)
 		if !handled {
 			continue
 		}
 		if err == nil {
-			if advisor, ok := adapter.(harnesspkg.InstallAdvisor); ok {
+			if advisor != nil {
 				result.NextStep = advisor.InstallNextStep(result.Changed, options.DryRun)
 			}
 		}
@@ -86,10 +79,6 @@ func installPlanAction(ctx context.Context, options Options, harness registry.Ha
 		return result, true, err
 	case harnesspkg.RenderedFileAction:
 		result, err := installRenderedPlan(options, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.RenderedFilesAction:
-		result, err := installRenderedFilesPlan(options, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.PluginDirectoryAction:
@@ -422,59 +411,6 @@ func installRenderedPlan(
 	})
 }
 
-func installRenderedFilesPlan(
-	options Options,
-	harness registry.Harness,
-	plan harnesspkg.RenderedFilesInstallPlan,
-) (Result, error) {
-	files, err := renderInstallFiles(plan.Files, "rendered")
-	if err != nil {
-		return Result{}, err
-	}
-
-	label := installLabel(plan.Label, harness, "artifacts")
-	configLabel := installLabel(plan.ConfigLabel, harness, "artifacts")
-	changed, needsUpdate, err := renderedFilesNeedUpdate(plan.Dir, files, options.Force)
-	if err != nil {
-		return Result{}, err
-	}
-	stale, err := staleManagedRenderedFiles(plan.Dir, files)
-	if err != nil {
-		return Result{}, err
-	}
-	changed = changed || len(stale) > 0
-	if changed && !options.DryRun {
-		for name, content := range files {
-			path := filepath.Join(plan.Dir, name)
-			if err := writeInstallFile(
-				path,
-				[]byte(content),
-				needsUpdate[name],
-				false,
-				"creating "+configLabel+" directory",
-				"writing "+label,
-			); err != nil {
-				return Result{}, err
-			}
-		}
-		for _, path := range stale {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return Result{}, fmt.Errorf("removing stale managed artifact %s: %w", path, err)
-			}
-		}
-	}
-
-	return Result{
-		Harness:  string(harness),
-		Path:     plan.Dir,
-		Changed:  changed,
-		Message:  installMessage(label, changed, options.DryRun),
-		NextStep: "",
-		Snippet:  renderedFilesSnippet(files, plan.SnippetOrder),
-		Error:    "",
-	}, nil
-}
-
 func renderInstallContent(content string, jsonContent any) (string, error) {
 	if jsonContent == nil {
 		return content, nil
@@ -486,44 +422,6 @@ func renderInstallContent(content string, jsonContent any) (string, error) {
 	}
 
 	return string(append(data, '\n')), nil
-}
-
-func renderedFilesNeedUpdate(
-	dir string,
-	files map[string]string,
-	force bool,
-) (bool, map[string]bool, error) {
-	changed := false
-	needsUpdate := make(map[string]bool, len(files))
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		update, err := fileNeedsUpdate(path, content, force)
-		if err != nil {
-			return false, nil, err
-		}
-		needsUpdate[name] = update
-		changed = changed || update
-	}
-
-	return changed, needsUpdate, nil
-}
-
-func renderedFilesSnippet(files map[string]string, snippetOrder []string) string {
-	order := snippetOrder
-	if len(order) == 0 {
-		order = make([]string, 0, len(files))
-		for name := range files {
-			order = append(order, name)
-		}
-		slices.Sort(order)
-	}
-
-	parts := make([]string, 0, len(order))
-	for _, name := range order {
-		parts = append(parts, "== "+name+" ==\n"+files[name])
-	}
-
-	return strings.Join(parts, "\n")
 }
 
 //nolint:cyclop // plugin installation coordinates staged files, manifests, rollback, and ownership

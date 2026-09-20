@@ -276,7 +276,7 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 		}
 		return p.transition(event.Type, registry.ActivityRunning)
 	case "TurnEnd", "StepInterrupted", "TurnBegin", "StepBegin", "CompactionBegin", "CompactionEnd", "StepRetry":
-		if len(event.Payload) == 0 || event.Payload[0] != '{' || !json.Valid(event.Payload) {
+		if len(event.Payload) == 0 || event.Payload[0] != '{' {
 			return Update{Event: "", Activity: ""}, false, errInvalidLifecyclePayload
 		}
 		if nested {

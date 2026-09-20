@@ -1,6 +1,7 @@
 package kimi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -91,7 +92,28 @@ func (kimiCodeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return kimiCodePayloadDefaults(payload)
+	sessionID := harness.PayloadString(payload, "session_id")
+	sessionPath, err := kimiCodeSessionPath(sessionID)
+	if err != nil {
+		return harness.PayloadDefaults{}, err
+	}
+	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "kimi_code_hook_event", harness.PayloadString(payload, "hook_event_name"))
+	harness.AddAttributeString(attributes, "kimi_code_start_source", harness.PayloadString(payload, "source"))
+	harness.AddAttributeString(attributes, "kimi_code_tool_name", harness.PayloadString(payload, "tool_name"))
+	harness.AddAttributeString(attributes, "kimi_code_turn_id", payloadScalarString(payload, "turn_id"))
+	harness.AddAttributeString(attributes, "kimi_code_decision", harness.PayloadString(payload, "decision"))
+	harness.AddAttributeString(attributes, "kimi_code_reason", harness.PayloadString(payload, "reason"))
+	harness.AddAttributeString(attributes, "kimi_code_notification_type", harness.PayloadStringAny(payload, "notification_type", "type"))
+
+	return harness.PayloadDefaults{
+		SessionID:   sessionID,
+		SessionPath: sessionPath,
+		CWD:         harness.PayloadString(payload, "cwd"),
+		ProjectRoot: "",
+		Event:       harness.PayloadString(payload, "hook_event_name"),
+		Attributes:  attributes,
+	}, nil
 }
 
 func (kimiCodeHarness) ValidateWireArgs(args []string) error {
@@ -194,15 +216,15 @@ func kimiCodeHookBlock(binary string) string {
 		builder.WriteByte('\n')
 		builder.WriteString("[[hooks]]\n")
 		builder.WriteString("event = ")
-		builder.WriteString(strconv.Quote(spec.event))
+		builder.WriteString(tomlQuoteString(spec.event))
 		builder.WriteByte('\n')
 		if spec.matcher != "" {
 			builder.WriteString("matcher = ")
-			builder.WriteString(strconv.Quote(spec.matcher))
+			builder.WriteString(tomlQuoteString(spec.matcher))
 			builder.WriteByte('\n')
 		}
 		builder.WriteString("command = ")
-		builder.WriteString(strconv.Quote(spec.command))
+		builder.WriteString(tomlQuoteString(spec.command))
 		builder.WriteByte('\n')
 		builder.WriteString("timeout = ")
 		builder.WriteString(strconv.Itoa(spec.timeout))
@@ -215,33 +237,17 @@ func kimiCodeHookBlock(binary string) string {
 	return builder.String()
 }
 
-func kimiCodeHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.HarnessKimiCode, transition, event, kimiCodeIntegrationSource)
+func tomlQuoteString(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return strconv.Quote(s)
+	}
+	encoded = bytes.ReplaceAll(encoded, []byte{0x7f}, []byte(`\u007f`))
+	return string(encoded)
 }
 
-func kimiCodePayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	sessionID := harness.PayloadString(payload, "session_id")
-	sessionPath, err := kimiCodeSessionPath(sessionID)
-	if err != nil {
-		return harness.PayloadDefaults{}, err
-	}
-	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "kimi_code_hook_event", harness.PayloadString(payload, "hook_event_name"))
-	harness.AddAttributeString(attributes, "kimi_code_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "kimi_code_tool_name", harness.PayloadString(payload, "tool_name"))
-	harness.AddAttributeString(attributes, "kimi_code_turn_id", payloadScalarString(payload, "turn_id"))
-	harness.AddAttributeString(attributes, "kimi_code_decision", harness.PayloadString(payload, "decision"))
-	harness.AddAttributeString(attributes, "kimi_code_reason", harness.PayloadString(payload, "reason"))
-	harness.AddAttributeString(attributes, "kimi_code_notification_type", harness.PayloadStringAny(payload, "notification_type", "type"))
-
-	return harness.PayloadDefaults{
-		SessionID:   sessionID,
-		SessionPath: sessionPath,
-		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
-		Event:       harness.PayloadString(payload, "hook_event_name"),
-		Attributes:  attributes,
-	}, nil
+func kimiCodeHookCommand[T harness.Transition](binary string, transition T, event string) string {
+	return harness.ReportHookCommand(binary, registry.HarnessKimiCode, transition, event, kimiCodeIntegrationSource)
 }
 
 func payloadScalarString(payload map[string]any, key string) string {

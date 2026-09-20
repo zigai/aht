@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/zigai/aht/pkg/registry"
 )
+
+var errTrailingData = errors.New("extra trailing data after JSON object")
 
 type renderedFileInstall struct {
 	Harness                 registry.Harness
@@ -113,9 +116,15 @@ func readJSONObject(path string) (map[string]any, error) {
 		return make(map[string]any), nil
 	}
 
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := decoder.Decode(&config); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("parsing %s: %w", path, errTrailingData)
 	}
 	if config == nil {
 		config = make(map[string]any)

@@ -310,24 +310,10 @@ func agyHookAttributes(defaultAttributes map[string]string, event string) map[st
 }
 
 func isAgyInputWaitingTool(payload map[string]any) bool {
-	switch agyToolName(payload) {
+	switch harness.NestedString(payload, "toolCall", "name") {
 	case "ask_permission", "ask_question":
 		return true
 	default:
 		return false
 	}
-}
-
-func agyToolName(payload map[string]any) string {
-	toolCall, ok := payload["toolCall"].(map[string]any)
-	if !ok {
-		return ""
-	}
-
-	name, ok := toolCall["name"].(string)
-	if !ok {
-		return ""
-	}
-
-	return strings.TrimSpace(name)
 }

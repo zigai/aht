@@ -154,10 +154,6 @@ func (claudeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return claudePayloadDefaults(payload), nil
-}
-
-func claudePayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "claude_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "claude_start_source", harness.PayloadString(payload, "source"))
@@ -173,7 +169,7 @@ func claudePayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
-	}
+	}, nil
 }
 
 func claudeConfigDir() string {

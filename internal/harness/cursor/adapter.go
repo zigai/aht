@@ -95,23 +95,6 @@ func (cursorHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (cursorHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return cursorPayloadDefaults(payload), nil
-}
-
-func (cursorHarness) ObservableProcess(process processinfo.Process) bool {
-	if process.TTY == "" && process.MultiplexerPane == "" && !slices.Contains(process.Args, "agent") {
-		return false
-	}
-	return true
-}
-
-func cursorHookCommand[T harness.Transition](binary string, transition T, event string, hookOutput string) string {
-	report := harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCursor, transition, event, cursorIntegrationSource)
-
-	return report + " >/dev/null 2>&1 || true; printf '%s\\n' " + harness.ShellQuote(hookOutput)
-}
-
-func cursorPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "cursor_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "cursor_start_source", harness.PayloadString(payload, "source"))
@@ -137,7 +120,20 @@ func cursorPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: projectRoot,
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
+	}, nil
+}
+
+func (cursorHarness) ObservableProcess(process processinfo.Process) bool {
+	if process.TTY == "" && process.MultiplexerPane == "" && !slices.Contains(process.Args, "agent") {
+		return false
 	}
+	return true
+}
+
+func cursorHookCommand[T harness.Transition](binary string, transition T, event string, hookOutput string) string {
+	report := harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCursor, transition, event, cursorIntegrationSource)
+
+	return report + " >/dev/null 2>&1 || true; printf '%s\\n' " + harness.ShellQuote(hookOutput)
 }
 
 func cursorHome() string {

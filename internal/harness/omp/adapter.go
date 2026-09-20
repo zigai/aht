@@ -16,7 +16,7 @@ const (
 	ompIntegrationID       = "omp"
 	ompIntegrationSourceID = "omp-extension"
 	ompSessionFlag         = "--session"
-	integrationVersion     = 15
+	integrationVersion     = 16
 )
 
 //go:embed assets/aht-state.ts.tmpl

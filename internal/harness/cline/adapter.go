@@ -92,23 +92,6 @@ func (clineHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	return clinePayloadDefaults(payload), nil
-}
-
-func renderClinePlugin(binary string, version string) string {
-	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
-		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
-	)
-
-	return replacer.Replace(clinePluginTemplate)
-}
-
-func clineMarkerContent(version string) string {
-	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=cline\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, clineIntegrationSource)
-}
-
-func clinePayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	sessionID := harness.FirstNonEmpty(harness.NestedString(payload, "sessionContext", "rootSessionId"), harness.PayloadString(payload, "taskId"))
 	projectRoot := harness.FirstNonEmpty(harness.NestedString(payload, "workspaceInfo", "rootPath"), harness.FirstArrayString(payload, "workspaceRoots"))
 	cwd := harness.FirstNonEmpty(harness.PayloadString(payload, "cwd"), projectRoot)
@@ -130,7 +113,20 @@ func clinePayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 		ProjectRoot: projectRoot,
 		Event:       harness.PayloadString(payload, "hookName"),
 		Attributes:  attributes,
-	}
+	}, nil
+}
+
+func renderClinePlugin(binary string, version string) string {
+	replacer := strings.NewReplacer(
+		"{{BINARY}}", strconv.Quote(binary),
+		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
+	)
+
+	return replacer.Replace(clinePluginTemplate)
+}
+
+func clineMarkerContent(version string) string {
+	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=cline\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, clineIntegrationSource)
 }
 
 func clinePayloadValidator(rawPayload json.RawMessage) bool {

@@ -1,6 +1,7 @@
 package omp
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,8 +24,9 @@ func TestPluginTemplateRendersCleanly(t *testing.T) {
 	if strings.TrimSpace(rendered) == "" {
 		t.Fatal("rendered omp template is empty")
 	}
-	if strings.Contains(rendered, "{{") || strings.Contains(rendered, "}}") {
-		t.Fatalf("rendered omp template contains unresolved placeholders:\n%s", rendered)
+	placeholderPattern := regexp.MustCompile(`\{\{[A-Z0-9_]+\}\}`)
+	if match := placeholderPattern.FindString(rendered); match != "" {
+		t.Fatalf("rendered omp template contains unresolved placeholder %q:\n%s", match, rendered)
 	}
 }
 

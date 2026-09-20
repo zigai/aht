@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -23,16 +22,12 @@ func RemoveContext(ctx context.Context, options Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("remove integration context: %w", err)
 	}
-	adapter, ok := harnesscatalog.Find(options.Harness)
-	if !ok {
-		return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
-	}
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
-	}
 	if options.Binary == "" {
 		options.Binary = defaultBinary
+	}
+	plan, _, err := installPlanForHarness(options.Harness, options.Binary)
+	if err != nil {
+		return Result{}, err
 	}
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(options.Harness))
 	shimStatus, err := ClassifyArtifact(shimPath)
@@ -42,7 +37,7 @@ func RemoveContext(ctx context.Context, options Options) (Result, error) {
 	if shimStatus == ArtifactForeign {
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, shimPath)
 	}
-	result, err := removeNativeIntegration(ctx, options, installer.InstallPlan(options.Binary))
+	result, err := removeNativeIntegration(ctx, options, plan)
 	if err != nil {
 		return result, err
 	}
@@ -96,13 +91,6 @@ func removePlanAction(ctx context.Context, options Options, harnessID registry.H
 		return result, true, err
 	case harnesspkg.RenderedFileAction:
 		result, err := removeOwnedFiles(options, harnessID, []string{typed.Plan.Path}, typed.Plan.Path)
-		return result, true, err
-	case harnesspkg.RenderedFilesAction:
-		paths := make([]string, 0, len(typed.Plan.Files))
-		for _, file := range typed.Plan.Files {
-			paths = append(paths, filepath.Join(typed.Plan.Dir, file.Name))
-		}
-		result, err := removeOwnedFiles(options, harnessID, paths, typed.Plan.Dir)
 		return result, true, err
 	case harnesspkg.PluginDirectoryAction:
 		result, err := removePluginDirectory(ctx, options, harnessID, typed.Plan)

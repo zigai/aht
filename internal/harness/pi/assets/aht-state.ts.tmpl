@@ -162,8 +162,6 @@ type ExtensionContext = {
   readonly sessionManager?: {
     readonly getSessionFile?: () => string | undefined;
     readonly getSessionId?: () => string | undefined;
-    readonly getCwd?: () => string | undefined;
-    readonly getBranch?: () => readonly { readonly type: string }[];
     readonly getEntries?: () => readonly { readonly type: string; readonly customType?: string; readonly data?: unknown }[];
   };
 };
@@ -172,15 +170,10 @@ type NativeEvent = {
   readonly reason?: string | undefined;
   readonly status?: string | undefined;
   readonly kind?: string | undefined;
-  readonly toolName?: string | undefined;
-  readonly approvalMode?: string | undefined;
-  readonly approved?: boolean | undefined;
   readonly interrupted?: boolean | undefined;
   readonly willContinue?: boolean | undefined;
   readonly error?: string | { readonly message?: string | undefined } | undefined;
-  readonly message?: string | undefined;
   readonly messages?: readonly unknown[] | undefined;
-  readonly args?: unknown;
 };
 type ExtensionAPI = {
   on(name: string, handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>): void;
@@ -199,19 +192,15 @@ function parseEvent(value: unknown): NativeEvent {
   return {
     type: stringField("type"), reason: stringField("reason"),
     status: stringField("status"), kind: stringField("kind"),
-    toolName: stringField("toolName"), approvalMode: stringField("approvalMode"),
-    approved: typeof fields.approved === "boolean" ? fields.approved : undefined,
     interrupted: fields.interrupted === true, willContinue: fields.willContinue === true,
     error: typeof error === "string" ? error :
       typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
         ? { message: error.message } : undefined,
-    message: stringField("message"),
     messages: Array.isArray(fields.messages) ? fields.messages : undefined,
-    args: fields.args,
   };
 }
 
-type AssistantResult = { readonly stopReason?: string | undefined; readonly errorMessage?: string | undefined };
+type AssistantResult = { readonly stopReason?: string | undefined };
 function lastAssistantMessage(messages: readonly unknown[] | undefined): AssistantResult | undefined {
   if (!messages) return undefined;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -219,7 +208,6 @@ function lastAssistantMessage(messages: readonly unknown[] | undefined): Assista
     if (typeof message !== "object" || message === null || !("role" in message) || message.role !== "assistant") continue;
     return {
       stopReason: "stopReason" in message && typeof message.stopReason === "string" ? message.stopReason : undefined,
-      errorMessage: "errorMessage" in message && typeof message.errorMessage === "string" ? message.errorMessage : undefined,
     };
   }
   return undefined;
