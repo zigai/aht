@@ -3,8 +3,11 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/zigai/aht/internal/install"
 	"github.com/zigai/aht/pkg/harness"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -117,21 +120,89 @@ func TestCapabilitiesJSONCompatibility(t *testing.T) {
 }
 
 func TestInspectRuntimeSeparatesStaticFromRuntime(t *testing.T) {
-	t.Parallel()
-	status, err := harness.InspectRuntime(context.Background(), registry.HarnessPi, "/path/to/fake-aht")
+	tempHome := t.TempDir()
+	piDir := filepath.Join(tempHome, ".pi", "agent")
+	stateDir := filepath.Join(tempHome, "state")
+	t.Setenv("HOME", tempHome)
+	t.Setenv("PI_CODING_AGENT_DIR", piDir)
+	t.Setenv("AHT_STATE_DIR", stateDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempHome, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tempHome, ".local", "share"))
+
+	ctx := context.Background()
+	fakeBin := "/path/to/fake-aht"
+
+	// 1. Missing state
+	status, err := harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
 	if err != nil {
 		t.Fatalf("unexpected error inspecting runtime: %v", err)
 	}
-	if status.Harness != registry.HarnessPi {
-		t.Fatalf("status.Harness = %q, want %q", status.Harness, registry.HarnessPi)
-	}
-	// Runtime status reflects installed/current state, not static capabilities
-	if status.Status == "" {
-		t.Fatal("expected non-empty Status")
-	}
+	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, false, false, "missing")
 
-	all := harness.AllRuntimeStatuses(context.Background(), "/path/to/fake-aht")
-	if len(all) == 0 {
-		t.Fatal("expected at least one runtime status")
+	// 2. Current state after installation
+	if _, err := install.RunContext(ctx, install.Options{Harness: registry.HarnessPi, Binary: fakeBin, Force: true}); err != nil {
+		t.Fatalf("installing pi extension: %v", err)
+	}
+	status, err = harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
+	if err != nil {
+		t.Fatalf("unexpected error inspecting runtime after install: %v", err)
+	}
+	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, true, true, "current")
+
+	// 3. Stale state when extension version is older
+	writeStalePiExtension(t, piDir)
+	status, err = harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
+	if err != nil {
+		t.Fatalf("unexpected error inspecting runtime after stale write: %v", err)
+	}
+	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, true, false, "stale")
+
+	// 4. Inspection error state for unsupported harness
+	errStatus, err := harness.InspectRuntime(ctx, "nonexistent", fakeBin)
+	if err == nil {
+		t.Fatal("expected error for nonexistent harness, got nil")
+	}
+	assertExpectedRuntimeStatus(t, errStatus, "nonexistent", false, false, "error")
+
+	// 5. Aggregate status check against known outcomes
+	all := harness.AllRuntimeStatuses(ctx, fakeBin)
+	if len(all) != len(harness.Supported()) {
+		t.Fatalf("AllRuntimeStatuses count = %d, want %d", len(all), len(harness.Supported()))
+	}
+	assertAllRuntimeStatusesContainsPiStale(t, all)
+}
+
+func assertAllRuntimeStatusesContainsPiStale(t *testing.T, all []harness.RuntimeStatus) {
+	t.Helper()
+	foundPi := false
+	for _, st := range all {
+		if st.Harness == registry.HarnessPi {
+			foundPi = true
+			if !st.Installed || st.Current || st.Status != "stale" {
+				t.Fatalf("AllRuntimeStatuses Pi entry = %#v, want stale", st)
+			}
+		}
+		if st.Status == "" {
+			t.Errorf("harness %s has empty status in AllRuntimeStatuses", st.Harness)
+		}
+	}
+	if !foundPi {
+		t.Fatal("Pi not found in AllRuntimeStatuses")
+	}
+}
+
+func assertExpectedRuntimeStatus(t *testing.T, status harness.RuntimeStatus, id registry.Harness, installed, current bool, statusStr string) {
+	t.Helper()
+	if status.Harness != id || status.Installed != installed || status.Current != current || status.Status != statusStr {
+		t.Fatalf("status = %#v, want harness=%s, installed=%v, current=%v, status=%s", status, id, installed, current, statusStr)
+	}
+}
+
+func writeStalePiExtension(t *testing.T, piDir string) {
+	t.Helper()
+	extPath := filepath.Join(piDir, "extensions", "aht-state.ts")
+	staleContent := "\"aht managed integration\";\n\"AHT_INTEGRATION_ID=pi\";\n\"AHT_INTEGRATION_VERSION=5\";\n"
+	if err := os.WriteFile(extPath, []byte(staleContent), 0o600); err != nil {
+		t.Fatalf("writing stale extension: %v", err)
 	}
 }
