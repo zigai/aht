@@ -197,7 +197,7 @@ func TestWatchOutputPreservesLongSessionLabels(t *testing.T) {
 func TestSummaryIncludesFailureStatesAndServerIdentity(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &application{stdout: &stdout}
-	if err := app.writeSummaryTable([]registry.Summary{{MultiplexerKind: registry.MultiplexerTmux, MultiplexerServerID: "server-one", MultiplexerSessionID: "$0", Failed: 2, Interrupted: 3, Total: 5, Live: 5}}, false); err != nil {
+	if err := app.writeSummaryTableForGroup([]registry.Summary{{MultiplexerKind: registry.MultiplexerTmux, MultiplexerServerID: "server-one", MultiplexerSessionID: "$0", Failed: 2, Interrupted: 3, Total: 5, Live: 5}}, registry.SummaryGroupByMultiplexerSession, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range []string{"server-one", "$0", "Failed", "Interrupted", "2", "3"} {

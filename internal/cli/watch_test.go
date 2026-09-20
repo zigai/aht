@@ -209,7 +209,11 @@ func TestWatchJSONModeEmitsJSONLinesOnlyWhenRequested(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &application{storePath: path, outputJSON: true, stdout: &stdout, stderr: &bytes.Buffer{}}
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
-		return app.runWatch(ctx, watchOptions{ready: ready})
+		options, err := app.prepareWatch(watchOptions{ready: ready})
+		if err != nil {
+			return err
+		}
+		return app.runWatch(ctx, options)
 	})
 	watcher.stop(t)
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -233,7 +237,11 @@ func TestWatchDefaultsToHumanTable(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &application{storePath: path, stdout: &stdout, stderr: &bytes.Buffer{}}
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
-		return app.runWatch(ctx, watchOptions{ready: ready})
+		options, err := app.prepareWatch(watchOptions{ready: ready})
+		if err != nil {
+			return err
+		}
+		return app.runWatch(ctx, options)
 	})
 	watcher.stop(t)
 	if !strings.Contains(stdout.String(), "Time") || !strings.Contains(stdout.String(), "Event") || !strings.Contains(stdout.String(), "snapshot") || !strings.Contains(stdout.String(), "watch-human") || strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
@@ -259,7 +267,11 @@ func TestWatchNoSnapshotSignalsReadyWithoutOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &application{storePath: path, stdout: &stdout, stderr: &bytes.Buffer{}}
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
-		return app.runWatch(ctx, watchOptions{noSnapshot: true, ready: ready})
+		options, err := app.prepareWatch(watchOptions{noSnapshot: true, ready: ready})
+		if err != nil {
+			return err
+		}
+		return app.runWatch(ctx, options)
 	})
 	watcher.stop(t)
 	if stdout.Len() != 0 {
