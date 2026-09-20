@@ -4,7 +4,28 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
+
+func TestSummarySeparatesServersAndCountsAllActivities(t *testing.T) {
+	failed, interrupted := ActivityFailed, ActivityInterrupted
+	sessions := []Session{
+		{Presence: PresenceLive, Activity: &failed, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"}},
+		{Presence: PresenceLive, Activity: &interrupted, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "second", SessionID: "$0"}},
+		{Presence: PresenceGone, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"}},
+	}
+	summaries := summariesForSessions(sessions)
+	if len(summaries) != 2 {
+		t.Fatalf("summaries = %#v, want distinct servers", summaries)
+	}
+	if summaries[0].MultiplexerServerID != "first" || summaries[0].Failed != 1 || summaries[0].Gone != 1 || summaries[0].Total != 2 {
+		t.Fatalf("first summary = %#v", summaries[0])
+	}
+	if summaries[1].MultiplexerServerID != "second" || summaries[1].Interrupted != 1 || summaries[1].Total != 1 {
+		t.Fatalf("second summary = %#v", summaries[1])
+	}
+}
 
 func TestSummariesEmptyInputReturnsEmptySlice(t *testing.T) {
 	t.Parallel()
@@ -294,7 +315,7 @@ func TestSummariesFiltersBeforeGrouping(t *testing.T) {
 	}
 
 	// Filter by HarnessClaude before summarizing
-	filtered := filterSessions(sessions, Filter{Harness: HarnessClaude})
+	filtered := FilterSessions(sessions, Filter{Harness: HarnessClaude})
 	summaries := SummariesWithOptions(filtered, SummaryOptions{GroupBy: SummaryGroupByProject})
 
 	if len(summaries) != 1 {
@@ -370,16 +391,8 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 
 func assertSummaryParity(t *testing.T, groupBy SummaryGroupBy, fileSum, memSum []Summary) {
 	t.Helper()
-	if len(fileSum) != len(memSum) {
-		t.Fatalf("group %s: fileStore length %d != memStore length %d", groupBy, len(fileSum), len(memSum))
-	}
-	for i := range fileSum {
-		if fileSum[i].GroupKey != memSum[i].GroupKey ||
-			fileSum[i].GroupLabel != memSum[i].GroupLabel ||
-			fileSum[i].Total != memSum[i].Total ||
-			fileSum[i].Live != memSum[i].Live {
-			t.Fatalf("group %s item %d mismatch: file=%+v, mem=%+v", groupBy, i, fileSum[i], memSum[i])
-		}
+	if diff := cmp.Diff(fileSum, memSum); diff != "" {
+		t.Fatalf("group %s summary mismatch (-file +mem):\n%s", groupBy, diff)
 	}
 }
 
