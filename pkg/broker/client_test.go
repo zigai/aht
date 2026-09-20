@@ -9,10 +9,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/internal/brokerserver"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -189,35 +189,125 @@ func TestBrokerStoreFallbackParity(t *testing.T) {
 func TestBrokerOldJSONRequestDefaultsToMultiplexer(t *testing.T) {
 	t.Parallel()
 
-	type legacySummaryRequest struct {
-		Version        int                     `json:"version"`
-		ID             string                  `json:"id"`
-		Method         string                  `json:"method"`
-		GroupBy        registry.SummaryGroupBy `json:"group_by"`
-		SummaryOptions registry.SummaryOptions `json:"summary_options"`
-	}
+	ctx := t.Context()
+	store, socketPath := startBrokerServer(t)
 
-	legacyJSON := `{"version":0,"id":"req-legacy","method":"summary"}`
-	var req legacySummaryRequest
-	if err := json.NewDecoder(strings.NewReader(legacyJSON)).Decode(&req); err != nil {
+	// Seed two sessions that share the same multiplexer session/server
+	// but differ by project and harness, so grouping by multiplexer gives 1 summary,
+	// while project or harness grouping would give 2 summaries.
+	running := registry.ActivityRunning
+	now := time.Now().UTC()
+	obs1 := registry.Observation{
+		Source:      registry.ObservationSourceNative,
+		Evidence:    registry.ObservationEvidenceNativeEvent,
+		Harness:     registry.HarnessClaude,
+		Identity:    registry.ObservationIdentity{SessionID: "sess-1"},
+		Presence:    new(registry.PresenceLive),
+		Activity:    &running,
+		Catalog:     &registry.CatalogMetadata{ProjectRoot: "/repo/one"},
+		Multiplexer: &registry.MultiplexerContext{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%1"},
+		ObservedAt:  now,
+	}
+	obs2 := registry.Observation{
+		Source:      registry.ObservationSourceNative,
+		Evidence:    registry.ObservationEvidenceNativeEvent,
+		Harness:     registry.HarnessCodex,
+		Identity:    registry.ObservationIdentity{SessionID: "sess-2"},
+		Presence:    new(registry.PresenceLive),
+		Activity:    &running,
+		Catalog:     &registry.CatalogMetadata{ProjectRoot: "/repo/two"},
+		Multiplexer: &registry.MultiplexerContext{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%2"},
+		ObservedAt:  now,
+	}
+	if _, err := store.Observe(ctx, obs1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Observe(ctx, obs2); err != nil {
 		t.Fatal(err)
 	}
 
-	if req.GroupBy != "" {
-		t.Fatalf("unmarshaled GroupBy = %q, want empty string", req.GroupBy)
+	// Send a raw JSON summary request without summary_options
+	dialer := net.Dialer{Timeout: time.Second}
+	conn, err := dialer.DialContext(ctx, "unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if req.SummaryOptions.GroupBy != "" {
-		t.Fatalf("unmarshaled SummaryOptions.GroupBy = %q, want empty string", req.SummaryOptions.GroupBy)
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	reqJSON := fmt.Sprintf(`{"version":%d,"id":"req-compat","method":"summary"}`+"\n", broker.ProtocolVersion)
+	if _, err := conn.Write([]byte(reqJSON)); err != nil {
+		t.Fatal(err)
 	}
 
-	// In server execution, empty GroupBy defaults to SummaryGroupByMultiplexerSession
-	opts := req.SummaryOptions
-	if opts.GroupBy == "" {
-		opts.GroupBy = registry.SummaryGroupByMultiplexerSession
+	var resp broker.Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("decode broker response: %v", err)
 	}
-	if opts.GroupBy != registry.SummaryGroupByMultiplexerSession {
-		t.Fatalf("defaulted opts.GroupBy = %q, want multiplexer-session", opts.GroupBy)
+	if resp.ID != "req-compat" {
+		t.Fatalf("resp.ID = %q, want req-compat", resp.ID)
 	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected broker error: %s: %s", resp.Error.Code, resp.Error.Message)
+	}
+	if len(resp.Summaries) != 1 {
+		t.Fatalf("expected 1 summary (multiplexer grouping), got %d: %#v", len(resp.Summaries), resp.Summaries)
+	}
+	if resp.Summaries[0].GroupBy != registry.SummaryGroupByMultiplexerSession {
+		t.Fatalf("summary GroupBy = %q, want %q", resp.Summaries[0].GroupBy, registry.SummaryGroupByMultiplexerSession)
+	}
+	if resp.Summaries[0].Total != 2 {
+		t.Fatalf("summary Total = %d, want 2", resp.Summaries[0].Total)
+	}
+}
+
+func startBrokerServer(t *testing.T) (*registry.MemoryStore, string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the socket below Darwin's path limit, independently of TMPDIR and the test name.
+	socketDir, err := os.MkdirTemp("/tmp", "aht-broker-") //nolint:usetesting // Go 1.27.1's t.TempDir paths can exceed Unix socket limits; MkdirTemp isolates this protocol fixture and t.Cleanup removes it.
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketDir); err != nil {
+			t.Error(err)
+		}
+	})
+	socketPath := filepath.Join(socketDir, "broker.sock")
+	ready := make(chan struct{})
+	server := brokerserver.New(brokerserver.Options{
+		Store:      store,
+		SocketPath: socketPath,
+		Ready:      ready,
+	})
+	serverDone := make(chan struct{})
+	var serverErr error
+	go func() {
+		defer close(serverDone)
+		serverErr = server.Serve(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-serverDone
+		if serverErr != nil {
+			t.Error(serverErr)
+		}
+	})
+	select {
+	case <-ready:
+	case <-serverDone:
+		t.Fatalf("broker exited before readiness: %v", serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("broker did not become ready")
+	}
+	return store, socketPath
 }
 
 // responseServer starts a one-shot Unix-socket broker that decodes the first
