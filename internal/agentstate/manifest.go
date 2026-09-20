@@ -16,6 +16,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/zigai/aht/internal/config"
 	"github.com/zigai/aht/internal/harness"
 	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
@@ -76,8 +77,8 @@ type manifestCacheEntry struct {
 }
 
 func DefaultConfigDir() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil || configDir == "" {
+	configDir := config.UserConfigDir()
+	if configDir == "" {
 		return ""
 	}
 	return filepath.Join(configDir, "aht", "detection")

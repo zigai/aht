@@ -13,9 +13,6 @@ import (
 
 var errUnknownFieldInConfig = errors.New("unknown field in config")
 
-// boundedConfigFile wraps a path for bounded reading.
-type boundedConfigFile string
-
 // readBounded reads up to limit bytes from r. If more than limit bytes are
 // available, it returns ErrConfigFileTooLarge.
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
@@ -44,10 +41,6 @@ func readBoundedFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	return contents, nil
-}
-
-func (path boundedConfigFile) ReadBytes() ([]byte, error) {
-	return readBoundedFile(string(path))
 }
 
 // decodeTOML decodes TOML bytes into target with strict unknown field rejection.

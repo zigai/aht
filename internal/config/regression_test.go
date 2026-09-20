@@ -48,10 +48,12 @@ func TestLoadNormalizesUIValues(t *testing.T) {
 	if cfg.UI.Sort != "updated" || cfg.UI.DefaultPresence != "all" || cfg.UI.TimeFormat != "iso8601" {
 		t.Fatalf("noncanonical UI configuration: %+v", cfg.UI)
 	}
-	t.Setenv("AHT_UI_SORT", " Agent ")
+	if err := os.WriteFile(path, []byte("[ui]\nsort = ' Agent '\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg, _, err = Load(path)
 	if err != nil || cfg.UI.Sort != "harness" {
-		t.Fatalf("environment alias: sort = %q, error = %v", cfg.UI.Sort, err)
+		t.Fatalf("file alias: sort = %q, error = %v", cfg.UI.Sort, err)
 	}
 }
 
@@ -131,13 +133,13 @@ func TestWriteConfigReplacesWithoutMutatingExistingInode(t *testing.T) {
 	}
 }
 
-func TestConfigProviderBoundsActualRead(t *testing.T) {
+func TestReadBoundedFileBoundsActualRead(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(strings.Repeat("#", maxConfigFileSize+1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := boundedConfigFile(path).ReadBytes(); !errors.Is(err, ErrConfigFileTooLarge) {
-		t.Fatalf("provider read error = %v, want size limit", err)
+	if _, err := readBoundedFile(path); !errors.Is(err, ErrConfigFileTooLarge) {
+		t.Fatalf("readBoundedFile error = %v, want size limit", err)
 	}
 }

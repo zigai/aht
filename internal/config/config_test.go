@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,13 @@ func TestParseDuration(t *testing.T) {
 	}
 }
 
+func isolateConfigEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(ConfigEnv, "")
+}
+
 func TestLoadMissingDefaultFile(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	nonExistentPath := filepath.Join(tempDir, "does-not-exist.toml")
 	t.Setenv(ConfigEnv, nonExistentPath)
@@ -82,6 +89,7 @@ func TestLoadExplicitMissingFile(t *testing.T) {
 
 //nolint:cyclop,gocognit // test verifies all fields of full configuration
 func TestLoadValidFullTOML(t *testing.T) {
+	isolateConfigEnv(t)
 	content := `
 [ui]
 default_presence = "live"
@@ -288,44 +296,27 @@ grace_period = "-10s"`,
 	}
 }
 
-func TestEnvironmentOverrides(t *testing.T) {
-	content := `
-[ui]
-sort = "updated"
-default_presence = "live"
-
-[tracker]
-interval = "10s"
-quiet = false
-`
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.toml")
-	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
+func TestSettingsIgnoreEnvironment(t *testing.T) {
+	for _, key := range []string{
+		"AHT_UI_DEFAULT_PRESENCE", "AHT_UI_SORT", "AHT_UI_SORT_DESC",
+		"AHT_UI_ABSOLUTE_TIME", "AHT_UI_TIME_FORMAT", "AHT_RETENTION_AUTO_CLEAN",
+		"AHT_RETENTION_MAX_GONE_AGE", "AHT_FILTER_IGNORE_HARNESSES", "AHT_FILTER_IGNORE_PATHS",
+		"AHT_TRACKER_INTERVAL", "AHT_TRACKER_GRACE_PERIOD", "AHT_TRACKER_QUIET",
+		"AHT_DETECTION_MANIFESTS_DIR", "AHT_DETECTION_SCREEN_INSPECTION",
+	} {
+		t.Setenv(key, "invalid")
 	}
-
-	t.Setenv("AHT_UI_SORT", "created")
-	t.Setenv("AHT_TRACKER_INTERVAL", "2s")
-	t.Setenv("AHT_TRACKER_QUIET", "true")
-	t.Setenv("AHT_FILTER_IGNORE_HARNESSES", "copilot,gemini")
-	t.Setenv("AHT_STORE", "/path/to/store.json") // Should be ignored by config loader
-
-	cfg, _, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load failed with env overrides: %v", err)
-	}
-
-	if cfg.UI.Sort != "created" {
-		t.Errorf("UI.Sort = %q, want 'created' from env", cfg.UI.Sort)
-	}
-	if cfg.Tracker.Interval != "2s" {
-		t.Errorf("Tracker.Interval = %q, want '2s' from env", cfg.Tracker.Interval)
-	}
-	if cfg.Tracker.Quiet == nil || !*cfg.Tracker.Quiet {
-		t.Errorf("Tracker.Quiet = %v, want true from env", cfg.Tracker.Quiet)
-	}
-	if len(cfg.Filter.IgnoreHarnesses) != 2 || cfg.Filter.IgnoreHarnesses[0] != "copilot" {
-		t.Errorf("Filter.IgnoreHarnesses = %v, want ['copilot', 'gemini']", cfg.Filter.IgnoreHarnesses)
+	for _, noConfig := range []bool{false, true} {
+		cfg, _, err := LoadWithOptions(Options{
+			Path:     filepath.Join(t.TempDir(), "missing.toml"),
+			NoConfig: noConfig,
+		})
+		if err != nil {
+			t.Fatalf("NoConfig=%v: %v", noConfig, err)
+		}
+		if !reflect.DeepEqual(cfg, Defaults()) {
+			t.Fatalf("NoConfig=%v: environment changed settings: %+v", noConfig, cfg)
+		}
 	}
 }
 
@@ -357,6 +348,7 @@ func TestMaxFileSizeLimit(t *testing.T) {
 
 //nolint:cyclop,gocognit // test verifies all fields of default configuration template
 func TestDefaultConfigTemplateValid(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "default_template.toml")
 
@@ -531,7 +523,8 @@ sort = "created"
 	}
 }
 
-func TestLoadWithOptionsSixTiers(t *testing.T) {
+func TestLoadWithOptionsFilePrecedence(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	sysDir := filepath.Join(tempDir, "sys")
 	userDir := filepath.Join(tempDir, "user")
@@ -543,21 +536,16 @@ func TestLoadWithOptionsSixTiers(t *testing.T) {
 		}
 	}
 
-	// System tier: sets time_format = "iso8601"
-	if err := os.WriteFile(filepath.Join(sysDir, "aht", "config.toml"), []byte("[ui]\ntime_format = \"iso8601\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sysDir, "aht", "config.toml"), []byte("[ui]\ntime_format = \"iso8601\"\nsort = \"updated\"\ndefault_presence = \"unknown\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// User tier: sets sort = "cwd"
-	if err := os.WriteFile(filepath.Join(userDir, "aht", "config.toml"), []byte("[ui]\nsort = \"cwd\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(userDir, "aht", "config.toml"), []byte("[ui]\nsort = \"cwd\"\ndefault_presence = \"gone\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Project tier: sets default_presence = "live"
 	if err := os.WriteFile(filepath.Join(projectDir, ".aht.toml"), []byte("[ui]\ndefault_presence = \"live\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	// Environment override: sets sort = "id" (overriding user tier sort = "cwd")
-	t.Setenv("AHT_UI_SORT", "id")
 
 	cfg, resolved, err := LoadWithOptions(Options{
 		CWD:           projectDir,
@@ -572,9 +560,9 @@ func TestLoadWithOptionsSixTiers(t *testing.T) {
 	}
 
 	// Check precedence:
-	// Env wins for sort
-	if cfg.UI.Sort != "id" {
-		t.Errorf("expected sort='id' from env, got %q", cfg.UI.Sort)
+	// User tier provides sort
+	if cfg.UI.Sort != "cwd" {
+		t.Errorf("expected sort='cwd' from user config, got %q", cfg.UI.Sort)
 	}
 	// Project tier wins for default_presence
 	if cfg.UI.DefaultPresence != "live" {
@@ -600,8 +588,6 @@ func TestLoadWithOptionsNoConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AHT_UI_DEFAULT_PRESENCE", "live")
-
 	cfg, resolved, err := LoadWithOptions(Options{
 		NoConfig: true,
 		CWD:      projectDir,
@@ -616,9 +602,9 @@ func TestLoadWithOptionsNoConfig(t *testing.T) {
 	if cfg.UI.Sort != "updated" {
 		t.Errorf("expected default sort='updated', got %q", cfg.UI.Sort)
 	}
-	// Env is still honored
-	if cfg.UI.DefaultPresence != "live" {
-		t.Errorf("expected default_presence='live' from env, got %q", cfg.UI.DefaultPresence)
+	// Unconfigured values retain defaults
+	if cfg.UI.DefaultPresence != "all" {
+		t.Errorf("expected default_presence='all', got %q", cfg.UI.DefaultPresence)
 	}
 }
 
@@ -648,4 +634,50 @@ default_presence = "unknown"
 	if cfg.Tracker.Interval != "300ms" {
 		t.Errorf("expected tracker.interval='300ms', got %q", cfg.Tracker.Interval)
 	}
+}
+
+func TestUserConfigDirAndDefaultPath(t *testing.T) {
+	tempDir := t.TempDir()
+	xdgDir := filepath.Join(tempDir, "xdg_config")
+	homeDir := filepath.Join(tempDir, "home")
+
+	t.Run("explicit AHT_CONFIG overrides default path", func(t *testing.T) {
+		customPath := filepath.Join(tempDir, "custom", "config.toml")
+		t.Setenv(ConfigEnv, customPath)
+		t.Setenv("XDG_CONFIG_HOME", xdgDir)
+		t.Setenv("HOME", homeDir)
+
+		if got := DefaultPath(); got != customPath {
+			t.Fatalf("DefaultPath() = %q, want %q", got, customPath)
+		}
+	})
+
+	t.Run("XDG_CONFIG_HOME takes precedence when AHT_CONFIG unset", func(t *testing.T) {
+		t.Setenv(ConfigEnv, "")
+		t.Setenv("XDG_CONFIG_HOME", xdgDir)
+		t.Setenv("HOME", homeDir)
+
+		if got := UserConfigDir(); got != xdgDir {
+			t.Fatalf("UserConfigDir() = %q, want %q", got, xdgDir)
+		}
+		expectedPath := filepath.Join(xdgDir, "aht", "config.toml")
+		if got := DefaultPath(); got != expectedPath {
+			t.Fatalf("DefaultPath() = %q, want %q", got, expectedPath)
+		}
+	})
+
+	t.Run("HOME/.config is used when XDG_CONFIG_HOME is unset", func(t *testing.T) {
+		t.Setenv(ConfigEnv, "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", homeDir)
+
+		expectedDir := filepath.Join(homeDir, ".config")
+		if got := UserConfigDir(); got != expectedDir {
+			t.Fatalf("UserConfigDir() = %q, want %q", got, expectedDir)
+		}
+		expectedPath := filepath.Join(homeDir, ".config", "aht", "config.toml")
+		if got := DefaultPath(); got != expectedPath {
+			t.Fatalf("DefaultPath() = %q, want %q", got, expectedPath)
+		}
+	})
 }

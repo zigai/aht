@@ -40,9 +40,6 @@ var (
 	ErrConfigFileTooLarge  = errors.New("config file exceeds 1 MiB limit")
 	ErrConfigNotFound      = errors.New("config file not found")
 	ErrParseConfig         = errors.New("failed to parse config file")
-	ErrLoadDefaults        = errors.New("failed to load base defaults")
-	ErrLoadEnv             = errors.New("failed to load environment overrides")
-	ErrUnmarshalConfig     = errors.New("failed to unmarshal configuration")
 	ErrAccessConfig        = errors.New("failed to access config file")
 	ErrInvalidDuration     = errors.New("invalid duration")
 
@@ -152,17 +149,29 @@ func Defaults() Config {
 	}
 }
 
+// UserConfigDir returns the base directory for user configuration.
+// It prioritizes $XDG_CONFIG_HOME, then $HOME/.config (consistent across Linux
+// and macOS), before falling back to the operating system's user config directory.
+func UserConfigDir() string {
+	if val := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); val != "" {
+		return val
+	}
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		return filepath.Join(home, ".config")
+	}
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return dir
+	}
+	return ""
+}
+
 // DefaultPath returns the default path to the user's config file.
 func DefaultPath() string {
 	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
 		return val
 	}
-	configDir, err := os.UserConfigDir()
-	if err == nil && configDir != "" {
-		return filepath.Join(configDir, "aht", "config.toml")
-	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".config", "aht", "config.toml")
+	if dir := UserConfigDir(); dir != "" {
+		return filepath.Join(dir, "aht", "config.toml")
 	}
 	return filepath.Join(os.TempDir(), "aht", "config.toml")
 }
@@ -372,17 +381,13 @@ func Load(path string) (Config, string, error) {
 
 // LoadWithOptions resolves configuration across all tiers per the given options.
 //
-//nolint:gocognit,cyclop,nestif // layered configuration resolution across 6 tiers
+//nolint:gocognit,cyclop,nestif // resolve explicit input or layered disk configuration
 func LoadWithOptions(opts Options) (Config, string, error) {
 	cfg := Defaults()
 	var resolvedPath string
 
 	if opts.NoConfig {
-		if err := applyEnvOverrides(&cfg); err != nil {
-			return Config{}, "", fmt.Errorf("%w: %w", ErrLoadEnv, err)
-		}
-		norm, err := normalizeConfig(cfg)
-		return norm, "", err
+		return cfg, "", nil
 	}
 
 	explicit := opts.Explicit
@@ -392,8 +397,8 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 	}
 
 	if targetPath != "" {
-		switch {
-		case targetPath == "-":
+		switch targetPath {
+		case "-":
 			r := opts.Stdin
 			if r == nil {
 				r = os.Stdin
@@ -409,49 +414,10 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 				return Config{}, "-", fmt.Errorf("%w stdin: %w", ErrParseConfig, err)
 			}
 			resolvedPath = "-"
-		case explicit:
-			cleanTarget := filepath.Clean(targetPath)
-			info, err := os.Stat(cleanTarget)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, err)
-				}
-				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, err)
-			}
-			if info.IsDir() {
-				return Config{}, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
-			}
-			if info.Size() > maxConfigFileSize {
-				return Config{}, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
-			}
-			contents, err := readBoundedFile(cleanTarget)
-			if err != nil {
-				return Config{}, targetPath, err
-			}
-			if err := decodeTOML(contents, &cfg); err != nil {
-				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
-			}
-			resolvedPath = targetPath
 		default:
 			resolvedPath = targetPath
-			cleanTarget := filepath.Clean(targetPath)
-			info, err := os.Stat(cleanTarget)
-			if err == nil {
-				if info.IsDir() {
-					return Config{}, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
-				}
-				if info.Size() > maxConfigFileSize {
-					return Config{}, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
-				}
-				contents, err := readBoundedFile(cleanTarget)
-				if err != nil {
-					return Config{}, targetPath, err
-				}
-				if err := decodeTOML(contents, &cfg); err != nil {
-					return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
-				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return Config{}, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, err)
+			if err := loadDiskConfig(targetPath, &cfg, explicit); err != nil {
+				return Config{}, targetPath, err
 			}
 		}
 	} else {
@@ -463,7 +429,7 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 		}
 		for _, baseDir := range slices.Backward(systemDirs) {
 			sysPath := filepath.Join(baseDir, "aht", "config.toml")
-			if err := loadDiskOverlay(sysPath, &cfg); err != nil {
+			if err := loadDiskConfig(sysPath, &cfg, false); err != nil {
 				return Config{}, sysPath, err
 			}
 		}
@@ -476,7 +442,7 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 			userPath = filepath.Join(userPath, "aht", "config.toml")
 		}
 		resolvedPath = userPath
-		if err := loadDiskOverlay(userPath, &cfg); err != nil {
+		if err := loadDiskConfig(userPath, &cfg, false); err != nil {
 			return Config{}, userPath, err
 		}
 
@@ -490,7 +456,7 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 			cleanProj := filepath.Clean(projectPath)
 			info, err := os.Stat(cleanProj)
 			if err == nil && !info.IsDir() {
-				if err := loadDiskOverlay(projectPath, &cfg); err != nil {
+				if err := loadDiskConfig(projectPath, &cfg, false); err != nil {
 					return Config{}, projectPath, err
 				}
 				resolvedPath = projectPath
@@ -498,20 +464,18 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 		}
 	}
 
-	// Layer 2: Environment variable overrides
-	if err := applyEnvOverrides(&cfg); err != nil {
-		return Config{}, resolvedPath, fmt.Errorf("%w: %w", ErrLoadEnv, err)
-	}
-
 	norm, err := normalizeConfig(cfg)
 	return norm, resolvedPath, err
 }
 
-func loadDiskOverlay(path string, target *Config) error {
+func loadDiskConfig(path string, target *Config, required bool) error {
 	cleanPath := filepath.Clean(path)
 	info, err := os.Stat(cleanPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if required {
+				return fmt.Errorf("%w %s: %w", ErrConfigNotFound, path, err)
+			}
 			return nil
 		}
 		return fmt.Errorf("%w %s: %w", ErrAccessConfig, path, err)
@@ -547,87 +511,6 @@ func defaultSystemConfigDirs() []string {
 	for d := range strings.SplitSeq(xdgDirs, ":") {
 		if trimmed := strings.TrimSpace(d); trimmed != "" {
 			clean = append(clean, trimmed)
-		}
-	}
-	return clean
-}
-
-//nolint:gocognit,cyclop // straightforward mapping of environment variables to config fields
-func applyEnvOverrides(cfg *Config) error {
-	if v, ok := os.LookupEnv("AHT_UI_DEFAULT_PRESENCE"); ok {
-		cfg.UI.DefaultPresence = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_UI_SORT"); ok {
-		cfg.UI.Sort = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_UI_SORT_DESC"); ok {
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return fmt.Errorf("invalid AHT_UI_SORT_DESC %q: %w", v, err)
-		}
-		cfg.UI.SortDesc = new(b)
-	}
-	if v, ok := os.LookupEnv("AHT_UI_ABSOLUTE_TIME"); ok {
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return fmt.Errorf("invalid AHT_UI_ABSOLUTE_TIME %q: %w", v, err)
-		}
-		cfg.UI.AbsoluteTime = new(b)
-	}
-	if v, ok := os.LookupEnv("AHT_UI_TIME_FORMAT"); ok {
-		cfg.UI.TimeFormat = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_RETENTION_AUTO_CLEAN"); ok {
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return fmt.Errorf("invalid AHT_RETENTION_AUTO_CLEAN %q: %w", v, err)
-		}
-		cfg.Retention.AutoClean = new(b)
-	}
-	if v, ok := os.LookupEnv("AHT_RETENTION_MAX_GONE_AGE"); ok {
-		cfg.Retention.MaxGoneAge = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_FILTER_IGNORE_HARNESSES"); ok {
-		cfg.Filter.IgnoreHarnesses = parseEnvList(v)
-	}
-	if v, ok := os.LookupEnv("AHT_FILTER_IGNORE_PATHS"); ok {
-		cfg.Filter.IgnorePaths = parseEnvList(v)
-	}
-	if v, ok := os.LookupEnv("AHT_TRACKER_INTERVAL"); ok {
-		cfg.Tracker.Interval = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_TRACKER_GRACE_PERIOD"); ok {
-		cfg.Tracker.GracePeriod = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_TRACKER_QUIET"); ok {
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return fmt.Errorf("invalid AHT_TRACKER_QUIET %q: %w", v, err)
-		}
-		cfg.Tracker.Quiet = new(b)
-	}
-	if v, ok := os.LookupEnv("AHT_DETECTION_MANIFESTS_DIR"); ok {
-		cfg.Detection.ManifestsDir = strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv("AHT_DETECTION_SCREEN_INSPECTION"); ok {
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return fmt.Errorf("invalid AHT_DETECTION_SCREEN_INSPECTION %q: %w", v, err)
-		}
-		cfg.Detection.ScreenInspection = new(b)
-	}
-	return nil
-}
-
-func parseEnvList(v string) []string {
-	if strings.TrimSpace(v) == "" {
-		return []string{}
-	}
-	parts := strings.Split(v, ",")
-	clean := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			clean = append(clean, t)
 		}
 	}
 	return clean
