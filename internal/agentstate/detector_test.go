@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -43,6 +45,10 @@ func TestGoldenScreenFixtures(t *testing.T) {
 			decision := manifest.Evaluate(NormalizeSnapshot(fixture.Screen, fixture.Agent))
 			if decision.Activity != fixture.Want {
 				t.Fatalf("decision = %#v, want %s", decision, fixture.Want)
+			}
+			inspection := manifest.Inspect(NormalizeSnapshot(fixture.Screen, fixture.Agent))
+			if diff := cmp.Diff(decision, inspection.Decision); diff != "" {
+				t.Fatalf("inspection decision differs from evaluation (-evaluate +inspect):\n%s", diff)
 			}
 		})
 	}
@@ -228,6 +234,10 @@ title_regex_any=["^CODEX"]
 	manifest.Rules[1].Priority = 20
 	if stable := manifest.Evaluate(NormalizeSnapshot("READY\nApproval needed: Allow or Deny", "Codex task")); stable.RuleID != "low" {
 		t.Fatalf("equal-priority order was not stable: %#v", stable)
+	}
+	snapshot := NormalizeSnapshot("READY\nApproval needed: Allow or Deny", "Codex task")
+	if diff := cmp.Diff(manifest.Evaluate(snapshot), manifest.Inspect(snapshot).Decision); diff != "" {
+		t.Fatalf("inspection after priority mutation differs (-evaluate +inspect):\n%s", diff)
 	}
 }
 
@@ -830,6 +840,32 @@ regex_any=["[unclosed"]
 		_, explicitErr := LoadExplicitManifest(overridePath, registry.HarnessCodex)
 		if explicitErr == nil {
 			t.Fatal("explicit loader must fail on broken override file")
+		}
+	})
+}
+
+func TestDefaultConfigDir(t *testing.T) {
+	tempDir := t.TempDir()
+	xdgDir := filepath.Join(tempDir, "xdg_config")
+	homeDir := filepath.Join(tempDir, "home")
+
+	t.Run("XDG_CONFIG_HOME takes precedence", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", xdgDir)
+		t.Setenv("HOME", homeDir)
+
+		want := filepath.Join(xdgDir, "aht", "detection")
+		if got := DefaultConfigDir(); got != want {
+			t.Fatalf("DefaultConfigDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("HOME/.config is used when XDG_CONFIG_HOME is unset", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", homeDir)
+
+		want := filepath.Join(homeDir, ".config", "aht", "detection")
+		if got := DefaultConfigDir(); got != want {
+			t.Fatalf("DefaultConfigDir() = %q, want %q", got, want)
 		}
 	})
 }

@@ -70,7 +70,7 @@ func NormalizeSnapshot(text string, title string) Snapshot {
 }
 
 func (manifest *Manifest) Evaluate(snapshot Snapshot) Decision {
-	decision := Decision{Activity: registry.ActivityUnknown, Reason: "no_rule_matched", RuleID: "", ManifestSource: manifest.Source, ManifestVersion: manifest.Version, Warning: manifest.Warning, Evidence: make([]RuleEvidence, 0, len(manifest.Rules))}
+	decision := manifest.initialDecision()
 	for _, rule := range sortedRules(manifest.Rules) {
 		matched := rule.matches(snapshot)
 		decision.Evidence = append(decision.Evidence, RuleEvidence{RuleID: rule.ID, Matched: matched})
@@ -87,21 +87,23 @@ func (manifest *Manifest) Evaluate(snapshot Snapshot) Decision {
 }
 
 func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
-	decision := manifest.Evaluate(snapshot)
+	decision := manifest.initialDecision()
 	sorted := sortedRules(manifest.Rules)
 
 	var winnerPriority int
-	for _, rule := range sorted {
-		if rule.ID == decision.RuleID {
-			winnerPriority = rule.Priority
-			break
-		}
-	}
-
 	candidates := make([]CandidateRule, 0, len(sorted))
 	for _, rule := range sorted {
 		matched, matchers, firstFailure := rule.inspect(snapshot)
-		winner := decision.RuleID != "" && rule.ID == decision.RuleID
+		winner := matched && decision.RuleID == ""
+		if decision.RuleID == "" {
+			decision.Evidence = append(decision.Evidence, RuleEvidence{RuleID: rule.ID, Matched: matched})
+			if winner {
+				decision.Activity, _ = registry.NormalizeActivity(rule.State)
+				decision.Reason = "manifest_rule"
+				decision.RuleID = rule.ID
+				winnerPriority = rule.Priority
+			}
+		}
 
 		var reason string
 		switch {
@@ -147,6 +149,10 @@ func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
 	}
 }
 
+func (manifest *Manifest) initialDecision() Decision {
+	return Decision{Activity: registry.ActivityUnknown, Reason: "no_rule_matched", RuleID: "", ManifestSource: manifest.Source, ManifestVersion: manifest.Version, Warning: manifest.Warning, Evidence: make([]RuleEvidence, 0, len(manifest.Rules))}
+}
+
 func (rule Rule) inspect(snapshot Snapshot) (bool, []MatcherInspection, string) {
 	var matchers []MatcherInspection
 	var firstFailure string
@@ -175,8 +181,7 @@ func (rule Rule) inspect(snapshot Snapshot) (bool, []MatcherInspection, string) 
 	inspectTextMatchers(rule, text, appendMatcher)
 	inspectTitleMatchers(rule, title, appendMatcher)
 
-	matched := rule.matches(snapshot)
-	return matched, matchers, firstFailure
+	return firstFailure == "", matchers, firstFailure
 }
 
 func inspectRegionMatcher(rule Rule, lines []string) ([]string, MatcherInspection, bool, bool) {
@@ -229,25 +234,21 @@ func inspectTitleMatchers(rule Rule, title string, appendMatcher func(MatcherIns
 }
 
 func inspectAllMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	var missing []string
 	for _, literal := range rule.All {
 		if !strings.Contains(text, normalizedLiteral(literal, rule.CaseSensitive)) {
-			missing = append(missing, literal)
+			failMsg := fmt.Sprintf("missing literal %q", literal)
+			return MatcherInspection{
+				Name:    "all",
+				Passed:  false,
+				Details: failMsg,
+			}, false, "all: " + failMsg
 		}
 	}
-	if len(missing) == 0 {
-		return MatcherInspection{
-			Name:    "all",
-			Passed:  true,
-			Details: fmt.Sprintf("all %d literals matched", len(rule.All)),
-		}, true, ""
-	}
-	failMsg := fmt.Sprintf("missing literal %q", missing[0])
 	return MatcherInspection{
 		Name:    "all",
-		Passed:  false,
-		Details: failMsg,
-	}, false, "all: " + failMsg
+		Passed:  true,
+		Details: fmt.Sprintf("all %d literals matched", len(rule.All)),
+	}, true, ""
 }
 
 func inspectAnyMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
