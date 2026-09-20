@@ -240,16 +240,19 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 		c := client.New(client.Config{})
 		c.SetWatcherForTest(tw)
 
-		var res client.WaitResult
-		var waitErr error
-		var wg sync.WaitGroup
-		wg.Go(func() {
-			res, waitErr = c.Wait(context.Background(), client.WaitOptions{
+		type waitOutcome struct {
+			res client.WaitResult
+			err error
+		}
+		done := make(chan waitOutcome, 1)
+		go func() {
+			res, err := c.Wait(context.Background(), client.WaitOptions{
 				ID:        "sess-flicker",
 				Activity:  client.ActivityIdle,
 				StableFor: 300 * time.Millisecond,
 			})
-		})
+			done <- waitOutcome{res: res, err: err}
+		}()
 
 		synctest.Wait()
 
@@ -267,18 +270,46 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 		// Sleep past the original 300ms deadline; wait must NOT complete because it flickered!
 		time.Sleep(250 * time.Millisecond)
 		synctest.Wait()
+		select {
+		case out := <-done:
+			t.Fatalf("Wait completed prematurely after flicker at original deadline: %+v", out)
+		default:
+		}
 
 		// Now transition back to idle and let it stay stable for full 300ms
+		idleStart := time.Now()
 		tw.SendSessions(idle)
 		synctest.Wait()
 
-		wg.Wait()
-
-		if waitErr != nil {
-			t.Fatalf("Wait() error = %v", waitErr)
+		// Advance to just before the 300ms stability deadline
+		time.Sleep(250 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case out := <-done:
+			t.Fatalf("Wait completed before full stability interval elapsed: %+v", out)
+		default:
 		}
-		if res.Session.ID != "sess-flicker" {
-			t.Errorf("res.Session.ID = %q, want sess-flicker", res.Session.ID)
+
+		// Sleep the remaining 50ms to reach full 300ms uninterrupted stability
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+
+		select {
+		case out := <-done:
+			if out.err != nil {
+				t.Fatalf("Wait() error = %v", out.err)
+			}
+			if out.res.Session.ID != "sess-flicker" {
+				t.Errorf("res.Session.ID = %q, want sess-flicker", out.res.Session.ID)
+			}
+			if out.res.Session.Activity == nil || *out.res.Session.Activity != registry.ActivityIdle {
+				t.Errorf("res.Session.Activity = %v, want idle", out.res.Session.Activity)
+			}
+			if elapsed := time.Since(idleStart); elapsed < 300*time.Millisecond {
+				t.Errorf("virtual elapsed time since second idle = %v, want >= 300ms", elapsed)
+			}
+		default:
+			t.Fatal("Wait did not complete after full stability duration")
 		}
 	})
 }
