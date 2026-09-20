@@ -206,8 +206,8 @@ func normalizeFileStoreWatchOptions(options WatchOptions) WatchOptions {
 
 func addFileStoreWatchPaths(watcher *fsnotify.Watcher, directory string) error {
 	root := filepath.Dir(directory)
-	if err := watcher.Add(root); err != nil {
-		return fmt.Errorf("watching store directory parent: %w", err)
+	if !isSystemOrTempRoot(root) {
+		_ = watcher.Add(root)
 	}
 	if err := watcher.Add(directory); err != nil {
 		return fmt.Errorf("watching store directory: %w", err)
@@ -306,4 +306,19 @@ func (s *FileStore) watchSnapshot(filter Filter) ([]Session, time.Time, error) {
 		sessions = append(sessions, session)
 	}
 	return FilterSessions(sessions, filter), snap.UpdatedAt, nil
+}
+
+func isSystemOrTempRoot(dir string) bool {
+	clean := filepath.Clean(dir)
+	if clean == "/" || clean == "." || clean == filepath.Dir(clean) {
+		return true
+	}
+	temp := filepath.Clean(os.TempDir())
+	if clean == temp || CanonicalPath(clean) == CanonicalPath(temp) {
+		return true
+	}
+	if clean == "/tmp" || clean == "/var/tmp" || clean == "/private/tmp" || clean == "/private/var/tmp" {
+		return true
+	}
+	return false
 }
