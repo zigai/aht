@@ -96,6 +96,9 @@ function attribute(args, key, value) {
   if (text(value)) args.push("--attribute", `${key}=${text(value)}`);
 }
 
+// Microsecond seed: a restarted process must never emit lower sequences.
+let reportSequence = Date.now() * 1000;
+
 function report(eventName, event, ctx, transition) {
   const sessionId = text(event.sessionId) || text(ctx.sessionId) || text(event.sessionKey) || text(ctx.sessionKey);
   if (!sessionId) return;
@@ -110,6 +113,7 @@ function report(eventName, event, ctx, transition) {
   const args = [
     "report", "openclaw", "--session-id", sessionId,
     "--event", eventName, "--observed-at", new Date().toISOString(),
+    "--sequence", String(++reportSequence),
     "--quiet", "--no-tmux",
     "--attribute", "aht_integration=openclaw-plugin",
     "--attribute", `aht_integration_version=${integrationVersion}`,

@@ -19,7 +19,6 @@ import (
 const (
 	storeSchemaVersion      = 2
 	maxObservedAtFutureSkew = 5 * time.Minute
-	automaticGoneRetention  = 5 * time.Minute
 	maxSnapshotBytes        = 64 << 20
 
 	// IntegrationActivityLease is the maximum age of a matching integration
@@ -182,12 +181,6 @@ func applyObservationBatch(
 		saved = append(saved, session)
 	}
 
-	deleteExpiredGoneSessions(
-		snap.Sessions,
-		receivedAt,
-		automaticGoneRetention,
-		func(session Session) time.Time { return session.UpdatedAt },
-	)
 	snap.UpdatedAt = maxTime(snap.UpdatedAt, receivedAt)
 
 	return saved, nil
@@ -315,31 +308,41 @@ func sequencedObservationTime(
 		strings.TrimSpace(previous.Attributes["aht_integration"]) != reporter {
 		return at, nil
 	}
-	if previous.Sequence != nil && observation.Sequence == nil {
-		return time.Time{}, fmt.Errorf(
-			"%w: reporter %q omitted sequence after using sequence %d",
-			ErrObservationConflict,
-			reporter,
-			*previous.Sequence,
-		)
+	if err := validateSequenceOrder(reporter, previous.Sequence, observation.Sequence); err != nil {
+		return time.Time{}, err
 	}
 	if observation.Sequence == nil {
+		if at.Equal(previous.ObservedAt) && !observationEquivalent(session, observation, at) {
+			at = previous.ObservedAt.Add(time.Nanosecond)
+		}
 		return at, nil
-	}
-	if previous.Sequence != nil && *observation.Sequence <= *previous.Sequence {
-		return time.Time{}, fmt.Errorf(
-			"%w: reporter %q sequence %d does not follow %d",
-			ErrObservationConflict,
-			reporter,
-			*observation.Sequence,
-			*previous.Sequence,
-		)
 	}
 	if !at.After(previous.ObservedAt) {
 		at = previous.ObservedAt.Add(time.Nanosecond)
 	}
 
 	return at, nil
+}
+
+func validateSequenceOrder(reporter string, previous, current *uint64) error {
+	if previous != nil && current == nil {
+		return fmt.Errorf(
+			"%w: reporter %q omitted sequence after using sequence %d",
+			ErrObservationConflict,
+			reporter,
+			*previous,
+		)
+	}
+	if previous != nil && current != nil && *current <= *previous {
+		return fmt.Errorf(
+			"%w: reporter %q sequence %d does not follow %d",
+			ErrObservationConflict,
+			reporter,
+			*current,
+			*previous,
+		)
+	}
+	return nil
 }
 
 func shouldIgnoreNativeAfterGone(session Session, observation Observation, at time.Time) bool {
@@ -624,6 +627,9 @@ func applyPresenceAndActivity(session *Session, observation Observation, at time
 			}
 			return
 		}
+		if currentAt := currentProcessObservationTime(*session); !currentAt.IsZero() && at.Before(currentAt) {
+			return
+		}
 		setGone(session, at)
 	case ObservationSourceScreen:
 		screen := session.Observations.Screen
@@ -739,11 +745,17 @@ func conflictingSessionReplacement(session Session, observation Observation) (bo
 }
 
 func nativeSessionReplacement(session Session, observation Observation, sameProcess bool) bool {
-	return observation.Source == ObservationSourceNative &&
-		observationHasIdentity(observation) &&
-		session.Harness == observation.Harness &&
-		observationIdentityConflicts(session, observation.Identity) &&
-		sameProcess
+	if !sameProcess ||
+		observation.Source != ObservationSourceNative ||
+		!observationHasIdentity(observation) ||
+		session.Harness != observation.Harness ||
+		!observationIdentityConflicts(session, observation.Identity) {
+		return false
+	}
+	if observation.Attributes["aht_multi_session"] == "true" || (session.Observations.Native != nil && session.Observations.Native.Attributes["aht_multi_session"] == "true") {
+		return false
+	}
+	return session.Harness.ExclusiveProcessSessions()
 }
 
 func processHarnessReplacement(observation Observation, sameProcess bool) bool {

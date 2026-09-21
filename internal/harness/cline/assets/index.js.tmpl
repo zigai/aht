@@ -74,6 +74,9 @@ function attribute(args, key, value) {
   if (normalized) args.push("--attribute", `${key}=${normalized}`);
 }
 
+// Microsecond seed: a restarted process must never emit lower sequences.
+let reportSequence = Date.now() * 1000;
+
 function report(eventName, context, transition) {
   const snapshot = context?.snapshot ?? {};
   const identity = sessionId || text(snapshot.conversationId) || text(snapshot.agentId);
@@ -84,6 +87,7 @@ function report(eventName, context, transition) {
     "--pid", String(process.pid),
     "--event", eventName,
     "--observed-at", new Date().toISOString(),
+    "--sequence", String(++reportSequence),
     "--quiet",
     "--attribute", "aht_integration=cline-plugin",
     "--attribute", `aht_integration_version=${integrationVersion}`,

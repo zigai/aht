@@ -237,7 +237,7 @@ func TestStoreGCUsesInclusiveAgeBoundary(t *testing.T) {
 	}
 }
 
-func TestObserveAutomaticallyRemovesExpiredGoneSessions(t *testing.T) {
+func TestObservePreservesGoneSessionsWithoutGC(t *testing.T) {
 	t.Parallel()
 
 	base := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
@@ -257,42 +257,25 @@ func TestObserveAutomaticallyRemovesExpiredGoneSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	now = base.Add(24 * time.Hour)
 	live := PresenceLive
-	observeLive := func() {
-		t.Helper()
-
-		if _, err := store.Observe(context.Background(), Observation{
-			Source:     ObservationSourceNative,
-			Evidence:   ObservationEvidenceNativeEvent,
-			Harness:    HarnessCodex,
-			Identity:   ObservationIdentity{SessionID: "current"},
-			Presence:   &live,
-			ObservedAt: now,
-		}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := store.Observe(context.Background(), Observation{
+		Source:     ObservationSourceNative,
+		Evidence:   ObservationEvidenceNativeEvent,
+		Harness:    HarnessCodex,
+		Identity:   ObservationIdentity{SessionID: "current"},
+		Presence:   &live,
+		ObservedAt: now,
+	}); err != nil {
+		t.Fatal(err)
 	}
-
-	now = base.Add(automaticGoneRetention - time.Nanosecond)
-	observeLive()
 
 	sessions, err := store.List(context.Background(), Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sessions) != 2 {
-		t.Fatalf("sessions before retention boundary = %#v, want recent tombstone retained", sessions)
-	}
-
-	now = base.Add(automaticGoneRetention)
-	observeLive()
-
-	sessions, err = store.List(context.Background(), Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 1 || sessions[0].SessionID != "current" {
-		t.Fatalf("sessions after automatic cleanup = %#v, want only current live session", sessions)
+		t.Fatalf("sessions after observation batch = %d, want both retained without explicit GC", len(sessions))
 	}
 }
 
@@ -595,6 +578,164 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 	}
 	if liveTotal != 1 || liveWithIdentity != 1 {
 		t.Fatalf("live sessions = %d (session_id=restart: %d), want exactly one: %#v", liveTotal, liveWithIdentity, sessions)
+	}
+}
+
+func TestStoreOlderProcessAbsenceDoesNotOverrideNewerNativePresence(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	s.setNowForTest(func() time.Time { return now })
+	proc := &ProcessIdentity{PID: 1234, StartIdentity: "start"}
+	initial := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "active"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		Process:     proc,
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}
+	saved, err := s.Observe(ctx, initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(10 * time.Second)
+	fresh := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "active"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		Process:     proc,
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}
+	if _, err = s.Observe(ctx, fresh); err != nil {
+		t.Fatal(err)
+	}
+	// Delayed observer batch: process absence sampled before the latest native callback.
+	absent := Observation{
+		Source:         ObservationSourceProcess,
+		Evidence:       ObservationEvidenceProcessPresence,
+		Harness:        HarnessPi,
+		Process:        proc,
+		ProcessPresent: new(false),
+		ObservedAt:     now.Add(-5 * time.Second),
+	}
+	if _, err = s.Observe(ctx, absent); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Presence == PresenceGone {
+		t.Fatalf("native evidence at %s was overridden by older absence at %s", fresh.ObservedAt, absent.ObservedAt)
+	}
+}
+
+func TestStoreMultiSessionHarnessDoesNotRetireSiblingSessions(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	s.setNowForTest(func() time.Time { return now })
+	proc := &ProcessIdentity{PID: 1234, StartIdentity: "gateway-incarnation"}
+	first := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessOpenClaw,
+		Identity:    ObservationIdentity{SessionID: "concurrent-A"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		Process:     proc,
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}
+	saved, err := s.Observe(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	second := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessOpenClaw,
+		Identity:    ObservationIdentity{SessionID: "concurrent-B"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		Process:     proc,
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}
+	if _, err = s.Observe(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Presence != PresenceLive {
+		t.Fatalf("session A became %q with reason=%q solely because session B reported the same host process", got.Presence, got.ActivityDecision.Reason)
+	}
+}
+
+func TestStoreSameMillisecondNativeEventsDoNotConflict(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	s.setNowForTest(func() time.Time { return now })
+	first := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessKilo,
+		Identity:    ObservationIdentity{SessionID: "kilo-session"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		NativeEvent: "session.status",
+		Attributes:  map[string]string{"aht_integration": "kilo-plugin", "kilo_status": "busy"},
+		ObservedAt:  now,
+	}
+	saved, err := s.Observe(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessKilo,
+		Identity:    ObservationIdentity{SessionID: "kilo-session"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityIdle),
+		NativeEvent: "session.status",
+		Attributes:  map[string]string{"aht_integration": "kilo-plugin", "kilo_status": "idle"},
+		ObservedAt:  now,
+	}
+	_, err = s.Observe(ctx, second)
+	got, getErr := s.Get(ctx, saved.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if errors.Is(err, ErrObservationConflict) {
+		t.Fatalf("distinct sequential event in the same millisecond rejected: %v; activity remains %q", err, *got.Activity)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

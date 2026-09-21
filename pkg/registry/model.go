@@ -359,6 +359,20 @@ func (h Harness) IsValid() bool {
 	return false
 }
 
+// ExclusiveProcessSessions reports whether a process hosts at most one native session.
+func (h Harness) ExclusiveProcessSessions() bool {
+	switch h {
+	case HarnessOpenClaw:
+		return false
+	case HarnessClaude, HarnessCodex, HarnessCursor, HarnessCopilot, HarnessCline,
+		HarnessKimiCode, HarnessGrok, HarnessGoose, HarnessPi, HarnessOmp,
+		HarnessOpenCode, HarnessAgy, HarnessKilo, HarnessDroid, HarnessHermes:
+		return true
+	default:
+		return true
+	}
+}
+
 func (g SummaryGroupBy) IsValid() bool {
 	switch g {
 	case SummaryGroupByMultiplexerSession, SummaryGroupByProject, SummaryGroupByHarness:
