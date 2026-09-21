@@ -21,7 +21,9 @@ import (
 
 const (
 	// indexVersion is the schema version written by indexSchema.
-	indexVersion = 2
+	indexVersion            = 2
+	indexApplicationID      = 0x41485431 // ASCII "AHT1".
+	requiredIndexTableCount = 4
 	// indexInvalidSuffix names the retained copy of an unusable default cache.
 	indexInvalidSuffix = ".invalid"
 	// sqlitePrimaryCodeMask isolates a primary SQLite result code from extended codes.
@@ -51,6 +53,7 @@ CREATE TRIGGER parts_insert AFTER INSERT ON parts BEGIN
  INSERT INTO parts_fts(rowid,folded) VALUES(new.id,new.folded); END;
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  INSERT INTO parts_fts(parts_fts,rowid,folded) VALUES('delete',old.id,old.folded); END;
+PRAGMA application_id=0x41485431;
 PRAGMA user_version=2;
 `
 
@@ -198,6 +201,13 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 // ensureSchema validates the on-disk schema, creating it when the file holds no
 // tables at all.
 func (index *historyIndex) ensureSchema(ctx context.Context) error {
+	var appID int
+	if err := index.conn.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+		if isIndexContentFailure(err) {
+			return schemaFailure(err)
+		}
+		return fmt.Errorf("read history index application id: %w", err)
+	}
 	var version int
 	if err := index.conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		if isIndexContentFailure(err) {
@@ -205,10 +215,10 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 		}
 		return fmt.Errorf("read history index version: %w", err)
 	}
-	if version == indexVersion {
-		return nil
+	if version == indexVersion && appID == indexApplicationID {
+		return index.validateSchemaTables(ctx)
 	}
-	if version != 0 {
+	if version != 0 || appID != 0 {
 		return errIndexSchema
 	}
 	tx, err := index.conn.BeginTx(ctx, nil)
@@ -224,10 +234,41 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 	return nil
 }
 
+func (index *historyIndex) validateSchemaTables(ctx context.Context) error {
+	var count int
+	if err := index.conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('files','conversations','parts','parts_fts')").Scan(&count); err != nil {
+		if isIndexContentFailure(err) {
+			return schemaFailure(err)
+		}
+		return fmt.Errorf("inspect history index tables: %w", err)
+	}
+	if count < requiredIndexTableCount {
+		return errIndexSchema
+	}
+	var foreignCount int
+	if err := index.conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('files','conversations','parts','parts_fts') AND name NOT LIKE 'parts_fts_%'").Scan(&foreignCount); err != nil {
+		if isIndexContentFailure(err) {
+			return schemaFailure(err)
+		}
+		return fmt.Errorf("inspect history index foreign tables: %w", err)
+	}
+	if foreignCount != 0 {
+		return errIndexSchema
+	}
+	return nil
+}
+
 // createSchema creates the index schema inside the caller's write transaction:
 // the emptiness and version checks happen under the write lock, so concurrent
 // searches observe one creator instead of racing to create the same tables.
 func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
+	var appID int
+	if err := tx.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+		if isIndexContentFailure(err) {
+			return schemaFailure(err)
+		}
+		return fmt.Errorf("read history index application id: %w", err)
+	}
 	var version int
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		if isIndexContentFailure(err) {
@@ -236,11 +277,21 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("read history index version: %w", err)
 	}
 	switch {
-	case version == indexVersion:
+	case version == indexVersion && appID == indexApplicationID:
 		return nil
-	case version != 0:
+	case version != 0 || appID != 0:
 		return errIndexSchema
 	}
+	if err := index.inspectSchemaEmptiness(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, indexSchema); err != nil {
+		return fmt.Errorf("create history index: %w", err)
+	}
+	return nil
+}
+
+func (index *historyIndex) inspectSchemaEmptiness(ctx context.Context, tx *sql.Tx) error {
 	var tables int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").Scan(&tables); err != nil {
 		if isIndexContentFailure(err) {
@@ -250,9 +301,6 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 	}
 	if tables != 0 {
 		return errIndexSchema
-	}
-	if _, err := tx.ExecContext(ctx, indexSchema); err != nil {
-		return fmt.Errorf("create history index: %w", err)
 	}
 	return nil
 }
@@ -277,6 +325,9 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	//nolint:gosec // G202: sourceSQL emits only fixed predicates, binds every source value, and uses 0 for empty selections; TestIndexScopesFileMetadataAndCandidates exercises the SQLite queries.
 	rows, err := index.conn.QueryContext(ctx, "SELECT id,harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
 	if err != nil {
+		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
+			return schemaFailure(err)
+		}
 		return fmt.Errorf("read indexed histories: %w", err)
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()

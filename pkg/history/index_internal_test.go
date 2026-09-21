@@ -2,7 +2,9 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,4 +173,151 @@ func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 	}
 	compareIndexedSearch(t, c, Query{Text: "needle"})
 	compareIndexedSearch(t, c, Query{Text: "canceled token"})
+}
+
+func TestTwoLoadedIndexesDoNotDuplicateAppend(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	body := "{\"type\":\"session\",\"id\":\"review-session\",\"cwd\":\"/work\"}\n" +
+		"{\"type\":\"message\",\"id\":\"seed\",\"message\":{\"role\":\"user\",\"content\":\"seed token\"}}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sources := []Source{{Harness: registry.HarnessPi, Path: root}}
+	indexPath := filepath.Join(t.TempDir(), "index.sqlite")
+	catalog := Catalog{Sources: sources, IndexPath: indexPath}
+	if _, err := catalog.Search(ctx, Query{Text: "seed token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first, second := openTwoTestIndexes(t, ctx, indexPath, sources)
+	defer func() { _ = first.close() }()
+	defer func() { _ = second.close() }()
+
+	appendTranscriptLine(t, path, "append", "review appended token")
+	indexTranscriptFile(t, ctx, first, sources[0], path, "review appended token")
+	indexTranscriptFile(t, ctx, second, sources[0], path, "review appended token")
+
+	var count int
+	if err := second.conn.QueryRowContext(ctx, "SELECT count(*) FROM parts WHERE message_id='append'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("append indexed %d times; want exactly once", count)
+	}
+}
+
+func openTwoTestIndexes(t *testing.T, ctx context.Context, indexPath string, sources []Source) (*historyIndex, *historyIndex) {
+	t.Helper()
+	first, err := openHistoryIndex(ctx, indexPath, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := openHistoryIndex(ctx, indexPath, sources)
+	if err != nil {
+		_ = first.close()
+		t.Fatal(err)
+	}
+	return first, second
+}
+
+func appendTranscriptLine(t *testing.T, path, id, token string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	msg := "{\"type\":\"message\",\"id\":\"" + id + "\",\"message\":{\"role\":\"user\",\"content\":\"" + token + "\"}}\n"
+	if _, err := file.WriteString(msg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func indexTranscriptFile(t *testing.T, ctx context.Context, index *historyIndex, source Source, path, needle string) {
+	t.Helper()
+	opened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	s := &search{
+		index:       index,
+		query:       Query{Text: needle, Limit: 100},
+		needle:      needle,
+		needleASCII: true,
+		needleBytes: []byte(needle),
+	}
+	if err := index.transcript(ctx, s, source, path, opened); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForeignDatabaseNotAltered(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	foreignPath := filepath.Join(t.TempDir(), "foreign.sqlite")
+	beforeHash := createForeignTestDB(t, ctx, foreignPath)
+
+	sources := []Source{{Harness: registry.HarnessPi, Path: t.TempDir()}}
+	idx, err := openHistoryIndex(ctx, foreignPath, sources)
+	if idx != nil {
+		defer func() { _ = idx.close() }()
+	}
+	if err == nil {
+		t.Fatal("expected error opening foreign database")
+	}
+
+	verifyForeignDBUnmodified(t, ctx, foreignPath, beforeHash)
+}
+
+func createForeignTestDB(t *testing.T, ctx context.Context, foreignPath string) [32]byte {
+	t.Helper()
+	db, err := sql.Open("sqlite", foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=DELETE; CREATE TABLE unrelated_data(value TEXT); INSERT INTO unrelated_data VALUES('keep me'); PRAGMA user_version=2;"); err != nil {
+		t.Fatal(err)
+	}
+	beforeBytes, err := os.ReadFile(foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha256.Sum256(beforeBytes)
+}
+
+func verifyForeignDBUnmodified(t *testing.T, ctx context.Context, foreignPath string, beforeHash [32]byte) {
+	t.Helper()
+	verifyDB, err := sql.Open("sqlite", foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = verifyDB.Close() }()
+	var mode string
+	if err := verifyDB.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "delete" {
+		t.Fatalf("journal mode was mutated to %q, want delete", mode)
+	}
+	var val string
+	if err := verifyDB.QueryRowContext(ctx, "SELECT value FROM unrelated_data").Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != "keep me" {
+		t.Fatalf("data changed: %q", val)
+	}
+
+	afterBytes, err := os.ReadFile(foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterHash := sha256.Sum256(afterBytes)
+	if beforeHash != afterHash {
+		t.Fatalf("foreign database bytes changed from %s to %s", hex.EncodeToString(beforeHash[:]), hex.EncodeToString(afterHash[:]))
+	}
 }

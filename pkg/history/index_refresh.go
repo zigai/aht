@@ -196,28 +196,15 @@ func (index *historyIndex) refresh(ctx context.Context, s *search, source Source
 }
 
 func (index *historyIndex) writeRefresh(ctx context.Context, s *search, source Source, path, stamp string, previous indexedFile, read func(*indexWriter, *search, indexedFile) error) (indexedFile, error) {
-	fileID := previous.id
-	// Storing tool content is opt-in, but a file that already stores it keeps it:
-	// the tool mode never flaps and the indexed rows are written once.
-	includeTools := previous.tools || s.query.IncludeTools
-	if fileID == 0 {
-		// A concurrent search may have indexed this history first: the upsert keeps
-		// exactly one row per history and adopts the storage mode of this refresh.
-		if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,stamp,checkpoint,issues,omitted) VALUES(?,?,?,'','','[]',0) ON CONFLICT(harness,path) DO UPDATE SET tools=excluded.tools", source.Harness, path, includeTools); err != nil {
-			return indexedFile{}, index.contention(fmt.Errorf("add indexed history: %w", err))
-		}
-		id, err := index.indexedRow(ctx, source, path)
-		if err != nil {
-			return indexedFile{}, err
-		}
-		fileID = id
+	file, skip, err := index.prepareIndexedFile(ctx, s, source, path, stamp, previous)
+	if err != nil || skip {
+		return file, err
 	}
-	// saveRefresh persists the row this refresh wrote, not the id it started from.
-	previous.id = fileID
+
 	writer := new(indexWriter)
-	writer.tx, writer.fileID = index.tx, fileID
-	writer.includeTools = includeTools
-	writer.checkpoint.Tools = includeTools
+	writer.tx, writer.fileID = index.tx, file.id
+	writer.includeTools = file.tools
+	writer.checkpoint.Tools = file.tools
 	insert, err := index.tx.PrepareContext(ctx, "INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp) VALUES(?,?,?,?,?,?,?)")
 	if err != nil {
 		return indexedFile{}, fmt.Errorf("prepare history indexing: %w", err)
@@ -225,15 +212,49 @@ func (index *historyIndex) writeRefresh(ctx context.Context, s *search, source S
 	writer.insert = insert
 	defer func() { _ = writer.insert.Close() }()
 	reader := new(search)
-	reader.query.IncludeTools = includeTools
+	reader.query.IncludeTools = file.tools
 	reader.kimiDirs, reader.writer = s.kimiDirs, writer
-	if err = read(writer, reader, previous); err != nil {
+	if err = read(writer, reader, file); err != nil {
 		return indexedFile{}, err
 	}
 	if err = errors.Join(writer.err, ctx.Err()); err != nil {
 		return indexedFile{}, fmt.Errorf("refresh history: %w", err)
 	}
-	return index.saveRefresh(ctx, source, path, stamp, previous, reader)
+	return index.saveRefresh(ctx, source, path, stamp, file, reader)
+}
+
+func (index *historyIndex) prepareIndexedFile(ctx context.Context, s *search, source Source, path, stamp string, previous indexedFile) (indexedFile, bool, error) {
+	var current indexedFile
+	err := index.tx.QueryRowContext(ctx, "SELECT id,stamp,checkpoint,issues,omitted,tools FROM files WHERE harness=? AND path=?", source.Harness, path).Scan(
+		&current.id, &current.stamp, &current.checkpoint, &current.issues, &current.omitted, &current.tools,
+	)
+	includeTools := previous.tools || s.query.IncludeTools
+	switch {
+	case err == nil:
+		includeTools = current.tools || s.query.IncludeTools
+		if current.stamp == stamp && (!s.query.IncludeTools || current.tools) {
+			current.harness = string(source.Harness)
+			current.path = path
+			return current, true, nil
+		}
+		current.harness = string(source.Harness)
+		current.path = path
+		current.tools = includeTools
+		return current, false, nil
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,stamp,checkpoint,issues,omitted) VALUES(?,?,?,'','','[]',0) ON CONFLICT(harness,path) DO UPDATE SET tools=excluded.tools", source.Harness, path, includeTools); err != nil {
+			return indexedFile{}, false, index.contention(fmt.Errorf("add indexed history: %w", err))
+		}
+		id, err := index.indexedRow(ctx, source, path)
+		if err != nil {
+			return indexedFile{}, false, err
+		}
+		previous.id = id
+		previous.tools = includeTools
+		return previous, false, nil
+	default:
+		return indexedFile{}, false, fmt.Errorf("identify indexed history: %w", err)
+	}
 }
 
 // indexedRow returns the row of one indexed history, visible to the open
