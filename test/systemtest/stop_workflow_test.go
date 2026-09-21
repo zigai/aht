@@ -269,6 +269,7 @@ func seedTmuxStopSession(t *testing.T, store *registry.FileStore, sessionID stri
 	process := &registry.ProcessIdentity{
 		PID:           pane.PanePID,
 		StartIdentity: requireProcessStartIdentity(t, pane.PanePID),
+		Foreground:    true,
 	}
 	present := true
 	at := time.Now().UTC()

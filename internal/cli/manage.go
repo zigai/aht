@@ -349,10 +349,48 @@ func validateTmuxStopTarget(ctx context.Context, s registry.Session) (stopTarget
 	if e != nil {
 		return stopTargetValidation{}, fmt.Errorf("list tmux panes: %w", e)
 	}
-	return tmuxStopTargetValidation(s, panes), nil
+	v := tmuxStopTargetValidation(s, panes)
+	if !v.OK {
+		return v, nil
+	}
+	return revalidateTmuxForegroundProcess(ctx, s)
+}
+
+func revalidateTmuxForegroundProcess(ctx context.Context, s registry.Session) (stopTargetValidation, error) {
+	if s.Process == nil || s.Process.PID <= 0 {
+		return stopTargetValidation{OK: true}, nil
+	}
+	if !s.Process.Complete() {
+		return stopTargetValidation{Reason: "missing process start identity"}, nil
+	}
+	id := processinfo.StartIdentity(ctx, s.Process.PID)
+	if id == "" {
+		return stopTargetValidation{Reason: "process no longer exists"}, nil
+	}
+	if id != s.Process.StartIdentity {
+		return stopTargetValidation{Reason: "process identity changed"}, nil
+	}
+	cmd, e := processinfo.CommandName(ctx, s.Process.PID)
+	if e != nil {
+		return stopTargetValidation{}, fmt.Errorf("read process command: %w", e)
+	}
+	if !harnessCommandMatches(s.Harness, cmd) {
+		return stopTargetValidation{Reason: "process command changed"}, nil
+	}
+	proc, found, err := processinfo.Find(ctx, s.Process.PID)
+	if err != nil {
+		return stopTargetValidation{}, fmt.Errorf("find process: %w", err)
+	}
+	if !found || !proc.Foreground {
+		return stopTargetValidation{Reason: "process is not in foreground"}, nil
+	}
+	return stopTargetValidation{OK: true}, nil
 }
 
 func tmuxStopTargetValidation(session registry.Session, panes []tmux.Pane) stopTargetValidation {
+	if session.Process != nil && !session.Process.Foreground {
+		return stopTargetValidation{Reason: "tracked process is not in foreground"}
+	}
 	paneIDFound := false
 	for _, p := range panes {
 		if p.Tmux.PaneID != session.Tmux.PaneID {

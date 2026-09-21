@@ -221,6 +221,35 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 	}
 }
 
+func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
+	t.Parallel()
+
+	loc := registry.TmuxContext{
+		ServerSocket: "/tmp/aht-test.sock",
+		PaneID:       "%3",
+		PanePID:      200,
+		SessionID:    "$1",
+		WindowID:     "@1",
+	}
+	session := registry.Session{
+		Presence: registry.PresenceLive,
+		Tmux:     loc,
+		Process: &registry.ProcessIdentity{
+			PID:           201,
+			StartIdentity: "agent-201",
+			Foreground:    false,
+		},
+	}
+	target, ok := stopTargetForSession(session)
+	if !ok || target.Method != "tmux-interrupt" {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+	result := tmuxStopTargetValidation(session, []tmux.Pane{{Tmux: loc, PanePID: 200}})
+	if result.OK {
+		t.Fatal("unchanged shell pane accepted tmux interrupt even though tracked agent was not foreground")
+	}
+}
+
 func TestRunManageStopSessionsValidatesBeforeDeduplicating(t *testing.T) {
 	t.Parallel()
 
