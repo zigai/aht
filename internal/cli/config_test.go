@@ -622,3 +622,20 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatal("file was not overwritten with default template on --force")
 	}
 }
+
+func TestAutoCleanCLIFlagHonorsConfiguredMaxGoneAge(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{
+		Retention: config.RetentionConfig{
+			AutoClean:  new(false),
+			MaxGoneAge: "7d",
+		},
+	}
+	var opts observeOptions
+	applyTrackerAutoClean(&opts, cfg)
+	opts.autoClean = true
+	if opts.maxGoneAge != 7*24*time.Hour {
+		t.Fatalf("enabling --auto-clean after loading default config uses %v retention, want 7d", opts.maxGoneAge)
+	}
+}

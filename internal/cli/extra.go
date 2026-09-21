@@ -163,12 +163,14 @@ func applyTrackerIntervals(o *observeOptions, cmd *cobra.Command, cfg config.Con
 }
 
 func applyTrackerAutoClean(o *observeOptions, cfg config.Config) {
-	if cfg.Retention.AutoClean != nil && *cfg.Retention.AutoClean && cfg.Retention.MaxGoneAge != "" {
+	if cfg.Retention.MaxGoneAge != "" {
 		d, err := config.ParseDuration(cfg.Retention.MaxGoneAge)
 		if err == nil && d >= 0 {
-			o.autoClean = true
 			o.maxGoneAge = d
 		}
+	}
+	if cfg.Retention.AutoClean != nil && *cfg.Retention.AutoClean {
+		o.autoClean = true
 	}
 }
 
