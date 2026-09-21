@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/pkg/history"
 	"github.com/zigai/aht/pkg/registry"
@@ -353,5 +354,218 @@ func TestSearchCLIUnsupportedSourceSummaryListsHarnessOnce(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "cursor, cursor") {
 		t.Fatalf("harness listed twice: %q", stderr.String())
+	}
+}
+
+func TestHighlightNeedle(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name          string
+		text          string
+		needle        string
+		caseSensitive bool
+		want          string
+	}{
+		{
+			name:          "case-insensitive simple",
+			text:          "Hello World",
+			needle:        "world",
+			caseSensitive: false,
+			want:          "Hello \x1b[1;36mWorld\x1b[0m",
+		},
+		{
+			name:          "case-insensitive multiple",
+			text:          "test one, TEST two, Test three",
+			needle:        "test",
+			caseSensitive: false,
+			want:          "\x1b[1;36mtest\x1b[0m one, \x1b[1;36mTEST\x1b[0m two, \x1b[1;36mTest\x1b[0m three",
+		},
+		{
+			name:          "case-sensitive match",
+			text:          "Exact Match and exact mismatch",
+			needle:        "Exact",
+			caseSensitive: true,
+			want:          "\x1b[1;36mExact\x1b[0m Match and exact mismatch",
+		},
+		{
+			name:          "no match",
+			text:          "completely unrelated content",
+			needle:        "absent",
+			caseSensitive: false,
+			want:          "completely unrelated content",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := highlightNeedle(tt.text, tt.needle, tt.caseSensitive)
+			if got != tt.want {
+				t.Errorf("highlightNeedle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchMatchTTY(t *testing.T) {
+	t.Parallel()
+	var stdout bytes.Buffer
+	app := &application{stdout: &stdout}
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	match := history.Match{
+		Conversation: history.Conversation{
+			Harness:   registry.HarnessPi,
+			SessionID: "01a0c324-11ca-7000-894a-0e31b911d7ae",
+			Title:     "Fix failing workflow",
+			CWD:       "/work/project",
+			Path:      "/work/project/session.jsonl",
+			UpdatedAt: now,
+		},
+		Live: []history.LiveState{
+			{Presence: registry.PresenceLive},
+		},
+		Excerpts: []history.Excerpt{
+			{Role: "user", Text: "Please fix the failing workflow"},
+			{Role: "assistant", Text: "I fixed the workflow test"},
+		},
+	}
+	if err := app.writeSearchMatchTTY(match, history.Query{Text: "workflow"}, false); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Fix failing workflow") {
+		t.Errorf("TTY output missing title: %q", output)
+	}
+	if !strings.Contains(output, "01a0c324") {
+		t.Errorf("TTY output missing inline short ID: %q", output)
+	}
+	if !strings.Contains(output, "● live") {
+		t.Errorf("TTY output missing live badge: %q", output)
+	}
+	if !strings.Contains(output, "├─") || !strings.Contains(output, "└─") {
+		t.Errorf("TTY output missing tree connectors: %q", output)
+	}
+	if strings.Contains(output, "\x1b[2m│\x1b[0m\n") {
+		t.Errorf("TTY output must not contain standalone stem line: %q", output)
+	}
+	if !strings.Contains(output, "\x1b[1;36mworkflow\x1b[0m") {
+		t.Errorf("TTY output missing highlighted needle: %q", output)
+	}
+	if !strings.Contains(output, "\x1b[1;33muser:\x1b[0m") || !strings.Contains(output, "\x1b[1;37massistant:\x1b[0m") {
+		t.Errorf("TTY output missing distinct role colors: %q", output)
+	}
+}
+
+func TestCleanSessionTitle(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "# AGENTS.md instructions for /home/zigai/Projects/loti <INSTRUCTIONS> When calling spawn_agent, never set the...",
+			want:  "When calling spawn_agent, never set the...",
+		},
+		{
+			input: "<environment_context> <cwd>/home/user/app</cwd> </environment_context> Real task description",
+			want:  "Real task description",
+		},
+		{
+			input: "Normal session title",
+			want:  "Normal session title",
+		},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			got := cleanSessionTitle(tt.input)
+			if got != tt.want {
+				t.Errorf("cleanSessionTitle(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveSearchTitle(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name     string
+		conv     history.Conversation
+		excerpts []history.Excerpt
+		want     string
+	}{
+		{
+			name: "fallback when title is a truncated fragment",
+			conv: history.Conversation{
+				SessionID: "sess1",
+				Title:     "When calli…",
+			},
+			excerpts: []history.Excerpt{
+				{Role: "user", Text: "No not this. It was not for freelance jobs, it was for regular jobs."},
+			},
+			want: "No not this. It was not for freelance jobs, it was for regular jobs.",
+		},
+		{
+			name: "fallback when title contains environment context",
+			conv: history.Conversation{
+				SessionID: "sess2",
+				Title:     "<environment_context> <cwd>/home/user/project</cwd> <approval_policy>on…",
+			},
+			excerpts: []history.Excerpt{
+				{Role: "user", Text: "Professional settings, including an internship at nChain and freelance projects."},
+			},
+			want: "Professional settings, including an internship at nChain and freelance projects.",
+		},
+		{
+			name: "retains clean existing title",
+			conv: history.Conversation{
+				SessionID: "sess3",
+				Title:     "Fix failing GitHub Actions workflow",
+			},
+			excerpts: []history.Excerpt{
+				{Role: "user", Text: "Please fix GHA"},
+			},
+			want: "Fix failing GitHub Actions workflow",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveSearchTitle(tt.conv, tt.excerpts)
+			if got != tt.want {
+				t.Errorf("resolveSearchTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchCLIRoleFilter(t *testing.T) {
+	path := searchCLIFixture(t)
+	store := filepath.Join(t.TempDir(), "state.json")
+	for _, test := range []struct {
+		role    string
+		matches int
+		valid   bool
+	}{
+		{"user", 1, true},
+		{"agent", 0, true},
+		{"assistant", 0, true},
+		{"all", 1, true},
+		{"invalid", 0, false},
+	} {
+		t.Run("role="+test.role, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := []string{"--no-config", "--store", store, "--json", "search", "Refresh token", "--source", "pi=" + path, "--role", test.role}
+			code := executeCLI(t.Context(), args, strings.NewReader(""), &stdout, &stderr)
+			if !test.valid {
+				if code != exitCodeUsage {
+					t.Fatalf("expected usage error for invalid role %q, got code %d", test.role, code)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("expected success for role %q, got code %d, stderr: %s", test.role, code, stderr.String())
+			}
+			var result history.Result
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Matches) != test.matches {
+				t.Fatalf("role %q: got %d matches, want %d", test.role, len(result.Matches), test.matches)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"unicode"
 
@@ -242,6 +243,13 @@ func (app *application) maxLineWidth() int {
 		}
 	}
 	return humanLineWidth
+}
+
+func (app *application) isColorEnabled() bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("NOCOLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return app != nil && app.stdout != nil && terminalWidth(app.stdout) > 0
 }
 
 func validateHumanColumns(columns []humanColumn, maxLineWidth int) error {
