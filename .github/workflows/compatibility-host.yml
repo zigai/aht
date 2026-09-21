@@ -57,13 +57,14 @@ jobs:
       - name: Install tmux
         run: |
           sudo apt-get update && sudo apt-get install --yes libevent-dev ncurses-dev build-essential bison pkg-config
-          curl -fsSL https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz | tar -xz
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o tmux-3.6.tar.gz https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz
+          tar -xzf tmux-3.6.tar.gz
           cd tmux-3.6
           ./configure --prefix=/usr
           make -j"$(nproc)"
           sudo make install
           cd ..
-          rm -rf tmux-3.6
+          rm -rf tmux-3.6 tmux-3.6.tar.gz
 
       - name: Exercise installed integration and host
         id: lifecycle
