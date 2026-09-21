@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type MemoryStore struct {
 	storageRevision   uint64
 	persistedRevision uint64
 	stateChanged      chan struct{}
+	lastDiskModTime   time.Time
+	lastDiskSize      int64
 	dirty             chan struct{}
 	flush             chan struct{}
 }
@@ -49,6 +52,12 @@ func OpenMemoryStore(path string) (*MemoryStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	var modTime time.Time
+	var size int64
+	if fi, err := os.Stat(fileStore.Path()); err == nil {
+		modTime = fi.ModTime()
+		size = fi.Size()
+	}
 
 	return &MemoryStore{
 		mu:                sync.RWMutex{},
@@ -58,6 +67,8 @@ func OpenMemoryStore(path string) (*MemoryStore, error) {
 		revision:          1,
 		storageRevision:   0,
 		persistedRevision: 0,
+		lastDiskModTime:   modTime,
+		lastDiskSize:      size,
 		stateChanged:      make(chan struct{}),
 		dirty:             make(chan struct{}, 1),
 		flush:             make(chan struct{}, 1),
@@ -99,6 +110,7 @@ func (s *MemoryStore) ObserveBatch(ctx context.Context, observations []Observati
 	}
 
 	s.mu.Lock()
+	s.syncFromDiskLocked()
 	receivedAt := s.now().UTC()
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
 	saved, err := applyObservationBatch(ctx, &candidate, observations, receivedAt)
@@ -155,12 +167,14 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
+	s.syncFromDiskLocked()
 	session, ok := s.snapshot.Sessions[id]
-	s.mu.RUnlock()
 	if !ok {
+		s.mu.Unlock()
 		return Session{}, ErrSessionNotFound
 	}
+	s.mu.Unlock()
 
 	session = cloneSessionValue(session)
 	session.SchemaVersion = storeSchemaVersion
@@ -193,6 +207,7 @@ func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResu
 	}
 
 	s.mu.Lock()
+	s.syncFromDiskLocked()
 	if err := ctx.Err(); err != nil {
 		s.mu.Unlock()
 		return GCResult{}, fmt.Errorf("collecting registry: %w", err)
@@ -232,10 +247,10 @@ func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, 
 		return StateSnapshot{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
+	s.syncFromDiskLocked()
 	state := s.stateLocked(filter)
-	s.mu.RUnlock()
-
+	s.mu.Unlock()
 	return state, nil
 }
 
@@ -295,14 +310,21 @@ func (s *MemoryStore) Flush(ctx context.Context) error {
 		return fmt.Errorf("flushing registry: %w", err)
 	}
 
-	s.mu.RLock()
+	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+
+	s.mu.Lock()
+	s.syncFromDiskLocked()
 	if s.storageRevision <= s.persistedRevision {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return nil
 	}
 	revision := s.storageRevision
 	snapshot := cloneRegistrySnapshot(s.snapshot)
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("flushing registry: %w", err)
@@ -312,6 +334,10 @@ func (s *MemoryStore) Flush(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
+	if fi, err := os.Stat(s.path); err == nil {
+		s.lastDiskModTime = fi.ModTime()
+		s.lastDiskSize = fi.Size()
+	}
 	if revision > s.persistedRevision {
 		s.persistedRevision = revision
 	}
@@ -322,6 +348,50 @@ func (s *MemoryStore) Flush(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ResetResult{}, fmt.Errorf("checking context: %w", err)
+	}
+	select {
+	case s.flush <- struct{}{}:
+		defer func() { <-s.flush }()
+	case <-ctx.Done():
+		return ResetResult{}, fmt.Errorf("waiting to reset registry: %w", ctx.Err())
+	}
+
+	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	if err != nil {
+		return ResetResult{}, err
+	}
+	defer func() { _ = lock.Close() }()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.syncFromDiskLocked()
+	cleared := len(s.snapshot.Sessions)
+	now := s.now().UTC()
+	snap := newSnapshot()
+	snap.UpdatedAt = now
+	s.snapshot = snap
+	s.storageRevision++
+	s.revision++
+
+	if err := writeSnapshotAtomic(s.path, snap); err != nil {
+		return ResetResult{}, err
+	}
+	if fi, err := os.Stat(s.path); err == nil {
+		s.lastDiskModTime = fi.ModTime()
+		s.lastDiskSize = fi.Size()
+	}
+	s.persistedRevision = s.storageRevision
+	close(s.stateChanged)
+	s.stateChanged = make(chan struct{})
+	s.signalDirty()
+
+	return ResetResult{Cleared: cleared, Remaining: 0}, nil
 }
 
 // RunPersistence coalesces bursts of observations into durable atomic snapshots.
@@ -362,6 +432,57 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 			}
 			return fmt.Errorf("persisting registry snapshot: %w", err)
 		}
+	}
+}
+
+func (s *MemoryStore) syncFromDiskLocked() {
+	fi, err := os.Stat(s.path)
+	if err != nil {
+		return
+	}
+	if fi.ModTime().Equal(s.lastDiskModTime) && fi.Size() == s.lastDiskSize {
+		return
+	}
+	data, err := readSnapshotFile(s.path)
+	if err != nil {
+		return
+	}
+	var snap snapshot
+	if err := json.Unmarshal(data, &snap); err != nil || snap.SchemaVersion != storeSchemaVersion {
+		return
+	}
+	if snap.Sessions == nil {
+		snap.Sessions = make(map[string]Session)
+	}
+	s.lastDiskModTime = fi.ModTime()
+	s.lastDiskSize = fi.Size()
+	s.mergeDiskSnapshotLocked(snap)
+}
+
+func (s *MemoryStore) mergeDiskSnapshotLocked(snap snapshot) {
+	// A newer empty snapshot from another process clears local state.
+	if len(snap.Sessions) == 0 && !snap.UpdatedAt.IsZero() && (len(s.snapshot.Sessions) == 0 || snap.UpdatedAt.After(s.snapshot.UpdatedAt)) {
+		s.snapshot = cloneRegistrySnapshot(snap)
+		s.storageRevision++
+		s.revision++
+		return
+	}
+
+	changed := false
+	for id, diskSess := range snap.Sessions {
+		memSess, exists := s.snapshot.Sessions[id]
+		if !exists || diskSess.UpdatedAt.After(memSess.UpdatedAt) {
+			s.snapshot.Sessions[id] = cloneSessionValue(diskSess)
+			changed = true
+		}
+	}
+	if snap.UpdatedAt.After(s.snapshot.UpdatedAt) {
+		s.snapshot.UpdatedAt = snap.UpdatedAt
+		changed = true
+	}
+	if changed {
+		s.storageRevision++
+		s.revision++
 	}
 }
 

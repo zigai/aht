@@ -201,7 +201,8 @@ func validateRequest(request broker.Request) error {
 		broker.MethodGet,
 		broker.MethodSummary,
 		broker.MethodGC,
-		broker.MethodSubscribe:
+		broker.MethodSubscribe,
+		broker.MethodReset:
 	default:
 		return fmt.Errorf("%w: %q", errUnknownMethod, request.Method)
 	}
@@ -253,6 +254,10 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 		var result registry.GCResult
 		result, err = s.store.GC(ctx, request.DeleteAfter)
 		response.GC = &result
+	case broker.MethodReset:
+		var result registry.ResetResult
+		result, err = s.store.Reset(ctx)
+		response.Reset = &result
 	}
 	if err != nil {
 		return operationErrorResponse(request.ID, err)
@@ -329,6 +334,7 @@ func newResponse(id, responseType string) broker.Response {
 		Summaries: nil,
 		Snapshot:  nil,
 		GC:        nil,
+		Reset:     nil,
 		Now:       time.Time{},
 	}
 }

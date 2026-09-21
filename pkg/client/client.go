@@ -141,6 +141,7 @@ type stateStore interface {
 	SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error)
 	SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error)
 	GC(ctx context.Context, maxAge time.Duration) (registry.GCResult, error)
+	Reset(ctx context.Context) (registry.ResetResult, error)
 }
 
 // Client reads and updates agent-harness state through the local AHT broker.
@@ -316,6 +317,14 @@ func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GC
 		return registry.GCResult{}, c.configErr
 	}
 	result, err := c.store.GC(ctx, deleteAfter)
+	return result, publicError(err)
+}
+
+func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
+	if c.configErr != nil {
+		return registry.ResetResult{}, c.configErr
+	}
+	result, err := c.store.Reset(ctx)
 	return result, publicError(err)
 }
 

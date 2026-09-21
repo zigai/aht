@@ -188,3 +188,106 @@ func benchmarkRegistryObserve(b *testing.B, store Store) {
 		}
 	}
 }
+
+func TestMemoryStoreResetClearsLiveState(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := OpenMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	s.setNowForTest(func() time.Time { return now })
+	saved, err := s.Observe(ctx, Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "reset-me"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	disk := NewFileStore(path)
+	if _, err = disk.Reset(ctx); err != nil {
+		t.Fatal(err)
+	}
+	live, err := s.List(ctx, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if _, err = s.Observe(ctx, Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "unrelated"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, restoredErr := disk.Get(ctx, saved.ID)
+	if len(live) != 0 || restoredErr == nil {
+		t.Fatalf("reset left %d live records; deleted record restored on flush=%v", len(live), restoredErr == nil)
+	}
+}
+
+func TestMemoryStoreFlushPreservesExternalFallbackWrites(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := OpenMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	s.setNowForTest(func() time.Time { return now })
+	disk := NewFileStore(path)
+	disk.setNowForTest(func() time.Time { return now })
+	saved, err := disk.Observe(ctx, Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "arrived-before-socket"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Observe(ctx, Observation{
+		Source:      ObservationSourceNative,
+		Evidence:    ObservationEvidenceNativeEvent,
+		Harness:     HarnessPi,
+		Identity:    ObservationIdentity{SessionID: "broker-update"},
+		Presence:    new(PresenceLive),
+		Activity:    new(ActivityRunning),
+		NativeEvent: "agent_start",
+		ObservedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = disk.Get(ctx, saved.ID); errors.Is(err, ErrSessionNotFound) {
+		t.Fatal("successful fallback observation overwritten by broker loaded snapshot")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+}

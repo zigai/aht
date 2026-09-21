@@ -21,6 +21,7 @@ const (
 	MethodSummary      = "summary"
 	MethodGC           = "gc"
 	MethodSubscribe    = "subscribe"
+	MethodReset        = "reset"
 )
 
 // SocketPathEnv overrides the broker socket used by clients and integrations.
@@ -58,6 +59,7 @@ type Response struct {
 	Summaries []registry.Summary      `json:"summaries,omitempty"`
 	Snapshot  *registry.StateSnapshot `json:"snapshot,omitempty"`
 	GC        *registry.GCResult      `json:"gc,omitempty"`
+	Reset     *registry.ResetResult   `json:"reset,omitempty"`
 	Now       time.Time               `json:"now,omitzero"`
 }
 

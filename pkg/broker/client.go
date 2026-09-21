@@ -180,6 +180,19 @@ func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GC
 	return *response.GC, nil
 }
 
+func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
+	request := newRequest(MethodReset)
+	response, err := c.roundTrip(ctx, request)
+	if err != nil {
+		return registry.ResetResult{}, err
+	}
+	if response.Reset == nil {
+		return registry.ResetResult{}, fmt.Errorf("%w: reset response omitted result", ErrProtocol)
+	}
+
+	return *response.Reset, nil
+}
+
 // NewSubscription returns a Subscription wrapping the given channels and optional cancel function.
 func NewSubscription(snapshots <-chan registry.StateSnapshot, errors <-chan error, cancel context.CancelFunc) *Subscription {
 	return &Subscription{Snapshots: snapshots, Errors: errors, cancel: cancel, done: nil}

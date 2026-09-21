@@ -134,3 +134,17 @@ func (s *Store) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCR
 
 	return result, nil
 }
+
+func (s *Store) Reset(ctx context.Context) (registry.ResetResult, error) {
+	result, err := s.client.Reset(ctx)
+	if !IsUnavailable(err) {
+		return result, err
+	}
+
+	result, err = s.fallback.Reset(ctx)
+	if err != nil {
+		return registry.ResetResult{}, fmt.Errorf("resetting fallback registry: %w", err)
+	}
+
+	return result, nil
+}

@@ -139,12 +139,12 @@ func (app *application) newRegistryResetCommand() *cobra.Command {
 			if !force {
 				return exitCode(errStateResetForce, exitCodeUsage)
 			}
-			s := app.store()
+			s := app.registryStore()
 			r, e := s.Reset(cmd.Context())
 			if e != nil {
 				return fmt.Errorf("resetting store: %w", e)
 			}
-			o := manageResetResult{ResetResult: r, Path: s.Path()}
+			o := manageResetResult{ResetResult: r, Path: s.StorePath()}
 			if app.outputJSON {
 				return app.writeJSON(o)
 			}
@@ -161,7 +161,7 @@ func (app *application) newRegistryResetCommand() *cobra.Command {
 
 func (app *application) resolveStopSessions(ctx context.Context, args []string, all bool) ([]registry.Session, error) {
 	if all {
-		listed, err := app.store().List(ctx, registry.Filter{Presence: registry.PresenceLive})
+		listed, err := app.registryStore().List(ctx, registry.Filter{Presence: registry.PresenceLive})
 		if err != nil {
 			return nil, fmt.Errorf("list live sessions: %w", err)
 		}
