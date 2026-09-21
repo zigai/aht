@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -749,5 +750,33 @@ func assertBrokerParity(t *testing.T, groupBy registry.SummaryGroupBy, brokerSum
 			brokerSummaries[i].Total != memSummaries[i].Total {
 			t.Fatalf("mismatch for %s item %d: broker=%+v mem=%+v", groupBy, i, brokerSummaries[i], memSummaries[i])
 		}
+	}
+}
+
+func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.sock")
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	if err = syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}); err != nil {
+		t.Fatal(err)
+	}
+	if err = syscall.Listen(fd, 0); err != nil {
+		t.Fatal(err)
+	} // Tiny queue to reproduce overload deterministically.
+	conn, err := new(net.Dialer).DialContext(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	replacement, err := listenLocal(context.Background(), path)
+	if replacement != nil {
+		defer func() { _ = replacement.Close() }()
+		t.Fatal("BUG: live listening socket with full backlog was unlinked and replaced by another broker listener")
+	}
+	if err == nil {
+		t.Fatal("expected refusal while original listener exists")
 	}
 }

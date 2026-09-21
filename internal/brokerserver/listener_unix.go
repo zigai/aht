@@ -29,6 +29,9 @@ func listenLocal(ctx context.Context, path string) (net.Listener, error) {
 			_ = connection.Close()
 			return nil, ErrAlreadyRunning
 		}
+		if !errors.Is(dialErr, syscall.ECONNREFUSED) {
+			return nil, fmt.Errorf("%w: existing broker socket probe failed: %w", ErrAlreadyRunning, dialErr)
+		}
 		if removeErr := removeStaleSocket(path); removeErr != nil {
 			return nil, removeErr
 		}
