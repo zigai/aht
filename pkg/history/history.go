@@ -1,6 +1,7 @@
 package history
 
 import (
+	"bytes"
 	"cmp"
 	"container/heap"
 	"context"
@@ -10,7 +11,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zigai/aht/internal/pathmatch"
 	"github.com/zigai/aht/pkg/harness"
@@ -56,6 +59,7 @@ type Query struct {
 	Text            string             `json:"text"`
 	Harness         registry.Harness   `json:"harness,omitempty"`
 	Dir             string             `json:"dir,omitempty"`
+	Role            string             `json:"role,omitempty"`
 	IncludeTools    bool               `json:"include_tools"`
 	CaseSensitive   bool               `json:"case_sensitive"`
 	Limit           int                `json:"limit"`
@@ -144,6 +148,7 @@ type Result struct {
 }
 
 type search struct {
+	mu              sync.Mutex
 	index           *historyIndex
 	writer          *indexWriter
 	indexErr        error
@@ -151,6 +156,9 @@ type search struct {
 	kimiDirs        map[string]string
 	query           Query
 	needle          string
+	needleASCII     bool
+	needleEscaped   bool
+	needleBytes     []byte
 	matched         int
 	recent          matchHeap
 	result          Result
@@ -206,6 +214,9 @@ func (q Query) Validate() error {
 		if _, err := harness.Parse(string(q.Harness)); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidQuery, err)
 		}
+	}
+	if q.Role != "" && q.Role != "user" && q.Role != "assistant" && q.Role != "agent" && q.Role != "tool" && q.Role != "all" {
+		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, tool, or all", ErrInvalidQuery, q.Role)
 	}
 	return nil
 }
@@ -320,7 +331,7 @@ func (s *search) indexSources(sources []Source) []Source {
 		}
 		selected = append(selected, source)
 		if info, err := os.Stat(source.Path); err == nil && !info.IsDir() {
-			if resolved, err := filepath.EvalSymlinks(source.Path); err == nil && resolved != source.Path {
+			if resolved, err := resolveSymlinkFile(source.Path); err == nil && resolved != source.Path {
 				selected = append(selected, Source{Harness: source.Harness, Path: resolved})
 			}
 		}
@@ -381,7 +392,50 @@ func (s *search) prepare() error {
 	if !s.query.CaseSensitive {
 		s.needle = fold(s.needle)
 	}
+	s.needleBytes = []byte(s.needle)
+	s.needleASCII = isASCII(s.needle)
+	s.needleEscaped = hasJSONEscapes(s.needle)
+	if s.query.Role == "agent" {
+		s.query.Role = "assistant"
+	}
+	if s.query.Role == "all" {
+		s.query.Role = ""
+	}
 	return nil
+}
+
+func hasJSONEscapes(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x20 || s[i] == '"' || s[i] == '\\' {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *search) containsNeedle(data []byte) bool {
+	if s.needleEscaped {
+		return true
+	}
+	if s.query.CaseSensitive {
+		return bytes.Contains(data, s.needleBytes)
+	}
+	if s.needleASCII && containsFoldASCII(data, s.needle) {
+		return true
+	}
+	if hasNonASCIIBytes(data) {
+		return strings.Contains(fold(string(data)), s.needle)
+	}
+	return false
+}
+
+func hasNonASCIIBytes(b []byte) bool {
+	for _, c := range b {
+		if c >= utf8.RuneSelf {
+			return true
+		}
+	}
+	return false
 }
 
 // reset clears the result state so a discarded attempt cannot leak matches,
@@ -417,6 +471,8 @@ func (s *search) issue(source Source, path string, err error) {
 }
 
 func (s *search) recordIssue(issue Issue) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.result.Issues) >= maxIssues {
 		s.result.OmittedIssues++
 		return
@@ -461,6 +517,8 @@ func (s *search) keep(m Match, indexID int64) {
 	if m.Conversation.SessionID == "" || m.MatchingParts == 0 || !s.accepts(m.Conversation) {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.matched++
 	if s.query.Limit == 0 {
 		s.result.Matches = append(s.result.Matches, m)
@@ -491,6 +549,15 @@ func (s *search) finalize() Result {
 		copy(ordered, s.result.Matches)
 	}
 	slices.SortStableFunc(ordered, compareMatches)
+	slices.SortFunc(s.result.Issues, func(a, b Issue) int {
+		if cmpSource := cmp.Compare(a.Source.Harness, b.Source.Harness); cmpSource != 0 {
+			return cmpSource
+		}
+		if cmpPath := cmp.Compare(a.Path, b.Path); cmpPath != 0 {
+			return cmpPath
+		}
+		return cmp.Compare(a.Message, b.Message)
+	})
 	for i := range ordered {
 		ordered[i].Live = liveMatches(ordered[i].Conversation, s.query.Registry)
 	}
@@ -550,7 +617,7 @@ func liveMatches(c Conversation, sessions []registry.Session) []LiveState {
 			continue
 		}
 		sameID := session.SessionID != "" && session.SessionID == c.SessionID
-		samePath := !isDatabase(c.Path) && session.SessionPath != "" && filepath.Clean(session.SessionPath) == c.Path
+		samePath := !isDatabase(c.Path) && session.SessionPath != "" && (filepath.Clean(session.SessionPath) == c.Path || registry.PathsEqual(session.SessionPath, c.Path))
 		if (sameID && (session.SessionPath == "" || samePath)) || (samePath && session.SessionID == "") {
 			result = append(result, LiveState{RegistryID: session.ID, Presence: session.Presence, UpdatedAt: session.UpdatedAt})
 		}

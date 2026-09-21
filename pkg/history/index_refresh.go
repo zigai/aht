@@ -272,11 +272,6 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path,
 		return file, fmt.Errorf("encode index issues: %w", err)
 	}
 	file = indexedFile{id: previous.id, harness: string(source.Harness), path: path, stamp: stamp, checkpoint: string(checkpoint), issues: string(issues), omitted: reader.result.OmittedIssues, tools: writer.includeTools}
-	// Parse diagnostics are retained for this result, but failures must be retried:
-	// a transient lock or permission failure can recover without a content change.
-	if len(reader.result.Issues) > 0 || reader.result.OmittedIssues > 0 {
-		file.stamp = ""
-	}
 	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=?,tools=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.tools, file.id); err != nil {
 		return file, index.contention(fmt.Errorf("save history checkpoint: %w", err))
 	}

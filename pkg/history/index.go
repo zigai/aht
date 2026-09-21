@@ -68,7 +68,6 @@ type indexedFile struct {
 	omitted                                  int
 	tools                                    bool
 }
-
 type historyIndex struct {
 	db           *sql.DB
 	conn         *sql.Conn

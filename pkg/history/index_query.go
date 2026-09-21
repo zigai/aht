@@ -113,10 +113,7 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	}
 	// Tool parts are stored for opt-in searches only, so a default query must
 	// exclude them from candidate plans in both the trigram and instr branches.
-	predicate := filter
-	if !s.query.IncludeTools {
-		predicate = "(" + filter + ") AND p.role <> 'tool'"
-	}
+	predicate, args := rolePredicate(filter, s.query.Role, s.query.IncludeTools, args)
 	query := "SELECT c.file_id,c.id,p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + predicate
 	trigrams := false
 	if fileID != 0 {
@@ -148,6 +145,16 @@ func (index *historyIndex) smallSelection(ctx context.Context, filter string, ar
 		return false, index.contention(fmt.Errorf("select indexed conversations: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
+}
+
+func rolePredicate(filter, role string, includeTools bool, args []any) (string, []any) {
+	if role != "" {
+		return "(" + filter + ") AND p.role = ?", append(args, role)
+	}
+	if !includeTools {
+		return "(" + filter + ") AND p.role <> 'tool'", args
+	}
+	return filter, args
 }
 
 func (index *historyIndex) matches(ctx context.Context, s *search, file indexedFile, changed bool) (err error) {

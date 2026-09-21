@@ -1,6 +1,7 @@
 package history
 
 import (
+	"bytes"
 	"strings"
 	"unicode/utf8"
 
@@ -52,4 +53,73 @@ func foldRuneIndex(text string, foldedOffset int) int {
 		}
 	}
 	return index
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+func containsFoldASCII(s []byte, needle string) bool {
+	n := len(needle)
+	if n == 0 {
+		return true
+	}
+	if len(s) < n {
+		return false
+	}
+	firstLower := needle[0]
+	firstUpper := firstLower
+	if firstLower >= 'a' && firstLower <= 'z' {
+		firstUpper = firstLower - ('a' - 'A')
+	}
+	limit := len(s) - n
+	for i := 0; i <= limit; {
+		idx1 := bytes.IndexByte(s[i:], firstLower)
+		idx2 := -1
+		if firstLower != firstUpper {
+			idx2 = bytes.IndexByte(s[i:], firstUpper)
+		}
+		next := nextByteIndex(idx1, idx2)
+		if next < 0 {
+			return false
+		}
+		pos := i + next
+		if pos > limit {
+			return false
+		}
+		if matchFoldASCII(s[pos:pos+n], needle) {
+			return true
+		}
+		i = pos + 1
+	}
+	return false
+}
+
+func matchFoldASCII(b []byte, needle string) bool {
+	for i := range len(needle) {
+		c := b[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != needle[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func nextByteIndex(idx1, idx2 int) int {
+	switch {
+	case idx1 >= 0 && idx2 >= 0:
+		return min(idx1, idx2)
+	case idx1 >= 0:
+		return idx1
+	default:
+		return idx2
+	}
 }

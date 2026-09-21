@@ -97,3 +97,79 @@ func TestIndexCleanupOnlyVisitsSelectedSources(t *testing.T) {
 		t.Fatalf("selected vanished source retained: files=%d err=%v", files, err)
 	}
 }
+
+func TestWarmIndexSymlinkedParentSource(t *testing.T) {
+	t.Parallel()
+	realRoot := t.TempDir()
+	symlinkRoot := filepath.Join(t.TempDir(), "symlink-parent")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Fatal(err)
+	}
+	path := writeHistory(t, symlinkRoot, "session.jsonl", treeHistory)
+	link := filepath.Join(symlinkRoot, "selected.jsonl")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	catalog := history.Catalog{
+		Sources:   []history.Source{{Harness: registry.HarnessPi, Path: link}},
+		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
+	}
+	for range 2 {
+		result := requireIndexedMatches(t, catalog, history.Query{Text: "refresh", Limit: 1}, 1)
+		if result.Matches[0].Conversation.Path != path || len(result.Matches[0].Excerpts) == 0 {
+			t.Fatalf("symlink result = %#v", result)
+		}
+	}
+}
+
+func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
+	t.Parallel()
+	realRoot := t.TempDir()
+	symlinkRoot := filepath.Join(t.TempDir(), "symlink-parent")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Fatal(err)
+	}
+	created := writeHistory(t, symlinkRoot, "a-recently-created.jsonl", `{"type":"session","id":"recently-created","cwd":"/work/project","timestamp":"2026-09-20T08:00:00Z"}
+{"type":"message","id":"u1","timestamp":"2026-09-20T08:00:01Z","message":{"role":"user","content":"refresh token"}}
+{"type":"message","id":"a1","timestamp":"2026-09-20T08:30:00Z","message":{"role":"assistant","content":"refresh token again"}}
+`)
+	updated := writeHistory(t, symlinkRoot, "b-recently-updated.jsonl", `{"type":"session","id":"recently-updated","cwd":"/work/project","timestamp":"2026-09-19T00:00:00Z"}
+{"type":"message","id":"u1","timestamp":"2026-09-19T00:00:01Z","message":{"role":"user","content":"refresh token"}}
+{"type":"message","id":"a1","timestamp":"2026-09-20T09:00:00Z","message":{"role":"assistant","content":"refresh token again"}}
+`)
+	sources := []history.Source{{Harness: registry.HarnessPi, Path: created}, {Harness: registry.HarnessPi, Path: updated}}
+	catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
+	query := history.Query{Text: "refresh token", Limit: 1, Registry: []registry.Session{
+		{ID: "live", Harness: registry.HarnessPi, SessionID: "recently-updated", SessionPath: sources[1].Path},
+	}}
+	limited := requireIndexedMatches(t, catalog, query, 1)
+	if len(limited.Matches[0].Live) != 1 {
+		t.Fatalf("live match failed under symlink parent: %#v", limited.Matches[0].Live)
+	}
+}
+
+func TestIndexCleanupSymlinkedParent(t *testing.T) {
+	t.Parallel()
+	realRoot := t.TempDir()
+	symlinkRoot := filepath.Join(t.TempDir(), "symlink-parent")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Fatal(err)
+	}
+	first := writeHistory(t, symlinkRoot, "session.jsonl", treeHistory)
+	second := writeHistory(t, t.TempDir(), "other.jsonl", treeHistory)
+	catalog := history.Catalog{
+		Sources:   []history.Source{{Harness: registry.HarnessPi, Path: symlinkRoot}, {Harness: registry.HarnessPi, Path: second}},
+		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
+	}
+	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 2)
+	if err := os.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	catalog.Sources = []history.Source{{Harness: registry.HarnessPi, Path: first}}
+	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	db := openTestIndex(t, catalog.IndexPath)
+	var files int
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 2 {
+		t.Fatalf("unselected source was cleaned up: files=%d err=%v", files, err)
+	}
+}

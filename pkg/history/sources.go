@@ -10,8 +10,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/zigai/aht/pkg/registry"
+)
+
+const (
+	maxScanWorkers = 16
+	minScanWorkers = 2
 )
 
 // Native history basenames, including retired OpenClaw transcript artifacts.
@@ -33,6 +40,8 @@ var sourcePatterns = map[registry.Harness][]string{
 	registry.HarnessAgy:      nil,
 	registry.HarnessDroid:    nil,
 }
+
+var errSymlinkCycle = errors.New("too many levels of symbolic links")
 
 // DefaultSources resolves native environment overrides and standard history
 // locations. Missing directories are normal and do not make search incomplete.
@@ -100,7 +109,7 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		}
 		s.scanDirectory(ctx, source, &status)
 	} else {
-		resolved, resolveErr := filepath.EvalSymlinks(path)
+		resolved, resolveErr := resolveSymlinkFile(path)
 		if resolveErr != nil {
 			s.issue(source, path, resolveErr)
 		} else {
@@ -119,6 +128,7 @@ func (s *search) scanDirectory(ctx context.Context, source Source, status *Sourc
 		return
 	}
 	defer s.closeReader(source, source.Path, root)
+	var filesToScan []string
 	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := s.checkScan(ctx); err != nil {
 			return err
@@ -127,22 +137,77 @@ func (s *search) scanDirectory(ctx context.Context, source Source, status *Sourc
 			s.issue(source, filepath.Join(source.Path, path), walkErr)
 			return nil
 		}
-		if entry.IsDir() {
-			if skipHistoryDirectory(source.Harness, path) {
-				return fs.SkipDir
-			}
-			return nil
+		skip, process := s.shouldVisitEntry(source, path, entry)
+		if skip {
+			return fs.SkipDir
 		}
-		if !entry.Type().IsRegular() || !historyFile(source.Harness, entry.Name()) {
+		if !process {
 			return nil
 		}
 
-		s.scanEntry(ctx, source, path, root, status)
+		if s.index != nil {
+			s.scanEntry(ctx, source, path, root, status)
+		} else {
+			filesToScan = append(filesToScan, path)
+		}
 		return nil
 	})
 	if err != nil && ctx.Err() == nil {
 		s.issue(source, source.Path, err)
 	}
+	if s.index == nil && len(filesToScan) > 0 {
+		s.scanFilesParallel(ctx, source, filesToScan, root, status)
+	}
+}
+
+func (s *search) scanFilesParallel(ctx context.Context, source Source, files []string, root *os.Root, status *SourceStatus) {
+	if len(files) == 1 {
+		s.scanEntry(ctx, source, files[0], root, status)
+		return
+	}
+	workers := min(maxScanWorkers, len(files), max(minScanWorkers, runtime.GOMAXPROCS(0)))
+	var totalFiles atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := range workers {
+		go func(workerID int) {
+			defer wg.Done()
+			for i := workerID; i < len(files); i += workers {
+				if ctx.Err() != nil {
+					return
+				}
+				s.scanEntryDirect(ctx, source, files[i], root, &totalFiles)
+			}
+		}(w)
+	}
+	wg.Wait()
+	status.Files += int(totalFiles.Load())
+}
+
+func (s *search) scanEntryDirect(ctx context.Context, source Source, path string, root *os.Root, totalFiles *atomic.Int64) {
+	absolute := filepath.Join(source.Path, path)
+	if isDatabase(path) {
+		s.scanFile(ctx, source, absolute, nil)
+		totalFiles.Add(1)
+		return
+	}
+	file, openErr := root.Open(path)
+	if openErr != nil {
+		s.issue(source, absolute, openErr)
+		return
+	}
+	totalFiles.Add(1)
+	s.scanTranscript(ctx, source, absolute, file)
+	if err := file.Close(); err != nil {
+		s.issue(source, absolute, err)
+	}
+}
+
+func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry) (bool, bool) {
+	if entry.IsDir() {
+		return skipHistoryDirectory(source.Harness, path), false
+	}
+	return false, entry.Type().IsRegular() && historyFile(source.Harness, entry.Name())
 }
 
 func (s *search) scanFile(ctx context.Context, source Source, path string, status *SourceStatus) {
@@ -163,7 +228,9 @@ func (s *search) scanFile(ctx context.Context, source Source, path string, statu
 			s.kimiDirs = s.kimiMetadata(source, sessionsDir)
 		}
 	}
-	status.Files++
+	if status != nil {
+		status.Files++
+	}
 	if isDatabase(path) {
 		s.scanDatabase(ctx, source, path)
 		return
@@ -221,9 +288,21 @@ func (s *search) scanEntry(ctx context.Context, source Source, path string, root
 	}
 }
 
+func isIgnoredDirName(name string) bool {
+	switch name {
+	case ".git", "node_modules", ".cache", ".npm", ".cargo", "vendor", "__pycache__", ".venv", "venv":
+		return true
+	default:
+		return false
+	}
+}
+
 func skipHistoryDirectory(h registry.Harness, path string) bool {
 	if path == "." {
 		return false
+	}
+	if isIgnoredDirName(filepath.Base(path)) {
+		return true
 	}
 	if h == registry.HarnessOpenCode || h == registry.HarnessKilo {
 		return true
@@ -232,10 +311,7 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 		return false
 	}
 	parts := strings.Split(filepath.ToSlash(path), "/")
-	if len(parts) <= 1 {
-		return false
-	}
-	return parts[1] != "agent" && parts[1] != "sessions"
+	return len(parts) > 1 && parts[1] != "agent" && parts[1] != "sessions"
 }
 
 // inspectSource resolves and stats a source before checking reader support, so an
@@ -302,4 +378,27 @@ func databaseLocation(root, variable string) string {
 		return value
 	}
 	return filepath.Join(root, value)
+}
+
+// resolveSymlinkFile resolves symlinks for a single file source while preserving
+// the lexical directory path of non-symlink parents.
+func resolveSymlinkFile(path string) (string, error) {
+	for range 64 {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve symlink source: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		target, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("read symlink target: %w", err)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		path = filepath.Clean(target)
+	}
+	return "", errSymlinkCycle
 }

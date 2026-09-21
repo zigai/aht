@@ -2,6 +2,7 @@ package history
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -86,8 +87,7 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		}
 		if readErr != nil {
 			lines, complete = line, false
-			s.issue(source, path, fmt.Errorf("line %d: %w", line, readErr))
-			if errors.Is(readErr, errRecordSize) {
+			if s.handleLineReadError(source, path, line, readErr) {
 				continue
 			}
 			break
@@ -95,6 +95,10 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		lines = line
 		complete = len(data) > 0 && data[len(data)-1] == '\n'
 		if len(strings.TrimSpace(string(data))) == 0 {
+			continue
+		}
+		if s.canQuickUpdate(t, data) {
+			s.quickUpdateMetadata(t, data)
 			continue
 		}
 		var r record
@@ -302,7 +306,7 @@ func (s *search) capture(ctx context.Context, t *transcript, role, body, id stri
 		}
 	}
 	if c.Title == "" && role == "user" {
-		c.Title = clip(body, titleRunes)
+		c.Title = clip(cleanPromptTitle(body), titleRunes)
 	}
 	if s.writer != nil {
 		s.writer.append(ctx, Excerpt{Role: role, Text: body, MessageID: id, Line: line, Timestamp: timestamp})
@@ -317,6 +321,9 @@ func (s *search) capture(ctx context.Context, t *transcript, role, body, id stri
 // conversation metadata stays independent of IncludeTools.
 func (s *search) matchText(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	if role == "tool" && !s.query.IncludeTools {
+		return
+	}
+	if s.query.Role != "" && s.query.Role != role {
 		return
 	}
 	value := body
@@ -353,6 +360,9 @@ func (s *search) matchText(t *transcript, role, body, id string, line int, times
 }
 
 func messageParts(raw json.RawMessage, role string, tools bool) []textPart {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
+		return []textPart{{role: role, text: string(raw[1 : len(raw)-1])}}
+	}
 	var body string
 	if json.Unmarshal(raw, &body) == nil {
 		return []textPart{{role: role, text: body}}
@@ -401,8 +411,12 @@ func contentText(raw json.RawMessage) string {
 }
 
 func str(r record, key string) string {
+	raw := r[key]
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
+		return string(raw[1 : len(raw)-1])
+	}
 	var value string
-	_ = json.Unmarshal(r[key], &value)
+	_ = json.Unmarshal(raw, &value)
 	return value
 }
 
@@ -422,6 +436,9 @@ func firstString(r record, keys ...string) string {
 }
 
 func parseTime(raw json.RawMessage) time.Time {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
+		return nativeTime(string(raw[1 : len(raw)-1]))
+	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return nativeTime(text)
@@ -449,6 +466,121 @@ func clip(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit]) + "…"
+}
+
+func cleanPromptTitle(body string) string {
+	text := strings.TrimSpace(body)
+	if _, after, ok := strings.Cut(text, "</INSTRUCTIONS>"); ok {
+		if trimmed := strings.TrimSpace(after); trimmed != "" {
+			return trimmed
+		}
+	}
+	if _, after, ok := strings.Cut(text, "<INSTRUCTIONS>"); ok {
+		if trimmed := strings.TrimSpace(after); trimmed != "" {
+			return trimmed
+		}
+	}
+	if _, after, ok := strings.Cut(text, "</environment_context>"); ok {
+		if trimmed := strings.TrimSpace(after); trimmed != "" {
+			return trimmed
+		}
+	}
+	if strings.HasPrefix(text, "# AGENTS.md instructions") {
+		for line := range strings.SplitSeq(text, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "<") {
+				return trimmed
+			}
+		}
+	}
+	return text
+}
+
+func isSessionHeader(data []byte) bool {
+	return bytes.Contains(data, []byte(`"session"`)) ||
+		bytes.Contains(data, []byte(`"session_meta"`)) ||
+		bytes.Contains(data, []byte(`"session_info"`)) ||
+		bytes.Contains(data, []byte(`"title"`)) ||
+		bytes.Contains(data, []byte(`"custom-title"`)) ||
+		bytes.Contains(data, []byte(`"sessionId"`)) ||
+		bytes.Contains(data, []byte(`"cwd"`))
+}
+
+func (s *search) quickUpdateMetadata(t *transcript, data []byte) {
+	if ts := extractLineTimestamp(data); !ts.IsZero() {
+		c := &t.match.Conversation
+		if c.CreatedAt.IsZero() || ts.Before(c.CreatedAt) {
+			c.CreatedAt = ts
+		}
+		if ts.After(c.UpdatedAt) {
+			c.UpdatedAt = ts
+		}
+	}
+}
+
+func extractLineTimestamp(data []byte) time.Time {
+	_, after, ok := bytes.Cut(data, []byte(`"timestamp"`))
+	if !ok {
+		return time.Time{}
+	}
+	rest := bytes.TrimLeft(after, " \t:")
+	if len(rest) == 0 {
+		return time.Time{}
+	}
+	if rest[0] == '"' {
+		return extractStringTimestamp(rest)
+	}
+	return extractNumericTimestamp(rest)
+}
+
+func extractStringTimestamp(rest []byte) time.Time {
+	end := bytes.IndexByte(rest[1:], '"')
+	if end < 0 {
+		return time.Time{}
+	}
+	raw := rest[1 : end+1]
+	if bytes.IndexByte(raw, '\\') < 0 {
+		return nativeTime(string(raw))
+	}
+	var text string
+	if json.Unmarshal(rest[:end+2], &text) == nil {
+		return nativeTime(text)
+	}
+	return time.Time{}
+}
+
+func extractNumericTimestamp(rest []byte) time.Time {
+	end := 0
+	for end < len(rest) && (rest[end] >= '0' && rest[end] <= '9' || rest[end] == '.') {
+		end++
+	}
+	if end == 0 {
+		return time.Time{}
+	}
+	number, err := strconv.ParseFloat(string(rest[:end]), 64)
+	if err != nil || !(number > 0) {
+		return time.Time{}
+	}
+	const millisThreshold = 1e11
+	const millisPerSecond = 1000
+	if number >= millisThreshold {
+		number /= millisPerSecond
+	}
+	const latestUnixSecond = 253402300799
+	if number > latestUnixSecond {
+		return time.Time{}
+	}
+	seconds := int64(number)
+	return time.Unix(seconds, int64((number-float64(seconds))*float64(time.Second))).UTC()
+}
+
+func (s *search) handleLineReadError(source Source, path string, line int, err error) bool {
+	s.issue(source, path, fmt.Errorf("line %d: %w", line, err))
+	return errors.Is(err, errRecordSize)
+}
+
+func (s *search) canQuickUpdate(t *transcript, data []byte) bool {
+	return s.writer == nil && !s.containsNeedle(data) && t.identified() && !isSessionHeader(data) && t.match.Conversation.Title != ""
 }
 
 func toolContent(block record) string {
