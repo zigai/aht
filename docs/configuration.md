@@ -1,10 +1,14 @@
 # Configuration
 
-AHT works without configuration. To find the active file or inspect settings:
+AHT works without configuration. To inspect or edit settings:
 
 ```sh
 aht manage config path
 aht manage config show
+aht manage config get ui.sort
+aht manage config set ui.sort created
+aht manage config show --provenance
+aht manage config schema
 ```
 
 The configuration file is `~/.config/aht/config.toml`.

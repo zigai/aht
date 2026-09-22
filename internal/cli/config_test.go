@@ -639,3 +639,182 @@ func TestAutoCleanCLIFlagHonorsConfiguredMaxGoneAge(t *testing.T) {
 		t.Fatalf("enabling --auto-clean after loading default config uses %v retention, want 7d", opts.maxGoneAge)
 	}
 }
+
+//nolint:cyclop // integration test verifying manage config set lifecycle
+func TestCLIManageConfigSet(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "config.toml")
+	ctx := context.Background()
+
+	// 1. Set key in new config file -> creates template, sets key in-place, preserves comments
+	var stdout bytes.Buffer
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "manage", "config", "set", "ui.sort", "created"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config set failed: %v", err)
+	}
+
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target config: %v", err)
+	}
+	if !strings.Contains(string(content), "# AHT Configuration") {
+		t.Fatal("manage config set dropped template comments")
+	}
+
+	// 2. Verify setting was applied
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "--json", "manage", "config", "show"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config show failed: %v", err)
+	}
+	var loaded config.Config
+	if err := json.Unmarshal(stdout.Bytes(), &loaded); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if loaded.UI.Sort != "created" {
+		t.Fatalf("expected ui.sort=created, got %q", loaded.UI.Sort)
+	}
+
+	// 3. Set another key via --json
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "--json", "manage", "config", "set", "ui.default_presence", "live"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config set --json failed: %v", err)
+	}
+	var res map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal set result: %v", err)
+	}
+	if res["set"] != true || res["key"] != "ui.default_presence" || res["value"] != "live" {
+		t.Fatalf("unexpected set result: %+v", res)
+	}
+
+	// 4. Setting invalid value fails validation and leaves file uncorrupted
+	if err := runTestCLI(ctx, []string{"--config", targetPath, "manage", "config", "set", "ui.sort", "invalid_sort_key"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected invalid sort key to fail, got nil")
+	}
+	// File should still have ui.sort = "created"
+	reRead, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(reRead), "invalid_sort_key") {
+		t.Fatal("file was corrupted by invalid setting")
+	}
+
+	// 5. --no-config disallows set
+	if err := runTestCLI(ctx, []string{"--no-config", "manage", "config", "set", "ui.sort", "created"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected --no-config to disallow set, got nil")
+	}
+}
+
+func TestCLIManageConfigShowProvenance(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.toml")
+	ctx := context.Background()
+
+	if err := os.WriteFile(configPath, []byte("[ui]\nsort = \"created\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Text mode with --provenance
+	var stdout bytes.Buffer
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "show", "--provenance"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config show --provenance failed: %v", err)
+	}
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "# Active configuration files") || !strings.Contains(outStr, "ui.sort") {
+		t.Fatalf("expected provenance output to mention active files and ui.sort, got:\n%s", outStr)
+	}
+
+	// 2. JSON mode with --provenance
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--json", "manage", "config", "show", "--provenance"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config show --provenance --json failed: %v", err)
+	}
+	var res map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal provenance json: %v", err)
+	}
+	if _, ok := res["active_files"]; !ok {
+		t.Fatalf("missing active_files in provenance json: %+v", res)
+	}
+	if _, ok := res["origins"]; !ok {
+		t.Fatalf("missing origins in provenance json: %+v", res)
+	}
+}
+
+//nolint:cyclop // integration test verifying manage config get lifecycle
+func TestCLIManageConfigGet(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.toml")
+	ctx := context.Background()
+
+	if err := os.WriteFile(configPath, []byte("[ui]\nsort = \"created\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Plain text get
+	var stdout bytes.Buffer
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "get", "ui.sort"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config get failed: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != "created" {
+		t.Fatalf("expected 'created', got %q", stdout.String())
+	}
+
+	// 2. Get with --provenance
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "get", "ui.sort", "--provenance"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config get with provenance failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "created") || !strings.Contains(stdout.String(), configPath) {
+		t.Fatalf("expected value and config path in provenance get, got: %q", stdout.String())
+	}
+
+	// 3. Get with --json
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--json", "manage", "config", "get", "ui.sort"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config get --json failed: %v", err)
+	}
+	var res map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal json get: %v", err)
+	}
+	if res["key"] != "ui.sort" || res["value"] != "created" {
+		t.Fatalf("unexpected json get result: %+v", res)
+	}
+
+	// 4. Get with --json and --provenance
+	stdout.Reset()
+	if err := runTestCLI(ctx, []string{"--config", configPath, "--json", "manage", "config", "get", "ui.sort", "--provenance"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config get --json --provenance failed: %v", err)
+	}
+	res = nil
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal json get with provenance: %v", err)
+	}
+	if _, ok := res["origin"]; !ok {
+		t.Fatalf("expected origin in result: %+v", res)
+	}
+
+	// 5. Unknown key fails
+	if err := runTestCLI(ctx, []string{"--config", configPath, "manage", "config", "get", "nonexistent.key"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected error for unknown key, got nil")
+	}
+}
+
+func TestCLIManageConfigSchema(t *testing.T) {
+	ctx := context.Background()
+	var stdout bytes.Buffer
+	if err := runTestCLI(ctx, []string{"manage", "config", "schema"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("manage config schema failed: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("schema output is not valid json: %v", err)
+	}
+	if schema["title"] != "AHT Configuration" {
+		t.Fatalf("unexpected schema title: %v", schema["title"])
+	}
+	if _, ok := schema["properties"]; !ok {
+		t.Fatal("schema missing properties")
+	}
+}

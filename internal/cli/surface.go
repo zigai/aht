@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
+	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/internal/config"
 	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
@@ -19,6 +21,11 @@ import (
 	"github.com/zigai/aht/internal/service"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
+)
+
+const (
+	configSetArgsCount = 2
+	configGetArgsCount = 1
 )
 
 var (
@@ -39,6 +46,9 @@ var (
 	errRemoveHarnessRequired    = errors.New("remove requires at least one harness or 'all'")
 	errNoConfigDisallowsInit    = errors.New("cannot initialize config when --no-config is set")
 	errInitJSONTemplateConflict = errors.New("cannot output JSON when writing template to stdout")
+	errNoConfigDisallowsSet     = errors.New("cannot set config when --no-config is set")
+	errStdinDisallowsSet        = errors.New("cannot set key on stdin configuration")
+	errUnknownConfigKey         = errors.New("unknown configuration key")
 )
 
 type integrationCommandOptions struct {
@@ -46,7 +56,6 @@ type integrationCommandOptions struct {
 	dryRun, force, shim  bool
 	showContent          bool
 }
-
 type setupResult struct {
 	Integrations []install.Result `json:"integrations"`
 	Tracker      service.Result   `json:"tracker"`
@@ -882,7 +891,10 @@ func (app *application) newManageConfigCommand() *cobra.Command {
 	command.AddCommand(
 		app.newConfigPathCommand(),
 		app.newConfigShowCommand(),
+		app.newConfigGetCommand(),
+		app.newConfigSetCommand(),
 		app.newConfigInitCommand(),
+		app.newConfigSchemaCommand(),
 	)
 	return command
 }
@@ -914,8 +926,10 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 	}
 }
 
+//nolint:gocognit,cyclop // display configuration with optional provenance
 func (app *application) newConfigShowCommand() *cobra.Command {
-	return &cobra.Command{
+	var showProvenance bool
+	cmd := &cobra.Command{
 		Use:           "show",
 		Short:         "Print effective configuration",
 		SilenceErrors: true,
@@ -928,13 +942,298 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg := app.cfg
 			if app.outputJSON {
+				if showProvenance && app.cfgMeta != nil {
+					type keyOrigin struct {
+						Source   string `json:"source"`
+						Path     string `json:"path,omitempty"`
+						Line     int    `json:"line,omitempty"`
+						RawValue string `json:"raw_value,omitempty"`
+					}
+					type provenanceResult struct {
+						Config      config.Config        `json:"config"`
+						ActiveFiles []string             `json:"active_files"`
+						Origins     map[string]keyOrigin `json:"origins"`
+					}
+					allConfigKeys := []string{
+						"ui.default_presence",
+						"ui.sort",
+						"ui.sort_desc",
+						"ui.absolute_time",
+						"ui.time_format",
+						"retention.auto_clean",
+						"retention.max_gone_age",
+						"filter.ignore_harnesses",
+						"filter.ignore_paths",
+						"tracker.interval",
+						"tracker.grace_period",
+						"tracker.quiet",
+						"detection.manifests_dir",
+						"detection.screen_inspection",
+					}
+					origins := make(map[string]keyOrigin)
+					for _, k := range allConfigKeys {
+						if o, ok := app.cfgMeta.Where(k); ok {
+							origins[k] = keyOrigin{
+								Source:   string(o.Source),
+								Path:     o.Path,
+								Line:     o.Line,
+								RawValue: o.RawValue,
+							}
+						}
+					}
+					return app.writeJSON(provenanceResult{
+						Config:      cfg,
+						ActiveFiles: app.cfgMeta.ActiveFiles(),
+						Origins:     origins,
+					})
+				}
 				return app.writeJSON(cfg)
+			}
+			if showProvenance && app.cfgMeta != nil {
+				var b strings.Builder
+				active := app.cfgMeta.ActiveFiles()
+				if len(active) > 0 {
+					fmt.Fprintf(&b, "# Active configuration files (highest precedence last):\n")
+					for _, f := range active {
+						fmt.Fprintf(&b, "#   - %s\n", f)
+					}
+					fmt.Fprintf(&b, "\n")
+				}
+				allConfigKeys := []string{
+					"ui.default_presence",
+					"ui.sort",
+					"ui.sort_desc",
+					"ui.absolute_time",
+					"ui.time_format",
+					"retention.auto_clean",
+					"retention.max_gone_age",
+					"filter.ignore_harnesses",
+					"filter.ignore_paths",
+					"tracker.interval",
+					"tracker.grace_period",
+					"tracker.quiet",
+					"detection.manifests_dir",
+					"detection.screen_inspection",
+				}
+				for _, k := range allConfigKeys {
+					if o, ok := app.cfgMeta.Where(k); ok {
+						switch {
+						case o.Line > 0:
+							fmt.Fprintf(&b, "# %s (from %s:%d)\n", k, o.Path, o.Line)
+						case o.Path != "":
+							fmt.Fprintf(&b, "# %s (from %s %s)\n", k, o.Source, o.Path)
+						default:
+							fmt.Fprintf(&b, "# %s (from %s)\n", k, o.Source)
+						}
+					}
+				}
+				fmt.Fprintf(&b, "\n")
+				data, err := toml.Marshal(cfg)
+				if err != nil {
+					return fmt.Errorf("encode config toml: %w", err)
+				}
+				b.Write(data)
+				return app.writef("%s", b.String())
 			}
 			data, err := toml.Marshal(cfg)
 			if err != nil {
 				return fmt.Errorf("encode config toml: %w", err)
 			}
 			return app.writef("%s", string(data))
+		},
+	}
+	cmd.Flags().BoolVar(&showProvenance, "provenance", false, "include layer provenance for resolved keys")
+	return cmd
+}
+
+//nolint:gocognit // manage config get command with JSON and provenance formatting
+func (app *application) newConfigGetCommand() *cobra.Command {
+	var showProvenance bool
+	cmd := &cobra.Command{
+		Use:           "get <key>",
+		Short:         "Get a configuration setting by key",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.ExactArgs(configGetArgsCount),
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			_, err := app.loadConfig()
+			return err
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			key := args[0]
+			val, ok := getConfigValue(app.cfg, key)
+			if !ok {
+				return exitCode(fmt.Errorf("%w: %q", errUnknownConfigKey, key), exitCodeUsage)
+			}
+
+			if app.outputJSON {
+				res := map[string]any{
+					"key":   key,
+					"value": val,
+				}
+				if showProvenance && app.cfgMeta != nil {
+					if o, found := app.cfgMeta.Where(key); found {
+						res["origin"] = map[string]any{
+							"source":    string(o.Source),
+							"path":      o.Path,
+							"line":      o.Line,
+							"raw_value": o.RawValue,
+						}
+					}
+				}
+				return app.writeJSON(res)
+			}
+
+			if showProvenance && app.cfgMeta != nil {
+				if o, found := app.cfgMeta.Where(key); found {
+					switch {
+					case o.Line > 0:
+						return app.writef("%v (from %s:%d)\n", val, o.Path, o.Line)
+					case o.Path != "":
+						return app.writef("%v (from %s %s)\n", val, o.Source, o.Path)
+					default:
+						return app.writef("%v (from %s)\n", val, o.Source)
+					}
+				}
+			}
+
+			return app.writef("%v\n", val)
+		},
+	}
+	cmd.Flags().BoolVar(&showProvenance, "provenance", false, "include layer provenance for the key")
+	return cmd
+}
+
+//nolint:cyclop // key mapping table
+func getConfigValue(cfg config.Config, key string) (any, bool) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "ui.default_presence":
+		return cfg.UI.DefaultPresence, true
+	case "ui.sort":
+		return cfg.UI.Sort, true
+	case "ui.sort_desc":
+		if cfg.UI.SortDesc != nil {
+			return *cfg.UI.SortDesc, true
+		}
+		return false, true
+	case "ui.absolute_time":
+		if cfg.UI.AbsoluteTime != nil {
+			return *cfg.UI.AbsoluteTime, true
+		}
+		return false, true
+	case "ui.time_format":
+		return cfg.UI.TimeFormat, true
+	case "retention.auto_clean":
+		if cfg.Retention.AutoClean != nil {
+			return *cfg.Retention.AutoClean, true
+		}
+		return false, true
+	case "retention.max_gone_age":
+		return cfg.Retention.MaxGoneAge, true
+	case "filter.ignore_harnesses":
+		return cfg.Filter.IgnoreHarnesses, true
+	case "filter.ignore_paths":
+		return cfg.Filter.IgnorePaths, true
+	case "tracker.interval":
+		return cfg.Tracker.Interval, true
+	case "tracker.grace_period":
+		return cfg.Tracker.GracePeriod, true
+	case "tracker.quiet":
+		if cfg.Tracker.Quiet != nil {
+			return *cfg.Tracker.Quiet, true
+		}
+		return false, true
+	case "detection.manifests_dir":
+		return cfg.Detection.ManifestsDir, true
+	case "detection.screen_inspection":
+		if cfg.Detection.ScreenInspection != nil {
+			return *cfg.Detection.ScreenInspection, true
+		}
+		return true, true
+	default:
+		return nil, false
+	}
+}
+
+func (app *application) newConfigSchemaCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:           "schema",
+		Short:         "Output JSON Schema for AHT configuration",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			schemaBytes, err := strata.Schema[config.Config](
+				strata.WithSchemaID("https://aht.dev/schema/config.json"),
+				strata.WithSchemaTitle("AHT Configuration"),
+			)
+			if err != nil {
+				return fmt.Errorf("generate schema: %w", err)
+			}
+			return app.writef("%s\n", string(schemaBytes))
+		},
+	}
+}
+
+func (app *application) newConfigSetCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:           "set <key> <value>",
+		Short:         "Set a configuration key in the active config file",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.ExactArgs(configSetArgsCount),
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			if app.noConfig {
+				return exitCode(errNoConfigDisallowsSet, exitCodeUsage)
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			key, val := args[0], args[1]
+			path := app.configPath
+			if path == "" {
+				path = config.DefaultPath()
+			}
+			if path == "-" {
+				return exitCode(errStdinDisallowsSet, exitCodeUsage)
+			}
+
+			if _, err := config.EnsureConfigFile(path); err != nil {
+				return fmt.Errorf("ensure config file %s: %w", path, err)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read config %s: %w", path, err)
+			}
+
+			updated, err := strata.SetBytes(filepath.Ext(path), data, key, val)
+			if err != nil {
+				return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
+			}
+
+			var testCfg config.Config
+			if err := config.DecodeTOML(updated, &testCfg); err != nil {
+				return exitCode(fmt.Errorf("updated configuration is invalid: %w", err), exitCodeUsage)
+			}
+			if err := testCfg.Validate(); err != nil {
+				return exitCode(fmt.Errorf("invalid value for %q: %w", key, err), exitCodeUsage)
+			}
+
+			//nolint:gosec // path is validated config destination
+			if err := os.WriteFile(filepath.Clean(path), updated, 0o600); err != nil {
+				return fmt.Errorf("write config %s: %w", path, err)
+			}
+
+			if app.outputJSON {
+				return app.writeJSON(map[string]any{
+					"path":  path,
+					"key":   key,
+					"value": val,
+					"set":   true,
+				})
+			}
+			return app.writef("set %s = %s in %s\n", key, val, path)
 		},
 	}
 }

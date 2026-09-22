@@ -23,6 +23,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/zigai/strata"
+
 	"github.com/zigai/aht/internal/agentstate"
 	"github.com/zigai/aht/internal/config"
 	"github.com/zigai/aht/internal/harness"
@@ -91,6 +93,7 @@ type application struct {
 	noConfig           bool
 	cfgLoaded          bool
 	cfg                config.Config
+	cfgMeta            *strata.Metadata
 	resolvedConfigPath string
 	cfgErr             error
 	outputJSON         bool
@@ -173,13 +176,14 @@ func (app *application) loadConfig() (config.Config, error) {
 		return app.cfg, app.cfgErr
 	}
 	app.configExplicit = app.configPath != ""
-	cfg, resolved, err := config.LoadWithOptions(config.Options{
+	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
 		Path:     app.configPath,
 		Explicit: app.configExplicit,
 		NoConfig: app.noConfig,
 		Stdin:    app.stdin,
 	})
 	app.cfg = cfg
+	app.cfgMeta = meta
 	app.resolvedConfigPath = resolved
 	app.cfgErr = exitCode(err, exitCodeUsage)
 	app.cfgLoaded = true

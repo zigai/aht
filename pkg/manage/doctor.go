@@ -203,11 +203,25 @@ func (m *Manager) checkConfigFile(configPath string, add func(string, DoctorStat
 		add("config.file", DoctorStatusError, statErr.Error())
 		return
 	}
-	if _, _, err := config.Load(path); err != nil {
+	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
+		Path:          path,
+		Explicit:      configPath != "",
+		NoConfig:      false,
+		Stdin:         nil,
+		CWD:           "",
+		UserConfigDir: "",
+		SystemDirs:    nil,
+	})
+	_ = cfg
+	if err != nil {
 		add("config.file", DoctorStatusError, err.Error())
 		return
 	}
-	add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s)", path))
+	if meta != nil && len(meta.ActiveFiles()) > 1 {
+		add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s; layers: %s)", resolved, strings.Join(meta.ActiveFiles(), ", ")))
+		return
+	}
+	add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s)", resolved))
 }
 
 func (m *Manager) checkIntegrations(

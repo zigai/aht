@@ -4,14 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
-	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -22,6 +21,8 @@ const (
 
 	// maxConfigFileSize caps configuration files to 1 MiB.
 	maxConfigFileSize = 1024 * 1024
+
+	strataBaseOptionCapacity = 2
 
 	defaultDirMode  = 0o700
 	defaultFileMode = 0o600
@@ -36,8 +37,8 @@ var (
 	ErrNegativeAge         = errors.New("retention.max_gone_age must be non-negative")
 	ErrNonPositiveInterval = errors.New("tracker.interval must be positive")
 	ErrNegativeGracePeriod = errors.New("tracker.grace_period must be non-negative")
-	ErrConfigIsDirectory   = errors.New("config path is a directory")
-	ErrConfigFileTooLarge  = errors.New("config file exceeds 1 MiB limit")
+	ErrConfigIsDirectory   = strata.ErrPathIsDirectory
+	ErrConfigFileTooLarge  = fmt.Errorf("%w: config file exceeds 1 MiB limit", strata.ErrFileTooLarge)
 	ErrConfigNotFound      = errors.New("config file not found")
 	ErrParseConfig         = errors.New("failed to parse config file")
 	ErrAccessConfig        = errors.New("failed to access config file")
@@ -117,6 +118,23 @@ type Options struct {
 	CWD           string
 	UserConfigDir string
 	SystemDirs    []string
+}
+
+// SetDefaults declares the configuration defaults for strata.Defaulter.
+func (c *Config) SetDefaults() {
+	*c = Defaults()
+}
+
+// ValidateWith checks configuration invariants and normalizes canonical fields.
+// It implements strata.MetadataValidator.
+func (c *Config) ValidateWith(meta *strata.Metadata) error {
+	if err := c.validateUI(meta); err != nil {
+		return err
+	}
+	if err := c.validateRetention(meta); err != nil {
+		return err
+	}
+	return c.validateTracker(meta)
 }
 
 // Defaults returns a complete typed configuration with all base defaults populated.
@@ -272,19 +290,7 @@ func ParseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil
 	}
-	if strings.HasSuffix(s, "d") || strings.HasSuffix(s, "D") {
-		valStr := strings.TrimSpace(s[:len(s)-1])
-		days, err := strconv.ParseInt(valStr, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid day duration %q: %w", s, err)
-		}
-		const day = 24 * time.Hour
-		if days > math.MaxInt64/int64(day) || days < math.MinInt64/int64(day) {
-			return 0, fmt.Errorf("%w: day duration %q is out of range", ErrInvalidDuration, s)
-		}
-		return time.Duration(days) * day, nil
-	}
-	d, err := time.ParseDuration(s)
+	d, err := strata.ParseDuration(s)
 	if err != nil {
 		if _, numErr := strconv.Atoi(s); numErr == nil {
 			return 0, fmt.Errorf("%w: %q (e.g. %q or %q)", ErrMissingUnitSuffix, s, s+"d", s+"h")
@@ -304,70 +310,130 @@ func NormalizeSort(s string) (string, error) {
 }
 
 // Validate checks configuration invariants.
-func (c Config) Validate() error {
-	if err := c.validateUI(); err != nil {
-		return err
-	}
-	if err := c.validateRetention(); err != nil {
-		return err
-	}
-	return c.validateTracker()
+func (c *Config) Validate() error {
+	return c.ValidateWith(nil)
 }
 
-func (c Config) validateUI() error {
-	if c.UI.DefaultPresence != "" {
-		trimmed := strings.ToLower(strings.TrimSpace(c.UI.DefaultPresence))
-		if trimmed != "all" {
-			if _, err := registry.NormalizePresence(trimmed); err != nil {
-				return fmt.Errorf("%w %q (allowed: live, gone, unknown, all): %w", ErrInvalidPresence, c.UI.DefaultPresence, err)
-			}
-		}
+func (c *Config) validateUI(meta *strata.Metadata) error {
+	if err := c.validatePresence(meta); err != nil {
+		return err
 	}
-	if c.UI.Sort != "" {
-		if _, err := NormalizeSort(c.UI.Sort); err != nil {
-			return err
-		}
+	if err := c.validateSort(meta); err != nil {
+		return err
 	}
-	if c.UI.TimeFormat != "" {
-		tf := strings.ToLower(strings.TrimSpace(c.UI.TimeFormat))
-		if tf != "relative" && tf != "absolute" && tf != "iso8601" {
-			return fmt.Errorf("%w %q (allowed: relative, absolute, iso8601)", ErrInvalidTimeFormat, c.UI.TimeFormat)
+	return c.validateTimeFormat(meta)
+}
+
+func (c *Config) validatePresence(meta *strata.Metadata) error {
+	trimmed := strings.ToLower(strings.TrimSpace(c.UI.DefaultPresence))
+	c.UI.DefaultPresence = trimmed
+	if trimmed == "" || trimmed == "all" {
+		return nil
+	}
+	if _, err := registry.NormalizePresence(trimmed); err != nil {
+		valErr := fmt.Errorf("%w %q (allowed: live, gone, unknown, all): %w", ErrInvalidPresence, c.UI.DefaultPresence, err)
+		if meta != nil {
+			return meta.NewConfigError("ui.default_presence", valErr)
 		}
+		return valErr
 	}
 	return nil
 }
 
-func (c Config) validateRetention() error {
-	if c.Retention.MaxGoneAge != "" {
-		d, err := ParseDuration(c.Retention.MaxGoneAge)
-		if err != nil {
-			return fmt.Errorf("invalid retention.max_gone_age %q: %w", c.Retention.MaxGoneAge, err)
+func (c *Config) validateSort(meta *strata.Metadata) error {
+	if c.UI.Sort == "" {
+		return nil
+	}
+	norm, err := NormalizeSort(c.UI.Sort)
+	if err != nil {
+		if meta != nil {
+			return meta.NewConfigError("ui.sort", err)
 		}
-		if d < 0 {
-			return ErrNegativeAge
+		return err
+	}
+	c.UI.Sort = norm
+	return nil
+}
+
+func (c *Config) validateTimeFormat(meta *strata.Metadata) error {
+	tf := strings.ToLower(strings.TrimSpace(c.UI.TimeFormat))
+	c.UI.TimeFormat = tf
+	if tf == "" || tf == "relative" || tf == "absolute" || tf == "iso8601" {
+		return nil
+	}
+	valErr := fmt.Errorf("%w %q (allowed: relative, absolute, iso8601)", ErrInvalidTimeFormat, c.UI.TimeFormat)
+	if meta != nil {
+		return meta.NewConfigError("ui.time_format", valErr)
+	}
+	return valErr
+}
+
+func (c *Config) validateRetention(meta *strata.Metadata) error {
+	if c.Retention.MaxGoneAge == "" {
+		return nil
+	}
+	d, err := ParseDuration(c.Retention.MaxGoneAge)
+	if err != nil {
+		valErr := fmt.Errorf("invalid retention.max_gone_age %q: %w", c.Retention.MaxGoneAge, err)
+		if meta != nil {
+			return meta.NewConfigError("retention.max_gone_age", valErr)
 		}
+		return valErr
+	}
+	if d < 0 {
+		if meta != nil {
+			return meta.NewConfigError("retention.max_gone_age", ErrNegativeAge)
+		}
+		return ErrNegativeAge
 	}
 	return nil
 }
 
-func (c Config) validateTracker() error {
-	if c.Tracker.Interval != "" {
-		d, err := ParseDuration(c.Tracker.Interval)
-		if err != nil {
-			return fmt.Errorf("invalid tracker.interval %q: %w", c.Tracker.Interval, err)
-		}
-		if d <= 0 {
-			return ErrNonPositiveInterval
-		}
+func (c *Config) validateTracker(meta *strata.Metadata) error {
+	if err := c.validateInterval(meta); err != nil {
+		return err
 	}
-	if c.Tracker.GracePeriod != "" {
-		d, err := ParseDuration(c.Tracker.GracePeriod)
-		if err != nil {
-			return fmt.Errorf("invalid tracker.grace_period %q: %w", c.Tracker.GracePeriod, err)
+	return c.validateGracePeriod(meta)
+}
+
+func (c *Config) validateInterval(meta *strata.Metadata) error {
+	if c.Tracker.Interval == "" {
+		return nil
+	}
+	d, err := ParseDuration(c.Tracker.Interval)
+	if err != nil {
+		valErr := fmt.Errorf("invalid tracker.interval %q: %w", c.Tracker.Interval, err)
+		if meta != nil {
+			return meta.NewConfigError("tracker.interval", valErr)
 		}
-		if d < 0 {
-			return ErrNegativeGracePeriod
+		return valErr
+	}
+	if d <= 0 {
+		if meta != nil {
+			return meta.NewConfigError("tracker.interval", ErrNonPositiveInterval)
 		}
+		return ErrNonPositiveInterval
+	}
+	return nil
+}
+
+func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
+	if c.Tracker.GracePeriod == "" {
+		return nil
+	}
+	d, err := ParseDuration(c.Tracker.GracePeriod)
+	if err != nil {
+		valErr := fmt.Errorf("invalid tracker.grace_period %q: %w", c.Tracker.GracePeriod, err)
+		if meta != nil {
+			return meta.NewConfigError("tracker.grace_period", valErr)
+		}
+		return valErr
+	}
+	if d < 0 {
+		if meta != nil {
+			return meta.NewConfigError("tracker.grace_period", ErrNegativeGracePeriod)
+		}
+		return ErrNegativeGracePeriod
 	}
 	return nil
 }
@@ -380,22 +446,30 @@ func Load(path string) (Config, string, error) {
 }
 
 // LoadWithOptions resolves configuration across all tiers per the given options.
-//
-//nolint:gocognit,cyclop,nestif // resolve explicit input or layered disk configuration
 func LoadWithOptions(opts Options) (Config, string, error) {
-	cfg := Defaults()
-	var resolvedPath string
+	cfg, _, resolved, err := LoadWithMetadata(opts)
+	return cfg, resolved, err
+}
 
+// LoadWithMetadata resolves configuration across all tiers per the given options and returns strata.Metadata.
+//
+//nolint:gocognit,cyclop,nestif // resolve explicit input or layered disk configuration via strata
+func LoadWithMetadata(opts Options) (Config, *strata.Metadata, string, error) {
 	if opts.NoConfig {
-		return cfg, "", nil
+		return Defaults(), strata.NewMetadata(), "", nil
 	}
 
 	explicit := opts.Explicit
 	targetPath := opts.Path
-	if targetPath == "" {
+	if targetPath == "" && !explicit {
 		targetPath = strings.TrimSpace(os.Getenv(ConfigEnv))
 	}
 
+	newStrataOptions := func(extras ...strata.Option) []strata.Option {
+		res := make([]strata.Option, 0, len(extras)+strataBaseOptionCapacity)
+		res = append(res, strata.WithMaxFileSize(maxConfigFileSize), strata.WithDecoder(".toml", decodeTOML))
+		return append(res, extras...)
+	}
 	if targetPath != "" {
 		switch targetPath {
 		case "-":
@@ -403,132 +477,106 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 			if r == nil {
 				r = os.Stdin
 			}
-			contents, err := readBounded(r, maxConfigFileSize)
+			strataOpts := newStrataOptions(strata.WithExplicitPath("-"), strata.WithStdin(r))
+			cfg, meta, err := strata.Load[Config](strataOpts...)
 			if err != nil {
-				if errors.Is(err, ErrConfigFileTooLarge) {
-					return Config{}, "-", fmt.Errorf("%w: stdin", ErrConfigFileTooLarge)
+				if errors.Is(err, strata.ErrFileTooLarge) {
+					return Config{}, nil, "-", fmt.Errorf("%w: stdin", ErrConfigFileTooLarge)
 				}
-				return Config{}, "-", err
+				return Config{}, nil, "-", fmt.Errorf("%w stdin: %w", ErrParseConfig, err)
 			}
-			if err := decodeTOML(contents, &cfg); err != nil {
-				return Config{}, "-", fmt.Errorf("%w stdin: %w", ErrParseConfig, err)
-			}
-			resolvedPath = "-"
+			return cfg, meta, "-", nil
 		default:
-			resolvedPath = targetPath
-			if err := loadDiskConfig(targetPath, &cfg, explicit); err != nil {
-				return Config{}, targetPath, err
-			}
-		}
-	} else {
-		// Discovered mode across 3 disk tiers: System -> User -> Project
-		// 1. System tier (earlier entries in systemDirs take precedence)
-		systemDirs := opts.SystemDirs
-		if len(systemDirs) == 0 {
-			systemDirs = defaultSystemConfigDirs()
-		}
-		for _, baseDir := range slices.Backward(systemDirs) {
-			sysPath := filepath.Join(baseDir, "aht", "config.toml")
-			if err := loadDiskConfig(sysPath, &cfg, false); err != nil {
-				return Config{}, sysPath, err
-			}
-		}
-
-		// 2. User tier
-		userPath := opts.UserConfigDir
-		if userPath == "" {
-			userPath = DefaultPath()
-		} else if !strings.HasSuffix(userPath, ".toml") {
-			userPath = filepath.Join(userPath, "aht", "config.toml")
-		}
-		resolvedPath = userPath
-		if err := loadDiskConfig(userPath, &cfg, false); err != nil {
-			return Config{}, userPath, err
-		}
-
-		// 3. Project tier (.aht.toml in CWD)
-		cwd := opts.CWD
-		if cwd == "" {
-			cwd, _ = os.Getwd()
-		}
-		if cwd != "" {
-			projectPath := filepath.Join(cwd, ".aht.toml")
-			cleanProj := filepath.Clean(projectPath)
-			info, err := os.Stat(cleanProj)
-			if err == nil && !info.IsDir() {
-				if err := loadDiskConfig(projectPath, &cfg, false); err != nil {
-					return Config{}, projectPath, err
+			cleanPath := filepath.Clean(targetPath)
+			info, statErr := os.Stat(cleanPath)
+			if statErr != nil {
+				if errors.Is(statErr, os.ErrNotExist) {
+					if explicit {
+						return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, statErr)
+					}
+					return Defaults(), strata.NewMetadata(), targetPath, nil
 				}
-				resolvedPath = projectPath
+				return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, statErr)
 			}
-		}
-	}
-
-	norm, err := normalizeConfig(cfg)
-	return norm, resolvedPath, err
-}
-
-func loadDiskConfig(path string, target *Config, required bool) error {
-	cleanPath := filepath.Clean(path)
-	info, err := os.Stat(cleanPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			if required {
-				return fmt.Errorf("%w %s: %w", ErrConfigNotFound, path, err)
+			if info.IsDir() {
+				return Config{}, nil, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
 			}
-			return nil
+			if info.Size() > maxConfigFileSize {
+				return Config{}, nil, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
+			}
+			strataOpts := newStrataOptions(strata.WithExplicitPath(cleanPath))
+			cfg, meta, err := strata.Load[Config](strataOpts...)
+			if err != nil {
+				if errors.Is(err, strata.ErrFileTooLarge) {
+					return Config{}, nil, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
+				}
+				if isValidationOrDurationError(err) {
+					return Config{}, nil, targetPath, err
+				}
+				return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
+			}
+			return cfg, meta, targetPath, nil
 		}
-		return fmt.Errorf("%w %s: %w", ErrAccessConfig, path, err)
 	}
-	if info.IsDir() {
-		return fmt.Errorf("%w: %s", ErrConfigIsDirectory, path)
+
+	// Discovered mode across tiers: System -> User -> Project
+	strataOpts := newStrataOptions(strata.WithAppName("aht"))
+	if opts.CWD != "" {
+		strataOpts = append(strataOpts, strata.WithCWD(opts.CWD))
 	}
-	if info.Size() > maxConfigFileSize {
-		return fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), path)
+
+	if len(opts.SystemDirs) > 0 {
+		old := os.Getenv("XDG_CONFIG_DIRS")
+		_ = os.Setenv("XDG_CONFIG_DIRS", strings.Join(opts.SystemDirs, ":"))
+		defer func() {
+			if old == "" {
+				_ = os.Unsetenv("XDG_CONFIG_DIRS")
+			} else {
+				_ = os.Setenv("XDG_CONFIG_DIRS", old)
+			}
+		}()
 	}
-	contents, err := readBoundedFile(cleanPath)
+
+	if opts.UserConfigDir != "" {
+		old := os.Getenv("XDG_CONFIG_HOME")
+		_ = os.Setenv("XDG_CONFIG_HOME", opts.UserConfigDir)
+		defer func() {
+			if old == "" {
+				_ = os.Unsetenv("XDG_CONFIG_HOME")
+			} else {
+				_ = os.Setenv("XDG_CONFIG_HOME", old)
+			}
+		}()
+	}
+
+	cfg, meta, err := strata.Load[Config](strataOpts...)
+	resolvedPath := DefaultPath()
+	if meta != nil {
+		if active := meta.ActiveFiles(); len(active) > 0 {
+			resolvedPath = active[len(active)-1]
+		}
+	}
+
 	if err != nil {
-		return err
+		if errors.Is(err, strata.ErrFileTooLarge) {
+			return Config{}, nil, resolvedPath, fmt.Errorf("%w: %s", ErrConfigFileTooLarge, resolvedPath)
+		}
+		if isValidationOrDurationError(err) {
+			return Config{}, nil, resolvedPath, err
+		}
+		return Config{}, nil, resolvedPath, fmt.Errorf("%w %s: %w", ErrParseConfig, resolvedPath, err)
 	}
-	if err := decodeTOML(contents, target); err != nil {
-		return fmt.Errorf("%w %s: %w", ErrParseConfig, path, err)
-	}
-	return nil
+
+	return cfg, meta, resolvedPath, nil
 }
 
-func defaultSystemConfigDirs() []string {
-	if runtime.GOOS == "windows" {
-		if progData := os.Getenv("ProgramData"); progData != "" {
-			return []string{progData}
-		}
-		return nil
-	}
-	xdgDirs := os.Getenv("XDG_CONFIG_DIRS")
-	if xdgDirs == "" {
-		return []string{"/etc/xdg"}
-	}
-	var clean []string
-	for d := range strings.SplitSeq(xdgDirs, ":") {
-		if trimmed := strings.TrimSpace(d); trimmed != "" {
-			clean = append(clean, trimmed)
-		}
-	}
-	return clean
-}
-
-func normalizeConfig(cfg Config) (Config, error) {
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
-	}
-	cfg.UI.DefaultPresence = strings.ToLower(strings.TrimSpace(cfg.UI.DefaultPresence))
-	cfg.UI.TimeFormat = strings.ToLower(strings.TrimSpace(cfg.UI.TimeFormat))
-	if cfg.UI.Sort != "" {
-		var err error
-		cfg.UI.Sort, err = NormalizeSort(cfg.UI.Sort)
-		if err != nil {
-			return Config{}, err
-		}
-	}
-
-	return cfg, nil
+func isValidationOrDurationError(err error) bool {
+	return errors.Is(err, ErrInvalidPresence) ||
+		errors.Is(err, ErrInvalidSort) ||
+		errors.Is(err, ErrInvalidTimeFormat) ||
+		errors.Is(err, ErrNegativeAge) ||
+		errors.Is(err, ErrNonPositiveInterval) ||
+		errors.Is(err, ErrNegativeGracePeriod) ||
+		errors.Is(err, ErrInvalidDuration) ||
+		errors.Is(err, ErrMissingUnitSuffix)
 }

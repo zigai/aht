@@ -13,6 +13,11 @@ import (
 
 var errUnknownFieldInConfig = errors.New("unknown field in config")
 
+// DecodeTOML decodes TOML bytes into target with strict unknown field rejection.
+func DecodeTOML(data []byte, target any) error {
+	return decodeTOML(data, target)
+}
+
 // readBounded reads up to limit bytes from r. If more than limit bytes are
 // available, it returns ErrConfigFileTooLarge.
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
