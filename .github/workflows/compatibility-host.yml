@@ -31,10 +31,9 @@ jobs:
         run: echo "AHT_COMPAT_WORK=$RUNNER_TEMP/aht-compat-diagnostics" >> "$GITHUB_ENV"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: host
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -52,19 +51,14 @@ jobs:
 
       - name: Install harness
         id: install
-        run: go run ./internal/tools/compatibility install
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$AHT_COMPAT_WORK"
+          go run ./internal/tools/compatibility install 2>&1 | tee "$AHT_COMPAT_WORK/$AHT_COMPAT_HARNESS-install.log"
 
       - name: Install tmux
-        run: |
-          sudo apt-get update && sudo apt-get install --yes libevent-dev ncurses-dev build-essential bison pkg-config
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o tmux-3.6.tar.gz https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz
-          tar -xzf tmux-3.6.tar.gz
-          cd tmux-3.6
-          ./configure --prefix=/usr
-          make -j"$(nproc)"
-          sudo make install
-          cd ..
-          rm -rf tmux-3.6 tmux-3.6.tar.gz
+        uses: ./.github/actions/setup-tmux
 
       - name: Exercise installed integration and host
         id: lifecycle
@@ -88,6 +82,7 @@ jobs:
           name: current-${{ inputs.harness }}-diagnostics
           path: |
             ${{ runner.temp }}/aht-compat-diagnostics/${{ inputs.harness }}.log
+            ${{ runner.temp }}/aht-compat-diagnostics/${{ inputs.harness }}-install.log
             ${{ runner.temp }}/aht-compat-diagnostics/${{ inputs.harness }}-result.json
           if-no-files-found: error
           overwrite: true

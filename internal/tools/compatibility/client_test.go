@@ -17,7 +17,7 @@ func TestReleaseSources(t *testing.T) {
 	}{
 		{"claude", "/npm/@anthropic-ai%2Fclaude-code/latest", `{"name":"@anthropic-ai/claude-code","version":"1.2.3"}`, "1.2.3", false},
 		{"hermes", "/pypi/hermes-agent/json", `{"info":{"name":"hermes-agent","version":"1.2.3"},"urls":[{"yanked":false}]}`, "1.2.3", false},
-		{"kimi-code", "/pypi/kimi-cli/json", `{"info":{"name":"kimi-cli","version":"1.52.0"},"urls":[{"yanked":false}]}`, "1.51.0", false},
+		{"kimi-code", "/pypi/kimi-cli/json", `{"info":{"name":"kimi-cli","version":"1.52.0"},"urls":[{"yanked":false}]}`, "1.52.0", false},
 		{"goose", "/github/repos/aaif-goose/goose/releases/latest", `{"tag_name":"v1.2.3","assets":[{"name":"download_cli.sh","state":"uploaded"}]}`, "v1.2.3", false},
 		{"grok", "/channel", "1.2.3\n", "1.2.3", false},
 		{"droid", "/npm/droid/latest", `{"name":"different","version":"1.2.3"}`, "", true},
@@ -51,6 +51,29 @@ func TestReleaseSources(t *testing.T) {
 			version, err := client.latest(t.Context(), spec)
 			if (err != nil) != tt.bad || version != tt.want {
 				t.Fatalf("latest = %q, %v", version, err)
+			}
+		})
+	}
+}
+
+func TestSupportedCapDoesNotHideLatestRelease(t *testing.T) {
+	for _, tc := range []struct{ latest, supported string }{
+		{"1.50.0", "1.50.0"}, {"1.51.0", "1.51.0"}, {"1.52.0", "1.51.0"},
+	} {
+		t.Run(tc.latest, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"info":{"name":"kimi-cli","version":%q},"urls":[{"yanked":false}]}`, tc.latest)
+			}))
+			t.Cleanup(server.Close)
+			client := testClient(server)
+			spec := testHarness(t, "kimi-code")
+			version, err := client.supported(t.Context(), spec)
+			if err != nil || version != tc.supported {
+				t.Fatalf("supported = %q, %v", version, err)
+			}
+			plan, err := detect(t.Context(), emptyState(), spec.ID, false, client.latest)
+			if err != nil || len(plan.Matrix.Include) != 1 || plan.Matrix.Include[0].Version != tc.latest {
+				t.Fatalf("upstream detection = %+v, %v", plan, err)
 			}
 		})
 	}

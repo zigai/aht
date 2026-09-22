@@ -18,7 +18,7 @@ const (
 	requestTimeout   = 30 * time.Second
 	maxMetadataBytes = 2 * 1024 * 1024
 	maxRedirects     = 10
-	stateArtifact    = "compatibility-release-state-v1"
+	stateArtifact    = "compatibility-release-state-v2"
 	workflowPath     = ".github/workflows/compatibility-releases.yml"
 	artifactPageSize = 100
 	maxArtifactPages = 20
@@ -159,17 +159,31 @@ func (c *releaseClient) pypiVersion(ctx context.Context, spec harnessSpec) (stri
 	}
 	for _, file := range data.URLs {
 		if !file.Yanked {
-			if spec.MaxVersion != "" {
-				maxV, maxErr := parseVersion(spec.MaxVersion)
-				curV, curErr := parseVersion(data.Info.Version)
-				if maxErr == nil && curErr == nil && slices.Compare(curV[:], maxV[:]) > 0 {
-					return spec.MaxVersion, nil
-				}
-			}
 			return data.Info.Version, nil
 		}
 	}
 	return "", fmt.Errorf("%w: no non-yanked distribution", errCompatibility)
+}
+
+// supported applies the integration cap to change checks. Release discovery uses
+// latest directly so an upstream release beyond that cap remains visible.
+func (c *releaseClient) supported(ctx context.Context, spec harnessSpec) (string, error) {
+	version, err := c.latest(ctx, spec)
+	if err != nil || spec.MaxVersion == "" {
+		return version, err
+	}
+	maximum, err := parseVersion(spec.MaxVersion)
+	if err != nil {
+		return "", err
+	}
+	current, err := parseVersion(version)
+	if err != nil {
+		return "", err
+	}
+	if slices.Compare(current[:], maximum[:]) > 0 {
+		return spec.MaxVersion, nil
+	}
+	return version, nil
 }
 
 func (c *releaseClient) githubVersion(ctx context.Context, spec harnessSpec) (string, error) {
@@ -202,16 +216,27 @@ func (c *releaseClient) restoreState(ctx context.Context, repository, branch, ru
 		return state, fmt.Errorf("%w: GITHUB_REPOSITORY and AHT_DEFAULT_BRANCH are required", errCompatibility)
 	}
 	base := c.githubBase + "/repos/" + repository + "/actions"
+	for _, name := range []string{stateArtifact, "compatibility-release-state-v1"} {
+		restored, found, err := c.restoreArtifactState(ctx, base, name, branch, runID)
+		if err != nil || found {
+			return restored, err
+		}
+	}
+	return state, nil
+}
+
+func (c *releaseClient) restoreArtifactState(ctx context.Context, base, name, branch, runID string) (releaseState, bool, error) {
+	state := emptyState()
 	for page := 1; page <= maxArtifactPages; page++ {
 		var data struct {
 			Artifacts []artifact `json:"artifacts"`
 		}
-		target := base + "/artifacts?name=" + stateArtifact + "&per_page=" + strconv.Itoa(artifactPageSize) + "&page=" + strconv.Itoa(page)
+		target := base + "/artifacts?name=" + name + "&per_page=" + strconv.Itoa(artifactPageSize) + "&page=" + strconv.Itoa(page)
 		if err := c.getJSON(ctx, target, &data); err != nil {
-			return state, err
+			return state, false, err
 		}
 		if data.Artifacts == nil {
-			return state, fmt.Errorf("%w: invalid artifact listing; refusing to reset release history", errCompatibility)
+			return state, false, fmt.Errorf("%w: invalid artifact listing; refusing to reset release history", errCompatibility)
 		}
 		slices.SortFunc(data.Artifacts, func(a, b artifact) int {
 			return cmp.Compare(b.ID, a.ID)
@@ -219,22 +244,23 @@ func (c *releaseClient) restoreState(ctx context.Context, repository, branch, ru
 		for _, item := range data.Artifacts {
 			allowed, err := c.trustedArtifact(ctx, base, item, branch, runID)
 			if err != nil {
-				return state, err
+				return state, false, err
 			}
 			if !allowed {
 				continue
 			}
 			body, err := c.get(ctx, base+"/artifacts/"+strconv.FormatInt(item.ID, 10)+"/zip")
 			if err != nil {
-				return state, err
+				return state, false, err
 			}
-			return decodeStateArchive(body)
+			restored, err := decodeStateArchive(body)
+			return restored, true, err
 		}
 		if len(data.Artifacts) < artifactPageSize {
-			return state, nil
+			return state, false, nil
 		}
 	}
-	return state, fmt.Errorf("%w: no usable state within artifact search limit", errCompatibility)
+	return state, false, fmt.Errorf("%w: no usable state within artifact search limit", errCompatibility)
 }
 
 func (c *releaseClient) trustedArtifact(ctx context.Context, base string, item artifact, branch, runID string) (bool, error) {

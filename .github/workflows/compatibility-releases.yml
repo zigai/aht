@@ -38,10 +38,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: selector
 
       - name: Detect new major/minor versions
         id: detect
@@ -67,7 +66,7 @@ jobs:
     if: needs.detect.outputs.changed == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     uses: ./.github/workflows/compatibility-host.yml
     with:
@@ -86,10 +85,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: selector
 
       - name: Download plan
         uses: actions/download-artifact@v7
@@ -117,7 +115,7 @@ jobs:
       - name: Persist release state
         uses: actions/upload-artifact@v6
         with:
-          name: compatibility-release-state-v1
+          name: compatibility-release-state-v2
           path: ${{ runner.temp }}/release-state/state.json
           if-no-files-found: error
           overwrite: true

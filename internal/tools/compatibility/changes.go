@@ -126,6 +126,7 @@ func (a application) changes(ctx context.Context) error {
 		return err
 	}
 	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}}
+	client := a.releaseClient()
 	for _, id := range affectedHosts(paths) {
 		spec, err := findHarness(id)
 		if err != nil {
@@ -137,7 +138,7 @@ func (a application) changes(ctx context.Context) error {
 		}
 		// Like probe, use an empty state and never restore or publish the hourly
 		// cache. Resolve each selected distribution once, then pin the host job.
-		resolved, err := detect(ctx, emptyState(), id, false, a.releaseClient().latest)
+		resolved, err := detect(ctx, emptyState(), id, false, client.supported)
 		if err != nil {
 			return err
 		}

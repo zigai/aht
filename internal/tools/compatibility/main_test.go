@@ -29,12 +29,12 @@ func TestResultRejectsVersionDrift(t *testing.T) {
 	if err := readJSON(filepath.Join(directory, "codex-result.json"), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != "failure" {
+	if result.Outcome != "infrastructure" {
 		t.Fatalf("result = %+v", result)
 	}
 }
 
-func TestResultWritesFailureWhenLogMissing(t *testing.T) {
+func TestResultRemainsRetryableWhenLogMissing(t *testing.T) {
 	directory := t.TempDir()
 	env := map[string]string{"AHT_COMPAT_WORK": directory, "AHT_COMPAT_HARNESS": "codex", "AHT_COMPAT_VERSION": "0.153.4", "AHT_INSTALL_OUTCOME": "success", "AHT_TEST_OUTCOME": "success"}
 	app := application{getenv: func(key string) string { return env[key] }, stdout: io.Discard, stderr: io.Discard}
@@ -45,7 +45,7 @@ func TestResultWritesFailureWhenLogMissing(t *testing.T) {
 	if err := readJSON(filepath.Join(directory, "codex-result.json"), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != "failure" {
+	if result.Outcome != "infrastructure" {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -98,6 +98,26 @@ func TestWorkflowOutputsAndStateRoundTrip(t *testing.T) {
 	}
 	runTestCommand(t, app, "detect")
 	assertOutputs(t, output, "matrix={\"include\":[]}\n", "changed=false\n")
+	runTestCommand(t, app, "finish")
+	assertOutputs(t, output, "failed=true\n")
+}
+
+func TestResultOutcomes(t *testing.T) {
+	for _, tc := range []struct{ install, test, want string }{
+		{"success", "success", "success"},
+		{"success", "failure", "failure"},
+		{"failure", "skipped", "infrastructure"},
+		{"failure", "failure", "infrastructure"},
+		{"success", "cancelled", "incomplete"}, //nolint:misspell // GitHub Actions uses the external outcome "cancelled".
+		{"cancelled", "skipped", "incomplete"}, //nolint:misspell // GitHub Actions uses the external outcome "cancelled".
+		{"skipped", "skipped", "incomplete"},
+	} {
+		t.Run(tc.install+"/"+tc.test, func(t *testing.T) {
+			if got := resultOutcome(tc.install, tc.test); got != tc.want {
+				t.Fatalf("outcome = %s, want %s", got, tc.want)
+			}
+		})
+	}
 }
 
 func runTestCommand(t *testing.T, app application, command string) {

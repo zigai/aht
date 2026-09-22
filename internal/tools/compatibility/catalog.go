@@ -15,7 +15,7 @@ import (
 const (
 	versionComponents = 3
 	seriesComponents  = 2
-	stateSchema       = 1
+	stateSchema       = 2
 )
 
 var (
@@ -75,21 +75,24 @@ type releasePlan struct {
 }
 
 type checkedRelease struct {
-	Source  string `json:"source"`
-	Version string `json:"version"`
-	Outcome string `json:"outcome"`
-	RunURL  string `json:"run_url"`
+	Source   string `json:"source"`
+	Version  string `json:"version"`
+	Outcome  string `json:"outcome"`
+	RunURL   string `json:"run_url"`
+	Revision string `json:"revision,omitempty"`
 }
 
 type releaseState struct {
-	Schema    int                       `json:"schema"`
-	Harnesses map[string]checkedRelease `json:"harnesses"`
+	Schema     int                       `json:"schema"`
+	Harnesses  map[string]checkedRelease `json:"harnesses"`
+	Successful map[string]checkedRelease `json:"successful"`
 }
 
 type hostResult struct {
-	Harness string `json:"harness"`
-	Version string `json:"version"`
-	Outcome string `json:"outcome"`
+	Harness  string `json:"harness"`
+	Version  string `json:"version"`
+	Outcome  string `json:"outcome"`
+	Revision string `json:"revision,omitempty"`
 }
 
 func findHarness(id string) (harnessSpec, error) {
@@ -131,6 +134,9 @@ func needsCheck(spec harnessSpec, version string, previous checkedRelease, force
 		return false, err
 	}
 	if force || previous.Source != spec.sourceKey() {
+		return true, nil
+	}
+	if previous.Outcome == "infrastructure" || previous.Outcome == "incomplete" {
 		return true, nil
 	}
 	before, err := parseVersion(previous.Version)

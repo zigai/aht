@@ -145,17 +145,17 @@ func (a application) recordResult() error {
 	} else if _, err := parseVersion(version); err != nil {
 		return err
 	}
-	result := hostResult{Harness: spec.ID, Version: version, Outcome: resultOutcome(a.getenv("AHT_INSTALL_OUTCOME"), a.getenv("AHT_TEST_OUTCOME"))}
+	result := hostResult{Harness: spec.ID, Version: version, Outcome: resultOutcome(a.getenv("AHT_INSTALL_OUTCOME"), a.getenv("AHT_TEST_OUTCOME")), Revision: a.getenv("GITHUB_SHA")}
 	var mismatch error
 	if result.Outcome == "success" && version != "current" {
 		log, err := os.ReadFile(filepath.Join(a.workDirectory(), spec.ID+".log"))
 		if err != nil {
-			result.Outcome = "failure"
+			result.Outcome = "infrastructure"
 			writeErr := a.writeJSON(spec.ID+"-result.json", result)
 			return errors.Join(fmt.Errorf("read lifecycle log: %w", err), writeErr)
 		}
 		if !checkedVersion(string(log), spec.ID, version) {
-			result.Outcome = "failure"
+			result.Outcome = "infrastructure"
 			mismatch = fmt.Errorf("%w: lifecycle test did not observe requested %s version %s", errCompatibility, spec.ID, version)
 		}
 	}
@@ -166,7 +166,10 @@ func (a application) recordResult() error {
 }
 
 func resultOutcome(install, test string) string {
-	if install == "failure" || test == "failure" {
+	if install == "failure" {
+		return "infrastructure"
+	}
+	if install == "success" && test == "failure" {
 		return "failure"
 	}
 	if install == "success" && test == "success" {
@@ -209,7 +212,7 @@ func (a application) finish(ctx context.Context) error {
 	if err := a.summary(releaseSummary(plan, next, incomplete)); err != nil {
 		return err
 	}
-	failed := planHasErrors(plan) || len(incomplete) > 0 || selectedFailure(plan, results)
+	failed := planHasErrors(plan) || len(incomplete) > 0 || unresolvedFailure(next)
 	return a.output("failed", failed)
 }
 
@@ -229,12 +232,11 @@ func readResults(directory string, plan releasePlan) ([]hostResult, error) {
 	return results, nil
 }
 
-func selectedFailure(plan releasePlan, results []hostResult) bool {
-	for _, selected := range plan.Matrix.Include {
-		for _, result := range results {
-			if result.Harness == selected.Harness && result.Version == selected.Version && result.Outcome == "failure" {
-				return true
-			}
+func unresolvedFailure(state releaseState) bool {
+	for _, spec := range defaultCatalog {
+		previous := state.Harnesses[spec.ID]
+		if previous.Source == spec.sourceKey() && previous.Outcome != "success" {
+			return true
 		}
 	}
 	return false
@@ -242,8 +244,8 @@ func selectedFailure(plan releasePlan, results []hostResult) bool {
 
 func releaseSummary(plan releasePlan, state releaseState, incomplete []string) string {
 	var report strings.Builder
-	fmt.Fprintf(&report, "## Release compatibility\n\n%d harness(es) selected; major/minor changes only.\n\n", len(plan.Matrix.Include))
-	report.WriteString("| Harness | Latest observed | Last checked | Result |\n| --- | --- | --- | --- |\n")
+	fmt.Fprintf(&report, "## Release compatibility\n\n%d harness(es) selected; major/minor changes and infrastructure retries. Unresolved failures keep this check failing.\n\n", len(plan.Matrix.Include))
+	report.WriteString("| Harness | Latest observed | Last attempted | Last successful | Result | Supported maximum |\n| --- | --- | --- | --- | --- | --- |\n")
 	for _, spec := range defaultCatalog {
 		if spec.Source == "weekly" {
 			continue
@@ -253,7 +255,11 @@ func releaseSummary(plan releasePlan, state releaseState, incomplete []string) s
 		if previous := state.Harnesses[spec.ID]; previous.Source == spec.sourceKey() {
 			version, outcome = previous.Version, previous.Outcome
 		}
-		fmt.Fprintf(&report, "| %s | %s | %s | %s |\n", spec.ID, markdownCell(latest), version, outcome)
+		successful := "none"
+		if previous := state.Successful[spec.ID]; previous.Source == spec.sourceKey() {
+			successful = previous.Version
+		}
+		fmt.Fprintf(&report, "| %s | %s | %s | %s | %s | %s |\n", spec.ID, markdownCell(latest), version, successful, outcome, cmp.Or(spec.MaxVersion, "latest"))
 	}
 	if len(incomplete) > 0 {
 		report.WriteString("\nIncomplete (will retry): " + strings.Join(incomplete, ", ") + ".\n")
