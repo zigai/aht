@@ -17,6 +17,7 @@ func TestReleaseSources(t *testing.T) {
 	}{
 		{"claude", "/npm/@anthropic-ai%2Fclaude-code/latest", `{"name":"@anthropic-ai/claude-code","version":"1.2.3"}`, "1.2.3", false},
 		{"hermes", "/pypi/hermes-agent/json", `{"info":{"name":"hermes-agent","version":"1.2.3"},"urls":[{"yanked":false}]}`, "1.2.3", false},
+		{"kimi-code", "/pypi/kimi-cli/json", `{"info":{"name":"kimi-cli","version":"1.52.0"},"urls":[{"yanked":false}]}`, "1.51.0", false},
 		{"goose", "/github/repos/aaif-goose/goose/releases/latest", `{"tag_name":"v1.2.3","assets":[{"name":"download_cli.sh","state":"uploaded"}]}`, "v1.2.3", false},
 		{"grok", "/channel", "1.2.3\n", "1.2.3", false},
 		{"droid", "/npm/droid/latest", `{"name":"different","version":"1.2.3"}`, "", true},

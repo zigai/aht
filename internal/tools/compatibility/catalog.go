@@ -24,32 +24,33 @@ var (
 	observedVersionPattern = regexp.MustCompile(`v?[0-9]+\.[0-9]+\.[0-9]+`)
 
 	defaultCatalog = []harnessSpec{
-		{ID: "claude", Source: "npm", Package: "@anthropic-ai/claude-code", Repo: "", Asset: "", URL: ""},
-		{ID: "codex", Source: "npm", Package: "@openai/codex", Repo: "", Asset: "", URL: ""},
-		{ID: "cursor", Source: "weekly", Package: "", Repo: "", Asset: "", URL: ""},
-		{ID: "copilot", Source: "npm", Package: "@github/copilot", Repo: "", Asset: "", URL: ""},
-		{ID: "cline", Source: "npm", Package: "cline", Repo: "", Asset: "", URL: ""},
-		{ID: "kimi-code", Source: "pypi", Package: "kimi-cli", Repo: "", Asset: "", URL: ""},
-		{ID: "grok", Source: "channel", Package: "", Repo: "", Asset: "", URL: "https://x.ai/cli/stable"},
-		{ID: "goose", Source: "github", Package: "", Repo: "aaif-goose/goose", Asset: "download_cli.sh", URL: ""},
-		{ID: "pi", Source: "npm", Package: "@earendil-works/pi-coding-agent", Repo: "", Asset: "", URL: ""},
-		{ID: "omp", Source: "npm", Package: "@oh-my-pi/pi-coding-agent", Repo: "", Asset: "", URL: ""},
-		{ID: "opencode", Source: "npm", Package: "opencode-ai", Repo: "", Asset: "", URL: ""},
-		{ID: "agy", Source: "github", Package: "", Repo: "google-antigravity/antigravity-cli", Asset: "agy_cli_linux_x64.tar.gz", URL: ""},
-		{ID: "kilo", Source: "npm", Package: "@kilocode/cli", Repo: "", Asset: "", URL: ""},
-		{ID: "droid", Source: "npm", Package: "droid", Repo: "", Asset: "", URL: ""},
-		{ID: "openclaw", Source: "npm", Package: "openclaw", Repo: "", Asset: "", URL: ""},
-		{ID: "hermes", Source: "pypi", Package: "hermes-agent", Repo: "", Asset: "", URL: ""},
+		{ID: "claude", Source: "npm", Package: "@anthropic-ai/claude-code", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "codex", Source: "npm", Package: "@openai/codex", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "cursor", Source: "weekly", Package: "", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "copilot", Source: "npm", Package: "@github/copilot", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "cline", Source: "npm", Package: "cline", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "kimi-code", Source: "pypi", Package: "kimi-cli", Repo: "", Asset: "", URL: "", MaxVersion: "1.51.0"},
+		{ID: "grok", Source: "channel", Package: "", Repo: "", Asset: "", URL: "https://x.ai/cli/stable", MaxVersion: ""},
+		{ID: "goose", Source: "github", Package: "", Repo: "aaif-goose/goose", Asset: "download_cli.sh", URL: "", MaxVersion: ""},
+		{ID: "pi", Source: "npm", Package: "@earendil-works/pi-coding-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "omp", Source: "npm", Package: "@oh-my-pi/pi-coding-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "opencode", Source: "npm", Package: "opencode-ai", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "agy", Source: "github", Package: "", Repo: "google-antigravity/antigravity-cli", Asset: "agy_cli_linux_x64.tar.gz", URL: "", MaxVersion: ""},
+		{ID: "kilo", Source: "npm", Package: "@kilocode/cli", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "droid", Source: "npm", Package: "droid", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "openclaw", Source: "npm", Package: "openclaw", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "hermes", Source: "pypi", Package: "hermes-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
 	}
 )
 
 type harnessSpec struct {
-	ID      string
-	Source  string
-	Package string
-	Repo    string
-	Asset   string
-	URL     string
+	ID         string
+	Source     string
+	Package    string
+	Repo       string
+	Asset      string
+	URL        string
+	MaxVersion string
 }
 
 type candidate struct {

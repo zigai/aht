@@ -159,6 +159,13 @@ func (c *releaseClient) pypiVersion(ctx context.Context, spec harnessSpec) (stri
 	}
 	for _, file := range data.URLs {
 		if !file.Yanked {
+			if spec.MaxVersion != "" {
+				maxV, maxErr := parseVersion(spec.MaxVersion)
+				curV, curErr := parseVersion(data.Info.Version)
+				if maxErr == nil && curErr == nil && slices.Compare(curV[:], maxV[:]) > 0 {
+					return spec.MaxVersion, nil
+				}
+			}
 			return data.Info.Version, nil
 		}
 	}
