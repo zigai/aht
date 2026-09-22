@@ -23,6 +23,7 @@ type (
 		TTYTmuxContext     bool             `json:"tty_tmux_context"`
 		Installable        bool             `json:"installable"`
 		Resumable          bool             `json:"resumable"`
+		TitleLookup        bool             `json:"title_lookup"`
 		ScreenSupport      bool             `json:"screen_support"`
 		ScreenFallback     bool             `json:"screen_fallback"`
 		Authority          string           `json:"authority"`
@@ -56,6 +57,7 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 			TTYTmuxContext:     false,
 			Installable:        false,
 			Resumable:          false,
+			TitleLookup:        false,
 			ScreenSupport:      false,
 			ScreenFallback:     false,
 			Authority:          "",
@@ -66,6 +68,7 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 	definition := adapter.Definition()
 	_, isInstallable := adapter.(harness.Installable)
 	_, isResumable := adapter.(harness.Resumable)
+	_, hasTitleLookup := adapter.(harness.TitleReader)
 	screenSupport := catalog.SupportsScreen(harnessID)
 	authority, fallback, source := catalog.PolicyFor(harnessID)
 
@@ -80,6 +83,7 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 		TTYTmuxContext:     definition.Capabilities.TTYTmuxContext,
 		Installable:        isInstallable,
 		Resumable:          isResumable,
+		TitleLookup:        hasTitleLookup,
 		ScreenSupport:      screenSupport,
 		ScreenFallback:     fallback,
 		Authority:          string(authority),

@@ -61,6 +61,23 @@ func TestCapabilitiesForCodex(t *testing.T) {
 	if !caps.ScreenSupport {
 		t.Fatal("Codex should have screen support")
 	}
+	if !caps.TitleLookup {
+		t.Fatal("Codex should support native title lookup")
+	}
+}
+
+func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
+	t.Parallel()
+	for _, id := range []registry.Harness{registry.HarnessCodex, registry.HarnessPi, registry.HarnessOmp} {
+		caps, ok := harness.CapabilitiesFor(id)
+		if !ok || !caps.TitleLookup {
+			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)
+		}
+	}
+	caps, ok := harness.CapabilitiesFor(registry.HarnessClaude)
+	if !ok || caps.TitleLookup {
+		t.Fatalf("Claude title lookup capability = %t, %t", caps.TitleLookup, ok)
+	}
 }
 
 func TestCapabilitiesForOpenClaw(t *testing.T) {
@@ -121,7 +138,7 @@ func TestCapabilitiesJSONCompatibility(t *testing.T) {
 	expectedFields := []string{
 		"harness", "session_start", "session_end", "running_idle", "waiting_permission",
 		"process_identity", "native_catalog", "tty_tmux_context", "installable",
-		"resumable", "screen_support", "screen_fallback", "authority",
+		"resumable", "title_lookup", "screen_support", "screen_fallback", "authority",
 	}
 	for _, field := range expectedFields {
 		if _, ok := raw[field]; !ok {
