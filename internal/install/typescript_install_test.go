@@ -195,20 +195,72 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	if result.Path != filepath.Join(dir, "opencode", "plugins", openCodePluginName) {
 		t.Fatalf("unexpected path %q", result.Path)
 	}
-	if !strings.Contains(result.Snippet, "AHT_INTEGRATION_ID=opencode") {
-		t.Fatalf("expected integration id in snippet: %q", result.Snippet)
+	requireTextContainsAll(t, result.Snippet, []string{
+		"AHT_INTEGRATION_ID=opencode",
+		"AHT_INTEGRATION_VERSION=10",
+		`export default { id: "aht-state", setup, server };`,
+		`async function server(ctx: V1PluginContext)`,
+		`async function setup(ctx: V2PluginContext)`,
+		`event: async ({ event }`,
+		`ctx?.event?.subscribe`,
+		`ctx?.location?.directory`,
+		`"permission.asked"`,
+		`"session.deleted"`,
+		`state === "gone" ? "--presence"`,
+		`"--observed-at", observedAt`,
+	}, "opencode plugin")
+}
+
+func TestInstallOpenCodeReplacesManagedPlugin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "opencode", "plugins", openCodePluginName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("creating opencode plugin dir: %v", err)
 	}
-	if !strings.Contains(result.Snippet, `event: async ({ event }`) {
-		t.Fatalf("expected native event handler in snippet: %q", result.Snippet)
+	oldPlugin := `"aht managed integration";
+const old = "old-aht";
+`
+	if err := os.WriteFile(path, []byte(oldPlugin), 0o600); err != nil {
+		t.Fatalf("writing old plugin: %v", err)
 	}
-	if !strings.Contains(result.Snippet, `"permission.asked"`) {
-		t.Fatalf("expected permission event mapping in snippet: %q", result.Snippet)
+
+	result, err := Run(Options{
+		Harness:      registry.HarnessOpenCode,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
-	if !strings.Contains(result.Snippet, `"session.deleted"`) || !strings.Contains(result.Snippet, `state === "gone" ? "--presence"`) {
-		t.Fatalf("expected OpenCode session deletion mapping in snippet: %q", result.Snippet)
+	if !result.Changed {
+		t.Fatal("expected opencode install to replace old managed plugin")
 	}
-	if !strings.Contains(result.Snippet, `"--observed-at", observedAt`) {
-		t.Fatalf("expected opencode observed timestamp in snippet: %q", result.Snippet)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading installed plugin: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "old-aht") {
+		t.Fatalf("expected old managed plugin to be removed: %s", text)
+	}
+	second, err := Run(Options{
+		Harness:      registry.HarnessOpenCode,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal("expected second opencode install to be idempotent")
 	}
 }
 

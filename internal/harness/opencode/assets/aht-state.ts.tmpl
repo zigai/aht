@@ -17,27 +17,70 @@ let reportSequence = Date.now() * 1000;
 
 {{TYPESCRIPT_EVENT_PARSER}}
 // Consumer-only native plugin contract; event bus payloads are parsed as unknown.
-// https://opencode.ai/docs/plugins/ and https://kilo.ai/docs/automate/extending/plugins
-type PluginContext = {
+// V2: https://opencode.ai/v2/docs/build/plugins/
+// V1 (1.18.29+): server() is the bounded V1 compatibility entrypoint.
+// Dual entrypoint: V2 loaders invoke setup(), while V1 loaders invoke server().
+// Exporting both from a single hermetic object allows one generated file to support
+// both runtimes without external dependencies or install-time version branching.
+type SessionRefs = {
+  readonly directory?: string | undefined;
+  readonly projectRoot?: string | undefined;
+};
+
+type V1PluginContext = {
   readonly directory?: string | undefined;
   readonly worktree?: string | undefined;
   readonly project?: { readonly path?: string | undefined; readonly root?: string };
 };
-type PluginHooks = {
+type V1PluginHooks = {
   event(input: { readonly event: unknown }): Promise<void>;
   dispose(): Promise<void>;
 };
-async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
+
+type V2PluginContext = {
+  readonly location?: {
+    readonly directory?: string | undefined;
+    readonly project?: {
+      readonly canonical?: string | undefined;
+      readonly directory?: string | undefined;
+    } | undefined;
+  } | undefined;
+  readonly event?: {
+    subscribe(options?: { readonly signal?: AbortSignal }): AsyncIterable<unknown>;
+  } | undefined;
+};
+
+function addAttribute(args: string[], key: string, value: unknown): void {
+  if (typeof value === "string" && value.length > 0) {
+    args.push("--attribute", `${key}=${value}`);
+  }
+}
+
+function addEvent(args: string[], value: unknown): void {
+  if (typeof value === "string" && value.length > 0) {
+    args.push("--event", value);
+  }
+}
+
+function createCore(initialRefs?: SessionRefs) {
   let currentSessionId: string | undefined;
   let currentSessionPath: string | undefined;
-  let currentCwd: string | undefined;
-  let currentProjectRoot: string | undefined;
+  let currentCwd: string | undefined = initialRefs?.directory;
+  let currentProjectRoot: string | undefined = initialRefs?.projectRoot;
+
+  function setRefs(refs: SessionRefs): void {
+    if (refs.directory) currentCwd = refs.directory;
+    if (refs.projectRoot) currentProjectRoot = refs.projectRoot;
+  }
 
   function refreshSessionRef(event: unknown): void {
     currentSessionId = firstPathString(event, [
       ["sessionID"],
       ["sessionId"],
       ["session_id"],
+      ["data", "sessionID"],
+      ["data", "sessionId"],
+      ["data", "session_id"],
       ["properties", "sessionID"],
       ["properties", "sessionId"],
       ["properties", "session_id"],
@@ -52,6 +95,9 @@ async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
       ["sessionPath"],
       ["session_path"],
       ["path"],
+      ["data", "sessionPath"],
+      ["data", "session_path"],
+      ["data", "path"],
       ["properties", "info", "path"],
       ["properties", "info", "file"],
       ["session", "path"],
@@ -59,33 +105,20 @@ async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
     ]) ?? currentSessionPath;
 
     currentCwd = firstString(
-      ctx?.directory,
-      ctx?.worktree,
+      currentCwd,
       valueAt(event, ["cwd"]),
+      valueAt(event, ["data", "cwd"]),
       valueAt(event, ["session", "cwd"]),
       valueAt(event, ["properties", "cwd"]),
       valueAt(event, ["properties", "info", "directory"]),
     ) ?? currentCwd;
 
     currentProjectRoot = firstString(
-      ctx?.worktree,
-      ctx?.project?.path,
-      ctx?.project?.root,
+      currentProjectRoot,
+      valueAt(event, ["data", "projectRoot"]),
       valueAt(event, ["properties", "info", "directory"]),
     ) ?? currentProjectRoot;
   }
-
-function addAttribute(args: string[], key: string, value: unknown): void {
-  if (typeof value === "string" && value.length > 0) {
-    args.push("--attribute", `${key}=${value}`);
-  }
-}
-
-function addEvent(args: string[], value: unknown): void {
-  if (typeof value === "string" && value.length > 0) {
-    args.push("--event", value);
-  }
-}
 
   function report(state: string, event: unknown): Promise<void> {
     const observedAt = new Date().toISOString();
@@ -109,9 +142,11 @@ function addEvent(args: string[], value: unknown): void {
 
     addAttribute(args, "opencode_status", firstPathString(event, [
       ["status", "type"],
+      ["data", "status", "type"],
       ["properties", "status", "type"],
       ["session", "status", "type"],
       ["status"],
+      ["data", "status"],
       ["properties", "status"],
       ["session", "status"],
     ]));
@@ -120,23 +155,64 @@ function addEvent(args: string[], value: unknown): void {
     return enqueueCommand(args);
   }
 
+  async function handle(event: unknown): Promise<void> {
+    const state = stateForEvent(event);
+    if (state === undefined) {
+      return;
+    }
+
+    await report(state, event);
+  }
+
+  async function drain(): Promise<void> {
+    await commandDrain;
+  }
+
   return {
-    // OpenCode dispatches event hooks without awaiting their promises, but
-    // awaits dispose before tearing down the instance. Drain only observations
-    // already received from the native bus; disposal is not a session event.
-    // https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/plugin/index.ts
+    setRefs,
+    handle,
+    drain,
+  };
+}
+
+async function server(ctx: V1PluginContext): Promise<V1PluginHooks> {
+  const directory = firstString(ctx?.directory, ctx?.worktree);
+  const projectRoot = firstString(ctx?.worktree, ctx?.project?.path, ctx?.project?.root);
+  const core = createCore({ directory, projectRoot });
+
+  return {
     dispose: async () => {
-      await commandDrain;
+      await core.drain();
     },
     event: async ({ event }) => {
-      const state = stateForEvent(event);
-      if (state === undefined) {
-        return;
-      }
-
-      await report(state, event);
+      await core.handle(event);
     },
   };
 }
 
-export default { id: "aht-state", server: AHTPlugin };
+async function setup(ctx: V2PluginContext): Promise<() => Promise<void>> {
+  const directory = ctx?.location?.directory;
+  const projectRoot = ctx?.location?.project?.canonical ?? ctx?.location?.project?.directory ?? directory;
+  const core = createCore({ directory, projectRoot });
+
+  const controller = new AbortController();
+  if (ctx?.event?.subscribe) {
+    const stream = ctx.event.subscribe({ signal: controller.signal });
+    void (async () => {
+      try {
+        for await (const event of stream) {
+          await core.handle(event);
+        }
+      } catch {
+        // Unloaded or aborted subscription
+      }
+    })();
+  }
+
+  return async () => {
+    controller.abort();
+    await core.drain();
+  };
+}
+
+export default { id: "aht-state", setup, server };

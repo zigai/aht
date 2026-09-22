@@ -54,10 +54,16 @@ function stateForEvent(event: unknown): string | undefined {
     case "session.idle":
       return "idle";
     case "session.error":
+    case "session.execution.failed":
     case "error":
       return "failed";
     case "session.interrupted":
+    case "session.execution.interrupted":
       return "interrupted";
+    case "session.execution.started":
+      return "running";
+    case "session.execution.succeeded":
+      return "idle";
     case "permission.asked":
       return "waiting";
     case "permission.replied":
@@ -65,13 +71,14 @@ function stateForEvent(event: unknown): string | undefined {
     case "session.status":
       return normalizeStatus(firstPathString(event, [
         ["status", "type"],
+        ["data", "status", "type"],
         ["properties", "status", "type"],
         ["session", "status", "type"],
         ["status"],
+        ["data", "status"],
         ["properties", "status"],
         ["session", "status"],
       ]));
-    default:
       return undefined;
   }
 }

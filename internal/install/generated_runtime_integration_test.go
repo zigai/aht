@@ -100,6 +100,15 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "idle")
 	})
 
+	t.Run("opencode-plugin-v2", func(t *testing.T) {
+		capture := captureBinary(t)
+		t.Setenv("AHT_CAPTURE", capture.path)
+		module := generatedArtifactContent(t, registry.HarnessOpenCode, "aht-state.ts")
+		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/opencode-v2-session.mjs"), nil)
+		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "failed")
+		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "idle")
+	})
+
 	t.Run("kilo-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
@@ -134,6 +143,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		}
 
 		runNodeRuntime(t, "opencode_absent.ts", renderAbsentModule(registry.HarnessOpenCode), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "opencode_v2_absent.ts", renderAbsentModule(registry.HarnessOpenCode), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
 
 		runNodeRuntime(t, "kilo_absent.ts", renderAbsentModule(registry.HarnessKilo), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
 
