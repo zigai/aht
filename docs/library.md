@@ -54,6 +54,44 @@ and `SocketPath` select another local instance. Saved state may be stale.
 | `Subscribe(ctx, filter)` | Snapshot and error channels. Close the subscription when done. |
 | `Wait(ctx, options)` | A session once the requested presence or activity is observed. |
 
+## Display titles
+
+`LookupTitles(ctx, sessions)` returns titles in the same order as the input
+sessions. It uses each session's native `SessionID` and, where available,
+`SessionPath`. An empty title means no name was recorded or AHT has no title
+reader for that harness. The `TitleLookup` field returned by `Capabilities`
+distinguishes reader support from an unnamed session.
+
+Codex, Pi, and OMP currently have title readers. Codex resolves names from its
+state database and legacy name index. Lookup reads native metadata on demand
+and may return an error with partial titles. Cache Pi results when refreshing a
+view repeatedly, since Pi records names in its transcript.
+
+## Manage integrations and the tracker
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/zigai/aht/pkg/aht"
+)
+
+func main() {
+	manager := aht.NewManager(aht.ManagerConfig{})
+	status, err := manager.IntegrationStatus(context.Background(), aht.HarnessCodex)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if status.Status == aht.ArtifactStale {
+		fmt.Println("Codex integration needs an update")
+	}
+}
+```
+
 ## Search history
 
 `SearchHistory` searches retained local conversations, including sessions AHT
