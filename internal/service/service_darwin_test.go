@@ -15,8 +15,8 @@ type statusExecutor struct {
 	err    error
 }
 
-func (executor statusExecutor) Run(context.Context, string, ...string) ([]byte, error) {
-	return executor.output, executor.err
+func (e statusExecutor) Run(context.Context, string, ...string) ([]byte, error) {
+	return e.output, e.err
 }
 
 func TestLaunchdStatusClassifiesMissingService(t *testing.T) {

@@ -13,19 +13,19 @@ import (
 
 const (
 	integrationVersion        = 9
-	openClawCommand           = "openclaw"
-	openClawPluginName        = "aht-state"
-	openClawMarkerFileName    = ".aht-managed"
-	openClawIntegrationSource = "openclaw-plugin"
+	openclawCommand           = "openclaw"
+	openclawPluginName        = "aht-state"
+	openclawMarkerFileName    = ".aht-managed"
+	openclawIntegrationSource = "openclaw-plugin"
 )
 
 //go:embed assets/index.js.tmpl
-var openClawPluginTemplate string
+var openclawPluginTemplate string
 
-type openClawHarness struct{ harness.BaseAdapter }
+type openclawHarness struct{ harness.BaseAdapter }
 
-func New() openClawHarness {
-	return openClawHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+func New() openclawHarness {
+	return openclawHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ID:           registry.HarnessOpenClaw,
 		Aliases:      nil,
 		ProcessNames: []string{"openclaw"},
@@ -46,50 +46,50 @@ func New() openClawHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
-		IntegrationSource:  openClawIntegrationSource,
+		IntegrationSource:  openclawIntegrationSource,
 		StateAuthority:     harness.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
 
-func (openClawHarness) InstallPlan(binary string) harness.InstallPlan {
+func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
 	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(registry.DefaultStateDir(), "integrations", "openclaw", openClawPluginName)
+	dir := filepath.Join(registry.DefaultStateDir(), "integrations", "openclaw", openclawPluginName)
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   dir,
 		Label: "OpenClaw plugin",
 		Files: []harness.RenderedFileInstallSpec{
 			{Name: "package.json", Content: "", JSONContent: map[string]any{
-				"name": openClawPluginName, "version": "0.0." + version, "private": true, "type": "module",
+				"name": openclawPluginName, "version": "0.0." + version, "private": true, "type": "module",
 				"openclaw": map[string]any{"extensions": []string{"./index.js"}},
 			}},
 			{Name: "openclaw.plugin.json", Content: "", JSONContent: map[string]any{
-				"id": openClawPluginName, "name": "AHT State", "version": "0.0." + version,
+				"id": openclawPluginName, "name": "AHT State", "version": "0.0." + version,
 				"description":  "Reports local OpenClaw session lifecycle and activity to aht.",
 				"activation":   map[string]any{"onCapabilities": []string{"hook"}},
 				"configSchema": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}},
 			}},
-			{Name: "index.js", Content: renderOpenClawPlugin(binary, version), JSONContent: nil},
-			{Name: openClawMarkerFileName, Content: openClawMarkerContent(version), JSONContent: nil},
+			{Name: "index.js", Content: renderOpenclawPlugin(binary, version), JSONContent: nil},
+			{Name: openclawMarkerFileName, Content: openclawMarkerContent(version), JSONContent: nil},
 		},
-		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openClawMarkerFileName},
-		MarkerFile:     openClawMarkerFileName,
+		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openclawMarkerFileName},
+		MarkerFile:     openclawMarkerFileName,
 		ObsoleteFiles:  nil,
 		ImportManifest: nil,
-		Registration:   newRegistration(openClawCommand, openClawPluginName, "0.0."+version, true),
+		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
 	}}}}
 }
 
-func renderOpenClawPlugin(binary string, version string) string {
+func renderOpenclawPlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
 		"{{BINARY}}", strconv.Quote(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 
-	return replacer.Replace(openClawPluginTemplate)
+	return replacer.Replace(openclawPluginTemplate)
 }
 
-func openClawMarkerContent(version string) string {
-	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=openclaw\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, openClawIntegrationSource)
+func openclawMarkerContent(version string) string {
+	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=openclaw\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, openclawIntegrationSource)
 }

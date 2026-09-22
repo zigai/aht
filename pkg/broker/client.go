@@ -194,8 +194,8 @@ func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
 }
 
 // NewSubscription returns a Subscription wrapping the given channels and optional cancel function.
-func NewSubscription(snapshots <-chan registry.StateSnapshot, errors <-chan error, cancel context.CancelFunc) *Subscription {
-	return &Subscription{Snapshots: snapshots, Errors: errors, cancel: cancel, done: nil}
+func NewSubscription(snapshots <-chan registry.StateSnapshot, errCh <-chan error, cancel context.CancelFunc) *Subscription {
+	return &Subscription{Snapshots: snapshots, Errors: errCh, cancel: cancel, done: nil}
 }
 
 // Close cancels the subscription and waits for its broker reader to finish.

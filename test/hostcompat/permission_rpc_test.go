@@ -29,7 +29,7 @@ func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 			case registry.HarnessPi:
 				runPiPermission(t, host, allow)
 			case registry.HarnessOmp:
-				runOMPPermission(t, host, allow)
+				runOmpPermission(t, host, allow)
 			default:
 				t.Fatalf("no RPC-family permission driver for %s", contract.ID)
 			}
@@ -157,7 +157,7 @@ func permissionJSONPipes(t *testing.T, cmd *exec.Cmd) (*os.File, func() map[stri
 // OMP's native approval wrapper calls the RPC-backed select UI and emits
 // tool_approval_requested/resolved around the decision. No policy extension is
 // needed: always-ask gates the built-in shell tool itself.
-func runOMPPermission(t *testing.T, host isolatedHost, allow bool) {
+func runOmpPermission(t *testing.T, host isolatedHost, allow bool) {
 	t.Helper()
 	configured, setup := host.lifecycleCommand(t)
 	if len(setup) != 0 {

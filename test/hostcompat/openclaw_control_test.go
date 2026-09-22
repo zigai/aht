@@ -15,14 +15,14 @@ import (
 // https://docs.openclaw.ai/gateway/protocol/rpc-session-control
 func (host isolatedHost) interruptOpenClaw(t *testing.T) {
 	t.Helper()
-	output := host.openClawRPC(t, "sessions.resolve", map[string]any{"sessionId": "aht-compat"})
+	output := host.openclawRPC(t, "sessions.resolve", map[string]any{"sessionId": "aht-compat"})
 	var session struct {
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal(output, &session); err != nil || session.Key == "" {
 		t.Fatalf("resolving owned gateway session: %v; response: %s", err, output)
 	}
-	abortOutput := host.openClawRPC(t, "sessions.abort", map[string]any{"key": session.Key})
+	abortOutput := host.openclawRPC(t, "sessions.abort", map[string]any{"key": session.Key})
 	var result struct {
 		OK           bool   `json:"ok"`
 		Status       string `json:"status"`
@@ -33,7 +33,7 @@ func (host isolatedHost) interruptOpenClaw(t *testing.T) {
 	}
 }
 
-func (host isolatedHost) openClawRPC(t *testing.T, method string, params map[string]any) []byte {
+func (host isolatedHost) openclawRPC(t *testing.T, method string, params map[string]any) []byte {
 	t.Helper()
 	data, err := json.Marshal(params)
 	if err != nil {

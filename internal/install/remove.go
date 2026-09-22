@@ -13,23 +13,23 @@ import (
 )
 
 // Remove deletes only artifacts owned by aht for one harness.
-func Remove(options Options) (Result, error) {
-	return RemoveContext(context.Background(), options)
+func Remove(opts Options) (Result, error) {
+	return RemoveContext(context.Background(), opts)
 }
 
 // RemoveContext removes one integration while honoring caller cancellation.
-func RemoveContext(ctx context.Context, options Options) (Result, error) {
+func RemoveContext(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("remove integration context: %w", err)
 	}
-	if options.Binary == "" {
-		options.Binary = defaultBinary
+	if opts.Binary == "" {
+		opts.Binary = defaultBinary
 	}
-	plan, _, err := installPlanForHarness(options.Harness, options.Binary)
+	plan, _, err := installPlanForHarness(opts.Harness, opts.Binary)
 	if err != nil {
 		return Result{}, err
 	}
-	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(options.Harness))
+	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(opts.Harness))
 	shimStatus, err := ClassifyArtifact(shimPath)
 	if err != nil {
 		return Result{}, err
@@ -37,11 +37,11 @@ func RemoveContext(ctx context.Context, options Options) (Result, error) {
 	if shimStatus == ArtifactForeign {
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, shimPath)
 	}
-	result, err := removeNativeIntegration(ctx, options, plan)
+	result, err := removeNativeIntegration(ctx, opts, plan)
 	if err != nil {
 		return result, err
 	}
-	shimChanged, err := removeOwnedShim(shimPath, options.DryRun, shimStatus)
+	shimChanged, err := removeOwnedShim(shimPath, opts.DryRun, shimStatus)
 	if err != nil {
 		return Result{}, err
 	}
@@ -50,19 +50,19 @@ func RemoveContext(ctx context.Context, options Options) (Result, error) {
 			result.Path = shimPath
 		}
 		result.Changed = true
-		result.Message = removeResult(options.Harness, result.Path, true, options.DryRun).Message
+		result.Message = removeResult(opts.Harness, result.Path, true, opts.DryRun).Message
 	}
 	return result, nil
 }
 
-func removeNativeIntegration(ctx context.Context, options Options, plan harnesspkg.InstallPlan) (Result, error) {
+func removeNativeIntegration(ctx context.Context, opts Options, plan harnesspkg.InstallPlan) (Result, error) {
 	for _, action := range plan.Actions {
-		result, handled, err := removePlanAction(ctx, options, options.Harness, action)
+		result, handled, err := removePlanAction(ctx, opts, opts.Harness, action)
 		if handled {
 			return result, err
 		}
 	}
-	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
+	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
 }
 
 func removeOwnedShim(path string, dryRun bool, status ArtifactStatus) (bool, error) {
@@ -78,22 +78,22 @@ func removeOwnedShim(path string, dryRun bool, status ArtifactStatus) (bool, err
 	return true, nil
 }
 
-func removePlanAction(ctx context.Context, options Options, harnessID registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
+func removePlanAction(ctx context.Context, opts Options, harnessID registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		result, err := removeJSONCommandHooks(options, harnessID, typed.Plan)
+		result, err := removeJSONCommandHooks(opts, harnessID, typed.Plan)
 		return result, true, err
 	case harnesspkg.CursorJSONHooksAction:
-		result, err := removeCursorJSONHooks(options, harnessID, typed.Plan)
+		result, err := removeCursorJSONHooks(opts, harnessID, typed.Plan)
 		return result, true, err
 	case harnesspkg.ManagedTextBlockAction:
-		result, err := removeTextBlock(options, harnessID, typed.Plan)
+		result, err := removeTextBlock(opts, harnessID, typed.Plan)
 		return result, true, err
 	case harnesspkg.RenderedFileAction:
-		result, err := removeOwnedFiles(options, harnessID, []string{typed.Plan.Path}, typed.Plan.Path)
+		result, err := removeOwnedFiles(opts, harnessID, []string{typed.Plan.Path}, typed.Plan.Path)
 		return result, true, err
 	case harnesspkg.PluginDirectoryAction:
-		result, err := removePluginDirectory(ctx, options, harnessID, typed.Plan)
+		result, err := removePluginDirectory(ctx, opts, harnessID, typed.Plan)
 		return result, true, err
 	case harnesspkg.ShimAction:
 		var result Result
@@ -104,21 +104,21 @@ func removePlanAction(ctx context.Context, options Options, harnessID registry.H
 	}
 }
 
-func removeJSONCommandHooks(options Options, harnessID registry.Harness, plan harnesspkg.JSONCommandHookInstallPlan) (Result, error) {
-	return removeJSONHooks(options, harnessID, plan.Path, func(config map[string]any) bool {
+func removeJSONCommandHooks(opts Options, harnessID registry.Harness, plan harnesspkg.JSONCommandHookInstallPlan) (Result, error) {
+	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
 		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID))
-		changed := removeWrappedCommandHooks(config, plan, isManaged)
+		changed := removeWrappedCommandHooks(harnessConfig, plan, isManaged)
 		if plan.HooksAtRoot {
 			for _, spec := range plan.Hooks {
-				changed = removeManagedJSONHookEvent(config, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
+				changed = removeManagedJSONHookEvent(harnessConfig, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
 			}
 		}
 		return changed
 	})
 }
 
-func removeWrappedCommandHooks(config map[string]any, plan harnesspkg.JSONCommandHookInstallPlan, isManaged func(string) bool) bool {
-	hooks, ok := config["hooks"].(map[string]any)
+func removeWrappedCommandHooks(harnessConfig map[string]any, plan harnesspkg.JSONCommandHookInstallPlan, isManaged func(string) bool) bool {
+	hooks, ok := harnessConfig["hooks"].(map[string]any)
 	if !ok {
 		return false
 	}
@@ -127,14 +127,14 @@ func removeWrappedCommandHooks(config map[string]any, plan harnesspkg.JSONComman
 		changed = removeManagedJSONHookEvent(hooks, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
 	}
 	if changed && len(hooks) == 0 {
-		delete(config, "hooks")
+		delete(harnessConfig, "hooks")
 	}
 	return changed
 }
 
-func removeCursorJSONHooks(options Options, harnessID registry.Harness, plan harnesspkg.CursorJSONHookInstallPlan) (Result, error) {
-	return removeJSONHooks(options, harnessID, plan.Path, func(config map[string]any) bool {
-		hooks, ok := config["hooks"].(map[string]any)
+func removeCursorJSONHooks(opts Options, harnessID registry.Harness, plan harnesspkg.CursorJSONHookInstallPlan) (Result, error) {
+	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
+		hooks, ok := harnessConfig["hooks"].(map[string]any)
 		if !ok {
 			return false
 		}
@@ -169,14 +169,14 @@ func removeManagedJSONHookEvent(
 	return true
 }
 
-func removeJSONHooks(options Options, harnessID registry.Harness, path string, apply func(map[string]any) bool) (Result, error) {
-	config, err := readJSONObject(path)
+func removeJSONHooks(opts Options, harnessID registry.Harness, path string, apply func(map[string]any) bool) (Result, error) {
+	harnessConfig, err := readJSONObject(path)
 	if err != nil {
 		return Result{}, err
 	}
-	changed := apply(config)
-	if changed && !options.DryRun {
-		data, err := json.MarshalIndent(config, "", "  ")
+	changed := apply(harnessConfig)
+	if changed && !opts.DryRun {
+		data, err := json.MarshalIndent(harnessConfig, "", "  ")
 		if err != nil {
 			return Result{}, fmt.Errorf("encoding cleaned integration config: %w", err)
 		}
@@ -184,7 +184,7 @@ func removeJSONHooks(options Options, harnessID registry.Harness, path string, a
 			return Result{}, err
 		}
 	}
-	return removeResult(harnessID, path, changed, options.DryRun), nil
+	return removeResult(harnessID, path, changed, opts.DryRun), nil
 }
 
 func removeTextBlock(options Options, harnessID registry.Harness, plan harnesspkg.ManagedTextBlockInstallPlan) (Result, error) {

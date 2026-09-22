@@ -131,7 +131,7 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 		args = []string{"run", "--text", compatibilityPrompt, "--provider", "openai", "--model", "compat", "--max-turns", "2", "--quiet"}
 	case registry.HarnessOpenCode, registry.HarnessKilo:
 		configDir := filepath.Join(host.root, string(host.contract.ID))
-		host.writeFile(t, filepath.Join(configDir, "opencode.json"), openCodeConfigJSON(baseURL))
+		host.writeFile(t, filepath.Join(configDir, "opencode.json"), opencodeConfigJSON(baseURL))
 		args = []string{"run", "--model", "aht-compat/compat", "--auto", "--dir", host.work, compatibilityPrompt}
 	case registry.HarnessHermes:
 		config := fmt.Sprintf("model:\n  default: compat\n  provider: custom\n  base_url: %q\n  api_key: compat\n  api_mode: chat_completions\napprovals:\n  mode: manual\nplugins:\n  enabled:\n    - aht-state\n", baseURL)

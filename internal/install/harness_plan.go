@@ -27,30 +27,30 @@ type importEntry struct {
 	Components []string `json:"components"`
 }
 
-func installHarnessAdapter(ctx context.Context, options Options) (Result, error) {
-	plan, advisor, err := installPlanForHarness(options.Harness, options.Binary)
+func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
+	plan, advisor, err := installPlanForHarness(opts.Harness, opts.Binary)
 	if err != nil {
 		return Result{}, err
 	}
 
-	if options.UseShim && installPlanHasShim(plan) {
-		return installShim(options, options.Harness)
+	if opts.UseShim && installPlanHasShim(plan) {
+		return installShim(opts, opts.Harness)
 	}
 
 	for _, action := range plan.Actions {
-		result, handled, err := installPlanAction(ctx, options, options.Harness, action)
+		result, handled, err := installPlanAction(ctx, opts, opts.Harness, action)
 		if !handled {
 			continue
 		}
 		if err == nil {
 			if advisor != nil {
-				result.NextStep = advisor.InstallNextStep(result.Changed, options.DryRun)
+				result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
 			}
 		}
 		return result, err
 	}
 
-	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, options.Harness)
+	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
 }
 
 func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
@@ -141,17 +141,17 @@ func applyJSONCommandHooks(
 		))
 	}
 
-	return func(config map[string]any) bool {
+	return func(harnessConfig map[string]any) bool {
 		changed := false
-		hooks := config
+		hooks := harnessConfig
 		if plan.HooksAtRoot {
-			changed = removeWrappedCommandHooks(config, plan, isManaged)
+			changed = removeWrappedCommandHooks(harnessConfig, plan, isManaged)
 		} else {
 			var ok bool
-			hooks, ok = config["hooks"].(map[string]any)
+			hooks, ok = harnessConfig["hooks"].(map[string]any)
 			if !ok {
 				hooks = make(map[string]any)
-				config["hooks"] = hooks
+				harnessConfig["hooks"] = hooks
 			}
 		}
 		for _, event := range events {
@@ -196,10 +196,10 @@ func applyCursorJSONHooks(
 	source := managedSource(plan.Source, harness)
 	isManaged := isManagedSourceHookCommand(source)
 
-	return func(config map[string]any) bool {
-		changed := ensureCursorVersion(config)
+	return func(harnessConfig map[string]any) bool {
+		changed := ensureCursorVersion(harnessConfig)
 		for _, hook := range plan.Hooks {
-			updated := upsertCursorHook(config, hook.Event, hook.Command, isManaged)
+			updated := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
 			changed = changed || updated
 		}
 
@@ -207,23 +207,22 @@ func applyCursorJSONHooks(
 	}
 }
 
-func ensureCursorVersion(config map[string]any) bool {
-	if _, ok := config["version"]; ok {
+func ensureCursorVersion(harnessConfig map[string]any) bool {
+	if _, ok := harnessConfig["version"]; ok {
 		return false
 	}
 
-	config["version"] = float64(1)
+	harnessConfig["version"] = float64(1)
 
 	return true
 }
 
-func upsertCursorHook(config map[string]any, event string, command string, isManaged func(string) bool) bool {
-	hooks, ok := config["hooks"].(map[string]any)
+func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) bool {
+	hooks, ok := harnessConfig["hooks"].(map[string]any)
 	if !ok {
 		hooks = make(map[string]any)
-		config["hooks"] = hooks
+		harnessConfig["hooks"] = hooks
 	}
-
 	definitions, ok := hooks[event].([]any)
 	if !ok {
 		definitions = nil

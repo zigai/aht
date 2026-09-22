@@ -5,6 +5,6 @@ import _ "embed"
 //go:embed assets/screen.toml
 var screenManifest string
 
-func (openCodeHarness) ScreenManifest() string {
+func (opencodeHarness) ScreenManifest() string {
 	return screenManifest
 }

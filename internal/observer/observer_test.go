@@ -603,7 +603,7 @@ func TestObserverMarksHookCreatedDeadProcessGoneInOneCycle(t *testing.T) {
 	}
 }
 
-func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPid(t *testing.T) {
+func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPID(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	at := time.Now().UTC().Add(-time.Minute)

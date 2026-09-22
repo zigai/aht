@@ -64,23 +64,23 @@ type Options struct {
 }
 
 // New returns a broker server. Serve validates required dependencies.
-func New(options Options) *Server {
-	maxConnections := options.MaxConnections
+func New(opts Options) *Server {
+	maxConnections := opts.MaxConnections
 	if maxConnections <= 0 {
 		maxConnections = defaultMaxConnections
 	}
 
-	wt := options.WriteTimeout
+	wt := opts.WriteTimeout
 	if wt <= 0 {
 		wt = writeTimeout
 	}
 	return &Server{
-		store:            options.Store,
-		socketPath:       options.SocketPath,
+		store:            opts.Store,
+		socketPath:       opts.SocketPath,
 		maxConnections:   maxConnections,
 		writeTimeout:     wt,
-		ready:            options.Ready,
-		onConnectionDone: options.OnConnectionDone,
+		ready:            opts.Ready,
+		onConnectionDone: opts.OnConnectionDone,
 	}
 }
 

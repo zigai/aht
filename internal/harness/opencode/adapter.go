@@ -12,19 +12,19 @@ import (
 
 const (
 	integrationVersion        = 10
-	openCodePluginName        = "aht-state.ts"
-	openCodeIntegrationID     = "opencode"
-	openCodeIntegrationSource = "opencode-plugin"
-	openCodeSessionFlag       = "--session"
+	opencodePluginName        = "aht-state.ts"
+	opencodeIntegrationID     = "opencode"
+	opencodeIntegrationSource = "opencode-plugin"
+	opencodeSessionFlag       = "--session"
 )
 
 //go:embed assets/aht-state.ts.tmpl
-var openCodePluginTemplate string
+var opencodePluginTemplate string
 
-type openCodeHarness struct{ harness.BaseAdapter }
+type opencodeHarness struct{ harness.BaseAdapter }
 
-func New() openCodeHarness {
-	return openCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+func New() opencodeHarness {
+	return opencodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ID:           registry.HarnessOpenCode,
 		Aliases:      []string{"open-code", "open_code"},
 		ProcessNames: []string{"opencode", "open-code"},
@@ -45,23 +45,23 @@ func New() openCodeHarness {
 			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
-		IntegrationSource:  openCodeIntegrationSource,
+		IntegrationSource:  opencodeIntegrationSource,
 		StateAuthority:     harness.AuthorityHook,
 		ScreenFallback:     true,
 	})}
 }
 
-func (openCodeHarness) InstallPlan(binary string) harness.InstallPlan {
+func (opencodeHarness) InstallPlan(binary string) harness.InstallPlan {
 	return harness.InstallPlan{Actions: []harness.InstallAction{
 		harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-			Path:        filepath.Join(openCodeConfigDir(), "plugins", openCodePluginName),
+			Path:        filepath.Join(opencodeConfigDir(), "plugins", opencodePluginName),
 			Label:       "opencode plugin",
 			ConfigLabel: "opencode plugin",
 			Content: harness.RenderScriptTemplate(
-				openCodePluginTemplate,
-				openCodeIntegrationID,
+				opencodePluginTemplate,
+				opencodeIntegrationID,
 				binary,
-				openCodeIntegrationSource,
+				opencodeIntegrationSource,
 				integrationVersion,
 			),
 			JSONContent: nil,
@@ -70,15 +70,15 @@ func (openCodeHarness) InstallPlan(binary string) harness.InstallPlan {
 	}}
 }
 
-func (openCodeHarness) ResumeCommand(sessionID string, _ string) []string {
+func (opencodeHarness) ResumeCommand(sessionID string, _ string) []string {
 	if sessionID == "" {
 		return nil
 	}
 
-	return []string{"opencode", openCodeSessionFlag, sessionID}
+	return []string{"opencode", opencodeSessionFlag, sessionID}
 }
 
-func openCodeConfigDir() string {
+func opencodeConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("OPENCODE_CONFIG_DIR")); value != "" {
 		return value
 	}

@@ -152,10 +152,10 @@ type Observer struct {
 }
 
 //nolint:cyclop // constructor applies defaults for each injectable observer dependency
-func New(options Options) *Observer {
-	providedStorePath := options.StorePath
-	storePath := options.StorePath
-	store := options.Store
+func New(opts Options) *Observer {
+	providedStorePath := opts.StorePath
+	storePath := opts.StorePath
+	store := opts.Store
 	if store == nil {
 		if storePath == "" {
 			storePath = registry.DefaultStorePath()
@@ -164,27 +164,27 @@ func New(options Options) *Observer {
 	} else if providedStorePath == "" {
 		storePath = ""
 	}
-	processList := options.ProcessList
+	processList := opts.ProcessList
 	if processList == nil {
 		processList = processinfo.List
 	}
-	paneList := options.PaneList
+	paneList := opts.PaneList
 	if paneList == nil {
 		paneList = listMultiplexerPanes
 	}
-	now := options.Now
+	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	interval := options.Interval
+	interval := opts.Interval
 	if interval <= 0 {
 		interval = defaultObserverInterval
 	}
-	errorWriter := options.ErrorWriter
+	errorWriter := opts.ErrorWriter
 	if errorWriter == nil {
 		errorWriter = os.Stderr
 	}
-	healthPath := options.HealthPath
+	healthPath := opts.HealthPath
 	if healthPath == "" && storePath != "" {
 		healthPath = storePath + ".observer-health.json"
 	}
@@ -192,20 +192,20 @@ func New(options Options) *Observer {
 	if storePath != "" {
 		lockPath = storePath + ".observer.lock"
 	}
-	catalogList := options.CatalogList
+	catalogList := opts.CatalogList
 	if catalogList == nil {
 		catalogList = DefaultCatalogList
 	}
-	screenCapture := options.ScreenCapture
+	screenCapture := opts.ScreenCapture
 	if screenCapture == nil {
 		screenCapture = captureMultiplexerPane
 	}
 	return &Observer{
-		store: store, interval: interval, grace: options.GracePeriod,
+		store: store, interval: interval, grace: opts.GracePeriod,
 		healthPath: healthPath, processList: processList, paneList: paneList, catalogList: catalogList,
-		screenCapture: screenCapture, manifestLoader: agentstate.Loader{ConfigDir: options.DetectionConfigDir},
-		disableScreenInspection: options.DisableScreenInspection,
-		now:                     now, errorWriter: errorWriter, quiet: options.Quiet,
+		screenCapture: screenCapture, manifestLoader: agentstate.Loader{ConfigDir: opts.DetectionConfigDir},
+		disableScreenInspection: opts.DisableScreenInspection,
+		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet,
 		tracked: make(map[processKey]trackedProcess), screenPending: make(map[processKey]pendingScreenDecision),
 		mu: sync.Mutex{}, startedAt: time.Time{}, initialized: false, health: Health{PID: 0, StartIdentity: "", Interval: 0, GracePeriod: 0, StartedAt: time.Time{}, LastAttemptAt: time.Time{}, LastSuccessAt: time.Time{}, LastEnumerationErrorCategory: "", LastEnumerationError: "", Cycles: 0, Observations: 0, Sessions: 0, Degraded: false},
 		lastHealthWrite: time.Time{}, lockPath: lockPath, lockFile: nil, running: false, continuous: false,

@@ -120,13 +120,13 @@ func (kimiCodeHarness) ValidateWireArgs(args []string) error {
 	return ValidateArgs(args)
 }
 
-func (kimiCodeHarness) RunWire(ctx context.Context, options harness.WireOptions) error {
+func (kimiCodeHarness) RunWire(ctx context.Context, opts harness.WireOptions) error {
 	return Run(ctx, Options{
-		Args:      options.Args,
-		StorePath: options.StorePath,
-		Stdin:     options.Stdin,
-		Stdout:    options.Stdout,
-		Stderr:    options.Stderr,
+		Args:      opts.Args,
+		StorePath: opts.StorePath,
+		Stdin:     opts.Stdin,
+		Stdout:    opts.Stdout,
+		Stderr:    opts.Stderr,
 	})
 }
 

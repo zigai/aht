@@ -307,8 +307,8 @@ func DefaultStorePath() string {
 }
 
 // NewSubscription creates a subscription wrapping custom channels.
-func NewSubscription(snapshots <-chan StateSnapshot, errors <-chan error, cancel context.CancelFunc) *Subscription {
-	return broker.NewSubscription(snapshots, errors, cancel)
+func NewSubscription(snapshots <-chan StateSnapshot, errCh <-chan error, cancel context.CancelFunc) *Subscription {
+	return broker.NewSubscription(snapshots, errCh, cancel)
 }
 
 // IsUnavailable reports whether err means that no realtime broker accepted the connection.

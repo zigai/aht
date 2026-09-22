@@ -23,8 +23,8 @@ type linuxBackend struct {
 }
 
 // RenderSystemdUnit returns the exact managed user unit for options.
-func RenderSystemdUnit(options Options) (string, error) {
-	normalized, err := normalizeOptions(options)
+func RenderSystemdUnit(opts Options) (string, error) {
+	normalized, err := normalizeOptions(opts)
 	if err != nil {
 		return "", err
 	}
@@ -48,8 +48,8 @@ func RenderSystemdUnit(options Options) (string, error) {
 	}, "\n"), nil
 }
 
-func platformBackend(options Options) (backend, error) {
-	rendered, err := RenderSystemdUnit(options)
+func platformBackend(opts Options) (backend, error) {
+	rendered, err := RenderSystemdUnit(opts)
 	if err != nil {
 		return nil, err
 	}

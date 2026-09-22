@@ -192,7 +192,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	if !result.Changed {
 		t.Fatal("expected opencode install to report changed")
 	}
-	if result.Path != filepath.Join(dir, "opencode", "plugins", openCodePluginName) {
+	if result.Path != filepath.Join(dir, "opencode", "plugins", opencodePluginName) {
 		t.Fatalf("unexpected path %q", result.Path)
 	}
 	requireTextContainsAll(t, result.Snippet, []string{
@@ -214,7 +214,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 func TestInstallOpenCodeReplacesManagedPlugin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := filepath.Join(dir, "opencode", "plugins", openCodePluginName)
+	path := filepath.Join(dir, "opencode", "plugins", opencodePluginName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("creating opencode plugin dir: %v", err)
 	}

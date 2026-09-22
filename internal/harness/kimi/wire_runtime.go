@@ -95,22 +95,22 @@ func ValidateArgs(args []string) error {
 // transitions. Only native hook evidence for this child can establish identity.
 //
 //nolint:gocognit,cyclop // Run manages bidirectional frame pumps, timeout bounds, and lifecycle processes.
-func Run(ctx context.Context, options Options) error {
-	if err := ValidateArgs(options.Args); err != nil {
+func Run(ctx context.Context, opts Options) error {
+	if err := ValidateArgs(opts.Args); err != nil {
 		return err
 	}
-	if options.Stdin == nil || options.Stdout == nil || options.Stderr == nil {
+	if opts.Stdin == nil || opts.Stdout == nil || opts.Stderr == nil {
 		return errWireOSStreamsRequired
 	}
 	if ctx.Err() != nil {
 		return &ExitError{Code: sigintExitCode}
 	}
-	input, restoreInput, err := duplicateStream(options.Stdin)
+	input, restoreInput, err := duplicateStream(opts.Stdin)
 	if err != nil {
 		return errWireInputPlatform
 	}
 	defer restoreInput()
-	output, restoreOutput, err := duplicateStream(options.Stdout)
+	output, restoreOutput, err := duplicateStream(opts.Stdout)
 	if err != nil {
 		return errWireOutputPlatform
 	}
@@ -128,9 +128,9 @@ func Run(ctx context.Context, options Options) error {
 	defer func() { _ = fromChild.Close() }()
 	defer func() { _ = childOut.Close() }()
 
-	command := exec.CommandContext(ctx, "kimi", append([]string{"--wire"}, options.Args...)...)
-	command.Stdin, command.Stdout, command.Stderr = childIn, childOut, options.Stderr
-	command.Env = append(os.Environ(), registry.StorePathEnv+"="+options.StorePath)
+	command := exec.CommandContext(ctx, "kimi", append([]string{"--wire"}, opts.Args...)...)
+	command.Stdin, command.Stdout, command.Stderr = childIn, childOut, opts.Stderr
+	command.Env = append(os.Environ(), registry.StorePathEnv+"="+opts.StorePath)
 	if err := ownProcessGroup(command); err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	var protocol Protocol
 	//nolint:exhaustruct_v5 // default socket and routing mode are selected
-	sink := client.New(client.Config{StorePath: options.StorePath})
+	sink := client.New(client.Config{StorePath: opts.StorePath})
 	inputDone := make(chan error, 1)
 	hostDone := make(chan error, 1)
 	go func() {

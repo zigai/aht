@@ -116,7 +116,7 @@ const (
 	testInstallBinary     = "/usr/local/bin/aht"
 	piExtensionName       = "aht-state.ts"
 	ompExtensionName      = "aht-state.ts"
-	openCodePluginName    = "aht-state.ts"
+	opencodePluginName    = "aht-state.ts"
 	kiloPluginName        = "aht-state.ts"
 	agyPluginName         = "aht-state"
 	agyMarkerFileName     = ".aht-managed"

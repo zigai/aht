@@ -49,20 +49,20 @@ func AllHarnesses() []registry.Harness {
 	return slices.Clone(allHarnesses)
 }
 
-func Run(options Options) (Result, error) {
-	return RunContext(context.Background(), options)
+func Run(opts Options) (Result, error) {
+	return RunContext(context.Background(), opts)
 }
 
 // RunContext installs one integration while honoring caller cancellation.
-func RunContext(ctx context.Context, options Options) (Result, error) {
+func RunContext(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("install integration context: %w", err)
 	}
-	if options.Binary == "" {
-		options.Binary = defaultBinary
+	if opts.Binary == "" {
+		opts.Binary = defaultBinary
 	}
 
-	return installHarnessAdapter(ctx, options)
+	return installHarnessAdapter(ctx, opts)
 }
 
 func installableHarnesses() []registry.Harness {

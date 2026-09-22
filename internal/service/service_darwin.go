@@ -33,8 +33,8 @@ type darwinBackend struct {
 }
 
 // RenderLaunchAgent returns the exact managed LaunchAgent plist for options.
-func RenderLaunchAgent(options Options) (string, error) {
-	normalized, err := normalizeOptions(options)
+func RenderLaunchAgent(opts Options) (string, error) {
+	normalized, err := normalizeOptions(opts)
 	if err != nil {
 		return "", err
 	}
@@ -60,8 +60,8 @@ func RenderLaunchAgent(options Options) (string, error) {
 	return b.String(), nil
 }
 
-func platformBackend(options Options) (backend, error) {
-	rendered, err := RenderLaunchAgent(options)
+func platformBackend(opts Options) (backend, error) {
+	rendered, err := RenderLaunchAgent(opts)
 	if err != nil {
 		return nil, err
 	}

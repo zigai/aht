@@ -86,32 +86,32 @@ func New(executor CommandExecutor) *Service {
 	return &Service{executor: executor}
 }
 
-func Install(ctx context.Context, options Options) (Result, error) {
-	return defaultService.Install(ctx, options)
+func Install(ctx context.Context, opts Options) (Result, error) {
+	return defaultService.Install(ctx, opts)
 }
 
-func Update(ctx context.Context, options Options) (Result, error) {
-	return defaultService.Update(ctx, options)
+func Update(ctx context.Context, opts Options) (Result, error) {
+	return defaultService.Update(ctx, opts)
 }
 
-func Uninstall(ctx context.Context, options Options) (Result, error) {
-	return defaultService.Uninstall(ctx, options)
+func Uninstall(ctx context.Context, opts Options) (Result, error) {
+	return defaultService.Uninstall(ctx, opts)
 }
 
-func Status(ctx context.Context, options Options) (Result, error) {
-	return defaultService.Status(ctx, options)
+func Status(ctx context.Context, opts Options) (Result, error) {
+	return defaultService.Status(ctx, opts)
 }
 
-func (s *Service) Install(ctx context.Context, options Options) (Result, error) {
-	return s.apply(ctx, options, false)
+func (s *Service) Install(ctx context.Context, opts Options) (Result, error) {
+	return s.apply(ctx, opts, false)
 }
 
-func (s *Service) Update(ctx context.Context, options Options) (Result, error) {
-	return s.apply(ctx, options, true)
+func (s *Service) Update(ctx context.Context, opts Options) (Result, error) {
+	return s.apply(ctx, opts, true)
 }
 
-func (s *Service) Uninstall(ctx context.Context, options Options) (Result, error) {
-	backend, err := platformBackend(options)
+func (s *Service) Uninstall(ctx context.Context, opts Options) (Result, error) {
+	backend, err := platformBackend(opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -128,7 +128,7 @@ func (s *Service) Uninstall(ctx context.Context, options Options) (Result, error
 		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
 	}
 	result.Installed, result.Current = true, string(content) == backend.content()
-	if options.DryRun {
+	if opts.DryRun {
 		result.Message = "would uninstall"
 		return result, nil
 	}
@@ -147,8 +147,8 @@ func (s *Service) Uninstall(ctx context.Context, options Options) (Result, error
 	return result, nil
 }
 
-func (s *Service) Status(ctx context.Context, options Options) (Result, error) {
-	backend, err := platformBackend(options)
+func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
+	backend, err := platformBackend(opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -380,38 +380,38 @@ func wrapManagerError(action string, output []byte, err error) error {
 	return fmt.Errorf("%s: %w (%s)", action, err, message)
 }
 
-func normalizeOptions(options Options) (Options, error) {
-	if options.Binary == "" {
-		return options, errBinaryRequired
+func normalizeOptions(opts Options) (Options, error) {
+	if opts.Binary == "" {
+		return opts, errBinaryRequired
 	}
-	if options.StorePath == "" {
-		return options, errStorePathRequired
+	if opts.StorePath == "" {
+		return opts, errStorePathRequired
 	}
-	binary := options.Binary
+	binary := opts.Binary
 	if filepath.Base(binary) == binary {
 		resolved, err := exec.LookPath(binary)
 		if err != nil {
-			return options, fmt.Errorf("find binary %q: %w", binary, err)
+			return opts, fmt.Errorf("find binary %q: %w", binary, err)
 		}
 		binary = resolved
 	}
 	binary, err := filepath.Abs(binary)
 	if err != nil {
-		return options, fmt.Errorf("resolve binary: %w", err)
+		return opts, fmt.Errorf("resolve binary: %w", err)
 	}
-	store, err := filepath.Abs(options.StorePath)
+	store, err := filepath.Abs(opts.StorePath)
 	if err != nil {
-		return options, fmt.Errorf("resolve store: %w", err)
+		return opts, fmt.Errorf("resolve store: %w", err)
 	}
-	if options.Interval == 0 {
-		options.Interval = defaultInterval
+	if opts.Interval == 0 {
+		opts.Interval = defaultInterval
 	}
-	if options.Interval <= 0 {
-		return options, errIntervalPositive
+	if opts.Interval <= 0 {
+		return opts, errIntervalPositive
 	}
-	if options.GracePeriod < 0 {
-		return options, errGraceNonnegative
+	if opts.GracePeriod < 0 {
+		return opts, errGraceNonnegative
 	}
-	options.Binary, options.StorePath = binary, store
-	return options, nil
+	opts.Binary, opts.StorePath = binary, store
+	return opts, nil
 }

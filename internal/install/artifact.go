@@ -67,20 +67,20 @@ func installStatusMessage(changed bool, dryRun bool, dryRunMsg, alreadyInstalled
 	return installedMsg
 }
 
-func installJSONHookFile(options Options, file jsonHookFileInstall) (Result, error) {
-	config, err := readJSONObject(file.Path)
+func installJSONHookFile(opts Options, file jsonHookFileInstall) (Result, error) {
+	harnessConfig, err := readJSONObject(file.Path)
 	if err != nil {
 		return Result{}, err
 	}
 
-	changed := file.Apply(config)
-	data, err := json.MarshalIndent(config, "", "  ")
+	changed := file.Apply(harnessConfig)
+	data, err := json.MarshalIndent(harnessConfig, "", "  ")
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", file.EncodeError, err)
 	}
 	data = append(data, '\n')
 
-	if err := writeInstallFile(file.Path, data, changed, options.DryRun, file.CreateDirError, file.WriteError); err != nil {
+	if err := writeInstallFile(file.Path, data, changed, opts.DryRun, file.CreateDirError, file.WriteError); err != nil {
 		return Result{}, err
 	}
 
@@ -88,7 +88,7 @@ func installJSONHookFile(options Options, file jsonHookFileInstall) (Result, err
 		Harness:  string(file.Harness),
 		Path:     file.Path,
 		Changed:  changed,
-		Message:  installStatusMessage(changed, options.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
+		Message:  installStatusMessage(changed, opts.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
 		NextStep: "",
 		Snippet:  string(data),
 		Error:    "",
@@ -118,17 +118,17 @@ func readJSONObject(path string) (map[string]any, error) {
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	var config map[string]any
-	if err := decoder.Decode(&config); err != nil {
+	var harnessConfig map[string]any
+	if err := decoder.Decode(&harnessConfig); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing %s: %w", path, errTrailingData)
 	}
-	if config == nil {
-		config = make(map[string]any)
+	if harnessConfig == nil {
+		harnessConfig = make(map[string]any)
 	}
 
-	return config, nil
+	return harnessConfig, nil
 }

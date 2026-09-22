@@ -36,12 +36,12 @@ func TestPluginTemplateRendersCleanly(t *testing.T) {
 func TestConfigDirOverride(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", "/tmp/opencode-config")
 	t.Setenv("OPENCODE_CONFIG", "/tmp/ignored/config.json")
-	if got := openCodeConfigDir(); got != "/tmp/opencode-config" {
+	if got := opencodeConfigDir(); got != "/tmp/opencode-config" {
 		t.Fatalf("expected OPENCODE_CONFIG_DIR to win, got %q", got)
 	}
 }
 
-func runOpenCodeDriver(t *testing.T, driverSource string) []string {
+func runOpencodeDriver(t *testing.T, driverSource string) []string {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -56,7 +56,7 @@ func runOpenCodeDriver(t *testing.T, driverSource string) []string {
 	if err := os.WriteFile(reporter, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$AHT_CAPTURE\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	module := harness.RenderScriptTemplate(openCodePluginTemplate, openCodeIntegrationID, reporter, openCodeIntegrationSource, integrationVersion)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, opencodeIntegrationID, reporter, opencodeIntegrationSource, integrationVersion)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ for (const [sessionID, type] of [["first", "busy"], ["first", "idle"], ["resumed
 await hooks.dispose();
 process.exit(0);
 `
-	observations := runOpenCodeDriver(t, driver)
+	observations := runOpencodeDriver(t, driver)
 	if got := strings.Join(observations, ","); got != "first:running,first:idle,resumed:running,resumed:idle" {
 		t.Fatalf("native observations must finish in order before disposal returns: %s", got)
 	}
@@ -122,7 +122,7 @@ await finished;
 await cleanup();
 process.exit(0);
 `
-	observations := runOpenCodeDriver(t, driver)
+	observations := runOpencodeDriver(t, driver)
 	if got := strings.Join(observations, ","); got != "first:running,first:idle,resumed:running,resumed:idle" {
 		t.Fatalf("native observations must finish in order before cleanup returns: %s", got)
 	}
@@ -139,7 +139,7 @@ func TestPluginDefaultExportShape(t *testing.T) {
 	if err := os.WriteFile(reporter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	module := harness.RenderScriptTemplate(openCodePluginTemplate, openCodeIntegrationID, reporter, openCodeIntegrationSource, integrationVersion)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, opencodeIntegrationID, reporter, opencodeIntegrationSource, integrationVersion)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ process.exit(0);
 	}
 }
 
-func TestOpenCodeV2EventStateTransitions(t *testing.T) {
+func TestOpencodeV2EventStateTransitions(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to exercise the generated plugin")
@@ -172,7 +172,7 @@ func TestOpenCodeV2EventStateTransitions(t *testing.T) {
 	if err := os.WriteFile(reporter, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$AHT_CAPTURE\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	module := harness.RenderScriptTemplate(openCodePluginTemplate, openCodeIntegrationID, reporter, openCodeIntegrationSource, integrationVersion)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, opencodeIntegrationID, reporter, opencodeIntegrationSource, integrationVersion)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}

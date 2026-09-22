@@ -123,6 +123,6 @@ func ompModelsYAML(baseURL string) string {
 	return fmt.Sprintf("providers:\n  aht-compat:\n    baseUrl: %q\n    api: openai-completions\n    apiKey: compat\n    models:\n      - id: compat\n        name: AHT compatibility\n        reasoning: false\n        input: [text]\n        contextWindow: 32000\n        maxTokens: 4096\n", baseURL)
 }
 
-func openCodeConfigJSON(baseURL string) string {
+func opencodeConfigJSON(baseURL string) string {
 	return fmt.Sprintf(`{"$schema":"https://opencode.ai/config.json","provider":{"aht-compat":{"npm":"@ai-sdk/openai-compatible","name":"AHT compatibility","options":{"baseURL":%q,"apiKey":"compat"},"models":{"compat":{"name":"AHT compatibility"}}}}}`, baseURL)
 }
