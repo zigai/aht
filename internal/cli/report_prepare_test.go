@@ -179,6 +179,11 @@ func TestPrepareReportAddsNativeResumeCommand(t *testing.T) {
 			options: reportOptions{harness: "pi", event: "agent_settled", sessionPath: "/tmp/pi-session.json"},
 			want:    []string{"pi", "--session", "/tmp/pi-session.json"},
 		},
+		{
+			name:    "openclaw id",
+			options: reportOptions{harness: "openclaw", event: "agent_end", sessionID: "openclaw-session"},
+			want:    []string{"openclaw", "tui", "--session", "openclaw-session"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

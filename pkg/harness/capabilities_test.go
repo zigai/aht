@@ -63,6 +63,17 @@ func TestCapabilitiesForCodex(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesForOpenClaw(t *testing.T) {
+	t.Parallel()
+	caps, ok := harness.CapabilitiesFor(registry.HarnessOpenClaw)
+	if !ok {
+		t.Fatal("CapabilitiesFor(HarnessOpenClaw) returned false")
+	}
+	if !caps.Resumable {
+		t.Fatal("OpenClaw should be resumable")
+	}
+}
+
 func TestAllCapabilities(t *testing.T) {
 	t.Parallel()
 	all := harness.AllCapabilities()

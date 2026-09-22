@@ -170,6 +170,13 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionPath: "",
 			want:        []string{"droid", "--resume", testSessionID},
 		},
+		{
+			name:        "openclaw",
+			harness:     registry.HarnessOpenClaw,
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"openclaw", "tui", "--session", testSessionID},
+		},
 	}
 
 	for _, test := range tests {

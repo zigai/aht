@@ -17,6 +17,7 @@ const (
 	openclawPluginName        = "aht-state"
 	openclawMarkerFileName    = ".aht-managed"
 	openclawIntegrationSource = "openclaw-plugin"
+	openclawSessionFlag       = "--session"
 )
 
 //go:embed assets/index.js.tmpl
@@ -79,6 +80,14 @@ func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
 		ImportManifest: nil,
 		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
 	}}}}
+}
+
+func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+
+	return []string{openclawCommand, "tui", openclawSessionFlag, sessionID}
 }
 
 func renderOpenclawPlugin(binary string, version string) string {
