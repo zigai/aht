@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,7 +73,7 @@ func (a application) releaseClient() *releaseClient {
 	if a.client != nil {
 		return a.client
 	}
-	return newReleaseClient(a.getenv("GH_TOKEN"))
+	return newReleaseClient(cmp.Or(a.getenv("GH_TOKEN"), a.getenv("GITHUB_TOKEN")))
 }
 
 func (a application) restore(ctx context.Context) (releaseState, error) {
