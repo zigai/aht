@@ -127,7 +127,7 @@ func (defaultSessionStopSignaler) SendProcessInterrupt(pid int) error {
 	return nil
 }
 
-func (app *application) newRegistryResetCommand() *cobra.Command {
+func (app *application) newStateResetCommand() *cobra.Command {
 	var force bool
 	command := &cobra.Command{
 		Use:           "reset",
@@ -275,12 +275,12 @@ func readConfirmationLine(ctx context.Context, file *os.File) (bool, error) {
 	return ans == "y" || ans == "yes", nil
 }
 
-func runManageStopSessions(ctx context.Context, ss []registry.Session, o manageStopAllOptions) (manageStopAllResult, error) {
-	if o.signaler == nil {
-		o.signaler = defaultSessionStopSignaler{}
+func runManageStopSessions(ctx context.Context, ss []registry.Session, opts manageStopAllOptions) (manageStopAllResult, error) {
+	if opts.signaler == nil {
+		opts.signaler = defaultSessionStopSignaler{}
 	}
 	sort.Slice(ss, func(i, j int) bool { return ss[i].ID < ss[j].ID })
-	r := manageStopAllResult{DryRun: o.dryRun, Results: make([]manageStopSessionResult, 0, len(ss))}
+	r := manageStopAllResult{DryRun: opts.dryRun, Results: make([]manageStopSessionResult, 0, len(ss))}
 	seen := map[string]bool{}
 	for _, s := range ss {
 		entry := manageStopSessionResult{ID: s.ID, Harness: s.Harness, Presence: s.Presence, Activity: s.Activity, Status: "skipped"}
@@ -299,7 +299,7 @@ func runManageStopSessions(ctx context.Context, ss []registry.Session, o manageS
 		}
 		entry.Method = t.Method
 		entry.Target = t.Target
-		v, e := o.signaler.ValidateStopTarget(ctx, s, t)
+		v, e := opts.signaler.ValidateStopTarget(ctx, s, t)
 		if e != nil {
 			entry.Status = "failed"
 			entry.Error = e.Error()
@@ -322,12 +322,12 @@ func runManageStopSessions(ctx context.Context, ss []registry.Session, o manageS
 		}
 		seen[k] = true
 		r.Stoppable++
-		if o.dryRun {
+		if opts.dryRun {
 			entry.Status = "would_stop"
 			r.Results = append(r.Results, entry)
 			continue
 		}
-		if e = sendStopSignal(ctx, o.signaler, t); e != nil {
+		if e = sendStopSignal(ctx, opts.signaler, t); e != nil {
 			entry.Status = "failed"
 			entry.Error = e.Error()
 			r.Failed++

@@ -459,7 +459,7 @@ func (app *application) warnf(format string, args ...any) {
 	}
 }
 
-func (app *application) newRegistryPathCommand() *cobra.Command {
+func (app *application) newStatePathCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:           "path",
 		Short:         "Print the registry state file path",
@@ -562,11 +562,11 @@ func parseReportSequence(value string) (uint64, bool, error) {
 	return sequence, true, nil
 }
 
-func (app *application) runReport(ctx context.Context, stdin io.Reader, options reportOptions) error {
-	prepared, err := prepareReport(stdin, options, reportRuntimeContext{
-		tmux:        reportTmuxContext(ctx, options.noTmux),
+func (app *application) runReport(ctx context.Context, stdin io.Reader, opts reportOptions) error {
+	prepared, err := prepareReport(stdin, opts, reportRuntimeContext{
+		tmux:        reportTmuxContext(ctx, opts.noTmux),
 		multiplexer: reportMultiplexerContext(),
-		processes:   reportProcessAncestors(ctx, options.pid),
+		processes:   reportProcessAncestors(ctx, opts.pid),
 	})
 	if err != nil {
 		return err
@@ -575,7 +575,7 @@ func (app *application) runReport(ctx context.Context, stdin io.Reader, options 
 		if app.outputJSON {
 			return app.writeJSON(map[string]string{statusCommandName: "ignored", "harness": string(prepared.harness)})
 		}
-		if options.quiet {
+		if opts.quiet {
 			return nil
 		}
 		return app.writef("ignored %s report: hook payload does not match harness\n", prepared.harness)
@@ -584,7 +584,7 @@ func (app *application) runReport(ctx context.Context, stdin io.Reader, options 
 	if err != nil {
 		return fmt.Errorf("recording observation: %w", err)
 	}
-	return app.writeReportResult(session, options.quiet)
+	return app.writeReportResult(session, opts.quiet)
 }
 
 //nolint:gocognit,cyclop,nestif // report preparation validates independent evidence dimensions in order
@@ -916,8 +916,8 @@ func reportTmuxContext(ctx context.Context, noTmux bool) registry.TmuxContext {
 }
 
 func reportMultiplexerContext() registry.MultiplexerContext {
-	if context := herdr.Current(); !context.Empty() {
-		return context
+	if ctx := herdr.Current(); !ctx.Empty() {
+		return ctx
 	}
 	return zellij.Current()
 }
@@ -1039,7 +1039,9 @@ func (app *application) newListCommand() *cobra.Command {
 }
 
 func configureSessionFilterFlags(f *pflag.FlagSet, o *listOptions) {
-	f.StringVar(&o.harness, "agent", "", "filter by agent `<name>`")
+	f.StringVar(&o.harness, "harness", "", "filter by harness `<name>`")
+	f.StringVar(&o.harness, "agent", "", "filter by harness `<name>` (alias for --harness)")
+	_ = f.MarkHidden("agent")
 	f.StringVar(&o.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
 	f.StringVar(&o.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
 	f.StringVar(&o.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
@@ -1076,36 +1078,36 @@ func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
 	}
 }
 
-func (app *application) validateListOptions(options listOptions) error {
-	if app.outputJSON && options.absoluteSet {
+func (app *application) validateListOptions(opts listOptions) error {
+	if app.outputJSON && opts.absoluteSet {
 		return errListAbsoluteJSON
 	}
-	if err := validateListSummaryOptions(options); err != nil {
+	if err := validateListSummaryOptions(opts); err != nil {
 		return err
 	}
-	if options.summary {
+	if opts.summary {
 		return nil
 	}
-	if options.sortSet && strings.TrimSpace(options.sortBy) == "" {
+	if opts.sortSet && strings.TrimSpace(opts.sortBy) == "" {
 		return fmt.Errorf("%w: empty value", errInvalidListSort)
 	}
-	_, err := listSortLess(normalizeListSort(options.sortBy))
+	_, err := listSortLess(normalizeListSort(opts.sortBy))
 	return err
 }
 
-func validateListSummaryOptions(options listOptions) error {
-	if options.summary && (options.absoluteSet || options.sortSet || options.descSet) {
+func validateListSummaryOptions(opts listOptions) error {
+	if opts.summary && (opts.absoluteSet || opts.sortSet || opts.descSet) {
 		return errListSummaryFlag
 	}
-	if (options.groupBySet || options.groupBy != "") && !options.summary {
+	if (opts.groupBySet || opts.groupBy != "") && !opts.summary {
 		return errListGroupByWithoutSummary
 	}
-	if options.groupBySet || options.groupBy != "" {
-		switch options.groupBy {
+	if opts.groupBySet || opts.groupBy != "" {
+		switch opts.groupBy {
 		case "multiplexer-session", "project", "harness":
 			// valid
 		default:
-			return fmt.Errorf("%w: %q (expected multiplexer-session, project, or harness)", errUnsupportedGroupBy, options.groupBy)
+			return fmt.Errorf("%w: %q (expected multiplexer-session, project, or harness)", errUnsupportedGroupBy, opts.groupBy)
 		}
 	}
 	return nil
@@ -1850,43 +1852,43 @@ func sessionLabel(name, id string) string {
 	return "-"
 }
 
-func tmuxSessionLabel(c registry.TmuxContext) string {
-	return sessionLabel(c.SessionName, c.SessionID)
+func tmuxSessionLabel(ctx registry.TmuxContext) string {
+	return sessionLabel(ctx.SessionName, ctx.SessionID)
 }
 
-func tmuxWindowLabel(c registry.TmuxContext) string {
-	if c.WindowIndex != "" && c.WindowName != "" {
-		return c.WindowIndex + ":" + c.WindowName
+func tmuxWindowLabel(ctx registry.TmuxContext) string {
+	if ctx.WindowIndex != "" && ctx.WindowName != "" {
+		return ctx.WindowIndex + ":" + ctx.WindowName
 	}
-	if c.WindowName != "" {
-		return c.WindowName
+	if ctx.WindowName != "" {
+		return ctx.WindowName
 	}
-	if c.WindowIndex != "" {
-		return c.WindowIndex
+	if ctx.WindowIndex != "" {
+		return ctx.WindowIndex
 	}
 	return "-"
 }
 
-func multiplexerSessionLabel(context registry.MultiplexerContext) string {
-	return sessionLabel(context.SessionName, context.SessionID)
+func multiplexerSessionLabel(ctx registry.MultiplexerContext) string {
+	return sessionLabel(ctx.SessionName, ctx.SessionID)
 }
 
-func multiplexerContainerLabel(context registry.MultiplexerContext) string {
-	if context.Kind == registry.MultiplexerTmux {
-		return tmuxWindowLabel(context.TmuxContext())
+func multiplexerContainerLabel(ctx registry.MultiplexerContext) string {
+	if ctx.Kind == registry.MultiplexerTmux {
+		return tmuxWindowLabel(ctx.TmuxContext())
 	}
 	var parts []string
-	if context.WorkspaceName != "" {
-		parts = append(parts, context.WorkspaceName)
-	} else if context.WorkspaceID != "" {
-		parts = append(parts, context.WorkspaceID)
+	if ctx.WorkspaceName != "" {
+		parts = append(parts, ctx.WorkspaceName)
+	} else if ctx.WorkspaceID != "" {
+		parts = append(parts, ctx.WorkspaceID)
 	}
-	tab := context.TabName
+	tab := ctx.TabName
 	if tab == "" {
-		tab = context.TabID
+		tab = ctx.TabID
 	}
 	if tab == "" {
-		tab = context.TabIndex
+		tab = ctx.TabIndex
 	}
 	if tab != "" {
 		parts = append(parts, tab)

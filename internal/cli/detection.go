@@ -32,10 +32,10 @@ func (app *application) resolvePaneSession(ctx context.Context, paneID, serverID
 	return session, nil
 }
 
-func evaluateExplanation(ctx context.Context, session registry.Session, options infoOptions) (manage.Explanation, error) {
+func evaluateExplanation(ctx context.Context, session registry.Session, opts infoOptions) (manage.Explanation, error) {
 	exp, err := manage.ExplainSession(ctx, session, manage.ExplainOptions{
-		LiveScreen: !options.disableScreenInspection,
-		ConfigDir:  options.configDir,
+		LiveScreen: !opts.disableScreenInspection,
+		ConfigDir:  opts.configDir,
 	})
 	if err != nil {
 		return exp, fmt.Errorf("explain session: %w", err)

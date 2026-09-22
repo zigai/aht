@@ -105,14 +105,14 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) runDetectionTest(ctx context.Context, harnessID registry.Harness, options detectionTestOptions) error {
-	rawScreen, err := agentstate.ReadScreenInput(options.screenPath, app.stdin)
+func (app *application) runDetectionTest(ctx context.Context, harnessID registry.Harness, opts detectionTestOptions) error {
+	rawScreen, err := agentstate.ReadScreenInput(opts.screenPath, app.stdin)
 	if err != nil {
 		return exitCode(err, exitCodeGeneral)
 	}
 
 	inspection, err := detection.Inspect(ctx, harnessID, rawScreen, detection.Options{
-		Title: options.title, ManifestPath: options.manifestPath, ConfigDir: options.configDir, IncludeScreen: options.showScreen,
+		Title: opts.title, ManifestPath: opts.manifestPath, ConfigDir: opts.configDir, IncludeScreen: opts.showScreen,
 	})
 	if err != nil {
 		return exitCode(err, exitCodeGeneral)

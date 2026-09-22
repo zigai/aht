@@ -311,7 +311,7 @@ func (app *application) writeIntegrationStatuses(results []install.IntegrationSt
 	)
 }
 
-func installIntegrations(ctx context.Context, args []string, options integrationCommandOptions) ([]install.Result, error) {
+func installIntegrations(ctx context.Context, args []string, opts integrationCommandOptions) ([]install.Result, error) {
 	harnesses, err := selectedHarnesses(args, false)
 	if err != nil {
 		return nil, err
@@ -319,7 +319,7 @@ func installIntegrations(ctx context.Context, args []string, options integration
 	results := make([]install.Result, 0, len(harnesses))
 	var failures []error
 	for _, harnessID := range harnesses {
-		result, installErr := install.RunContext(ctx, install.Options{Harness: harnessID, Binary: options.binary, TargetBinary: options.targetBinary, DryRun: options.dryRun, Force: options.force, UseShim: options.shim})
+		result, installErr := install.RunContext(ctx, install.Options{Harness: harnessID, Binary: opts.binary, TargetBinary: opts.targetBinary, DryRun: opts.dryRun, Force: opts.force, UseShim: opts.shim})
 		if installErr != nil {
 			result = failedIntegrationResult(harnessID, "install failed", installErr)
 			failures = append(failures, installErr)
@@ -609,12 +609,12 @@ func (app *application) newStateCommand() *cobra.Command {
 			return exitCode(errSilentUsageError, exitCodeUsage)
 		},
 	}
-	command.AddCommand(app.newRegistryPathCommand(), app.newRegistryResetCommand(), app.newRegistryCleanCommand())
+	command.AddCommand(app.newStatePathCommand(), app.newStateResetCommand(), app.newStateCleanCommand())
 	return command
 }
 
 //nolint:gocognit,cyclop // clean selection validation, age calculations, confirmation, and garbage collection
-func (app *application) newRegistryCleanCommand() *cobra.Command {
+func (app *application) newStateCleanCommand() *cobra.Command {
 	options := cleanOptions{}
 	var yes bool
 	command := &cobra.Command{
@@ -671,9 +671,9 @@ func (app *application) newRegistryCleanCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) runRegistryClean(ctx context.Context, options cleanOptions) error {
-	age := options.olderThan
-	if options.all {
+func (app *application) runRegistryClean(ctx context.Context, opts cleanOptions) error {
+	age := opts.olderThan
+	if opts.all {
 		age = 0
 	}
 	result, err := app.registryStore().GC(ctx, age)
@@ -741,14 +741,14 @@ func (app *application) newInfoCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) writeInfo(ctx context.Context, session registry.Session, options infoOptions) error {
-	if !options.explain {
+func (app *application) writeInfo(ctx context.Context, session registry.Session, opts infoOptions) error {
+	if !opts.explain {
 		if app.outputJSON {
 			return app.writeJSON(session)
 		}
 		return app.writeSessionDetails(session)
 	}
-	explanation, explanationErr := evaluateExplanation(ctx, session, options)
+	explanation, explanationErr := evaluateExplanation(ctx, session, opts)
 	if app.outputJSON {
 		if err := app.writeJSON(explainedInfoResult{Session: session, Explanation: explanation}); err != nil {
 			return err
@@ -810,7 +810,7 @@ func (app *application) newWatchCommand() *cobra.Command {
 			}
 			prepared, err = app.prepareWatch(watchOptions{
 				filter:     filter,
-				agent:      options.harness,
+				harness:    options.harness,
 				noSnapshot: noSnapshot,
 				format:     watchFormat,
 				formatSet:  cmd.Flags().Changed("format"),

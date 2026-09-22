@@ -52,7 +52,7 @@ var (
 
 type watchOptions struct {
 	filter     registry.Filter
-	agent      string
+	harness    string
 	noSnapshot bool
 	format     string
 	formatSet  bool
@@ -172,7 +172,7 @@ func newWatchUpdateProcessor(app *application, o watchOptions) *watchUpdateProce
 }
 
 func (p *watchUpdateProcessor) accept(rawSessions []registry.Session, initial bool) error {
-	currentSessions := applyConfigFilter(rawSessions, p.app.cfg.Filter, p.options.agent)
+	currentSessions := applyConfigFilter(rawSessions, p.app.cfg.Filter, p.options.harness)
 	if initial {
 		p.previous = currentSessions
 		if !p.options.noSnapshot {
@@ -365,33 +365,33 @@ func sortWatchEvents(e []watchEvent) {
 	})
 }
 
-func watchTmuxLabel(c registry.TmuxContext) string {
+func watchTmuxLabel(ctx registry.TmuxContext) string {
 	p := []string{}
-	if x := tmuxSessionLabel(c); x != "-" {
+	if x := tmuxSessionLabel(ctx); x != "-" {
 		p = append(p, x)
 	}
-	if x := tmuxWindowLabel(c); x != "-" {
+	if x := tmuxWindowLabel(ctx); x != "-" {
 		p = append(p, x)
 	}
-	if c.PaneID != "" {
-		p = append(p, c.PaneID)
+	if ctx.PaneID != "" {
+		p = append(p, ctx.PaneID)
 	}
 	return strings.Join(p, ":")
 }
 
-func watchMultiplexerLabel(context registry.MultiplexerContext) string {
-	if context.Empty() {
+func watchMultiplexerLabel(ctx registry.MultiplexerContext) string {
+	if ctx.Empty() {
 		return ""
 	}
-	parts := []string{string(context.Kind)}
-	if session := multiplexerSessionLabel(context); session != "-" {
+	parts := []string{string(ctx.Kind)}
+	if session := multiplexerSessionLabel(ctx); session != "-" {
 		parts = append(parts, session)
 	}
-	if container := multiplexerContainerLabel(context); container != "-" {
+	if container := multiplexerContainerLabel(ctx); container != "-" {
 		parts = append(parts, container)
 	}
-	if context.PaneID != "" {
-		parts = append(parts, context.PaneID)
+	if ctx.PaneID != "" {
+		parts = append(parts, ctx.PaneID)
 	}
 	return strings.Join(parts, ":")
 }

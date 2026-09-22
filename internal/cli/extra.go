@@ -301,16 +301,16 @@ func (app *application) writeObserverResult(result observer.Result) error {
 	return nil
 }
 
-func runServiceOperation(ctx context.Context, operation string, options service.Options) (service.Result, error) {
+func runServiceOperation(ctx context.Context, operation string, opts service.Options) (service.Result, error) {
 	var result service.Result
 	var err error
 	switch operation {
 	case "update":
-		result, err = service.Update(ctx, options)
+		result, err = service.Update(ctx, opts)
 	case "uninstall":
-		result, err = service.Uninstall(ctx, options)
+		result, err = service.Uninstall(ctx, opts)
 	case statusCommandName:
-		result, err = service.Status(ctx, options)
+		result, err = service.Status(ctx, opts)
 	default:
 		return service.Result{}, fmt.Errorf("%w: %s", errUnknownServiceOperation, operation)
 	}
@@ -320,28 +320,28 @@ func runServiceOperation(ctx context.Context, operation string, options service.
 	return result, nil
 }
 
-func (app *application) parseServiceOptions(options serviceOptions) (service.Options, error) {
-	if options.binary == "" {
-		options.binary = defaultInstallBinary()
+func (app *application) parseServiceOptions(opts serviceOptions) (service.Options, error) {
+	if opts.binary == "" {
+		opts.binary = defaultInstallBinary()
 	}
-	if options.interval <= 0 {
+	if opts.interval <= 0 {
 		return service.Options{}, exitCode(errInvalidObserveInterval, exitCodeUsage)
 	}
-	if options.grace < 0 {
+	if opts.grace < 0 {
 		return service.Options{}, exitCode(errInvalidObserveGracePeriod, exitCodeUsage)
 	}
-	return service.Options{Binary: options.binary, StorePath: app.resolvedStorePath(), Interval: options.interval, GracePeriod: options.grace, DryRun: options.dryRun}, nil
+	return service.Options{Binary: opts.binary, StorePath: app.resolvedStorePath(), Interval: opts.interval, GracePeriod: opts.grace, DryRun: opts.dryRun}, nil
 }
 
-func (app *application) configuredServiceOptions(cmd *cobra.Command, options serviceOptions) (service.Options, error) {
+func (app *application) configuredServiceOptions(cmd *cobra.Command, opts serviceOptions) (service.Options, error) {
 	cfg, err := app.loadConfig()
 	if err != nil {
 		return service.Options{}, err
 	}
-	intervals := observeOptions{interval: options.interval, grace: options.grace}
+	intervals := observeOptions{interval: opts.interval, grace: opts.grace}
 	if err := applyTrackerIntervals(&intervals, cmd, cfg); err != nil {
 		return service.Options{}, err
 	}
-	options.interval, options.grace = intervals.interval, intervals.grace
-	return app.parseServiceOptions(options)
+	opts.interval, opts.grace = intervals.interval, intervals.grace
+	return app.parseServiceOptions(opts)
 }

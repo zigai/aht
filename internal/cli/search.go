@@ -39,7 +39,7 @@ var (
 
 type searchOptions struct {
 	query   history.Query
-	agent   string
+	harness string
 	role    string
 	sources []string
 	verbose bool
@@ -75,7 +75,9 @@ func (app *application) newSearchCommand() *cobra.Command {
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&options.agent, "agent", "", "filter by harness `<name>`")
+	flags.StringVar(&options.harness, "harness", "", "filter by harness `<name>`")
+	flags.StringVar(&options.harness, "agent", "", "filter by harness `<name>` (alias for --harness)")
+	_ = flags.MarkHidden("agent")
 	flags.StringVar(&options.query.Dir, "dir", "", "match recorded working directories or workspace roots under `<path>`")
 	flags.BoolVar(&options.query.IncludeTools, "include-tools", false, "also search tool calls and tool output")
 	flags.BoolVar(&options.query.CaseSensitive, "case-sensitive", false, "match text with exact case")
@@ -87,8 +89,8 @@ func (app *application) newSearchCommand() *cobra.Command {
 }
 
 func (options *searchOptions) validate() ([]history.Source, error) {
-	if options.agent != "" {
-		id, err := harness.Parse(options.agent)
+	if options.harness != "" {
+		id, err := harness.Parse(options.harness)
 		if err != nil {
 			return nil, fmt.Errorf("search agent: %w", err)
 		}
@@ -113,7 +115,7 @@ func (options *searchOptions) validate() ([]history.Source, error) {
 			return nil, fmt.Errorf("search source: %w", err)
 		}
 		if options.query.Harness != "" && id != options.query.Harness {
-			return nil, fmt.Errorf("search: %w: --agent %q and --source %q select different harnesses; see aht search --help", errSearchAgentConflict, options.agent, value)
+			return nil, fmt.Errorf("search: %w: --agent %q and --source %q select different harnesses; see aht search --help", errSearchAgentConflict, options.harness, value)
 		}
 		sources = append(sources, history.Source{Harness: id, Path: path})
 	}
@@ -201,7 +203,7 @@ func searchFailure(err error) error {
 	}
 }
 
-func (app *application) writeSearchResults(result history.Result, searchErr error, options searchOptions) error {
+func (app *application) writeSearchResults(result history.Result, searchErr error, opts searchOptions) error {
 	if len(result.Matches) == 0 {
 		empty := "No matching conversations."
 		if searchErr != nil {
@@ -215,7 +217,7 @@ func (app *application) writeSearchResults(result history.Result, searchErr erro
 	for _, match := range result.Matches {
 		var err error
 		if isTTY {
-			err = app.writeSearchMatchTTY(match, options.query, options.verbose)
+			err = app.writeSearchMatchTTY(match, opts.query, opts.verbose)
 		} else {
 			err = app.writeSearchMatch(match)
 		}
@@ -229,7 +231,7 @@ func (app *application) writeSearchResults(result history.Result, searchErr erro
 			return err
 		}
 	}
-	app.writeSearchIssues(result.Issues, options.verbose)
+	app.writeSearchIssues(result.Issues, opts.verbose)
 	if result.Truncated {
 		app.warnf("More matching conversations exist; increase or omit --limit, or narrow --agent/--dir.\n")
 	}

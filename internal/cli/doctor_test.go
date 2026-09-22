@@ -18,7 +18,7 @@ func TestDoctorIsConciseUnlessVerbose(t *testing.T) {
 	assertDoctorSurface(t)
 }
 
-func TestDoctorFixtureIgnoresInheritedOMPProfile(t *testing.T) {
+func TestDoctorFixtureIgnoresInheritedOmpProfile(t *testing.T) {
 	foreignProfile := filepath.Join(t.TempDir(), ".omp", "agent")
 	t.Setenv("PI_CODING_AGENT_DIR", foreignProfile)
 	installed, err := install.RunContext(t.Context(), install.Options{Harness: registry.HarnessOmp, Binary: defaultInstallBinary()})
