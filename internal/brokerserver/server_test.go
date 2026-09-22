@@ -754,7 +754,12 @@ func assertBrokerParity(t *testing.T, groupBy registry.SummaryGroupBy, brokerSum
 }
 
 func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "busy.sock")
+	tempDir, err := os.MkdirTemp("/tmp", "aht-busy-") //nolint:usetesting // reason: Unix domain socket paths in /tmp must stay short to prevent sockaddr_un overflow on macOS
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
+	path := filepath.Join(tempDir, "busy.sock")
 	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatal(err)
