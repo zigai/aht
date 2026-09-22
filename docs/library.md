@@ -96,13 +96,7 @@ func main() {
 
 `SearchHistory` searches retained local conversations, including sessions AHT
 never tracked. The tracker, the broker, and the harnesses do not need to be
-running. Matching is literal and case-insensitive by default; set
-`CaseSensitive: true` to require exact case. Case-insensitive matching applies
-Unicode case folding after simple lowercasing, so `STRASSE` matches `Straße`,
-ligature sequences match (`ﬃ`/`ffi`), Greek sigma variants match (`Σ`/`ς`), and
-Turkish dotted `İ` still matches ASCII `i`. User and assistant messages are
-searched by default; system and reasoning text never matches. Set
-`IncludeTools: true` to also search tool calls and tool output.
+running. Matching is literal and case-insensitive by default.
 
 ```go
 package main
@@ -124,8 +118,7 @@ func main() {
 	result, err := aht.SearchHistory(ctx, aht.HistoryQuery{Text: "refresh token"})
 	report(result, err)
 
-	// Explicit sources replace discovery. IndexPath keeps the disposable cache
-	// used to skip unchanged transcripts next to the archives it indexes.
+	// Explicit sources.
 	catalog := aht.HistoryCatalog{
 		Sources: []aht.HistorySource{
 			{Harness: aht.HarnessPi, Path: "/archive/pi/sessions"},
@@ -151,30 +144,4 @@ func report(result aht.HistoryResult, err error) {
 }
 ```
 
-Search returns partial results when some sources cannot be read, so always
-inspect both the result and the error: `errors.Is(err, aht.ErrHistoryIncomplete)`
-means at least one source was not searched, while `result.Matches` still holds
-everything that was found, `result.Sources` reports each source's coverage
-(`searched`, `skipped`, `missing`, `unsupported`, or `failed`), and
-`result.Issues` carries bounded diagnostics without transcript text. Invalid
-options fail before any history is read with `aht.ErrInvalidHistoryQuery`, and a
-canceled context returns the partial result together with
-`context.Canceled`.
-
-A `HistoryCatalog` with non-nil `Sources` searches exactly those locations
-instead of default discovery; an empty non-nil slice searches nothing. Each
-source names a native transcript directory or SQLite database, and repeated
-entries are searched once. `HistoryQuery.Harness` restricts matching to one
-harness; `HistoryQuery.Dir` restricts it to conversations whose recorded
-working directory or workspace root is that path or beneath it.
-
-Search uses a disposable SQLite index so unchanged transcripts are not
-rescanned. With an empty `IndexPath` it lives under the user cache directory at
-`$XDG_CACHE_HOME/aht/history-v1.sqlite` (mode `0600`) and stores searchable
-transcript text: user and assistant messages by default, plus tool calls and
-output for histories already searched with `IncludeTools: true`. Deleting it is
-safe; the next search rebuilds it. An unusable default cache is renamed aside to
-`history-v1.sqlite.invalid` and rebuilt rather than failing the search, and when
-the index cannot be used at all the search falls back to scanning histories
-directly. A custom `IndexPath` is never replaced: a foreign schema there is
-reported as an error and the file is left untouched.
+Search returns partial results when some sources cannot be read.
