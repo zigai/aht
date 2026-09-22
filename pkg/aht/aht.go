@@ -2,7 +2,6 @@ package aht
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/zigai/aht/pkg/broker"
@@ -367,11 +366,7 @@ func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Sess
 
 // ResolveSessions resolves a selector against an existing session snapshot.
 func ResolveSessions(sessions []Session, selector Selector) (Session, error) {
-	session, err := client.ResolveSessions(sessions, selector)
-	if err != nil {
-		return session, fmt.Errorf("resolve session: %w", err)
-	}
-	return session, nil
+	return client.ResolveSessions(sessions, selector) //nolint:wrapcheck // facade forwards client error unchanged
 }
 
 // Current returns the session for the calling agent context using the provided client.
@@ -381,20 +376,12 @@ func Current(ctx context.Context, c *Client) (Session, error) {
 
 // ExplainSession returns an Explanation for the given session.
 func ExplainSession(ctx context.Context, session Session, options ExplainOptions) (Explanation, error) {
-	exp, err := manage.ExplainSession(ctx, session, options)
-	if err != nil {
-		return exp, fmt.Errorf("explain session: %w", err)
-	}
-	return exp, nil
+	return manage.ExplainSession(ctx, session, options) //nolint:wrapcheck // facade forwards manage error unchanged
 }
 
 // ReadTrackerHealth reads and evaluates the tracker health sidecar at path.
 func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (TrackerHealth, error) {
-	health, err := manage.ReadTrackerHealth(path, now, maxAge)
-	if err != nil {
-		return health, fmt.Errorf("read tracker health: %w", err)
-	}
-	return health, nil
+	return manage.ReadTrackerHealth(path, now, maxAge) //nolint:wrapcheck // facade forwards manage error unchanged
 }
 
 // Capabilities returns the static capabilities of harnessID.

@@ -1,6 +1,7 @@
 package aht_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -183,5 +184,19 @@ func TestNewManagerUsesConfiguredStorePath(t *testing.T) {
 	manager := aht.NewManager(aht.ManagerConfig{StorePath: storePath})
 	if got, want := manager.HealthPath(), storePath+".observer-health.json"; got != want {
 		t.Fatalf("HealthPath() = %q, want %q", got, want)
+	}
+}
+
+func TestExplainSessionDoesNotDuplicateErrorContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := aht.ExplainSession(ctx, aht.Session{}, aht.ExplainOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExplainSession error = %v, want context.Canceled", err)
+	}
+	if got, want := err.Error(), "explain session: context canceled"; got != want {
+		t.Fatalf("ExplainSession error = %q, want %q", got, want)
 	}
 }
