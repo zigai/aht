@@ -1,0 +1,34 @@
+name: Set up tmux 3.6
+description: Cache a verified tmux build on Ubuntu 24.04.
+runs:
+  using: composite
+  steps:
+    - name: Locate tmux installation
+      id: path
+      shell: bash
+      run: |
+        . /etc/os-release
+        test "$ID:$VERSION_ID" = 'ubuntu:24.04'
+        echo "prefix=$HOME/.local/share/aht-ci/tmux" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      id: cache
+      with:
+        path: ${{ steps.path.outputs.prefix }}
+        key: aht-tmux-3.6-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('.github/actions/setup-tmux/action.yml', '.github/scripts/install-tmux.sh') }}
+    - name: Build tmux on a cache miss
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        AHT_TMUX_PREFIX: ${{ steps.path.outputs.prefix }}
+      run: bash .github/scripts/install-tmux.sh
+    - name: Check tmux runtime dependencies and version
+      shell: bash
+      env:
+        AHT_TMUX_PREFIX: ${{ steps.path.outputs.prefix }}
+      run: |
+        if ldd "$AHT_TMUX_PREFIX/bin/tmux" | grep 'not found'; then
+          sudo apt-get update
+          sudo apt-get install --yes libevent-core-2.1-7t64 libncursesw6
+        fi
+        test "$("$AHT_TMUX_PREFIX/bin/tmux" -V)" = 'tmux 3.6'
+        echo "$AHT_TMUX_PREFIX/bin" >> "$GITHUB_PATH"

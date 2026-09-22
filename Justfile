@@ -1,5 +1,5 @@
 golangci_lint_version := "v2.13.2"
-golangci_lint := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@" + golangci_lint_version
+golangci_lint := env("AHT_GOLANGCI_LINT", "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@" + golangci_lint_version)
 actionlint_version := "v1.7.12"
 actionlint := "go run github.com/rhysd/actionlint/cmd/actionlint@" + actionlint_version
 goreleaser_version := "v2.13.3"
@@ -28,6 +28,11 @@ integration:
 # Test release detection, state transitions, and workflow wiring
 compatibility-tests:
     go test ./internal/tools/compatibility
+    go test -count=1 -race -tags=compatibility ./test/hostcompat -skip '^TestCurrentHarnessLifecycle$'
+
+# Verify release guards and CI orchestration without remote mutations
+ci-tests:
+    node --test .github/scripts/*.test.cjs
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
@@ -69,7 +74,10 @@ lint:
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # Run all required non-mutating verification
-check: lint test race integration
+check: lint test race integration compatibility-tests ci-tests source-checks
+
+# Verify formatting, dependency consistency, builds, and workflow syntax
+source-checks:
     {{ golangci_lint }} fmt --diff
     go mod tidy -diff
     go build -o /dev/null .
@@ -122,6 +130,10 @@ snapshot: _goreleaser-version-check
 # Build and upload a draft release
 release-draft: _goreleaser-version-check
     goreleaser release --clean
+
+# Build tagged release artifacts for native validation before draft creation
+release-build: _goreleaser-version-check
+    goreleaser release --clean --skip=publish
 
 _release-check:
     #!/usr/bin/env sh

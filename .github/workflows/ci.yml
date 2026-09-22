@@ -29,10 +29,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: selector
 
       - name: Select affected hosts and resolve distributions
         id: select
@@ -47,7 +46,7 @@ jobs:
     if: needs.affected-hosts.outputs.selected == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix: ${{ fromJSON(needs.affected-hosts.outputs.matrix) }}
     uses: ./.github/workflows/compatibility-host.yml
     with:
@@ -84,10 +83,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: verify
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -97,20 +95,32 @@ jobs:
       - name: Set up Just
         uses: extractions/setup-just@v3
 
-      - name: Install tmux
-        run: |
-          sudo apt-get update && sudo apt-get install --yes libevent-dev ncurses-dev build-essential bison pkg-config
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o tmux-3.6.tar.gz https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz
-          tar -xzf tmux-3.6.tar.gz
-          cd tmux-3.6
-          ./configure --prefix=/usr
-          make -j"$(nproc)"
-          sudo make install
-          cd ..
-          rm -rf tmux-3.6 tmux-3.6.tar.gz
+      - name: Set up pinned linter
+        uses: ./.github/actions/setup-lint
 
-      - name: Verify source
-        run: just check
+      - name: Install tmux
+        uses: ./.github/actions/setup-tmux
+
+      - name: Lint
+        run: just lint
+
+      - name: Unit tests
+        run: just test
+
+      - name: Race tests
+        run: just race
+
+      - name: Integration tests
+        run: just integration
+
+      - name: Compatibility helper tests
+        run: just compatibility-tests
+
+      - name: Release guard tests
+        run: just ci-tests
+
+      - name: Source consistency
+        run: just source-checks
 
   verify-darwin:
     runs-on: macos-15
@@ -120,10 +130,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: verify
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -133,16 +142,28 @@ jobs:
       - name: Set up Just
         uses: extractions/setup-just@v3
 
+      - name: Set up pinned linter
+        uses: ./.github/actions/setup-lint
+
       - name: Install tmux
         run: brew install tmux
 
-      - name: Verify source
-        run: just check
+      - name: Lint
+        run: just lint
+
+      - name: Unit tests
+        run: just test
+
+      - name: Race tests
+        run: just race
+
+      - name: Integration tests
+        run: just integration
+
+      - name: Source consistency
+        run: just source-checks
 
   build-snapshot:
-    needs:
-      - verify-linux
-      - verify-darwin
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -152,10 +173,9 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: package
 
       - name: Set up Just
         uses: extractions/setup-just@v3
@@ -176,6 +196,7 @@ jobs:
         with:
           name: snapshot-${{ github.sha }}
           path: dist
+          if-no-files-found: error
           retention-days: 14
 
   native-artifact-validation:
@@ -197,10 +218,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          profile: artifacts
 
       - name: Set up Just
         uses: extractions/setup-just@v3
@@ -236,6 +256,8 @@ jobs:
   artifact-validation:
     if: ${{ always() }}
     needs:
+      - verify-linux
+      - verify-darwin
       - build-snapshot
       - native-artifact-validation
     runs-on: ubuntu-slim
@@ -243,5 +265,7 @@ jobs:
     steps:
       - name: Require every artifact gate
         run: |
+          test "${{ needs.verify-linux.result }}" = "success"
+          test "${{ needs.verify-darwin.result }}" = "success"
           test "${{ needs.build-snapshot.result }}" = "success"
           test "${{ needs.native-artifact-validation.result }}" = "success"
