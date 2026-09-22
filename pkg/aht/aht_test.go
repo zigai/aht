@@ -175,3 +175,13 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 		t.Fatalf("exp.SessionID = %q, want s-facade", exp.SessionID)
 	}
 }
+
+func TestNewManagerUsesConfiguredStorePath(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "sessions.json")
+	manager := aht.NewManager(aht.ManagerConfig{StorePath: storePath})
+	if got, want := manager.HealthPath(), storePath+".observer-health.json"; got != want {
+		t.Fatalf("HealthPath() = %q, want %q", got, want)
+	}
+}

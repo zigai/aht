@@ -72,6 +72,21 @@ const (
 	SummaryGroupByMultiplexerSession SummaryGroupBy  = registry.SummaryGroupByMultiplexerSession
 	SummaryGroupByProject            SummaryGroupBy  = registry.SummaryGroupByProject
 	SummaryGroupByHarness            SummaryGroupBy  = registry.SummaryGroupByHarness
+
+	ArtifactMissing ArtifactStatus = manage.ArtifactMissing
+	ArtifactCurrent ArtifactStatus = manage.ArtifactCurrent
+	ArtifactStale   ArtifactStatus = manage.ArtifactStale
+	ArtifactForeign ArtifactStatus = manage.ArtifactForeign
+
+	HealthStatusHealthy  HealthStatus = manage.HealthStatusHealthy
+	HealthStatusDegraded HealthStatus = manage.HealthStatusDegraded
+	HealthStatusStale    HealthStatus = manage.HealthStatusStale
+	HealthStatusMissing  HealthStatus = manage.HealthStatusMissing
+	HealthStatusCorrupt  HealthStatus = manage.HealthStatusCorrupt
+
+	DoctorStatusOK      DoctorStatus = manage.DoctorStatusOK
+	DoctorStatusWarning DoctorStatus = manage.DoctorStatusWarning
+	DoctorStatusError   DoctorStatus = manage.DoctorStatusError
 )
 
 var (
@@ -161,6 +176,12 @@ var (
 
 	// ErrPaneNotLive means the target terminal multiplexer pane is not running or available.
 	ErrPaneNotLive = manage.ErrPaneNotLive
+
+	// ErrForeignTracker means the tracker service definition is not owned by AHT.
+	ErrForeignTracker = manage.ErrForeignTracker
+
+	// ErrUnsupportedTracker means background tracking is unavailable on this platform.
+	ErrUnsupportedTracker = manage.ErrUnsupportedTracker
 )
 
 type (
@@ -289,11 +310,34 @@ type (
 
 	// ManagerConfig identifies the binary, registry, and tracker settings used by a Manager.
 	ManagerConfig = manage.Config
+
+	// IntegrationOptions controls one managed harness integration operation.
+	IntegrationOptions = manage.IntegrationOptions
+
+	// IntegrationResult describes the effect of installing or removing one integration.
+	IntegrationResult = manage.IntegrationResult
+
+	// IntegrationStatus describes the installed state of one harness integration.
+	IntegrationStatus = manage.IntegrationStatus
+
+	// ArtifactStatus describes the ownership and freshness of a managed integration artifact.
+	ArtifactStatus = manage.ArtifactStatus
+
+	// TrackerOptions controls a tracker operation.
+	TrackerOptions = manage.TrackerOptions
+
+	// TrackerResult describes the tracker state after a management operation.
+	TrackerResult = manage.TrackerResult
 )
 
 // New returns a client for the configured local AHT instance.
 func New(config Config) *Client {
 	return client.New(config)
+}
+
+// NewManager returns a manager for harness integrations and the background tracker.
+func NewManager(config ManagerConfig) *Manager {
+	return manage.New(config)
 }
 
 // DefaultSocketPath returns the default endpoint for the current user's AHT broker.
