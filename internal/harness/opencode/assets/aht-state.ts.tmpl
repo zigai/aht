@@ -31,6 +31,12 @@ type V1PluginContext = {
   readonly directory?: string | undefined;
   readonly worktree?: string | undefined;
   readonly project?: { readonly path?: string | undefined; readonly root?: string };
+  readonly client?: OpenCodeClient;
+};
+type OpenCodeClient = {
+  readonly session?: {
+    get(input: { readonly path: { readonly id: string } }): Promise<unknown>;
+  };
 };
 type V1PluginHooks = {
   event(input: { readonly event: unknown }): Promise<void>;
@@ -45,6 +51,7 @@ type V2PluginContext = {
       readonly directory?: string | undefined;
     } | undefined;
   } | undefined;
+  readonly client?: OpenCodeClient;
   readonly event?: {
     subscribe(options?: { readonly signal?: AbortSignal }): AsyncIterable<unknown>;
   } | undefined;
@@ -62,7 +69,7 @@ function addEvent(args: string[], value: unknown): void {
   }
 }
 
-function createCore(initialRefs?: SessionRefs) {
+function createCore(initialRefs?: SessionRefs, client?: OpenCodeClient) {
   let currentSessionId: string | undefined;
   let currentSessionPath: string | undefined;
   let currentCwd: string | undefined = initialRefs?.directory;
@@ -120,7 +127,7 @@ function createCore(initialRefs?: SessionRefs) {
     ) ?? currentProjectRoot;
   }
 
-  function report(state: string, event: unknown): Promise<void> {
+  async function report(state: string, event: unknown): Promise<void> {
     const observedAt = new Date().toISOString();
     refreshSessionRef(event);
 
@@ -150,6 +157,12 @@ function createCore(initialRefs?: SessionRefs) {
       ["properties", "status"],
       ["session", "status"],
     ]));
+    if (currentSessionId && client?.session?.get) {
+      try {
+        const session = await client.session.get({ path: { id: currentSessionId } });
+        addAttribute(args, "opencode_title", firstPathString(session, [["title"], ["data", "title"]]));
+      } catch {}
+    }
     addAttribute(args, "aht_integration", source);
 
     return enqueueCommand(args);
@@ -178,7 +191,7 @@ function createCore(initialRefs?: SessionRefs) {
 async function server(ctx: V1PluginContext): Promise<V1PluginHooks> {
   const directory = firstString(ctx?.directory, ctx?.worktree);
   const projectRoot = firstString(ctx?.worktree, ctx?.project?.path, ctx?.project?.root);
-  const core = createCore({ directory, projectRoot });
+  const core = createCore({ directory, projectRoot }, ctx?.client);
 
   return {
     dispose: async () => {
@@ -193,7 +206,7 @@ async function server(ctx: V1PluginContext): Promise<V1PluginHooks> {
 async function setup(ctx: V2PluginContext): Promise<() => Promise<void>> {
   const directory = ctx?.location?.directory;
   const projectRoot = ctx?.location?.project?.canonical ?? ctx?.location?.project?.directory ?? directory;
-  const core = createCore({ directory, projectRoot });
+  const core = createCore({ directory, projectRoot }, ctx?.client);
 
   const controller = new AbortController();
   if (ctx?.event?.subscribe) {

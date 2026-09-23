@@ -31,6 +31,9 @@ func TestPluginTemplateRendersCleanly(t *testing.T) {
 	if match := placeholderPattern.FindString(rendered); match != "" {
 		t.Fatalf("rendered opencode template contains unresolved placeholder %q:\n%s", match, rendered)
 	}
+	if !strings.Contains(rendered, `client.session.get({ path: { id: currentSessionId } })`) {
+		t.Fatalf("expected native OpenCode session title lookup in rendered template:\n%s", rendered)
+	}
 }
 
 func TestConfigDirOverride(t *testing.T) {
@@ -42,6 +45,23 @@ func TestConfigDirOverride(t *testing.T) {
 }
 
 func runOpencodeDriver(t *testing.T, driverSource string) []string {
+	t.Helper()
+	data := runOpencodeDriverOutput(t, driverSource)
+	var observations []string
+	var activity string
+	fields := strings.Split(strings.TrimSpace(data), "\n")
+	for index := 0; index+1 < len(fields); index++ {
+		switch fields[index] {
+		case "--activity":
+			activity = fields[index+1]
+		case "--session-id":
+			observations = append(observations, fields[index+1]+":"+activity)
+		}
+	}
+	return observations
+}
+
+func runOpencodeDriverOutput(t *testing.T, driverSource string) string {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -73,18 +93,7 @@ func runOpencodeDriver(t *testing.T, driverSource string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var observations []string
-	var activity string
-	fields := strings.Split(strings.TrimSpace(string(data)), "\n")
-	for index := 0; index+1 < len(fields); index++ {
-		switch fields[index] {
-		case "--activity":
-			activity = fields[index+1]
-		case "--session-id":
-			observations = append(observations, fields[index+1]+":"+activity)
-		}
-	}
-	return observations
+	return string(data)
 }
 
 func TestPluginDisposalDrainsNativeEvents(t *testing.T) {
@@ -157,6 +166,20 @@ process.exit(0);
 	command := exec.CommandContext(t.Context(), node, "--experimental-strip-types", driverPath)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("shape validation failed: %v\n%s", err, output)
+	}
+}
+
+func TestOpencodePluginReportsServerSessionTitle(t *testing.T) {
+	driver := `import plugin from "./plugin.ts";
+	const client = { session: { get: async ({ path }) => ({ id: path.id, title: "Server title" }) } };
+const hooks = await plugin.server({ directory: "/work", client });
+await hooks.event({ event: { type: "session.status", properties: { sessionID: "s1", status: { type: "idle" } } } });
+await hooks.dispose();
+process.exit(0);
+`
+	output := runOpencodeDriverOutput(t, driver)
+	if !strings.Contains(output, "opencode_title=Server title") {
+		t.Fatalf("OpenCode native title was not reported:\n%s", output)
 	}
 }
 

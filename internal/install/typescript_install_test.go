@@ -197,7 +197,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	}
 	requireTextContainsAll(t, result.Snippet, []string{
 		"AHT_INTEGRATION_ID=opencode",
-		"AHT_INTEGRATION_VERSION=10",
+		"AHT_INTEGRATION_VERSION=11",
 		`export default { id: "aht-state", setup, server };`,
 		`async function server(ctx: V1PluginContext)`,
 		`async function setup(ctx: V2PluginContext)`,
