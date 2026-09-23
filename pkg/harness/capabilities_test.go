@@ -68,7 +68,13 @@ func TestCapabilitiesForCodex(t *testing.T) {
 
 func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 	t.Parallel()
-	for _, id := range []registry.Harness{registry.HarnessCodex, registry.HarnessPi, registry.HarnessOmp} {
+	for _, id := range []registry.Harness{
+		registry.HarnessCodex, registry.HarnessPi, registry.HarnessOmp,
+		registry.HarnessCline, registry.HarnessKimiCode, registry.HarnessGrok,
+		registry.HarnessGoose, registry.HarnessAmp, registry.HarnessOpenCode,
+		registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw,
+		registry.HarnessHermes,
+	} {
 		caps, ok := harness.CapabilitiesFor(id)
 		if !ok || !caps.TitleLookup {
 			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)

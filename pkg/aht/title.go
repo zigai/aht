@@ -42,9 +42,15 @@ func LookupTitles(ctx context.Context, sessions []Session) ([]string, error) {
 		}
 		batch := make([]registry.ObservationIdentity, len(indices))
 		for i, index := range indices {
+			var attributes map[string]string
+			if native := sessions[index].Observations.Native; native != nil {
+				attributes = native.Attributes
+			}
 			batch[i] = registry.ObservationIdentity{
 				SessionID:   sessions[index].SessionID,
 				SessionPath: sessions[index].SessionPath,
+				CWD:         sessions[index].CWD,
+				Attributes:  attributes,
 			}
 		}
 		found, err := reader.SessionTitles(ctx, batch)

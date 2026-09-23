@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/pkg/aht"
+	"github.com/zigai/aht/pkg/registry"
 )
 
 func writeTitleFixture(t *testing.T, root, name, body string) string {
@@ -51,12 +52,13 @@ func TestLookupTitlesReadsHarnessNativeNames(t *testing.T) {
 		{Harness: aht.HarnessOmp, SessionID: "another-omp", SessionPath: omp},
 		{Harness: aht.HarnessCodex, SessionID: "unknown", SessionPath: filepath.Join(codexHome, "sessions", "unknown.jsonl")},
 		{Harness: aht.HarnessClaude, SessionID: "unsupported", SessionPath: pi},
+		{Harness: aht.HarnessAmp, SessionID: "T-amp", Observations: registry.Observations{Native: &registry.NativeObservation{Attributes: map[string]string{"amp_title": "Amp title"}}}},
 	}
 	titles, err := aht.LookupTitles(t.Context(), sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Current title", "Second thread", "Current name", "Fast title", "", "", "", ""}
+	want := []string{"Current title", "Second thread", "Current name", "Fast title", "", "", "", "", "Amp title"}
 	if diff := cmp.Diff(want, titles); diff != "" {
 		t.Fatalf("titles mismatch (-want +got):\n%s", diff)
 	}
@@ -93,7 +95,13 @@ func TestLookupTitlesHonorsCancellation(t *testing.T) {
 
 func TestLookupTitlesSupportIsDiscoverableThroughAHT(t *testing.T) {
 	t.Parallel()
-	for _, id := range []aht.Harness{aht.HarnessCodex, aht.HarnessPi, aht.HarnessOmp} {
+	for _, id := range []aht.Harness{
+		aht.HarnessCodex, aht.HarnessPi, aht.HarnessOmp,
+		aht.HarnessCline, aht.HarnessKimiCode, aht.HarnessGrok,
+		aht.HarnessGoose, aht.HarnessAmp, aht.HarnessOpenCode,
+		aht.HarnessKilo, aht.HarnessDroid, aht.HarnessOpenClaw,
+		aht.HarnessHermes,
+	} {
 		capabilities, ok := aht.Capabilities(id)
 		if !ok || !capabilities.TitleLookup {
 			t.Fatalf("%s title lookup capability = %t, %t", id, capabilities.TitleLookup, ok)

@@ -266,8 +266,10 @@ type Session struct {
 }
 
 type ObservationIdentity struct {
-	SessionID   string `json:"session_id,omitempty"`
-	SessionPath string `json:"session_path,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`
+	SessionPath string            `json:"session_path,omitempty"`
+	CWD         string            `json:"cwd,omitempty"`
+	Attributes  map[string]string `json:"attributes,omitempty"`
 }
 
 type CatalogMetadata struct {

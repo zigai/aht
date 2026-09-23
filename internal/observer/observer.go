@@ -353,9 +353,11 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		key := processKey{harness: harnessID, pid: process.PID, start: process.StartIdentity}
 		current[key] = trackedProcess{process: process, missingSince: time.Time{}, missingCount: 0}
 		present := true
-		identity := registry.ObservationIdentity{SessionID: "", SessionPath: ""}
+		identity := registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}
 		if entry, ok := catalogByPID[process.PID]; ok && entry.Harness == harnessID {
-			identity = registry.ObservationIdentity{SessionID: entry.SessionID, SessionPath: entry.SessionPath}
+			identity = registry.ObservationIdentity{
+				SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
+			}
 		}
 		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // process evidence only
 			Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
@@ -411,7 +413,9 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		metadata := &registry.CatalogMetadata{ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD, ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current}
 		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // catalog metadata only
 			Source: registry.ObservationSourceCatalog, Evidence: registry.ObservationEvidenceCatalogMetadata,
-			Harness: entry.Harness, Identity: registry.ObservationIdentity{SessionID: entry.SessionID, SessionPath: entry.SessionPath},
+			Harness: entry.Harness, Identity: registry.ObservationIdentity{
+				SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
+			},
 			Catalog: metadata, ObservedAt: at,
 		})
 	}
@@ -649,11 +653,18 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 		}
 
 		present := false
+		identity := registry.ObservationIdentity{
+			SessionID: session.SessionID, SessionPath: session.SessionPath, CWD: session.CWD,
+			Attributes: nil,
+		}
+		if native := session.Observations.Native; native != nil {
+			identity.Attributes = native.Attributes
+		}
 		return registry.Observation{ //nolint:exhaustruct_v5 // process absence only
 			Source:         registry.ObservationSourceProcess,
 			Evidence:       registry.ObservationEvidenceProcessPresence,
 			Harness:        session.Harness,
-			Identity:       registry.ObservationIdentity{SessionID: session.SessionID, SessionPath: session.SessionPath},
+			Identity:       identity,
 			ProcessPresent: &present,
 			ObservedAt:     at,
 		}, true

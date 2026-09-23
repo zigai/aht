@@ -239,6 +239,8 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 		Identity: registry.ObservationIdentity{
 			SessionID:   defaults.SessionID,
 			SessionPath: defaults.SessionPath,
+			CWD:         defaults.CWD,
+			Attributes:  defaults.Attributes,
 		},
 		Activity:    activity,
 		NativeEvent: invocation.Event,
