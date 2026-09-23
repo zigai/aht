@@ -36,6 +36,7 @@ var sourcePatterns = map[registry.Harness][]string{
 	registry.HarnessGrok:     {"grok.db"},
 	registry.HarnessHermes:   {"state.db"},
 	registry.HarnessOpenClaw: {"openclaw-agent.sqlite", "*.jsonl", "*.jsonl.deleted.*", "*.jsonl.reset.*"},
+	registry.HarnessAmp:      {"T-*.json", "*.json"},
 	registry.HarnessCursor:   nil,
 	registry.HarnessAgy:      nil,
 	registry.HarnessDroid:    nil,
@@ -62,7 +63,7 @@ func DefaultSources() ([]Source, error) {
 	}
 	opencode := databaseLocation(filepath.Join(data, "opencode"), "OPENCODE_DB")
 	kilo := databaseLocation(filepath.Join(data, "kilo"), "KILO_DB")
-
+	amp := envPath("AMP_DATA_DIR", filepath.Join(data, "amp"))
 	return []Source{
 		{Harness: registry.HarnessClaude, Path: filepath.Join(envPath("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude")), "projects")},
 		{Harness: registry.HarnessCodex, Path: filepath.Join(codex, "sessions")},
@@ -73,6 +74,7 @@ func DefaultSources() ([]Source, error) {
 		{Harness: registry.HarnessKimiCode, Path: filepath.Join(envPath("KIMI_SHARE_DIR", filepath.Join(home, ".kimi")), "sessions")},
 		{Harness: registry.HarnessOpenCode, Path: opencode},
 		{Harness: registry.HarnessKilo, Path: kilo},
+		{Harness: registry.HarnessAmp, Path: filepath.Join(amp, "threads")},
 		{Harness: registry.HarnessGoose, Path: filepath.Join(goose, "sessions", "sessions.db")},
 		{Harness: registry.HarnessGrok, Path: filepath.Join(home, ".grok", "grok.db")},
 		{Harness: registry.HarnessHermes, Path: filepath.Join(envPath("HERMES_HOME", filepath.Join(home, ".hermes")), "state.db")},

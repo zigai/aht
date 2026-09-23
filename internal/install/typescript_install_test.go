@@ -351,3 +351,92 @@ const old = "old-aht";
 		t.Fatal("expected second kilo install to be idempotent")
 	}
 }
+
+func TestInstallAmpWritesPlugin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	result, err := Run(Options{
+		Harness:      registry.HarnessAmp,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("expected amp install to report changed")
+	}
+	if result.Path != filepath.Join(dir, "amp", "plugins", ampPluginName) {
+		t.Fatalf("unexpected path %q", result.Path)
+	}
+	requireTextContainsAll(t, result.Snippet, []string{
+		"AHT_INTEGRATION_ID=amp",
+		`export default function (amp: PluginAPI)`,
+		`amp.on("session.start"`,
+		`amp.on("agent.start"`,
+		`amp.on("tool.call"`,
+		`amp.on("agent.end"`,
+		`state === "gone" ? "--presence"`,
+		`"AHT_INTEGRATION_VERSION=1"`,
+		`"--observed-at", observedAt`,
+		`"report", "amp"`,
+		`"aht_integration="`,
+	}, "amp snippet")
+}
+
+func TestInstallAmpReplacesManagedPlugin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "amp", "plugins", ampPluginName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("creating amp plugin dir: %v", err)
+	}
+	oldPlugin := `"aht managed integration";
+const old = "old-aht";
+`
+	if err := os.WriteFile(path, []byte(oldPlugin), 0o600); err != nil {
+		t.Fatalf("writing old plugin: %v", err)
+	}
+
+	result, err := Run(Options{
+		Harness:      registry.HarnessAmp,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("expected amp install to replace old managed plugin")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading installed plugin: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "old-aht") {
+		t.Fatalf("expected old managed plugin to be removed: %s", text)
+	}
+	second, err := Run(Options{
+		Harness:      registry.HarnessAmp,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal("expected second amp install to be idempotent")
+	}
+}

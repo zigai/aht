@@ -177,6 +177,13 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionPath: "",
 			want:        []string{"openclaw", "tui", "--session", testSessionID},
 		},
+		{
+			name:        "amp",
+			harness:     registry.HarnessAmp,
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"amp", "threads", "continue", testSessionID},
+		},
 	}
 
 	for _, test := range tests {
@@ -233,6 +240,10 @@ func TestNormalize(t *testing.T) {
 		{name: "openclaw", value: "openclaw", want: registry.HarnessOpenClaw},
 		{name: "hermes", value: "hermes", want: registry.HarnessHermes},
 		{name: "hermes agent alias", value: "hermes-agent", want: registry.HarnessHermes},
+		{name: "amp", value: "amp", want: registry.HarnessAmp},
+		{name: "amp alias code", value: "ampcode", want: registry.HarnessAmp},
+		{name: "amp alias hyphen", value: "amp-code", want: registry.HarnessAmp},
+		{name: "amp alias underscore", value: "amp_code", want: registry.HarnessAmp},
 	}
 
 	for _, test := range tests {
@@ -270,6 +281,7 @@ func TestSupportedNames(t *testing.T) {
 		"droid",
 		"openclaw",
 		"hermes",
+		"amp",
 	}
 	got := SupportedNames()
 	if !slices.Equal(got, want) {
@@ -297,6 +309,8 @@ func TestEnvNames(t *testing.T) {
 				"PI_SESSION_ID",
 				"OPENCODE_SESSION_ID",
 				"KILO_SESSION_ID",
+				"AMP_THREAD_ID",
+				"AMP_SESSION_ID",
 			},
 		},
 		{
@@ -382,6 +396,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "openclaw", want: registry.HarnessOpenClaw, wantOK: true},
 		{command: "hermes", want: registry.HarnessHermes, wantOK: true},
 		{command: "hermes-agent", want: registry.HarnessHermes, wantOK: true},
+		{command: "amp", want: registry.HarnessAmp, wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 

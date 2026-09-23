@@ -88,6 +88,7 @@ func TestNativeJSONLReaders(t *testing.T) {
 {"role":"assistant","content":[{"type":"think","think":"reasoning-only"}]}
 `},
 		{"cline", registry.HarnessCline, "native-session.messages.json", `{"version":1,"sessionId":"native-session","system_prompt":"system-only","messages":[{"id":"u1","role":"user","content":"Refresh Token"},{"role":"tool","content":[{"type":"tool-result","output":{"value":"tool-only"}}]},{"role":"assistant","content":[{"type":"reasoning","text":"reasoning-only"}]}]}`},
+		{"amp", registry.HarnessAmp, "T-native-session.json", `{"v":1,"id":"native-session","title":"Authentication work","env":{"initial":{"trees":[{"uri":"file:///work/project"}]}},"messages":[{"messageId":0,"role":"user","content":[{"type":"text","text":"Refresh Token"}]},{"messageId":1,"role":"tool","content":[{"type":"tool-result","output":"tool-only"}]},{"messageId":2,"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]},{"messageId":3,"role":"system","content":"system-only"}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

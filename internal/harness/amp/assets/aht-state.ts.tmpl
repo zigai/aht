@@ -1,0 +1,158 @@
+"{{MANAGED_MARKER}}";
+"AHT_INTEGRATION_ID={{INTEGRATION_ID}}";
+"AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}";
+"aht_integration_version={{INTEGRATION_VERSION}}";
+
+import { spawn } from "node:child_process";
+import type { PluginAPI } from "@ampcode/plugin";
+
+export const description = "AHT session and state tracking integration";
+
+const ahtBin = {{BINARY}};
+const source = {{SOURCE}};
+
+{{TYPESCRIPT_QUEUE}}
+
+{{TYPESCRIPT_EVENT_PARSER}}
+
+export default function (amp: PluginAPI) {
+  let reportSequence = Date.now() * 1000;
+  const subscribedThreads = new Set<string>();
+
+  function resolveWorkspaceRoot(): string | undefined {
+    try {
+      const root = amp?.system?.workspaceRoot;
+      if (root) {
+        return amp?.helpers?.filePathFromURI?.(root) ?? (typeof root === "string" ? root : undefined);
+      }
+    } catch {}
+    try {
+      return process.cwd();
+    } catch {
+      return undefined;
+    }
+  }
+
+  function report(
+    state: string,
+    threadId: string | undefined,
+    eventName: string,
+    extraAttrs?: Record<string, string>,
+  ): Promise<void> {
+    const observedAt = new Date().toISOString();
+    const args = ["report", "amp", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+
+    if (eventName) {
+      args.push("--event", eventName);
+    }
+    args.push("--attribute", "aht_integration_version={{INTEGRATION_VERSION}}");
+    args.push("--attribute", "aht_integration=" + source);
+
+    if (threadId) {
+      args.push("--session-id", threadId);
+      for (const item of ["amp", "threads", "continue", threadId]) {
+        args.push("--resume-command", item);
+      }
+    }
+
+    const cwd = resolveWorkspaceRoot();
+    if (cwd) {
+      args.push("--cwd", cwd);
+      args.push("--project-root", cwd);
+    }
+
+    if (extraAttrs) {
+      for (const [k, v] of Object.entries(extraAttrs)) {
+        if (typeof v === "string" && v.length > 0) {
+          args.push("--attribute", `${k}=${v}`);
+        }
+      }
+    }
+
+    return enqueueCommand(args);
+  }
+
+  function attachThreadState(thread: any): void {
+    const id = thread?.id;
+    if (!id || subscribedThreads.has(id)) return;
+    subscribedThreads.add(id);
+
+    try {
+      if (typeof thread?.state?.subscribe === "function") {
+        thread.state.subscribe((threadState: string) => {
+          if (threadState === "running") {
+            void report("running", id, "thread.state", { amp_thread_state: threadState });
+          } else if (threadState === "awaiting-approval") {
+            void report("waiting", id, "thread.state", { amp_thread_state: threadState });
+          } else if (threadState === "idle") {
+            void report("idle", id, "thread.state", { amp_thread_state: threadState });
+          } else if (threadState === "error") {
+            void report("failed", id, "thread.state", { amp_thread_state: threadState });
+          }
+        });
+      }
+    } catch {}
+  }
+
+  amp.on("session.start", (event, ctx) => {
+    const id = event?.thread?.id;
+    if (ctx?.thread) {
+      attachThreadState(ctx.thread);
+    }
+    void report("idle", id, "session.start");
+  });
+
+  amp.on("agent.start", (event, ctx) => {
+    const id = event?.thread?.id;
+    if (ctx?.thread) {
+      attachThreadState(ctx.thread);
+    }
+    void report("running", id, "agent.start");
+  });
+
+  amp.on("tool.call", (event, ctx) => {
+    const id = event?.thread?.id;
+    if (ctx?.thread) {
+      attachThreadState(ctx.thread);
+    }
+    void report("running", id, "tool.call", {
+      amp_tool: event?.tool,
+      amp_tool_use_id: event?.toolUseID,
+    });
+    return { action: "allow" };
+  });
+
+  amp.on("tool.result", (event, ctx) => {
+    const id = event?.thread?.id;
+    if (ctx?.thread) {
+      attachThreadState(ctx.thread);
+    }
+    void report("running", id, "tool.result", {
+      amp_tool: event?.tool,
+      amp_tool_status: event?.status,
+    });
+  });
+
+  amp.on("agent.end", (event, ctx) => {
+    const id = event?.thread?.id;
+    let activity = "idle";
+    if (event?.status === "error") {
+      activity = "failed";
+    } else if (event?.status === "cancelled") {
+      activity = "interrupted";
+    }
+    void report(activity, id, "agent.end", {
+      amp_status: event?.status,
+    });
+  });
+
+  try {
+    if (typeof amp?.onDispose === "function") {
+      amp.onDispose(() => {
+        for (const id of subscribedThreads) {
+          void report("gone", id, "session.end");
+        }
+      });
+    }
+  } catch {}
+}

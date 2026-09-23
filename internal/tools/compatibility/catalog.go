@@ -40,6 +40,7 @@ var (
 		{ID: "droid", Source: "npm", Package: "droid", Repo: "", Asset: "", URL: "", MaxVersion: ""},
 		{ID: "openclaw", Source: "npm", Package: "openclaw", Repo: "", Asset: "", URL: "", MaxVersion: ""},
 		{ID: "hermes", Source: "pypi", Package: "hermes-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
+		{ID: "amp", Source: "npm", Package: "@ampcode/cli", Repo: "", Asset: "", URL: "", MaxVersion: ""},
 	}
 )
 

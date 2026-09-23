@@ -8,6 +8,7 @@ import (
 
 	"github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/harness/agy"
+	"github.com/zigai/aht/internal/harness/amp"
 	"github.com/zigai/aht/internal/harness/claude"
 	"github.com/zigai/aht/internal/harness/cline"
 	"github.com/zigai/aht/internal/harness/codex"
@@ -59,6 +60,7 @@ var adapters = []harness.Adapter{
 	droid.New(),
 	openclaw.New(),
 	hermes.New(),
+	amp.New(),
 }
 
 func All() []harness.Adapter {

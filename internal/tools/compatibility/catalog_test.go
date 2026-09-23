@@ -187,7 +187,7 @@ func TestCatalogPartition(t *testing.T) {
 			releases = append(releases, spec.ID)
 		}
 	}
-	if strings.Join(weekly, ",") != "cursor" || len(releases) != 15 {
+	if strings.Join(weekly, ",") != "cursor" || len(releases) != 16 {
 		t.Fatalf("weekly=%v releases=%v", weekly, releases)
 	}
 }

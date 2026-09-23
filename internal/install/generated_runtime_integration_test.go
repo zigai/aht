@@ -118,6 +118,15 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		requireCapturedArguments(t, capture.path, "report", "kilo", "--activity", "idle")
 	})
 
+	t.Run("amp-plugin", func(t *testing.T) {
+		capture := captureBinary(t)
+		t.Setenv("AHT_CAPTURE", capture.path)
+		module := generatedArtifactContent(t, registry.HarnessAmp, "aht-state.ts")
+		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/amp-failed.mjs"), nil)
+		requireCapturedArguments(t, capture.path, "report", "amp", "--activity", "failed")
+		requireCapturedArguments(t, capture.path, "report", "amp", "--activity", "idle")
+	})
+
 	t.Run("missing-binary-nonfatal", func(t *testing.T) {
 		const absentBinary = "/nonexistent/binary/absent-aht"
 		renderAbsentModule := func(h registry.Harness) string {
@@ -150,5 +159,6 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		runNodeRuntime(t, "pi_absent.ts", renderAbsentModule(registry.HarnessPi), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
 
 		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.HarnessOmp), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.HarnessAmp), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
 	})
 }

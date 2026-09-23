@@ -168,7 +168,7 @@ func (s *search) readRecord(ctx context.Context, t *transcript, r record, line i
 		}
 	case registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenClaw:
 		s.treeRecord(ctx, t, r, line)
-	case registry.HarnessCursor, registry.HarnessCline, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessHermes:
+	case registry.HarnessCursor, registry.HarnessCline, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessHermes, registry.HarnessAmp:
 		return // These harnesses have document/SQLite readers or no supported reader.
 	}
 }

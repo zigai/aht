@@ -65,7 +65,7 @@ func transcriptExtra(s *search, source Source, path string) string {
 		extra = s.kimiDirs[filepath.Base(filepath.Dir(filepath.Dir(path)))]
 	case registry.HarnessCline:
 		extra = stampPath(strings.TrimSuffix(path, ".messages.json") + ".json")
-	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes:
+	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes, registry.HarnessAmp:
 		// Other supported transcripts carry metadata in the history itself.
 	}
 	return extra

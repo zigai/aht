@@ -31,6 +31,7 @@ const (
 	HarnessDroid    Harness = "droid"
 	HarnessOpenClaw Harness = "openclaw"
 	HarnessHermes   Harness = "hermes"
+	HarnessAmp      Harness = "amp"
 )
 
 const (
@@ -97,7 +98,7 @@ var (
 		HarnessClaude, HarnessCodex, HarnessCursor, HarnessCopilot, HarnessCline,
 		HarnessKimiCode, HarnessGrok, HarnessGoose, HarnessPi, HarnessOmp,
 		HarnessOpenCode, HarnessAgy, HarnessKilo, HarnessDroid, HarnessOpenClaw,
-		HarnessHermes,
+		HarnessHermes, HarnessAmp,
 	}
 )
 
@@ -353,7 +354,7 @@ func (h Harness) IsValid() bool {
 	case HarnessClaude, HarnessCodex, HarnessCursor, HarnessCopilot, HarnessCline,
 		HarnessKimiCode, HarnessGrok, HarnessGoose, HarnessPi, HarnessOmp,
 		HarnessOpenCode, HarnessAgy, HarnessKilo, HarnessDroid, HarnessOpenClaw,
-		HarnessHermes:
+		HarnessHermes, HarnessAmp:
 		return true
 	}
 	return false
@@ -366,7 +367,8 @@ func (h Harness) ExclusiveProcessSessions() bool {
 		return false
 	case HarnessClaude, HarnessCodex, HarnessCursor, HarnessCopilot, HarnessCline,
 		HarnessKimiCode, HarnessGrok, HarnessGoose, HarnessPi, HarnessOmp,
-		HarnessOpenCode, HarnessAgy, HarnessKilo, HarnessDroid, HarnessHermes:
+		HarnessOpenCode, HarnessAgy, HarnessKilo, HarnessDroid, HarnessHermes,
+		HarnessAmp:
 		return true
 	default:
 		return true

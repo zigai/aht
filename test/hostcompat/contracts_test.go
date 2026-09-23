@@ -47,6 +47,7 @@ var hostContracts = []hostContract{
 	{ID: registry.HarnessDroid, Executable: "droid", VersionArgs: []string{"--version"}, Level: compatibilityLifecycle, Protocol: protocolOpenAIChat, Docs: []string{"https://docs.factory.ai/harness/hooks", "https://docs.factory.ai/droid-exec/overview", "https://docs.factory.ai/model-independence/byok"}},
 	{ID: registry.HarnessOpenClaw, Executable: "openclaw", VersionArgs: []string{"--version"}, Level: compatibilityLifecycle, Protocol: protocolOpenAIChat, Docs: []string{"https://docs.openclaw.ai/plugins/hooks", "https://docs.openclaw.ai/gateway/protocol/rpc-session-control", "https://docs.openclaw.ai/cli/agent"}},
 	{ID: registry.HarnessHermes, Executable: "hermes", VersionArgs: []string{"--version"}, Level: compatibilityLifecycle, Protocol: protocolOpenAIChat, Docs: []string{"https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/plugins.md", "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/hooks.md"}},
+	{ID: registry.HarnessAmp, Executable: "amp", VersionArgs: []string{"--version"}, Level: compatibilityDiscovery, Docs: []string{"https://ampcode.com/docs/plugin-api", "https://ampcode.com/docs/threads"}},
 }
 
 func TestEveryHarnessHasCurrentHostContract(t *testing.T) { //nolint:cyclop // One table-validation test intentionally checks every contract invariant.

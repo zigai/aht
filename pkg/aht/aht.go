@@ -64,6 +64,7 @@ const (
 	HarnessDroid    Harness = registry.HarnessDroid
 	HarnessOpenClaw Harness = registry.HarnessOpenClaw
 	HarnessHermes   Harness = registry.HarnessHermes
+	HarnessAmp      Harness = registry.HarnessAmp
 
 	MultiplexerTmux                  MultiplexerKind = client.MultiplexerTmux
 	MultiplexerZellij                MultiplexerKind = client.MultiplexerZellij

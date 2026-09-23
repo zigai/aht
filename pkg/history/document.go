@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -36,6 +37,10 @@ func (s *search) scanTranscript(ctx context.Context, source Source, path string,
 	}
 	if source.Harness == registry.HarnessCline {
 		s.scanCline(ctx, source, path, file)
+		return
+	}
+	if source.Harness == registry.HarnessAmp {
+		s.scanAmp(ctx, source, path, file)
 		return
 	}
 	s.scanJSONL(ctx, source, path, file)
@@ -75,6 +80,105 @@ func (s *search) scanCline(ctx context.Context, source Source, path string, file
 		s.message(ctx, &t, message, str(message, "id"), 0, parseTime(message["timestamp"]))
 	}
 	s.add(ctx, t.match)
+}
+
+func (s *search) scanAmp(ctx context.Context, source Source, path string, file *os.File) {
+	data, err := readAmpDocument(file)
+	if err != nil {
+		s.issue(source, path, err)
+		return
+	}
+	var r record
+	if json.Unmarshal(data, &r) != nil {
+		s.issue(source, path, errInvalidRecord)
+		return
+	}
+	sessionID := str(r, "id")
+	if sessionID == "" {
+		s.issue(source, path, errUnknownFormat)
+		return
+	}
+	messages, err := parseAmpMessages(r["messages"])
+	if err != nil {
+		s.issue(source, path, err)
+		return
+	}
+	var t transcript
+	t.recognized = true
+	t.match.Conversation.Harness = source.Harness
+	t.match.Conversation.Path = path
+	t.match.Conversation.SessionID = sessionID
+	t.match.Conversation.CreatedAt = parseTime(r["created"])
+	t.match.Conversation.Title = str(r, "title")
+	if dir := ampDirectory(obj(r, "env")); dir != "" {
+		t.match.Conversation.CWD = dir
+		t.match.Conversation.ProjectRoot = dir
+	}
+	for line, msg := range messages {
+		if ctx.Err() != nil {
+			return
+		}
+		s.message(ctx, &t, msg, ampMessageID(msg), line+1, ampMessageTimestamp(msg))
+	}
+	s.add(ctx, t.match)
+}
+
+func readAmpDocument(file *os.File) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(file, maxDocumentBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read thread: %w", err)
+	}
+	if len(data) > maxDocumentBytes {
+		return nil, errDocumentSize
+	}
+	return data, nil
+}
+
+func parseAmpMessages(raw json.RawMessage) ([]record, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var messages []record
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil, errUnknownFormat
+	}
+	return messages, nil
+}
+
+func ampDirectory(env record) string {
+	if len(env) == 0 {
+		return ""
+	}
+	initialObj := obj(env, "initial")
+	if len(initialObj) == 0 {
+		return ""
+	}
+	var trees []record
+	if json.Unmarshal(initialObj["trees"], &trees) != nil || len(trees) == 0 {
+		return ""
+	}
+	uri := str(trees[0], "uri")
+	if dir, ok := strings.CutPrefix(uri, "file://"); ok {
+		return dir
+	}
+	return ""
+}
+
+func ampMessageTimestamp(msg record) time.Time {
+	if ts := parseTime(obj(msg, "meta")["sentAt"]); !ts.IsZero() {
+		return ts
+	}
+	return parseTime(msg["timestamp"])
+}
+
+func ampMessageID(msg record) string {
+	if id := str(msg, "id"); id != "" {
+		return id
+	}
+	if rawID, ok := msg["messageId"]; ok && len(rawID) > 0 {
+		return strings.Trim(string(rawID), `"`)
+	}
+	return ""
 }
 
 func (s *search) clineMetadata(source Source, path string, t *transcript) {

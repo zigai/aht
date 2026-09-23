@@ -118,6 +118,7 @@ const (
 	ompExtensionName      = "aht-state.ts"
 	opencodePluginName    = "aht-state.ts"
 	kiloPluginName        = "aht-state.ts"
+	ampPluginName         = "aht-state.ts"
 	agyPluginName         = "aht-state"
 	agyMarkerFileName     = ".aht-managed"
 	agyImportManifestName = "import_manifest.json"

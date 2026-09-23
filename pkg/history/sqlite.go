@@ -130,7 +130,7 @@ func historySQL(ctx context.Context, db *sql.DB, h registry.Harness) (string, st
 			return boundedSQLPrefix + opencodeV2Query + boundedSQLSuffix, "opencode-v2", nil
 		}
 		return boundedSQLPrefix + opencodeV1Query + boundedSQLSuffix, "opencode-v1", nil
-	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessCline, registry.HarnessKimiCode, registry.HarnessPi, registry.HarnessOmp, registry.HarnessAgy, registry.HarnessDroid:
+	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessCline, registry.HarnessKimiCode, registry.HarnessPi, registry.HarnessOmp, registry.HarnessAgy, registry.HarnessDroid, registry.HarnessAmp:
 		return "", "", errUnknownFormat
 	default:
 		return "", "", errUnknownFormat
