@@ -35,6 +35,9 @@ func TestPluginTemplateRendersCleanly(t *testing.T) {
 	if !strings.Contains(rendered, `"report", "amp"`) {
 		t.Fatalf("expected report amp in rendered template:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "amp.threads.get(threadId as ThreadID).title.get()") {
+		t.Fatalf("expected native Amp thread title lookup in rendered template:\n%s", rendered)
+	}
 }
 
 func TestResumeCommand(t *testing.T) {

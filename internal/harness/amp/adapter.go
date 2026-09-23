@@ -14,7 +14,7 @@ const (
 	ampPluginName        = "aht-state.ts"
 	ampIntegrationID     = "amp"
 	ampIntegrationSource = "amp-plugin"
-	integrationVersion   = 1
+	integrationVersion   = 2
 )
 
 //go:embed assets/aht-state.ts.tmpl

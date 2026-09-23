@@ -4,7 +4,7 @@
 "aht_integration_version={{INTEGRATION_VERSION}}";
 
 import { spawn } from "node:child_process";
-import type { PluginAPI } from "@ampcode/plugin";
+import type { PluginAPI, ThreadID } from "@ampcode/plugin";
 
 export const description = "AHT session and state tracking integration";
 
@@ -33,7 +33,7 @@ export default function (amp: PluginAPI) {
     }
   }
 
-  function report(
+  async function report(
     state: string,
     threadId: string | undefined,
     eventName: string,
@@ -53,6 +53,12 @@ export default function (amp: PluginAPI) {
       for (const item of ["amp", "threads", "continue", threadId]) {
         args.push("--resume-command", item);
       }
+      try {
+        const title = await amp.threads.get(threadId as ThreadID).title.get();
+        if (typeof title === "string" && title.trim()) {
+          args.push("--attribute", `amp_title=${title.trim()}`);
+        }
+      } catch {}
     }
 
     const cwd = resolveWorkspaceRoot();
@@ -89,6 +95,21 @@ export default function (amp: PluginAPI) {
           } else if (threadState === "error") {
             void report("failed", id, "thread.state", { amp_thread_state: threadState });
           }
+        });
+      }
+      if (typeof thread?.title?.subscribe === "function") {
+        thread.title.subscribe(async () => {
+          try {
+            const threadState = await thread.state.get();
+            const state = threadState === "running"
+              ? "running"
+              : threadState === "awaiting-approval"
+                ? "waiting"
+                : threadState === "error"
+                  ? "failed"
+                  : "idle";
+            await report(state, id, "thread.title");
+          } catch {}
         });
       }
     } catch {}
