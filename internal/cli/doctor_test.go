@@ -58,6 +58,7 @@ func prepareDoctorEnvironment(t *testing.T) string {
 	for _, key := range []string{"XDG_CONFIG_HOME", "AHT_CONFIG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "AGY_CONFIG_HOME", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "KILO_CONFIG_DIR", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
+	t.Setenv("AHT_CONFIG", filepath.Join(home, "config.toml"))
 	t.Setenv("OMP_PROFILE", "default")
 	t.Setenv("PI_PROFILE", "default")
 	fakeBin := filepath.Join(home, "bin")

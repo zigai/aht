@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -841,39 +841,13 @@ func (app *application) newConfigSetCommand() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			key, val := args[0], args[1]
-			path := app.configPath
-			if path == "" {
-				path = config.DefaultPath()
-			}
-			if path == "-" {
-				return exitCode(errStdinDisallowsSet, exitCodeUsage)
-			}
-
-			if _, err := config.EnsureConfigFile(path); err != nil {
-				return fmt.Errorf("ensure config file %s: %w", path, err)
-			}
-
-			data, err := os.ReadFile(path)
+			path, err := app.configEditPath()
 			if err != nil {
-				return fmt.Errorf("read config %s: %w", path, err)
+				return exitCode(err, exitCodeUsage)
 			}
 
-			updated, err := strata.SetBytes(filepath.Ext(path), data, key, val)
-			if err != nil {
-				return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
-			}
-
-			var testCfg config.Config
-			if err := config.DecodeTOML(updated, &testCfg); err != nil {
-				return exitCode(fmt.Errorf("updated configuration is invalid: %w", err), exitCodeUsage)
-			}
-			if err := testCfg.Validate(); err != nil {
-				return exitCode(fmt.Errorf("invalid value for %q: %w", key, err), exitCodeUsage)
-			}
-
-			//nolint:gosec // path is validated config destination
-			if err := os.WriteFile(filepath.Clean(path), updated, 0o600); err != nil {
-				return fmt.Errorf("write config %s: %w", path, err)
+			if err := setConfigValue(path, key, val); err != nil {
+				return err
 			}
 
 			if app.outputJSON {
@@ -887,6 +861,59 @@ func (app *application) newConfigSetCommand() *cobra.Command {
 			return app.writef("set %s = %s in %s\n", key, val, path)
 		},
 	}
+}
+
+func (app *application) configEditPath() (string, error) {
+	if app.configPath == "-" {
+		return "", errStdinDisallowsSet
+	}
+	options := []strata.Option{strata.WithFormats(".toml")}
+	if app.configPath != "" {
+		options = append(options, strata.WithPath(app.configPath))
+	} else if path := strings.TrimSpace(os.Getenv(config.ConfigEnv)); path != "" {
+		options = append(options, strata.WithOptionalPath(path))
+	} else {
+		options = append(options, strata.WithAppName("aht"))
+	}
+	path, err := strata.ConfigEditPath(options...)
+	if err != nil {
+		return "", fmt.Errorf("select config edit path: %w", err)
+	}
+	return path, nil
+}
+
+func setConfigValue(path, key, value string) error {
+	if err := ensureEditableConfigFile(path); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
+	updated, err := strata.SetBytes(".toml", data, key, value)
+	if err != nil {
+		return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
+	}
+	_, err = strata.Load[config.Config](
+		strata.WithPath("-"),
+		strata.WithStdin(bytes.NewReader(updated)),
+		strata.WithFormats(".toml"),
+		strata.WithStrict(),
+	)
+	if err != nil {
+		return exitCode(fmt.Errorf("updated configuration is invalid: %w", err), exitCodeUsage)
+	}
+	if err := strata.Set[config.Config](path, key, value); err != nil {
+		return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
+	}
+	return nil
+}
+
+func ensureEditableConfigFile(path string) error {
+	if _, err := config.EnsureConfigFile(path); err != nil {
+		return fmt.Errorf("ensure config file %s: %w", path, err)
+	}
+	return nil
 }
 
 //nolint:gocognit,cyclop // manage config init path, stdin template output, directory checks, and publication
@@ -909,9 +936,9 @@ func (app *application) newConfigInitCommand() *cobra.Command {
 				return app.writef("%s", config.DefaultConfigTemplate())
 			}
 
-			path := app.configPath
-			if path == "" {
-				path = config.DefaultPath()
+			path, err := app.configEditPath()
+			if err != nil {
+				return exitCode(err, exitCodeUsage)
 			}
 
 			info, err := os.Stat(path)

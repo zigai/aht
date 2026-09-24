@@ -143,24 +143,6 @@ func (app *application) loadConfig() (config.Config, error) {
 	return app.cfg, app.cfgErr
 }
 
-// publishConfig runs at the command boundary, after preparation and Cobra's
-// argument/flag validation. Loading effective settings never creates files.
-func (app *application) publishConfig(cmd *cobra.Command) {
-	if !app.cfgLoaded || app.cfgErr != nil || app.configExplicit || app.noConfig {
-		return
-	}
-	if flag := cmd.Flags().Lookup("dry-run"); flag != nil && flag.Value.String() == "true" {
-		return
-	}
-	path := config.DefaultPath()
-	if path == "-" {
-		return
-	}
-	// First-run publication is best effort; resolved settings remain usable when
-	// the default location is not writable. Existing files are preserved.
-	_, _ = config.EnsureConfigFile(path)
-}
-
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := executeCLI(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
@@ -194,14 +176,6 @@ func (app *application) configureCommandTree(cmd *cobra.Command) {
 		}
 		return err
 	})
-	// Configured commands resolve and validate options in a PreRun hook. Cobra
-	// checks required flags and flag groups before reaching this RunE boundary.
-	if run := cmd.RunE; run != nil && (cmd.PreRunE != nil || cmd.PreRun != nil) {
-		cmd.RunE = func(c *cobra.Command, args []string) error {
-			app.publishConfig(c)
-			return run(c, args)
-		}
-	}
 	for _, sub := range cmd.Commands() {
 		app.configureCommandTree(sub)
 	}

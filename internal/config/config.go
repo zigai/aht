@@ -22,8 +22,6 @@ const (
 	// maxConfigFileSize caps configuration files to 1 MiB.
 	maxConfigFileSize = 1024 * 1024
 
-	strataBaseOptionCapacity = 2
-
 	defaultDirMode  = 0o700
 	defaultFileMode = 0o600
 )
@@ -111,13 +109,10 @@ type DetectionConfig struct {
 
 // Options controls layered configuration resolution.
 type Options struct {
-	Path          string
-	Explicit      bool
-	NoConfig      bool
-	Stdin         io.Reader
-	CWD           string
-	UserConfigDir string
-	SystemDirs    []string
+	Path     string
+	Explicit bool
+	NoConfig bool
+	Stdin    io.Reader
 }
 
 // SetDefaults declares the configuration defaults for strata.Defaulter.
@@ -188,6 +183,9 @@ func DefaultPath() string {
 	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
 		return val
 	}
+	if path, err := strata.ConfigEditPath(strata.WithAppName("aht"), strata.WithFormats(".toml")); err == nil {
+		return path
+	}
 	if dir := UserConfigDir(); dir != "" {
 		return filepath.Join(dir, "aht", "config.toml")
 	}
@@ -256,6 +254,9 @@ func WriteConfigFile(path string) error {
 	if path == "" {
 		path = DefaultPath()
 	}
+	if err := validateTOMLPath(path); err != nil {
+		return err
+	}
 	_, err := publishConfigFile(path, true)
 	return err
 }
@@ -269,6 +270,9 @@ func WriteConfigFile(path string) error {
 func EnsureConfigFile(path string) (bool, error) {
 	if path == "" {
 		path = DefaultPath()
+	}
+	if err := validateTOMLPath(path); err != nil {
+		return false, err
 	}
 	info, err := os.Stat(path)
 	if err == nil {
@@ -439,8 +443,6 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 }
 
 // Load loads, parses, and validates the configuration file from path.
-// If path is empty, DefaultPath() is used.
-// A missing default config file is silently skipped; a missing explicitly specified path is an error.
 func Load(path string) (Config, string, error) {
 	return LoadWithOptions(Options{Path: path, Explicit: path != ""})
 }
@@ -452,122 +454,85 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 }
 
 // LoadWithMetadata resolves configuration across all tiers per the given options and returns strata.Metadata.
-//
-//nolint:gocognit,cyclop,nestif // resolve explicit input or layered disk configuration via strata
 func LoadWithMetadata(opts Options) (Config, *strata.Metadata, string, error) {
+	strataOpts, targetPath := strataLoadOptions(opts)
+	cfg, meta, err := strata.LoadWithMetadata[Config](strataOpts...)
+	resolvedPath := resolveConfigPath(opts, targetPath, meta)
+	if err != nil {
+		return Config{}, nil, resolvedPath, classifyLoadError(err, opts, targetPath, resolvedPath)
+	}
+	return cfg, meta, resolvedPath, nil
+}
+
+func strataLoadOptions(opts Options) ([]strata.Option, string) {
+	strataOpts := []strata.Option{
+		strata.WithAppName("aht"),
+		strata.WithEnvPrefix("AHT_"),
+		strata.WithFormats(".toml"),
+		strata.WithMaxFileSize(maxConfigFileSize),
+		strata.WithStrict(),
+	}
 	if opts.NoConfig {
-		return Defaults(), strata.NewMetadata(), "", nil
+		return append(strataOpts, strata.WithoutFiles()), ""
 	}
 
-	explicit := opts.Explicit
 	targetPath := opts.Path
-	if targetPath == "" && !explicit {
+	if targetPath == "" {
 		targetPath = strings.TrimSpace(os.Getenv(ConfigEnv))
 	}
-
-	newStrataOptions := func(extras ...strata.Option) []strata.Option {
-		res := make([]strata.Option, 0, len(extras)+strataBaseOptionCapacity)
-		res = append(res, strata.WithMaxFileSize(maxConfigFileSize), strata.WithDecoder(".toml", decodeTOML))
-		return append(res, extras...)
+	if targetPath == "" {
+		return strataOpts, ""
 	}
-	if targetPath != "" {
-		switch targetPath {
-		case "-":
-			r := opts.Stdin
-			if r == nil {
-				r = os.Stdin
-			}
-			strataOpts := newStrataOptions(strata.WithExplicitPath("-"), strata.WithStdin(r))
-			cfg, meta, err := strata.Load[Config](strataOpts...)
-			if err != nil {
-				if errors.Is(err, strata.ErrFileTooLarge) {
-					return Config{}, nil, "-", fmt.Errorf("%w: stdin", ErrConfigFileTooLarge)
-				}
-				return Config{}, nil, "-", fmt.Errorf("%w stdin: %w", ErrParseConfig, err)
-			}
-			return cfg, meta, "-", nil
-		default:
-			cleanPath := filepath.Clean(targetPath)
-			info, statErr := os.Stat(cleanPath)
-			if statErr != nil {
-				if errors.Is(statErr, os.ErrNotExist) {
-					if explicit {
-						return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, statErr)
-					}
-					return Defaults(), strata.NewMetadata(), targetPath, nil
-				}
-				return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrAccessConfig, targetPath, statErr)
-			}
-			if info.IsDir() {
-				return Config{}, nil, targetPath, fmt.Errorf("%w: %s", ErrConfigIsDirectory, targetPath)
-			}
-			if info.Size() > maxConfigFileSize {
-				return Config{}, nil, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
-			}
-			strataOpts := newStrataOptions(strata.WithExplicitPath(cleanPath))
-			cfg, meta, err := strata.Load[Config](strataOpts...)
-			if err != nil {
-				if errors.Is(err, strata.ErrFileTooLarge) {
-					return Config{}, nil, targetPath, fmt.Errorf("%w (%d bytes): %s", ErrConfigFileTooLarge, info.Size(), targetPath)
-				}
-				if isValidationOrDurationError(err) {
-					return Config{}, nil, targetPath, err
-				}
-				return Config{}, nil, targetPath, fmt.Errorf("%w %s: %w", ErrParseConfig, targetPath, err)
-			}
-			return cfg, meta, targetPath, nil
-		}
+	if opts.Explicit {
+		strataOpts = append(strataOpts, strata.WithPath(targetPath))
+	} else {
+		strataOpts = append(strataOpts, strata.WithOptionalPath(targetPath))
+	}
+	if targetPath == "-" && opts.Stdin != nil {
+		strataOpts = append(strataOpts, strata.WithStdin(opts.Stdin))
 	}
 
-	// Discovered mode across tiers: System -> User -> Project
-	strataOpts := newStrataOptions(strata.WithAppName("aht"))
-	if opts.CWD != "" {
-		strataOpts = append(strataOpts, strata.WithCWD(opts.CWD))
-	}
+	return strataOpts, targetPath
+}
 
-	if len(opts.SystemDirs) > 0 {
-		old := os.Getenv("XDG_CONFIG_DIRS")
-		_ = os.Setenv("XDG_CONFIG_DIRS", strings.Join(opts.SystemDirs, ":"))
-		defer func() {
-			if old == "" {
-				_ = os.Unsetenv("XDG_CONFIG_DIRS")
-			} else {
-				_ = os.Setenv("XDG_CONFIG_DIRS", old)
-			}
-		}()
+func validateTOMLPath(path string) error {
+	_, err := strata.ConfigEditPath(strata.WithPath(path), strata.WithFormats(".toml"))
+	if err != nil {
+		return fmt.Errorf("select TOML config path %s: %w", path, err)
 	}
+	return nil
+}
 
-	if opts.UserConfigDir != "" {
-		old := os.Getenv("XDG_CONFIG_HOME")
-		_ = os.Setenv("XDG_CONFIG_HOME", opts.UserConfigDir)
-		defer func() {
-			if old == "" {
-				_ = os.Unsetenv("XDG_CONFIG_HOME")
-			} else {
-				_ = os.Setenv("XDG_CONFIG_HOME", old)
-			}
-		}()
+func resolveConfigPath(opts Options, targetPath string, meta *strata.Metadata) string {
+	if opts.NoConfig {
+		return ""
 	}
-
-	cfg, meta, err := strata.Load[Config](strataOpts...)
 	resolvedPath := DefaultPath()
+	if targetPath != "" {
+		resolvedPath = targetPath
+	}
 	if meta != nil {
 		if active := meta.ActiveFiles(); len(active) > 0 {
 			resolvedPath = active[len(active)-1]
 		}
 	}
+	return resolvedPath
+}
 
-	if err != nil {
-		if errors.Is(err, strata.ErrFileTooLarge) {
-			return Config{}, nil, resolvedPath, fmt.Errorf("%w: %s", ErrConfigFileTooLarge, resolvedPath)
-		}
-		if isValidationOrDurationError(err) {
-			return Config{}, nil, resolvedPath, err
-		}
-		return Config{}, nil, resolvedPath, fmt.Errorf("%w %s: %w", ErrParseConfig, resolvedPath, err)
+func classifyLoadError(err error, opts Options, targetPath, resolvedPath string) error {
+	if errors.Is(err, strata.ErrFileTooLarge) {
+		return fmt.Errorf("%w: %s", ErrConfigFileTooLarge, resolvedPath)
 	}
-
-	return cfg, meta, resolvedPath, nil
+	if errors.Is(err, os.ErrNotExist) && opts.Explicit {
+		return fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, err)
+	}
+	if _, ok := errors.AsType[*os.PathError](err); ok {
+		return fmt.Errorf("%w %s: %w", ErrAccessConfig, resolvedPath, err)
+	}
+	if isValidationOrDurationError(err) {
+		return err
+	}
+	return fmt.Errorf("%w %s: %w", ErrParseConfig, resolvedPath, err)
 }
 
 func isValidationOrDurationError(err error) bool {

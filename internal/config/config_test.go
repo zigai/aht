@@ -1,12 +1,14 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zigai/strata"
 )
 
 func TestParseDuration(t *testing.T) {
@@ -54,12 +56,16 @@ func TestParseDuration(t *testing.T) {
 func isolateConfigEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv(ConfigEnv, "")
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(t.TempDir(), "system"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "user"))
 }
 
 func TestLoadMissingDefaultFile(t *testing.T) {
 	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	nonExistentPath := filepath.Join(tempDir, "does-not-exist.toml")
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(tempDir, "system"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempDir, "user"))
 	t.Setenv(ConfigEnv, nonExistentPath)
 
 	cfg, resolved, err := Load("")
@@ -75,6 +81,7 @@ func TestLoadMissingDefaultFile(t *testing.T) {
 }
 
 func TestLoadExplicitMissingFile(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	nonExistentPath := filepath.Join(tempDir, "missing.toml")
 
@@ -183,6 +190,7 @@ screen_inspection = false
 }
 
 func TestLoadUnknownField(t *testing.T) {
+	isolateConfigEnv(t)
 	content := `
 [ui]
 unknown_setting = "invalid"
@@ -203,6 +211,7 @@ unknown_setting = "invalid"
 }
 
 func TestLoadSyntaxError(t *testing.T) {
+	isolateConfigEnv(t)
 	content := `
 [ui
 broken toml syntax
@@ -223,6 +232,7 @@ broken toml syntax
 }
 
 func TestValidationErrors(t *testing.T) {
+	isolateConfigEnv(t)
 	tests := []struct {
 		name   string
 		toml   string
@@ -296,31 +306,37 @@ grace_period = "-10s"`,
 	}
 }
 
-func TestSettingsIgnoreEnvironment(t *testing.T) {
-	for _, key := range []string{
-		"AHT_UI_DEFAULT_PRESENCE", "AHT_UI_SORT", "AHT_UI_SORT_DESC",
-		"AHT_UI_ABSOLUTE_TIME", "AHT_UI_TIME_FORMAT", "AHT_RETENTION_AUTO_CLEAN",
-		"AHT_RETENTION_MAX_GONE_AGE", "AHT_FILTER_IGNORE_HARNESSES", "AHT_FILTER_IGNORE_PATHS",
-		"AHT_TRACKER_INTERVAL", "AHT_TRACKER_GRACE_PERIOD", "AHT_TRACKER_QUIET",
-		"AHT_DETECTION_MANIFESTS_DIR", "AHT_DETECTION_SCREEN_INSPECTION",
-	} {
-		t.Setenv(key, "invalid")
+func TestSettingsEnvironmentLayer(t *testing.T) {
+	dir := t.TempDir()
+	userDir := filepath.Join(dir, "user", "aht")
+	t.Setenv(ConfigEnv, "")
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(dir, "system"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "user"))
+	t.Setenv("AHT_UI_SORT", "created")
+	if err := os.MkdirAll(userDir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	for _, noConfig := range []bool{false, true} {
-		cfg, _, err := LoadWithOptions(Options{
-			Path:     filepath.Join(t.TempDir(), "missing.toml"),
-			NoConfig: noConfig,
-		})
-		if err != nil {
-			t.Fatalf("NoConfig=%v: %v", noConfig, err)
-		}
-		if !reflect.DeepEqual(cfg, Defaults()) {
-			t.Fatalf("NoConfig=%v: environment changed settings: %+v", noConfig, cfg)
-		}
+	if err := os.WriteFile(filepath.Join(userDir, "config.toml"), []byte("[ui]\ndefault_presence = 'gone'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, meta, _, err := LoadWithMetadata(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Sort != "created" || cfg.UI.DefaultPresence != "gone" {
+		t.Fatalf("layered config = %+v", cfg.UI)
+	}
+	if origin, ok := meta.Where("ui.sort"); !ok || origin.Source != strata.SourceEnv || origin.Path != "AHT_UI_SORT" {
+		t.Fatalf("environment origin = %+v, found %t", origin, ok)
+	}
+	cfg, _, err = LoadWithOptions(Options{NoConfig: true})
+	if err != nil || cfg.UI.Sort != "created" || cfg.UI.DefaultPresence != "all" {
+		t.Fatalf("no-config result = %+v, error = %v", cfg, err)
 	}
 }
 
 func TestMaxFileSizeLimit(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	largeConfig := filepath.Join(tempDir, "large.toml")
 
@@ -489,6 +505,7 @@ func TestEnsureConfigFile(t *testing.T) {
 }
 
 func TestSparseConfigPreservesDefaults(t *testing.T) {
+	isolateConfigEnv(t)
 	tempDir := t.TempDir()
 	sparseConfig := filepath.Join(tempDir, "sparse.toml")
 	content := `
@@ -524,91 +541,85 @@ sort = "created"
 }
 
 func TestLoadWithOptionsFilePrecedence(t *testing.T) {
-	isolateConfigEnv(t)
-	tempDir := t.TempDir()
-	sysDir := filepath.Join(tempDir, "sys")
-	userDir := filepath.Join(tempDir, "user")
-	projectDir := filepath.Join(tempDir, "project")
-
-	for _, d := range []string{filepath.Join(sysDir, "aht"), filepath.Join(userDir, "aht"), projectDir} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+	dir := t.TempDir()
+	sysDir := filepath.Join(dir, "system")
+	userDir := filepath.Join(dir, "user")
+	explicitPath := filepath.Join(dir, "config.toml")
+	t.Setenv(ConfigEnv, "")
+	t.Setenv("XDG_CONFIG_DIRS", sysDir)
+	t.Setenv("XDG_CONFIG_HOME", userDir)
+	for _, path := range []string{filepath.Join(sysDir, "aht"), filepath.Join(userDir, "aht")} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	if err := os.WriteFile(filepath.Join(sysDir, "aht", "config.toml"), []byte("[ui]\ntime_format = \"iso8601\"\nsort = \"updated\"\ndefault_presence = \"unknown\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sysDir, "aht", "config.toml"), []byte("[ui]\ntime_format = 'iso8601'\nsort = 'updated'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(userDir, "aht", "config.toml"), []byte("[ui]\nsort = \"cwd\"\ndefault_presence = \"gone\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(userDir, "aht", "config.toml"), []byte("[ui]\nsort = 'cwd'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Project tier: sets default_presence = "live"
-	if err := os.WriteFile(filepath.Join(projectDir, ".aht.toml"), []byte("[ui]\ndefault_presence = \"live\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(explicitPath, []byte("[ui]\ndefault_presence = 'live'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	cfg, resolved, err := LoadWithOptions(Options{
-		CWD:           projectDir,
-		UserConfigDir: userDir,
-		SystemDirs:    []string{sysDir},
-	})
+	cfg, meta, resolved, err := LoadWithMetadata(Options{Path: explicitPath, Explicit: true})
 	if err != nil {
-		t.Fatalf("LoadWithOptions failed: %v", err)
+		t.Fatal(err)
 	}
-	if resolved != filepath.Join(projectDir, ".aht.toml") {
-		t.Errorf("expected resolved path %s, got %s", filepath.Join(projectDir, ".aht.toml"), resolved)
+	if resolved != explicitPath || cfg.UI.Sort != "cwd" || cfg.UI.DefaultPresence != "live" || cfg.UI.TimeFormat != "iso8601" {
+		t.Fatalf("layers: path=%q, config=%+v", resolved, cfg.UI)
 	}
+	assertLayerOrigins(t, meta)
+}
 
-	// Check precedence:
-	// User tier provides sort
-	if cfg.UI.Sort != "cwd" {
-		t.Errorf("expected sort='cwd' from user config, got %q", cfg.UI.Sort)
-	}
-	// Project tier wins for default_presence
-	if cfg.UI.DefaultPresence != "live" {
-		t.Errorf("expected default_presence='live' from project, got %q", cfg.UI.DefaultPresence)
-	}
-	// System tier provides time_format
-	if cfg.UI.TimeFormat != "iso8601" {
-		t.Errorf("expected time_format='iso8601' from system, got %q", cfg.UI.TimeFormat)
-	}
-	// Untouched field retains hardcoded default
-	if cfg.Retention.MaxGoneAge != "7d" {
-		t.Errorf("expected max_gone_age='7d' from defaults, got %q", cfg.Retention.MaxGoneAge)
+func assertLayerOrigins(t *testing.T, meta *strata.Metadata) {
+	t.Helper()
+	for _, tc := range []struct {
+		key    string
+		source strata.SourceKind
+	}{
+		{key: "ui.time_format", source: strata.SourceSystem},
+		{key: "ui.sort", source: strata.SourceUser},
+		{key: "ui.default_presence", source: strata.SourceFile},
+	} {
+		origin, ok := meta.Where(tc.key)
+		if !ok || origin.Source != tc.source {
+			t.Errorf("%s origin = %+v, found %t", tc.key, origin, ok)
+		}
 	}
 }
 
-func TestLoadWithOptionsNoConfig(t *testing.T) {
-	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "project")
-	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+func TestProjectFileRequiresExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(ConfigEnv, "")
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(dir, "system"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "user"))
+	t.Chdir(dir)
+	path := filepath.Join(dir, ".aht.toml")
+	if err := os.WriteFile(path, []byte("[ui]\nsort = 'created'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".aht.toml"), []byte("[ui]\nsort = \"harness\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, resolved, err := LoadWithOptions(Options{
-		NoConfig: true,
-		CWD:      projectDir,
-	})
+	cfg, meta, _, err := LoadWithMetadata(Options{})
 	if err != nil {
-		t.Fatalf("LoadWithOptions NoConfig failed: %v", err)
+		t.Fatal(err)
 	}
-	if resolved != "" {
-		t.Errorf("expected resolved path '', got %q", resolved)
+	if cfg.UI.Sort != "updated" || len(meta.ActiveFiles()) != 0 {
+		t.Fatalf("implicit project file affected config: %+v, files = %v", cfg.UI, meta.ActiveFiles())
 	}
-	// Disk project config was skipped
-	if cfg.UI.Sort != "updated" {
-		t.Errorf("expected default sort='updated', got %q", cfg.UI.Sort)
+	cfg, meta, resolved, err := LoadWithMetadata(Options{Path: path, Explicit: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Unconfigured values retain defaults
-	if cfg.UI.DefaultPresence != "all" {
-		t.Errorf("expected default_presence='all', got %q", cfg.UI.DefaultPresence)
+	if cfg.UI.Sort != "created" || resolved != path {
+		t.Fatalf("explicit file: sort=%q, path=%q", cfg.UI.Sort, resolved)
+	}
+	if origin, ok := meta.Where("ui.sort"); !ok || origin.Source != strata.SourceFile {
+		t.Fatalf("explicit origin = %+v, found %t", origin, ok)
 	}
 }
 
 func TestLoadWithOptionsStdin(t *testing.T) {
+	isolateConfigEnv(t)
 	stdinContent := `
 [ui]
 sort = "activity"
@@ -666,6 +677,22 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 		}
 	})
 
+	t.Run("existing user YAML is ignored", func(t *testing.T) {
+		t.Setenv(ConfigEnv, "")
+		t.Setenv("XDG_CONFIG_HOME", xdgDir)
+		path := filepath.Join(xdgDir, "aht", "config.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("ui:\n  sort: created\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		expectedPath := filepath.Join(xdgDir, "aht", "config.toml")
+		if got := DefaultPath(); got != expectedPath {
+			t.Fatalf("DefaultPath() = %q, want %q", got, expectedPath)
+		}
+	})
+
 	t.Run("HOME/.config is used when XDG_CONFIG_HOME is unset", func(t *testing.T) {
 		t.Setenv(ConfigEnv, "")
 		t.Setenv("XDG_CONFIG_HOME", "")
@@ -680,4 +707,60 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 			t.Fatalf("DefaultPath() = %q, want %q", got, expectedPath)
 		}
 	})
+}
+
+func TestOnlyTOMLConfigFiles(t *testing.T) {
+	isolateConfigEnv(t)
+	userBase := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userBase)
+	userDir := filepath.Join(userBase, "aht")
+	if err := os.MkdirAll(userDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []string{".yaml", ".json"} {
+		path := filepath.Join(userDir, "config"+ext)
+		if err := os.WriteFile(path, []byte("[ui]\nsort = \"created\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+			t.Fatalf("Load(%q) error = %v, want unsupported format", path, err)
+		}
+		if err := WriteConfigFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+			t.Fatalf("WriteConfigFile(%q) error = %v, want unsupported format", path, err)
+		}
+		if _, err := EnsureConfigFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+			t.Fatalf("EnsureConfigFile(%q) error = %v, want unsupported format", path, err)
+		}
+	}
+	cfg, resolved, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Sort != "updated" || resolved != filepath.Join(userDir, "config.toml") {
+		t.Fatalf("config sort = %q, path = %q", cfg.UI.Sort, resolved)
+	}
+	t.Setenv(ConfigEnv, filepath.Join(userDir, "config.yaml"))
+	if _, _, err := Load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
+		t.Fatalf("AHT_CONFIG YAML error = %v, want unsupported format", err)
+	}
+	t.Setenv(ConfigEnv, filepath.Join(userDir, "missing.yaml"))
+	if _, _, err := Load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
+		t.Fatalf("missing AHT_CONFIG YAML error = %v, want unsupported format", err)
+	}
+}
+
+func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
+	isolateConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.TOML")
+	created, err := EnsureConfigFile(path)
+	if err != nil || !created {
+		t.Fatalf("EnsureConfigFile(%q) = %t, %v", path, created, err)
+	}
+	if err := WriteConfigFile(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg, resolved, err := Load(path)
+	if err != nil || resolved != path || cfg.UI.Sort != "updated" {
+		t.Fatalf("Load(%q): sort = %q, resolved = %q, error = %v", path, cfg.UI.Sort, resolved, err)
+	}
 }

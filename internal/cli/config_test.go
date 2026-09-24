@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/strata"
+
 	"github.com/zigai/aht/internal/config"
 	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
@@ -346,8 +348,8 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 	if configCheck.Status != doctorOK {
 		t.Fatalf("config.file status = %s, want ok", configCheck.Status)
 	}
-	if !strings.Contains(configCheck.Message, "no config file present (using defaults)") {
-		t.Fatalf("config.file message = %q, want 'no config file present (using defaults)'", configCheck.Message)
+	if !strings.Contains(configCheck.Message, "no config file present") {
+		t.Fatalf("config.file message = %q, want no config file present", configCheck.Message)
 	}
 }
 
@@ -408,63 +410,17 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 	}
 }
 
-func TestCLIFirstRunConfigAutoCreation(t *testing.T) {
+func TestCLIFirstRunDoesNotCreateConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
-	targetConfigPath := filepath.Join(tempDir, "autocreated", "config.toml")
+	targetConfigPath := filepath.Join(tempDir, "config", "config.toml")
 	t.Setenv(config.ConfigEnv, targetConfigPath)
-
-	ctx := context.Background()
-
-	// 1. Run 'aht list' when no config file exists
 	var stdout bytes.Buffer
-	if err := runTestCLI(ctx, []string{"--store", storePath, "list"}, &stdout, &bytes.Buffer{}); err != nil {
+	if err := runTestCLI(t.Context(), []string{"--store", storePath, "list"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("first run aht list failed: %v", err)
 	}
-
-	// Assert config file was created at the exact path
-	info, err := os.Stat(targetConfigPath)
-	if err != nil {
-		t.Fatalf("expected config file to be created at %s: %v", targetConfigPath, err)
-	}
-	if info.IsDir() {
-		t.Fatalf("created path is a directory")
-	}
-
-	// Assert content matches DefaultConfigTemplate and parses cleanly
-	cfg, resolved, err := config.Load(targetConfigPath)
-	if err != nil {
-		t.Fatalf("auto-created config failed to parse: %v", err)
-	}
-	if resolved != targetConfigPath {
-		t.Fatalf("expected resolved path %q, got %q", targetConfigPath, resolved)
-	}
-	if cfg.UI.DefaultPresence != "all" || cfg.UI.Sort != "updated" {
-		t.Fatalf("unexpected defaults in auto-created config: %+v", cfg)
-	}
-
-	// Modify the file to ensure subsequent runs do NOT overwrite it
-	modifiedContent := `# user modified
-[ui]
-sort = "created"
-`
-	if err := os.WriteFile(targetConfigPath, []byte(modifiedContent), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// 2. Run 'aht list' again
-	stdout.Reset()
-	if err := runTestCLI(ctx, []string{"--store", storePath, "list"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatalf("second run aht list failed: %v", err)
-	}
-
-	// Verify existing file was preserved
-	currentContent, err := os.ReadFile(targetConfigPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(currentContent) != modifiedContent {
-		t.Fatalf("existing config file was overwritten on subsequent run: got %q, want %q", string(currentContent), modifiedContent)
+	if _, err := os.Stat(targetConfigPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("config file unexpectedly created: %v", err)
 	}
 }
 
@@ -639,6 +595,51 @@ func TestCLIManageConfigSet(t *testing.T) {
 	// 5. --no-config disallows set
 	if err := runTestCLI(ctx, []string{"--no-config", "manage", "config", "set", "ui.sort", "created"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected --no-config to disallow set, got nil")
+	}
+}
+
+func TestCLIManageConfigRejectsOtherFormats(t *testing.T) {
+	for _, ext := range []string{".yaml", ".json"} {
+		t.Run(ext, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config"+ext)
+			for _, args := range [][]string{
+				{"--config", path, "manage", "config", "init"},
+				{"--config", path, "manage", "config", "set", "ui.sort", "created"},
+				{"--config", path, "manage", "config", "show"},
+			} {
+				if err := runTestCLI(t.Context(), args, &bytes.Buffer{}, &bytes.Buffer{}); !errors.Is(err, strata.ErrUnsupportedFormat) {
+					t.Fatalf("%v: expected unsupported format, got %v", args, err)
+				}
+			}
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unsupported config file was created: %v", err)
+			}
+		})
+	}
+}
+
+func TestCLIManageConfigIgnoresExistingUserYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "aht", "config.yaml")
+	t.Setenv(config.ConfigEnv, "")
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("ui:\n  sort: updated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTestCLI(t.Context(), []string{"manage", "config", "set", "ui.sort", "created"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "ui:\n  sort: updated\n" {
+		t.Fatalf("user YAML changed: %q, error = %v", data, err)
+	}
+	tomlPath := filepath.Join(dir, "aht", "config.toml")
+	cfg, resolved, err := config.Load("")
+	if err != nil || cfg.UI.Sort != "created" || resolved != tomlPath {
+		t.Fatalf("TOML config: sort = %q, path = %q, error = %v", cfg.UI.Sort, resolved, err)
 	}
 }
 

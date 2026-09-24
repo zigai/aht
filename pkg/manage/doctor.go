@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -191,34 +190,18 @@ func (m *Manager) CheckManifests(add func(string, DoctorStatus, string)) {
 }
 
 func (m *Manager) checkConfigFile(configPath string, add func(string, DoctorStatus, string)) {
-	path := configPath
-	if path == "" {
-		path = config.DefaultPath()
-	}
-	if _, statErr := os.Stat(path); statErr != nil {
-		if errors.Is(statErr, os.ErrNotExist) {
-			add("config.file", DoctorStatusOK, "no config file present (using defaults)")
-			return
-		}
-		add("config.file", DoctorStatusError, statErr.Error())
-		return
-	}
-	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
-		Path:          path,
-		Explicit:      configPath != "",
-		NoConfig:      false,
-		Stdin:         nil,
-		CWD:           "",
-		UserConfigDir: "",
-		SystemDirs:    nil,
-	})
-	_ = cfg
+	_, meta, resolved, err := config.LoadWithMetadata(config.Options{Path: configPath, Explicit: configPath != "", NoConfig: false, Stdin: nil})
 	if err != nil {
 		add("config.file", DoctorStatusError, err.Error())
 		return
 	}
-	if meta != nil && len(meta.ActiveFiles()) > 1 {
-		add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s; layers: %s)", resolved, strings.Join(meta.ActiveFiles(), ", ")))
+	active := meta.ActiveFiles()
+	if len(active) == 0 {
+		add("config.file", DoctorStatusOK, "no config file present (using defaults or environment)")
+		return
+	}
+	if len(active) > 1 {
+		add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s; layers: %s)", resolved, strings.Join(active, ", ")))
 		return
 	}
 	add("config.file", DoctorStatusOK, fmt.Sprintf("config file is valid (%s)", resolved))

@@ -99,37 +99,28 @@ func TestCLIConfigResolutionDoesNotPublishAndStaysCached(t *testing.T) {
 }
 
 func TestCLIInvalidConfigDoesNotPublish(t *testing.T) {
-	_, store := configureFirstRunTest(t)
-	t.Chdir(t.TempDir())
-	if err := os.WriteFile(".aht.toml", []byte("[ui]\nsort = 'invalid'\n"), 0o600); err != nil {
+	path, store := configureFirstRunTest(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(config.ConfigEnv, "")
-	path := config.DefaultPath()
+	if err := os.WriteFile(path, []byte("[ui]\nsort = 'invalid'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	code := executeCLI(t.Context(), []string{"--store", store, "list"}, nil, &stdout, &stderr)
 	if code != exitCodeUsage {
 		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitCodeUsage, stderr.String())
 	}
-	assertConfigNotPublished(t, path)
 }
 
-func TestCLIDoctorPublishesConfigBeforeDiagnostics(t *testing.T) {
+func TestCLIDoctorDoesNotCreateConfigBeforeDiagnostics(t *testing.T) {
 	path, store := configureFirstRunTest(t)
 	app := &application{storePath: store, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
 	command := app.newDoctorCommand()
 	diagnosticsStarted := false
-	// Replace host diagnostics while preserving the real command preparation
-	// and publication boundary that must run before those diagnostics.
 	command.RunE = func(_ *cobra.Command, _ []string) error {
 		diagnosticsStarted = true
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("configuration unavailable at diagnostic startup: %v", err)
-		}
-		if string(contents) != config.DefaultConfigTemplate() {
-			t.Fatal("published config differs from the default template")
-		}
+		assertConfigNotPublished(t, path)
 		return nil
 	}
 	app.configureCommandTree(command)
@@ -143,13 +134,13 @@ func TestCLIDoctorPublishesConfigBeforeDiagnostics(t *testing.T) {
 }
 
 func TestCLIDoctorInvalidConfigKeepsStructuredFailure(t *testing.T) {
-	_, store := configureFirstRunTest(t)
-	t.Chdir(t.TempDir())
-	if err := os.WriteFile(".aht.toml", []byte("[ui]\nsort = 'invalid'\n"), 0o600); err != nil {
+	path, store := configureFirstRunTest(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(config.ConfigEnv, "")
-	path := config.DefaultPath()
+	if err := os.WriteFile(path, []byte("[ui]\nsort = 'invalid'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	code := executeCLI(t.Context(), []string{"--store", store, "manage", "doctor", "--json"}, nil, &stdout, &stderr)
 	if code != exitCodeGeneral {
@@ -166,10 +157,9 @@ func TestCLIDoctorInvalidConfigKeepsStructuredFailure(t *testing.T) {
 	if check.Name != "tracker configuration" || check.Status != doctorError || !strings.Contains(check.Message, config.ErrInvalidSort.Error()) {
 		t.Fatalf("configuration diagnostic = %+v", check)
 	}
-	assertConfigNotPublished(t, path)
 }
 
-func TestCLIFirstRunResolvesLayersBeforePublication(t *testing.T) {
+func TestCLIFirstRunResolvesLayersWithoutWritingConfig(t *testing.T) {
 	dir := t.TempDir()
 	userDir := filepath.Join(dir, "user")
 	systemDir := filepath.Join(dir, "system")
@@ -183,9 +173,7 @@ func TestCLIFirstRunResolvesLayersBeforePublication(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(systemDir, "aht", "config.toml"), []byte("[ui]\nsort = 'created'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".aht.toml"), []byte("[ui]\ndefault_presence = 'live'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("AHT_UI_DEFAULT_PRESENCE", "live")
 	var stdout bytes.Buffer
 	if err := runTestCLI(t.Context(), []string{"manage", "config", "show", "--json"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -197,13 +185,7 @@ func TestCLIFirstRunResolvesLayersBeforePublication(t *testing.T) {
 	if cfg.UI.Sort != "created" || cfg.UI.DefaultPresence != "live" {
 		t.Fatalf("first-run settings lost existing layers: %+v", cfg.UI)
 	}
-	contents, err := os.ReadFile(filepath.Join(userDir, "aht", "config.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(contents) != config.DefaultConfigTemplate() {
-		t.Fatal("published config differs from the default template")
-	}
+	assertConfigNotPublished(t, filepath.Join(userDir, "aht", "config.toml"))
 }
 
 func configureFirstRunTest(t *testing.T) (string, string) {

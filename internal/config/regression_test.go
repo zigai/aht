@@ -37,6 +37,7 @@ func TestParseDurationDayBounds(t *testing.T) {
 }
 
 func TestLoadNormalizesUIValues(t *testing.T) {
+	isolateConfigEnv(t)
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[ui]\nsort = ' Time '\ndefault_presence = ' ALL '\ntime_format = ' ISO8601 '\n"), 0o600); err != nil {
 		t.Fatal(err)

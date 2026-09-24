@@ -52,7 +52,7 @@ func (app *application) newDoctorCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if manager != nil {
-				res := manager.Doctor(cmd.Context(), manage.DoctorOptions{IncludeAll: verbose, ConfigPath: app.resolvedConfigPath, MaxHealthAge: 0})
+				res := manager.Doctor(cmd.Context(), manage.DoctorOptions{IncludeAll: verbose, ConfigPath: app.configPath, MaxHealthAge: 0})
 				result = doctorResult{OK: res.OK, Checks: res.Checks, Capabilities: res.Capabilities}
 			}
 			if err := app.writeDoctorResult(result); err != nil {
