@@ -23,7 +23,7 @@ const (
 
 var (
 	errCompatibility       = errors.New("compatibility")
-	stableVersionPattern   = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	stableVersionPattern   = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-g[0-9a-fA-F]+)?$`)
 	observedVersionPattern = regexp.MustCompile(`v?[0-9]+\.[0-9]+\.[0-9]+`)
 
 	defaultCatalog = distributionCatalog()
@@ -130,6 +130,9 @@ func needsCheck(spec harnessSpec, version string, previous checkedRelease, force
 	before, err := parseVersion(previous.Version)
 	if err != nil {
 		return false, err
+	}
+	if current[0] == 0 && current[1] == 0 {
+		return current[2] > before[2], nil
 	}
 	return slices.Compare(current[:seriesComponents], before[:seriesComponents]) > 0, nil
 }

@@ -26,6 +26,12 @@ func TestMajorMinorSelection(t *testing.T) {
 		{"v1.2.3", "1.2.4", false},
 		{"2026.9.3", "2026.9.9", false},
 		{"2026.9.3", "2026.10.0", true},
+		{"0.0.100", "0.0.101", true},
+		{"0.0.100", "0.0.100", false},
+		{"0.0.100", "0.0.99", false},
+		{"0.0.1790236865-g40d640", "0.0.1790236866-gaaaaaa", true},
+		{"0.0.1790236865-g40d640", "0.0.1790236865-gbbbbbb", false},
+		{"0.0.1790236865-g40d640", "0.0.1790236864-gcccccc", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.before+"_to_"+tt.after, func(t *testing.T) {
@@ -53,10 +59,34 @@ func TestMajorMinorSelection(t *testing.T) {
 }
 
 func TestInvalidVersions(t *testing.T) {
-	for _, value := range []string{"1.2.3-beta.1", "1.2.3+build", "latest", "--global", "1.2.3\nX=y", "$(id)", "01.2.3", "1.2", "", "18446744073709551616.0.0"} {
+	for _, value := range []string{"1.2.3-beta.1", "1.2.3+build", "latest", "--global", "1.2.3\nX=y", "$(id)", "01.2.3", "1.2", "", "18446744073709551616.0.0", "0.0.1-alpha", "0.0.1-g", "0.0.1-gzzzz"} {
 		if _, err := parseVersion(value); err == nil {
 			t.Errorf("accepted %q", value)
 		}
+	}
+}
+
+func TestParseVersionGitSHASuffix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  [versionComponents]uint64
+	}{
+		{"0.0.1790236865-g40d640", [versionComponents]uint64{0, 0, 1790236865}},
+		{"v0.0.123-gAbC123", [versionComponents]uint64{0, 0, 123}},
+		{"1.2.3-gdeadbeef", [versionComponents]uint64{1, 2, 3}},
+		{"1.2.3", [versionComponents]uint64{1, 2, 3}},
+		{"v1.2.3", [versionComponents]uint64{1, 2, 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseVersion(tt.input)
+			if err != nil {
+				t.Fatalf("parseVersion(%q) failed: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseVersion(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
