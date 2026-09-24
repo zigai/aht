@@ -9,17 +9,17 @@ import (
 )
 
 func TestFileStoreWatchSuppressesUnchangedSnapshots(t *testing.T) {
-	store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := NewJournal(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
 	watcher := newScanTestWatcher(t)
 	var results []WatchResult
 	watch := fileStoreWatch{
-		store: store, watcher: watcher, directory: filepath.Dir(store.Path()),
+		store: store.FileStore, watcher: watcher, directory: filepath.Dir(store.Path()),
 		yield: func(result WatchResult) error {
 			results = append(results, result)
 			return result.Err
 		},
 	}
-	if err := watch.scan(); err != nil {
+	if err := watch.scan(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	snap := newSnapshot()
@@ -29,7 +29,7 @@ func TestFileStoreWatchSuppressesUnchangedSnapshots(t *testing.T) {
 	}
 	// Drive the scan synchronously and assert that the replacement was actually
 	// consumed. Filesystem event delivery is exercised by the public watch tests.
-	if err := watch.scan(); err != nil {
+	if err := watch.scan(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if !watch.baselineUpdatedAt.Equal(snap.UpdatedAt) {
@@ -39,13 +39,10 @@ func TestFileStoreWatchSuppressesUnchangedSnapshots(t *testing.T) {
 		t.Fatalf("unchanged results = %#v, want only the initial result", results)
 	}
 	activity := ActivityIdle
-	if _, err := store.Observe(t.Context(), Observation{
-		Harness: HarnessCodex, Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
-		Identity: ObservationIdentity{SessionID: "changed"}, Activity: &activity,
-	}); err != nil {
+	if _, err := store.Observe(t.Context(), Observation{Harness: HarnessCodex, At: time.Time{}, Subject: ObservationIdentity{SessionID: "changed"}, Evidence: &Report{Activity: &activity}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := watch.scan(); err != nil {
+	if err := watch.scan(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if len(results) != 2 || results[1].Initial || len(results[1].Sessions) != 1 {

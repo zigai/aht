@@ -26,9 +26,9 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	}
 	host.provider.mu.Unlock()
 	var output []byte
-	if host.contract.ID == registry.HarnessCline {
+	if host.contract.ID == registry.Harness("cline") {
 		host.runClineResume(t, original.Env, previous)
-	} else if host.contract.ID == registry.HarnessDroid {
+	} else if host.contract.ID == registry.Harness("droid") {
 		output = host.runDroidRPC(t, original.Env, &previous, false)
 	} else {
 		command := exec.Command(original.Path, resumeArguments(host.contract.ID, original.Args[1:], previous)...)
@@ -43,7 +43,7 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	if len(requests) != 2 {
 		t.Fatalf("resume made %d provider requests, want a restored turn and tool continuation", len(requests))
 	}
-	if host.contract.ID == registry.HarnessDroid {
+	if host.contract.ID == registry.Harness("droid") {
 		if !containsJSONString(requests[0].Body, "compat complete") {
 			t.Fatal("resumed model request did not restore the prior native conversation")
 		}
@@ -65,25 +65,25 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 func resumeArguments(id registry.Harness, original []string, session registry.Session) []string {
 	args := append([]string(nil), original...)
 	switch id {
-	case registry.HarnessCodex:
+	case registry.Harness("codex"):
 		return []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "resume", session.SessionID, compatibilityPrompt}
-	case registry.HarnessCopilot:
+	case registry.Harness("copilot"):
 		return append(args, "--resume="+session.SessionID)
-	case registry.HarnessPi:
+	case registry.Harness("pi"):
 		return append(args, "--session", resumeReference(session))
-	case registry.HarnessOmp:
+	case registry.Harness("omp"):
 		return append(args, "--resume", resumeReference(session))
-	case registry.HarnessKimiCode:
+	case registry.Harness("kimi-code"):
 		return append(args, "--session", session.SessionID)
-	case registry.HarnessGoose:
+	case registry.Harness("goose"):
 		return append(args, "--resume", "--session-id", session.SessionID)
-	case registry.HarnessHermes:
+	case registry.Harness("hermes"):
 		// Oneshot (-z) persists history but ignores --resume. The native chat
 		// query path loads that same session's full conversation from SQLite.
 		return []string{"chat", "-q", compatibilityPrompt, "-Q", "--provider", "custom", "--model", "compat", "--yolo", "--accept-hooks", "--resume", session.SessionID}
-	case registry.HarnessOpenCode, registry.HarnessKilo:
+	case registry.Harness("opencode"), registry.Harness("kilo"):
 		return append(args, "--session", session.SessionID)
-	case registry.HarnessOpenClaw:
+	case registry.Harness("openclaw"):
 		// agent --session-id addresses the durable Gateway session on both turns.
 		return args
 	default:

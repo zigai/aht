@@ -42,7 +42,7 @@ func prepareUpgradeFailure(t *testing.T) string {
 	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "AGY_CONFIG_HOME", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "KILO_CONFIG_DIR", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
-	installed, err := install.RunContext(t.Context(), install.Options{Harness: registry.HarnessCodex, Binary: "/bin/old-aht"})
+	installed, err := install.RunContext(t.Context(), install.Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,7 +38,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(user), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old, err := RunContext(t.Context(), Options{Harness: registry.HarnessClaude, Binary: "/bin/old-aht"})
+	old, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func assertUpgradedHooks(t *testing.T, path string, before []byte, dry bool) {
 func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 	isolateUpgradeHome(t)
 	target := "/custom/harness with 'quotes'"
-	old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: target}, registry.HarnessCodex)
+	old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: target}, registry.Harness("codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 	if err != nil || len(results) != 1 || results[0].Path != old.Path {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	got, exists, err := installedShim(registry.HarnessCodex)
+	got, exists, err := installedShim(registry.Harness("codex"))
 	if err != nil || !exists || got != target {
 		t.Fatalf("target = %q, %v, %v", got, exists, err)
 	}
-	native, err := installedNative(registry.HarnessCodex, "/bin/new-aht")
+	native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
 	if err != nil || native {
 		t.Fatalf("shim migrated to native: %v, %v", native, err)
 	}
@@ -103,21 +103,21 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 
 func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	isolateUpgradeHome(t)
-	claude, err := RunContext(t.Context(), Options{Harness: registry.HarnessClaude, Binary: "/bin/old-aht"})
+	claude, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(claude.Path, []byte(`{"aht managed integration":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunContext(t.Context(), Options{Harness: registry.HarnessCodex, Binary: "/bin/old-aht"}); err != nil {
+	if _, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"}); err != nil {
 		t.Fatal(err)
 	}
 	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
 	if err == nil || len(results) != 2 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	status, err := InspectContext(t.Context(), registry.HarnessCodex, "/bin/new-aht")
+	status, err := InspectContext(t.Context(), registry.Harness("codex"), "/bin/new-aht")
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("healthy integration was not upgraded: %+v, %v", status, err)
 	}
@@ -166,7 +166,7 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 	isolateUpgradeHome(t)
 	hermes := installFakeHermesCLI(t)
 	openclaw := installFakeOpenClawCLI(t)
-	for _, id := range []registry.Harness{registry.HarnessHermes, registry.HarnessOpenClaw} {
+	for _, id := range []registry.Harness{registry.Harness("hermes"), registry.Harness("openclaw")} {
 		if _, err := RunContext(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +189,7 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 
 func assertUpgradeNextStep(t *testing.T, id registry.Harness, first, repeated Result) {
 	t.Helper()
-	if (id == registry.HarnessOpenClaw || id == registry.HarnessHermes) && first.NextStep == "" {
+	if (id == registry.Harness("openclaw") || id == registry.Harness("hermes")) && first.NextStep == "" {
 		t.Fatalf("first upgrade for %s should set NextStep restart notice: %+v", id, first)
 	}
 	if repeated.NextStep != "" {
@@ -280,7 +280,7 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("old binary"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	installed, err := RunContext(t.Context(), Options{Harness: registry.HarnessCodex, Binary: binary})
+	installed, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: binary})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/observer"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/internal/service"
@@ -82,7 +83,7 @@ func TestObserverReportsAutoCleanFailures(t *testing.T) {
 			var stdout bytes.Buffer
 			app := &application{stdout: &stdout}
 			watcher := observer.New(observer.Options{
-				Store:       registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+				Store:       registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 				ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 				PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 				CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
@@ -102,7 +103,7 @@ func TestQuietLongRunningObserverStreamsRequestedJSONLines(t *testing.T) {
 	var stderr bytes.Buffer
 	app := &application{outputJSON: true, stdout: &stdout, stderr: &stderr}
 	watcher := observer.New(observer.Options{
-		Store: registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			cancel()
 			return nil, nil
@@ -132,7 +133,7 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 		var stdout bytes.Buffer
 		app := &application{outputJSON: outputJSON, stdout: &stdout, stderr: &bytes.Buffer{}}
 		watcher := observer.New(observer.Options{
-			Store:       registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+			Store:       registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, errTestPaneList },
 			CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },

@@ -14,7 +14,7 @@ func TestResponseFrameLimit(t *testing.T) {
 }
 
 func TestResponseFramesAreIndividuallyDecoded(t *testing.T) {
-	scanner := responseScanner(strings.NewReader("{\"version\":1}\n{\"version\":1}\n"))
+	scanner := responseScanner(strings.NewReader("{\"version\":2}\n{\"version\":2}\n"))
 	for range 2 {
 		response, err := readResponse(scanner)
 		if err != nil || response.Version != ProtocolVersion {

@@ -14,7 +14,7 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 	t.Setenv("KIMI_SHARE_DIR", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessKimiCode,
+		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -59,7 +59,7 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 		`event = "SessionEnd"` + "\nmatcher = \"exit\"",
 		"--raw-stdin",
 		"--quiet",
-		"aht_integration=kimi-code-hook",
+		"--reporter kimi-code-hook",
 		managedMarker,
 		"--activity idle --event SessionStart",
 		"--activity running --event UserPromptSubmit",
@@ -103,7 +103,7 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessKimiCode,
+		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -132,7 +132,7 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 	}
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessKimiCode,
+		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -152,7 +152,7 @@ func TestInstallKimiCodeDryRunDoesNotWrite(t *testing.T) {
 	t.Setenv("KIMI_SHARE_DIR", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessKimiCode,
+		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       true,

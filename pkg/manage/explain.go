@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
+
 	"github.com/zigai/aht/internal/agentstate"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/herdr"
@@ -110,24 +112,24 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	policy := agentstate.PolicyFor(session.Harness)
-	hookEvaluation := agentstate.EvaluateHook(session, now)
-	authority := string(policy.Primary)
+	policy := (harnesscatalog.Rules{}).Policy(session.Harness)
+	hookEvaluation := registry.EvaluateHook(session, policy, now)
+	selected, reason := registry.ActivityAuthority(session, policy, now)
+	authority := string(selected)
 	fallbackReason := ""
-	if policy.Primary == agentstate.AuthorityHook && policy.ScreenFallback && !hookEvaluation.Active {
-		authority = string(agentstate.AuthorityScreen)
-		fallbackReason = hookEvaluation.Reason
+	if selected == registry.AuthorityScreen && policy.Authority == registry.AuthorityHook {
+		fallbackReason = reason
 	}
 
 	result := buildBaseExplanation(session, now, authority, fallbackReason, hookEvaluation)
 	populateStoredScreenDecision(&result, session)
 
 	if !options.LiveScreen {
-		if session.ActivityDecision != nil {
-			result.SelectedAuthority = session.ActivityDecision.Authority
+		if session.Decision() != nil {
+			result.SelectedAuthority = string(session.Decision().Authority)
 			result.FallbackReason = ""
 		}
-		if strings.TrimSpace(session.Multiplexer.PaneID) == "" {
+		if strings.TrimSpace(session.Location.PaneID) == "" {
 			result.Screen.UnavailableReason = "no_live_pane"
 		} else {
 			result.Screen.UnavailableReason = "screen_inspection_disabled"
@@ -176,17 +178,17 @@ func buildBaseExplanation(
 	now time.Time,
 	authority string,
 	fallbackReason string,
-	hookEvaluation agentstate.HookEvaluation,
+	hookEvaluation registry.HookEvaluation,
 ) Explanation {
 	result := Explanation{
 		SessionID:         session.ID,
 		Harness:           session.Harness,
-		PaneID:            session.Multiplexer.PaneID,
+		PaneID:            session.Location.PaneID,
 		Process:           cloneProcessIdentity(session.Process),
 		ProcessMatch:      processMatchExplanation(session),
 		SelectedAuthority: authority,
 		FallbackReason:    fallbackReason,
-		FinalActivity:     activityString(session.Activity),
+		FinalActivity:     activityString(session.Activity()),
 		Hook: HookExplanation{
 			Event:           "",
 			Integration:     "",
@@ -211,13 +213,13 @@ func buildBaseExplanation(
 			},
 			Error: "",
 		},
-		RegistryActivity: cloneActivity(session.Activity),
-		RegistryDecision: cloneActivityDecision(session.ActivityDecision),
+		RegistryActivity: cloneActivity(session.Activity()),
+		RegistryDecision: cloneActivityDecision(session.Decision()),
 	}
 
 	if native := session.Observations.Native; native != nil {
 		result.Hook.Event = native.Event
-		result.Hook.Integration = native.Attributes["aht_integration"]
+		result.Hook.Integration = native.Reporter.Integration
 		result.Hook.ObservedAt = native.ObservedAt
 		result.Hook.Age = now.Sub(native.ObservedAt).Round(time.Millisecond).String()
 	}
@@ -226,17 +228,17 @@ func buildBaseExplanation(
 }
 
 func populateStoredScreenDecision(result *Explanation, session registry.Session) {
-	if session.ActivityDecision != nil && session.ActivityDecision.Authority == string(agentstate.AuthorityScreen) {
+	if session.Decision() != nil && session.Decision().Authority == registry.AuthorityScreen {
 		activity := registry.ActivityUnknown
-		if session.Activity != nil {
-			activity = *session.Activity
+		if session.Activity() != nil {
+			activity = *session.Activity()
 		}
 		result.Screen.Decision = ScreenDecision{
 			Activity:        activity,
-			Reason:          session.ActivityDecision.Reason,
-			RuleID:          session.ActivityDecision.RuleID,
-			ManifestSource:  session.ActivityDecision.ManifestSource,
-			ManifestVersion: session.ActivityDecision.ManifestVersion,
+			Reason:          session.Decision().Reason,
+			RuleID:          session.Decision().RuleID,
+			ManifestSource:  session.Decision().ManifestSource,
+			ManifestVersion: session.Decision().ManifestVersion,
 			Warning:         "",
 			Evidence:        nil,
 		}
@@ -262,7 +264,7 @@ func evaluateExplanationScreen(
 	authority string,
 	currentActivity string,
 ) (ScreenExplanation, string, error) {
-	if authority != string(agentstate.AuthorityScreen) {
+	if authority != string(registry.AuthorityScreen) {
 		return ScreenExplanation{
 			Evaluated:         false,
 			UnavailableReason: "",
@@ -278,7 +280,7 @@ func evaluateExplanationScreen(
 			Error: "",
 		}, currentActivity, nil
 	}
-	if strings.TrimSpace(session.Multiplexer.PaneID) == "" {
+	if strings.TrimSpace(session.Location.PaneID) == "" {
 		return ScreenExplanation{
 			Evaluated:         false,
 			UnavailableReason: "no_live_pane",
@@ -316,7 +318,7 @@ func evaluateLiveScreen(
 	session registry.Session,
 	configDir string,
 ) (ScreenDecision, bool, error) {
-	if session.Multiplexer.Kind != registry.MultiplexerTmux {
+	if session.Location.Kind != registry.MultiplexerTmux {
 		return evaluateNonTmuxLiveScreen(ctx, session, configDir)
 	}
 	return evaluateTmuxLiveScreen(ctx, session, configDir)
@@ -328,7 +330,7 @@ func evaluateNonTmuxLiveScreen(
 	configDir string,
 ) (ScreenDecision, bool, error) {
 	pane := mux.Pane{
-		Location:    session.Multiplexer,
+		Location:    session.Location,
 		Processes:   nil,
 		ProcessTTY:  "",
 		Command:     "",
@@ -339,7 +341,7 @@ func evaluateNonTmuxLiveScreen(
 	}
 	var text string
 	var title string
-	if session.Multiplexer.Kind == registry.MultiplexerTmux {
+	if session.Location.Kind == registry.MultiplexerTmux {
 		return ScreenDecision{
 			Activity:        registry.ActivityUnknown,
 			Reason:          "",
@@ -348,11 +350,11 @@ func evaluateNonTmuxLiveScreen(
 			ManifestVersion: 0,
 			Warning:         "",
 			Evidence:        nil,
-		}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Multiplexer.PaneID)
+		}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
 	}
 	var driver mux.Driver
 	for _, d := range []mux.Driver{zellij.NewDriver(), herdr.NewDriver()} {
-		if d.Kind() == session.Multiplexer.Kind {
+		if d.Kind() == session.Location.Kind {
 			driver = d
 			break
 		}
@@ -366,7 +368,7 @@ func evaluateNonTmuxLiveScreen(
 			ManifestVersion: 0,
 			Warning:         "",
 			Evidence:        nil,
-		}, false, fmt.Errorf("%w: %s", ErrUnsupportedMultiplexer, session.Multiplexer.Kind)
+		}, false, fmt.Errorf("%w: %s", ErrUnsupportedMultiplexer, session.Location.Kind)
 	}
 	snapshot, err := driver.CapturePane(ctx, pane)
 	if err != nil {
@@ -378,7 +380,7 @@ func evaluateNonTmuxLiveScreen(
 			ManifestVersion: 0,
 			Warning:         "",
 			Evidence:        nil,
-		}, false, fmt.Errorf("capture %s pane: %w", session.Multiplexer.Kind, err)
+		}, false, fmt.Errorf("capture %s pane: %w", session.Location.Kind, err)
 	}
 	text, title = snapshot.Text, snapshot.Title
 	return evaluateSnapshotText(session.Harness, text, title, configDir)
@@ -402,7 +404,7 @@ func evaluateTmuxLiveScreen(
 		}, false, fmt.Errorf("list tmux panes: %w", err)
 	}
 	for _, pane := range panes {
-		if pane.Tmux.PaneID != session.Tmux.PaneID || !sameTmuxServer(pane.ServerIdentity, session.Tmux.ServerSocket) {
+		if pane.Tmux.PaneID != session.Location.PaneID || !sameTmuxServer(pane.ServerIdentity, session.Location.ServerID) {
 			continue
 		}
 		snapshot, captureErr := tmux.CapturePane(ctx, pane)
@@ -427,7 +429,7 @@ func evaluateTmuxLiveScreen(
 		ManifestVersion: 0,
 		Warning:         "",
 		Evidence:        nil,
-	}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Tmux.PaneID)
+	}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
 }
 
 func evaluateSnapshotText(
@@ -473,15 +475,13 @@ func processMatchExplanation(session registry.Session) string {
 	if session.Process == nil {
 		return "unavailable"
 	}
-	if session.Process.Foreground && session.Process.TTY != "" && session.Process.TTY == session.Multiplexer.PaneTTY {
+	if session.Process.Foreground && session.Process.TTY != "" && session.Process.TTY == session.Location.PaneTTY {
 		return "foreground_tty_process"
 	}
-	if session.Observations.Multiplexer != nil && session.Observations.Multiplexer.Process.Equal(*session.Process) {
+	if session.Observations.Location != nil && session.Observations.Location.Process.Equal(*session.Process) {
 		return "pid_start_identity"
 	}
-	if session.Observations.Tmux != nil && session.Observations.Tmux.Process.Equal(*session.Process) {
-		return "pid_start_identity"
-	}
+
 	return "unverified"
 }
 

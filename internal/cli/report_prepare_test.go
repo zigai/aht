@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/registry"
 )
 
-const expectedSessionSchemaVersion = 2
+const expectedSessionSchemaVersion = 3
 
 //nolint:cyclop // assertions independently verify each report dimension
 func TestPrepareReportCarriesIndependentDimensions(t *testing.T) {
@@ -23,40 +24,40 @@ func TestPrepareReportCarriesIndependentDimensions(t *testing.T) {
 		harness: "codex", presence: "live", activity: "waiting", sessionID: "session-1", event: "permission_prompt",
 		cwd: "/work", projectRoot: "/work", resumeCommand: []string{"codex", "resume", "session-1"}, rawStdin: true,
 	}, reportRuntimeContext{
-		tmux:              registry.TmuxContext{Inside: true, SessionName: "dev", PaneID: "%4"},
+		tmux:              registry.Location{Kind: registry.MultiplexerTmux, SessionName: "dev", PaneID: "%4"},
 		defaultObservedAt: time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.observation.Presence == nil || *prepared.observation.Presence != registry.PresenceLive || prepared.observation.Activity == nil || *prepared.observation.Activity != registry.ActivityWaiting {
+	if prepared.observation.Report().Claim == nil || *prepared.observation.Report().Claim != registry.PresenceLive || prepared.observation.ActivityClaim() == nil || *prepared.observation.ActivityClaim() != registry.ActivityWaiting {
 		t.Fatalf("independent dimensions lost: %#v", prepared.observation)
 	}
-	if prepared.observation.ActivityAuthoritative == nil || *prepared.observation.ActivityAuthoritative {
+	if (catalog.Rules{}).Policy(prepared.observation.Harness).Authority != registry.AuthorityScreen {
 		t.Fatalf("Codex hook activity must be stored as a non-authoritative hint: %#v", prepared.observation)
 	}
-	if prepared.observation.Catalog == nil || len(prepared.observation.Catalog.ResumeCommand) != 3 {
-		t.Fatalf("catalog metadata missing: %#v", prepared.observation.Catalog)
+	if prepared.observation.Listing() == nil || len(prepared.observation.Listing().ResumeCommand) != 3 {
+		t.Fatalf("catalog metadata missing: %#v", prepared.observation.Listing())
 	}
-	if prepared.observation.Tmux == nil || prepared.observation.Tmux.SessionName != "dev" || prepared.observation.Tmux.PaneID != "%4" {
-		t.Fatalf("tmux context missing: %#v", prepared.observation.Tmux)
+	if prepared.observation.Location() == nil || prepared.observation.Location().SessionName != "dev" || prepared.observation.Location().PaneID != "%4" {
+		t.Fatalf("tmux context missing: %#v", prepared.observation.Location())
 	}
-	if len(prepared.observation.RawPayload) == 0 {
+	if len(prepared.observation.Report().Payload) == 0 {
 		t.Fatal("raw payload was not preserved")
 	}
 }
 
 func TestPrepareReportIncludesNativeMultiplexerContext(t *testing.T) {
 	t.Parallel()
-	location := registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"}
+	location := registry.Location{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"}
 	prepared, err := prepareReport(nil, reportOptions{
 		harness: "codex", sessionID: "session", event: "turn_complete",
 	}, reportRuntimeContext{multiplexer: location, defaultObservedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.observation.Multiplexer == nil || *prepared.observation.Multiplexer != location {
-		t.Fatalf("multiplexer context = %#v", prepared.observation.Multiplexer)
+	if prepared.observation.Location() == nil || *prepared.observation.Location() != location {
+		t.Fatalf("multiplexer context = %#v", prepared.observation.Location())
 	}
 }
 
@@ -70,7 +71,7 @@ func TestPrepareReportCarriesNativeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.observation.Lifecycle == nil || *prepared.observation.Lifecycle != registry.NativeLifecycleResume {
+	if prepared.observation.Report().Lifecycle == nil || *prepared.observation.Report().Lifecycle != registry.NativeLifecycleResume {
 		t.Fatalf("native lifecycle missing: %#v", prepared.observation)
 	}
 }
@@ -148,14 +149,14 @@ func TestPrepareReportInfersLifecycleFromNativeEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			observation := prepared.observation
-			if observation.Lifecycle == nil || *observation.Lifecycle != test.lifecycle {
-				t.Fatalf("lifecycle = %#v, want %q", observation.Lifecycle, test.lifecycle)
+			if observation.Report().Lifecycle == nil || *observation.Report().Lifecycle != test.lifecycle {
+				t.Fatalf("lifecycle = %#v, want %q", observation.Report().Lifecycle, test.lifecycle)
 			}
-			if observation.Presence == nil || *observation.Presence != test.presence {
-				t.Fatalf("presence = %#v, want %q", observation.Presence, test.presence)
+			if observation.Report().Claim == nil || *observation.Report().Claim != test.presence {
+				t.Fatalf("presence = %#v, want %q", observation.Report().Claim, test.presence)
 			}
-			if observation.NativeEvent != test.nativeEvent {
-				t.Fatalf("native event = %q, want %q", observation.NativeEvent, test.nativeEvent)
+			if observation.Report().Event != test.nativeEvent {
+				t.Fatalf("native event = %q, want %q", observation.Report().Event, test.nativeEvent)
 			}
 		})
 	}
@@ -192,8 +193,8 @@ func TestPrepareReportAddsNativeResumeCommand(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if prepared.observation.Catalog == nil || !slices.Equal(prepared.observation.Catalog.ResumeCommand, test.want) {
-				t.Fatalf("resume command = %#v, want %#v", prepared.observation.Catalog, test.want)
+			if prepared.observation.Listing() == nil || !slices.Equal(prepared.observation.Listing().ResumeCommand, test.want) {
+				t.Fatalf("resume command = %#v, want %#v", prepared.observation.Listing(), test.want)
 			}
 		})
 	}
@@ -220,8 +221,8 @@ func TestPrepareReportAttachesMatchingAgentProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.observation.Process == nil || prepared.observation.Process.PID != agent.PID || prepared.observation.Process.StartIdentity != agent.StartIdentity {
-		t.Fatalf("report process identity = %#v, want agent process %#v", prepared.observation.Process, agent)
+	if prepared.observation.ProcessIdentity() == nil || prepared.observation.ProcessIdentity().PID != agent.PID || prepared.observation.ProcessIdentity().StartIdentity != agent.StartIdentity {
+		t.Fatalf("report process identity = %#v, want agent process %#v", prepared.observation.ProcessIdentity(), agent)
 	}
 }
 
@@ -237,16 +238,16 @@ func TestPrepareReportProcessEvidenceDoesNotCarryNativeAuthority(t *testing.T) {
 	t.Parallel()
 	process := processinfo.Process{PID: 42, PPID: 10, ProcessGroupID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/4"}
 	prepared, err := prepareReport(nil, reportOptions{
-		harness: "codex", presence: "live", evidence: "process", pid: process.PID, event: "process.start",
+		harness: "codex", presence: "live", evidence: "process", pid: process.PID, event: "process.start", sessionID: "native-process-session",
 	}, reportRuntimeContext{processes: []processinfo.Process{process}, defaultObservedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	observation := prepared.observation
-	if observation.Source != registry.ObservationSourceProcess || observation.ActivityAuthoritative != nil || observation.Activity != nil || observation.NativeEvent != "" {
+	if observation.Kind() != "sighting" || observation.ActivityClaim() != nil || observation.Report().Event != "" {
 		t.Fatalf("process observation retained native fields: %#v", observation)
 	}
-	if err := observation.Validate(); err != nil {
+	if err := observation.Validate(catalog.Rules{}); err != nil {
 		t.Fatalf("process observation is invalid: %v", err)
 	}
 }
@@ -255,7 +256,7 @@ func TestShimProcessReportsInferIdentityAndTransitionState(t *testing.T) {
 	t.Parallel()
 
 	process := processinfo.Process{PID: 42, PPID: 10, ProcessGroupID: 42, StartIdentity: "boot:42", Executable: "/bin/sh", CWD: "/work", TTY: "/dev/pts/4"}
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	base := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	var sessionID string
 	for index, test := range []struct {
@@ -277,7 +278,7 @@ func TestShimProcessReportsInferIdentityAndTransitionState(t *testing.T) {
 
 func requireShimProcessTransition(
 	t *testing.T,
-	store *registry.FileStore,
+	store *registry.Journal,
 	process processinfo.Process,
 	name, presence string,
 	present bool,
@@ -304,19 +305,19 @@ func requireShimProcessTransition(
 	if !present {
 		wantPresence = registry.PresenceGone
 	}
-	if session.Presence != wantPresence {
-		t.Fatalf("session presence = %q, want %q", session.Presence, wantPresence)
+	if session.Presence() != wantPresence {
+		t.Fatalf("session presence = %q, want %q", session.Presence(), wantPresence)
 	}
 	return session.ID
 }
 
 func requireShimObservation(t *testing.T, observation registry.Observation, process processinfo.Process, present bool) {
 	t.Helper()
-	if observation.Source != registry.ObservationSourceProcess || observation.Process == nil || !observation.Process.Complete() || observation.Process.StartIdentity != process.StartIdentity {
-		t.Fatalf("shim process identity = %#v", observation.Process)
+	if observation.Kind() != "sighting" || observation.ProcessIdentity() == nil || !observation.ProcessIdentity().Complete() || observation.ProcessIdentity().StartIdentity != process.StartIdentity {
+		t.Fatalf("shim process identity = %#v", observation.ProcessIdentity())
 	}
-	if observation.ProcessPresent == nil || *observation.ProcessPresent != present {
-		t.Fatalf("process presence = %#v, want %v", observation.ProcessPresent, present)
+	if observation.Present() == nil || *observation.Present() != present {
+		t.Fatalf("process presence = %#v, want %v", observation.Present(), present)
 	}
 }
 
@@ -354,10 +355,10 @@ func TestPrepareReportAcceptsLargeCodexPostToolUseDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.observation.Identity.SessionID != "codex-image" || prepared.observation.NativeEvent != "PostToolUse" {
+	if prepared.observation.Subject.SessionID != "codex-image" || prepared.observation.Report().Event != "PostToolUse" {
 		t.Fatalf("PostToolUse metadata = %#v", prepared.observation)
 	}
-	if len(prepared.observation.RawPayload) != 0 {
-		t.Fatalf("PostToolUse raw payload was retained: %d bytes", len(prepared.observation.RawPayload))
+	if len(prepared.observation.Report().Payload) != 0 {
+		t.Fatalf("PostToolUse raw payload was retained: %d bytes", len(prepared.observation.Report().Payload))
 	}
 }

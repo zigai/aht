@@ -18,7 +18,7 @@ var errStopWatchCallback = errors.New("stop callback")
 
 func TestFileStoreWatchInitialResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, behaviorRules{})
 	want := observeWatchSession(t, store, "initial")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -42,7 +42,7 @@ func TestFileStoreWatchInitialResult(t *testing.T) {
 
 func TestFileStoreWatchUpdate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, behaviorRules{})
 	observeWatchSession(t, store, "first")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -77,9 +77,9 @@ func TestFileStoreWatchUpdate(t *testing.T) {
 func TestFileStoreWatchAtomicRename(t *testing.T) {
 	directory := t.TempDir()
 	targetPath := filepath.Join(directory, "sessions.json")
-	target := registry.NewFileStore(targetPath)
+	target := registry.NewJournal(targetPath, behaviorRules{})
 	sourcePath := filepath.Join(directory, "replacement.json")
-	source := registry.NewFileStore(sourcePath)
+	source := registry.NewJournal(sourcePath, behaviorRules{})
 	want := observeWatchSession(t, source, "replacement")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -117,9 +117,9 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "state")
 	targetPath := filepath.Join(directory, "sessions.json")
-	target := registry.NewFileStore(targetPath)
+	target := registry.NewJournal(targetPath, behaviorRules{})
 	observeWatchSession(t, target, "initial")
-	source := registry.NewFileStore(filepath.Join(root, "replacement.json"))
+	source := registry.NewJournal(filepath.Join(root, "replacement.json"), behaviorRules{})
 	replacement := observeWatchSession(t, source, "replacement")
 	replacementData, err := os.ReadFile(source.Path())
 	if err != nil {
@@ -170,7 +170,7 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 }
 
 func TestFileStoreWatchCancellation(t *testing.T) {
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx, cancel := context.WithCancel(context.Background())
 	initial := make(chan struct{})
 	done := make(chan error, 1)
@@ -192,8 +192,8 @@ func TestFileStoreWatchCancellation(t *testing.T) {
 func TestFileStoreWatchReconcilesMissedEvent(t *testing.T) {
 	directory := t.TempDir()
 	targetPath := filepath.Join(directory, "sessions.json")
-	target := registry.NewFileStore(targetPath)
-	source := registry.NewFileStore(filepath.Join(directory, "source.json"))
+	target := registry.NewJournal(targetPath, behaviorRules{})
+	source := registry.NewJournal(filepath.Join(directory, "source.json"), behaviorRules{})
 	want := observeWatchSession(t, source, "reconciled")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -232,9 +232,9 @@ func TestFileStoreWatchReconcilesMissedEvent(t *testing.T) {
 func TestFileStoreWatchReportsReadErrorAndRetainsBaseline(t *testing.T) {
 	directory := t.TempDir()
 	targetPath := filepath.Join(directory, "sessions.json")
-	target := registry.NewFileStore(targetPath)
+	target := registry.NewJournal(targetPath, behaviorRules{})
 	wantBaseline := observeWatchSession(t, target, "baseline")
-	source := registry.NewFileStore(filepath.Join(directory, "recovered.json"))
+	source := registry.NewJournal(filepath.Join(directory, "recovered.json"), behaviorRules{})
 	wantRecovered := observeWatchSession(t, source, "recovered")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -278,8 +278,8 @@ func TestFileStoreWatchRecoversInitialMalformedSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	targetPath := filepath.Join(directory, "sessions.json")
 	writeWatchTestFile(t, targetPath, []byte("{"))
-	target := registry.NewFileStore(targetPath)
-	source := registry.NewFileStore(filepath.Join(directory, "recovered.json"))
+	target := registry.NewJournal(targetPath, behaviorRules{})
+	source := registry.NewJournal(filepath.Join(directory, "recovered.json"), behaviorRules{})
 	want := observeWatchSession(t, source, "recovered")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -318,7 +318,7 @@ func TestFileStoreWatchRecoversInitialMalformedSnapshot(t *testing.T) {
 }
 
 func TestFileStoreWatchSerializesCallbacks(t *testing.T) {
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	observeWatchSession(t, store, "initial")
 	ctx, cancel := context.WithTimeout(context.Background(), watchTestTimeout)
 	defer cancel()
@@ -377,7 +377,7 @@ func TestFileStoreWatchSerializesCallbacks(t *testing.T) {
 }
 
 func TestFileStoreWatchReturnsCallbackError(t *testing.T) {
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	want := errStopWatchCallback
 	err := store.Watch(context.Background(), registry.WatchOptions{}, func(registry.WatchResult) error {
 		return want
@@ -387,17 +387,10 @@ func TestFileStoreWatchReturnsCallbackError(t *testing.T) {
 	}
 }
 
-func observeWatchSession(t *testing.T, store *registry.FileStore, id string) registry.Session {
+func observeWatchSession(t *testing.T, store *registry.Journal, id string) registry.Session {
 	t.Helper()
 	activity := registry.ActivityIdle
-	session, err := store.Observe(context.Background(), registry.Observation{
-		Harness:    registry.HarnessCodex,
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Identity:   registry.ObservationIdentity{SessionID: id},
-		Activity:   &activity,
-		ObservedAt: time.Now().UTC(),
-	})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: id}, Evidence: &registry.Report{Activity: &activity}})
 	if err != nil {
 		t.Fatal(err)
 	}

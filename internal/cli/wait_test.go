@@ -9,26 +9,19 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
 func createTestStoreSession(t *testing.T, storePath, sessionID string, presence registry.Presence, activity registry.Activity) registry.Session {
 	t.Helper()
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	var act *registry.Activity
 	if activity != "" {
 		act = &activity
 	}
 	pres := presence
-	observed, err := store.Observe(t.Context(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: sessionID},
-		Presence:   &pres,
-		Activity:   act,
-		ObservedAt: time.Now().UTC(),
-	})
+	observed, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Report{Claim: &pres, Activity: act}})
 	if err != nil {
 		t.Fatalf("failed to observe test session: %v", err)
 	}
@@ -189,8 +182,8 @@ func TestWaitCLISuccessJSON(t *testing.T) {
 	if parsed.ID != session.ID {
 		t.Errorf("parsed.ID = %q, want %q", parsed.ID, session.ID)
 	}
-	if parsed.Activity == nil || *parsed.Activity != registry.ActivityIdle {
-		t.Errorf("parsed.Activity = %v, want idle", parsed.Activity)
+	if parsed.Activity() == nil || *parsed.Activity() != registry.ActivityIdle {
+		t.Errorf("parsed.Activity = %v, want idle", parsed.Activity())
 	}
 }
 

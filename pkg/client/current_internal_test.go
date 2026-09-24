@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -15,39 +16,23 @@ func TestCurrentAncestorLookup(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 
 	agentPID := 100
 	agentIdentity := "boot-1:100:agent-start"
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
-	obs := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-ancestor-1"},
-		Lifecycle:  nil,
-		Presence:   &live,
-		Activity:   &activity,
-		Attributes: nil,
-		Process: &registry.ProcessIdentity{
-			PID:            agentPID,
-			PPID:           1,
-			ProcessGroupID: 100,
-			Foreground:     true,
-			StartIdentity:  agentIdentity,
-			Executable:     "/usr/bin/codex",
-			CWD:            "/tmp/work",
-			TTY:            "/dev/pts/1",
-		},
-		Tmux:        nil,
-		Multiplexer: nil,
-		Catalog:     nil,
-		Screen:      nil,
-		RawPayload:  nil,
-		ObservedAt:  time.Now().UTC(),
-	}
+	obs := registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-ancestor-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: &registry.ProcessIdentity{
+		PID:            agentPID,
+		PPID:           1,
+		ProcessGroupID: 100,
+		Foreground:     true,
+		StartIdentity:  agentIdentity,
+		Executable:     "/usr/bin/codex",
+		CWD:            "/tmp/work",
+		TTY:            "/dev/pts/1",
+	}, Location: nil, Listing: nil, Attributes: nil, Payload: nil}}
 
 	createdSession, err := store.Observe(t.Context(), obs)
 	if err != nil {
@@ -141,39 +126,23 @@ func TestCurrentPIDReuseDefense(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 
 	agentPID := 500
 	originalIdentity := "boot-1:500:original-start"
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
-	obs := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-reused-1"},
-		Lifecycle:  nil,
-		Presence:   &live,
-		Activity:   &activity,
-		Attributes: nil,
-		Process: &registry.ProcessIdentity{
-			PID:            agentPID,
-			PPID:           1,
-			ProcessGroupID: 500,
-			Foreground:     true,
-			StartIdentity:  originalIdentity,
-			Executable:     "/usr/bin/claude",
-			CWD:            "/tmp/work",
-			TTY:            "/dev/pts/2",
-		},
-		Tmux:        nil,
-		Multiplexer: nil,
-		Catalog:     nil,
-		Screen:      nil,
-		RawPayload:  nil,
-		ObservedAt:  time.Now().UTC(),
-	}
+	obs := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-reused-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: &registry.ProcessIdentity{
+		PID:            agentPID,
+		PPID:           1,
+		ProcessGroupID: 500,
+		Foreground:     true,
+		StartIdentity:  originalIdentity,
+		Executable:     "/usr/bin/claude",
+		CWD:            "/tmp/work",
+		TTY:            "/dev/pts/2",
+	}, Location: nil, Listing: nil, Attributes: nil, Payload: nil}}
 
 	if _, err := store.Observe(t.Context(), obs); err != nil {
 		t.Fatal(err)
@@ -231,55 +200,39 @@ func TestCurrentTerminalContext(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
-	obs := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-tmux-pane"},
-		Lifecycle:  nil,
-		Presence:   &live,
-		Activity:   &activity,
-		Attributes: nil,
-		Process: &registry.ProcessIdentity{
-			PID:            700,
-			PPID:           1,
-			ProcessGroupID: 700,
-			Foreground:     true,
-			StartIdentity:  "boot-1:700:tmux-agent",
-			Executable:     "/usr/bin/claude",
-			CWD:            "/tmp/work",
-			TTY:            "/dev/pts/3",
-		},
-		Tmux: nil,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:            registry.MultiplexerTmux,
-			ServerID:        "/tmp/tmux.sock",
-			SessionID:       "$1",
-			SessionName:     "main",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "@1",
-			WindowIndex:     "1",
-			WindowName:      "win",
-			PaneID:          "%10",
-			PaneIndex:       "0",
-			PaneCurrentPath: "/tmp/work",
-			PanePID:         700,
-			PaneTTY:         "/dev/pts/3",
-			ClientTTY:       "",
-		},
-		Catalog:    nil,
-		Screen:     nil,
-		RawPayload: nil,
-		ObservedAt: time.Now().UTC(),
-	}
+	obs := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-tmux-pane"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: &registry.ProcessIdentity{
+		PID:            700,
+		PPID:           1,
+		ProcessGroupID: 700,
+		Foreground:     true,
+		StartIdentity:  "boot-1:700:tmux-agent",
+		Executable:     "/usr/bin/claude",
+		CWD:            "/tmp/work",
+		TTY:            "/dev/pts/3",
+	}, Location: &registry.Location{
+		Kind:            registry.MultiplexerTmux,
+		ServerID:        "/tmp/tmux.sock",
+		SessionID:       "$1",
+		SessionName:     "main",
+		WorkspaceID:     "",
+		WorkspaceName:   "",
+		TabID:           "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "@1",
+		WindowIndex:     "1",
+		WindowName:      "win",
+		PaneID:          "%10",
+		PaneIndex:       "0",
+		PaneCurrentPath: "/tmp/work",
+		PanePID:         700,
+		PaneTTY:         "/dev/pts/3",
+		ClientTTY:       "",
+	}, Listing: nil, Attributes: nil, Payload: nil}}
 
 	createdSession, err := store.Observe(t.Context(), obs)
 	if err != nil {
@@ -319,10 +272,10 @@ func TestCurrentTerminalContext(t *testing.T) {
 			}
 			return processinfo.Process{}, false, nil
 		},
-		TmuxCurrent: func(context.Context) (registry.TmuxContext, error) {
-			return registry.TmuxContext{
-				Inside:          true,
-				ServerSocket:    "/tmp/tmux.sock",
+		TmuxCurrent: func(context.Context) (registry.Location, error) {
+			return registry.Location{
+				Kind:            registry.MultiplexerTmux,
+				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
 				SessionName:     "main",
 				WindowID:        "@1",
@@ -353,10 +306,10 @@ func TestCurrentTerminalContext(t *testing.T) {
 			return nil, nil
 		},
 		ProcessFind: nil,
-		TmuxCurrent: func(context.Context) (registry.TmuxContext, error) {
-			return registry.TmuxContext{
-				Inside:          true,
-				ServerSocket:    "/tmp/tmux.sock",
+		TmuxCurrent: func(context.Context) (registry.Location, error) {
+			return registry.Location{
+				Kind:            registry.MultiplexerTmux,
+				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
 				SessionName:     "main",
 				WindowID:        "@1",
@@ -386,10 +339,10 @@ func TestCurrentTerminalContext(t *testing.T) {
 		ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
 			return processinfo.Process{}, false, nil // process not found (died)
 		},
-		TmuxCurrent: func(context.Context) (registry.TmuxContext, error) {
-			return registry.TmuxContext{
-				Inside:          true,
-				ServerSocket:    "/tmp/tmux.sock",
+		TmuxCurrent: func(context.Context) (registry.Location, error) {
+			return registry.Location{
+				Kind:            registry.MultiplexerTmux,
+				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
 				SessionName:     "main",
 				WindowID:        "@1",
@@ -438,7 +391,7 @@ func TestCurrentNoAmbientAgent(t *testing.T) {
 
 func TestCurrentRejectsUnverifiedPaneCandidates(t *testing.T) {
 	t.Parallel()
-	location := registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_1"}
+	location := registry.Location{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_1"}
 	caller := processinfo.Process{PID: 200, TTY: "/dev/pts/2"}
 	agent := processinfo.Process{PID: 100, TTY: "/dev/pts/1", StartIdentity: "live"}
 	opts := currentInspectors{PID: caller.PID, ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
@@ -448,7 +401,7 @@ func TestCurrentRejectsUnverifiedPaneCandidates(t *testing.T) {
 		return agent, true, nil
 	}}
 	for _, process := range []*registry.ProcessIdentity{nil, {PID: agent.PID, StartIdentity: "reused"}, {PID: agent.PID, StartIdentity: agent.StartIdentity}} {
-		sessions := []registry.Session{{ID: "agent", Multiplexer: location, Process: process}}
+		sessions := []registry.Session{{ID: "agent", Location: location, Process: process}}
 		_, found, err := resolvePaneSession(t.Context(), sessions, location.Kind, "", location.PaneID, location.SessionName, opts)
 		if found || err != nil {
 			t.Fatalf("unverified pane resolved: process=%+v found=%v err=%v", process, found, err)

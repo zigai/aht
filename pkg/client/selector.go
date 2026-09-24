@@ -89,7 +89,6 @@ func (s Selector) Filter() registry.Filter {
 		Harness:            s.Harness,
 		Presence:           "",
 		Activity:           "",
-		TmuxSession:        "",
 		MultiplexerSession: "",
 		Project:            s.Project,
 		ProjectSubtree:     s.ProjectSubtree,
@@ -157,9 +156,9 @@ func matchesIDAndHarness(s registry.Session, selector Selector) bool {
 }
 
 func matchesLocation(s registry.Session, selector Selector) bool {
-	location := s.Multiplexer
+	location := s.Location
 	if location.Empty() {
-		location = registry.MultiplexerFromTmux(s.Tmux)
+		location = s.Location
 	}
 	if selector.MultiplexerKind != "" && location.Kind != selector.MultiplexerKind {
 		return false
@@ -168,8 +167,7 @@ func matchesLocation(s registry.Session, selector Selector) bool {
 		return false
 	}
 	if selector.MultiplexerPane != "" &&
-		s.Multiplexer.PaneID != selector.MultiplexerPane &&
-		s.Tmux.PaneID != selector.MultiplexerPane {
+		s.Location.PaneID != selector.MultiplexerPane {
 		return false
 	}
 	return true

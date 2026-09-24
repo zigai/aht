@@ -63,32 +63,32 @@ func TestNativeJSONLReaders(t *testing.T) {
 		harness    registry.Harness
 		file, body string
 	}{
-		{"pi", registry.HarnessPi, "session.jsonl", treeHistory},
-		{"omp", registry.HarnessOmp, "session.jsonl", strings.ReplaceAll(treeHistory, `{"type":"session_info","name":"Authentication work"}`, `{"type":"title_change","title":"Authentication work"}`)},
-		{"openclaw", registry.HarnessOpenClaw, "session.jsonl", treeHistory},
-		{"claude", registry.HarnessClaude, "session.jsonl", `{"type":"user","sessionId":"native-session","cwd":"/work/project","uuid":"u1","message":{"role":"user","content":"Refresh Token"}}
+		{"pi", registry.Harness("pi"), "session.jsonl", treeHistory},
+		{"omp", registry.Harness("omp"), "session.jsonl", strings.ReplaceAll(treeHistory, `{"type":"session_info","name":"Authentication work"}`, `{"type":"title_change","title":"Authentication work"}`)},
+		{"openclaw", registry.Harness("openclaw"), "session.jsonl", treeHistory},
+		{"claude", registry.Harness("claude"), "session.jsonl", `{"type":"user","sessionId":"native-session","cwd":"/work/project","uuid":"u1","message":{"role":"user","content":"Refresh Token"}}
 {"type":"user","sessionId":"native-session","message":{"role":"user","content":[{"type":"tool_result","content":"tool-only"}]}}
 {"type":"assistant","sessionId":"native-session","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]}}
 `},
-		{"codex", registry.HarnessCodex, "rollout-session.jsonl", `{"type":"session_meta","payload":{"id":"native-session","cwd":"/work/project"}}
+		{"codex", registry.Harness("codex"), "rollout-session.jsonl", `{"type":"session_meta","payload":{"id":"native-session","cwd":"/work/project"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Refresh Token"}]}}
 {"type":"event_msg","payload":{"type":"user_message","message":"Refresh Token"}}
 {"type":"response_item","payload":{"type":"function_call_output","call_id":"t1","output":"tool-only"}}
 {"type":"response_item","payload":{"type":"reasoning","summary":[{"text":"reasoning-only"}]}}
 {"type":"response_item","payload":{"type":"message","role":"assistant","channel":"analysis","content":[{"type":"output_text","text":"reasoning-only"}]}}
 `},
-		{"copilot", registry.HarnessCopilot, "events.jsonl", `{"type":"session.start","data":{"sessionId":"native-session","context":{"cwd":"/work/project"}}}
+		{"copilot", registry.Harness("copilot"), "events.jsonl", `{"type":"session.start","data":{"sessionId":"native-session","context":{"cwd":"/work/project"}}}
 {"type":"user.message","id":"u1","data":{"content":"Refresh Token"}}
 {"type":"assistant.message_delta","data":{"deltaContent":"Refresh Token"}}
 {"type":"tool.execution_complete","data":{"result":{"content":"tool-only"}}}
 {"type":"assistant.reasoning","data":{"content":"reasoning-only"}}
 `},
-		{"kimi", registry.HarnessKimiCode, "native-session/context.jsonl", `{"role":"user","content":[{"type":"text","text":"Refresh Token"}]}
+		{"kimi", registry.Harness("kimi-code"), "native-session/context.jsonl", `{"role":"user","content":[{"type":"text","text":"Refresh Token"}]}
 {"role":"tool","content":"tool-only"}
 {"role":"assistant","content":[{"type":"think","think":"reasoning-only"}]}
 `},
-		{"cline", registry.HarnessCline, "native-session.messages.json", `{"version":1,"sessionId":"native-session","system_prompt":"system-only","messages":[{"id":"u1","role":"user","content":"Refresh Token"},{"role":"tool","content":[{"type":"tool-result","output":{"value":"tool-only"}}]},{"role":"assistant","content":[{"type":"reasoning","text":"reasoning-only"}]}]}`},
-		{"amp", registry.HarnessAmp, "T-native-session.json", `{"v":1,"id":"native-session","title":"Authentication work","env":{"initial":{"trees":[{"uri":"file:///work/project"}]}},"messages":[{"messageId":0,"role":"user","content":[{"type":"text","text":"Refresh Token"}]},{"messageId":1,"role":"tool","content":[{"type":"tool-result","output":"tool-only"}]},{"messageId":2,"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]},{"messageId":3,"role":"system","content":"system-only"}]}`},
+		{"cline", registry.Harness("cline"), "native-session.messages.json", `{"version":1,"sessionId":"native-session","system_prompt":"system-only","messages":[{"id":"u1","role":"user","content":"Refresh Token"},{"role":"tool","content":[{"type":"tool-result","output":{"value":"tool-only"}}]},{"role":"assistant","content":[{"type":"reasoning","text":"reasoning-only"}]}]}`},
+		{"amp", registry.Harness("amp"), "T-native-session.json", `{"v":1,"id":"native-session","title":"Authentication work","env":{"initial":{"trees":[{"uri":"file:///work/project"}]}},"messages":[{"messageId":0,"role":"user","content":[{"type":"text","text":"Refresh Token"}]},{"messageId":1,"role":"tool","content":[{"type":"tool-result","output":"tool-only"}]},{"messageId":2,"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]},{"messageId":3,"role":"system","content":"system-only"}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,11 +102,29 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	path := writeHistory(t, root, "session.jsonl", treeHistory)
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}}
 	q := history.Query{Text: "refresh token", Dir: "/work/project", Registry: []registry.Session{
-		{ID: "live", Harness: registry.HarnessPi, SessionID: "native-session", SessionPath: path, Presence: registry.PresenceLive, UpdatedAt: time.Now()},
-		{ID: "wrong-harness", Harness: registry.HarnessCodex, SessionID: "native-session", Presence: registry.PresenceLive},
-		{ID: "wrong-profile", Harness: registry.HarnessPi, SessionID: "native-session", SessionPath: "/other/session.jsonl", Presence: registry.PresenceLive},
+		{
+			ID:          "live",
+			Harness:     registry.Harness("pi"),
+			SessionID:   "native-session",
+			SessionPath: path,
+			UpdatedAt:   time.Now(),
+			Liveness:    registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:        "wrong-harness",
+			Harness:   registry.Harness("codex"),
+			SessionID: "native-session",
+			Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:          "wrong-profile",
+			Harness:     registry.Harness("pi"),
+			SessionID:   "native-session",
+			SessionPath: "/other/session.jsonl",
+			Liveness:    registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
 	}}
 	result, err := c.Search(t.Context(), q)
 	if err != nil || len(result.Matches) != 1 {
@@ -135,7 +153,7 @@ func TestPartialSearchAndLimits(t *testing.T) {
 	root := t.TempDir()
 	writeHistory(t, root, "a.jsonl", treeHistory+"invalid private-content\n")
 	writeHistory(t, root, "b.jsonl", strings.ReplaceAll(treeHistory, "native-session", "other-session"))
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}}
 	result, err := c.Search(t.Context(), history.Query{Text: "refresh", Limit: 1})
 	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 1 || !result.Truncated || len(result.Issues) != 1 {
 		t.Fatalf("partial = %#v, %v", result, err)
@@ -163,7 +181,7 @@ func TestSearchOptionalLimit(t *testing.T) {
 		id := strconv.Itoa(i)
 		writeHistory(t, root, id+".jsonl", strings.ReplaceAll(treeHistory, "native-session", id))
 	}
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}}
 	for _, limit := range []int{0, 50, 1001, conversations, 2000} {
 		t.Run(strconv.Itoa(limit), func(t *testing.T) {
 			result, err := c.Search(t.Context(), history.Query{Text: "refresh", Limit: limit})
@@ -185,12 +203,12 @@ func TestMissingUnsupportedAndSymlinkSources(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "outside.jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}, {Harness: registry.HarnessCodex, Path: filepath.Join(root, "absent")}, {Harness: registry.HarnessCursor, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}, {Harness: registry.Harness("codex"), Path: filepath.Join(root, "absent")}, {Harness: registry.Harness("cursor"), Path: root}}}
 	result, err := c.Search(t.Context(), history.Query{Text: "refresh"})
 	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 0 || result.Sources[1].Status != "missing" || result.Sources[2].Status != "unsupported" {
 		t.Fatalf("coverage = %#v, %v", result, err)
 	}
-	if _, err := c.Search(t.Context(), history.Query{Text: "refresh", Harness: registry.HarnessCursor}); !errors.Is(err, history.ErrIncomplete) {
+	if _, err := c.Search(t.Context(), history.Query{Text: "refresh", Harness: registry.Harness("cursor")}); !errors.Is(err, history.ErrIncomplete) {
 		t.Fatalf("explicit unsupported search = %v", err)
 	}
 }
@@ -198,7 +216,7 @@ func TestMissingUnsupportedAndSymlinkSources(t *testing.T) {
 func TestUnicodeExcerptAndJSON(t *testing.T) {
 	t.Parallel()
 	body := strings.Replace(treeHistory, "Find the Refresh Token handler", strings.Repeat("é", 300)+" İSTANBUL refresh token "+strings.Repeat("é", 300), 1)
-	result := searchFile(t, registry.HarnessPi, "session.jsonl", body, "istanbul", false)
+	result := searchFile(t, registry.Harness("pi"), "session.jsonl", body, "istanbul", false)
 	if len(result.Matches) != 1 || !strings.Contains(result.Matches[0].Excerpts[0].Text, "İSTANBUL") {
 		t.Fatalf("Unicode match = %#v", result)
 	}
@@ -225,7 +243,7 @@ func TestKimiNativeDirectoryMetadata(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessKimiCode, Path: tt.path}}}
+			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: tt.path}}}
 			result, err := catalog.Search(t.Context(), history.Query{Text: "refresh", Dir: "/work/kimi-project"})
 			if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.CWD != "/work/kimi-project" {
 				t.Fatalf("Kimi cwd = %#v, %v", result, err)
@@ -244,13 +262,13 @@ func assertNativeTextPolicy(t *testing.T, h registry.Harness, file, body string)
 	if len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "native-session" {
 		t.Fatalf("matches = %#v", result.Matches)
 	}
-	if (h == registry.HarnessOmp || h == registry.HarnessPi) && result.Matches[0].Conversation.Title != "Authentication work" {
+	if (h == registry.Harness("omp") || h == registry.Harness("pi")) && result.Matches[0].Conversation.Title != "Authentication work" {
 		t.Fatalf("%s conversation title = %q, want %q", h, result.Matches[0].Conversation.Title, "Authentication work")
 	}
 	if result.Matches[0].Live == nil || len(result.Matches[0].Live) != 0 {
 		t.Fatal("untracked historical session should have unknown presence")
 	}
-	if h == registry.HarnessCodex && result.Matches[0].MatchingParts != 1 {
+	if h == registry.Harness("codex") && result.Matches[0].MatchingParts != 1 {
 		t.Fatal("duplicated mirrored Codex event")
 	}
 	assertRoleFilteringPolicy(t, h, file, body)
@@ -276,7 +294,7 @@ func TestClineManifestAndConfiguredPathFiltering(t *testing.T) {
 	root := t.TempDir()
 	writeHistory(t, root, "native.messages.json", `{"version":1,"sessionId":"native","updated_at":"2026-09-01T00:00:00Z","messages":[{"role":"user","content":"refresh token"}]}`)
 	writeHistory(t, root, "native.json", `{"session_id":"native","cwd":"/work/private/project","workspace_root":"/work/private","metadata":{"title":"Native title"},"messages_path":"/outside/do-not-follow"}`)
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessCline, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}}
 	result, err := c.Search(t.Context(), history.Query{Text: "refresh", Dir: "/work"})
 	if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.Title != "Native title" {
 		t.Fatalf("manifest = %#v, %v", result, err)
@@ -292,7 +310,7 @@ func TestOversizedRecordDoesNotHideLaterMessages(t *testing.T) {
 	const recordBudget = 16 << 20
 	body := `{"type":"session","id":"large"}` + "\n" + `{"type":"blob","data":"` + strings.Repeat("x", recordBudget) + `"}` + "\n" + `{"type":"message","message":{"role":"user","content":"after-big-record"}}` + "\n"
 	path := writeHistory(t, t.TempDir(), "large.jsonl", body)
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessPi, Path: path}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: path}}}
 	result, err := c.Search(t.Context(), history.Query{Text: "after-big-record"})
 	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 1 || len(result.Issues) != 1 {
 		t.Fatalf("oversized record = %#v, %v", result, err)
@@ -303,7 +321,7 @@ func TestOpenClawRetainedArchives(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	writeHistory(t, root, "main/sessions/native.jsonl.deleted.2026-09-01", treeHistory)
-	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessOpenClaw, Path: root}}}
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("openclaw"), Path: root}}}
 	result, err := c.Search(t.Context(), history.Query{Text: "refresh"})
 	if err != nil || len(result.Matches) != 1 {
 		t.Fatalf("archive search = %#v, %v", result, err)
@@ -320,10 +338,10 @@ func TestCopilotToolRequestsAreOptIn(t *testing.T) {
 	const body = `{"type":"session.start","data":{"sessionId":"native"}}
 {"type":"assistant.message","data":{"content":"Checking","toolRequests":[{"name":"bash","arguments":{"command":"request-only"},"toolCallId":"call"}]}}
 `
-	if result := searchFile(t, registry.HarnessCopilot, "events.jsonl", body, "request-only", false); len(result.Matches) != 0 {
+	if result := searchFile(t, registry.Harness("copilot"), "events.jsonl", body, "request-only", false); len(result.Matches) != 0 {
 		t.Fatal("tool request leaked into default search")
 	}
-	if result := searchFile(t, registry.HarnessCopilot, "events.jsonl", body, "request-only", true); len(result.Matches) != 1 {
+	if result := searchFile(t, registry.Harness("copilot"), "events.jsonl", body, "request-only", true); len(result.Matches) != 1 {
 		t.Fatal("opt-in did not search tool request")
 	}
 }
@@ -363,7 +381,7 @@ func requireMatches(t *testing.T, result history.Result, err error, want int) {
 func TestUnusableIndexPathFallsBackToDirectScan(t *testing.T) {
 	t.Parallel()
 	path := writeHistory(t, t.TempDir(), "session.jsonl", treeHistory)
-	catalog := directCatalog(t, []history.Source{{Harness: registry.HarnessPi, Path: path}})
+	catalog := directCatalog(t, []history.Source{{Harness: registry.Harness("pi"), Path: path}})
 	result, err := catalog.Search(t.Context(), history.Query{Text: "refresh token"})
 	requireMatches(t, result, err, 1)
 	if result.Matches[0].Conversation.SessionID != "native-session" {
@@ -382,8 +400,8 @@ func TestDuplicateSourcesAreDeduplicated(t *testing.T) {
 	// deduplication has to canonicalize instead of comparing source strings.
 	duplicate := root + string(filepath.Separator) + "." + string(filepath.Separator) + "session.jsonl"
 	catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{
-		{Harness: registry.HarnessPi, Path: path},
-		{Harness: registry.HarnessPi, Path: duplicate},
+		{Harness: registry.Harness("pi"), Path: path},
+		{Harness: registry.Harness("pi"), Path: duplicate},
 	}}
 	result, err := catalog.Search(t.Context(), history.Query{Text: "refresh"})
 	requireMatches(t, result, err, 1)
@@ -402,8 +420,8 @@ func TestSkippedSourcesReportIncompleteCoverage(t *testing.T) {
 	root := t.TempDir()
 	writeHistory(t, root, "session.jsonl", treeHistory)
 	catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{
-		{Harness: registry.HarnessPi, Path: root},
-		{Harness: registry.HarnessCodex, Path: root},
+		{Harness: registry.Harness("pi"), Path: root},
+		{Harness: registry.Harness("codex"), Path: root},
 	}}
 	for _, tt := range []struct {
 		name   string
@@ -412,12 +430,12 @@ func TestSkippedSourcesReportIncompleteCoverage(t *testing.T) {
 	}{
 		{
 			name:   "harness filter",
-			query:  history.Query{Text: "refresh", Harness: registry.HarnessCursor},
+			query:  history.Query{Text: "refresh", Harness: registry.Harness("cursor")},
 			reason: "does not match the requested harness",
 		},
 		{
 			name:   "ignore list",
-			query:  history.Query{Text: "refresh", IgnoreHarnesses: []registry.Harness{registry.HarnessPi, registry.HarnessCodex}},
+			query:  history.Query{Text: "refresh", IgnoreHarnesses: []registry.Harness{registry.Harness("pi"), registry.Harness("codex")}},
 			reason: "excluded by the ignore list",
 		},
 	} {
@@ -447,10 +465,10 @@ func TestPartiallySkippedSourcesAreNotIncomplete(t *testing.T) {
 	root := t.TempDir()
 	writeHistory(t, root, "session.jsonl", treeHistory)
 	catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{
-		{Harness: registry.HarnessPi, Path: root},
-		{Harness: registry.HarnessCodex, Path: root},
+		{Harness: registry.Harness("pi"), Path: root},
+		{Harness: registry.Harness("codex"), Path: root},
 	}}
-	result, err := catalog.Search(t.Context(), history.Query{Text: "refresh", Harness: registry.HarnessPi})
+	result, err := catalog.Search(t.Context(), history.Query{Text: "refresh", Harness: registry.Harness("pi")})
 	requireMatches(t, result, err, 1)
 	if len(result.Issues) != 0 {
 		t.Fatalf("partial coverage issues = %#v", result.Issues)
@@ -463,7 +481,7 @@ func TestPartiallySkippedSourcesAreNotIncomplete(t *testing.T) {
 func TestConversationMetadataIndependentOfToolSearch(t *testing.T) {
 	t.Parallel()
 	path := writeHistory(t, t.TempDir(), "session.jsonl", toolHistory)
-	sources := []history.Source{{Harness: registry.HarnessPi, Path: path}}
+	sources := []history.Source{{Harness: registry.Harness("pi"), Path: path}}
 	for _, mode := range searchModes(t, sources) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
@@ -487,7 +505,7 @@ func TestConversationMetadataIndependentOfToolSearch(t *testing.T) {
 func TestToolExcerptsAreOptIn(t *testing.T) {
 	t.Parallel()
 	path := writeHistory(t, t.TempDir(), "session.jsonl", toolHistory)
-	sources := []history.Source{{Harness: registry.HarnessPi, Path: path}}
+	sources := []history.Source{{Harness: registry.Harness("pi"), Path: path}}
 	for _, mode := range searchModes(t, sources) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
@@ -518,7 +536,7 @@ func orderingSources(t *testing.T) []history.Source {
 	root := t.TempDir()
 	created := writeHistory(t, root, "a-recently-created.jsonl", recentlyCreated)
 	updated := writeHistory(t, root, "b-recently-updated.jsonl", recentlyUpdated)
-	return []history.Source{{Harness: registry.HarnessPi, Path: created}, {Harness: registry.HarnessPi, Path: updated}}
+	return []history.Source{{Harness: registry.Harness("pi"), Path: created}, {Harness: registry.Harness("pi"), Path: updated}}
 }
 
 func TestResultOrderingPrefersMostRecentlyUpdated(t *testing.T) {

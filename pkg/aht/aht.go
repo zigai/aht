@@ -48,24 +48,6 @@ const (
 	// ActivityUnknown indicates activity cannot be determined.
 	ActivityUnknown Activity = registry.ActivityUnknown
 
-	HarnessClaude   Harness = registry.HarnessClaude
-	HarnessCodex    Harness = registry.HarnessCodex
-	HarnessCursor   Harness = registry.HarnessCursor
-	HarnessCopilot  Harness = registry.HarnessCopilot
-	HarnessCline    Harness = registry.HarnessCline
-	HarnessKimiCode Harness = registry.HarnessKimiCode
-	HarnessGrok     Harness = registry.HarnessGrok
-	HarnessGoose    Harness = registry.HarnessGoose
-	HarnessPi       Harness = registry.HarnessPi
-	HarnessOmp      Harness = registry.HarnessOmp
-	HarnessOpenCode Harness = registry.HarnessOpenCode
-	HarnessAgy      Harness = registry.HarnessAgy
-	HarnessKilo     Harness = registry.HarnessKilo
-	HarnessDroid    Harness = registry.HarnessDroid
-	HarnessOpenClaw Harness = registry.HarnessOpenClaw
-	HarnessHermes   Harness = registry.HarnessHermes
-	HarnessAmp      Harness = registry.HarnessAmp
-
 	MultiplexerTmux                  MultiplexerKind = client.MultiplexerTmux
 	MultiplexerZellij                MultiplexerKind = client.MultiplexerZellij
 	MultiplexerHerdr                 MultiplexerKind = client.MultiplexerHerdr
@@ -213,11 +195,13 @@ type (
 	// Harness identifies a supported AI coding agent.
 	Harness = registry.Harness
 
-	// TmuxContext represents the tmux multiplexer location of a session.
-	TmuxContext = registry.TmuxContext
+	Liveness = registry.Liveness
+	Live     = registry.Live
+	Gone     = registry.Gone
+	Unknown  = registry.Unknown
 
-	// MultiplexerContext represents the unified multiplexer location of a session.
-	MultiplexerContext = registry.MultiplexerContext
+	// Location represents the unified multiplexer location of a session.
+	Location = registry.Location
 
 	// MultiplexerKind identifies a supported terminal multiplexer.
 	MultiplexerKind = client.MultiplexerKind
@@ -331,6 +315,20 @@ type (
 )
 
 // New returns a client for the configured local AHT instance.
+type (
+	Evidence        = registry.Evidence
+	Report          = registry.Report
+	Reporter        = registry.Reporter
+	Sighting        = registry.Sighting
+	Placement       = registry.Placement
+	Listing         = registry.Listing
+	Reading         = registry.Reading
+	Incarnation     = registry.Incarnation
+	Authority       = registry.Authority
+	Lifecycle       = registry.NativeLifecycle
+	ProcessIdentity = registry.ProcessIdentity
+)
+
 func New(config Config) *Client {
 	return client.New(config)
 }

@@ -25,7 +25,9 @@ type hookPayload struct {
 
 func New() droidHarness {
 	return droidHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID: registry.HarnessDroid,
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("droid"),
 		Aliases: []string{
 			"factory",
 			"factory-droid",
@@ -52,7 +54,7 @@ func New() droidHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  droidIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -153,7 +155,7 @@ func (droidHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 }
 
 func droidHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessDroid, transition, event, droidIntegrationSource)
+	return harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("droid"), transition, event, droidIntegrationSource)
 }
 
 func droidConfigDir() string {
@@ -162,4 +164,11 @@ func droidConfigDir() string {
 	}
 
 	return ".factory"
+}
+
+func (droidHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["droid_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "droid_source", "source", "reason"))
 }

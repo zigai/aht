@@ -47,16 +47,17 @@ type paneRecord struct {
 	PaneCWD     string `json:"pane_cwd"`
 }
 
-func Current() registry.MultiplexerContext {
+func Current() registry.Location {
 	return CurrentWithEnv(Env{SessionName: os.Getenv("ZELLIJ_SESSION_NAME"), PaneID: os.Getenv("ZELLIJ_PANE_ID")})
 }
 
-func CurrentWithEnv(env Env) registry.MultiplexerContext {
+func CurrentWithEnv(env Env) registry.Location {
 	if strings.TrimSpace(env.SessionName) == "" || strings.TrimSpace(env.PaneID) == "" {
-		var empty registry.MultiplexerContext
+		var empty registry.Location
 		return empty
 	}
-	return registry.MultiplexerContext{ //nolint:exhaustruct_v5 // env exposes only session and pane
+	return registry.Location{
+		ServerID: "", SessionID: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: "",
 		Kind: registry.MultiplexerZellij, SessionName: env.SessionName, PaneID: mux.NormalizePaneID(registry.MultiplexerZellij, env.PaneID),
 	}
 }
@@ -155,7 +156,8 @@ func parsePanes(session string, output string) ([]mux.Pane, error) {
 			continue
 		}
 		paneID := "terminal_" + strconv.FormatUint(uint64(record.ID), 10)
-		location := registry.MultiplexerContext{ //nolint:exhaustruct_v5 // pane JSON lacks process and TTY
+		location := registry.Location{
+			ServerID: "", SessionID: "", WorkspaceID: "", WorkspaceName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneIndex: "", PanePID: 0, PaneTTY: "", ClientTTY: "",
 			Kind: registry.MultiplexerZellij, SessionName: session,
 			TabID: strconv.Itoa(record.TabID), TabIndex: strconv.Itoa(record.TabPosition), TabName: record.TabName,
 			PaneID: paneID, PaneCurrentPath: record.PaneCWD,

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
@@ -55,7 +56,7 @@ func TestObserverCycleAcceptsCanonicalizedCatalogAlias(t *testing.T) {
 	t.Setenv(catalogJSONEnv, `[{"harness":"claude-code","session_id":"alias","current":true}]`)
 	t.Setenv(catalogFileEnv, "")
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	watcher := New(Options{
 		Store:       store,
 		StorePath:   path,
@@ -76,7 +77,7 @@ func TestObserverCycleAcceptsCanonicalizedCatalogAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Harness != registry.HarnessClaude {
+	if len(sessions) != 1 || sessions[0].Harness != registry.Harness("claude") {
 		t.Fatalf("catalog sessions = %#v", sessions)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -35,7 +36,7 @@ func TestListRejectsModeSpecificFlags(t *testing.T) {
 
 func TestListDefaultsToLatestUpdateLastWithUsefulLabelsAndShortIDs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	old := observeTestSession(t, store, "older-session", time.Now().Add(-time.Hour))
 	newer := observeTestSession(t, store, "newer-session", time.Now())
 
@@ -82,15 +83,11 @@ func assertListJSONOutput(t *testing.T, data []byte, oldID, newerID string) {
 
 func TestListDisplaysAndFiltersZellijLocation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
-	location := &registry.MultiplexerContext{
+	store := registry.NewJournal(path, catalog.Rules{})
+	location := &registry.Location{
 		Kind: registry.MultiplexerZellij, SessionName: "work", TabName: "agents", PaneID: "terminal_7",
 	}
-	if _, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "zellij-session"},
-		NativeEvent: "turn_complete", Multiplexer: location, ObservedAt: time.Now().UTC(),
-	}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "zellij-session"}, Evidence: &registry.Report{Event: "turn_complete", Location: location}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -149,17 +146,12 @@ func TestListTableColumnsExpandsSessionAndCWDWhenWidthAllows(t *testing.T) {
 func TestListFullFlagRendersCompleteValues(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	now := time.Now().UTC()
 	live := registry.PresenceLive
 	longSession := "Deploy new analytics dashboard to production cluster for quarterly report"
 	longPath := "/home/zigai/Projects/very/deeply/nested/repository/path/with/lots/of/subdirectories"
-	session, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: longSession},
-		Presence: &live, NativeEvent: "start", ObservedAt: now,
-		Catalog: &registry.CatalogMetadata{CWD: longPath},
-	})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: now, Subject: registry.ObservationIdentity{SessionID: longSession}, Evidence: &registry.Report{Event: "start", Claim: &live, Listing: &registry.Listing{CWD: longPath}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +238,7 @@ func TestSessionDisplayLabel(t *testing.T) {
 		},
 		{
 			name:    "pane id fallback",
-			session: registry.Session{ID: "omp-12345678", Multiplexer: registry.MultiplexerContext{PaneID: "%12"}},
+			session: registry.Session{ID: "omp-12345678", Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%12"}},
 			want:    "%12",
 		},
 		{

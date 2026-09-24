@@ -85,7 +85,7 @@ func DefaultConfigDir() string {
 }
 
 func (l Loader) Supports(harness registry.Harness) bool {
-	if SupportsScreen(harness) {
+	if harnesscatalog.SupportsScreen(harness) {
 		return true
 	}
 	_, err := os.Stat(l.overridePath(harness))
@@ -191,7 +191,7 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 
 func loadUncached(harness registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
-	if SupportsScreen(harness) {
+	if harnesscatalog.SupportsScreen(harness) {
 		var err error
 		bundled, err = loadBundled(harness)
 		if err != nil {
@@ -199,7 +199,7 @@ func loadUncached(harness registry.Harness, path string) (Manifest, error) {
 		}
 	}
 	if path == "" {
-		if SupportsScreen(harness) {
+		if harnesscatalog.SupportsScreen(harness) {
 			return bundled, nil
 		}
 		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harness)
@@ -207,13 +207,13 @@ func loadUncached(harness registry.Harness, path string) (Manifest, error) {
 
 	data, readErr := readManifestFile(path)
 	if errors.Is(readErr, os.ErrNotExist) {
-		if SupportsScreen(harness) {
+		if harnesscatalog.SupportsScreen(harness) {
 			return bundled, nil
 		}
 		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harness)
 	}
 	if readErr != nil {
-		if !SupportsScreen(harness) {
+		if !harnesscatalog.SupportsScreen(harness) {
 			return Manifest{}, fmt.Errorf("reading local override %s: %w", path, readErr)
 		}
 		bundled.Warning = fmt.Sprintf("reading local override %s: %v", path, readErr)
@@ -222,7 +222,7 @@ func loadUncached(harness registry.Harness, path string) (Manifest, error) {
 
 	local, parseErr := ParseManifest(data, harness)
 	if parseErr != nil {
-		if !SupportsScreen(harness) {
+		if !harnesscatalog.SupportsScreen(harness) {
 			return Manifest{}, fmt.Errorf("loading local override %s: %w", path, parseErr)
 		}
 		bundled.Warning = fmt.Sprintf("ignoring invalid local override %s: %v", path, parseErr)

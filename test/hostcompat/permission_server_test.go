@@ -35,7 +35,7 @@ func runServerPermissionScenarios(t *testing.T, contract hostContract, oracle st
 				t.Fatal("server permission driver does not expect setup commands")
 			}
 			configName := "opencode.json"
-			if contract.ID == registry.HarnessKilo {
+			if contract.ID == registry.Harness("kilo") {
 				configName = "kilo.json"
 			}
 			host.writeFile(t, filepath.Join(host.work, configName), `{"permission":{"bash":"ask"}}`)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -79,7 +80,7 @@ func TestReportJSONCoversIgnoredResult(t *testing.T) {
 func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	at := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
 
@@ -91,13 +92,13 @@ func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start.observation.Process = process
+	start.observation.SetProcess(process)
 	session, err := store.Observe(context.Background(), start.observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Presence != registry.PresenceLive {
-		t.Fatalf("start presence = %q, want live", session.Presence)
+	if session.Presence() != registry.PresenceLive {
+		t.Fatalf("start presence = %q, want live", session.Presence())
 	}
 
 	end, err := prepareReport(
@@ -108,25 +109,21 @@ func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	end.observation.Process = process
+	end.observation.SetProcess(process)
 	session, err = store.Observe(context.Background(), end.observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Presence != registry.PresenceGone || session.Activity != nil {
+	if session.Presence() != registry.PresenceGone || session.Activity() != nil {
 		t.Fatalf("end state = %#v", session)
 	}
 
 	present := true
-	session, err = store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "codex-session"},
-		ProcessPresent: &present, Process: process, ObservedAt: at.Add(2 * time.Second),
-	})
+	session, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{SessionID: "codex-session"}, Evidence: &registry.Sighting{Process: *process, Present: present}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Presence != registry.PresenceGone {
+	if session.Presence() != registry.PresenceGone {
 		t.Fatalf("process evidence resurrected ended session: %#v", session)
 	}
 }
@@ -169,7 +166,7 @@ func TestHermesLifecycleReportsDriveDocumentedStateTransitions(t *testing.T) {
 func testLifecycleReports(t *testing.T, harness string, base time.Time, tests []lifecycleReportCase) {
 	t.Helper()
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	for index, test := range tests {
 		prepared, err := prepareReport(nil, reportOptions{
 			harness: harness, lifecycle: test.lifecycle, presence: test.presence, activity: test.activity,
@@ -182,8 +179,8 @@ func testLifecycleReports(t *testing.T, harness string, base time.Time, tests []
 		if err != nil {
 			t.Fatalf("recording %s report: %v", test.name, err)
 		}
-		if session.Presence != test.wantPresence || !equalActivity(session.Activity, test.wantActivity) {
-			t.Fatalf("%s state = presence %q activity %#v", test.name, session.Presence, session.Activity)
+		if session.Presence() != test.wantPresence || !equalActivity(session.Activity(), test.wantActivity) {
+			t.Fatalf("%s state = presence %q activity %#v", test.name, session.Presence(), session.Activity())
 		}
 	}
 }

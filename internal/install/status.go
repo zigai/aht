@@ -170,18 +170,10 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 	}
 }
 
-//nolint:cyclop // plugin status combines owned source and native/import registration state
 func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
 	result, err := inspectOwnedPath(plan.Dir)
 	if err != nil {
 		return result, err
-	}
-	obsoleteFiles, err := managedObsoleteFiles(plan.ObsoleteFiles)
-	if err != nil {
-		return nil, err
-	}
-	for _, path := range obsoleteFiles {
-		result = append(result, inspectedArtifact{path: path, status: ArtifactStale})
 	}
 	if plan.Registration != nil {
 		registration, inspectErr := inspectRegistration(ctx, plan)

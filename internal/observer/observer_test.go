@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
@@ -36,7 +37,7 @@ type failGoneOnceStore struct {
 func (store *failGoneOnceStore) ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error) {
 	if !store.failed {
 		for _, observation := range observations {
-			if observation.ProcessPresent != nil && !*observation.ProcessPresent {
+			if observation.Present() != nil && !*observation.Present() {
 				store.failed = true
 				return nil, errFailGoneObservation
 			}
@@ -90,7 +91,7 @@ func (store *conflictObservationStore) ObserveBatch(ctx context.Context, observa
 }
 
 func (store *conflictObservationStore) conflicts(observation registry.Observation) bool {
-	return store.enabled && observation.Process != nil && observation.Process.PID == store.conflictPID
+	return store.enabled && observation.ProcessIdentity() != nil && observation.ProcessIdentity().PID == store.conflictPID
 }
 
 func requireOnlySessionPresence(t *testing.T, store Store, want registry.Presence) {
@@ -99,7 +100,7 @@ func requireOnlySessionPresence(t *testing.T, store Store, want registry.Presenc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != want {
+	if len(sessions) != 1 || sessions[0].Presence() != want {
 		t.Fatalf("sessions = %#v, want one %s session", sessions, want)
 	}
 }
@@ -163,12 +164,12 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 	if first.Present != 1 || first.Gone != 0 {
 		t.Fatalf("first result: %#v", first)
 	}
-	sessions, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("present sessions: %v %#v", err, sessions)
 	}
 	session := sessions[0]
-	if session.Presence != registry.PresenceLive || session.Activity == nil || *session.Activity != registry.ActivityUnknown {
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityUnknown {
 		t.Fatalf("present session: %#v", session)
 	}
 	processes = nil
@@ -188,11 +189,11 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 	if third.Gone != 1 {
 		t.Fatalf("second miss did not mark gone: %#v", third)
 	}
-	session, err = registry.NewFileStore(path).Get(context.Background(), session.ID)
+	session, err = registry.NewJournal(path, catalog.Rules{}).Get(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Presence != registry.PresenceGone || session.Activity != nil {
+	if session.Presence() != registry.PresenceGone || session.Activity() != nil {
 		t.Fatalf("gone session: %#v", session)
 	}
 }
@@ -201,7 +202,7 @@ func TestObserverRetriesFailedGoneObservationAndEvictsTrackedProcess(t *testing.
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewFileStore(path)
+	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
@@ -241,7 +242,7 @@ func TestObserverConflictDoesNotBlockIndependentObservation(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewFileStore(path)
+	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
@@ -276,7 +277,7 @@ func TestObserverRunWithResultsDeliversDegradedResultOnStoreFailure(t *testing.T
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewFileStore(path)
+	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
@@ -325,7 +326,7 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 	t.Parallel()
 
 	store := &conflictObservationStore{
-		Store:       registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+		Store:       registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 		conflictPID: 1234, enabled: true, batchOnly: true,
 	}
 	watcher := New(Options{
@@ -352,7 +353,7 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 	t.Parallel()
 
-	baseStore := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
@@ -386,7 +387,7 @@ func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if session.Process != nil && session.Process.PID == 5678 && session.Presence == registry.PresenceGone {
+		if session.Process != nil && session.Process.PID == 5678 && session.Presence() == registry.PresenceGone {
 			return
 		}
 	}
@@ -397,7 +398,7 @@ func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) 
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewFileStore(path)
+	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
@@ -447,7 +448,7 @@ func TestObserverRejectsConcurrentRunsOnOneInstance(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	watcher := New(Options{
-		Store: registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			close(entered)
 			<-release
@@ -482,7 +483,7 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 	healthPath := filepath.Join(blockedParent, "health.json")
 	at := time.Now().UTC()
 	watcher := New(Options{
-		Store:       registry.NewFileStore(filepath.Join(root, "sessions.json")),
+		Store:       registry.NewJournal(filepath.Join(root, "sessions.json"), catalog.Rules{}),
 		HealthPath:  healthPath,
 		Now:         func() time.Time { return at },
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
@@ -537,11 +538,11 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 		t.Fatalf("restart result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone || sessions[0].Activity != nil || sessions[0].ActivityDecision == nil || sessions[0].ActivityDecision.Reason != "process_gone" || sessions[0].ActivityDecision.Process.StartIdentity != process.StartIdentity {
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone || sessions[0].Activity() != nil || sessions[0].Decision() == nil || sessions[0].Decision().Reason != "process_gone" || sessions[0].Decision().Process.StartIdentity != process.StartIdentity {
 		t.Fatalf("sessions after restart: %#v", sessions)
 	}
 }
@@ -550,21 +551,10 @@ func seedHookCreatedLiveSession(t *testing.T, path string, at time.Time, process
 	t.Helper()
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
-	_, err := registry.NewFileStore(path).Observe(context.Background(), registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "hook-only"},
-		NativeEvent: "agent_start",
-		Presence:    &presence,
-		Activity:    &activity,
-		Process: &registry.ProcessIdentity{
-			PID:           process.PID,
-			StartIdentity: process.StartIdentity,
-		},
-		Tmux:       &registry.TmuxContext{Inside: true, SessionName: "0", PaneID: "%1"},
-		ObservedAt: at,
-	})
+	_, err := registry.NewJournal(path, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at, Subject: registry.ObservationIdentity{SessionID: "hook-only"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence, Activity: &activity, Process: &registry.ProcessIdentity{
+		PID:           process.PID,
+		StartIdentity: process.StartIdentity,
+	}, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,11 +584,11 @@ func TestObserverMarksHookCreatedDeadProcessGoneInOneCycle(t *testing.T) {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone {
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone {
 		t.Fatalf("sessions after sweep: %#v", sessions)
 	}
 }
@@ -625,11 +615,11 @@ func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPID(t *testing.T) {
 	if _, err := New(newOptions(at, liveProcesses)).RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceLive {
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceLive {
 		t.Fatalf("matching live process must stay live: %#v", sessions)
 	}
 
@@ -649,17 +639,7 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Minute)
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
-	_, err := registry.NewFileStore(path).Observe(context.Background(), registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessPi,
-		Identity:    registry.ObservationIdentity{SessionID: "hook-pi-pane"},
-		NativeEvent: "agent_start",
-		Presence:    &presence,
-		Activity:    &activity,
-		Tmux:        &registry.TmuxContext{Inside: true, SessionName: "0", PaneID: "%1", PanePID: 1392},
-		ObservedAt:  at,
-	})
+	_, err := registry.NewJournal(path, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionID: "hook-pi-pane"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence, Activity: &activity, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%1", PanePID: 1392}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,11 +663,11 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone {
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone {
 		t.Fatalf("sessions after dead pane PID sweep: %#v", sessions)
 	}
 }
@@ -697,10 +677,10 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	at := time.Now().UTC().Add(-time.Minute)
 
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	seedStaleSessionHistory(t, store, at)
 	preSessions, err := store.List(context.Background(), registry.Filter{})
-	if err != nil || len(preSessions) != 1 || preSessions[0].Presence != registry.PresenceLive || preSessions[0].Observations.Process == nil {
+	if err != nil || len(preSessions) != 1 || preSessions[0].Presence() != registry.PresenceLive || preSessions[0].Observations.Process == nil {
 		t.Fatalf("precondition failed: sessions=%#v, error=%v", preSessions, err)
 	}
 
@@ -729,7 +709,7 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence != registry.PresenceGone || sessions[0].Activity != nil {
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone || sessions[0].Activity() != nil {
 		t.Fatalf("session was not retired: %#v", sessions)
 	}
 }
@@ -743,69 +723,31 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 
 	start := registry.NativeLifecycleStart
 	// 1. Initial hook observation
-	_, err := store.Observe(context.Background(), registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
-		NativeEvent: "agent_start",
-		Lifecycle:   &start,
-		Presence:    &presence,
-		Activity:    &activity,
-		Process: &registry.ProcessIdentity{
-			PID:           process.PID,
-			StartIdentity: process.StartIdentity,
-		},
-		Tmux:       &registry.TmuxContext{Inside: true, SessionName: "0", PaneID: "%53"},
-		ObservedAt: at,
-	})
+	_, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at, Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_start", Lifecycle: &start, Claim: &presence, Activity: &activity, Process: &registry.ProcessIdentity{
+		PID:           process.PID,
+		StartIdentity: process.StartIdentity,
+	}, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%53"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Prior process observation showing process is absent
-	_, err = store.Observe(context.Background(), registry.Observation{
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Harness:        registry.HarnessOmp,
-		Identity:       registry.ObservationIdentity{SessionID: "stale-session"},
-		ProcessPresent: &present,
-		Process: &registry.ProcessIdentity{
-			PID:           process.PID,
-			StartIdentity: process.StartIdentity,
-		},
-		ObservedAt: at.Add(time.Second),
-	})
+	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{
+		PID:           process.PID,
+		StartIdentity: process.StartIdentity,
+	}, Present: present}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 3. A subsequent start hook revived presence to live
-	_, err = store.Observe(context.Background(), registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
-		NativeEvent: "agent_start",
-		Lifecycle:   &start,
-		Presence:    &presence,
-		Activity:    &activity,
-		ObservedAt:  at.Add(2 * time.Second),
-	})
+	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_start", Lifecycle: &start, Claim: &presence, Activity: &activity}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 4. Agent end hook with interrupted activity
-	_, err = store.Observe(context.Background(), registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "stale-session"},
-		NativeEvent: "agent_end",
-		Activity:    &activity,
-		ObservedAt:  at.Add(3 * time.Second),
-	})
+	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(3 * time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_end", Activity: &activity}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -816,7 +758,7 @@ func TestRunWithResultsStreamsEveryCycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	results := make([]Result, 0, 1)
 	watcher := New(Options{
-		Store: registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json")),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			cancel()
 			return nil, nil

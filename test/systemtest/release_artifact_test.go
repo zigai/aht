@@ -499,8 +499,8 @@ func verifyReleaseBinaryBehavior(binary string, metadata releaseMetadata) error 
 	if err := json.Unmarshal(reportOutput, &reported); err != nil {
 		return fmt.Errorf("decode report output %q: %w", reportOutput, err)
 	}
-	if reported.SchemaVersion != 2 || reported.SessionID != "release-verification" || reported.Harness != "codex" {
-		return fmt.Errorf("report output does not contain the schema-v2 Codex session: %q", reportOutput)
+	if reported.SchemaVersion != 3 || reported.SessionID != "release-verification" || reported.Harness != "codex" {
+		return fmt.Errorf("report output does not contain the schema-v3 Codex session: %q", reportOutput)
 	}
 
 	listOutput, err := runReleaseCommand(binary, workingDir, environment, "--store", storePath, "--json", "list")

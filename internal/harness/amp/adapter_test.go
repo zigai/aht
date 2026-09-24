@@ -73,8 +73,8 @@ func TestDefinition(t *testing.T) {
 
 	h := New()
 	def := h.Definition()
-	if def.ID != registry.HarnessAmp {
-		t.Fatalf("expected ID %q, got %q", registry.HarnessAmp, def.ID)
+	if def.ID != registry.Harness("amp") {
+		t.Fatalf("expected ID %q, got %q", registry.Harness("amp"), def.ID)
 	}
 	if !def.Capabilities.SessionStart || !def.Capabilities.SessionEnd || !def.Capabilities.RunningIdle || !def.Capabilities.WaitingPermission {
 		t.Fatalf("unexpected capabilities: %+v", def.Capabilities)

@@ -107,7 +107,7 @@ func processMatchingMultiplexerIdentity(pane mux.Pane, processes []processinfo.P
 }
 
 //nolint:cyclop // each multiplexer has different native identity guarantees
-func multiplexerIdentityMatches(process processinfo.Process, location registry.MultiplexerContext) bool {
+func multiplexerIdentityMatches(process processinfo.Process, location registry.Location) bool {
 	if process.MultiplexerKind == "" || process.MultiplexerKind != string(location.Kind) {
 		return false
 	}

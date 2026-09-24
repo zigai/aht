@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 11
+	integrationVersion        = 12
 	opencodePluginName        = "aht-state.ts"
 	opencodeIntegrationID     = "opencode"
 	opencodeIntegrationSource = "opencode-plugin"
@@ -25,9 +25,11 @@ type opencodeHarness struct{ harness.BaseAdapter }
 
 func New() opencodeHarness {
 	return opencodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessOpenCode,
-		Aliases:      []string{"open-code", "open_code"},
-		ProcessNames: []string{"opencode", "open-code"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("opencode"),
+		Aliases:          []string{"open-code", "open_code"},
+		ProcessNames:     []string{"opencode", "open-code"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"OPENCODE_SESSION_ID"},
 			SessionPath: []string{"OPENCODE_SESSION_PATH"},
@@ -46,7 +48,7 @@ func New() opencodeHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  opencodeIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     true,
 	})}
 }

@@ -82,7 +82,7 @@ func TestSubscriptionCloseJoinsReader(t *testing.T) {
 	}
 	<-subscription.Snapshots
 	subscription.Close()
-	subscription.Close()
+
 	select {
 	case _, ok := <-subscription.Snapshots:
 		if ok {

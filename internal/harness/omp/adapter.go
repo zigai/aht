@@ -16,7 +16,7 @@ const (
 	ompIntegrationID       = "omp"
 	ompIntegrationSourceID = "omp-extension"
 	ompSessionFlag         = "--session"
-	integrationVersion     = 16
+	integrationVersion     = 17
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -26,9 +26,11 @@ type ompHarness struct{ harness.BaseAdapter }
 
 func New() ompHarness {
 	return ompHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessOmp,
-		Aliases:      []string{"ohmypi", "oh-my-pi", "oh_my_pi"},
-		ProcessNames: []string{"omp", "ohmypi", "oh-my-pi"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("omp"),
+		Aliases:          []string{"ohmypi", "oh-my-pi", "oh_my_pi"},
+		ProcessNames:     []string{"omp", "ohmypi", "oh-my-pi"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -47,7 +49,7 @@ func New() ompHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ompIntegrationSourceID,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     true,
 	})}
 }
@@ -111,4 +113,11 @@ func ompAgentDir() string {
 	}
 
 	return filepath.Join(configRoot, "agent")
+}
+
+func (ompHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["omp_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "omp_reason", "omp_approval_reason", "source", "reason"))
 }

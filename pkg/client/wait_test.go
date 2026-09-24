@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/brokerserver"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
@@ -22,25 +23,23 @@ func makeTestSession(id string, presence registry.Presence, activity registry.Ac
 		act = &activity
 	}
 	return registry.Session{
-		SchemaVersion:     1,
-		ID:                id,
-		Harness:           registry.HarnessCodex,
-		Presence:          presence,
-		Activity:          act,
-		SessionID:         id,
-		SessionPath:       "",
-		ResumeCommand:     nil,
-		CWD:               "/tmp",
-		ProjectRoot:       "/tmp",
-		Process:           nil,
-		Tmux:              registry.TmuxContext{},
-		Multiplexer:       registry.MultiplexerContext{},
+		SchemaVersion: 1,
+		ID:            id,
+		Harness:       registry.Harness("pi"),
+		SessionID:     id,
+		SessionPath:   "",
+		ResumeCommand: nil,
+		CWD:           "/tmp",
+		ProjectRoot:   "/tmp",
+		Process:       nil,
+		Location:      registry.Location{},
+
 		Observations:      registry.Observations{},
 		CreatedAt:         time.Now().UTC(),
 		UpdatedAt:         time.Now().UTC(),
 		PresenceChangedAt: time.Now().UTC(),
 		ActivityChangedAt: time.Now().UTC(),
-		ActivityDecision:  nil,
+		Liveness:          registry.NewLiveness(presence, registry.ActivityValue(act), nil),
 	}
 }
 
@@ -221,8 +220,8 @@ func TestWaitEventualTransition(t *testing.T) {
 		if res.Initial {
 			t.Errorf("res.Initial = %v, want false for transition", res.Initial)
 		}
-		if res.Session.Activity == nil || *res.Session.Activity != registry.ActivityIdle {
-			t.Errorf("res.Session.Activity = %v, want idle", res.Session.Activity)
+		if res.Session.Activity() == nil || *res.Session.Activity() != registry.ActivityIdle {
+			t.Errorf("res.Session.Activity = %v, want idle", res.Session.Activity())
 		}
 	})
 }
@@ -302,8 +301,8 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 			if out.res.Session.ID != "sess-flicker" {
 				t.Errorf("res.Session.ID = %q, want sess-flicker", out.res.Session.ID)
 			}
-			if out.res.Session.Activity == nil || *out.res.Session.Activity != registry.ActivityIdle {
-				t.Errorf("res.Session.Activity = %v, want idle", out.res.Session.Activity)
+			if out.res.Session.Activity() == nil || *out.res.Session.Activity() != registry.ActivityIdle {
+				t.Errorf("res.Session.Activity = %v, want idle", out.res.Session.Activity())
 			}
 			if elapsed := time.Since(idleStart); elapsed < 300*time.Millisecond {
 				t.Errorf("virtual elapsed time since second idle = %v, want >= 300ms", elapsed)
@@ -461,8 +460,8 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 		if !res.Initial {
 			t.Errorf("res.Initial = %v, want true", res.Initial)
 		}
-		if res.Session.Presence != registry.PresenceGone {
-			t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence)
+		if res.Session.Presence() != registry.PresenceGone {
+			t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence())
 		}
 	})
 
@@ -499,8 +498,8 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 			if res.Initial {
 				t.Errorf("res.Initial = %v, want false for transition", res.Initial)
 			}
-			if res.Session.Presence != registry.PresenceGone {
-				t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence)
+			if res.Session.Presence() != registry.PresenceGone {
+				t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence())
 			}
 		})
 	})
@@ -577,7 +576,7 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	store, err := registry.OpenMemoryStore(storePath)
+	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,19 +647,11 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 
 	directory := t.TempDir()
 	storePath := filepath.Join(directory, "sessions.json")
-	fileStore := registry.NewFileStore(storePath)
+	fileStore := registry.NewJournal(storePath, catalog.Rules{})
 
 	presence := registry.PresenceLive
 	running := registry.ActivityRunning
-	observed, err := fileStore.Observe(t.Context(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "durable-sess"},
-		Presence:   &presence,
-		Activity:   &running,
-		ObservedAt: time.Now().UTC(),
-	})
+	observed, err := fileStore.Observe(t.Context(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "durable-sess"}, Evidence: &registry.Report{Claim: &presence, Activity: &running}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,23 +680,15 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 
 	// Update session to idle on durable file store
 	idle := registry.ActivityIdle
-	_, err = fileStore.Observe(t.Context(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "durable-sess"},
-		Presence:   &presence,
-		Activity:   &idle,
-		ObservedAt: time.Now().UTC().Add(time.Second),
-	})
+	_, err = fileStore.Observe(t.Context(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC().Add(time.Second), Subject: registry.ObservationIdentity{SessionID: "durable-sess"}, Evidence: &registry.Report{Claim: &presence, Activity: &idle}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	select {
 	case res := <-resCh:
-		if res.Session.Activity == nil || *res.Session.Activity != registry.ActivityIdle {
-			t.Fatalf("res.Session.Activity = %v, want idle", res.Session.Activity)
+		if res.Session.Activity() == nil || *res.Session.Activity() != registry.ActivityIdle {
+			t.Fatalf("res.Session.Activity = %v, want idle", res.Session.Activity())
 		}
 	case waitErr := <-errCh:
 		t.Fatalf("Wait() error = %v", waitErr)

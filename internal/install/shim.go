@@ -191,10 +191,10 @@ AHT_INTEGRATION_VERSION=%d
 aht_bin=%s
 harness_bin=%s
 
-"$aht_bin" report %s --presence live --evidence process --pid "$$" --event process.start --attribute aht_integration_version=%d --attribute aht_integration=%s-shim --quiet >/dev/null 2>&1 || true
+"$aht_bin" report %s --presence live --evidence process --pid "$$" --event process.start --reporter-version %d --reporter %s-shim --quiet >/dev/null 2>&1 || true
 "$harness_bin" "$@"
 status=$?
-"$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --attribute aht_integration_version=%d --attribute aht_integration=%s-shim --quiet >/dev/null 2>&1 || true
+"$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --reporter-version %d --reporter %s-shim --quiet >/dev/null 2>&1 || true
 exit "$status"
 `, harnesspkg.ShellQuote(managedMarker), harness, version, harnesspkg.ShellQuote(binary), harnesspkg.ShellQuote(target), harnesspkg.ShellQuote(harness), version, harness, harnesspkg.ShellQuote(harness), version, harness)
 }

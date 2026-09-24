@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -32,6 +31,7 @@ type StateSnapshot struct {
 type MemoryStore struct {
 	mu sync.RWMutex
 
+	reducer           Reducer
 	path              string
 	now               func() time.Time
 	snapshot          snapshot
@@ -39,40 +39,41 @@ type MemoryStore struct {
 	storageRevision   uint64
 	persistedRevision uint64
 	stateChanged      chan struct{}
-	lastDiskModTime   time.Time
-	lastDiskSize      int64
+	owner             *storeLock
 	dirty             chan struct{}
 	flush             chan struct{}
 }
 
 // OpenMemoryStore loads path once and returns an in-memory authoritative store.
-func OpenMemoryStore(path string) (*MemoryStore, error) {
-	fileStore := NewFileStore(path)
-	loaded, err := fileStore.load()
+func OpenMemoryStore(path string, rules Rules) (*MemoryStore, error) {
+	fileStore := NewFileStore(path, rules)
+	if err := os.MkdirAll(filepath.Dir(fileStore.Path()), 0o700); err != nil {
+		return nil, fmt.Errorf("creating state directory: %w", err)
+	}
+	owner, err := tryStoreLock(fileStore.Path() + ".owner.lock")
 	if err != nil {
 		return nil, err
 	}
-	var modTime time.Time
-	var size int64
-	if fi, err := os.Stat(fileStore.Path()); err == nil {
-		modTime = fi.ModTime()
-		size = fi.Size()
+	loaded, err := fileStore.load()
+	if err != nil {
+		return nil, closeStoreLock(owner, err)
 	}
+	store := &MemoryStore{mu: sync.RWMutex{}, storageRevision: 1, persistedRevision: 0, path: fileStore.Path(), reducer: NewReducer(rules), now: func() time.Time { return time.Now().UTC() }, snapshot: cloneRegistrySnapshot(loaded), revision: 1, stateChanged: make(chan struct{}), dirty: make(chan struct{}, 1), owner: owner, flush: make(chan struct{}, 1)}
+	if err := store.Flush(context.Background()); err != nil {
+		return nil, closeStoreLock(owner, err)
+	}
+	return store, nil
+}
 
-	return &MemoryStore{
-		mu:                sync.RWMutex{},
-		path:              fileStore.Path(),
-		now:               func() time.Time { return time.Now().UTC() },
-		snapshot:          cloneRegistrySnapshot(loaded),
-		revision:          1,
-		storageRevision:   0,
-		persistedRevision: 0,
-		lastDiskModTime:   modTime,
-		lastDiskSize:      size,
-		stateChanged:      make(chan struct{}),
-		dirty:             make(chan struct{}, 1),
-		flush:             make(chan struct{}, 1),
-	}, nil
+func (s *MemoryStore) Close() error {
+	err := s.Flush(context.Background())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner != nil {
+		err = closeStoreLock(s.owner, err)
+		s.owner = nil
+	}
+	return err
 }
 
 // Path returns the durable snapshot path associated with the store.
@@ -105,50 +106,15 @@ func (s *MemoryStore) Observe(ctx context.Context, observation Observation) (Ses
 // ObserveBatch atomically reduces observations into memory and notifies state
 // subscribers only when the effective consumer-visible state changes.
 func (s *MemoryStore) ObserveBatch(ctx context.Context, observations []Observation) ([]Session, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("checking context: %w", err)
-	}
-
-	s.mu.Lock()
-	s.syncFromDiskLocked()
-	receivedAt := s.now().UTC()
-	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
-	saved, err := applyObservationBatch(ctx, &candidate, observations, receivedAt)
+	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: observations, DeleteAfter: nil, Reset: false})
 	if err != nil {
-		s.mu.Unlock()
 		return nil, err
 	}
-	for _, session := range saved {
-		if reason := storedSessionCorruption(session.ID, session); reason != "" {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("%w: session %q: %s", ErrCorruptStore, session.ID, reason)
-		}
-	}
-	if err := validateNativePayloadChanges(s.snapshot, candidate); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-
-	stateChanged := !materialSnapshotsEqual(s.snapshot, candidate)
-	s.snapshot = candidate
-	s.storageRevision++
-	if stateChanged {
-		s.revision++
-		close(s.stateChanged)
-		s.stateChanged = make(chan struct{})
-	}
-	s.mu.Unlock()
-
-	if stateChanged {
-		s.signalDirty()
-	}
-
-	result := make([]Session, len(saved))
+	saved := make([]Session, len(result.sessions))
 	for index := range saved {
-		result[index] = cloneSessionValue(saved[index])
+		saved[index] = cloneSessionValue(result.sessions[index])
 	}
-
-	return result, nil
+	return saved, nil
 }
 
 // List returns a defensive copy of all sessions matching filter.
@@ -168,7 +134,10 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 	}
 
 	s.mu.Lock()
-	s.syncFromDiskLocked()
+	if err := s.drainLocked(ctx); err != nil {
+		s.mu.Unlock()
+		return Session{}, err
+	}
 	session, ok := s.snapshot.Sessions[id]
 	if !ok {
 		s.mu.Unlock()
@@ -178,7 +147,6 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 
 	session = cloneSessionValue(session)
 	session.SchemaVersion = storeSchemaVersion
-	populateMultiplexerProjection(&session)
 
 	return session, nil
 }
@@ -195,50 +163,10 @@ func (s *MemoryStore) SummaryWithOptions(ctx context.Context, filter Filter, opt
 	return SummariesWithOptions(sessions, opts), nil
 }
 
-// SummaryByTmuxSession returns summaries computed from one in-memory snapshot.
-func (s *MemoryStore) SummaryByTmuxSession(ctx context.Context, filter Filter) ([]Summary, error) {
-	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
-}
-
 // GC removes expired gone-session tombstones from memory.
 func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error) {
-	if err := ctx.Err(); err != nil {
-		return GCResult{}, fmt.Errorf("checking context: %w", err)
-	}
-
-	s.mu.Lock()
-	s.syncFromDiskLocked()
-	if err := ctx.Err(); err != nil {
-		s.mu.Unlock()
-		return GCResult{}, fmt.Errorf("collecting registry: %w", err)
-	}
-	now := s.now().UTC()
-	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
-	deleted := deleteExpiredGoneSessions(
-		candidate.Sessions,
-		now,
-		deleteAfter,
-		func(session Session) time.Time { return session.PresenceChangedAt },
-	)
-	if deleted == 0 {
-		remaining := len(s.snapshot.Sessions)
-		s.mu.Unlock()
-
-		return GCResult{Deleted: 0, Remaining: remaining}, nil
-	}
-
-	candidate.UpdatedAt = now
-	s.snapshot = candidate
-	s.storageRevision++
-	s.revision++
-	close(s.stateChanged)
-	s.stateChanged = make(chan struct{})
-	remaining := len(candidate.Sessions)
-	s.mu.Unlock()
-
-	s.signalDirty()
-
-	return GCResult{Deleted: deleted, Remaining: remaining}, nil
+	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: nil, DeleteAfter: &deleteAfter, Reset: false})
+	return result.gc, err
 }
 
 // State returns the latest effective state and its monotonic revision.
@@ -248,7 +176,10 @@ func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, 
 	}
 
 	s.mu.Lock()
-	s.syncFromDiskLocked()
+	if err := s.drainLocked(ctx); err != nil {
+		s.mu.Unlock()
+		return StateSnapshot{}, err
+	}
 	state := s.stateLocked(filter)
 	s.mu.Unlock()
 	return state, nil
@@ -261,20 +192,25 @@ func (s *MemoryStore) WaitForRevision(ctx context.Context, after uint64, filter 
 			return StateSnapshot{}, fmt.Errorf("waiting for registry revision: %w", err)
 		}
 
-		s.mu.RLock()
+		s.mu.Lock()
+		if err := s.drainLocked(ctx); err != nil {
+			s.mu.Unlock()
+			return StateSnapshot{}, err
+		}
 		if s.revision > after {
 			state := s.stateLocked(filter)
-			s.mu.RUnlock()
+			s.mu.Unlock()
 
 			return state, nil
 		}
 		changed := s.stateChanged
-		s.mu.RUnlock()
+		s.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
 			return StateSnapshot{}, fmt.Errorf("waiting for registry revision: %w", ctx.Err())
 		case <-changed:
+		case <-time.After(defaultPersistenceSettle):
 		}
 	}
 }
@@ -285,7 +221,6 @@ func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
 	for _, stored := range s.snapshot.Sessions {
 		session := cloneSessionValue(stored)
 		session.SchemaVersion = storeSchemaVersion
-		populateMultiplexerProjection(&session)
 		sessions = append(sessions, session)
 	}
 
@@ -298,100 +233,43 @@ func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
 
 // Flush atomically persists the latest in-memory snapshot.
 func (s *MemoryStore) Flush(ctx context.Context) error {
-	// Serialize the complete read/write/acknowledge transaction, not only its
-	// snapshot copy: an older concurrent flush must never replace a newer one.
 	select {
 	case s.flush <- struct{}{}:
 		defer func() { <-s.flush }()
 	case <-ctx.Done():
 		return fmt.Errorf("waiting to flush registry: %w", ctx.Err())
 	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("flushing registry: %w", err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner == nil {
+		return nil
 	}
-
 	lock, err := openStoreLock(ctx, s.path+".lock", nil)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lock.Close() }()
-
-	s.mu.Lock()
-	s.syncFromDiskLocked()
+	if err := s.consumeJournalLocked(ctx); err != nil {
+		return closeStoreLock(lock, err)
+	}
 	if s.storageRevision <= s.persistedRevision {
-		s.mu.Unlock()
-		return nil
+		return closeStoreLock(lock, nil)
 	}
-	revision := s.storageRevision
-	snapshot := cloneRegistrySnapshot(s.snapshot)
-	s.mu.Unlock()
-
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("flushing registry: %w", err)
+		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
 	}
-	if err := writeSnapshotAtomic(s.path, snapshot); err != nil {
-		return err
+	if err := persistJournalSnapshot(s.path, s.snapshot); err != nil {
+		return closeStoreLock(lock, err)
 	}
-
-	s.mu.Lock()
-	if fi, err := os.Stat(s.path); err == nil {
-		s.lastDiskModTime = fi.ModTime()
-		s.lastDiskSize = fi.Size()
-	}
-	if revision > s.persistedRevision {
-		s.persistedRevision = revision
-	}
-	dirty := s.storageRevision > s.persistedRevision
-	s.mu.Unlock()
-	if dirty {
-		s.signalDirty()
-	}
-
-	return nil
+	s.persistedRevision = s.storageRevision
+	return closeStoreLock(lock, nil)
 }
 
 func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
-	if err := ctx.Err(); err != nil {
-		return ResetResult{}, fmt.Errorf("checking context: %w", err)
-	}
-	select {
-	case s.flush <- struct{}{}:
-		defer func() { <-s.flush }()
-	case <-ctx.Done():
-		return ResetResult{}, fmt.Errorf("waiting to reset registry: %w", ctx.Err())
-	}
-
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: nil, DeleteAfter: nil, Reset: true})
 	if err != nil {
 		return ResetResult{}, err
 	}
-	defer func() { _ = lock.Close() }()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.syncFromDiskLocked()
-	cleared := len(s.snapshot.Sessions)
-	now := s.now().UTC()
-	snap := newSnapshot()
-	snap.UpdatedAt = now
-	s.snapshot = snap
-	s.storageRevision++
-	s.revision++
-
-	if err := writeSnapshotAtomic(s.path, snap); err != nil {
-		return ResetResult{}, err
-	}
-	if fi, err := os.Stat(s.path); err == nil {
-		s.lastDiskModTime = fi.ModTime()
-		s.lastDiskSize = fi.Size()
-	}
-	s.persistedRevision = s.storageRevision
-	close(s.stateChanged)
-	s.stateChanged = make(chan struct{})
-	s.signalDirty()
-
-	return ResetResult{Cleared: cleared, Remaining: 0}, nil
+	return result.reset, s.Flush(ctx)
 }
 
 // RunPersistence coalesces bursts of observations into durable atomic snapshots.
@@ -404,85 +282,22 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 		case <-ctx.Done():
 			return s.flushOnShutdown(ctx)
 		case <-s.dirty:
-		}
-
-		settleTimer := time.NewTimer(settle)
-		maximumTimer := time.NewTimer(maximumDelay)
-		ready := false
-		for !ready {
-			select {
-			case <-ctx.Done():
-				settleTimer.Stop()
-				maximumTimer.Stop()
-
-				return s.flushOnShutdown(ctx)
-			case <-s.dirty:
-				settleTimer.Reset(settle)
-			case <-settleTimer.C:
-				ready = true
-			case <-maximumTimer.C:
-				ready = true
+		case <-time.After(defaultPersistenceMaxDelay):
+			if err := s.Flush(ctx); err != nil {
+				return err
 			}
+			continue
 		}
-		settleTimer.Stop()
-		maximumTimer.Stop()
+
+		if err := s.coalescePersistence(ctx, settle, maximumDelay); err != nil {
+			return s.flushOnShutdown(ctx)
+		}
 		if err := s.Flush(ctx); err != nil {
 			if ctx.Err() != nil {
 				return s.flushOnShutdown(ctx)
 			}
 			return fmt.Errorf("persisting registry snapshot: %w", err)
 		}
-	}
-}
-
-func (s *MemoryStore) syncFromDiskLocked() {
-	fi, err := os.Stat(s.path)
-	if err != nil {
-		return
-	}
-	if fi.ModTime().Equal(s.lastDiskModTime) && fi.Size() == s.lastDiskSize {
-		return
-	}
-	data, err := readSnapshotFile(s.path)
-	if err != nil {
-		return
-	}
-	var snap snapshot
-	if err := json.Unmarshal(data, &snap); err != nil || snap.SchemaVersion != storeSchemaVersion {
-		return
-	}
-	if snap.Sessions == nil {
-		snap.Sessions = make(map[string]Session)
-	}
-	s.lastDiskModTime = fi.ModTime()
-	s.lastDiskSize = fi.Size()
-	s.mergeDiskSnapshotLocked(snap)
-}
-
-func (s *MemoryStore) mergeDiskSnapshotLocked(snap snapshot) {
-	// A newer empty snapshot from another process clears local state.
-	if len(snap.Sessions) == 0 && !snap.UpdatedAt.IsZero() && (len(s.snapshot.Sessions) == 0 || snap.UpdatedAt.After(s.snapshot.UpdatedAt)) {
-		s.snapshot = cloneRegistrySnapshot(snap)
-		s.storageRevision++
-		s.revision++
-		return
-	}
-
-	changed := false
-	for id, diskSess := range snap.Sessions {
-		memSess, exists := s.snapshot.Sessions[id]
-		if !exists || diskSess.UpdatedAt.After(memSess.UpdatedAt) {
-			s.snapshot.Sessions[id] = cloneSessionValue(diskSess)
-			changed = true
-		}
-	}
-	if snap.UpdatedAt.After(s.snapshot.UpdatedAt) {
-		s.snapshot.UpdatedAt = snap.UpdatedAt
-		changed = true
-	}
-	if changed {
-		s.storageRevision++
-		s.revision++
 	}
 }
 
@@ -496,7 +311,7 @@ func validateNativePayloadChanges(previous, candidate snapshot) error {
 		}
 		// Ask the same codec used by persistence to construct its MarshalerError.
 		// Valid payloads require no serialization or encoded copy on this path.
-		_, err := json.Marshal(native.RawPayload)
+		_, err := json.Marshal(session)
 		return fmt.Errorf("encoding store: %w", err)
 	}
 	return nil
@@ -534,138 +349,21 @@ func (s *MemoryStore) signalDirty() {
 	}
 }
 
-func cloneRegistrySnapshotForMutation(source snapshot) snapshot {
-	return snapshot{
-		SchemaVersion: source.SchemaVersion,
-		UpdatedAt:     source.UpdatedAt,
-		// The reducer treats Session values as copy-on-write and replaces every
-		// nested pointer or slice it changes, so cloning the map is sufficient
-		// for atomic rollback without copying every unaffected session.
-		Sessions: maps.Clone(source.Sessions),
-	}
-}
-
-func cloneRegistrySnapshot(source snapshot) snapshot {
-	cloned := snapshot{
-		SchemaVersion: source.SchemaVersion,
-		UpdatedAt:     source.UpdatedAt,
-		Sessions:      make(map[string]Session, len(source.Sessions)),
-	}
-	for id, session := range source.Sessions {
-		cloned.Sessions[id] = cloneSessionValue(session)
-	}
-
-	return cloned
-}
-
-func cloneSessionValue(source Session) Session {
-	cloned := source
-	cloned.Activity = clonePtr(source.Activity)
-	cloned.ResumeCommand = append([]string(nil), source.ResumeCommand...)
-	if source.Process != nil {
-		process := *source.Process
-		cloned.Process = &process
-	}
-	cloned.Observations = cloneObservations(source.Observations)
-	if source.ActivityDecision != nil {
-		decision := *source.ActivityDecision
-		cloned.ActivityDecision = &decision
-	}
-
-	return cloned
-}
-
-func cloneObservations(source Observations) Observations {
-	var cloned Observations
-	if source.Native != nil {
-		native := *source.Native
-		native.Lifecycle = clonePtr(source.Native.Lifecycle)
-		native.Presence = clonePtr(source.Native.Presence)
-		native.Activity = clonePtr(source.Native.Activity)
-		native.ActivityAuthoritative = clonePtr(source.Native.ActivityAuthoritative)
-		native.Sequence = clonePtr(source.Native.Sequence)
-		native.Attributes = cloneAttributes(source.Native.Attributes)
-		native.RawPayload = cloneRaw(source.Native.RawPayload)
-		cloned.Native = &native
-	}
-	if source.Process != nil {
-		process := *source.Process
-		cloned.Process = &process
-	}
-	if source.Tmux != nil {
-		tmux := *source.Tmux
-		cloned.Tmux = &tmux
-	}
-	if source.Multiplexer != nil {
-		multiplexer := *source.Multiplexer
-		cloned.Multiplexer = &multiplexer
-	}
-	if source.Catalog != nil {
-		catalog := *source.Catalog
-		catalog.ResumeCommand = append([]string(nil), source.Catalog.ResumeCommand...)
-		cloned.Catalog = &catalog
-	}
-	if source.Screen != nil {
-		screen := *source.Screen
-		cloned.Screen = &screen
-	}
-
-	return cloned
-}
-
-func materialSnapshotsEqual(left, right snapshot) bool {
-	if len(left.Sessions) != len(right.Sessions) {
-		return false
-	}
-	for id, leftSession := range left.Sessions {
-		rightSession, ok := right.Sessions[id]
-		if !ok || !materialSessionsEqual(leftSession, rightSession) {
-			return false
+func (s *MemoryStore) coalescePersistence(ctx context.Context, settle, maximumDelay time.Duration) error {
+	settleTimer := time.NewTimer(settle)
+	defer settleTimer.Stop()
+	maximumTimer := time.NewTimer(maximumDelay)
+	defer maximumTimer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting to persist: %w", ctx.Err())
+		case <-s.dirty:
+			settleTimer.Reset(settle)
+		case <-settleTimer.C:
+			return nil
+		case <-maximumTimer.C:
+			return nil
 		}
 	}
-
-	return true
-}
-
-//nolint:cyclop // Explicit field comparison avoids reflection in the update hot path.
-func materialSessionsEqual(left, right Session) bool {
-	return left.SchemaVersion == right.SchemaVersion &&
-		left.ID == right.ID &&
-		left.Harness == right.Harness &&
-		left.Presence == right.Presence &&
-		activityEqual(left.Activity, right.Activity) &&
-		left.SessionID == right.SessionID &&
-		left.SessionPath == right.SessionPath &&
-		slices.Equal(left.ResumeCommand, right.ResumeCommand) &&
-		left.CWD == right.CWD &&
-		left.ProjectRoot == right.ProjectRoot &&
-		processPointersEqual(left.Process, right.Process) &&
-		left.Tmux == right.Tmux &&
-		left.Multiplexer == right.Multiplexer &&
-		left.CreatedAt.Equal(right.CreatedAt) &&
-		left.PresenceChangedAt.Equal(right.PresenceChangedAt) &&
-		left.ActivityChangedAt.Equal(right.ActivityChangedAt) &&
-		materialDecisionsEqual(left.ActivityDecision, right.ActivityDecision)
-}
-
-func processPointersEqual(left, right *ProcessIdentity) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-
-	return *left == *right
-}
-
-func materialDecisionsEqual(left, right *ActivityDecision) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-
-	return left.Authority == right.Authority &&
-		left.Reason == right.Reason &&
-		left.RuleID == right.RuleID &&
-		left.ManifestSource == right.ManifestSource &&
-		left.ManifestVersion == right.ManifestVersion &&
-		left.FallbackReason == right.FallbackReason &&
-		left.Process == right.Process
 }

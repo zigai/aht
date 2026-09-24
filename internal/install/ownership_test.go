@@ -5,7 +5,7 @@ import "testing"
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
-	current := `{"command":"aht report codex --attribute aht_integration_version=8 --attribute aht_integration=codex-hook"}`
+	current := `{"command":"aht report codex --reporter-version 9 --reporter codex-hook"}`
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current source metadata classified as %q", status)
 	}
@@ -23,7 +23,7 @@ func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 
 func TestClassifyArtifactContentUsesHarnessGeneration(t *testing.T) {
 	t.Parallel()
-	current := "aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=8"
+	current := "aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=9"
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current agy status = %q", status)
 	}

@@ -22,7 +22,7 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 	t.Helper()
 	var command *exec.Cmd
 	switch host.contract.ID {
-	case registry.HarnessCline:
+	case registry.Harness("cline"):
 		// ACP branches before the CLI's ordinary provider/sandbox argument
 		// handling. Its documented environment supplies provider selection;
 		// force the native local backend to avoid a detached hub daemon.

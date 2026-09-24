@@ -89,8 +89,8 @@ function report(eventName, context, transition) {
     "--observed-at", new Date().toISOString(),
     "--sequence", String(++reportSequence),
     "--quiet",
-    "--attribute", "aht_integration=cline-plugin",
-    "--attribute", `aht_integration_version=${integrationVersion}`,
+    "--reporter", "cline-plugin",
+    "--reporter-version", String(integrationVersion),
   ];
   if (transition.presence) args.push("--presence", transition.presence);
   if (transition.activity) args.push("--activity", transition.activity);

@@ -9,18 +9,17 @@ import (
 )
 
 const (
-	ManagedMarker                 = "aht managed integration"
-	HookTimeoutSeconds            = 5
-	codexSessionEndTimeoutSeconds = 3
-	HookTypeCommand               = "command"
-	HookEventSessionStart         = "SessionStart"
-	HookEventSessionEnd           = "SessionEnd"
-	HookEventUserPromptSubmit     = "UserPromptSubmit"
-	HookEventPostToolUse          = "PostToolUse"
-	HookEventPostToolUseFailure   = "PostToolUseFailure"
-	HookEventPreToolUse           = "PreToolUse"
-	HookEventStop                 = "Stop"
-	ResumeFlag                    = "--resume"
+	ManagedMarker               = "aht managed integration"
+	HookTimeoutSeconds          = 5
+	HookTypeCommand             = "command"
+	HookEventSessionStart       = "SessionStart"
+	HookEventSessionEnd         = "SessionEnd"
+	HookEventUserPromptSubmit   = "UserPromptSubmit"
+	HookEventPostToolUse        = "PostToolUse"
+	HookEventPostToolUseFailure = "PostToolUseFailure"
+	HookEventPreToolUse         = "PreToolUse"
+	HookEventStop               = "Stop"
+	ResumeFlag                  = "--resume"
 
 	HookActivityRunning     HookTransition = "activity:running"
 	HookActivityWaiting     HookTransition = "activity:waiting"
@@ -135,7 +134,6 @@ type PluginDirectoryInstallPlan struct {
 	Files          []RenderedFileInstallSpec
 	SnippetOrder   []string
 	MarkerFile     string
-	ObsoleteFiles  []string
 	ImportManifest *ImportManifestInstallPlan
 	Registration   PluginRegistration
 }
@@ -169,15 +167,6 @@ func (RenderedFileAction) installAction() {}
 func (PluginDirectoryAction) installAction() {}
 
 func (ShimAction) installAction() {}
-
-// HookTimeoutSecondsFor returns the native command-hook timeout for an event.
-func HookTimeoutSecondsFor(harness registry.Harness, event string) int {
-	if harness == registry.HarnessCodex && event == HookEventSessionEnd {
-		return codexSessionEndTimeoutSeconds
-	}
-
-	return HookTimeoutSeconds
-}
 
 func ReportHookCommand[T Transition](binary string, harness registry.Harness, transition T, event string, source string) string {
 	return reportHookCommand(binary, harness, transition, event, source, "--raw-stdin")
@@ -244,8 +233,8 @@ func reportHookCommand[T Transition](
 	}
 	parts = append(
 		parts,
-		"--attribute", ShellQuote("aht_integration_version="+strconv.Itoa(IntegrationVersion)),
-		"--attribute", ShellQuote("aht_integration="+source),
+		"--reporter-version", ShellQuote(strconv.Itoa(IntegrationVersion)),
+		"--reporter", ShellQuote(source),
 		stdinFlag,
 		"--quiet",
 	)

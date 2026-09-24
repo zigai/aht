@@ -11,17 +11,17 @@ import (
 
 func TestIdentityReconciliationPrefersSessionPath(t *testing.T) {
 	t.Parallel()
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	at := time.Now().UTC().Add(-time.Minute)
-	first, err := store.Observe(context.Background(), registry.Observation{Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, NativeEvent: "test", Harness: registry.HarnessClaude, Identity: registry.ObservationIdentity{SessionPath: "/tmp/session.json"}, ObservedAt: at})
+	first, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: at, Subject: registry.ObservationIdentity{SessionPath: "/tmp/session.json"}, Evidence: &registry.Report{Event: "test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.Observe(context.Background(), registry.Observation{Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence, Harness: registry.HarnessClaude, Identity: registry.ObservationIdentity{SessionPath: "/tmp/session.json"}, ProcessPresent: new(true), Process: &registry.ProcessIdentity{PID: 41, StartIdentity: "boot:41"}, ObservedAt: at.Add(time.Second)})
+	second, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{SessionPath: "/tmp/session.json"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 41, StartIdentity: "boot:41"}, Present: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ID != second.ID || second.Presence != registry.PresenceLive {
+	if first.ID != second.ID || second.Presence() != registry.PresenceLive {
 		t.Fatalf("observations did not reconcile: first=%#v second=%#v", first, second)
 	}
 }
@@ -29,47 +29,33 @@ func TestIdentityReconciliationPrefersSessionPath(t *testing.T) {
 //nolint:cyclop // reconciliation assertions cover identity, process, location, and row compaction
 func TestNativeProcessIdentityReconcilesWithLiveTmuxSession(t *testing.T) {
 	t.Parallel()
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
 	path := "/tmp/pi-session.json"
 	process := &registry.ProcessIdentity{PID: 42, PPID: 10, ProcessGroupID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/node", CWD: "/work", TTY: "/dev/pts/4"}
 	idle := registry.ActivityIdle
-	identityOnly, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessPi, Identity: registry.ObservationIdentity{SessionPath: path},
-		NativeEvent: "session_start", Activity: &idle, ObservedAt: at,
-	})
+	identityOnly, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionPath: path}, Evidence: &registry.Report{Event: "session_start", Activity: &idle}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessPi, ProcessPresent: new(true), Process: process, ObservedAt: at.Add(time.Second),
-	})
+	live, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *process, Present: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmux := &registry.TmuxContext{Inside: true, SessionName: "sesh", PaneID: "%81", PaneTTY: "/dev/pts/4"}
-	if _, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
-		Harness: registry.HarnessPi, Process: process, Tmux: tmux, ObservedAt: at.Add(2 * time.Second),
-	}); err != nil {
+	tmux := &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "sesh", PaneID: "%81", PaneTTY: "/dev/pts/4"}
+	if _, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: *tmux}}); err != nil {
 		t.Fatal(err)
 	}
 	running := registry.ActivityRunning
-	reconciled, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessPi, Identity: registry.ObservationIdentity{SessionPath: path}, Process: process,
-		NativeEvent: "agent_start", Activity: &running, ObservedAt: at.Add(3 * time.Second),
-	})
+	reconciled, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at.Add(3 * time.Second), Subject: registry.ObservationIdentity{SessionPath: path}, Evidence: &registry.Report{Event: "agent_start", Activity: &running, Process: process}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reconciled.ID != live.ID || reconciled.ID == identityOnly.ID {
 		t.Fatalf("native report reconciled to %q, want live process record %q (identity-only %q)", reconciled.ID, live.ID, identityOnly.ID)
 	}
-	if reconciled.Presence != registry.PresenceLive || reconciled.Activity == nil || *reconciled.Activity != registry.ActivityRunning || reconciled.SessionPath != path || reconciled.Tmux.PaneID != "%81" {
+	if reconciled.Presence() != registry.PresenceLive || reconciled.Activity() == nil || *reconciled.Activity() != registry.ActivityRunning || reconciled.SessionPath != path || reconciled.Location.PaneID != "%81" {
 		t.Fatalf("reconciled session lost identity, activity, or tmux location: %#v", reconciled)
 	}
 	sessions, err := store.List(ctx, registry.Filter{})
@@ -84,33 +70,24 @@ func TestNativeProcessIdentityReconcilesWithLiveTmuxSession(t *testing.T) {
 func TestProcessObservationRetiresDifferentHarnessWithSameProcess(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
 	process := &registry.ProcessIdentity{PID: 85, StartIdentity: "boot:85"}
 	live := registry.PresenceLive
 	idle := registry.ActivityIdle
 
-	openCode, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessOpenCode, Identity: registry.ObservationIdentity{SessionID: "opencode-session"},
-		Presence: &live, Activity: &idle, Process: process,
-		NativeEvent: "session_start", ObservedAt: at,
-	})
+	openCode, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("opencode"), At: at, Subject: registry.ObservationIdentity{SessionID: "opencode-session"}, Evidence: &registry.Report{Event: "session_start", Claim: &live, Activity: &idle, Process: process}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	present := true
-	omp, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessOmp, ProcessPresent: &present, Process: process,
-		ObservedAt: at.Add(time.Second),
-	})
+	omp, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("omp"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *process, Present: present}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if omp.Harness != registry.HarnessOmp || omp.Presence != registry.PresenceLive {
+	if omp.Harness != registry.Harness("omp") || omp.Presence() != registry.PresenceLive {
 		t.Fatalf("OMP process session is not live: %#v", omp)
 	}
 
@@ -118,7 +95,7 @@ func TestProcessObservationRetiresDifferentHarnessWithSameProcess(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if openCode.Harness != registry.HarnessOpenCode || openCode.Presence != registry.PresenceGone || openCode.Activity != nil {
+	if openCode.Harness != registry.Harness("opencode") || openCode.Presence() != registry.PresenceGone || openCode.Activity() != nil {
 		t.Fatalf("OpenCode session was not retired: %#v", openCode)
 	}
 
@@ -131,24 +108,20 @@ func TestProcessObservationRetiresDifferentHarnessWithSameProcess(t *testing.T) 
 	}
 }
 
-func TestTmuxObservationRetiresDifferentHarnessWithoutProcessIdentity(t *testing.T) {
+func TestMultiplexerObservationRetiresDifferentHarnessWithoutProcessIdentity(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
-	location := &registry.TmuxContext{
-		Inside: true, ServerSocket: "/tmp/tmux/default", SessionID: "$0",
+	location := &registry.Location{
+		Kind: registry.MultiplexerTmux, ServerID: "/tmp/tmux/default", SessionID: "$0",
 		SessionName: "0", WindowID: "@2", PaneID: "%3",
 	}
 	live := registry.PresenceLive
 	idle := registry.ActivityIdle
 
-	openCode, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessOpenCode, Identity: registry.ObservationIdentity{SessionID: "opencode-session"},
-		Presence: &live, Activity: &idle, Tmux: location, NativeEvent: "session_start", ObservedAt: at,
-	})
+	openCode, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("opencode"), At: at, Subject: registry.ObservationIdentity{SessionID: "opencode-session"}, Evidence: &registry.Report{Event: "session_start", Claim: &live, Activity: &idle, Location: location}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,18 +131,10 @@ func TestTmuxObservationRetiresDifferentHarnessWithoutProcessIdentity(t *testing
 
 	process := &registry.ProcessIdentity{PID: 85, StartIdentity: "boot:85"}
 	present := true
-	if _, err = store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessOmp, ProcessPresent: &present, Process: process,
-		ObservedAt: at.Add(time.Second),
-	}); err != nil {
+	if _, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("omp"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *process, Present: present}}); err != nil {
 		t.Fatal(err)
 	}
-	omp, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
-		Harness: registry.HarnessOmp, Process: process, Tmux: location,
-		ObservedAt: at.Add(2 * time.Second),
-	})
+	omp, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("omp"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: *location}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,57 +143,40 @@ func TestTmuxObservationRetiresDifferentHarnessWithoutProcessIdentity(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if openCode.Presence != registry.PresenceGone || openCode.Activity != nil || !openCode.ActivityChangedAt.Equal(at.Add(2*time.Second)) {
+	if openCode.Presence() != registry.PresenceGone || openCode.Activity() != nil || !openCode.ActivityChangedAt.Equal(at.Add(2*time.Second)) {
 		t.Fatalf("processless OpenCode session was not retired at the replacement time: %#v", openCode)
 	}
-	if omp.Harness != registry.HarnessOmp || omp.Presence != registry.PresenceLive || omp.Tmux.PaneID != location.PaneID {
+	if omp.Harness != registry.Harness("omp") || omp.Presence() != registry.PresenceLive || omp.Location.PaneID != location.PaneID {
 		t.Fatalf("OMP replacement is not live on the pane: %#v", omp)
 	}
 }
 
-func TestTmuxObservationPreservesDifferentLiveProcessOnSamePane(t *testing.T) {
+func TestMultiplexerObservationPreservesDifferentLiveProcessOnSamePane(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
-	location := &registry.TmuxContext{
-		Inside: true, ServerSocket: "/tmp/tmux/default", SessionID: "$0",
+	location := &registry.Location{
+		Kind: registry.MultiplexerTmux, ServerID: "/tmp/tmux/default", SessionID: "$0",
 		SessionName: "0", WindowID: "@2", PaneID: "%3",
 	}
 	live := registry.PresenceLive
 	openCodeProcess := &registry.ProcessIdentity{PID: 84, StartIdentity: "boot:84"}
 	ompProcess := &registry.ProcessIdentity{PID: 85, StartIdentity: "boot:85"}
 
-	openCode, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessOpenCode, Identity: registry.ObservationIdentity{SessionID: "opencode-session"},
-		Presence: &live, Process: openCodeProcess, Tmux: location,
-		NativeEvent: "session_start", ObservedAt: at,
-	})
+	openCode, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("opencode"), At: at, Subject: registry.ObservationIdentity{SessionID: "opencode-session"}, Evidence: &registry.Report{Event: "session_start", Claim: &live, Process: openCodeProcess, Location: location}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	present := true
-	if _, err = store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessOpenCode, ProcessPresent: &present, Process: openCodeProcess,
-		ObservedAt: at.Add(2 * time.Second),
-	}); err != nil {
+	if _, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("opencode"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *openCodeProcess, Present: present}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessOmp, ProcessPresent: &present, Process: ompProcess,
-		ObservedAt: at.Add(2 * time.Second),
-	}); err != nil {
+	if _, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("omp"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *ompProcess, Present: present}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
-		Harness: registry.HarnessOmp, Process: ompProcess, Tmux: location,
-		ObservedAt: at.Add(2 * time.Second),
-	}); err != nil {
+	if _, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("omp"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *ompProcess, Location: *location}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -236,35 +184,28 @@ func TestTmuxObservationPreservesDifferentLiveProcessOnSamePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if openCode.Presence != registry.PresenceLive || openCode.Process == nil || !openCode.Process.Equal(*openCodeProcess) {
+	if openCode.Presence() != registry.PresenceLive || openCode.Process == nil || !openCode.Process.Equal(*openCodeProcess) {
 		t.Fatalf("distinct live OpenCode process was retired: %#v", openCode)
 	}
 }
 
 func TestNativeProcessIdentitySeedsObserverReconciliation(t *testing.T) {
 	t.Parallel()
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
 	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
-	tmux := &registry.TmuxContext{Inside: true, SessionName: "dev", PaneID: "%4"}
+	tmux := &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "dev", PaneID: "%4"}
 	activity := registry.ActivityRunning
-	native, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessPi, Identity: registry.ObservationIdentity{SessionPath: "/tmp/pi-session.json"},
-		Process: process, Tmux: tmux, NativeEvent: "agent_start", Activity: &activity, ObservedAt: at,
-	})
+	native, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionPath: "/tmp/pi-session.json"}, Evidence: &registry.Report{Event: "agent_start", Activity: &activity, Process: process, Location: tmux}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, err := store.Observe(ctx, registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessPi, ProcessPresent: new(true), Process: process, ObservedAt: at.Add(time.Second),
-	})
+	observed, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Sighting{Process: *process, Present: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.ID != native.ID || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityRunning || observed.Tmux.PaneID != "%4" {
+	if observed.ID != native.ID || observed.Presence() != registry.PresenceLive || observed.Activity() == nil || *observed.Activity() != registry.ActivityRunning || observed.Location.PaneID != "%4" {
 		t.Fatalf("observer did not reconcile with native process identity: native=%#v observed=%#v", native, observed)
 	}
 }

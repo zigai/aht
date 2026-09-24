@@ -74,8 +74,7 @@ type watchEvent struct {
 	Label            string             `json:"label,omitempty"`
 	NativeEvent      string             `json:"native_event,omitempty"`
 	CWD              string             `json:"cwd,omitempty"`
-	Tmux             string             `json:"tmux,omitempty"`
-	Multiplexer      string             `json:"multiplexer,omitempty"`
+	Location         string             `json:"location,omitempty"`
 }
 type watchUpdateProcessor struct {
 	app      *application
@@ -217,7 +216,7 @@ func normalizeWatchOptions(o watchOptions) watchOptions {
 	return o
 }
 
-func watchTarget(s *registry.FileStore) (string, string, error) {
+func watchTarget(s *registry.Journal) (string, string, error) {
 	p, e := filepath.Abs(s.Path())
 	if e != nil {
 		return "", "", fmt.Errorf("resolve watch target: %w", e)
@@ -262,7 +261,7 @@ func snapshotWatchEvents(s []registry.Session, at time.Time) []watchEvent {
 	return o
 }
 
-//nolint:gocognit,cyclop // event diffing compares each independent v2 dimension
+//nolint:cyclop // event diffing compares each independent session dimension
 func diffWatchEvents(p, n map[string]registry.Session, at time.Time) []watchEvent {
 	o := []watchEvent{}
 	for id, v := range n {
@@ -271,19 +270,19 @@ func diffWatchEvents(p, n map[string]registry.Session, at time.Time) []watchEven
 			o = append(o, watchEventFromSession(watchActionAdded, v, registry.Session{}, at))
 			continue
 		}
-		if v.Presence != old.Presence {
+		if v.Presence() != old.Presence() {
 			o = append(o, watchEventFromSession(watchActionPresenceChanged, v, old, at))
-			if v.Presence == registry.PresenceGone {
+			if v.Presence() == registry.PresenceGone {
 				o = append(o, watchEventFromSession(watchActionProcessGone, v, old, at))
 			}
 		}
-		if v.Presence == registry.PresenceLive && v.Process != nil && old.Process == nil {
+		if v.Presence() == registry.PresenceLive && v.Process != nil && old.Process == nil {
 			o = append(o, watchEventFromSession(watchActionProcessBound, v, old, at))
 		}
-		if !activityEqual(v.Activity, old.Activity) {
+		if !activityEqual(v.Activity(), old.Activity()) {
 			o = append(o, watchEventFromSession(watchActionActivityChanged, v, old, at))
 		}
-		if !multiplexerLocationEqual(v.Multiplexer, old.Multiplexer) || !tmuxLocationEqual(v.Tmux, old.Tmux) {
+		if !multiplexerLocationEqual(v.Location, old.Location) {
 			o = append(o, watchEventFromSession(watchActionLocationChanged, v, old, at))
 		}
 		if nativeEvent(v) != nativeEvent(old) {
@@ -306,16 +305,7 @@ func activityEqual(a, b *registry.Activity) bool {
 	return *a == *b
 }
 
-func tmuxLocationEqual(a, b registry.TmuxContext) bool {
-	a.WindowName, b.WindowName = "", ""
-	a.PaneCurrentPath, b.PaneCurrentPath = "", ""
-	a.PanePID, b.PanePID = 0, 0
-	a.PaneTTY, b.PaneTTY = "", ""
-	a.ClientTTY, b.ClientTTY = "", ""
-	return a == b
-}
-
-func multiplexerLocationEqual(a, b registry.MultiplexerContext) bool {
+func multiplexerLocationEqual(a, b registry.Location) bool {
 	a.WindowName, b.WindowName = "", ""
 	a.TabName, b.TabName = "", ""
 	a.WorkspaceName, b.WorkspaceName = "", ""
@@ -334,17 +324,17 @@ func nativeEvent(s registry.Session) string {
 }
 
 func watchEventFromSession(a string, s, p registry.Session, at time.Time) watchEvent {
-	e := watchEvent{Time: at.UTC(), Action: a, ID: s.ID, Harness: s.Harness, Presence: s.Presence, Activity: s.Activity, SessionID: s.SessionID, SessionPath: s.SessionPath, Label: sessionDisplayLabel(s), NativeEvent: nativeEvent(s), CWD: s.CWD, Tmux: watchTmuxLabel(s.Tmux), Multiplexer: watchMultiplexerLabel(s.Multiplexer)}
+	e := watchEvent{Time: at.UTC(), Action: a, ID: s.ID, Harness: s.Harness, Presence: s.Presence(), Activity: s.Activity(), SessionID: s.SessionID, SessionPath: s.SessionPath, Label: sessionDisplayLabel(s), NativeEvent: nativeEvent(s), CWD: s.CWD, Location: watchMultiplexerLabel(s.Location)}
 	if !s.UpdatedAt.IsZero() {
 		e.Time = s.UpdatedAt
 	}
 	if a == watchActionPresenceChanged {
 		e.Time = s.PresenceChangedAt
-		e.PreviousPresence = p.Presence
+		e.PreviousPresence = p.Presence()
 	}
 	if a == watchActionActivityChanged {
 		e.Time = s.ActivityChangedAt
-		e.PreviousActivity = p.Activity
+		e.PreviousActivity = p.Activity()
 	}
 	if e.Time.IsZero() {
 		e.Time = at.UTC()
@@ -365,21 +355,7 @@ func sortWatchEvents(e []watchEvent) {
 	})
 }
 
-func watchTmuxLabel(ctx registry.TmuxContext) string {
-	p := []string{}
-	if x := tmuxSessionLabel(ctx); x != "-" {
-		p = append(p, x)
-	}
-	if x := tmuxWindowLabel(ctx); x != "-" {
-		p = append(p, x)
-	}
-	if ctx.PaneID != "" {
-		p = append(p, ctx.PaneID)
-	}
-	return strings.Join(p, ":")
-}
-
-func watchMultiplexerLabel(ctx registry.MultiplexerContext) string {
+func watchMultiplexerLabel(ctx registry.Location) string {
 	if ctx.Empty() {
 		return ""
 	}
@@ -454,12 +430,12 @@ func formatWatchPlainEvent(e watchEvent) string {
 	if e.Action == watchActionSnapshotEmpty {
 		return e.Time.UTC().Format(time.RFC3339) + " snapshot_empty no sessions"
 	}
-	return sanitizeHumanText(strings.Join([]string{e.Time.UTC().Format(time.RFC3339), e.Action, string(e.Harness), string(e.Presence), appReportActivity(registry.Session{Activity: e.Activity}), "session=" + e.Label}, " "))
+	return sanitizeHumanText(strings.Join([]string{e.Time.UTC().Format(time.RFC3339), e.Action, string(e.Harness), string(e.Presence), formatActivity(e.Activity), "session=" + e.Label}, " "))
 }
 
 func formatWatchTableEvent(e watchEvent) string {
 	if e.Action == watchActionSnapshotEmpty {
 		return e.Time.UTC().Format(time.RFC3339) + "  snapshot_empty      no sessions"
 	}
-	return fmt.Sprintf("%s  %-18s  %-10s  %-8s  %-11s  %s", e.Time.UTC().Format(time.RFC3339), e.Action, e.Harness, e.Presence, appReportActivity(registry.Session{Activity: e.Activity}), sanitizeHumanText(e.Label))
+	return fmt.Sprintf("%s  %-18s  %-10s  %-8s  %-11s  %s", e.Time.UTC().Format(time.RFC3339), e.Action, e.Harness, e.Presence, formatActivity(e.Activity), sanitizeHumanText(e.Label))
 }

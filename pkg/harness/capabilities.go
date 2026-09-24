@@ -70,7 +70,7 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 	_, isResumable := adapter.(harness.Resumable)
 	_, hasTitleLookup := adapter.(harness.TitleReader)
 	screenSupport := catalog.SupportsScreen(harnessID)
-	authority, fallback, source := catalog.PolicyFor(harnessID)
+	policy := (catalog.Rules{}).Policy(harnessID)
 
 	return Capabilities{
 		Harness:            definition.ID,
@@ -85,9 +85,9 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 		Resumable:          isResumable,
 		TitleLookup:        hasTitleLookup,
 		ScreenSupport:      screenSupport,
-		ScreenFallback:     fallback,
-		Authority:          string(authority),
-		IntegrationSource:  source,
+		ScreenFallback:     policy.ScreenFallback,
+		Authority:          string(policy.Authority),
+		IntegrationSource:  policy.Reporter,
 		IntegrationVersion: definition.IntegrationVersion,
 	}, true
 }

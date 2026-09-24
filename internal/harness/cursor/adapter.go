@@ -29,7 +29,8 @@ type hookPayload struct {
 
 func New() cursorHarness {
 	return cursorHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessCursor,
+		ExclusiveProcess: true, CatalogCreates: false,
+		ID:           registry.Harness("cursor"),
 		Aliases:      []string{"cursor-agent", "cursor_agent", "cursor-cli", "cursor_cli"},
 		ProcessNames: []string{"cursor", "cursor-agent", "cursor-cli"},
 		Env: harness.EnvKeys{
@@ -50,7 +51,7 @@ func New() cursorHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  cursorIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -131,7 +132,7 @@ func (cursorHarness) ObservableProcess(process processinfo.Process) bool {
 }
 
 func cursorHookCommand[T harness.Transition](binary string, transition T, event string, hookOutput string) string {
-	report := harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCursor, transition, event, cursorIntegrationSource)
+	report := harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("cursor"), transition, event, cursorIntegrationSource)
 
 	return report + " >/dev/null 2>&1 || true; printf '%s\\n' " + harness.ShellQuote(hookOutput)
 }
@@ -145,4 +146,11 @@ func cursorHome() string {
 	}
 
 	return ".cursor"
+}
+
+func (cursorHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["cursor_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "cursor_start_source", "source", "reason"))
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/brokerserver"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
@@ -342,7 +343,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	createdSession := setupTestSessionForStore(t, store)
 
 	durableClient := client.New(client.Config{
@@ -382,7 +383,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	memoryStore, err := registry.OpenMemoryStore(storePath)
+	memoryStore, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +423,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	resolved, err := realtimeClient.Resolve(t.Context(), client.Selector{
 		ID:                "",
 		Reference:         "",
-		Harness:           client.HarnessClaude,
+		Harness:           client.Harness("claude"),
 		MultiplexerKind:   client.MultiplexerTmux,
 		MultiplexerServer: "/tmp/tmux-main.sock",
 		MultiplexerPane:   "%42",
@@ -446,48 +447,32 @@ func setupTestSessionForStore(t *testing.T, store registry.Store) registry.Sessi
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
-	obs := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-durable-1"},
-		Lifecycle:  nil,
-		Presence:   &live,
-		Activity:   &activity,
-		Attributes: nil,
-		Process:    nil,
-		Tmux:       nil,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:            registry.MultiplexerTmux,
-			ServerID:        "/tmp/tmux-main.sock",
-			SessionID:       "$0",
-			SessionName:     "main",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "@0",
-			WindowIndex:     "0",
-			WindowName:      "win",
-			PaneID:          "%42",
-			PaneIndex:       "0",
-			PaneCurrentPath: "/tmp/project",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		},
-		Catalog: &registry.CatalogMetadata{
-			ResumeCommand: nil,
-			CWD:           "/tmp/project",
-			ProjectRoot:   "/tmp/project",
-			ProcessPID:    0,
-			Current:       false,
-		},
-		Screen:     nil,
-		RawPayload: nil,
-		ObservedAt: time.Now().UTC(),
-	}
+	obs := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-durable-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: nil, Location: &registry.Location{
+		Kind:            registry.MultiplexerTmux,
+		ServerID:        "/tmp/tmux-main.sock",
+		SessionID:       "$0",
+		SessionName:     "main",
+		WorkspaceID:     "",
+		WorkspaceName:   "",
+		TabID:           "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "@0",
+		WindowIndex:     "0",
+		WindowName:      "win",
+		PaneID:          "%42",
+		PaneIndex:       "0",
+		PaneCurrentPath: "/tmp/project",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+	}, Listing: &registry.Listing{
+		ResumeCommand: nil,
+		CWD:           "/tmp/project",
+		ProjectRoot:   "/tmp/project",
+		ProcessPID:    0,
+		Current:       false,
+	}, Attributes: nil, Payload: nil}}
 
 	session, err := store.Observe(t.Context(), obs)
 	if err != nil {
@@ -498,25 +483,23 @@ func setupTestSessionForStore(t *testing.T, store registry.Store) registry.Sessi
 
 func testSessionWithID(id, harness, sessionID string) registry.Session {
 	return registry.Session{
-		SchemaVersion:     2,
-		ID:                id,
-		Harness:           registry.Harness(harness),
-		Presence:          registry.PresenceLive,
-		Activity:          nil,
-		SessionID:         sessionID,
-		SessionPath:       "",
-		ResumeCommand:     nil,
-		CWD:               "",
-		ProjectRoot:       "",
-		Process:           nil,
-		Tmux:              registry.TmuxContext{},
-		Multiplexer:       registry.MultiplexerContext{},
+		SchemaVersion: 2,
+		ID:            id,
+		Harness:       registry.Harness(harness),
+		SessionID:     sessionID,
+		SessionPath:   "",
+		ResumeCommand: nil,
+		CWD:           "",
+		ProjectRoot:   "",
+		Process:       nil,
+		Location:      registry.Location{},
+
 		Observations:      registry.Observations{},
 		CreatedAt:         time.Now().UTC(),
 		UpdatedAt:         time.Now().UTC(),
 		PresenceChangedAt: time.Now().UTC(),
 		ActivityChangedAt: time.Now().UTC(),
-		ActivityDecision:  nil,
+		Liveness:          registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
 	}
 }
 
@@ -528,7 +511,7 @@ func testSessionWithNative(id, harness, sessionID, sessionPath string) registry.
 
 func testSessionWithMultiplexer(id string, kind registry.MultiplexerKind, serverID, paneID string) registry.Session {
 	s := testSessionWithID(id, "claude", "sess-"+id)
-	s.Multiplexer = registry.MultiplexerContext{
+	s.Location = registry.Location{
 		Kind:            kind,
 		ServerID:        serverID,
 		SessionID:       "",
@@ -561,19 +544,12 @@ func testSessionWithPaths(id, projectRoot, cwd string) registry.Session {
 func TestResolveWithSessionLister(t *testing.T) {
 	t.Parallel()
 
-	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	live := registry.PresenceLive
-	session, err := store.Observe(t.Context(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-custom-store"},
-		Presence:   &live,
-		ObservedAt: time.Now().UTC(),
-	})
+	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-custom-store"}, Evidence: &registry.Report{Claim: &live}})
 	if err != nil {
 		t.Fatal(err)
 	}

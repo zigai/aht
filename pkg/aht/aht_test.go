@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/aht"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -30,8 +31,8 @@ func TestAhtPackageTypesAndDefaults(t *testing.T) {
 	if aht.PresenceLive != registry.PresenceLive {
 		t.Fatalf("PresenceLive = %q, want %q", aht.PresenceLive, registry.PresenceLive)
 	}
-	if aht.HarnessPi != registry.HarnessPi {
-		t.Fatalf("HarnessPi = %q, want %q", aht.HarnessPi, registry.HarnessPi)
+	if aht.HarnessPi != registry.Harness("pi") {
+		t.Fatalf("HarnessPi = %q, want %q", aht.HarnessPi, registry.Harness("pi"))
 	}
 	if aht.ActivityRunning != registry.ActivityRunning {
 		t.Fatalf("ActivityRunning = %q, want %q", aht.ActivityRunning, registry.ActivityRunning)
@@ -57,27 +58,11 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 
 	live := aht.PresenceLive
 	activity := aht.ActivityRunning
-	obs := aht.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     aht.HarnessClaude,
-		Identity:    aht.ObservationIdentity{SessionID: "sess-facade-1"},
-		Lifecycle:   nil,
-		Presence:    &live,
-		Activity:    &activity,
-		Attributes:  nil,
-		Process:     nil,
-		Tmux:        nil,
-		Multiplexer: nil,
-		Catalog:     nil,
-		Screen:      nil,
-		RawPayload:  nil,
-		ObservedAt:  time.Now().UTC(),
-	}
+	obs := aht.Observation{Harness: aht.HarnessClaude, At: time.Now().UTC(), Subject: aht.ObservationIdentity{SessionID: "sess-facade-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: nil, Location: nil, Listing: nil, Attributes: nil, Payload: nil}}
 
 	created, err := store.Observe(t.Context(), obs)
 	if err != nil {
@@ -165,8 +150,7 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 	session := aht.Session{
 		ID:       "s-facade",
 		Harness:  aht.HarnessPi,
-		Presence: aht.PresenceLive,
-		Activity: &running,
+		Liveness: registry.NewLiveness(aht.PresenceLive, registry.ActivityValue(&running), nil),
 	}
 	exp, err := aht.ExplainSession(t.Context(), session, aht.ExplainOptions{})
 	if err != nil {

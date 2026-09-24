@@ -302,7 +302,7 @@ func TestSearchCLIExplicitSourceOverridesIgnoredHarness(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &ignored); err != nil {
 		t.Fatal(err)
 	}
-	if len(ignored.Matches) != 0 || searchSourceStatus(t, ignored, registry.HarnessPi, sessions) != "skipped" {
+	if len(ignored.Matches) != 0 || searchSourceStatus(t, ignored, registry.Harness("pi"), sessions) != "skipped" {
 		t.Fatalf("configured ignore list lost effect: %#v", ignored)
 	}
 
@@ -316,7 +316,7 @@ func TestSearchCLIExplicitSourceOverridesIgnoredHarness(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &selected); err != nil {
 		t.Fatal(err)
 	}
-	if len(selected.Matches) != 1 || searchSourceStatus(t, selected, registry.HarnessPi, historyPath) != "searched" {
+	if len(selected.Matches) != 1 || searchSourceStatus(t, selected, registry.Harness("pi"), historyPath) != "searched" {
 		t.Fatalf("explicit source did not override the ignore list: %#v", selected)
 	}
 }
@@ -411,7 +411,7 @@ func TestSearchMatchTTY(t *testing.T) {
 	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
 	match := history.Match{
 		Conversation: history.Conversation{
-			Harness:   registry.HarnessPi,
+			Harness:   registry.Harness("pi"),
 			SessionID: "01a0c324-11ca-7000-894a-0e31b911d7ae",
 			Title:     "Fix failing workflow",
 			CWD:       "/work/project",

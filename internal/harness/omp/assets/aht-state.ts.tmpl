@@ -1,7 +1,6 @@
 "{{MANAGED_MARKER}}";
 "AHT_INTEGRATION_ID={{INTEGRATION_ID}}";
 "AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}";
-"aht_integration_version={{INTEGRATION_VERSION}}";
 
 import { spawn } from "node:child_process";
 
@@ -190,8 +189,8 @@ function report(snapshot: ReportSnapshot | undefined): Promise<void> {
   if (snapshot.eventType) {
     args.push("--event", snapshot.eventType);
   }
-  args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
-  args.push("--attribute", `aht_integration=${currentSessionSource}`);
+  args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
+  args.push("--reporter", currentSessionSource);
   if (mode === "tui" || mode === "rpc" || mode === "json" || mode === "print") {
     args.push("--attribute", `aht_interaction_mode=${mode}`);
   }

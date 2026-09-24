@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
+
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
@@ -133,7 +135,7 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 	}
 
 	registryPath := filepath.Join(stateDir, "tmux-stop-sessions.json")
-	store := registry.NewFileStore(registryPath)
+	store := registry.NewJournal(registryPath, catalog.Rules{})
 	targetSession := seedTmuxStopSession(t, store, "target-tmux", targetPane)
 	_ = seedTmuxStopSession(t, store, "control-tmux", controlPane)
 
@@ -264,7 +266,7 @@ func requireTmuxPane(t *testing.T, socket string) tmux.Pane {
 	}
 }
 
-func seedTmuxStopSession(t *testing.T, store *registry.FileStore, sessionID string, pane tmux.Pane) registry.Session {
+func seedTmuxStopSession(t *testing.T, store *registry.Journal, sessionID string, pane tmux.Pane) registry.Session {
 	t.Helper()
 	process := &registry.ProcessIdentity{
 		PID:           pane.PanePID,
@@ -273,17 +275,10 @@ func seedTmuxStopSession(t *testing.T, store *registry.FileStore, sessionID stri
 	}
 	present := true
 	at := time.Now().UTC()
-	if _, err := store.Observe(t.Context(), registry.Observation{
-		Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: sessionID},
-		ProcessPresent: &present, Process: process, ObservedAt: at,
-	}); err != nil {
+	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Sighting{Process: *process, Present: present}}); err != nil {
 		t.Fatalf("record tmux process observation: %v", err)
 	}
-	session, err := store.Observe(t.Context(), registry.Observation{
-		Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
-		Harness: registry.HarnessCodex, Process: process, Tmux: &pane.Tmux, ObservedAt: at.Add(time.Nanosecond),
-	})
+	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Nanosecond), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: pane.Tmux}})
 	if err != nil {
 		t.Fatalf("record tmux location observation: %v", err)
 	}

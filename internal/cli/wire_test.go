@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/internal/harness/kimi"
+	"github.com/zigai/aht/internal/harness/catalog"
 )
 
 func TestWireRejectsUnsupportedInvocationBeforeSideEffects(t *testing.T) {
@@ -35,7 +35,11 @@ func TestWireRejectsUnsupportedInvocationBeforeSideEffects(t *testing.T) {
 func TestWireNativeValuesAreNotReinterpretedAsModes(t *testing.T) {
 	t.Parallel()
 	args := []string{"--prompt", "--print", "--model=web", "--session", "native-session"}
-	if err := kimi.ValidateArgs(args); err != nil {
+	runner, ok := catalog.WireRunnerFor("kimi-code")
+	if !ok {
+		t.Fatal("missing Wire adapter")
+	}
+	if err := runner.ValidateWireArgs(args); err != nil {
 		t.Fatalf("native option value was reinterpreted: %v", err)
 	}
 }

@@ -26,7 +26,8 @@ type copilotHookSpec struct {
 
 func New() copilotHarness {
 	return copilotHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessCopilot,
+		ExclusiveProcess: true, CatalogCreates: false,
+		ID:           registry.Harness("copilot"),
 		Aliases:      []string{"github-copilot", "github_copilot", "copilot-cli", "copilot_cli", "github-copilot-cli", "github_copilot_cli"},
 		ProcessNames: []string{"copilot"},
 		Env: harness.EnvKeys{
@@ -47,7 +48,7 @@ func New() copilotHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  copilotIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -139,7 +140,7 @@ func copilotCommandHook(binary string, spec copilotHookSpec) map[string]any {
 }
 
 func copilotHookCommand(binary string, transition harness.HookTransition, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCopilot, transition, event, copilotIntegrationSource) +
+	return harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("copilot"), transition, event, copilotIntegrationSource) +
 		" --attribute " + harness.ShellQuote("copilot_hook_event="+event) +
 		" >/dev/null 2>&1 || true"
 }
@@ -166,4 +167,11 @@ func copilotHome() string {
 	}
 
 	return ".copilot"
+}
+
+func (copilotHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["copilot_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "copilot_start_source", "source", "reason"))
 }

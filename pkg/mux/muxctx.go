@@ -13,7 +13,7 @@ import (
 //   - Kind returns the canonical multiplexer identifier.
 //   - Current returns the enclosing multiplexer context for the caller.
 //     If the caller is not running inside this multiplexer, it returns an empty
-//     [registry.MultiplexerContext] and nil error. A non-nil error indicates an
+//     [registry.Location] and nil error. A non-nil error indicates an
 //     operational inspection failure or context cancellation.
 //   - ListPanes enumerates live panes for this multiplexer.
 //     If the multiplexer binary is not installed or no active server/session exists,
@@ -21,7 +21,7 @@ import (
 //   - CapturePane captures the visible terminal screen and title of the given pane.
 type Driver interface {
 	Kind() registry.MultiplexerKind
-	Current(ctx context.Context) (registry.MultiplexerContext, error)
+	Current(ctx context.Context) (registry.Location, error)
 	ListPanes(ctx context.Context) ([]Pane, error)
 	CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error)
 }
@@ -43,7 +43,7 @@ type ProcessRef struct {
 
 // Pane is transient native multiplexer inventory. Only Location is persisted.
 type Pane struct {
-	Location    registry.MultiplexerContext
+	Location    registry.Location
 	Processes   []ProcessRef
 	ProcessTTY  string
 	Command     string

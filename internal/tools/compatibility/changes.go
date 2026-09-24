@@ -25,12 +25,7 @@ func affectedHosts(paths []string) []string {
 			break
 		}
 		selected[id] = true
-		switch id {
-		case "pi", "omp":
-			selected["pi"], selected["omp"] = true, true
-		case "opencode", "kilo":
-			selected["opencode"], selected["kilo"] = true, true
-		}
+		selectRelatedHosts(selected, id)
 	}
 	ids := []string{}
 	for _, spec := range defaultCatalog {
@@ -54,11 +49,9 @@ func adapterForPath(path string) string {
 	if !ok {
 		return ""
 	}
-	if directory == "kimi" {
-		return "kimi-code"
-	}
+
 	for _, spec := range defaultCatalog {
-		if directory == spec.ID {
+		if directory == spec.Directory {
 			return spec.ID
 		}
 	}
@@ -155,4 +148,16 @@ func (a application) changes(ctx context.Context) error {
 		return err
 	}
 	return a.output("selected", len(plan.Matrix.Include) > 0)
+}
+
+func selectRelatedHosts(selected map[string]bool, id string) {
+	spec, err := findHarness(id)
+	if err != nil || spec.Family == "" {
+		return
+	}
+	for _, related := range defaultCatalog {
+		if related.Family == spec.Family {
+			selected[related.ID] = true
+		}
+	}
 }

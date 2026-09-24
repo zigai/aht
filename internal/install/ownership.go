@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	integrationVersionPattern = regexp.MustCompile(`(?i)aht[_-]?integration[_-]?version\s*[=:]\s*["']?([0-9]+)`)
-	integrationSourcePattern  = regexp.MustCompile(`(?i)aht[_-]?integration\s*[=:]`)
+	integrationVersionPattern = regexp.MustCompile(`(?i)(?:aht[_-]?integration[_-]?version\s*[=:]|--reporter-version)\s*["']?([0-9]+)`)
+	integrationSourcePattern  = regexp.MustCompile(`(?i)(?:aht[_-]?integration\s*[=:]|--reporter\s)`)
 	integrationIDPattern      = regexp.MustCompile(`(?i)AHT_INTEGRATION_ID\s*=\s*["']?([a-z0-9_-]+)`)
 )
 

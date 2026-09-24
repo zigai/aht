@@ -17,7 +17,7 @@ func TestInstallClaudeWritesHooks(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessClaude,
+		Harness:      registry.Harness("claude"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -45,7 +45,7 @@ func TestInstallClaudeWritesHooks(t *testing.T) {
 	requireTextContainsAll(t, string(data), []string{
 		"--raw-stdin",
 		"--quiet",
-		"aht_integration=claude-hook",
+		"--reporter claude-hook",
 		managedMarker,
 	}, "installed hook")
 }
@@ -92,7 +92,7 @@ func TestInstallClaudeReplacesManagedHooks(t *testing.T) {
 	}
 
 	requireManagedReplacement(t, managedReplacementCase{
-		Harness:              registry.HarnessClaude,
+		Harness:              registry.Harness("claude"),
 		Path:                 path,
 		RemovedText:          "old-aht",
 		RequiredText:         []string{"--raw-stdin"},
@@ -106,7 +106,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 
 	first, err := Run(Options{
-		Harness:      registry.HarnessClaude,
+		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -138,7 +138,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	}
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessClaude,
+		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -163,7 +163,7 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessCodex,
+		Harness:      registry.Harness("codex"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -232,7 +232,7 @@ func TestInstallCodexReplacesManagedHooks(t *testing.T) {
 	}
 
 	requireManagedReplacement(t, managedReplacementCase{
-		Harness:              registry.HarnessCodex,
+		Harness:              registry.Harness("codex"),
 		Path:                 path,
 		RemovedText:          "old-aht",
 		RequiredText:         []string{"--raw-stdin", "--quiet"},
@@ -257,7 +257,7 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness: registry.HarnessCodex,
+		Harness: registry.Harness("codex"),
 		Binary:  "/bin/aht-test",
 	})
 	if err != nil {
@@ -288,7 +288,7 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	if strings.Contains(content, "aht_integration_version=4") {
 		t.Fatalf("expected stale aht hook to be removed: %s", content)
 	}
-	if !strings.Contains(content, "/bin/aht-test report codex") || !strings.Contains(content, "aht_integration=codex-hook") {
+	if !strings.Contains(content, "/bin/aht-test report codex") || !strings.Contains(content, "--reporter codex-hook") {
 		t.Fatalf("expected new aht hook in target: %s", content)
 	}
 }
@@ -298,7 +298,7 @@ func TestInstallCursorWritesHooks(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessCursor,
+		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -332,7 +332,7 @@ func TestInstallCursorWritesHooks(t *testing.T) {
 	text := string(data)
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
-		"aht_integration=cursor-hook",
+		"--reporter cursor-hook",
 		"continue",
 	}, "cursor hooks")
 	if strings.Contains(text, "--raw-stdin ") {
@@ -353,7 +353,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessCursor,
+		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -380,7 +380,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 	}
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessCursor,
+		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -400,7 +400,7 @@ func TestInstallCopilotWritesHooks(t *testing.T) {
 	t.Setenv("COPILOT_HOME", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessCopilot,
+		Harness:      registry.Harness("copilot"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -435,7 +435,7 @@ func TestInstallCopilotWritesHooks(t *testing.T) {
 	text := string(readTestFile(t, result.Path, "reading copilot hooks text"))
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
-		"aht_integration=copilot-hook",
+		"--reporter copilot-hook",
 		"copilot_hook_event=preToolUse",
 		managedMarker,
 		"|| true",
@@ -461,7 +461,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessDroid,
+		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -502,14 +502,14 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	text := string(data)
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
-		"aht_integration=droid-hook",
+		"--reporter droid-hook",
 	}, "droid hooks")
 	if strings.Contains(text, "statusMessage") {
 		t.Fatalf("expected Droid hooks not to include unsupported statusMessage field: %s", text)
 	}
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessDroid,
+		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -528,7 +528,7 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 	t.Setenv("GROK_HOME", t.TempDir())
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessGrok,
+		Harness:      registry.Harness("grok"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -580,7 +580,7 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 	if !strings.Contains(text, "--raw-stdin") || !strings.Contains(text, "--quiet") {
 		t.Fatalf("expected stdin-aware quiet grok hook: %s", text)
 	}
-	if !strings.Contains(text, "aht_integration=grok-hook") {
+	if !strings.Contains(text, "--reporter grok-hook") {
 		t.Fatalf("expected managed grok hook marker: %s", text)
 	}
 	if !strings.Contains(text, managedMarker) {
@@ -601,7 +601,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessGrok,
+		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -625,7 +625,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 	}
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessGrok,
+		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -661,7 +661,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 
 	// Install Droid hooks
 	result, err := Run(Options{
-		Harness: registry.HarnessDroid,
+		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
 	if err != nil {
@@ -684,7 +684,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 
 	// Second install should be idempotent (no change needed despite 5.0 vs float64(5))
 	secondResult, err := Run(Options{
-		Harness: registry.HarnessDroid,
+		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
 	if err != nil {
@@ -696,7 +696,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 
 	// Remove hooks
 	removeResult, err := Remove(Options{
-		Harness: registry.HarnessDroid,
+		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 func TestProcessNames(t *testing.T) {
 	t.Parallel()
 
-	names := harness.ProcessNames(registry.HarnessCodex)
+	names := harness.ProcessNames(registry.Harness("codex"))
 	if !slices.Contains(names, "codex") {
 		t.Errorf("ProcessNames(codex) = %v, want codex", names)
 	}
@@ -25,10 +25,10 @@ func TestFromCommandResolvesProcessNames(t *testing.T) {
 		command string
 		want    registry.Harness
 	}{
-		{name: "openclaw", command: "openclaw", want: registry.HarnessOpenClaw},
-		{name: "openclaw path", command: "/usr/local/bin/openclaw", want: registry.HarnessOpenClaw},
-		{name: "hermes", command: "hermes", want: registry.HarnessHermes},
-		{name: "hermes agent", command: "hermes-agent", want: registry.HarnessHermes},
+		{name: "openclaw", command: "openclaw", want: registry.Harness("openclaw")},
+		{name: "openclaw path", command: "/usr/local/bin/openclaw", want: registry.Harness("openclaw")},
+		{name: "hermes", command: "hermes", want: registry.Harness("hermes")},
+		{name: "hermes agent", command: "hermes-agent", want: registry.Harness("hermes")},
 	}
 
 	for _, test := range tests {
@@ -51,10 +51,10 @@ func TestParseMatchesNamesWithoutPunctuation(t *testing.T) {
 		value string
 		want  registry.Harness
 	}{
-		{name: "claude code space", value: "claude code", want: registry.HarnessClaude},
-		{name: "claude code dot", value: "claude.code", want: registry.HarnessClaude},
-		{name: "codex bang", value: "codex!", want: registry.HarnessCodex},
-		{name: "kimi code space", value: "kimi code", want: registry.HarnessKimiCode},
+		{name: "claude code space", value: "claude code", want: registry.Harness("claude")},
+		{name: "claude code dot", value: "claude.code", want: registry.Harness("claude")},
+		{name: "codex bang", value: "codex!", want: registry.Harness("codex")},
+		{name: "kimi code space", value: "kimi code", want: registry.Harness("kimi-code")},
 	}
 
 	for _, test := range tests {

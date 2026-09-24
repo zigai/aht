@@ -33,7 +33,7 @@ func requireSurfaceOutput(t *testing.T, output string, message string, fragments
 func observeTestSession(t *testing.T, store registry.Store, sessionID string, at time.Time) registry.Session {
 	t.Helper()
 	activity := registry.ActivityIdle
-	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: sessionID}, Activity: &activity, ObservedAt: at})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Report{Activity: &activity}})
 	if err != nil {
 		t.Fatal(err)
 	}

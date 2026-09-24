@@ -289,32 +289,6 @@ func (plugin pluginDirectoryInstall) expectedDirs() map[string]struct{} {
 	return dirs
 }
 
-func managedObsoleteFiles(paths []string) ([]string, error) {
-	managed := make([]string, 0, len(paths))
-	for _, path := range paths {
-		status, err := ClassifyArtifact(path)
-		if err != nil {
-			return nil, err
-		}
-		if status == ArtifactCurrent || status == ArtifactStale {
-			managed = append(managed, path)
-		}
-	}
-
-	return managed, nil
-}
-
-func removeManagedObsoleteFiles(paths []string) error {
-	var failures []error
-	for _, path := range paths {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			failures = append(failures, fmt.Errorf("removing obsolete managed integration %s: %w", path, err))
-		}
-	}
-
-	return errors.Join(failures...)
-}
-
 func (plugin pluginDirectoryInstall) installStaged() (func() error, func() error, error) {
 	stagedDir, err := plugin.stage()
 	if err != nil {

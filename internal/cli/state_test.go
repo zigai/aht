@@ -11,15 +11,16 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
 //nolint:cyclop // one sequential scenario proves both safety and explicit cleanup modes
 func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	presence := registry.PresenceGone
-	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "gone"}, Presence: &presence, ObservedAt: time.Now().Add(-time.Hour)}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().Add(-time.Hour), Subject: registry.ObservationIdentity{SessionID: "gone"}, Evidence: &registry.Report{Claim: &presence}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -42,7 +43,7 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	if err := json.Unmarshal(machine.Bytes(), &cleanResult); err != nil || cleanResult.Deleted != 1 {
 		t.Fatalf("state clean JSON = %q, %v", machine.String(), err)
 	}
-	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "gone-again"}, Presence: &presence, ObservedAt: time.Now().Add(-time.Hour)}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().Add(-time.Hour), Subject: registry.ObservationIdentity{SessionID: "gone-again"}, Evidence: &registry.Report{Claim: &presence}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +58,7 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 
 func TestStatePathAndResetCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	observeTestSession(t, store, "reset-session", time.Now())
 
 	var stdout bytes.Buffer
@@ -98,7 +99,7 @@ func TestStateResetCommandRecoversMalformedState(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Cleared:    0") {
 		t.Fatalf("state reset output = %q", stdout.String())
 	}
-	if _, err := registry.NewFileStore(path).List(context.Background(), registry.Filter{}); err != nil {
+	if _, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{}); err != nil {
 		t.Fatalf("registry remains unreadable after reset: %v", err)
 	}
 }

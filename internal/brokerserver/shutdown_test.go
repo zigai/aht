@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -43,7 +44,7 @@ func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 		_ = os.Remove(path)
 		_ = os.Remove(socketPath)
 	})
-	store, err := registry.OpenMemoryStore(path)
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

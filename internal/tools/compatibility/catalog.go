@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/internal/harness/catalog"
 )
 
 const (
@@ -23,35 +26,19 @@ var (
 	stableVersionPattern   = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 	observedVersionPattern = regexp.MustCompile(`v?[0-9]+\.[0-9]+\.[0-9]+`)
 
-	defaultCatalog = []harnessSpec{
-		{ID: "claude", Source: "npm", Package: "@anthropic-ai/claude-code", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "codex", Source: "npm", Package: "@openai/codex", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "cursor", Source: "weekly", Package: "", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "copilot", Source: "npm", Package: "@github/copilot", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "cline", Source: "npm", Package: "cline", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "kimi-code", Source: "pypi", Package: "kimi-cli", Repo: "", Asset: "", URL: "", MaxVersion: "1.51.0"},
-		{ID: "grok", Source: "channel", Package: "", Repo: "", Asset: "", URL: "https://x.ai/cli/stable", MaxVersion: ""},
-		{ID: "goose", Source: "github", Package: "", Repo: "aaif-goose/goose", Asset: "download_cli.sh", URL: "", MaxVersion: ""},
-		{ID: "pi", Source: "npm", Package: "@earendil-works/pi-coding-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "omp", Source: "npm", Package: "@oh-my-pi/pi-coding-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "opencode", Source: "npm", Package: "opencode-ai", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "agy", Source: "github", Package: "", Repo: "google-antigravity/antigravity-cli", Asset: "agy_cli_linux_x64.tar.gz", URL: "", MaxVersion: ""},
-		{ID: "kilo", Source: "npm", Package: "@kilocode/cli", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "droid", Source: "npm", Package: "droid", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "openclaw", Source: "npm", Package: "openclaw", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "hermes", Source: "pypi", Package: "hermes-agent", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-		{ID: "amp", Source: "npm", Package: "@ampcode/cli", Repo: "", Asset: "", URL: "", MaxVersion: ""},
-	}
+	defaultCatalog = distributionCatalog()
 )
 
 type harnessSpec struct {
-	ID         string
-	Source     string
-	Package    string
-	Repo       string
-	Asset      string
-	URL        string
-	MaxVersion string
+	Directory, Family, PackageExtras string
+	Install                          func(string, string, string) []harness.DistributionCommand
+	ID                               string
+	Source                           string
+	Package                          string
+	Repo                             string
+	Asset                            string
+	URL                              string
+	MaxVersion                       string
 }
 
 type candidate struct {
@@ -228,4 +215,13 @@ func versionCharacter(char byte) bool {
 		char >= 'a' && char <= 'z' ||
 		char >= 'A' && char <= 'Z' ||
 		char == '.' || char == '_' || char == '+' || char == '-'
+}
+
+func distributionCatalog() []harnessSpec {
+	specs := make([]harnessSpec, 0, len(catalog.All()))
+	for _, adapter := range catalog.All() {
+		d := catalog.DistributionFor(adapter.Definition().ID)
+		specs = append(specs, harnessSpec{ID: string(adapter.Definition().ID), Source: d.Source, Package: d.Package, Repo: d.Repo, Asset: d.Asset, URL: d.URL, MaxVersion: d.MaxVersion, Directory: d.Directory, Family: d.Family, PackageExtras: d.PackageExtras, Install: d.Install})
+	}
+	return specs
 }

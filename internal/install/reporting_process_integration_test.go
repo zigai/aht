@@ -22,7 +22,7 @@ import (
 )
 
 func TestReportingPluginsBoundAndReapChildren(t *testing.T) {
-	for _, name := range []registry.Harness{registry.HarnessCline, registry.HarnessOpenClaw, registry.HarnessHermes} {
+	for _, name := range []registry.Harness{registry.Harness("cline"), registry.Harness("openclaw"), registry.Harness("hermes")} {
 		t.Run(string(name), func(t *testing.T) {
 			binary, capture := stalledReportingBinary(t)
 			dir := writeReportingPlugin(t, name, binary)
@@ -53,7 +53,7 @@ func TestReportingPluginsBoundAndReapChildren(t *testing.T) {
 }
 
 func TestReportingPluginsMissingBinaryIsNonfatal(t *testing.T) {
-	for _, name := range []registry.Harness{registry.HarnessCline, registry.HarnessOpenClaw, registry.HarnessHermes} {
+	for _, name := range []registry.Harness{registry.Harness("cline"), registry.Harness("openclaw"), registry.Harness("hermes")} {
 		t.Run(string(name), func(t *testing.T) {
 			dir := writeReportingPlugin(t, name, filepath.Join(t.TempDir(), "missing-aht"))
 			_, tool, _, driver := reportingDriver(t, name)
@@ -81,8 +81,8 @@ func TestReportingPluginsMissingBinaryIsNonfatal(t *testing.T) {
 
 func TestOpenClawGatewayStopJoinsReporter(t *testing.T) {
 	binary, capture := stalledReportingBinary(t)
-	dir := writeReportingPlugin(t, registry.HarnessOpenClaw, binary)
-	_, tool, terminal, driver := reportingDriver(t, registry.HarnessOpenClaw)
+	dir := writeReportingPlugin(t, registry.Harness("openclaw"), binary)
+	_, tool, terminal, driver := reportingDriver(t, registry.Harness("openclaw"))
 	t.Setenv("AHT_TEST_GATEWAY_STOP", "1")
 	runReportingDriver(t, tool, dir, driver, capture, terminal)
 	records := readReportingRecords(t, capture)
@@ -93,7 +93,7 @@ func TestOpenClawGatewayStopJoinsReporter(t *testing.T) {
 
 func TestTypeScriptReportingOwnsProcesses(t *testing.T) {
 	for _, harness := range []registry.Harness{
-		registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessKilo,
+		registry.Harness("pi"), registry.Harness("omp"), registry.Harness("opencode"), registry.Harness("kilo"),
 	} {
 		t.Run(string(harness), func(t *testing.T) {
 			command, capture := stalledReportingBinary(t)
@@ -112,7 +112,7 @@ func TestTypeScriptReportingOwnsProcesses(t *testing.T) {
 			writeTestFile(t, filepath.Join(dir, "extension.ts"), module, 0o600)
 			driver := runtimeScript(t, "node/extension-process-ownership.mjs")
 			terminalEvent := "session_shutdown"
-			if harness == registry.HarnessOpenCode || harness == registry.HarnessKilo {
+			if harness == registry.Harness("opencode") || harness == registry.Harness("kilo") {
 				driver = runtimeScript(t, "node/plugin-process-ownership.mjs")
 				terminalEvent = "session.deleted"
 			}
@@ -137,7 +137,7 @@ func TestTypeScriptReportingOwnsProcesses(t *testing.T) {
 }
 
 func TestTypeScriptReportingRejectsMalformedEventFields(t *testing.T) {
-	for _, harness := range []registry.Harness{registry.HarnessPi, registry.HarnessOmp} {
+	for _, harness := range []registry.Harness{registry.Harness("pi"), registry.Harness("omp")} {
 		t.Run(string(harness), func(t *testing.T) {
 			capture := captureBinary(t)
 			t.Setenv("AHT_CAPTURE", capture.path)
@@ -157,7 +157,7 @@ func TestTypeScriptReportingRejectsMalformedEventFields(t *testing.T) {
 
 func TestTypeScriptReportingMissingExecutableIsNonfatal(t *testing.T) {
 	for _, harness := range []registry.Harness{
-		registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessKilo,
+		registry.Harness("pi"), registry.Harness("omp"), registry.Harness("opencode"), registry.Harness("kilo"),
 	} {
 		t.Run(string(harness), func(t *testing.T) {
 			binary := filepath.Join(t.TempDir(), "missing-reporter")
@@ -166,7 +166,7 @@ func TestTypeScriptReportingMissingExecutableIsNonfatal(t *testing.T) {
 					continue
 				}
 				driver := runtimeScript(t, "node/extension-missing-reporter.mjs")
-				if harness == registry.HarnessOpenCode || harness == registry.HarnessKilo {
+				if harness == registry.Harness("opencode") || harness == registry.Harness("kilo") {
 					driver = runtimeScript(t, "node/plugin-missing-reporter.mjs")
 				}
 				runNodeRuntime(t, "extension.ts", artifact.content, driver, nil)
@@ -195,7 +195,7 @@ func writeReportingPlugin(t *testing.T, name registry.Harness, binary string) st
 			writeTestFile(t, filepath.Join(dir, suffix), artifact.content, 0o600)
 		}
 	}
-	if name == registry.HarnessOpenClaw {
+	if name == registry.Harness("openclaw") {
 		writeTestFile(t, filepath.Join(dir, "node_modules/openclaw/package.json"), `{"type":"module","exports":{"./plugin-sdk/plugin-entry":"./plugin-entry.js"}}`, 0o600)
 		writeTestFile(t, filepath.Join(dir, "node_modules/openclaw/plugin-entry.js"), runtimeScript(t, "node/openclaw-plugin-entry.mjs"), 0o600)
 	}
@@ -322,9 +322,9 @@ func runReportingDriver(t *testing.T, tool, dir, driver, capture, terminal strin
 func reportingDriver(t *testing.T, name registry.Harness) (string, string, string, string) {
 	t.Helper()
 	switch name {
-	case registry.HarnessCline:
+	case registry.Harness("cline"):
 		return "index.js", "node", "afterRun", runtimeScript(t, "node/cline-report-queue.mjs")
-	case registry.HarnessOpenClaw:
+	case registry.Harness("openclaw"):
 		return "index.js", "node", "session_end", runtimeScript(t, "node/openclaw-report-queue.mjs")
 	default:
 		return "__init__.py", "python3", "on_session_finalize", runtimeScript(t, "python/hermes-report-queue.py")

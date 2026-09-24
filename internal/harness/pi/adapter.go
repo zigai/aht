@@ -15,7 +15,7 @@ const (
 	piIntegrationID       = "pi"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
-	integrationVersion    = 15
+	integrationVersion    = 16
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -25,9 +25,11 @@ type piHarness struct{ harness.BaseAdapter }
 
 func New() piHarness {
 	return piHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessPi,
-		Aliases:      nil,
-		ProcessNames: []string{"pi"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("pi"),
+		Aliases:          nil,
+		ProcessNames:     []string{"pi"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"PI_SESSION_ID"},
 			SessionPath: []string{"PI_SESSION_PATH"},
@@ -46,7 +48,7 @@ func New() piHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  piIntegrationSourceID,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     true,
 	})}
 }
@@ -88,4 +90,11 @@ func piAgentDir() string {
 	}
 
 	return filepath.Join(".pi", "agent")
+}
+
+func (piHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["pi_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "pi_reason", "source", "reason"))
 }

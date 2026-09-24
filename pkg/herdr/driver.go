@@ -27,9 +27,9 @@ func (d Driver) Kind() registry.MultiplexerKind {
 
 // Current returns the enclosing Herdr context for the caller.
 // If the caller is not inside Herdr, it returns an empty context and nil error.
-func (d Driver) Current(ctx context.Context) (registry.MultiplexerContext, error) {
+func (d Driver) Current(ctx context.Context) (registry.Location, error) {
 	if err := ctx.Err(); err != nil {
-		return registry.MultiplexerContext{}, fmt.Errorf("current herdr context: %w", err)
+		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, fmt.Errorf("current herdr context: %w", err)
 	}
 	return Current(), nil
 }

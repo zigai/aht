@@ -160,11 +160,6 @@ func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registr
 	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
-// SummaryByTmuxSession implements registry.Store.
-func (c *Client) SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return c.Summary(ctx, filter)
-}
-
 // GC removes expired gone-session tombstones through the broker.
 func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCResult, error) {
 	request := newRequest(MethodGC)
@@ -391,7 +386,6 @@ func newRequest(method string) Request {
 			Harness:            "",
 			Presence:           "",
 			Activity:           "",
-			TmuxSession:        "",
 			MultiplexerSession: "",
 			Project:            "",
 			ProjectSubtree:     false,

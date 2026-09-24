@@ -52,33 +52,33 @@ func TestNativeSQLiteReadersAndWAL(t *testing.T) {
 		filename string
 		ddl      string
 	}{
-		{"goose", registry.HarnessGoose, "sessions.db", `CREATE TABLE sessions(id,name,working_dir,created_at,updated_at); CREATE TABLE messages(id,session_id,role,content_json,created_timestamp);
+		{"goose", registry.Harness("goose"), "sessions.db", `CREATE TABLE sessions(id,name,working_dir,created_at,updated_at); CREATE TABLE messages(id,session_id,role,content_json,created_timestamp);
 INSERT INTO sessions VALUES('native','title','/project','2026-09-01 00:00:00','2026-09-01 00:01:00');
 INSERT INTO messages VALUES(1,'native','user','[{"type":"text","text":"refresh token"}]',1);
 INSERT INTO messages VALUES(2,'native','assistant','[{"type":"toolResponse","toolResult":{"status":"success","value":{"content":[{"type":"text","text":"tool-only"}]}}}]',2);`},
-		{"hermes", registry.HarnessHermes, "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
+		{"hermes", registry.Harness("hermes"), "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
 INSERT INTO sessions VALUES('native','title',1,2); INSERT INTO messages VALUES(1,'native','user','refresh token',1); INSERT INTO messages VALUES(2,'native','tool','tool-only',2);`},
-		{"hermes-current", registry.HarnessHermes, "state.db", `CREATE TABLE sessions(id,title,cwd,git_repo_root,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,tool_calls,codex_message_items,timestamp);
+		{"hermes-current", registry.Harness("hermes"), "state.db", `CREATE TABLE sessions(id,title,cwd,git_repo_root,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,tool_calls,codex_message_items,timestamp);
 INSERT INTO sessions VALUES('native','title','/project','/project',1,2);
 INSERT INTO messages VALUES(1,'native','assistant','','[{"function":{"name":"read","arguments":"tool-only"}}]','[{"type":"message","channel":"final","content":[{"type":"output_text","text":"refresh token"}]}]',1);`},
 
-		{"grok", registry.HarnessGrok, "grok.db", `CREATE TABLE sessions(id,title,cwd_last,created_at,updated_at); CREATE TABLE messages(seq,session_id,role,message_json,created_at);
+		{"grok", registry.Harness("grok"), "grok.db", `CREATE TABLE sessions(id,title,cwd_last,created_at,updated_at); CREATE TABLE messages(seq,session_id,role,message_json,created_at);
 INSERT INTO sessions VALUES('native','title','/project',1,2);
 INSERT INTO messages VALUES(1,'native','user','{"role":"user","content":"refresh token"}',1);
 INSERT INTO messages VALUES(2,'native','tool','{"role":"tool","content":[{"type":"tool-result","output":{"type":"text","value":"tool-only"}}]}',2);`},
-		{"opencode-v1", registry.HarnessOpenCode, "opencode.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE message(id,session_id,data); CREATE TABLE part(id,message_id,data,time_created);
+		{"opencode-v1", registry.Harness("opencode"), "opencode.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE message(id,session_id,data); CREATE TABLE part(id,message_id,data,time_created);
 INSERT INTO session VALUES('native','title','/project',1,2); INSERT INTO message VALUES('m1','native','{"role":"assistant"}');
 INSERT INTO part VALUES('p1','m1','{"type":"text","text":"refresh token"}',1);
 INSERT INTO part VALUES('p2','m1','{"type":"tool","tool":"read","state":{"output":"tool-only"}}',2);`},
-		{"opencode-v2", registry.HarnessOpenCode, "opencode.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
+		{"opencode-v2", registry.Harness("opencode"), "opencode.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
 INSERT INTO session VALUES('native','title','/project',1,2);
 INSERT INTO session_message VALUES('m1','native','user','{"text":"refresh token"}',1);
 INSERT INTO session_message VALUES('m2','native','assistant','{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`},
-		{"kilo-v2", registry.HarnessKilo, "kilo.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
+		{"kilo-v2", registry.Harness("kilo"), "kilo.db", `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
 INSERT INTO session VALUES('native','title','/project',1,2);
 INSERT INTO session_message VALUES('m1','native','user','{"text":"refresh token"}',1);
 INSERT INTO session_message VALUES('m2','native','assistant','{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`},
-		{"openclaw", registry.HarnessOpenClaw, "openclaw-agent.sqlite", `CREATE TABLE session_windows(session_id,display_name,created_at,updated_at); CREATE TABLE transcript_events(session_id,seq,event_json,created_at);
+		{"openclaw", registry.Harness("openclaw"), "openclaw-agent.sqlite", `CREATE TABLE session_windows(session_id,display_name,created_at,updated_at); CREATE TABLE transcript_events(session_id,seq,event_json,created_at);
 INSERT INTO session_windows VALUES('native','title',1,2);
 INSERT INTO transcript_events VALUES('native',1,'{"type":"session","id":"native","cwd":"/project"}',1);
 INSERT INTO transcript_events VALUES('native',2,'{"type":"message","message":{"role":"user","content":"refresh token"}}',1);
@@ -146,7 +146,7 @@ INSERT INTO sessions VALUES('native','title',1,4);
 INSERT INTO messages VALUES(1,'native','assistant',NULL,1);
 
 INSERT INTO messages VALUES(2,'native','user','refresh token',2);`+tt.extraRows)
-			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessHermes, Path: databasePath(t, db)}}}
+			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("hermes"), Path: databasePath(t, db)}}}
 			result, err := catalog.Search(t.Context(), history.Query{Text: "refresh token"})
 			if !errors.Is(err, tt.err) || len(result.Issues) != tt.issues || len(result.Matches) != 1 || result.Matches[0].MatchingParts != tt.matchingParts || result.Sources[0].Status != tt.status {
 				t.Fatalf("content search = %#v, %v", result, err)
@@ -175,7 +175,7 @@ INSERT INTO messages VALUES(3,'native','assistant','[{"type":"text","text":"anot
 			if _, err := db.ExecContext(t.Context(), `INSERT INTO messages VALUES(2,'native','assistant',?,2)`, tt.body); err != nil {
 				t.Fatal(err)
 			}
-			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.HarnessGoose, Path: databasePath(t, db)}}}
+			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("goose"), Path: databasePath(t, db)}}}
 			result, err := catalog.Search(t.Context(), history.Query{Text: "refresh token"})
 			if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 1 || result.Matches[0].MatchingParts != 2 || len(result.Issues) != 1 || result.Sources[0].Status != "failed" {
 				t.Fatalf("malformed content search = %#v, %v", result, err)
@@ -196,7 +196,7 @@ CREATE TABLE messages(id,session_id,role,content_json,created_timestamp);
 INSERT INTO sessions VALUES('native','title','/project','2026-09-01 00:00:00','2026-09-01 00:02:00');
 INSERT INTO messages VALUES(1,'native','user','[{"type":"text","text":"refresh token"}]','2026-09-01 00:01:00');
 INSERT INTO messages VALUES(2,'native','tool','[{"type":"text","text":"tool-only"}]','2026-09-01 00:03:00');`)
-	return []history.Source{{Harness: registry.HarnessGoose, Path: databasePath(t, db)}}
+	return []history.Source{{Harness: registry.Harness("goose"), Path: databasePath(t, db)}}
 }
 
 func TestSQLiteToolRowsFeedMetadataWithoutToolSearch(t *testing.T) {

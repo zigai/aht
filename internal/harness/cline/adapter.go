@@ -18,7 +18,7 @@ const (
 	clinePluginName        = "aht-state"
 	clineMarkerFileName    = ".aht-managed"
 	clineIntegrationSource = "cline-plugin"
-	integrationVersion     = 10
+	integrationVersion     = 11
 )
 
 //go:embed assets/index.js.tmpl
@@ -28,9 +28,11 @@ type clineHarness struct{ harness.BaseAdapter }
 
 func New() clineHarness {
 	return clineHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessCline,
-		Aliases:      nil,
-		ProcessNames: []string{"cline"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("cline"),
+		Aliases:          nil,
+		ProcessNames:     []string{"cline"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -49,7 +51,7 @@ func New() clineHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  clineIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -73,7 +75,6 @@ func (clineHarness) InstallPlan(binary string) harness.InstallPlan {
 		},
 		SnippetOrder:   []string{"package.json", "index.js", clineMarkerFileName},
 		MarkerFile:     clineMarkerFileName,
-		ObsoleteFiles:  clineLegacyHookPaths(),
 		ImportManifest: nil,
 		Registration:   nil,
 	}}}}
@@ -156,35 +157,6 @@ func clineConfigDir() string {
 	}
 
 	return ".cline"
-}
-
-func clineLegacyHooksDir() string {
-	if value := strings.TrimSpace(os.Getenv("CLINE_HOOKS_DIR")); value != "" {
-		return value
-	}
-
-	return filepath.Join(clineConfigDir(), "hooks")
-}
-
-func clineLegacyHookPaths() []string {
-	names := []string{
-		"TaskStart.sh",
-		"TaskResume.sh",
-		"UserPromptSubmit.sh",
-		"PreToolUse.sh",
-		"PostToolUse.sh",
-		"TaskComplete.sh",
-		"TaskCancel.sh",
-		"TaskError.sh",
-		"PreCompact.sh",
-		"SessionShutdown.sh",
-	}
-	paths := make([]string, 0, len(names))
-	for _, name := range names {
-		paths = append(paths, filepath.Join(clineLegacyHooksDir(), name))
-	}
-
-	return paths
 }
 
 func clineSessionDir() string {

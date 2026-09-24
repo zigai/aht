@@ -38,7 +38,7 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 				if pane.Tmux.SessionName != "discovery" || filepath.Base(pane.ServerIdentity) != name {
 					continue
 				}
-				if pane.ServerIdentity == "-L:"+name || !filepath.IsAbs(pane.ServerIdentity) || pane.Tmux.ServerSocket != pane.ServerIdentity {
+				if pane.ServerIdentity == "-L:"+name || !filepath.IsAbs(pane.ServerIdentity) || pane.Tmux.ServerID != pane.ServerIdentity {
 					t.Fatalf("named server identity was not canonical: %#v", pane)
 				}
 				return

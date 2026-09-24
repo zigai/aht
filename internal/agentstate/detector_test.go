@@ -62,27 +62,27 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 		want    registry.Activity
 		rule    string
 	}{
-		{registry.HarnessCodex, "› implement this\nContext 63% used", registry.ActivityIdle, "input_prompt"},
-		{registry.HarnessCodex, "Would you like to run the following command?", registry.ActivityWaiting, "permission_prompt"},
-		{registry.HarnessCodex, "API error: Rate limit reached", registry.ActivityFailed, "error_prompt"},
-		{registry.HarnessCodex, "Operation cancelled by user", registry.ActivityInterrupted, "interrupted_prompt"}, //nolint:misspell // Fixture mirrors Codex output.
-		{registry.HarnessClaude, "Thinking… esc to interrupt", registry.ActivityRunning, "working_interruptible"},
-		{registry.HarnessClaude, "❯ \n? for shortcuts", registry.ActivityIdle, "input_prompt"},
-		{registry.HarnessClaude, "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
-		{registry.HarnessClaude, "Claude was interrupted", registry.ActivityInterrupted, "interrupted_prompt"},
-		{registry.HarnessOpenCode, "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
-		{registry.HarnessOpenCode, "Ask anything", registry.ActivityIdle, "input_prompt"},
-		{registry.HarnessOpenCode, "API error: Execution error", registry.ActivityFailed, "error_prompt"},
-		{registry.HarnessOpenCode, "Stopped by user", registry.ActivityInterrupted, "interrupted_prompt"},
-		{registry.HarnessPi, "Working · esc to interrupt", registry.ActivityRunning, "working_interruptible"},
-		{registry.HarnessPi, "Type a message · Enter to send", registry.ActivityIdle, "input_prompt"},
-		{registry.HarnessPi, "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
-		{registry.HarnessPi, "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
-		{registry.HarnessOmp, " ⠋ Working... (40s)", registry.ActivityRunning, "custom_working"},
-		{registry.HarnessOmp, " ~/Projects/sesh · Codex · GPT-5.6 Sol · medium 7.1%/1M" + strings.Repeat("\n ", 20), registry.ActivityIdle, "custom_input_prompt"},
-		{registry.HarnessOmp, "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
-		{registry.HarnessOmp, "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
-		{registry.HarnessOmp, "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
+		{registry.Harness("codex"), "› implement this\nContext 63% used", registry.ActivityIdle, "input_prompt"},
+		{registry.Harness("codex"), "Would you like to run the following command?", registry.ActivityWaiting, "permission_prompt"},
+		{registry.Harness("codex"), "API error: Rate limit reached", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("codex"), "Operation cancelled by user", registry.ActivityInterrupted, "interrupted_prompt"}, //nolint:misspell // Fixture mirrors Codex output.
+		{registry.Harness("claude"), "Thinking… esc to interrupt", registry.ActivityRunning, "working_interruptible"},
+		{registry.Harness("claude"), "❯ \n? for shortcuts", registry.ActivityIdle, "input_prompt"},
+		{registry.Harness("claude"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("claude"), "Claude was interrupted", registry.ActivityInterrupted, "interrupted_prompt"},
+		{registry.Harness("opencode"), "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
+		{registry.Harness("opencode"), "Ask anything", registry.ActivityIdle, "input_prompt"},
+		{registry.Harness("opencode"), "API error: Execution error", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("opencode"), "Stopped by user", registry.ActivityInterrupted, "interrupted_prompt"},
+		{registry.Harness("pi"), "Working · esc to interrupt", registry.ActivityRunning, "working_interruptible"},
+		{registry.Harness("pi"), "Type a message · Enter to send", registry.ActivityIdle, "input_prompt"},
+		{registry.Harness("pi"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("pi"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
+		{registry.Harness("omp"), " ⠋ Working... (40s)", registry.ActivityRunning, "custom_working"},
+		{registry.Harness("omp"), " ~/Projects/sesh · Codex · GPT-5.6 Sol · medium 7.1%/1M" + strings.Repeat("\n ", 20), registry.ActivityIdle, "custom_input_prompt"},
+		{registry.Harness("omp"), "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
+		{registry.Harness("omp"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("omp"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
 	}
 	for _, test := range tests {
 		t.Run(string(test.harness)+"/"+test.rule, func(t *testing.T) {
@@ -111,44 +111,44 @@ func TestBundledManifestScenarioBoundaries(t *testing.T) {
 		rule    string
 	}{
 		{
-			name: "codex case insensitive permission", harness: registry.HarnessCodex,
+			name: "codex case insensitive permission", harness: registry.Harness("codex"),
 			screen: "would you like to run the following command?", want: registry.ActivityWaiting, rule: "permission_prompt",
 		},
 		{
-			name: "codex permission outside region", harness: registry.HarnessCodex,
+			name: "codex permission outside region", harness: registry.Harness("codex"),
 			screen: "Would you like to run the following command?\n" + strings.Repeat("ordinary output\n", 30),
 			want:   registry.ActivityUnknown,
 		},
 		{
-			name: "codex historical error while running", harness: registry.HarnessCodex,
+			name: "codex historical error while running", harness: registry.Harness("codex"),
 			screen: "API error: old failure\nRunning command · esc to interrupt",
 			want:   registry.ActivityRunning, rule: "working_interruptible",
 		},
 		{
-			name: "pi ANSI custom footer", harness: registry.HarnessPi,
+			name: "pi ANSI custom footer", harness: registry.Harness("pi"),
 			screen: "\x1b[2m" + piFooter + "\x1b[0m", want: registry.ActivityIdle, rule: "custom_input_prompt",
 		},
 		{
-			name: "pi custom footer outside region", harness: registry.HarnessPi,
+			name: "pi custom footer outside region", harness: registry.Harness("pi"),
 			screen: piFooter + "\n" + strings.Repeat("ordinary output\n", 12),
 			want:   registry.ActivityUnknown,
 		},
 		{
-			name: "pi exact historical working text", harness: registry.HarnessPi,
+			name: "pi exact historical working text", harness: registry.Harness("pi"),
 			screen: "Working...\n" + piFooter, want: registry.ActivityIdle, rule: "custom_input_prompt",
 		},
 		{
-			name: "omp custom working with trailing action text", harness: registry.HarnessOmp,
+			name: "omp custom working with trailing action text", harness: registry.Harness("omp"),
 			screen: "  ⠋ Working... (2m 9s) Running build\n" + piFooter,
 			want:   registry.ActivityRunning, rule: "custom_working",
 		},
 		{
-			name: "omp custom working suppresses custom footer idle", harness: registry.HarnessOmp,
+			name: "omp custom working suppresses custom footer idle", harness: registry.Harness("omp"),
 			screen: "  ⠹ Working... (16m 30s) Running test suite\n" + piFooter,
 			want:   registry.ActivityRunning, rule: "custom_working",
 		},
 		{
-			name: "pi custom working with trailing action text", harness: registry.HarnessPi,
+			name: "pi custom working with trailing action text", harness: registry.Harness("pi"),
 			screen: "  ⠋ Working... (40s) Running tests\n" + piFooter,
 			want:   registry.ActivityRunning, rule: "custom_working",
 		},
@@ -187,7 +187,7 @@ func TestNormalizeSnapshotStripsTerminalEscapesAndBoundsHistory(t *testing.T) {
 
 func TestDetectorIsConservativeWhenNoRuleMatches(t *testing.T) {
 	t.Parallel()
-	manifest, err := (Loader{ConfigDir: t.TempDir()}).Load(registry.HarnessCodex)
+	manifest, err := (Loader{ConfigDir: t.TempDir()}).Load(registry.Harness("codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ regex_any=["ALLOW|DENY"]
 regex_none=["RESOLVED"]
 title_any=["codex"]
 title_regex_any=["^CODEX"]
-`), registry.HarnessCodex)
+`), registry.Harness("codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,11 +243,11 @@ title_regex_any=["^CODEX"]
 
 func TestManifestRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
-	_, err := ParseManifest([]byte("version=1\nagent='pi'\nunknown='typo'\n[[rules]]\nid='idle'\nstate='idle'\nany=['ready']\n"), registry.HarnessPi)
+	_, err := ParseManifest([]byte("version=1\nagent='pi'\nunknown='typo'\n[[rules]]\nid='idle'\nstate='idle'\nany=['ready']\n"), registry.Harness("pi"))
 	if err == nil || !strings.Contains(err.Error(), errManifestInvalid.Error()) {
 		t.Fatalf("unknown manifest field error = %v", err)
 	}
-	if _, err := ParseManifest(make([]byte, maxManifestBytes+1), registry.HarnessPi); err == nil || !strings.Contains(err.Error(), errManifestTooLarge.Error()) {
+	if _, err := ParseManifest(make([]byte, maxManifestBytes+1), registry.Harness("pi")); err == nil || !strings.Contains(err.Error(), errManifestTooLarge.Error()) {
 		t.Fatalf("oversized manifest error = %v", err)
 	}
 }
@@ -272,7 +272,7 @@ func TestManifestRejectsEmptyMatchers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			data := []byte("version=1\nagent='pi'\n[[rules]]\nid='invalid'\nstate='idle'\n" + test.matcher + "\n")
-			if _, err := ParseManifest(data, registry.HarnessPi); err == nil || !strings.Contains(err.Error(), "is empty") {
+			if _, err := ParseManifest(data, registry.Harness("pi")); err == nil || !strings.Contains(err.Error(), "is empty") {
 				t.Fatalf("ParseManifest() error = %v, want empty matcher rejection", err)
 			}
 		})
@@ -286,7 +286,7 @@ func TestLoaderUsesValidOverrideAndFallsBackFromInvalidOverride(t *testing.T) {
 	if err := os.WriteFile(path, []byte("version=1\nagent='pi'\n[[rules]]\nid='custom'\nstate='idle'\nany=['CUSTOM READY']\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := (Loader{ConfigDir: dir}).Load(registry.HarnessPi)
+	manifest, err := (Loader{ConfigDir: dir}).Load(registry.Harness("pi"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestLoaderUsesValidOverrideAndFallsBackFromInvalidOverride(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not valid ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err = (Loader{ConfigDir: dir}).Load(registry.HarnessPi)
+	manifest, err = (Loader{ConfigDir: dir}).Load(registry.Harness("pi"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,10 +309,10 @@ func TestLoaderUsesLocalOnlyAgyOverrideWithoutChangingDefaultSupport(t *testing.
 	t.Parallel()
 	dir := t.TempDir()
 	loader := Loader{ConfigDir: dir}
-	if loader.Supports(registry.HarnessAgy) {
+	if loader.Supports(registry.Harness("agy")) {
 		t.Fatal("Agy screen detection should require a local override")
 	}
-	if _, err := loader.Load(registry.HarnessAgy); err == nil {
+	if _, err := loader.Load(registry.Harness("agy")); err == nil {
 		t.Fatal("Agy screen manifest loaded without a local override")
 	}
 
@@ -320,10 +320,10 @@ func TestLoaderUsesLocalOnlyAgyOverrideWithoutChangingDefaultSupport(t *testing.
 	if err := os.WriteFile(path, []byte("version=1\nagent='agy'\n[[rules]]\nid='custom_footer'\nstate='idle'\nany=['ready']\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !loader.Supports(registry.HarnessAgy) {
+	if !loader.Supports(registry.Harness("agy")) {
 		t.Fatal("local Agy override did not enable screen detection")
 	}
-	manifest, err := loader.Load(registry.HarnessAgy)
+	manifest, err := loader.Load(registry.Harness("agy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestLoaderUsesLocalOnlyAgyOverrideWithoutChangingDefaultSupport(t *testing.
 func TestDecisionJSONNeverContainsScreenContents(t *testing.T) {
 	t.Parallel()
 	const secret = "SUPER-SECRET-PROMPT"
-	manifest, err := (Loader{ConfigDir: t.TempDir()}).Load(registry.HarnessCodex)
+	manifest, err := (Loader{ConfigDir: t.TempDir()}).Load(registry.Harness("codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,30 +354,35 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 	now := time.Now().UTC()
 	process := registry.ProcessIdentity{PID: 12, StartIdentity: "boot:12"}
 	running := registry.ActivityRunning
-	session := registry.Session{Harness: registry.HarnessPi, Presence: registry.PresenceLive, Process: &process, Observations: registry.Observations{Native: &registry.NativeObservation{Activity: &running, Attributes: map[string]string{"aht_integration": "pi-extension"}, Process: process, ObservedAt: now}}}
-	if !HookIsActive(session, now) || ShouldDetectScreen(session, now) {
+	session := registry.Session{
+		Harness:      registry.Harness("pi"),
+		Process:      &process,
+		Observations: registry.Observations{Native: &registry.NativeObservation{Activity: &running, Reporter: registry.Reporter{Integration: "pi-extension"}, Process: process, ObservedAt: now}},
+		Liveness:     registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+	}
+	if !registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now).Active || detectScreenForTest(session, now) {
 		t.Fatal("matching Pi extension report was not authoritative")
 	}
 	session.Observations.Native.Process.StartIdentity = "old"
-	if HookIsActive(session, now) || !ShouldDetectScreen(session, now) {
+	if registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now).Active || !detectScreenForTest(session, now) {
 		t.Fatal("stale Pi extension report did not fall back to screen")
 	}
 	session.Observations.Native.Process = process
 	gone := registry.PresenceGone
 	session.Observations.Native.Presence = &gone
-	if evaluation := EvaluateHook(session, now); evaluation.Active || evaluation.Reason != "integration_ended" {
+	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Reason != "integration_ended" {
 		t.Fatalf("ended integration evaluation = %#v", evaluation)
 	}
 	session.Observations.Native.Presence = nil
 	session.Observations.Native.ObservedAt = now.Add(time.Second)
-	if evaluation := EvaluateHook(session, now); evaluation.Active || !evaluation.ProcessMatches || evaluation.Reason != "integration_observation_from_future" {
+	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || !evaluation.ProcessMatches || evaluation.Reason != "integration_observation_from_future" {
 		t.Fatalf("future integration evaluation = %#v", evaluation)
 	}
 	session.Observations.Native.ObservedAt = now.Add(-registry.IntegrationActivityLease - time.Second)
-	if evaluation := EvaluateHook(session, now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !ShouldDetectScreen(session, now) {
+	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
 		t.Fatalf("stale integration evaluation = %#v", evaluation)
 	}
-	if PolicyFor(registry.HarnessCodex).Primary != AuthorityScreen {
+	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityScreen {
 		t.Fatal("Codex must be screen authoritative")
 	}
 }
@@ -387,15 +392,15 @@ func TestOmpHookAuthorityUsesNativeIntegration(t *testing.T) {
 	now := time.Now().UTC()
 	session := ompSession(now)
 
-	policy := PolicyFor(registry.HarnessOmp)
-	if policy.Primary != AuthorityHook || !policy.ScreenFallback || policy.IntegrationValue != "omp-extension" {
+	policy := (harnesscatalog.Rules{}).Policy(registry.Harness("omp"))
+	if policy.Authority != registry.AuthorityHook || !policy.ScreenFallback || policy.Reporter != "omp-extension" {
 		t.Fatalf("OMP policy = %#v", policy)
 	}
-	evaluation := EvaluateHook(session, now)
+	evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
 	if !evaluation.Active || !evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "matching_live_process_report" {
 		t.Fatalf("OMP hook evaluation = %#v", evaluation)
 	}
-	if ShouldDetectScreen(session, now) {
+	if detectScreenForTest(session, now) {
 		t.Fatal("fresh OMP hook should not fall back to screen detection")
 	}
 }
@@ -405,11 +410,11 @@ func TestOmpHookAuthorityFallsBackToScreenWhenStale(t *testing.T) {
 	now := time.Now().UTC()
 	session := ompSession(now.Add(-registry.IntegrationActivityLease - time.Second))
 
-	evaluation := EvaluateHook(session, now)
+	evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
 	if evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" {
 		t.Fatalf("stale OMP hook evaluation = %#v", evaluation)
 	}
-	if !ShouldDetectScreen(session, now) {
+	if !detectScreenForTest(session, now) {
 		t.Fatal("stale OMP hook must fall back to screen detection")
 	}
 }
@@ -418,15 +423,15 @@ func ompSession(observedAt time.Time) registry.Session {
 	process := registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
 	running := registry.ActivityRunning
 	return registry.Session{
-		Harness:  registry.HarnessOmp,
-		Presence: registry.PresenceLive,
-		Process:  &process,
+		Harness: registry.Harness("omp"),
+		Process: &process,
 		Observations: registry.Observations{Native: &registry.NativeObservation{
 			Activity:   &running,
-			Attributes: map[string]string{"aht_integration": "omp-extension"},
+			Reporter:   registry.Reporter{Integration: "omp-extension"},
 			Process:    process,
 			ObservedAt: observedAt,
 		}},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
 	}
 }
 
@@ -495,7 +500,7 @@ region="top:2"
 any=["HEADER_MARKER"]
 `)
 
-	manifest, err := ParseManifest(tomlManifest, registry.HarnessCodex)
+	manifest, err := ParseManifest(tomlManifest, registry.Harness("codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +721,7 @@ any=["READY"]
 		if err := os.WriteFile(path, validContent, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		manifest, err := LoadExplicitManifest(path, registry.HarnessCodex)
+		manifest, err := LoadExplicitManifest(path, registry.Harness("codex"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -727,7 +732,7 @@ any=["READY"]
 
 	t.Run("missing file returns error", func(t *testing.T) {
 		t.Parallel()
-		_, err := LoadExplicitManifest(filepath.Join(t.TempDir(), "missing.toml"), registry.HarnessCodex)
+		_, err := LoadExplicitManifest(filepath.Join(t.TempDir(), "missing.toml"), registry.Harness("codex"))
 		if err == nil {
 			t.Fatal("expected error for missing manifest file")
 		}
@@ -740,7 +745,7 @@ any=["READY"]
 		if err := os.WriteFile(path, []byte("invalid toml [["), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadExplicitManifest(path, registry.HarnessCodex)
+		_, err := LoadExplicitManifest(path, registry.Harness("codex"))
 		if err == nil || !strings.Contains(err.Error(), "parsing detection manifest") {
 			t.Fatalf("expected parsing error, got: %v", err)
 		}
@@ -762,7 +767,7 @@ any=["ok"]
 		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadExplicitManifest(path, registry.HarnessCodex)
+		_, err := LoadExplicitManifest(path, registry.Harness("codex"))
 		if err == nil || !strings.Contains(err.Error(), "parsing TOML") {
 			t.Fatalf("expected unknown field error, got: %v", err)
 		}
@@ -775,7 +780,7 @@ any=["ok"]
 		if err := os.WriteFile(path, validContent, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadExplicitManifest(path, registry.HarnessClaude)
+		_, err := LoadExplicitManifest(path, registry.Harness("claude"))
 		if err == nil || !strings.Contains(err.Error(), "does not match") {
 			t.Fatalf("expected agent mismatch error, got: %v", err)
 		}
@@ -796,7 +801,7 @@ regex_any=["[unclosed"]
 		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadExplicitManifest(path, registry.HarnessCodex)
+		_, err := LoadExplicitManifest(path, registry.Harness("codex"))
 		if err == nil || !strings.Contains(err.Error(), "compiling rule") {
 			t.Fatalf("expected regex error, got: %v", err)
 		}
@@ -810,7 +815,7 @@ regex_any=["[unclosed"]
 		if err := os.WriteFile(path, hugeData, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadExplicitManifest(path, registry.HarnessCodex)
+		_, err := LoadExplicitManifest(path, registry.Harness("codex"))
 		if !errors.Is(err, errManifestTooLarge) {
 			t.Fatalf("err = %v, want errManifestTooLarge", err)
 		}
@@ -825,7 +830,7 @@ regex_any=["[unclosed"]
 		}
 
 		// Ambient loader should succeed with warning and bundled fallback:
-		ambientManifest, err := (Loader{ConfigDir: configDir}).Load(registry.HarnessCodex)
+		ambientManifest, err := (Loader{ConfigDir: configDir}).Load(registry.Harness("codex"))
 		if err != nil {
 			t.Fatalf("ambient load unexpectedly failed: %v", err)
 		}
@@ -837,7 +842,7 @@ regex_any=["[unclosed"]
 		}
 
 		// Explicit loader MUST fail with error:
-		_, explicitErr := LoadExplicitManifest(overridePath, registry.HarnessCodex)
+		_, explicitErr := LoadExplicitManifest(overridePath, registry.Harness("codex"))
 		if explicitErr == nil {
 			t.Fatal("explicit loader must fail on broken override file")
 		}
@@ -868,4 +873,9 @@ func TestDefaultConfigDir(t *testing.T) {
 			t.Fatalf("DefaultConfigDir() = %q, want %q", got, want)
 		}
 	})
+}
+
+func detectScreenForTest(session registry.Session, now time.Time) bool {
+	authority, _ := registry.ActivityAuthority(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
+	return authority == registry.AuthorityScreen
 }

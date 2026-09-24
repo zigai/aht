@@ -118,7 +118,7 @@ func TestCapturePaneUsesDetectionBuffer(t *testing.T) {
 	var gotEnv map[string]string
 	var gotArgs []string
 	snapshot, err := herdr.CapturePaneWithOptions(context.Background(), mux.Pane{
-		Location: registry.MultiplexerContext{Kind: registry.MultiplexerHerdr, ServerID: "/tmp/herdr.sock", SessionName: "work", PaneID: "w1:p1"},
+		Location: registry.Location{Kind: registry.MultiplexerHerdr, ServerID: "/tmp/herdr.sock", SessionName: "work", PaneID: "w1:p1"},
 		Title:    "Codex",
 	}, herdr.CaptureOptions{Run: func(_ context.Context, env map[string]string, args ...string) (string, error) {
 		gotEnv = env

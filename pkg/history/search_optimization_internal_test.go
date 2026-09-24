@@ -11,7 +11,7 @@ func TestIndexScopesFileMetadataAndCandidates(t *testing.T) {
 	t.Parallel()
 	catalog := parityFixture(t)
 	root := catalog.Sources[0].Path
-	catalog.Sources = append(catalog.Sources, Source{Harness: registry.HarnessOmp, Path: root})
+	catalog.Sources = append(catalog.Sources, Source{Harness: registry.Harness("omp"), Path: root})
 	if _, err := catalog.Search(t.Context(), Query{Text: "needle"}); err != nil {
 		t.Fatal(err)
 	}
@@ -21,10 +21,10 @@ func TestIndexScopesFileMetadataAndCandidates(t *testing.T) {
 		query   Query
 		files   int
 	}{
-		{"agent", catalog.Sources, Query{Text: "needle", Harness: registry.HarnessPi}, 2},
-		{"file", []Source{{Harness: registry.HarnessPi, Path: filepath.Join(root, "0.jsonl")}}, Query{Text: "needle"}, 1},
-		{"ignored", catalog.Sources, Query{Text: "needle", IgnoreHarnesses: []registry.Harness{registry.HarnessPi}}, 2},
-		{"none", catalog.Sources, Query{Text: "needle", Harness: registry.HarnessCodex}, 0},
+		{"agent", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("pi")}, 2},
+		{"file", []Source{{Harness: registry.Harness("pi"), Path: filepath.Join(root, "0.jsonl")}}, Query{Text: "needle"}, 1},
+		{"ignored", catalog.Sources, Query{Text: "needle", IgnoreHarnesses: []registry.Harness{registry.Harness("pi")}}, 2},
+		{"none", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("codex")}, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			selected := Catalog{Sources: test.sources, IndexPath: catalog.IndexPath}

@@ -21,13 +21,13 @@ const permissionMarker = ".aht-permission-marker"
 func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
 	switch contract.ID {
-	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCopilot:
+	case registry.Harness("claude"), registry.Harness("codex"), registry.Harness("copilot"):
 		runCLIPermissionScenarios(t, contract, oracle)
-	case registry.HarnessPi, registry.HarnessOmp:
+	case registry.Harness("pi"), registry.Harness("omp"):
 		runRPCPermissionScenarios(t, contract, oracle)
-	case registry.HarnessKimiCode, registry.HarnessHermes:
+	case registry.Harness("kimi-code"), registry.Harness("hermes"):
 		runPythonPermissionScenarios(t, contract, oracle)
-	case registry.HarnessOpenCode, registry.HarnessKilo:
+	case registry.Harness("opencode"), registry.Harness("kilo"):
 		runServerPermissionScenarios(t, contract, oracle)
 	default:
 		// These lifecycle adapters do not advertise permission-wait coverage.
@@ -41,12 +41,12 @@ func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow
 	host.installIntegration(t)
 	args := lifecycleToolArgs(contract.ID)
 	command := "printf aht-compat-marker > " + permissionMarker + "; cat " + permissionMarker
-	if contract.ID == registry.HarnessHermes {
+	if contract.ID == registry.Harness("hermes") {
 		// Hermes asks only for dangerous shell operations. This disposable,
 		// nonexistent relative target cannot affect anything outside host.work.
 		command = "rm -rf .aht-permission-unused; " + command
 	}
-	if contract.ID == registry.HarnessCodex {
+	if contract.ID == registry.Harness("codex") {
 		args["cmd"] = command
 	} else {
 		args["command"] = command
@@ -62,10 +62,10 @@ func assertPermissionWaiting(t *testing.T, host isolatedHost) registry.Session {
 	waiting := host.waitForObservation(t, "live native permission wait before tool execution", func(session registry.Session) bool {
 		native := session.Observations.Native
 		return native != nil && native.SessionID != "" && native.Activity != nil &&
-			*native.Activity == registry.ActivityWaiting && session.Presence == registry.PresenceLive &&
+			*native.Activity == registry.ActivityWaiting && session.Presence() == registry.PresenceLive &&
 			filepath.Clean(session.CWD) == filepath.Clean(host.work)
 	})
-	if waiting.Activity == nil || (*waiting.Activity != registry.ActivityWaiting && *waiting.Activity != registry.ActivityUnknown) {
+	if waiting.Activity() == nil || (*waiting.Activity() != registry.ActivityWaiting && *waiting.Activity() != registry.ActivityUnknown) {
 		t.Fatalf("native permission wait has incompatible effective activity: %+v", waiting)
 	}
 	assertPermissionMarker(t, host, false)
@@ -83,7 +83,7 @@ func assertPermissionOutcome(t *testing.T, host isolatedHost, waiting registry.S
 			native.SessionID == waiting.Observations.Native.SessionID &&
 			((native.Presence != nil && *native.Presence == registry.PresenceGone) ||
 				(native.Activity != nil && *native.Activity != registry.ActivityWaiting)) &&
-			(session.Activity == nil || *session.Activity != registry.ActivityWaiting)
+			(session.Activity() == nil || *session.Activity() != registry.ActivityWaiting)
 	})
 	assertPermissionMarker(t, host, allow)
 	if err := host.provider.Error(); err != nil {

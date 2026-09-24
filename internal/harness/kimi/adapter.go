@@ -40,8 +40,10 @@ type kimiCodeHookSpec struct {
 
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:      registry.HarnessKimiCode,
-		Aliases: []string{"kimi", "kimi_code", "kimicode"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("kimi-code"),
+		Aliases:          []string{"kimi", "kimi_code", "kimicode"},
 		// Native startup replaces argv with this title through setproctitle.
 		ProcessNames: []string{"kimi", "kimi-code", "kimi_code", "kimicode", "kimi code"},
 		Env: harness.EnvKeys{
@@ -63,7 +65,7 @@ func New() kimiCodeHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  kimiCodeIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -122,6 +124,7 @@ func (kimiCodeHarness) ValidateWireArgs(args []string) error {
 
 func (kimiCodeHarness) RunWire(ctx context.Context, opts harness.WireOptions) error {
 	return Run(ctx, Options{
+		Sink:      opts.Sink,
 		Args:      opts.Args,
 		StorePath: opts.StorePath,
 		Stdin:     opts.Stdin,
@@ -247,7 +250,7 @@ func tomlQuoteString(s string) string {
 }
 
 func kimiCodeHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.HarnessKimiCode, transition, event, kimiCodeIntegrationSource)
+	return harness.ReportHookCommand(binary, registry.Harness("kimi-code"), transition, event, kimiCodeIntegrationSource)
 }
 
 func payloadScalarString(payload map[string]any, key string) string {
@@ -306,4 +309,11 @@ func kimiCodeHome() string {
 	}
 
 	return ".kimi"
+}
+
+func (kimiCodeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["kimi_code_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "kimi_code_start_source", "source", "reason"))
 }

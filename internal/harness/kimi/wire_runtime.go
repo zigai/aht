@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 
 	"github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -54,6 +52,7 @@ var (
 // Run duplicates the input and output descriptors and never closes the originals.
 // Stderr is inherited directly by the child, without capturing native output.
 type Options struct {
+	Sink      harness.WireSink
 	Args      []string
 	StorePath string
 	Stdin     *os.File
@@ -139,8 +138,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	_ = childIn.Close()
 	_ = childOut.Close()
-	//nolint:exhaustruct_v5 // remaining process fields are discovered through native hooks
-	identity := registry.ProcessIdentity{PID: command.Process.Pid, StartIdentity: processinfo.StartIdentity(ctx, command.Process.Pid)}
+
+	identity := registry.ProcessIdentity{PPID: 0, ProcessGroupID: 0, Foreground: false, Executable: "", CWD: "", TTY: "", PID: command.Process.Pid, StartIdentity: processinfo.StartIdentity(ctx, command.Process.Pid)}
 	childDone := make(chan error, 1)
 	go func() { childDone <- command.Wait() }()
 	transportCtx, cancel := context.WithCancel(ctx)
@@ -159,8 +158,8 @@ func Run(ctx context.Context, opts Options) error {
 		return errIdentity
 	}
 	var protocol Protocol
-	//nolint:exhaustruct_v5 // default socket and routing mode are selected
-	sink := client.New(client.Config{StorePath: opts.StorePath})
+
+	sink := opts.Sink
 	inputDone := make(chan error, 1)
 	hostDone := make(chan error, 1)
 	go func() {
@@ -278,28 +277,16 @@ func pumpFrames(input io.Reader, output *os.File, observe func([]byte) error) er
 	}
 }
 
-func publish(ctx context.Context, sink *client.Client, process registry.ProcessIdentity, update Update) error {
+func publish(ctx context.Context, sink harness.WireSink, process registry.ProcessIdentity, update Update) error {
 	operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 	session, err := nativeSession(operationCtx, sink, process)
 	if err != nil {
 		return err
 	}
-	attributes := map[string]string{
-		"aht_integration":         "kimi-wire",
-		"aht_integration_version": strconv.Itoa(harness.IntegrationVersion),
-		"aht_interaction_mode":    "wire",
-	}
+	reporter := registry.Reporter{Sequence: nil, Integration: "kimi-wire", Version: harness.IntegrationVersion, MultiSession: false}
 	//nolint:exhaustruct_v5 // native Wire observes activity transitions on existing native sessions
-	_, err = sink.Observe(operationCtx, registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessKimiCode,
-		Identity: registry.ObservationIdentity{SessionID: session.SessionID, SessionPath: session.SessionPath},
-		Activity: &update.Activity, NativeEvent: update.Event, Process: session.Process,
-		Tmux: &session.Tmux, Multiplexer: &session.Multiplexer,
-		Catalog:    &registry.CatalogMetadata{ResumeCommand: session.ResumeCommand, CWD: session.CWD, ProjectRoot: session.ProjectRoot},
-		Attributes: attributes, ObservedAt: time.Now().UTC(),
-	})
+	_, err = sink.Observe(operationCtx, registry.Observation{Harness: registry.Harness("kimi-code"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{CWD: "", Attributes: nil, SessionID: session.SessionID, SessionPath: session.SessionPath}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Attributes: nil, Payload: nil, Reporter: reporter, Event: update.Event, Activity: &update.Activity, Process: session.Process, Location: &session.Location, Listing: &registry.Listing{ResumeCommand: session.ResumeCommand, CWD: session.CWD, ProjectRoot: session.ProjectRoot}}})
 	if err != nil {
 		return errPublishActivity
 	}
@@ -307,12 +294,12 @@ func publish(ctx context.Context, sink *client.Client, process registry.ProcessI
 }
 
 //nolint:cyclop // nativeSession waits for active native identity matching the child process
-func nativeSession(ctx context.Context, sink *client.Client, process registry.ProcessIdentity) (registry.Session, error) {
+func nativeSession(ctx context.Context, sink harness.WireSink, process registry.ProcessIdentity) (registry.Session, error) {
 	var found registry.Session
 
 	err := retry.Do(ctx, retry.NewConstant(sessionPollInterval), func(ctx context.Context) error {
 		//nolint:exhaustruct_v5 // session lookup filters by harness alone
-		sessions, err := sink.List(ctx, registry.Filter{Harness: registry.HarnessKimiCode})
+		sessions, err := sink.List(ctx, registry.Filter{Harness: registry.Harness("kimi-code")})
 		if err != nil {
 			return errReadSessionEvidence
 		}
@@ -322,10 +309,10 @@ func nativeSession(ctx context.Context, sink *client.Client, process registry.Pr
 			if native == nil || !native.Process.Equal(process) || session.Process == nil || !session.Process.Equal(process) || session.SessionID == "" {
 				continue
 			}
-			if native.Attributes["aht_integration_version"] != strconv.Itoa(harness.IntegrationVersion) {
+			if native.Reporter.Version != harness.IntegrationVersion {
 				continue
 			}
-			source := native.Attributes["aht_integration"]
+			source := native.Reporter.Integration
 			if source == "kimi-code-hook" || source == "kimi-wire" {
 				found = session
 

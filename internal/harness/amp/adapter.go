@@ -14,7 +14,7 @@ const (
 	ampPluginName        = "aht-state.ts"
 	ampIntegrationID     = "amp"
 	ampIntegrationSource = "amp-plugin"
-	integrationVersion   = 2
+	integrationVersion   = 3
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -24,9 +24,11 @@ type ampHarness struct{ harness.BaseAdapter }
 
 func New() ampHarness {
 	return ampHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessAmp,
-		Aliases:      []string{"ampcode", "amp-code", "amp_code"},
-		ProcessNames: []string{"amp"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("amp"),
+		Aliases:          []string{"ampcode", "amp-code", "amp_code"},
+		ProcessNames:     []string{"amp"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"AMP_THREAD_ID", "AMP_SESSION_ID"},
 			SessionPath: nil,
@@ -45,7 +47,7 @@ func New() ampHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ampIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }

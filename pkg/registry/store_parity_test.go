@@ -38,8 +38,8 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
 
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	filePath := filepath.Join(t.TempDir(), "file.json")
-	fileStore := NewFileStore(filePath)
-	memoryStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"))
+	fileStore := NewJournal(filePath, fixtureRules{})
+	memoryStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +84,8 @@ func injectParityConflictBatch(t *testing.T, fileStore Store, memStore Store, ba
 	t.Helper()
 	running, idle := ActivityRunning, ActivityIdle
 	conflictBatch := []Observation{
-		{Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex, Identity: ObservationIdentity{SessionID: "conflict-item"}, Activity: &running, ObservedAt: base.Add(time.Duration(step) * time.Millisecond)},
-		{Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent, Harness: HarnessCodex, Identity: ObservationIdentity{SessionID: "conflict-item"}, Activity: &idle, ObservedAt: base.Add(time.Duration(step) * time.Millisecond)},
+		{Harness: HarnessCodex, At: base.Add(time.Duration(step) * time.Millisecond), Subject: ObservationIdentity{SessionID: "conflict-item"}, Evidence: &Report{Activity: &running}},
+		{Harness: HarnessCodex, At: base.Add(time.Duration(step) * time.Millisecond), Subject: ObservationIdentity{SessionID: "conflict-item"}, Evidence: &Report{Activity: &idle}},
 	}
 	_, fileBatchErr := fileStore.ObserveBatch(t.Context(), conflictBatch)
 	_, memBatchErr := memStore.ObserveBatch(t.Context(), conflictBatch)
@@ -96,20 +96,20 @@ func injectParityConflictBatch(t *testing.T, fileStore Store, memStore Store, ba
 
 func assertTerminalLifecycleOutcome(t *testing.T, step int, obs Observation, fileS Session, memS Session) {
 	t.Helper()
-	if obs.Lifecycle == nil || *obs.Lifecycle != NativeLifecycleEnd {
+	if obs.Report().Lifecycle == nil || *obs.Report().Lifecycle != NativeLifecycleEnd {
 		return
 	}
-	if fileS.Presence != PresenceGone || fileS.Activity != nil {
-		t.Fatalf("step %d file terminal observation resulted in presence %s, activity %v", step, fileS.Presence, fileS.Activity)
+	if fileS.Presence() != PresenceGone || fileS.Activity() != nil {
+		t.Fatalf("step %d file terminal observation resulted in presence %s, activity %v", step, fileS.Presence(), fileS.Activity())
 	}
-	if memS.Presence != PresenceGone || memS.Activity != nil {
-		t.Fatalf("step %d memory terminal observation resulted in presence %s, activity %v", step, memS.Presence, memS.Activity)
+	if memS.Presence() != PresenceGone || memS.Activity() != nil {
+		t.Fatalf("step %d memory terminal observation resulted in presence %s, activity %v", step, memS.Presence(), memS.Activity())
 	}
 }
 
 func assertReopenedFileStore(t *testing.T, filePath string, clock time.Time, step int, memorySessions []Session) {
 	t.Helper()
-	reopenedFileStore := NewFileStore(filePath)
+	reopenedFileStore := NewJournal(filePath, fixtureRules{})
 	reopenedFileStore.setNowForTest(func() time.Time { return clock })
 	reopenedSessions, err := reopenedFileStore.List(t.Context(), Filter{})
 	if err != nil {
@@ -139,33 +139,16 @@ func generatedObservation(generator *rand.Rand, sequences map[string]uint64, bas
 	case 0:
 		// Process presence evidence
 		present := generator.IntN(2) == 0
-		return Observation{
-			Source:         ObservationSourceProcess,
-			Evidence:       ObservationEvidenceProcessPresence,
-			Harness:        harness,
-			Identity:       ObservationIdentity{SessionID: sessionID},
-			ProcessPresent: &present,
-			Process:        process,
-			ObservedAt:     observedAt,
-		}
+		return Observation{Harness: harness, At: observedAt, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Sighting{Process: *process, Present: present}}
 	case 1:
 		// Screen state evidence
-		return Observation{
-			Source:   ObservationSourceScreen,
-			Evidence: ObservationEvidenceScreenState,
-			Harness:  harness,
-			Identity: ObservationIdentity{SessionID: sessionID},
-			Activity: &activity,
-			Process:  process,
-			Screen: &ScreenObservation{
-				Activity:   activity,
-				Authority:  "screen",
-				Reason:     "screen_rule",
-				Process:    *process,
-				ObservedAt: observedAt,
-			},
+		return Observation{Harness: harness, At: observedAt, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: (*Reading)(&ScreenObservation{
+			Activity:   activity,
+			Authority:  "screen",
+			Reason:     "screen_rule",
+			Process:    *process,
 			ObservedAt: observedAt,
-		}
+		})}
 	default:
 		// Native evidence with varied sequence and lifecycle
 		var seq *uint64
@@ -205,19 +188,7 @@ func generatedObservation(generator *rand.Rand, sequences map[string]uint64, bas
 			activityPtr = &activity
 		}
 
-		return Observation{
-			Source:      ObservationSourceNative,
-			Evidence:    ObservationEvidenceNativeEvent,
-			Harness:     harness,
-			Identity:    ObservationIdentity{SessionID: sessionID},
-			Activity:    activityPtr,
-			Lifecycle:   lifecycle,
-			Sequence:    seq,
-			Process:     process,
-			NativeEvent: []string{"session_start", "agent_start", "agent_end", "permission_request"}[generator.IntN(4)],
-			Attributes:  map[string]string{"aht_integration": "parity-test"},
-			ObservedAt:  observedAt,
-		}
+		return Observation{Harness: harness, At: observedAt, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Report{Reporter: Reporter{Integration: "parity-test", Sequence: seq}, Event: []string{"session_start", "agent_start", "agent_end", "permission_request"}[generator.IntN(4)], Lifecycle: lifecycle, Activity: activityPtr, Process: process}}
 	}
 }
 
@@ -225,8 +196,8 @@ func TestStoreBackendsRemainEquivalentOnTerminalLifecycleSequence(t *testing.T) 
 	t.Parallel()
 
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	fileStore := NewFileStore(filepath.Join(t.TempDir(), "file.json"))
-	memStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"))
+	fileStore := NewJournal(filepath.Join(t.TempDir(), "file.json"), fixtureRules{})
+	memStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,25 +232,14 @@ func testParityNativeLifecyclePhase(
 	t.Helper()
 	running := ActivityRunning
 	live := PresenceLive
-	obs := Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessCodex,
-		Identity:    ObservationIdentity{SessionID: sessionID},
-		Presence:    &live,
-		Activity:    &running,
-		Lifecycle:   &lifecycle,
-		Process:     process,
-		NativeEvent: expectedEvent,
-		ObservedAt:  at,
-	}
+	obs := Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Report{Event: expectedEvent, Lifecycle: &lifecycle, Claim: &live, Activity: &running, Process: process}}
 	fileS, fErr := fileStore.Observe(t.Context(), obs)
 	memS, mErr := memStore.Observe(t.Context(), obs)
 	if fErr != nil || mErr != nil {
 		t.Fatalf("%s errors: file %v, mem %v", lifecycle, fErr, mErr)
 	}
-	if fileS.Presence != PresenceLive || fileS.Activity == nil || *fileS.Activity != ActivityRunning {
-		t.Fatalf("%s session state = presence:%s activity:%v, want live/running", lifecycle, fileS.Presence, fileS.Activity)
+	if fileS.Presence() != PresenceLive || fileS.Activity() == nil || *fileS.Activity() != ActivityRunning {
+		t.Fatalf("%s session state = presence:%s activity:%v, want live/running", lifecycle, fileS.Presence(), fileS.Activity())
 	}
 	assertEquivalent(t, string(lifecycle)+" session", fileS, memS)
 }
@@ -288,17 +248,7 @@ func testParityInvalidEndPhase(t *testing.T, fileStore Store, memStore Store, se
 	t.Helper()
 	running := ActivityRunning
 	end := NativeLifecycleEnd
-	invalidEnd := Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessCodex,
-		Identity:    ObservationIdentity{SessionID: sessionID},
-		Activity:    &running,
-		Lifecycle:   &end,
-		Process:     process,
-		NativeEvent: "session_end",
-		ObservedAt:  at,
-	}
+	invalidEnd := Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Report{Event: "session_end", Lifecycle: &end, Activity: &running, Process: process}}
 	_, fErr := fileStore.Observe(t.Context(), invalidEnd)
 	_, mErr := memStore.Observe(t.Context(), invalidEnd)
 	if !errors.Is(fErr, ErrInvalidObservation) || !errors.Is(mErr, ErrInvalidObservation) {
@@ -309,27 +259,17 @@ func testParityInvalidEndPhase(t *testing.T, fileStore Store, memStore Store, se
 func testParityValidEndPhase(t *testing.T, fileStore Store, memStore Store, sessionID string, process *ProcessIdentity, at time.Time) {
 	t.Helper()
 	end := NativeLifecycleEnd
-	validEnd := Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessCodex,
-		Identity:    ObservationIdentity{SessionID: sessionID},
-		Activity:    nil,
-		Lifecycle:   &end,
-		Process:     process,
-		NativeEvent: "session_end",
-		ObservedAt:  at,
-	}
+	validEnd := Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Report{Event: "session_end", Lifecycle: &end, Activity: nil, Process: process}}
 	fileS, fErr := fileStore.Observe(t.Context(), validEnd)
 	memS, mErr := memStore.Observe(t.Context(), validEnd)
 	if fErr != nil || mErr != nil {
 		t.Fatalf("valid end errors: file %v, mem %v", fErr, mErr)
 	}
-	if fileS.Presence != PresenceGone || fileS.Activity != nil {
-		t.Fatalf("valid end file session state = presence:%s activity:%v, want gone/nil", fileS.Presence, fileS.Activity)
+	if fileS.Presence() != PresenceGone || fileS.Activity() != nil {
+		t.Fatalf("valid end file session state = presence:%s activity:%v, want gone/nil", fileS.Presence(), fileS.Activity())
 	}
-	if memS.Presence != PresenceGone || memS.Activity != nil {
-		t.Fatalf("valid end mem session state = presence:%s activity:%v, want gone/nil", memS.Presence, memS.Activity)
+	if memS.Presence() != PresenceGone || memS.Activity() != nil {
+		t.Fatalf("valid end mem session state = presence:%s activity:%v, want gone/nil", memS.Presence(), memS.Activity())
 	}
 	assertEquivalent(t, "valid end session", fileS, memS)
 }
@@ -337,25 +277,17 @@ func testParityValidEndPhase(t *testing.T, fileStore Store, memStore Store, sess
 func testParityProcessPresencePhase(t *testing.T, fileStore Store, memStore Store, sessionID string, process *ProcessIdentity, at time.Time) {
 	t.Helper()
 	present := true
-	procObs := Observation{
-		Source:         ObservationSourceProcess,
-		Evidence:       ObservationEvidenceProcessPresence,
-		Harness:        HarnessCodex,
-		Identity:       ObservationIdentity{SessionID: sessionID},
-		ProcessPresent: &present,
-		Process:        process,
-		ObservedAt:     at,
-	}
+	procObs := Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Sighting{Process: *process, Present: present}}
 	fileS, fErr := fileStore.Observe(t.Context(), procObs)
 	memS, mErr := memStore.Observe(t.Context(), procObs)
 	if fErr != nil || mErr != nil {
 		t.Fatalf("process presence errors: file %v, mem %v", fErr, mErr)
 	}
-	if fileS.Presence != PresenceGone || fileS.Activity != nil {
-		t.Fatalf("retained end file session state = presence:%s activity:%v, want gone/nil", fileS.Presence, fileS.Activity)
+	if fileS.Presence() != PresenceGone || fileS.Activity() != nil {
+		t.Fatalf("retained end file session state = presence:%s activity:%v, want gone/nil", fileS.Presence(), fileS.Activity())
 	}
-	if memS.Presence != PresenceGone || memS.Activity != nil {
-		t.Fatalf("retained end mem session state = presence:%s activity:%v, want gone/nil", memS.Presence, memS.Activity)
+	if memS.Presence() != PresenceGone || memS.Activity() != nil {
+		t.Fatalf("retained end mem session state = presence:%s activity:%v, want gone/nil", memS.Presence(), memS.Activity())
 	}
 	assertEquivalent(t, "retained end blocking", fileS, memS)
 }

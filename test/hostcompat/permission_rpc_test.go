@@ -26,9 +26,9 @@ func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
 			switch contract.ID {
-			case registry.HarnessPi:
+			case registry.Harness("pi"):
 				runPiPermission(t, host, allow)
-			case registry.HarnessOmp:
+			case registry.Harness("omp"):
 				runOmpPermission(t, host, allow)
 			default:
 				t.Fatalf("no RPC-family permission driver for %s", contract.ID)

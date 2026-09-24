@@ -13,7 +13,7 @@ import (
 func TestCapturePaneRequiresPaneID(t *testing.T) {
 	t.Parallel()
 
-	pane := Pane{Tmux: registry.TmuxContext{Inside: true, PaneID: ""}, ServerIdentity: "default", PanePID: 0, PaneTTY: ""}
+	pane := Pane{Tmux: registry.Location{Kind: registry.MultiplexerTmux, PaneID: ""}, ServerIdentity: "default", PanePID: 0, PaneTTY: ""}
 	_, err := CapturePane(context.Background(), pane)
 	if !errors.Is(err, errMissingCapturePane) {
 		t.Fatalf("CapturePane with empty pane ID error = %v, want errMissingCapturePane", err)
@@ -23,7 +23,7 @@ func TestCapturePaneRequiresPaneID(t *testing.T) {
 func TestCapturePaneRejectsInvalidServerIdentity(t *testing.T) {
 	t.Parallel()
 
-	pane := Pane{Tmux: registry.TmuxContext{Inside: true, PaneID: "%1"}, ServerIdentity: "-L:", PanePID: 0, PaneTTY: ""}
+	pane := Pane{Tmux: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1"}, ServerIdentity: "-L:", PanePID: 0, PaneTTY: ""}
 	_, err := CapturePane(context.Background(), pane)
 	if !errors.Is(err, errInvalidServerIdentity) {
 		t.Fatalf("CapturePane with invalid server identity error = %v, want errInvalidServerIdentity", err)

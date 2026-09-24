@@ -91,7 +91,7 @@ func TestCompatibilityOracleStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contract := hostContract{ID: registry.HarnessPi, Executable: executable}
+	contract := hostContract{ID: registry.Harness("pi"), Executable: executable}
 	first := newIsolatedHost(t, contract, oracle)
 	t.Run("isolated_scenario", func(t *testing.T) {
 		second := newIsolatedHost(t, contract, oracle)

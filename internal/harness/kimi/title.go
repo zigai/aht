@@ -35,14 +35,6 @@ var (
 	errKimiSessionMatchesMultipleWorkspaces = errors.New("kimi code session matched multiple workspaces")
 )
 
-type kimiWorkDir struct {
-	Path string `json:"path"`
-}
-
-type kimiMetadata struct {
-	WorkDirs []kimiWorkDir `json:"work_dirs"`
-}
-
 type kimiACPSessionInfo struct {
 	SessionID string
 	Title     string
@@ -262,7 +254,8 @@ func readKimiMetadata(ctx context.Context) (kimiMetadata, error) {
 	if len(data) > maxKimiMetadataBytes {
 		return metadata, errKimiMetadataTooLarge
 	}
-	if err := json.Unmarshal(data, &metadata); err != nil {
+	metadata, err = decodeWorkspaceMetadata(data)
+	if err != nil {
 		return metadata, fmt.Errorf("decode Kimi Code workspace metadata: %w", err)
 	}
 	return metadata, nil

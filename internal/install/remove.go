@@ -243,10 +243,6 @@ func removePluginDirectory(ctx context.Context, options Options, harnessID regis
 	if exists && !managed {
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, plan.Dir)
 	}
-	obsoleteFiles, err := managedObsoleteFiles(plan.ObsoleteFiles)
-	if err != nil {
-		return Result{}, err
-	}
 	if plan.Registration != nil {
 		return removeRegisteredPlugin(ctx, options, harnessID, plan, exists)
 	}
@@ -259,17 +255,17 @@ func removePluginDirectory(ctx context.Context, options Options, harnessID regis
 		}
 		manifest, manifestChanged = removeImport(manifest, plan.ImportManifest.Name)
 	}
-	changed := exists || manifestChanged || len(obsoleteFiles) > 0
+	changed := exists || manifestChanged
 	if changed && !options.DryRun {
-		if err := applyPluginRemoval(plan, exists, manifestChanged, manifest, obsoleteFiles); err != nil {
+		if err := applyPluginRemoval(plan, exists, manifestChanged, manifest); err != nil {
 			return Result{}, err
 		}
 	}
 	return removeResult(harnessID, plan.Dir, changed, options.DryRun), nil
 }
 
-func applyPluginRemoval(plan harnesspkg.PluginDirectoryInstallPlan, exists bool, manifestChanged bool, manifest importManifest, obsoleteFiles []string) error {
-	return applyPluginRemovalWithWriter(plan, exists, manifestChanged, manifest, obsoleteFiles, writeImportManifest)
+func applyPluginRemoval(plan harnesspkg.PluginDirectoryInstallPlan, exists bool, manifestChanged bool, manifest importManifest) error {
+	return applyPluginRemovalWithWriter(plan, exists, manifestChanged, manifest, writeImportManifest)
 }
 
 func applyPluginRemovalWithWriter(
@@ -277,10 +273,9 @@ func applyPluginRemovalWithWriter(
 	exists bool,
 	manifestChanged bool,
 	manifest importManifest,
-	obsoleteFiles []string,
 	writeManifest func(string, importManifest) error,
 ) error {
-	return applyPluginRemovalWithFinalizer(plan, exists, manifestChanged, manifest, obsoleteFiles, writeManifest, nil)
+	return applyPluginRemovalWithFinalizer(plan, exists, manifestChanged, manifest, writeManifest, nil)
 }
 
 func shouldUpdateManifest(plan harnesspkg.PluginDirectoryInstallPlan, manifestChanged bool) bool {
@@ -317,7 +312,6 @@ func applyPluginRemovalWithFinalizer(
 	exists bool,
 	manifestChanged bool,
 	manifest importManifest,
-	obsoleteFiles []string,
 	writeManifest func(string, importManifest) error,
 	finalizer func(parent string, backup string, backupExists bool) error,
 ) error {
@@ -346,9 +340,6 @@ func applyPluginRemovalWithFinalizer(
 		}
 	}
 
-	if err := removeManagedObsoleteFiles(obsoleteFiles); err != nil {
-		return rollbackPluginDirectoryAndManifest(rollbackPlugin, rollbackManifest, err)
-	}
 	if finalizePlugin == nil {
 		return nil
 	}

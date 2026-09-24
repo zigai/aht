@@ -10,6 +10,7 @@ import (
 
 	"github.com/zigai/aht/internal/brokerserver"
 	"github.com/zigai/aht/internal/config"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/observer"
 	"github.com/zigai/aht/internal/service"
 	"github.com/zigai/aht/pkg/broker"
@@ -101,10 +102,15 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 				return app.runObserver(cmd.Context(), o, watcher)
 			}
 
-			store, err := registry.OpenMemoryStore(app.resolvedStorePath())
+			store, err := registry.OpenMemoryStore(app.resolvedStorePath(), catalog.Rules{})
 			if err != nil {
 				return fmt.Errorf("opening in-memory registry: %w", err)
 			}
+			defer func() {
+				if err := store.Close(); err != nil {
+					app.warnf("warning: %v\n", err)
+				}
+			}()
 			watcher := observer.New(observer.Options{
 				Store:                   store,
 				StorePath:               store.Path(),

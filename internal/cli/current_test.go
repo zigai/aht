@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
-
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -47,7 +47,7 @@ func TestListProjectAndCWDAndLocationFilterFlags(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 
 	tempDir := t.TempDir()
 	proj1 := filepath.Join(tempDir, "proj1")
@@ -58,53 +58,33 @@ func TestListProjectAndCWDAndLocationFilterFlags(t *testing.T) {
 	activity := registry.ActivityRunning
 
 	// Session 1: proj1, subdir, tmux /tmp/s1.sock %1
-	s1, err := store.Observe(context.Background(), registry.Observation{
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessClaude,
-		Identity: registry.ObservationIdentity{SessionID: "sess-1"},
-		Presence: &live,
-		Activity: &activity,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:            registry.MultiplexerTmux,
-			ServerID:        "/tmp/s1.sock",
-			SessionID:       "$1",
-			SessionName:     "sess1",
-			PaneID:          "%1",
-			PaneCurrentPath: cwdSub,
-		},
-		Catalog: &registry.CatalogMetadata{
-			CWD:         cwdSub,
-			ProjectRoot: proj1,
-		},
-		ObservedAt: time.Now().UTC(),
-	})
+	s1, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: &live, Activity: &activity, Location: &registry.Location{
+		Kind:            registry.MultiplexerTmux,
+		ServerID:        "/tmp/s1.sock",
+		SessionID:       "$1",
+		SessionName:     "sess1",
+		PaneID:          "%1",
+		PaneCurrentPath: cwdSub,
+	}, Listing: &registry.Listing{
+		CWD:         cwdSub,
+		ProjectRoot: proj1,
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Session 2: root proj2, working dir proj2, zellij %1
-	s2, err := store.Observe(context.Background(), registry.Observation{
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessCodex,
-		Identity: registry.ObservationIdentity{SessionID: "sess-2"},
-		Presence: &live,
-		Activity: &activity,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:            registry.MultiplexerZellij,
-			ServerID:        "",
-			SessionID:       "z1",
-			SessionName:     "main",
-			PaneID:          "%1",
-			PaneCurrentPath: proj2,
-		},
-		Catalog: &registry.CatalogMetadata{
-			CWD:         proj2,
-			ProjectRoot: proj2,
-		},
-		ObservedAt: time.Now().UTC(),
-	})
+	s2, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: &live, Activity: &activity, Location: &registry.Location{
+		Kind:            registry.MultiplexerZellij,
+		ServerID:        "",
+		SessionID:       "z1",
+		SessionName:     "main",
+		PaneID:          "%1",
+		PaneCurrentPath: proj2,
+	}, Listing: &registry.Listing{
+		CWD:         proj2,
+		ProjectRoot: proj2,
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,44 +121,26 @@ func TestInfoQualifiedPaneResolution(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
 
 	// Two sessions in pane %0 on two different servers
-	s1, err := store.Observe(context.Background(), registry.Observation{
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessClaude,
-		Identity: registry.ObservationIdentity{SessionID: "s1"},
-		Presence: &live,
-		Activity: &activity,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:     registry.MultiplexerTmux,
-			ServerID: "/tmp/server1.sock",
-			PaneID:   "%0",
-		},
-		ObservedAt: time.Now().UTC(),
-	})
+	s1, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "s1"}, Evidence: &registry.Report{Claim: &live, Activity: &activity, Location: &registry.Location{
+		Kind:     registry.MultiplexerTmux,
+		ServerID: "/tmp/server1.sock",
+		PaneID:   "%0",
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = store.Observe(context.Background(), registry.Observation{
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessClaude,
-		Identity: registry.ObservationIdentity{SessionID: "s2"},
-		Presence: &live,
-		Activity: &activity,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:     registry.MultiplexerTmux,
-			ServerID: "/tmp/server2.sock",
-			PaneID:   "%0",
-		},
-		ObservedAt: time.Now().UTC(),
-	})
+	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "s2"}, Evidence: &registry.Report{Claim: &live, Activity: &activity, Location: &registry.Location{
+		Kind:     registry.MultiplexerTmux,
+		ServerID: "/tmp/server2.sock",
+		PaneID:   "%0",
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +169,7 @@ func TestCurrentWithVerifiedProcess(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
@@ -217,21 +179,11 @@ func TestCurrentWithVerifiedProcess(t *testing.T) {
 		t.Fatalf("find current process: found=%v err=%v", found, err)
 	}
 
-	s, err := store.Observe(context.Background(), registry.Observation{
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessClaude,
-		Identity: registry.ObservationIdentity{SessionID: "zellij-sess-current"},
-		Process:  &registry.ProcessIdentity{PID: proc.PID, StartIdentity: proc.StartIdentity},
-		Presence: &live,
-		Activity: &activity,
-		Multiplexer: &registry.MultiplexerContext{
-			Kind:        registry.MultiplexerZellij,
-			SessionName: "cli-test-session",
-			PaneID:      "terminal_55",
-		},
-		ObservedAt: time.Now().UTC(),
-	})
+	s, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "zellij-sess-current"}, Evidence: &registry.Report{Claim: &live, Activity: &activity, Process: &registry.ProcessIdentity{PID: proc.PID, StartIdentity: proc.StartIdentity}, Location: &registry.Location{
+		Kind:        registry.MultiplexerZellij,
+		SessionName: "cli-test-session",
+		PaneID:      "terminal_55",
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}

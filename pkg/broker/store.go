@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -18,7 +19,7 @@ var (
 // use functional; a running broker remains the authoritative hot path.
 type Store struct {
 	client   *Client
-	fallback *registry.FileStore
+	fallback *registry.Journal
 }
 
 // NewStore returns a broker-backed registry store for storePath.
@@ -29,7 +30,7 @@ func NewStore(storePath string) *Store {
 func NewStoreForSocket(storePath string, socketPath string) *Store {
 	return &Store{
 		client:   NewClientForSocket(socketPath),
-		fallback: registry.NewFileStore(storePath),
+		fallback: registry.NewJournal(storePath, catalog.Rules{}),
 	}
 }
 
@@ -59,7 +60,7 @@ func (s *Store) ObserveBatch(
 		return sessions, err
 	}
 
-	sessions, err = s.fallback.ObserveBatch(ctx, observations)
+	sessions, err = s.fallback.Append(ctx, observations)
 	if err != nil {
 		return nil, fmt.Errorf("recording fallback observations: %w", err)
 	}
@@ -111,14 +112,6 @@ func (s *Store) SummaryWithOptions(
 	}
 
 	return summaries, nil
-}
-
-// SummaryByTmuxSession implements registry.Store.
-func (s *Store) SummaryByTmuxSession(
-	ctx context.Context,
-	filter registry.Filter,
-) ([]registry.Summary, error) {
-	return s.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
 func (s *Store) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCResult, error) {

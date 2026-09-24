@@ -1,7 +1,6 @@
 "{{MANAGED_MARKER}}";
 "AHT_INTEGRATION_ID={{INTEGRATION_ID}}";
 "AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}";
-"aht_integration_version={{INTEGRATION_VERSION}}";
 
 import { spawn } from "node:child_process";
 
@@ -299,8 +298,8 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
 
   const args = ["report", "pi", "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
   args.push(transition === "gone" ? "--presence" : "--activity", transition);
-  args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
-  args.push("--attribute", `aht_integration=${currentSessionSource}`);
+  args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
+  args.push("--reporter", currentSessionSource);
   if (ctx?.mode === "tui" || ctx?.mode === "rpc" || ctx?.mode === "json" || ctx?.mode === "print") {
     args.push("--attribute", `aht_interaction_mode=${ctx.mode}`);
   }

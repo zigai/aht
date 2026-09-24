@@ -20,9 +20,9 @@ type currentInspectors struct {
 	PID           int
 	ProcessList   func(context.Context) ([]processinfo.Process, error)
 	ProcessFind   func(context.Context, int) (processinfo.Process, bool, error)
-	TmuxCurrent   func(context.Context) (registry.TmuxContext, error)
-	ZellijCurrent func() registry.MultiplexerContext
-	HerdrCurrent  func() registry.MultiplexerContext
+	TmuxCurrent   func(context.Context) (registry.Location, error)
+	ZellijCurrent func() registry.Location
+	HerdrCurrent  func() registry.Location
 }
 
 // Current resolves the session for the calling agent context.
@@ -48,7 +48,6 @@ func (c *Client) currentWithInspectors(ctx context.Context, opts currentInspecto
 		Harness:            "",
 		Presence:           registry.PresenceLive,
 		Activity:           "",
-		TmuxSession:        "",
 		MultiplexerSession: "",
 		Project:            "",
 		ProjectSubtree:     false,
@@ -231,10 +230,10 @@ func resolveCurrentTmux(
 	if err != nil {
 		return zero, false, nil //nolint:nilerr // tmux discovery errors fall back to other multiplexer detection
 	}
-	if tmuxCtx.Empty() || tmuxCtx.PaneID == "" || tmuxCtx.ServerSocket == "" || tmuxCtx.PaneTTY == "" {
+	if tmuxCtx.Empty() || tmuxCtx.PaneID == "" || tmuxCtx.ServerID == "" || tmuxCtx.PaneTTY == "" {
 		return zero, false, nil
 	}
-	return resolvePaneSession(ctx, sessions, registry.MultiplexerTmux, tmuxCtx.ServerSocket, tmuxCtx.PaneID, "", opts)
+	return resolvePaneSession(ctx, sessions, registry.MultiplexerTmux, tmuxCtx.ServerID, tmuxCtx.PaneID, "", opts)
 }
 
 func resolveCurrentZellij(
@@ -270,16 +269,16 @@ func matchesPaneLocation(
 	paneID string,
 	sessionName string,
 ) bool {
-	if s.Multiplexer.Kind != kind {
+	if s.Location.Kind != kind {
 		return false
 	}
-	if s.Multiplexer.PaneID != paneID && s.Tmux.PaneID != paneID {
+	if s.Location.PaneID != paneID {
 		return false
 	}
 	if serverID != "" && !registry.MatchesServer(s, serverID) {
 		return false
 	}
-	if sessionName != "" && s.Multiplexer.SessionName != sessionName {
+	if sessionName != "" && s.Location.SessionName != sessionName {
 		return false
 	}
 	return true

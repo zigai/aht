@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -55,7 +56,7 @@ func TestListSummaryFlagValidation(t *testing.T) {
 func setupSummaryTableFixture(t *testing.T) (string, context.Context) {
 	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, summaryFixtureRules{})
 	ctx := t.Context()
 
 	running := registry.ActivityRunning
@@ -63,47 +64,10 @@ func setupSummaryTableFixture(t *testing.T) (string, context.Context) {
 	waiting := registry.ActivityWaiting
 
 	obs := []registry.Observation{
-		{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessClaude,
-			Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
-			Presence:   new(registry.PresenceLive),
-			Activity:   &running,
-			Catalog:    &registry.CatalogMetadata{ProjectRoot: "/home/alice/service"},
-			Tmux:       &registry.TmuxContext{SessionName: "main"},
-			ObservedAt: time.Now().UTC(),
-		},
-		{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessClaude,
-			Identity:   registry.ObservationIdentity{SessionID: "sess-2"},
-			Presence:   new(registry.PresenceLive),
-			Activity:   &idle,
-			Catalog:    &registry.CatalogMetadata{ProjectRoot: "/home/bob/service"},
-			Tmux:       &registry.TmuxContext{SessionName: "worker"},
-			ObservedAt: time.Now().UTC(),
-		},
-		{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessCodex,
-			Identity:   registry.ObservationIdentity{SessionID: "sess-3"},
-			Presence:   new(registry.PresenceGone),
-			Catalog:    &registry.CatalogMetadata{ProjectRoot: "/home/carol/app"},
-			Tmux:       &registry.TmuxContext{SessionName: "main"},
-			ObservedAt: time.Now().UTC(),
-		},
-		{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessOmp,
-			Identity:   registry.ObservationIdentity{SessionID: "sess-4"},
-			Presence:   new(registry.PresenceLive),
-			Activity:   &waiting,
-			ObservedAt: time.Now().UTC(),
-		},
+		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"}, Listing: &registry.Listing{ProjectRoot: "/home/alice/service"}}},
+		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &idle, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "worker"}, Listing: &registry.Listing{ProjectRoot: "/home/bob/service"}}},
+		{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-3"}, Evidence: &registry.Report{Claim: new(registry.PresenceGone), Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"}, Listing: &registry.Listing{ProjectRoot: "/home/carol/app"}}},
+		{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-4"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &waiting}},
 	}
 	if _, err := store.ObserveBatch(ctx, obs); err != nil {
 		t.Fatal(err)
@@ -206,22 +170,12 @@ func testListSummaryDefaultTable(t *testing.T, ctx context.Context, storePath st
 func setupSummaryJSONFixture(t *testing.T) (string, context.Context) {
 	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, summaryFixtureRules{})
 	ctx := t.Context()
 
 	running := registry.ActivityRunning
 	obs := []registry.Observation{
-		{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessClaude,
-			Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
-			Presence:   new(registry.PresenceLive),
-			Activity:   &running,
-			Catalog:    &registry.CatalogMetadata{ProjectRoot: "/home/dev/myapp"},
-			Tmux:       &registry.TmuxContext{SessionName: "work"},
-			ObservedAt: time.Now().UTC(),
-		},
+		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "work"}, Listing: &registry.Listing{ProjectRoot: "/home/dev/myapp"}}},
 	}
 	if _, err := store.ObserveBatch(ctx, obs); err != nil {
 		t.Fatal(err)
@@ -286,8 +240,8 @@ func testListSummaryHarnessJSON(t *testing.T, ctx context.Context, storePath str
 	if summaries[0].GroupBy != registry.SummaryGroupByHarness {
 		t.Errorf("GroupBy = %q, want %q", summaries[0].GroupBy, registry.SummaryGroupByHarness)
 	}
-	if summaries[0].Harness != registry.HarnessClaude {
-		t.Errorf("Harness = %q, want %q", summaries[0].Harness, registry.HarnessClaude)
+	if summaries[0].Harness != registry.Harness("claude") {
+		t.Errorf("Harness = %q, want %q", summaries[0].Harness, registry.Harness("claude"))
 	}
 }
 
@@ -305,7 +259,7 @@ func testListSummaryDefaultJSON(t *testing.T, ctx context.Context, storePath str
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
-	if summaries[0].MultiplexerSessionName != "work" && summaries[0].TmuxSessionName != "work" {
+	if summaries[0].MultiplexerSessionName != "work" {
 		t.Errorf("legacy mux session name missing: %+v", summaries[0])
 	}
 	if summaries[0].Total != 1 || summaries[0].Live != 1 {
@@ -330,4 +284,12 @@ func TestListSummaryEmptyState(t *testing.T) {
 			t.Fatalf("group %s: expected 'No results.\\n', got %q", groupBy, got)
 		}
 	}
+}
+
+type summaryFixtureRules struct{ catalog.Rules }
+
+func (r summaryFixtureRules) Policy(id registry.Harness) registry.Policy {
+	policy := r.Rules.Policy(id)
+	policy.Authority = registry.AuthorityHook
+	return policy
 }

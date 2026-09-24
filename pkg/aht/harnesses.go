@@ -1,0 +1,21 @@
+package aht
+
+const (
+	HarnessClaude   Harness = Harness("claude")
+	HarnessCodex    Harness = Harness("codex")
+	HarnessCursor   Harness = Harness("cursor")
+	HarnessCopilot  Harness = Harness("copilot")
+	HarnessCline    Harness = Harness("cline")
+	HarnessKimiCode Harness = Harness("kimi-code")
+	HarnessGrok     Harness = Harness("grok")
+	HarnessGoose    Harness = Harness("goose")
+	HarnessPi       Harness = Harness("pi")
+	HarnessOmp      Harness = Harness("omp")
+	HarnessOpenCode Harness = Harness("opencode")
+	HarnessAgy      Harness = Harness("agy")
+	HarnessKilo     Harness = Harness("kilo")
+	HarnessDroid    Harness = Harness("droid")
+	HarnessOpenClaw Harness = Harness("openclaw")
+	HarnessHermes   Harness = Harness("hermes")
+	HarnessAmp      Harness = Harness("amp")
+)

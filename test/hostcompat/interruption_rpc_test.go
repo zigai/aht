@@ -21,9 +21,9 @@ func runRPCInterruption(t *testing.T, host isolatedHost, env []string) {
 	t.Helper()
 	var args []string
 	switch host.contract.ID {
-	case registry.HarnessPi:
+	case registry.Harness("pi"):
 		args = []string{"--mode", "rpc", "--provider", "aht-compat", "--model", "compat"}
-	case registry.HarnessOmp:
+	case registry.Harness("omp"):
 		// lifecycleCommand has configured the isolated model and installed hook.
 		// Preserve its explicit managed extension loading without print-mode flags.
 		hooks, err := filepath.Glob(filepath.Join(host.root, "pi-agent", "extensions", "*"))
@@ -83,7 +83,7 @@ func runRPCInterruption(t *testing.T, host isolatedHost, env []string) {
 				t.Fatalf("RPC completion was not a canceled assistant response: %v", frame)
 			}
 			ended = true
-			if host.contract.ID == registry.HarnessOmp {
+			if host.contract.ID == registry.Harness("omp") {
 				if frame["isTerminal"] != true {
 					t.Fatalf("OMP cancellation lacks terminal agent_end: %v", frame)
 				}

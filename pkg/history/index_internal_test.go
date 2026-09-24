@@ -56,7 +56,7 @@ func parityFixture(t *testing.T) Catalog {
 			t.Fatal(err)
 		}
 	}
-	return Catalog{Sources: []Source{{Harness: registry.HarnessPi, Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	return Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 }
 
 // compareIndexedSearch checks the index against the production direct scan.
@@ -119,7 +119,7 @@ func benchmarkCatalog(b *testing.B) Catalog {
 			b.Fatal(err)
 		}
 	}
-	c := Catalog{Sources: []Source{{Harness: registry.HarnessPi, Path: root}}, IndexPath: filepath.Join(b.TempDir(), "index.sqlite")}
+	c := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(b.TempDir(), "index.sqlite")}
 	if _, err := c.Search(b.Context(), Query{Text: "needle"}); err != nil {
 		b.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestTwoLoadedIndexesDoNotDuplicateAppend(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sources := []Source{{Harness: registry.HarnessPi, Path: root}}
+	sources := []Source{{Harness: registry.Harness("pi"), Path: root}}
 	indexPath := filepath.Join(t.TempDir(), "index.sqlite")
 	catalog := Catalog{Sources: sources, IndexPath: indexPath}
 	if _, err := catalog.Search(ctx, Query{Text: "seed token"}); err != nil {
@@ -261,7 +261,7 @@ func TestForeignDatabaseNotAltered(t *testing.T) {
 	foreignPath := filepath.Join(t.TempDir(), "foreign.sqlite")
 	beforeHash := createForeignTestDB(t, ctx, foreignPath)
 
-	sources := []Source{{Harness: registry.HarnessPi, Path: t.TempDir()}}
+	sources := []Source{{Harness: registry.Harness("pi"), Path: t.TempDir()}}
 	idx, err := openHistoryIndex(ctx, foreignPath, sources)
 	if idx != nil {
 		defer func() { _ = idx.close() }()

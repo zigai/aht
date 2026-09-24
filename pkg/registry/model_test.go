@@ -3,33 +3,10 @@ package registry_test
 import (
 	"encoding/json"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/zigai/aht/pkg/registry"
 )
-
-func TestHarnessIsValid(t *testing.T) {
-	t.Parallel()
-
-	all := registry.AllHarnesses()
-	if len(all) == 0 {
-		t.Fatal("AllHarnesses() returned empty slice")
-	}
-
-	for _, h := range all {
-		if !h.IsValid() {
-			t.Errorf("expected harness %q to be valid", h)
-		}
-	}
-
-	invalid := []registry.Harness{"", "unknown", "claude-code", "random"}
-	for _, h := range invalid {
-		if h.IsValid() {
-			t.Errorf("expected harness %q to be invalid", h)
-		}
-	}
-}
 
 func TestPresenceIsValid(t *testing.T) {
 	t.Parallel()
@@ -78,56 +55,6 @@ func TestActivityIsValid(t *testing.T) {
 	}
 }
 
-func TestObservationSourceIsValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.ObservationSource{
-		registry.ObservationSourceNative,
-		registry.ObservationSourceProcess,
-		registry.ObservationSourceTmux,
-		registry.ObservationSourceMultiplexer,
-		registry.ObservationSourceCatalog,
-		registry.ObservationSourceScreen,
-	}
-	for _, s := range valid {
-		if !s.IsValid() {
-			t.Errorf("expected source %q to be valid", s)
-		}
-	}
-
-	invalid := []registry.ObservationSource{"", "file", "unknown"}
-	for _, s := range invalid {
-		if s.IsValid() {
-			t.Errorf("expected source %q to be invalid", s)
-		}
-	}
-}
-
-func TestObservationEvidenceIsValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.ObservationEvidence{
-		registry.ObservationEvidenceNativeEvent,
-		registry.ObservationEvidenceProcessPresence,
-		registry.ObservationEvidenceTmuxLocation,
-		registry.ObservationEvidenceMultiplexerLocation,
-		registry.ObservationEvidenceCatalogMetadata,
-		registry.ObservationEvidenceScreenState,
-	}
-	for _, e := range valid {
-		if !e.IsValid() {
-			t.Errorf("expected evidence %q to be valid", e)
-		}
-	}
-
-	invalid := []registry.ObservationEvidence{"", "event", "unknown"}
-	for _, e := range invalid {
-		if e.IsValid() {
-			t.Errorf("expected evidence %q to be invalid", e)
-		}
-	}
-}
-
 func TestNativeLifecycleIsValid(t *testing.T) {
 	t.Parallel()
 
@@ -172,25 +99,9 @@ func TestMultiplexerKindIsValid(t *testing.T) {
 	}
 }
 
-func TestAllHarnessesCloned(t *testing.T) {
+func TestFilterUsesSnakeCaseWireNames(t *testing.T) {
 	t.Parallel()
-
-	first := registry.AllHarnesses()
-	second := registry.AllHarnesses()
-
-	if !slices.Equal(first, second) {
-		t.Fatalf("expected identical slices, got %v and %v", first, second)
-	}
-
-	first[0] = "mutated"
-	if slices.Equal(first, registry.AllHarnesses()) {
-		t.Fatal("AllHarnesses did not return an isolated clone")
-	}
-}
-
-func TestFilterPreservesBrokerWireNames(t *testing.T) {
-	t.Parallel()
-	encoded, err := json.Marshal(registry.Filter{Harness: registry.HarnessClaude, Presence: registry.PresenceLive, Activity: registry.ActivityIdle, TmuxSession: "work", MultiplexerSession: "work"})
+	encoded, err := json.Marshal(registry.Filter{Harness: registry.Harness("claude"), Presence: registry.PresenceLive, Activity: registry.ActivityIdle, MultiplexerSession: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +109,8 @@ func TestFilterPreservesBrokerWireNames(t *testing.T) {
 	if err := json.Unmarshal(encoded, &old); err != nil {
 		t.Fatal(err)
 	}
-	if old["Harness"] != "claude" || old["Presence"] != "live" || old["Activity"] != "idle" || old["TmuxSession"] != "work" || old["MultiplexerSession"] != "work" {
-		t.Fatalf("old broker could not decode filter: %s", encoded)
+	if old["harness"] != "claude" || old["presence"] != "live" || old["activity"] != "idle" || old["multiplexer_session"] != "work" {
+		t.Fatalf("invalid filter encoding: %s", encoded)
 	}
 }
 

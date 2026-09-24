@@ -98,7 +98,7 @@ func TestManageDetectionTestJSONOutput(t *testing.T) {
 			t.Fatalf("failed to unmarshal JSON: %v\nOutput: %s", err, raw)
 		}
 
-		if inspection.Harness != registry.HarnessClaude {
+		if inspection.Harness != registry.Harness("claude") {
 			t.Fatalf("harness = %s, want claude", inspection.Harness)
 		}
 		if inspection.WinningRule != "working_interruptible" {

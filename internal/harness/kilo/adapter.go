@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion = 8
+	integrationVersion = 9
 	kiloCommand        = "kilo"
 	kiloSessionFlag    = "--session"
 )
@@ -29,9 +29,11 @@ type kiloHarness struct{ harness.BaseAdapter }
 
 func New() kiloHarness {
 	return kiloHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessKilo,
-		Aliases:      []string{"kilocode", "kilo-code", "kilo_code"},
-		ProcessNames: []string{"kilo", "kilocode", "kilo-code", "kilo_code"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("kilo"),
+		Aliases:          []string{"kilocode", "kilo-code", "kilo_code"},
+		ProcessNames:     []string{"kilo", "kilocode", "kilo-code", "kilo_code"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"KILO_SESSION_ID"},
 			SessionPath: []string{"KILO_SESSION_PATH"},
@@ -50,7 +52,7 @@ func New() kiloHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  kiloIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }

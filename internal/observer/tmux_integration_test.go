@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
+
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
@@ -34,10 +36,10 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		screen  string
 		want    registry.Activity
 	}{
-		{registry.HarnessCodex, "Would you like to run the following command?", registry.ActivityWaiting},
-		{registry.HarnessClaude, "Thinking… esc to interrupt", registry.ActivityRunning},
-		{registry.HarnessOpenCode, "Ask anything", registry.ActivityIdle},
-		{registry.HarnessPi, "Type a message · Enter to send", registry.ActivityIdle},
+		{registry.Harness("codex"), "Would you like to run the following command?", registry.ActivityWaiting},
+		{registry.Harness("claude"), "Thinking… esc to interrupt", registry.ActivityRunning},
+		{registry.Harness("opencode"), "Ask anything", registry.ActivityIdle},
+		{registry.Harness("pi"), "Type a message · Enter to send", registry.ActivityIdle},
 	}
 	processes := make([]processinfo.Process, 0, len(tests))
 	panes := make([]tmux.Pane, 0, len(tests))
@@ -83,7 +85,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		panePID := info.PID
 		processPID := 5000 + index
 		processes = append(processes, processinfo.Process{PID: processPID, PPID: panePID, ProcessGroupID: processPID, Foreground: true, StartIdentity: "test:" + sessionName, Executable: "/usr/bin/" + sessionName, CWD: "/tmp", TTY: paneTTY, Args: []string{sessionName}})
-		tmuxCtx := registry.TmuxContext{Inside: true, ServerSocket: server.Socket, SessionID: string(sess.ID()), SessionName: sessionName, WindowID: string(info.WindowID), WindowIndex: "0", WindowName: sessionName, PaneID: paneID, PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: panePID, PaneTTY: paneTTY}
+		tmuxCtx := registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionID: string(sess.ID()), SessionName: sessionName, WindowID: string(info.WindowID), WindowIndex: "0", WindowName: sessionName, PaneID: paneID, PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: panePID, PaneTTY: paneTTY}
 		pane := tmux.Pane{Tmux: tmuxCtx, ServerIdentity: server.Socket, PanePID: panePID, PaneTTY: paneTTY}
 		panes = append(panes, pane)
 		deadline := time.Now().Add(2 * time.Second)
@@ -99,7 +101,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		}
 	}
 
-	store := registry.NewFileStore(filepath.Join(t.TempDir(), "state.json"))
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
 	observer := New(Options{Store: store, ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil }, PaneList: func(context.Context) ([]mux.Pane, error) { return multiplexerPanesFromTmux(panes), nil }, CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil }, DetectionConfigDir: t.TempDir(), Now: func() time.Time { return time.Now().UTC() }})
 	result, err := observer.RunOnce(ctx)
 	if err != nil {
@@ -121,8 +123,8 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 	}
 	for _, session := range sessions {
 		want := wantByHarness[session.Harness]
-		if session.Activity == nil || *session.Activity != want || session.ActivityDecision == nil || session.ActivityDecision.Authority != "screen" {
-			t.Errorf("session %s activity=%s screen=%#v, want %s screen activity", session.Harness, activityValue(session.Activity), *session.Observations.Screen, want)
+		if session.Activity() == nil || *session.Activity() != want || session.Decision() == nil || session.Decision().Authority != "screen" {
+			t.Errorf("session %s activity=%s screen=%#v, want %s screen activity", session.Harness, activityValue(session.Activity()), *session.Observations.Screen, want)
 		}
 	}
 
@@ -133,11 +135,11 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 			return mux.ScreenSnapshot{}, fmt.Errorf("capture race fixture: %w", captureErr)
 		}
 		harnessID := registry.Harness(pane.Location.SessionName)
-		if harnessID != registry.HarnessPi && harnessID != registry.HarnessOpenCode {
+		if harnessID != registry.Harness("pi") && harnessID != registry.Harness("opencode") {
 			return snapshot, nil
 		}
 		integration := "pi-extension"
-		if harnessID == registry.HarnessOpenCode {
+		if harnessID == registry.Harness("opencode") {
 			integration = "opencode-plugin"
 		}
 		for _, process := range processes {
@@ -146,7 +148,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 			}
 			running := registry.ActivityRunning
 			presence := registry.PresenceLive
-			if _, err := store.Observe(captureCtx, registry.Observation{Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Harness: harnessID, Identity: registry.ObservationIdentity{SessionID: "race-" + string(harnessID)}, Presence: &presence, Activity: &running, NativeEvent: "integration_race", Process: processIdentity(process), Attributes: map[string]string{"aht_integration": integration}, ObservedAt: time.Now().UTC()}); err != nil {
+			if _, err := store.Observe(captureCtx, registry.Observation{Harness: harnessID, At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "race-" + string(harnessID)}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: integration}, Event: "integration_race", Claim: &presence, Activity: &running, Process: processIdentity(process)}}); err != nil {
 				return mux.ScreenSnapshot{}, fmt.Errorf("record integration race: %w", err)
 			}
 			break
@@ -161,10 +163,10 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if session.Harness != registry.HarnessPi && session.Harness != registry.HarnessOpenCode {
+		if session.Harness != registry.Harness("pi") && session.Harness != registry.Harness("opencode") {
 			continue
 		}
-		if session.Activity == nil || *session.Activity != registry.ActivityRunning || session.ActivityDecision == nil || session.ActivityDecision.Authority != "hook" {
+		if session.Activity() == nil || *session.Activity() != registry.ActivityRunning || session.Decision() == nil || session.Decision().Authority != "hook" {
 			t.Errorf("real tmux race allowed fallback to overwrite %s integration: %#v", session.Harness, session)
 		}
 	}

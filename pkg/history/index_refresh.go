@@ -11,13 +11,12 @@ import (
 	"hash"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/zigai/aht/internal/harness/catalog"
 
-	"github.com/zigai/aht/pkg/registry"
+	"golang.org/x/sys/unix"
 )
 
 const hashChunkBytes = 64 << 10
@@ -59,16 +58,10 @@ func stampPath(path string) string {
 }
 
 func transcriptExtra(s *search, source Source, path string) string {
-	extra := ""
-	switch source.Harness {
-	case registry.HarnessKimiCode:
-		extra = s.kimiDirs[filepath.Base(filepath.Dir(filepath.Dir(path)))]
-	case registry.HarnessCline:
-		extra = stampPath(strings.TrimSuffix(path, ".messages.json") + ".json")
-	case registry.HarnessClaude, registry.HarnessCodex, registry.HarnessCursor, registry.HarnessCopilot, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenCode, registry.HarnessAgy, registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw, registry.HarnessHermes, registry.HarnessAmp:
-		// Other supported transcripts carry metadata in the history itself.
+	if extra := catalog.TranscriptFor(source.Harness).Extra; extra != nil {
+		return extra(path, s.sourceMetadata, stampPath)
 	}
-	return extra
+	return ""
 }
 
 // unchanged uses the same identity, ctime, size, mtime, mode and sidecar stamp as
@@ -104,7 +97,7 @@ func (index *historyIndex) transcript(ctx context.Context, s *search, source Sou
 		writer.checkpoint.Identity, _ = fileIdentity(info)
 		writer.checkpoint.Extra = extra
 		writer.checkpoint.Size = info.Size()
-		if source.Harness != registry.HarnessCline && !strings.HasSuffix(path, ".zst") {
+		if catalog.TranscriptFor(source.Harness).Document == nil && !strings.HasSuffix(path, ".zst") {
 			if err := writer.tryAppend(ctx, file, previous, info); err != nil {
 				return err
 			}
@@ -213,7 +206,7 @@ func (index *historyIndex) writeRefresh(ctx context.Context, s *search, source S
 	defer func() { _ = writer.insert.Close() }()
 	reader := new(search)
 	reader.query.IncludeTools = file.tools
-	reader.kimiDirs, reader.writer = s.kimiDirs, writer
+	reader.sourceMetadata, reader.writer = s.sourceMetadata, writer
 	if err = read(writer, reader, file); err != nil {
 		return indexedFile{}, err
 	}

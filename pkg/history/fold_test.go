@@ -24,7 +24,7 @@ func foldSearch(t *testing.T, body, query string) (Result, error) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	catalog := Catalog{Sources: []Source{{Harness: registry.HarnessPi, Path: path}}}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}}
 	return catalog.searchDirect(t.Context(), Query{Text: query})
 }
 

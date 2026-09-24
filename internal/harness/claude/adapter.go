@@ -26,7 +26,8 @@ type hookPayload struct {
 
 func New() claudeHarness {
 	return claudeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessClaude,
+		ExclusiveProcess: true, CatalogCreates: true,
+		ID:           registry.Harness("claude"),
 		Aliases:      []string{"claude-code", "claude_code"},
 		ProcessNames: []string{"claude", "claude-code"},
 		Env: harness.EnvKeys{
@@ -47,7 +48,7 @@ func New() claudeHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  claudeIntegrationSource,
-		StateAuthority:     harness.AuthorityScreen,
+		StateAuthority:     registry.AuthorityScreen,
 		ScreenFallback:     false,
 	})}
 }
@@ -65,77 +66,77 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 			{
 				Event:   harness.HookEventSessionStart,
 				Matcher: "startup|resume|clear|compact",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityIdle, harness.HookEventSessionStart, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, harness.HookEventSessionStart, claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, harness.HookEventUserPromptSubmit, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, harness.HookEventUserPromptSubmit, claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventPreToolUse,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, harness.HookEventPreToolUse, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, harness.HookEventPreToolUse, claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventPostToolUse,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, harness.HookEventPostToolUse, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, harness.HookEventPostToolUse, claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventPostToolUseFailure,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, harness.HookEventPostToolUseFailure, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, harness.HookEventPostToolUseFailure, claudeIntegrationSource),
 			},
 			{
 				Event:   "PermissionRequest",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityWaiting, "PermissionRequest", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "PermissionRequest", claudeIntegrationSource),
 			},
 			{
 				Event:   "PermissionDenied",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityIdle, "PermissionDenied", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PermissionDenied", claudeIntegrationSource),
 			},
 			{
 				Event:   "Notification",
 				Matcher: "permission_prompt",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityWaiting, "Notification", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "Notification", claudeIntegrationSource),
 			},
 			{
 				Event:   "SubagentStart",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, "SubagentStart", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "SubagentStart", claudeIntegrationSource),
 			},
 			{
 				Event:   "SubagentStop",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityIdle, "SubagentStop", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "SubagentStop", claudeIntegrationSource),
 			},
 			{
 				Event:   "PreCompact",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityRunning, "PreCompact", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "PreCompact", claudeIntegrationSource),
 			},
 			{
 				Event:   "PostCompact",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityIdle, "PostCompact", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PostCompact", claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventStop,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityIdle, harness.HookEventStop, claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, harness.HookEventStop, claudeIntegrationSource),
 			},
 			{
 				Event:   "StopFailure",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.ActivityFailed, "StopFailure", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityFailed, "StopFailure", claudeIntegrationSource),
 			},
 			{
 				Event:   "SessionEnd",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessClaude, registry.PresenceGone, "SessionEnd", claudeIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceGone, "SessionEnd", claudeIntegrationSource),
 			},
 		},
 	}}}}
@@ -181,4 +182,11 @@ func claudeConfigDir() string {
 	}
 
 	return ".claude"
+}
+
+func (claudeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["claude_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "claude_start_source", "source", "reason"))
 }

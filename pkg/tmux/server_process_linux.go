@@ -40,7 +40,7 @@ func listCurrentUserTmuxServers(ctx context.Context) ([]ServerProcess, error) {
 		}
 		process, processErr := readLinuxServerProcess(pid, uid)
 		if processErr != nil {
-			if errors.Is(processErr, errNotTmuxServer) || errors.Is(processErr, os.ErrNotExist) || errors.Is(processErr, os.ErrPermission) {
+			if skippableServerProcessError(processErr) {
 				continue
 			}
 			return nil, processErr
@@ -48,6 +48,10 @@ func listCurrentUserTmuxServers(ctx context.Context) ([]ServerProcess, error) {
 		processes = append(processes, *process)
 	}
 	return processes, nil
+}
+
+func skippableServerProcessError(err error) bool {
+	return errors.Is(err, errNotTmuxServer) || errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.ESRCH)
 }
 
 func readLinuxServerProcess(pid int, uid uint32) (*ServerProcess, error) {

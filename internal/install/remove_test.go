@@ -86,7 +86,7 @@ func TestRemoveDeletesStaleManagedRenderedArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Remove(Options{Harness: registry.HarnessPi, Binary: testInstallBinary})
+	result, err := Remove(Options{Harness: registry.Harness("pi"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,17 +107,17 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Run(Options{Harness: registry.HarnessClaude, Binary: testInstallBinary}); err != nil {
+	if _, err := Run(Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Remove(Options{Harness: registry.HarnessClaude, Binary: testInstallBinary}); err != nil {
+	if _, err := Remove(Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), userCommand) || strings.Contains(string(data), "aht_integration=claude-hook") {
+	if !strings.Contains(string(data), userCommand) || strings.Contains(string(data), "--reporter claude-hook") {
 		t.Fatalf("user hook was not preserved cleanly: %s", data)
 	}
 }
@@ -125,10 +125,10 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 func TestInspectReportsManagedCommandWithUnexpectedBinaryAsStale(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	if _, err := Run(Options{Harness: registry.HarnessClaude, Binary: testInstallBinary}); err != nil {
+	if _, err := Run(Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(registry.HarnessClaude, "/different/aht")
+	status, err := Inspect(registry.Harness("claude"), "/different/aht")
 	if err != nil || status.Status != ArtifactStale {
 		t.Fatalf("unexpected binary status = %+v, %v", status, err)
 	}
@@ -144,11 +144,11 @@ func TestRemoveRefusesForeignOwnedFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"version":1,"hooks":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(registry.HarnessCopilot, testInstallBinary)
+	status, err := Inspect(registry.Harness("copilot"), testInstallBinary)
 	if err != nil || status.Status != ArtifactForeign {
 		t.Fatalf("foreign status = %+v, %v", status, err)
 	}
-	if _, err := Remove(Options{Harness: registry.HarnessCopilot, Binary: testInstallBinary}); err == nil {
+	if _, err := Remove(Options{Harness: registry.Harness("copilot"), Binary: testInstallBinary}); err == nil {
 		t.Fatal("expected foreign integration removal to fail")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -161,11 +161,11 @@ func TestRemoveRefusesExtensionOwnedByAnotherHarness(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", dir)
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 
-	installed, err := Run(Options{Harness: registry.HarnessOmp, Binary: testInstallBinary})
+	installed, err := Run(Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Remove(Options{Harness: registry.HarnessPi, Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
+	if _, err := Remove(Options{Harness: registry.Harness("pi"), Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
 		t.Fatalf("Pi removal error = %v, want errForeignFile", err)
 	}
 	data, err := os.ReadFile(installed.Path)
@@ -203,7 +203,6 @@ func TestPluginRemovalRollsBackDirectoryWhenManifestWriteFails(t *testing.T) {
 		true,
 		true,
 		importManifest{Imports: nil},
-		nil,
 		func(string, importManifest) error { return errTestManifestWrite },
 	)
 	if !errors.Is(err, errTestManifestWrite) {
@@ -254,7 +253,6 @@ func testRemovalSyncFailure(t *testing.T) {
 		true,
 		true,
 		updatedManifest,
-		nil,
 		func(path string, m importManifest) error {
 			return os.WriteFile(path, []byte("{\"imports\":[]}\n"), 0o600)
 		},
@@ -286,7 +284,6 @@ func testRemovalBackupFailure(t *testing.T) {
 		true,
 		true,
 		updatedManifest,
-		nil,
 		func(path string, m importManifest) error {
 			return os.WriteFile(path, []byte("{\"imports\":[]}\n"), 0o600)
 		},
@@ -331,18 +328,18 @@ func TestRemoveAlsoRemovesManagedShimFallback(t *testing.T) {
 	if err := os.Chmod(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	installed, err := Run(Options{Harness: registry.HarnessCodex, Binary: testInstallBinary, TargetBinary: target, UseShim: true})
+	installed, err := Run(Options{Harness: registry.Harness("codex"), Binary: testInstallBinary, TargetBinary: target, UseShim: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(installed.Path); err != nil {
 		t.Fatalf("managed shim missing after install: %v", err)
 	}
-	status, err := Inspect(registry.HarnessCodex, testInstallBinary)
+	status, err := Inspect(registry.Harness("codex"), testInstallBinary)
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("shim status = %+v, %v", status, err)
 	}
-	removed, err := Remove(Options{Harness: registry.HarnessCodex, Binary: testInstallBinary})
+	removed, err := Remove(Options{Harness: registry.Harness("codex"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,22 +354,22 @@ func TestRemoveAlsoRemovesManagedShimFallback(t *testing.T) {
 func TestInspectDetectsAndInstallRepairsMissingPluginImport(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AGY_CONFIG_HOME", dir)
-	if _, err := Run(Options{Harness: registry.HarnessAgy, Binary: testInstallBinary}); err != nil {
+	if _, err := Run(Options{Harness: registry.Harness("agy"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(dir, agyImportManifestName)
 	if err := os.WriteFile(manifestPath, []byte("{\n  \"imports\": []\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(registry.HarnessAgy, testInstallBinary)
+	status, err := Inspect(registry.Harness("agy"), testInstallBinary)
 	if err != nil || status.Status != ArtifactMissing {
 		t.Fatalf("missing import status = %+v, %v", status, err)
 	}
-	repaired, err := Run(Options{Harness: registry.HarnessAgy, Binary: testInstallBinary})
+	repaired, err := Run(Options{Harness: registry.Harness("agy"), Binary: testInstallBinary})
 	if err != nil || !repaired.Changed {
 		t.Fatalf("repair install = %+v, %v", repaired, err)
 	}
-	status, err = Inspect(registry.HarnessAgy, testInstallBinary)
+	status, err = Inspect(registry.Harness("agy"), testInstallBinary)
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("repaired import status = %+v, %v", status, err)
 	}

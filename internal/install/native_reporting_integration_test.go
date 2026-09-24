@@ -47,7 +47,7 @@ func TestPiReportingRestoresLastFailureAfterReload(t *testing.T) {
 func piReportingArtifact(t *testing.T, binary string) string {
 	t.Helper()
 	for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: binary}) {
-		if artifact.harness == registry.HarnessPi && strings.HasSuffix(artifact.path, "aht-state.ts") {
+		if artifact.harness == registry.Harness("pi") && strings.HasSuffix(artifact.path, "aht-state.ts") {
 			return artifact.content
 		}
 	}
@@ -76,7 +76,7 @@ func TestOmpReportsRootSessionsWithAndWithoutUI(t *testing.T) {
 			t.Setenv("AHT_TEST_HAS_UI", strconv.FormatBool(test.hasUI))
 			t.Setenv("AHT_TEST_MODE", test.mode)
 			t.Setenv("AHT_TEST_SUBAGENT", strconv.FormatBool(test.subagent))
-			module := generatedArtifactContent(t, registry.HarnessOmp, "aht-state.ts")
+			module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 			runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-root-session.mjs"), nil)
 			if test.subagent {
 				data, err := os.ReadFile(capture.path)
@@ -120,7 +120,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 	binary, capture := stalledReportingBinary(t)
 	dir := t.TempDir()
 	for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: binary}) {
-		if artifact.harness == registry.HarnessOmp && strings.HasSuffix(artifact.path, "aht-state.ts") {
+		if artifact.harness == registry.Harness("omp") && strings.HasSuffix(artifact.path, "aht-state.ts") {
 			writeTestFile(t, filepath.Join(dir, "extension.ts"), artifact.content, 0o600)
 		}
 	}
@@ -179,7 +179,7 @@ func TestOmpRetryAndContinuationRemainRunning(t *testing.T) {
 			capture := captureBinary(t)
 			t.Setenv("AHT_CAPTURE", capture.path)
 			t.Setenv("AHT_TEST_EVENT", test.event)
-			module := generatedArtifactContent(t, registry.HarnessOmp, "aht-state.ts")
+			module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 			runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-retry-continuation.mjs"), nil)
 			data, err := os.ReadFile(capture.path)
 			if err != nil {
@@ -196,13 +196,13 @@ func TestOmpRetryAndContinuationRemainRunning(t *testing.T) {
 func TestOmpApprovalReportsWaitingState(t *testing.T) {
 	capture := captureBinary(t)
 	t.Setenv("AHT_CAPTURE", capture.path)
-	module := generatedArtifactContent(t, registry.HarnessOmp, "aht-state.ts")
+	module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 	runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-approval.mjs"), nil)
 	requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "waiting", "--session-id", "approval-session", "--event", "tool_approval_requested", "--attribute", "omp_approval_reason=Run command?", "--attribute", "agent_state_message=Run command?")
 }
 
 func TestExtensionsReportNativeInteractionMode(t *testing.T) {
-	for _, harness := range []registry.Harness{registry.HarnessPi, registry.HarnessOmp} {
+	for _, harness := range []registry.Harness{registry.Harness("pi"), registry.Harness("omp")} {
 		for _, mode := range []string{"tui", "print", "json", "rpc"} {
 			t.Run(string(harness)+"/"+mode, func(t *testing.T) {
 				capture := captureBinary(t)
@@ -220,7 +220,7 @@ func TestClinePluginReportsNativeAbort(t *testing.T) {
 	requireRuntimeTool(t, "node")
 	capture := captureBinary(t)
 	t.Setenv("AHT_CAPTURE", capture.path)
-	module := generatedArtifactContent(t, registry.HarnessCline, "index.js")
+	module := generatedArtifactContent(t, registry.Harness("cline"), "index.js")
 	runNodeRuntime(t, "index.js", module, runtimeScript(t, "node/cline-native-abort.mjs"), nil)
 	requireCapturedArguments(t, capture.path, "report", "cline", "--activity", "interrupted")
 }

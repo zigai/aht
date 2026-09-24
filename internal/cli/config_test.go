@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/config"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -21,7 +22,7 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	ctx := context.Background()
 
 	// Seed 3 sessions with different harnesses, presence, and created timestamps
@@ -30,43 +31,19 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	presentFalse := false
 
 	// Session 1: created earlier, live, claude
-	_, err := store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessClaude,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "s1"},
-		ProcessPresent: &presentTrue,
-		Process:        &registry.ProcessIdentity{PID: 101, StartIdentity: "pid101"},
-		ObservedAt:     now.Add(-10 * time.Minute),
-	})
+	_, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("claude"), At: now.Add(-10 * time.Minute), Subject: registry.ObservationIdentity{SessionID: "s1"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 101, StartIdentity: "pid101"}, Present: presentTrue}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Session 2: created later, live, codex
-	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessCodex,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "s2"},
-		ProcessPresent: &presentTrue,
-		Process:        &registry.ProcessIdentity{PID: 102, StartIdentity: "pid102"},
-		ObservedAt:     now.Add(-5 * time.Minute),
-	})
+	_, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("codex"), At: now.Add(-5 * time.Minute), Subject: registry.ObservationIdentity{SessionID: "s2"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 102, StartIdentity: "pid102"}, Present: presentTrue}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Session 3: gone, pi
-	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessPi,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "s3"},
-		ProcessPresent: &presentFalse,
-		Process:        &registry.ProcessIdentity{PID: 103, StartIdentity: "pid103"},
-		ObservedAt:     now.Add(-2 * time.Minute),
-	})
+	_, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: now.Add(-2 * time.Minute), Subject: registry.ObservationIdentity{SessionID: "s3"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 103, StartIdentity: "pid103"}, Present: presentFalse}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +77,8 @@ sort_desc = true
 		t.Fatalf("expected order [s2, s1], got [%s, %s]", sessions[0].SessionID, sessions[1].SessionID)
 	}
 	for _, s := range sessions {
-		if s.Presence != registry.PresenceLive {
-			t.Fatalf("expected live session, got %s", s.Presence)
+		if s.Presence() != registry.PresenceLive {
+			t.Fatalf("expected live session, got %s", s.Presence())
 		}
 	}
 
@@ -130,48 +107,24 @@ func TestCLIConfigFiltering(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	ctx := context.Background()
 	presentTrue := true
 
 	// Session 1: copilot harness (to be ignored)
-	_, err := store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessCopilot,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "copilot-sess"},
-		ProcessPresent: &presentTrue,
-		Process:        &registry.ProcessIdentity{PID: 201, StartIdentity: "pid201", CWD: "/home/user/project"},
-		ObservedAt:     time.Now().UTC(),
-	})
+	_, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("copilot"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "copilot-sess"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 201, StartIdentity: "pid201", CWD: "/home/user/project"}, Present: presentTrue}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Session 2: ignored path (/tmp/scratch)
-	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessClaude,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "scratch-sess"},
-		ProcessPresent: &presentTrue,
-		Process:        &registry.ProcessIdentity{PID: 202, StartIdentity: "pid202", CWD: "/tmp/scratch"},
-		ObservedAt:     time.Now().UTC(),
-	})
+	_, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "scratch-sess"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 202, StartIdentity: "pid202", CWD: "/tmp/scratch"}, Present: presentTrue}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Session 3: normal session
-	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessClaude,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "claude-proj"},
-		ProcessPresent: &presentTrue,
-		Process:        &registry.ProcessIdentity{PID: 203, StartIdentity: "pid203", CWD: "/home/user/project"},
-		ObservedAt:     time.Now().UTC(),
-	})
+	_, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "claude-proj"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 203, StartIdentity: "pid203", CWD: "/home/user/project"}, Present: presentTrue}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,35 +175,19 @@ func TestCLIConfigRetentionAutoCleanFallback(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	ctx := context.Background()
 	presentGone := false
 
 	now := time.Now().UTC()
 	// Record 1: Gone 48h ago
-	_, err := store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessGoose,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "old-gone"},
-		ProcessPresent: &presentGone,
-		Process:        &registry.ProcessIdentity{PID: 301, StartIdentity: "pid301"},
-		ObservedAt:     now.Add(-48 * time.Hour),
-	})
+	_, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("goose"), At: now.Add(-48 * time.Hour), Subject: registry.ObservationIdentity{SessionID: "old-gone"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 301, StartIdentity: "pid301"}, Present: presentGone}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Record 2: Gone 2h ago
-	_, err = store.Observe(ctx, registry.Observation{
-		Harness:        registry.HarnessGoose,
-		Source:         registry.ObservationSourceProcess,
-		Evidence:       registry.ObservationEvidenceProcessPresence,
-		Identity:       registry.ObservationIdentity{SessionID: "recent-gone"},
-		ProcessPresent: &presentGone,
-		Process:        &registry.ProcessIdentity{PID: 302, StartIdentity: "pid302"},
-		ObservedAt:     now.Add(-2 * time.Hour),
-	})
+	_, err = store.Observe(ctx, registry.Observation{Harness: registry.Harness("goose"), At: now.Add(-2 * time.Hour), Subject: registry.ObservationIdentity{SessionID: "recent-gone"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 302, StartIdentity: "pid302"}, Present: presentGone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +379,7 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 	}
 
 	// Verify the session was written to store
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	sessions, err := store.List(ctx, registry.Filter{})
 	if err != nil {
 		t.Fatal(err)

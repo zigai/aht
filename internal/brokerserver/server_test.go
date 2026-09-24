@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -108,7 +109,7 @@ func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 		_ = os.Remove(path)
 		_ = os.Remove(broker.SocketPath(path))
 	})
-	store, err := registry.OpenMemoryStore(path)
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,23 +152,13 @@ func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 
 	presence := registry.PresenceLive
 	running := registry.ActivityRunning
-	observation := registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "broker-live"},
-		Presence:    &presence,
-		Activity:    &running,
-		NativeEvent: "agent_start",
-		Attributes:  map[string]string{"aht_integration": "omp-extension"},
-		ObservedAt:  time.Now().UTC(),
-	}
+	observation := registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "broker-live"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "omp-extension"}, Event: "agent_start", Claim: &presence, Activity: &running}}
 	if _, err := client.Observe(ctx, observation); err != nil {
 		t.Fatal(err)
 	}
 
 	update := receiveSnapshot(t, ctx, subscription.Snapshots)
-	if update.Revision != 2 || len(update.Sessions) != 1 || update.Sessions[0].Activity == nil || *update.Sessions[0].Activity != registry.ActivityRunning {
+	if update.Revision != 2 || len(update.Sessions) != 1 || update.Sessions[0].Activity() == nil || *update.Sessions[0].Activity() != registry.ActivityRunning {
 		t.Fatalf("update snapshot = %#v, want one running session at revision 2", update)
 	}
 
@@ -298,16 +289,7 @@ func TestServer_BoundsSlowSubscriber(t *testing.T) {
 	padding := strings.Repeat("x", 1<<20)
 	presence := registry.PresenceLive
 	for index := range 4 {
-		_, err := fixture.store.Observe(t.Context(), registry.Observation{
-			Source:      registry.ObservationSourceNative,
-			Evidence:    registry.ObservationEvidenceNativeEvent,
-			Harness:     registry.HarnessOmp,
-			Identity:    registry.ObservationIdentity{SessionID: fmt.Sprintf("slow-%d", index)},
-			Presence:    &presence,
-			NativeEvent: "agent_start",
-			Attributes:  map[string]string{"padding": padding},
-			ObservedAt:  time.Now().UTC().Add(time.Duration(index) * time.Nanosecond),
-		})
+		_, err := fixture.store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC().Add(time.Duration(index) * time.Nanosecond), Subject: registry.ObservationIdentity{SessionID: fmt.Sprintf("slow-%d", index)}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence, Attributes: map[string]string{"padding": padding}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -319,15 +301,7 @@ func TestServer_BoundsSlowSubscriber(t *testing.T) {
 	if err := client.Ping(clientContext); err != nil {
 		t.Fatalf("slow subscriber blocked another client: %v", err)
 	}
-	session, err := client.Observe(clientContext, registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "healthy-client"},
-		Presence:    &presence,
-		NativeEvent: "agent_start",
-		ObservedAt:  time.Now().UTC(),
-	})
+	session, err := client.Observe(clientContext, registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "healthy-client"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence}})
 	if err != nil || session.SessionID != "healthy-client" {
 		t.Fatalf("healthy client observe = %#v, %v", session, err)
 	}
@@ -521,7 +495,7 @@ func startBrokerAdversityFixture(t *testing.T) brokerAdversityFixture {
 		_ = os.Remove(path)
 		_ = os.Remove(broker.SocketPath(path))
 	})
-	store, err := registry.OpenMemoryStore(path)
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +568,7 @@ func sendRawBrokerRequest(t *testing.T, storePath string, payload []byte) broker
 func BenchmarkBrokerObserveRoundTrip(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	path := filepath.Join(b.TempDir(), "state.json")
-	store, err := registry.OpenMemoryStore(path)
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -611,23 +585,13 @@ func BenchmarkBrokerObserveRoundTrip(b *testing.B) {
 	client := broker.NewClient(path)
 	running := registry.ActivityRunning
 	sequence := uint64(0)
-	observation := registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessOmp,
-		Identity:    registry.ObservationIdentity{SessionID: "benchmark"},
-		Activity:    &running,
-		Sequence:    &sequence,
-		NativeEvent: "agent_start",
-		Attributes:  map[string]string{"aht_integration": "omp-extension"},
-		ObservedAt:  time.Now().UTC(),
-	}
+	observation := registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "benchmark"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "omp-extension", Sequence: &sequence}, Event: "agent_start", Activity: &running}}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
 		sequence++
-		observation.ObservedAt = observation.ObservedAt.Add(time.Nanosecond)
+		observation.At = observation.At.Add(time.Nanosecond)
 		if _, err := client.Observe(ctx, observation); err != nil {
 			b.Fatal(err)
 		}
@@ -652,7 +616,7 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
 
-	store, err := registry.OpenMemoryStore(path)
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,28 +634,8 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 	client := broker.NewClient(path)
 	running := registry.ActivityRunning
 
-	obs1 := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
-		Presence:   new(registry.PresenceLive),
-		Activity:   &running,
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/repo/one"},
-		Tmux:       &registry.TmuxContext{SessionName: "main"},
-		ObservedAt: time.Now().UTC(),
-	}
-	obs2 := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-2"},
-		Presence:   new(registry.PresenceLive),
-		Activity:   &running,
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/repo/two"},
-		Tmux:       &registry.TmuxContext{SessionName: "other"},
-		ObservedAt: time.Now().UTC(),
-	}
+	obs1 := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"}, Listing: &registry.Listing{ProjectRoot: "/repo/one"}}}
+	obs2 := registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "other"}, Listing: &registry.Listing{ProjectRoot: "/repo/two"}}}
 
 	if _, err := client.ObserveBatch(ctx, []registry.Observation{obs1, obs2}); err != nil {
 		t.Fatal(err)

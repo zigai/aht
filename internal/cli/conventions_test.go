@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/internal/config"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -86,9 +87,9 @@ func TestServiceOptionsUseConfigAndExplicitOverrides(t *testing.T) {
 
 func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	presence := registry.PresenceGone
-	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "gone"}, Presence: &presence, ObservedAt: time.Now().Add(-time.Hour)}); err != nil {
+	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().Add(-time.Hour), Subject: registry.ObservationIdentity{SessionID: "gone"}, Evidence: &registry.Report{Claim: &presence}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,20 +119,20 @@ func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 
 func TestFilesystemWatchPreservesRequestedFilter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
-	for _, harness := range []registry.Harness{registry.HarnessCodex, registry.HarnessClaude} {
-		if _, err := store.Observe(t.Context(), registry.Observation{Harness: harness, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: string(harness)}, NativeEvent: "session_start", ObservedAt: time.Now()}); err != nil {
+	store := registry.NewJournal(path, catalog.Rules{})
+	for _, harness := range []registry.Harness{registry.Harness("codex"), registry.Harness("claude")} {
+		if _, err := store.Observe(t.Context(), registry.Observation{Harness: harness, At: time.Now(), Subject: registry.ObservationIdentity{SessionID: string(harness)}, Evidence: &registry.Report{Event: "session_start"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var stdout bytes.Buffer
 	app := &application{storePath: path, stdout: &stdout}
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
-		return app.runFilesystemWatch(ctx, watchOptions{filter: registry.Filter{Harness: registry.HarnessCodex}, format: watchFormatJSON, ready: ready, now: time.Now})
+		return app.runFilesystemWatch(ctx, watchOptions{filter: registry.Filter{Harness: registry.Harness("codex")}, format: watchFormatJSON, ready: ready, now: time.Now})
 	})
 	watcher.stop(t)
 	var event watchEvent
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &event); err != nil || event.Harness != registry.HarnessCodex {
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &event); err != nil || event.Harness != registry.Harness("codex") {
 		t.Fatalf("filtered snapshot = %q, %v", stdout.String(), err)
 	}
 }
@@ -148,7 +149,7 @@ func TestListColumnsPreservePrimaryValuesAndUseCellWidths(t *testing.T) {
 }
 
 func TestDisabledScreenInspectionDoesNotCaptureLivePane(t *testing.T) {
-	session := registry.Session{Harness: registry.HarnessCodex, Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%1"}}
+	session := registry.Session{Harness: registry.Harness("codex"), Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1"}}
 	result, err := evaluateExplanation(t.Context(), session, infoOptions{disableScreenInspection: true})
 	if err != nil || result.Screen.Evaluated || result.Screen.UnavailableReason != "screen_inspection_disabled" {
 		t.Fatalf("disabled screen explanation = %#v, %v", result.Screen, err)
@@ -161,7 +162,7 @@ func TestStopResultsPreserveCompleteTargetsAndErrors(t *testing.T) {
 	id := "kimi-code:1234567890abcdef1234567890abcdef"
 	target := "/run/user/1000/tmux-long-server-identity:%123456"
 	message := "permission denied while signaling the selected process; check the process owner before retrying"
-	result := manageStopAllResult{Failed: 1, Results: []manageStopSessionResult{{ID: id, Harness: registry.HarnessKimiCode, Target: target, Error: message, Status: "failed"}}}
+	result := manageStopAllResult{Failed: 1, Results: []manageStopSessionResult{{ID: id, Harness: registry.Harness("kimi-code"), Target: target, Error: message, Status: "failed"}}}
 	if err := app.writeManageStopAllResult(result); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestWatchOutputPreservesLongSessionLabels(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &application{stdout: &stdout}
 	label := strings.Repeat("long-session-identifier/", 12)
-	event := watchEvent{Time: time.Now(), Action: watchActionSnapshot, Harness: registry.HarnessCodex, Label: label}
+	event := watchEvent{Time: time.Now(), Action: watchActionSnapshot, Harness: registry.Harness("codex"), Label: label}
 	writer := watchEventWriter{app: app, format: watchFormatTable}
 	if err := writer.write([]watchEvent{event}); err != nil {
 		t.Fatal(err)

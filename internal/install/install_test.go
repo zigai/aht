@@ -22,7 +22,7 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	options := Options{Harness: registry.HarnessCodex, Binary: testInstallBinary}
+	options := Options{Harness: registry.Harness("codex"), Binary: testInstallBinary}
 
 	for _, test := range []struct {
 		name string
@@ -107,7 +107,7 @@ func TestAllHarnesses(t *testing.T) {
 	if len(harnesses) == 0 {
 		t.Fatal("expected installable harnesses")
 	}
-	if !slices.Contains(harnesses, registry.HarnessCodex) {
+	if !slices.Contains(harnesses, registry.Harness("codex")) {
 		t.Fatalf("AllHarnesses() = %v, want codex", harnesses)
 	}
 }

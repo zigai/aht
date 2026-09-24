@@ -19,7 +19,7 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 	}{{name: "managed-only"}, {name: "with-user-hook", withForeign: true}} {
 		t.Run(test.name, func(t *testing.T) {
 			options, path := writeWrappedDroidHooks(t, test.withForeign)
-			status, err := Inspect(registry.HarnessDroid, testInstallBinary)
+			status, err := Inspect(registry.Harness("droid"), testInstallBinary)
 			if err != nil || status.Status != ArtifactStale {
 				t.Fatalf("wrapped hooks status = %+v, error = %v", status, err)
 			}
@@ -30,7 +30,7 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 			config := decodeTestJSONObject(t, []byte(repaired.Snippet), "repaired Droid hooks")
 			requireTestHookEvents(t, config, []string{hookEventSessionStart, hookEventStop, "SessionEnd"})
 			requireDroidWrappedUserHooks(t, config, test.withForeign)
-			status, err = Inspect(registry.HarnessDroid, testInstallBinary)
+			status, err = Inspect(registry.Harness("droid"), testInstallBinary)
 			if err != nil || status.Status != ArtifactCurrent {
 				t.Fatalf("repaired hooks status = %+v, error = %v", status, err)
 			}
@@ -38,7 +38,7 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 				t.Fatal(err)
 			}
 			remaining := readTestFile(t, path, "removed Droid hooks")
-			if strings.Contains(string(remaining), "aht_integration=droid-hook") {
+			if strings.Contains(string(remaining), "--reporter droid-hook") {
 				t.Fatalf("removal left managed hooks: %s", remaining)
 			}
 			requireDroidWrappedUserHooks(t, decodeTestJSONObject(t, remaining, "removed Droid hooks"), test.withForeign)
@@ -49,7 +49,7 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 //nolint:gocognit,cyclop,errcheck,forcetypeassert // test validates notification group map structure
 func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	options := Options{Harness: registry.HarnessDroid, Binary: testInstallBinary}
+	options := Options{Harness: registry.Harness("droid"), Binary: testInstallBinary}
 	installed, err := Run(options)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 			t.Fatalf("managed Notification group = %#v, want matcher %q", group, want.matcher)
 		}
 		command, _ := hooks[0].(map[string]any)["command"].(string)
-		if !strings.Contains(command, "--activity "+want.activity) || !strings.Contains(command, "aht_integration=droid-hook") {
+		if !strings.Contains(command, "--activity "+want.activity) || !strings.Contains(command, "--reporter droid-hook") {
 			t.Fatalf("matcher %q command = %q", want.matcher, command)
 		}
 	}
@@ -120,7 +120,7 @@ func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 	if got := readTestFile(t, installed.Path, "repeated Droid hooks"); string(got) != string(upgradedBytes) {
 		t.Fatal("repeat install rewrote current hooks")
 	}
-	status, err := Inspect(registry.HarnessDroid, testInstallBinary)
+	status, err := Inspect(registry.Harness("droid"), testInstallBinary)
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("installed status = %+v, error = %v", status, err)
 	}
@@ -141,7 +141,7 @@ func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 func writeWrappedDroidHooks(t *testing.T, withForeign bool) (Options, string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	options := Options{Harness: registry.HarnessDroid, Binary: testInstallBinary}
+	options := Options{Harness: registry.Harness("droid"), Binary: testInstallBinary}
 	installed, err := Run(options)
 	if err != nil {
 		t.Fatal(err)

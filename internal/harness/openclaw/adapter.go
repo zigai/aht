@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	integrationVersion        = 9
+	integrationVersion        = 10
 	openclawCommand           = "openclaw"
 	openclawPluginName        = "aht-state"
 	openclawMarkerFileName    = ".aht-managed"
@@ -27,9 +27,11 @@ type openclawHarness struct{ harness.BaseAdapter }
 
 func New() openclawHarness {
 	return openclawHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessOpenClaw,
-		Aliases:      nil,
-		ProcessNames: []string{"openclaw"},
+		ExclusiveProcess: false,
+		CatalogCreates:   false,
+		ID:               registry.Harness("openclaw"),
+		Aliases:          nil,
+		ProcessNames:     []string{"openclaw"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -48,7 +50,7 @@ func New() openclawHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  openclawIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -76,7 +78,6 @@ func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
 		},
 		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openclawMarkerFileName},
 		MarkerFile:     openclawMarkerFileName,
-		ObsoleteFiles:  nil,
 		ImportManifest: nil,
 		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
 	}}}}

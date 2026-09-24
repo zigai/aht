@@ -77,7 +77,7 @@ process.exit(0);
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := registry.NewFileStore(filepath.Join(dir, "state.json"))
+	store := registry.NewJournal(filepath.Join(dir, "state.json"), piTestRules{})
 	// Deliver the generated reports into the real consumer with an equal clock
 	// reading, reproducing callbacks occurring within one Date millisecond.
 	at := time.Now().UTC()
@@ -87,38 +87,38 @@ process.exit(0);
 		if err := json.Unmarshal([]byte(line), &args); err != nil {
 			t.Fatal(err)
 		}
-		observation := registry.Observation{
-			Source:     registry.ObservationSourceNative,
-			Evidence:   registry.ObservationEvidenceNativeEvent,
-			Harness:    registry.HarnessPi,
-			Identity:   registry.ObservationIdentity{SessionID: "native-session"},
-			Attributes: map[string]string{"aht_integration": piIntegrationSourceID},
-			ObservedAt: at,
-		}
+		observation := registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionID: "native-session"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: piIntegrationSourceID}}}
 		for index := 0; index+1 < len(args); index++ {
 			switch args[index] {
 			case "--event":
-				observation.NativeEvent = args[index+1]
+				observation.Report().Event = args[index+1]
 			case "--activity":
 				activity := registry.Activity(args[index+1])
-				observation.Activity = &activity
+				observation.SetActivity(&activity)
 			case "--presence":
 				presence := registry.Presence(args[index+1])
-				observation.Presence = &presence
+				observation.Report().Claim = &presence
 			case "--sequence":
 				sequence, err := strconv.ParseUint(args[index+1], 10, 64)
 				if err != nil {
 					t.Fatal(err)
 				}
-				observation.Sequence = &sequence
+				observation.Report().Reporter.Sequence = &sequence
 			}
 		}
 		session, err = store.Observe(t.Context(), observation)
 		if err != nil {
-			t.Fatalf("native %s was lost: %v", observation.NativeEvent, err)
+			t.Fatalf("native %s was lost: %v", observation.Report().Event, err)
 		}
 	}
-	if session.Presence != registry.PresenceGone || session.Observations.Native == nil || session.Observations.Native.Event != "session_shutdown" {
+	if session.Presence() != registry.PresenceGone || session.Observations.Native == nil || session.Observations.Native.Event != "session_shutdown" {
 		t.Fatalf("shutdown was not retained as native terminal evidence: %#v", session)
 	}
+}
+
+type piTestRules struct{}
+
+func (piTestRules) Known(id registry.Harness) bool { return id == New().Definition().ID }
+func (piTestRules) Policy(registry.Harness) registry.Policy {
+	return registry.Policy{ExclusiveProcess: true, Authority: registry.AuthorityHook, ScreenFallback: true, Reporter: piIntegrationSourceID}
 }

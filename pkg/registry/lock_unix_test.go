@@ -20,7 +20,7 @@ func TestFileStoreMutationsCancelWhileLockHeld(t *testing.T) {
 
 func testFileStoreMutationCancelsWhileLockHeld(t *testing.T, operation string) {
 	t.Helper()
-	store := NewFileStore(filepath.Join(t.TempDir(), "state.json"))
+	store := NewJournal(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
 	lock, err := openStoreLock(t.Context(), store.Path()+".lock")
 	if err != nil {
 		t.Fatal(err)
@@ -67,24 +67,18 @@ func testFileStoreMutationCancelsWhileLockHeld(t *testing.T, operation string) {
 		t.Fatal("mutation did not stop while the store lock remained held")
 	}
 
+	releaseTestStoreLock(t, lock)
+	lock = nil
 	if sessions, listErr := store.List(t.Context(), Filter{}); listErr != nil || len(sessions) != 0 {
 		t.Fatalf("store committed sessions despite canceled mutation: %v, %v", sessions, listErr)
 	}
 }
 
-func runBlockedMutation(ctx context.Context, store *FileStore, operation string) error {
+func runBlockedMutation(ctx context.Context, store *Journal, operation string) error {
 	switch operation {
 	case "observe":
 		act := ActivityRunning
-		_, err := store.Observe(ctx, Observation{
-			Harness:     HarnessCodex,
-			Source:      ObservationSourceNative,
-			Evidence:    ObservationEvidenceNativeEvent,
-			Identity:    ObservationIdentity{SessionID: "blocked"},
-			Activity:    &act,
-			NativeEvent: "agent_start",
-			ObservedAt:  time.Now().UTC(),
-		})
+		_, err := store.Observe(ctx, Observation{Harness: HarnessCodex, At: time.Now().UTC(), Subject: ObservationIdentity{SessionID: "blocked"}, Evidence: &Report{Event: "agent_start", Activity: &act}})
 		return err
 	case "gc":
 		_, err := store.GC(ctx, 0)
@@ -118,5 +112,12 @@ func TestStoreLockDeadlineWhileHeld(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lock error = %v, want deadline exceeded", err)
+	}
+}
+
+func releaseTestStoreLock(t *testing.T, lock *storeLock) {
+	t.Helper()
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

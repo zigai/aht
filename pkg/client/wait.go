@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -139,7 +140,6 @@ func emptyFilter() registry.Filter {
 		Harness:            "",
 		Presence:           "",
 		Activity:           "",
-		TmuxSession:        "",
 		MultiplexerSession: "",
 		Project:            "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: "",
 	}
@@ -306,14 +306,14 @@ func (c *Client) startWatcher(ctx context.Context) (sessionWatcher, error) {
 
 func evaluateCondition(session registry.Session, options WaitOptions) (bool, error) {
 	if options.Presence == PresenceGone {
-		return session.Presence == PresenceGone, nil
+		return session.Presence() == PresenceGone, nil
 	}
 
-	if session.Presence == PresenceGone {
+	if session.Presence() == PresenceGone {
 		return false, ErrSessionDisappeared
 	}
 
-	if session.Presence == PresenceUnknown {
+	if session.Presence() == PresenceUnknown {
 		if options.Presence == PresenceUnknown {
 			return true, nil
 		}
@@ -325,10 +325,10 @@ func evaluateCondition(session registry.Session, options WaitOptions) (bool, err
 	}
 
 	if options.Activity != "" {
-		if session.Activity == nil {
+		if session.Activity() == nil {
 			return false, nil
 		}
-		return *session.Activity == options.Activity, nil
+		return *session.Activity() == options.Activity, nil
 	}
 
 	return true, nil
@@ -427,7 +427,7 @@ func (w *durableSessionWatcher) run(ctx context.Context, storePath string) {
 	defer close(w.done)
 	defer close(w.events)
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	err := store.Watch(ctx, registry.WatchOptions{
 		Filter:            emptyFilter(),
 		Debounce:          defaultFileWatchDebounce,

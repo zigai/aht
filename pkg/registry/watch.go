@@ -93,17 +93,17 @@ func (s *FileStore) Watch(ctx context.Context, options WatchOptions, yield func(
 		baselineUpdatedAt: time.Time{},
 		haveBaseline:      false,
 	}
-	if err := watch.scan(); err != nil {
+	if err := watch.scan(ctx); err != nil {
 		return err
 	}
 	return watch.run(ctx)
 }
 
-func (watch *fileStoreWatch) scan() error {
+func (watch *fileStoreWatch) scan(ctx context.Context) error {
 	if err := watch.ensureDirectoryWatch(); err != nil {
 		return watch.yieldError(err)
 	}
-	sessions, updatedAt, err := watch.store.watchSnapshot(watch.options.Filter)
+	sessions, updatedAt, err := watch.store.watchSnapshot(ctx, watch.options.Filter)
 	if err != nil {
 		return watch.yieldError(err)
 	}
@@ -163,7 +163,7 @@ func (state *watchRunState) step(ctx context.Context) (bool, error) {
 		if isFileStoreWatchDirectoryRemoval(event, state.watch.directory) {
 			if err := state.watch.watcher.Remove(state.watch.directory); err != nil &&
 				!errors.Is(err, fsnotify.ErrNonExistentWatch) {
-				return false, state.watch.handleWatcherError(err)
+				return false, state.watch.handleWatcherError(ctx, err)
 			}
 		}
 		if isFileStoreWatchEvent(event, state.watch.target, state.watch.directory) {
@@ -173,25 +173,25 @@ func (state *watchRunState) step(ctx context.Context) (bool, error) {
 		return false, nil
 	case <-state.debounce:
 		state.debounce = nil
-		return false, state.watch.scan()
+		return false, state.watch.scan(ctx)
 	case <-state.reconcile:
-		return false, state.watch.scan()
+		return false, state.watch.scan(ctx)
 	case watchErr, ok := <-state.watch.watcher.Errors:
 		if !ok {
 			return true, nil
 		}
-		return false, state.watch.handleWatcherError(watchErr)
+		return false, state.watch.handleWatcherError(ctx, watchErr)
 	}
 }
 
-func (watch *fileStoreWatch) handleWatcherError(watchErr error) error {
+func (watch *fileStoreWatch) handleWatcherError(ctx context.Context, watchErr error) error {
 	if watchErr == nil {
 		return nil
 	}
 	if err := watch.yieldError(watchErr); err != nil {
 		return err
 	}
-	return watch.scan()
+	return watch.scan(ctx)
 }
 
 func normalizeFileStoreWatchOptions(options WatchOptions) WatchOptions {
@@ -257,7 +257,7 @@ func isFileStoreWatchEvent(event fsnotify.Event, target, directory string) bool 
 		return false
 	}
 	path = filepath.Clean(path)
-	return path == target || path == directory
+	return path == target || path == target+".journal.jsonl" || path == directory
 }
 
 func isFileStoreWatchDirectoryRemoval(event fsnotify.Event, directory string) bool {
@@ -294,15 +294,14 @@ func cloneWatchSessions(sessions []Session) []Session {
 	return cloned
 }
 
-func (s *FileStore) watchSnapshot(filter Filter) ([]Session, time.Time, error) {
-	snap, err := s.load()
+func (s *FileStore) watchSnapshot(ctx context.Context, filter Filter) ([]Session, time.Time, error) {
+	snap, err := s.loadContext(ctx)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
 	sessions := make([]Session, 0, len(snap.Sessions))
 	for _, session := range snap.Sessions {
 		session.SchemaVersion = storeSchemaVersion
-		populateMultiplexerProjection(&session)
 		sessions = append(sessions, session)
 	}
 	return FilterSessions(sessions, filter), snap.UpdatedAt, nil

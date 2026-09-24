@@ -8,9 +8,12 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/zigai/aht/internal/harness/catalog"
 
 	harnesspkg "github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/pkg/registry"
@@ -137,7 +140,7 @@ func applyJSONCommandHooks(
 			hook.Command,
 			hook.Matcher,
 			statusMessage,
-			harnesspkg.HookTimeoutSecondsFor(harness, hook.Event),
+			catalog.HookTimeoutSecondsFor(harness, hook.Event),
 		))
 	}
 
@@ -423,7 +426,6 @@ func renderInstallContent(content string, jsonContent any) (string, error) {
 	return string(append(data, '\n')), nil
 }
 
-//nolint:cyclop // plugin installation coordinates staged files, manifests, rollback, and ownership
 func installPluginDirectory(
 	ctx context.Context,
 	options Options,
@@ -444,10 +446,6 @@ func installPluginDirectory(
 	if err != nil {
 		return Result{}, err
 	}
-	obsoleteFiles, err := managedObsoleteFiles(plan.ObsoleteFiles)
-	if err != nil {
-		return Result{}, err
-	}
 	if plan.Registration != nil {
 		return installRegisteredPlugin(ctx, options, harness, plan, plugin, pluginChanged)
 	}
@@ -457,13 +455,10 @@ func installPluginDirectory(
 		return Result{}, err
 	}
 
-	changed := pluginChanged || manifestChanged || len(obsoleteFiles) > 0
+	changed := pluginChanged || manifestChanged
 
 	if changed && !options.DryRun {
 		if err := writePluginDirectoryChanges(plugin, plan.ImportManifest, manifest, pluginChanged, manifestChanged); err != nil {
-			return Result{}, err
-		}
-		if err := removeManagedObsoleteFiles(obsoleteFiles); err != nil {
 			return Result{}, err
 		}
 	}
@@ -737,10 +732,8 @@ func managedSource(source string, harness registry.Harness) string {
 }
 
 func isManagedSourceHookCommand(source string) func(string) bool {
-	return func(command string) bool {
-		return strings.Contains(command, "aht_integration="+source) ||
-			strings.Contains(command, "--source "+source)
-	}
+	pattern := regexp.MustCompile(`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` + regexp.QuoteMeta(source) + `(?:['"\s]|$)`)
+	return pattern.MatchString
 }
 
 func installLabel(value string, harness registry.Harness, suffix string) string {

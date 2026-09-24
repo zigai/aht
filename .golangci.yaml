@@ -25,6 +25,7 @@ linters:
     - copyloopvar
     - cyclop
     - decorder
+    - depguard
     - dogsled
     - dupl
     - dupword
@@ -40,6 +41,7 @@ linters:
     - exptostd
     - fatcontext
     - forcetypeassert
+    - forbidigo
     - funcorder
     - ginkgolinter
     - gocheckcompilerdirectives
@@ -111,6 +113,27 @@ linters:
     - zerologlint
 
   settings:
+    depguard:
+      rules:
+        registry:
+          files: ["**/pkg/registry/*.go"]
+          deny:
+            - pkg: github.com/zigai/aht/internal
+              desc: Registry is a pure domain and persistence package; inject harness rules.
+        adapter_consumers:
+          list-mode: lax
+          files: ["**/internal/cli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
+          allow:
+            - github.com/zigai/aht/internal/harness/catalog$
+            - github.com/zigai/aht/internal/harness/transcript
+          deny:
+            - pkg: github.com/zigai/aht/internal/harness/
+              desc: Dispatch through the catalog and shared transcript capability.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '(^|\.)Harness(Claude|Codex|Cursor|Copilot|Cline|KimiCode|Grok|Goose|Pi|Omp|OpenCode|Agy|Kilo|Droid|OpenClaw|Hermes|Amp)$'
+          msg: Harness names belong to adapters and the public constants file.
     errcheck:
       check-type-assertions: true
     exhaustive:
@@ -210,6 +233,8 @@ linters:
     warn-unused: false
     presets: []
     rules:
+      - path: '(^internal/harness/|^pkg/aht/harnesses\.go$|_test\.go$)'
+        linters: [forbidigo]
       - path: "main\\.go"
         linters: [mnd]
 

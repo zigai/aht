@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -19,8 +20,8 @@ func BenchmarkPrepareReport(b *testing.B) {
 }
 
 func BenchmarkObserveBatch(b *testing.B) {
-	store := registry.NewFileStore(filepath.Join(b.TempDir(), "sessions.json"))
-	observation := registry.Observation{Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, NativeEvent: "turn_start", Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "benchmark"}, ObservedAt: time.Now().UTC()}
+	store := registry.NewJournal(filepath.Join(b.TempDir(), "sessions.json"), catalog.Rules{})
+	observation := registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "benchmark"}, Evidence: &registry.Report{Event: "turn_start"}}
 	b.ResetTimer()
 	for b.Loop() {
 		if _, err := store.Observe(context.Background(), observation); err != nil {

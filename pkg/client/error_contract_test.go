@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/brokerserver"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
@@ -46,7 +47,7 @@ func errorContractBroker(t *testing.T) (client.Config, registry.Session, registr
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := registry.OpenMemoryStore(storePath)
+	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +102,8 @@ func assertRegistryFailures(t *testing.T, c *client.Client, accepted registry.Se
 	assertRegistryError(t, err, registry.ErrSessionNotFound, "not_found", online)
 
 	idle := registry.ActivityIdle
-	observation.Activity = &idle
-	observation.ObservedAt = observation.ObservedAt.Add(-time.Second)
+	observation.SetActivity(&idle)
+	observation.At = observation.At.Add(-time.Second)
 	_, err = c.Observe(t.Context(), observation)
 	assertRegistryError(t, err, registry.ErrObservationConflict, "observation_conflict", online)
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/brokerserver"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
@@ -19,7 +20,7 @@ func TestClientListFallsBackToDurableRegistry(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("fallback")); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestClientRealtimeOnlyFailsWhenOffline(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("fallback")); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestClientDurableOnlyBypassesBroker(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("durable-session")); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestClientWatchYieldsRealtimeRevisions(t *testing.T) {
 		_ = os.Remove(storePath)
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
-	store, err := registry.OpenMemoryStore(storePath)
+	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +181,7 @@ func receiveSnapshot(t *testing.T, snapshots <-chan registry.StateSnapshot) regi
 func runningObservation(sessionID string) registry.Observation {
 	presence := registry.PresenceLive
 	activity := registry.ActivityRunning
-	return registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: sessionID},
-		Presence:   &presence,
-		Activity:   &activity,
-		ObservedAt: time.Now().UTC(),
-	}
+	return registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Report{Claim: &presence, Activity: &activity}}
 }
 
 // shortStatePath keeps the derived broker socket below Darwin's Unix socket path limit.
@@ -220,47 +213,18 @@ func TestClientSummaryModesParity(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(storePath) })
 	socketPath := broker.SocketPath(storePath)
 
-	fileStore := registry.NewFileStore(storePath)
+	fileStore := registry.NewJournal(storePath, catalog.Rules{})
 	running := registry.ActivityRunning
 
-	obs1 := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-1"},
-		Presence:   new(registry.PresenceLive),
-		Activity:   &running,
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/a"},
-		Tmux:       &registry.TmuxContext{SessionName: "alpha"},
-		ObservedAt: time.Now().UTC(),
-	}
-	obs2 := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-2"},
-		Presence:   new(registry.PresenceLive),
-		Activity:   &running,
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/b"},
-		Tmux:       &registry.TmuxContext{SessionName: "beta"},
-		ObservedAt: time.Now().UTC(),
-	}
-	obs3 := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-3"},
-		Presence:   new(registry.PresenceGone),
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/proj/a"},
-		Tmux:       &registry.TmuxContext{SessionName: "alpha"},
-		ObservedAt: time.Now().UTC(),
-	}
+	obs1 := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "alpha"}, Listing: &registry.Listing{ProjectRoot: "/proj/a"}}}
+	obs2 := registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "beta"}, Listing: &registry.Listing{ProjectRoot: "/proj/b"}}}
+	obs3 := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-3"}, Evidence: &registry.Report{Claim: new(registry.PresenceGone), Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "alpha"}, Listing: &registry.Listing{ProjectRoot: "/proj/a"}}}
 
 	if _, err := fileStore.ObserveBatch(ctx, []registry.Observation{obs1, obs2, obs3}); err != nil {
 		t.Fatal(err)
 	}
 
-	memStore, err := registry.OpenMemoryStore(storePath)
+	memStore, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

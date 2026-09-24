@@ -22,7 +22,7 @@ func TestInstallShimRequiresForceForForeignFile(t *testing.T) {
 	}
 
 	_, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "/usr/bin/opencode",
 		DryRun:       false,
@@ -39,7 +39,7 @@ func TestInstallShimWritesManagedScript(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "/usr/bin/opencode",
 		DryRun:       false,
@@ -71,7 +71,7 @@ func TestInstallShimRepairsExecutableMode(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(registry.StateDirEnv, dir)
 	options := Options{
-		Harness: registry.HarnessOpenCode, Binary: defaultBinary,
+		Harness: registry.Harness("opencode"), Binary: defaultBinary,
 		TargetBinary: "/usr/bin/opencode", UseShim: true,
 	}
 	first, err := Run(options)
@@ -81,7 +81,7 @@ func TestInstallShimRepairsExecutableMode(t *testing.T) {
 	if err := os.Chmod(first.Path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(registry.HarnessOpenCode, defaultBinary)
+	status, err := Inspect(registry.Harness("opencode"), defaultBinary)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,8 +110,8 @@ func TestInstallShimSupportsHarnessesMissingExitHooks(t *testing.T) {
 		harness      registry.Harness
 		targetBinary string
 	}{
-		{name: "codex", harness: registry.HarnessCodex, targetBinary: "/usr/bin/codex"},
-		{name: "agy", harness: registry.HarnessAgy, targetBinary: "/usr/bin/agy"},
+		{name: "codex", harness: registry.Harness("codex"), targetBinary: "/usr/bin/codex"},
+		{name: "agy", harness: registry.Harness("agy"), targetBinary: "/usr/bin/agy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -163,7 +163,7 @@ func TestInstallShimResolvesTargetOutsideManagedShimDir(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
 		DryRun:       true,
@@ -187,7 +187,7 @@ func TestInstallShimRejectsManagedShimTarget(t *testing.T) {
 	shimPath := filepath.Join(dir, "shims", "opencode")
 
 	_, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: shimPath,
 		DryRun:       true,

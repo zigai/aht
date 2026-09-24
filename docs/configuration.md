@@ -74,3 +74,40 @@ These path overrides are separate from the TOML settings above.
 | State directory | Directory containing registry state. | `$XDG_STATE_HOME/aht`, otherwise `~/.local/state/aht`. | `AHT_STATE_DIR` |
 | Registry file | Exact registry file; `--store` takes precedence. | `state.json` in the state directory. | `AHT_STORE` |
 | Broker socket | Socket used to connect to the tracker. | Registry file path with `.sock` appended. | `AHT_SOCKET` |
+
+## Reporting and durable state
+
+Generated integrations identify their reporter with typed flags:
+
+```sh
+aht report pi --session-id SESSION_ID --event session_start \
+  --reporter pi-extension --reporter-version 16 --sequence 1
+```
+
+`--reporter` names the integration, `--reporter-version` identifies its generated
+artifact version, and `--sequence` orders that reporter's observations. Add
+`--multi-session` for a reporter that manages multiple native identities in one
+process. Ordinary native metadata still uses `--attribute key=value`.
+
+Run `aht manage integrations status` to find stale artifacts and
+`aht manage integrations upgrade` to replace them with current managed files.
+
+State consists of the registry snapshot and `<store>.journal.jsonl`. The journal
+is fsynced and limited to 64 MiB; exceeding the limit returns an error. The tracker
+owns live state and applies pending journal entries before operations. When no
+tracker owns the state, a writer folds the snapshot and journal under the store
+lock and checkpoints the result. Reads without a broker fold both files, so they
+include pending writes. Clean and reset use the same ordered command stream.
+Snapshots settle after 25 ms, with a 250 ms maximum batching interval, and flush
+on tracker shutdown.
+
+Snapshots use schema 3; other versions are rejected with instructions to reset
+the state. Restart the tracker after upgrading the binary. Keep snapshot and journal together when
+moving or backing up an instance while writes may be pending.
+
+Session JSON from `list --json` and `info` contains
+`liveness: {"kind":"live","activity":"idle"}` (optionally with a decision), or
+`{"kind":"gone","at":"...","reason":"..."}`. Terminal context is under
+`location`, with `kind` such as `tmux`, `zellij`, or `herdr`. Watch events
+retain presence/activity change fields and use `location` for their terminal
+label. `--tmux-session` is accepted as an alias for the multiplexer-session filter.

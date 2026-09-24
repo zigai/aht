@@ -11,7 +11,7 @@ import (
 
 const (
 	// ProtocolVersion is the current newline-delimited JSON protocol version.
-	ProtocolVersion = 1
+	ProtocolVersion = 2
 
 	MethodPing         = "ping"
 	MethodObserve      = "observe"

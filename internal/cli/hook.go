@@ -90,7 +90,7 @@ func (app *application) runManagedHook(
 		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harness)
 	}
 	if result.ReportOK {
-		result.Report.Process = reportProcessIdentity(harness, reportProcessAncestors(ctx, 0))
+		result.Report.SetProcess(reportProcessIdentity(harness, reportProcessAncestors(ctx, 0)))
 	}
 
 	if err := reportManagedHook(ctx, app.registryStore(), result); err != nil {
@@ -104,12 +104,12 @@ func reportManagedHook(ctx context.Context, store observationSink, result harnes
 	if !result.ReportOK {
 		return nil
 	}
-	observation := result.Report
+	observation := harnesspkg.PrepareObservation(result.Report)
 	if collected, err := tmux.Current(ctx); err == nil {
-		observation.Tmux = &collected
+		observation.SetLocation(&collected)
 	}
 	if collected := reportMultiplexerContext(); !collected.Empty() {
-		observation.Multiplexer = &collected
+		observation.SetLocation(&collected)
 	}
 	if _, err := store.Observe(ctx, observation); err != nil {
 		return fmt.Errorf("recording managed hook observation: %w", err)

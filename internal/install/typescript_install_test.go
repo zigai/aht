@@ -32,7 +32,7 @@ func TestInstallPiWritesExtension(t *testing.T) {
 	path := writeStalePiExtension(t, dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessPi,
+		Harness:      registry.Harness("pi"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -80,7 +80,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOmp,
+		Harness:      registry.Harness("omp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -107,7 +107,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 		`on("session_stop"`,
 		`on("session_shutdown"`,
 		`export default function`,
-		"AHT_INTEGRATION_VERSION=16",
+		"AHT_INTEGRATION_VERSION=17",
 	}, "oh-my-pi extension")
 	if strings.Contains(result.Snippet, `on("input"`) {
 		t.Fatalf("OMP extension must not treat local interactive input as agent activity: %q", result.Snippet)
@@ -115,7 +115,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 	if strings.Contains(result.Snippet, `"--queue"`) {
 		t.Fatalf("OMP extension must report through the broker hot path: %q", result.Snippet)
 	}
-	reinstalled, err := Run(Options{Harness: registry.HarnessOmp, Binary: testInstallBinary})
+	reinstalled, err := Run(Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestPiAndOmpRefuseToOverwriteSharedExtension(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", dir)
 
-	piResult, err := Run(Options{Harness: registry.HarnessPi, Binary: testInstallBinary})
+	piResult, err := Run(Options{Harness: registry.Harness("pi"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestPiAndOmpRefuseToOverwriteSharedExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Run(Options{Harness: registry.HarnessOmp, Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
+	if _, err := Run(Options{Harness: registry.Harness("omp"), Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
 		t.Fatalf("OMP overwrite error = %v, want errForeignFile", err)
 	}
 	current, err := os.ReadFile(piResult.Path)
@@ -157,7 +157,7 @@ func TestInstallOmpUsesProfileAgentDir(t *testing.T) {
 	t.Setenv("PI_PROFILE", "")
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOmp,
+		Harness:      registry.Harness("omp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -179,7 +179,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -197,7 +197,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	}
 	requireTextContainsAll(t, result.Snippet, []string{
 		"AHT_INTEGRATION_ID=opencode",
-		"AHT_INTEGRATION_VERSION=11",
+		"AHT_INTEGRATION_VERSION=12",
 		`export default { id: "aht-state", setup, server };`,
 		`async function server(ctx: V1PluginContext)`,
 		`async function setup(ctx: V2PluginContext)`,
@@ -226,7 +226,7 @@ const old = "old-aht";
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -249,7 +249,7 @@ const old = "old-aht";
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
 	second, err := Run(Options{
-		Harness:      registry.HarnessOpenCode,
+		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -269,7 +269,7 @@ func TestInstallKiloWritesPlugin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessKilo,
+		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -292,10 +292,10 @@ func TestInstallKiloWritesPlugin(t *testing.T) {
 		`"permission.asked"`,
 		`"session.deleted"`,
 		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=8"`,
+		`"AHT_INTEGRATION_VERSION=9"`,
 		`"--observed-at", observedAt`,
 		`"kilo_status"`,
-		`"aht_integration", source`,
+		`"--reporter", source`,
 	}, "kilo snippet")
 }
 
@@ -314,7 +314,7 @@ const old = "old-aht";
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessKilo,
+		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -337,7 +337,7 @@ const old = "old-aht";
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
 	second, err := Run(Options{
-		Harness:      registry.HarnessKilo,
+		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -357,7 +357,7 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessAmp,
+		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -381,10 +381,10 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 		`amp.on("tool.call"`,
 		`amp.on("agent.end"`,
 		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=2"`,
+		`"AHT_INTEGRATION_VERSION=3"`,
 		`"--observed-at", observedAt`,
 		`"report", "amp"`,
-		`"aht_integration="`,
+		`"--reporter", source`,
 	}, "amp snippet")
 }
 
@@ -403,7 +403,7 @@ const old = "old-aht";
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessAmp,
+		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -426,7 +426,7 @@ const old = "old-aht";
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
 	second, err := Run(Options{
-		Harness:      registry.HarnessAmp,
+		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,

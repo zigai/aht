@@ -24,9 +24,11 @@ type grokHookSpec struct {
 
 func New() grokHarness {
 	return grokHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessGrok,
-		Aliases:      []string{"grok-build", "grok_build"},
-		ProcessNames: []string{"grok", "grok-build"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("grok"),
+		Aliases:          []string{"grok-build", "grok_build"},
+		ProcessNames:     []string{"grok", "grok-build"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"GROK_SESSION_ID"},
 			SessionPath: nil,
@@ -45,7 +47,7 @@ func New() grokHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  grokIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -187,7 +189,7 @@ func grokCommandHookGroup(command string) map[string]any {
 }
 
 func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.HarnessGrok, transition, event, grokIntegrationSource)
+	return harness.ReportHookCommand(binary, registry.Harness("grok"), transition, event, grokIntegrationSource)
 }
 
 func grokHome() string {
@@ -199,4 +201,11 @@ func grokHome() string {
 	}
 
 	return ".grok"
+}
+
+func (grokHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["grok_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "grok_start_source", "source", "reason"))
 }

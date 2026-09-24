@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -11,9 +12,18 @@ import (
 func TestSummarySeparatesServersAndCountsAllActivities(t *testing.T) {
 	failed, interrupted := ActivityFailed, ActivityInterrupted
 	sessions := []Session{
-		{Presence: PresenceLive, Activity: &failed, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"}},
-		{Presence: PresenceLive, Activity: &interrupted, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "second", SessionID: "$0"}},
-		{Presence: PresenceGone, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"}},
+		{
+			Location: Location{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"},
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil),
+		},
+		{
+			Location: Location{Kind: MultiplexerTmux, ServerID: "second", SessionID: "$0"},
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil),
+		},
+		{
+			Location: Location{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"},
+			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil),
+		},
 	}
 	summaries := summariesForSessions(sessions)
 	if len(summaries) != 2 {
@@ -57,20 +67,52 @@ func TestSummariesSumConservationAndNilActivity(t *testing.T) {
 
 	sessions := []Session{
 		// Live with non-nil activity
-		{ID: "1", Presence: PresenceLive, Activity: &running, ProjectRoot: "/p1"},
-		{ID: "2", Presence: PresenceLive, Activity: &idle, ProjectRoot: "/p1"},
+		{
+			ID:          "1",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:          "2",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+		},
 		// Live with nil activity (must count into ActivityUnknown)
-		{ID: "3", Presence: PresenceLive, Activity: nil, ProjectRoot: "/p1"},
+		{
+			ID:          "3",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(nil), nil),
+		},
 		// Gone with nil activity (must NOT increment idle/running or ActivityUnknown)
-		{ID: "4", Presence: PresenceGone, Activity: nil, ProjectRoot: "/p1"},
+		{
+			ID:          "4",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil),
+		},
 		// Gone with non-nil activity (must NOT increment activity counts)
-		{ID: "5", Presence: PresenceGone, Activity: &failed, ProjectRoot: "/p1"},
+		{
+			ID:          "5",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(&failed), nil),
+		},
 		// Unknown presence with activity
-		{ID: "6", Presence: PresenceUnknown, Activity: &running, ProjectRoot: "/p1"},
+		{
+			ID:          "6",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(&running), nil),
+		},
 		// Unknown presence with nil activity
-		{ID: "7", Presence: PresenceUnknown, Activity: nil, ProjectRoot: "/p1"},
+		{
+			ID:          "7",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(nil), nil),
+		},
 		// Blank presence with nil activity (must count as PresenceUnknown, ActivityUnknown)
-		{ID: "8", Presence: "", Activity: nil, ProjectRoot: "/p1"},
+		{
+			ID:          "8",
+			ProjectRoot: "/p1",
+			Liveness:    NewLiveness("", ActivityValue(nil), nil),
+		},
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByProject})
@@ -129,14 +171,46 @@ func TestSummariesAllActivitiesAndPresenceStates(t *testing.T) {
 	invalidAct := Activity("custom-unknown")
 
 	sessions := []Session{
-		{ID: "r", Presence: PresenceLive, Activity: &running, Harness: HarnessClaude},
-		{ID: "w", Presence: PresenceLive, Activity: &waiting, Harness: HarnessClaude},
-		{ID: "i", Presence: PresenceLive, Activity: &idle, Harness: HarnessClaude},
-		{ID: "f", Presence: PresenceLive, Activity: &failed, Harness: HarnessClaude},
-		{ID: "int", Presence: PresenceLive, Activity: &interrupted, Harness: HarnessClaude},
-		{ID: "unk", Presence: PresenceLive, Activity: &unknownAct, Harness: HarnessClaude},
-		{ID: "inv", Presence: PresenceLive, Activity: &invalidAct, Harness: HarnessClaude},
-		{ID: "gone", Presence: PresenceGone, Activity: &running, Harness: HarnessClaude},
+		{
+			ID:       "r",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "w",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&waiting), nil),
+		},
+		{
+			ID:       "i",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+		},
+		{
+			ID:       "f",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil),
+		},
+		{
+			ID:       "int",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil),
+		},
+		{
+			ID:       "unk",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&unknownAct), nil),
+		},
+		{
+			ID:       "inv",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&invalidAct), nil),
+		},
+		{
+			ID:       "gone",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceGone, ActivityValue(&running), nil),
+		},
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByHarness})
@@ -181,9 +255,21 @@ func TestSummariesProjectGroupingCollidingBasenames(t *testing.T) {
 
 	// Two sessions with identical project basename "service", but distinct roots
 	sessions := []Session{
-		{ID: "1", Presence: PresenceLive, Activity: &running, ProjectRoot: "/home/alice/work/service"},
-		{ID: "2", Presence: PresenceLive, Activity: &running, ProjectRoot: "/home/alice/work/service"},
-		{ID: "3", Presence: PresenceLive, Activity: &running, ProjectRoot: "/home/bob/other/service"},
+		{
+			ID:          "1",
+			ProjectRoot: "/home/alice/work/service",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:          "2",
+			ProjectRoot: "/home/alice/work/service",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:          "3",
+			ProjectRoot: "/home/bob/other/service",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByProject})
@@ -217,12 +303,28 @@ func TestSummariesProjectGroupingUnknownAndMissingRoot(t *testing.T) {
 
 	sessions := []Session{
 		// Missing root
-		{ID: "1", Presence: PresenceLive, Activity: &running, ProjectRoot: ""},
-		{ID: "2", Presence: PresenceLive, Activity: &running, ProjectRoot: ""},
+		{
+			ID:          "1",
+			ProjectRoot: "",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:          "2",
+			ProjectRoot: "",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
 		// Project with root literally named "/var/projects/unknown"
-		{ID: "3", Presence: PresenceLive, Activity: &running, ProjectRoot: "/var/projects/unknown"},
+		{
+			ID:          "3",
+			ProjectRoot: "/var/projects/unknown",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
 		// Normal project
-		{ID: "4", Presence: PresenceLive, Activity: &running, ProjectRoot: "/home/user/alpha"},
+		{
+			ID:          "4",
+			ProjectRoot: "/home/user/alpha",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByProject})
@@ -251,10 +353,26 @@ func TestSummariesHarnessGroupingAndUnknown(t *testing.T) {
 	running := ActivityRunning
 
 	sessions := []Session{
-		{ID: "1", Presence: PresenceLive, Activity: &running, Harness: HarnessClaude},
-		{ID: "2", Presence: PresenceLive, Activity: &running, Harness: HarnessCodex},
-		{ID: "3", Presence: PresenceLive, Activity: &running, Harness: ""},
-		{ID: "4", Presence: PresenceLive, Activity: &running, Harness: ""},
+		{
+			ID:       "1",
+			Harness:  HarnessClaude,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "2",
+			Harness:  HarnessCodex,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "3",
+			Harness:  "",
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "4",
+			Harness:  "",
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByHarness})
@@ -279,10 +397,25 @@ func TestSummariesMultiplexerGroupingServerQualified(t *testing.T) {
 	running := ActivityRunning
 
 	sessions := []Session{
-		{ID: "1", Presence: PresenceLive, Activity: &running, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"}},
-		{ID: "2", Presence: PresenceLive, Activity: &running, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "srv2", SessionName: "work"}},
-		{ID: "3", Presence: PresenceLive, Activity: &running, Multiplexer: MultiplexerContext{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"}},
-		{ID: "4", Presence: PresenceLive, Activity: &running}, // unlocated
+		{
+			ID:       "1",
+			Location: Location{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"},
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "2",
+			Location: Location{Kind: MultiplexerTmux, ServerID: "srv2", SessionName: "work"},
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "3",
+			Location: Location{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"},
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:       "4",
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		}, // unlocated
 	}
 
 	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
@@ -309,9 +442,24 @@ func TestSummariesFiltersBeforeGrouping(t *testing.T) {
 	idle := ActivityIdle
 
 	sessions := []Session{
-		{ID: "1", Presence: PresenceLive, Activity: &running, Harness: HarnessClaude, ProjectRoot: "/app"},
-		{ID: "2", Presence: PresenceLive, Activity: &idle, Harness: HarnessCodex, ProjectRoot: "/app"},
-		{ID: "3", Presence: PresenceGone, Activity: nil, Harness: HarnessClaude, ProjectRoot: "/app"},
+		{
+			ID:          "1",
+			Harness:     HarnessClaude,
+			ProjectRoot: "/app",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+		},
+		{
+			ID:          "2",
+			Harness:     HarnessCodex,
+			ProjectRoot: "/app",
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+		},
+		{
+			ID:          "3",
+			Harness:     HarnessClaude,
+			ProjectRoot: "/app",
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil),
+		},
 	}
 
 	// Filter by HarnessClaude before summarizing
@@ -334,33 +482,15 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "sessions.json")
-	fileStore := NewFileStore(storePath)
-	memStore, err := OpenMemoryStore(storePath)
+	fileStore := NewJournal(storePath, fixtureRules{})
+	memStore, err := OpenMemoryStore(storePath, fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	running := ActivityRunning
-	obs1 := Observation{
-		Source:   ObservationSourceNative,
-		Evidence: ObservationEvidenceNativeEvent,
-		Harness:  HarnessClaude,
-		Identity: ObservationIdentity{SessionID: "sess-1"},
-		Presence: new(PresenceLive),
-		Activity: &running,
-		Catalog:  &CatalogMetadata{ProjectRoot: "/repo/one"},
-		Tmux:     &TmuxContext{SessionName: "main"},
-	}
-	obs2 := Observation{
-		Source:   ObservationSourceNative,
-		Evidence: ObservationEvidenceNativeEvent,
-		Harness:  HarnessCodex,
-		Identity: ObservationIdentity{SessionID: "sess-2"},
-		Presence: new(PresenceLive),
-		Activity: &running,
-		Catalog:  &CatalogMetadata{ProjectRoot: "/repo/two"},
-		Tmux:     &TmuxContext{SessionName: "other"},
-	}
+	obs1 := Observation{Harness: HarnessClaude, At: time.Time{}, Subject: ObservationIdentity{SessionID: "sess-1"}, Evidence: &Report{Claim: new(PresenceLive), Activity: &running, Location: &Location{Kind: MultiplexerTmux, SessionName: "main"}, Listing: &Listing{ProjectRoot: "/repo/one"}}}
+	obs2 := Observation{Harness: HarnessCodex, At: time.Time{}, Subject: ObservationIdentity{SessionID: "sess-2"}, Evidence: &Report{Claim: new(PresenceLive), Activity: &running, Location: &Location{Kind: MultiplexerTmux, SessionName: "other"}, Listing: &Listing{ProjectRoot: "/repo/two"}}}
 
 	ctx := t.Context()
 	if _, err := fileStore.ObserveBatch(ctx, []Observation{obs1, obs2}); err != nil {
@@ -400,14 +530,14 @@ func TestSummariesUnsupportedGroupBy(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	store := NewFileStore(filepath.Join(t.TempDir(), "sessions.json"))
+	store := NewJournal(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
 
 	_, err := store.SummaryWithOptions(ctx, Filter{}, SummaryOptions{GroupBy: "invalid-group"})
 	if !errors.Is(err, ErrUnsupportedGroupBy) {
 		t.Fatalf("expected ErrUnsupportedGroupBy, got %v", err)
 	}
 
-	memStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "sessions.json"))
+	memStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}

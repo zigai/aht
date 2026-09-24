@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	integrationVersion      = 8
+	integrationVersion      = 9
 	hermesCommand           = "hermes"
 	hermesPluginName        = "aht-state"
 	hermesMarkerFileName    = ".aht-managed"
@@ -27,9 +27,11 @@ type hermesHarness struct{ harness.BaseAdapter }
 
 func New() hermesHarness {
 	return hermesHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessHermes,
-		Aliases:      []string{"hermes-agent", "hermes_agent"},
-		ProcessNames: []string{"hermes", "hermes-agent"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("hermes"),
+		Aliases:          []string{"hermes-agent", "hermes_agent"},
+		ProcessNames:     []string{"hermes", "hermes-agent"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -48,7 +50,7 @@ func New() hermesHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  hermesIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -67,7 +69,6 @@ func (hermesHarness) InstallPlan(binary string) harness.InstallPlan {
 		},
 		SnippetOrder:   []string{"plugin.yaml", "__init__.py", hermesMarkerFileName},
 		MarkerFile:     hermesMarkerFileName,
-		ObsoleteFiles:  nil,
 		ImportManifest: nil,
 		Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
 	}}}}

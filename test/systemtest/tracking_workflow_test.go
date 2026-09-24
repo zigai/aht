@@ -88,10 +88,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 		"--cwd", maliciousCWD,
 		"--raw-stdin-defaults-only",
 		"--no-tmux",
-		// Do not bind this synthetic observation to an actual coding-agent
-		// ancestor running the test: its process CWD legitimately wins over
-		// catalog metadata. Init has no coding-agent ancestor on supported hosts.
-		"--pid", "1",
+		"--pid", "2147483647",
 	)
 	transcript.Write(reportOutput)
 	var reported registry.Session
@@ -101,7 +98,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	assertPhaseOneSession(t, reported, maliciousSessionID, maliciousCWD)
 
 	observed := receiveSessionWatchEvent(t, watchCommand, watchEvents, reported.SessionID)
-	if observed.Harness != registry.HarnessCodex || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityUnknown {
+	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityUnknown {
 		t.Fatalf("watch event = %#v, want live Codex session with screen-authoritative activity pending", observed)
 	}
 	stopSystemTestCommand(t, watchCommand)
@@ -368,11 +365,11 @@ func decodeSessionByID(t *testing.T, source string, data []byte, sessionID strin
 
 func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
 	t.Helper()
-	if session.SchemaVersion != 2 || session.SessionID != sessionID || session.Harness != registry.HarnessCodex {
-		t.Fatalf("session identity = %#v, want schema-v2 phase-one Codex session", session)
+	if session.SchemaVersion != 3 || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
+		t.Fatalf("session identity = %#v, want schema-v3 phase-one Codex session", session)
 	}
-	if session.Presence != registry.PresenceLive || session.Activity == nil || *session.Activity != registry.ActivityUnknown {
-		t.Fatalf("effective session state = presence %q activity %v, want live/unknown until screen evidence", session.Presence, session.Activity)
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityUnknown {
+		t.Fatalf("effective session state = presence %q activity %v, want live/unknown until screen evidence", session.Presence(), session.Activity())
 	}
 	if session.Observations.Native == nil || session.Observations.Native.Activity == nil || *session.Observations.Native.Activity != registry.ActivityRunning {
 		t.Fatalf("reported activity = %#v, want running native observation", session.Observations.Native)

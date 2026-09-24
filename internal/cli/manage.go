@@ -92,8 +92,8 @@ func (defaultSessionStopSignaler) ValidateStopTarget(ctx context.Context, s regi
 	if s.Observations.Process != nil {
 		latest = s.Observations.Process.ObservedAt
 	}
-	if s.Observations.Tmux != nil && s.Observations.Tmux.ObservedAt.After(latest) {
-		latest = s.Observations.Tmux.ObservedAt
+	if s.Observations.Location != nil && s.Observations.Location.ObservedAt.After(latest) {
+		latest = s.Observations.Location.ObservedAt
 	}
 	if latest.IsZero() || time.Since(latest) > stopTargetMaxAge {
 		return stopTargetValidation{Reason: "observation too old"}, nil
@@ -283,8 +283,8 @@ func runManageStopSessions(ctx context.Context, ss []registry.Session, opts mana
 	r := manageStopAllResult{DryRun: opts.dryRun, Results: make([]manageStopSessionResult, 0, len(ss))}
 	seen := map[string]bool{}
 	for _, s := range ss {
-		entry := manageStopSessionResult{ID: s.ID, Harness: s.Harness, Presence: s.Presence, Activity: s.Activity, Status: "skipped"}
-		if s.Presence != registry.PresenceLive {
+		entry := manageStopSessionResult{ID: s.ID, Harness: s.Harness, Presence: s.Presence(), Activity: s.Activity(), Status: "skipped"}
+		if s.Presence() != registry.PresenceLive {
 			entry.Reason = "session is not live"
 			r.Skipped++
 			r.Results = append(r.Results, entry)
@@ -393,11 +393,11 @@ func tmuxStopTargetValidation(session registry.Session, panes []tmux.Pane) stopT
 	}
 	paneIDFound := false
 	for _, p := range panes {
-		if p.Tmux.PaneID != session.Tmux.PaneID {
+		if p.Tmux.PaneID != session.Location.PaneID {
 			continue
 		}
 		paneIDFound = true
-		if tmuxTargetMatchesSession(session.Tmux, p.Tmux) {
+		if tmuxTargetMatchesSession(session.Location, p.Tmux) {
 			return stopTargetValidation{OK: true}
 		}
 	}
@@ -428,8 +428,8 @@ func validateProcessStopTarget(ctx context.Context, s registry.Session) (stopTar
 	return stopTargetValidation{OK: true}, nil
 }
 
-func tmuxTargetMatchesSession(a, b registry.TmuxContext) bool {
-	if a.ServerSocket == "" || b.ServerSocket == "" || a.ServerSocket != b.ServerSocket {
+func tmuxTargetMatchesSession(a, b registry.Location) bool {
+	if a.ServerID == "" || b.ServerID == "" || a.ServerID != b.ServerID {
 		return false
 	}
 	if a.PanePID > 0 && b.PanePID > 0 && a.PanePID != b.PanePID {
@@ -449,8 +449,8 @@ func harnessCommandMatches(h registry.Harness, c string) bool {
 }
 
 func stopTargetForSession(s registry.Session) (stopTarget, bool) {
-	if s.Tmux.PaneID != "" && s.Tmux.ServerSocket != "" {
-		return stopTarget{Method: "tmux-interrupt", Target: s.Tmux.PaneID, ServerIdentity: s.Tmux.ServerSocket}, true
+	if s.Location.PaneID != "" && s.Location.ServerID != "" {
+		return stopTarget{Method: "tmux-interrupt", Target: s.Location.PaneID, ServerIdentity: s.Location.ServerID}, true
 	}
 	if s.Process != nil && s.Process.PID > 0 {
 		return stopTarget{Method: "pid-interrupt", Target: strconv.Itoa(s.Process.PID), PID: s.Process.PID}, true

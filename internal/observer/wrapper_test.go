@@ -11,7 +11,7 @@ func TestResolveHarnessUsesScopedAgentHint(t *testing.T) {
 	t.Parallel()
 	process := processinfo.Process{Executable: "/usr/bin/fence", AgentHint: "claude", Args: []string{"fence", "--", "node"}}
 	harness, ok := resolveHarness(process)
-	if !ok || harness != registry.HarnessClaude {
+	if !ok || harness != registry.Harness("claude") {
 		t.Fatalf("resolveHarness = %q, %v; want Claude from hint", harness, ok)
 	}
 }
@@ -35,7 +35,7 @@ func TestResolveHarnessKeepsOmpHeadlessSessions(t *testing.T) {
 		Args:       []string{"/home/test/.local/bin/omp", "--print", "check this repository"},
 	}
 	harness, ok := resolveHarness(process)
-	if !ok || harness != registry.HarnessOmp {
+	if !ok || harness != registry.Harness("omp") {
 		t.Fatalf("resolveHarness = %q, %v; want headless OMP session", harness, ok)
 	}
 }
@@ -47,7 +47,7 @@ func TestResolveHarnessScansKnownWrappers(t *testing.T) {
 			t.Parallel()
 			process := processinfo.Process{Executable: "/usr/bin/" + wrapper, Args: []string{wrapper, "--wrapper-option", "value", "--", "/usr/bin/codex"}}
 			harness, ok := resolveHarness(process)
-			if !ok || harness != registry.HarnessCodex {
+			if !ok || harness != registry.Harness("codex") {
 				t.Fatalf("resolveHarness = %q, %v; want Codex behind %s", harness, ok, wrapper)
 			}
 		})
@@ -101,21 +101,21 @@ func TestHasAncestorHarness(t *testing.T) {
 		40: {PID: 40, PPID: 1},
 	}
 	harnessByPID := map[int]registry.Harness{
-		10: registry.HarnessClaude,
-		20: registry.HarnessClaude,
-		30: registry.HarnessClaude,
-		40: registry.HarnessCodex,
+		10: registry.Harness("claude"),
+		20: registry.Harness("claude"),
+		30: registry.Harness("claude"),
+		40: registry.Harness("codex"),
 	}
-	if hasAncestorHarness(10, registry.HarnessClaude, processes, harnessByPID) {
+	if hasAncestorHarness(10, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 10 unexpectedly has ancestor with same harness")
 	}
-	if !hasAncestorHarness(20, registry.HarnessClaude, processes, harnessByPID) {
+	if !hasAncestorHarness(20, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 20 should have PID 10 as ancestor with same harness")
 	}
-	if !hasAncestorHarness(30, registry.HarnessClaude, processes, harnessByPID) {
+	if !hasAncestorHarness(30, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 30 should have ancestor with same harness")
 	}
-	if hasAncestorHarness(40, registry.HarnessCodex, processes, harnessByPID) {
+	if hasAncestorHarness(40, registry.Harness("codex"), processes, harnessByPID) {
 		t.Fatal("PID 40 should not have ancestor with same harness")
 	}
 }

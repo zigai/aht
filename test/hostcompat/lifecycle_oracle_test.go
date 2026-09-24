@@ -35,18 +35,12 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	t.Parallel()
 
 	workDir := "/tmp/project"
-	processOnly := registry.Session{
-		ID:       "s1",
-		Harness:  registry.HarnessOpenCode,
-		Presence: registry.PresenceLive,
-		CWD:      workDir,
-		Observations: registry.Observations{
-			Process: &registry.ProcessObservation{
-				Present: true,
-			},
+	processOnly := registry.Session{ID: "s1", Harness: registry.Harness("opencode"), CWD: workDir, Observations: registry.Observations{
+		Process: &registry.ProcessObservation{
+			Present: true,
 		},
-	}
-	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.HarnessOpenCode, Level: compatibilityLifecycle}}
+	}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)}
+	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLifecycle}}
 	if host.validateSession(processOnly) {
 		t.Fatal("oracle accepted process-only session for non-exempt harness")
 	}
@@ -62,14 +56,14 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	}
 	withNative.Observations.Native.Event = "session.idle"
 	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
-	withNative.Activity = new(registry.ActivityUnknown)
+	withNative.Liveness = registry.NewLiveness(withNative.Presence(), registry.ActivityValue(new(registry.ActivityUnknown)), withNative.Decision())
 	if host.validateSession(withNative) {
 		t.Fatal("oracle accepted unexplained unknown effective activity")
 	}
-	withNative.ActivityDecision = &registry.ActivityDecision{
+	withNative.Liveness = registry.NewLiveness(withNative.Presence(), registry.ActivityValue(withNative.Activity()), &registry.ActivityDecision{
 		Authority: "screen",
 		Reason:    "screen_not_in_supported_multiplexer",
-	}
+	})
 	if !host.validateSession(withNative) {
 		t.Fatal("oracle rejected screen-authoritative headless terminal session")
 	}
@@ -85,7 +79,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		t.Fatal("oracle accepted session with mismatched native session ID")
 	}
 
-	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.HarnessCursor, Level: compatibilityDiscovery}}
+	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityDiscovery}}
 	if !cursorHost.validateSession(processOnly) {
 		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
 	}
@@ -105,7 +99,7 @@ func isolatedEnvironment() []string {
 }
 
 func discoveryScope(id registry.Harness) string {
-	if id == registry.HarnessCursor {
+	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
 	return "agy --help documents hosted model selection but no local-provider endpoint; https://docs.agy.ai/plugins was unreachable during contract review, so native lifecycle support is not asserted"
@@ -146,11 +140,11 @@ func terminalSession(id registry.Harness, session registry.Session) bool {
 		return false
 	}
 	// Hermes chat explicitly finalizes the session; oneshot ends only its turn.
-	if id == registry.HarnessHermes && native.Event == "on_session_finalize" {
-		return native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence == registry.PresenceGone
+	if id == registry.Harness("hermes") && native.Event == "on_session_finalize" {
+		return native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone
 	}
 	switch id {
-	case registry.HarnessOpenCode, registry.HarnessKilo, registry.HarnessCline, registry.HarnessOpenClaw, registry.HarnessHermes:
+	case registry.Harness("opencode"), registry.Harness("kilo"), registry.Harness("cline"), registry.Harness("openclaw"), registry.Harness("hermes"):
 		if native.Activity == nil || *native.Activity != registry.ActivityIdle {
 			return false
 		}
@@ -160,11 +154,11 @@ func terminalSession(id registry.Harness, session registry.Session) bool {
 		// Both current OpenCode/Kilo idle notifications are native terminal
 		// evidence; either may be the last drained event.
 		return native.Event == terminalEvent(id) ||
-			((id == registry.HarnessOpenCode || id == registry.HarnessKilo) && native.Event == "session.idle")
+			((id == registry.Harness("opencode") || id == registry.Harness("kilo")) && native.Event == "session.idle")
 	default:
 		// A process-observer tombstone is not a native SessionEnd.
 		return native.Presence != nil && *native.Presence == registry.PresenceGone &&
-			session.Presence == registry.PresenceGone && native.Event == terminalEvent(id)
+			session.Presence() == registry.PresenceGone && native.Event == terminalEvent(id)
 	}
 }
 
@@ -178,36 +172,33 @@ func nativeActivityMatches(session registry.Session, want registry.Activity) boo
 	}
 	// A later presence-only hook replaces the native snapshot without
 	// invalidating the retained activity decision for the same incarnation.
-	decision := session.ActivityDecision
-	return session.Activity != nil && *session.Activity == want && decision != nil &&
+	decision := session.Decision()
+	return session.Activity() != nil && *session.Activity() == want && decision != nil &&
 		decision.Authority == "hook" && decision.Process.Equal(native.Process)
 }
 
 func TestNativeActivityOracleRetainsPresenceOnlyProvenance(t *testing.T) {
 	t.Parallel()
 	process := registry.ProcessIdentity{PID: 123, StartIdentity: "first"}
-	session := registry.Session{
-		Activity: new(registry.ActivityRunning),
-		Observations: registry.Observations{
-			Native: &registry.NativeObservation{Event: "sessionStart", Process: process},
-		},
-	}
+	session := registry.Session{Observations: registry.Observations{
+		Native: &registry.NativeObservation{Event: "sessionStart", Process: process},
+	}, Liveness: registry.NewLiveness(registry.PresenceUnknown, registry.ActivityValue(new(registry.ActivityRunning)), nil)}
 	if nativeActivityMatches(session, registry.ActivityRunning) {
 		t.Fatal("effective activity without native provenance passed")
 	}
-	session.ActivityDecision = &registry.ActivityDecision{Authority: "process", Process: process}
+	session.Liveness = registry.NewLiveness(session.Presence(), registry.ActivityValue(session.Activity()), &registry.ActivityDecision{Authority: "process", Process: process})
 	if nativeActivityMatches(session, registry.ActivityRunning) {
 		t.Fatal("process-derived activity passed as native evidence")
 	}
-	session.ActivityDecision.Authority = "hook"
+	session.Decision().Authority = "hook"
 	if !nativeActivityMatches(session, registry.ActivityRunning) {
 		t.Fatal("presence-only callback erased same-incarnation native running proof")
 	}
-	session.ActivityDecision.Process.StartIdentity = "previous"
+	session.Decision().Process.StartIdentity = "previous"
 	if nativeActivityMatches(session, registry.ActivityRunning) {
 		t.Fatal("prior-incarnation activity passed as current native evidence")
 	}
-	session.ActivityDecision.Process = process
+	session.Decision().Process = process
 	session.Observations.Native.Activity = new(registry.ActivityIdle)
 	if nativeActivityMatches(session, registry.ActivityRunning) {
 		t.Fatal("retained decision overrode an explicit newer native idle state")
@@ -215,32 +206,32 @@ func TestNativeActivityOracleRetainsPresenceOnlyProvenance(t *testing.T) {
 }
 
 func effectiveActivityMatches(session registry.Session, want registry.Activity) bool {
-	if session.Activity == nil {
-		return session.Presence == registry.PresenceGone
+	if session.Activity() == nil {
+		return session.Presence() == registry.PresenceGone
 	}
-	if *session.Activity == want {
+	if *session.Activity() == want {
 		return true
 	}
 	// A headless host can retain authoritative native lifecycle evidence while
 	// the effective state deliberately defers to an unavailable terminal screen.
-	return *session.Activity == registry.ActivityUnknown && session.ActivityDecision != nil &&
-		session.ActivityDecision.Authority == "screen" &&
-		session.ActivityDecision.Reason == "screen_not_in_supported_multiplexer"
+	return *session.Activity() == registry.ActivityUnknown && session.Decision() != nil &&
+		session.Decision().Authority == "screen" &&
+		session.Decision().Reason == "screen_not_in_supported_multiplexer"
 }
 
 func terminalEvent(id registry.Harness) string {
 	switch id {
-	case registry.HarnessPi, registry.HarnessOmp:
+	case registry.Harness("pi"), registry.Harness("omp"):
 		return "session_shutdown"
-	case registry.HarnessCopilot:
+	case registry.Harness("copilot"):
 		return "sessionEnd"
-	case registry.HarnessOpenCode, registry.HarnessKilo:
+	case registry.Harness("opencode"), registry.Harness("kilo"):
 		return "session.status"
-	case registry.HarnessCline:
+	case registry.Harness("cline"):
 		return "afterRun"
-	case registry.HarnessOpenClaw:
+	case registry.Harness("openclaw"):
 		return "agent_end"
-	case registry.HarnessHermes:
+	case registry.Harness("hermes"):
 		return "on_session_end"
 	default:
 		return "SessionEnd"
@@ -249,15 +240,15 @@ func terminalEvent(id registry.Harness) string {
 
 func startEvent(id registry.Harness) string {
 	switch id {
-	case registry.HarnessPi, registry.HarnessOmp, registry.HarnessOpenClaw:
+	case registry.Harness("pi"), registry.Harness("omp"), registry.Harness("openclaw"):
 		return "session_start"
-	case registry.HarnessCopilot:
+	case registry.Harness("copilot"):
 		return "sessionStart"
-	case registry.HarnessOpenCode, registry.HarnessKilo:
+	case registry.Harness("opencode"), registry.Harness("kilo"):
 		return "session.created"
-	case registry.HarnessCline:
+	case registry.Harness("cline"):
 		return "beforeRun"
-	case registry.HarnessHermes:
+	case registry.Harness("hermes"):
 		return "on_session_start"
 	default:
 		return "SessionStart"
@@ -266,15 +257,15 @@ func startEvent(id registry.Harness) string {
 
 func turnEndEvent(id registry.Harness) string {
 	switch id {
-	case registry.HarnessPi:
+	case registry.Harness("pi"):
 		return "agent_end"
-	case registry.HarnessOmp:
+	case registry.Harness("omp"):
 		return "session_stop"
-	case registry.HarnessCopilot:
+	case registry.Harness("copilot"):
 		return "agentStop"
-	case registry.HarnessHermes:
+	case registry.Harness("hermes"):
 		return "on_session_end"
-	case registry.HarnessCline, registry.HarnessOpenCode, registry.HarnessKilo, registry.HarnessOpenClaw:
+	case registry.Harness("cline"), registry.Harness("opencode"), registry.Harness("kilo"), registry.Harness("openclaw"):
 		return terminalEvent(id)
 	default:
 		return "Stop"
@@ -304,9 +295,9 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 	t.Parallel()
 	gone := registry.PresenceGone
 	idle := registry.ActivityIdle
-	for _, id := range []registry.Harness{registry.HarnessClaude, registry.HarnessCodex, registry.HarnessPi, registry.HarnessOmp, registry.HarnessCopilot, registry.HarnessKimiCode, registry.HarnessGrok, registry.HarnessGoose, registry.HarnessDroid} {
+	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid")} {
 		t.Run(string(id), func(t *testing.T) {
-			session := registry.Session{Presence: gone, Observations: registry.Observations{Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle}}}
+			session := registry.Session{Observations: registry.Observations{Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle}}, Liveness: registry.NewLiveness(gone, registry.ActivityValue(nil), nil)}
 			if terminalSession(id, session) {
 				t.Fatal("process retirement masked missing advertised native session end")
 			}
@@ -315,7 +306,7 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 			if !terminalSession(id, session) {
 				t.Fatal("rejected native terminal evidence")
 			}
-			session.Presence = registry.PresenceLive
+			session.Liveness = registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(session.Activity()), session.Decision())
 			if terminalSession(id, session) {
 				t.Fatal("accepted stuck-live effective state")
 			}
@@ -327,18 +318,15 @@ func TestTurnOracleRejectsStuckRunning(t *testing.T) {
 	t.Parallel()
 	idle := registry.ActivityIdle
 	running := registry.ActivityRunning
-	for _, id := range []registry.Harness{registry.HarnessOpenCode, registry.HarnessKilo, registry.HarnessCline, registry.HarnessOpenClaw, registry.HarnessHermes} {
+	for _, id := range []registry.Harness{registry.Harness("opencode"), registry.Harness("kilo"), registry.Harness("cline"), registry.Harness("openclaw"), registry.Harness("hermes")} {
 		t.Run(string(id), func(t *testing.T) {
-			session := registry.Session{
-				Presence: registry.PresenceLive, Activity: &running,
-				Observations: registry.Observations{Native: &registry.NativeObservation{
-					Event: terminalEvent(id), Activity: &idle,
-				}},
-			}
+			session := registry.Session{Observations: registry.Observations{Native: &registry.NativeObservation{
+				Event: terminalEvent(id), Activity: &idle,
+			}}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil)}
 			if terminalSession(id, session) {
 				t.Fatal("native idle masked stuck-running effective activity")
 			}
-			session.Activity = &idle
+			session.Liveness = registry.NewLiveness(session.Presence(), registry.ActivityValue(&idle), session.Decision())
 			session.Observations.Native.Activity = &running
 			if terminalSession(id, session) {
 				t.Fatal("effective idle masked stuck-running native activity")

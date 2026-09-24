@@ -97,8 +97,8 @@ func (m *Manager) checkStoreSchema(ctx context.Context, add func(string, DoctorS
 	if storePath == "" {
 		storePath = registry.DefaultStorePath()
 	}
-	store := registry.NewFileStore(storePath)
-	if _, err := store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", TmuxSession: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""}); err != nil {
+	store := registry.NewJournal(storePath, catalog.Rules{})
+	if _, err := store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""}); err != nil {
 		if unsupported, ok := errors.AsType[*registry.UnsupportedSchemaError](err); ok {
 			add("store.schema", DoctorStatusError, unsupported.Error())
 		} else {
@@ -168,7 +168,7 @@ func (m *Manager) checkReconciliation(maxAge time.Duration, add func(string, Doc
 // CheckManifests evaluates bundled and configured detection manifests.
 func (m *Manager) CheckManifests(add func(string, DoctorStatus, string)) {
 	loader := agentstate.Loader{ConfigDir: ""}
-	harnesses := registry.AllHarnesses()
+	harnesses := catalog.Harnesses()
 	var warnings []string
 	for _, harnessID := range harnesses {
 		if !loader.Supports(harnessID) {

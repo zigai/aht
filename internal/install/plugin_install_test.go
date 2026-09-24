@@ -2,7 +2,6 @@ package install
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +15,7 @@ func TestInstallAgyWritesPlugin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessAgy,
+		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -39,7 +38,7 @@ func TestInstallAgyWritesPlugin(t *testing.T) {
 	requireAgyImportManifest(t, filepath.Join(home, ".gemini", "antigravity-cli", agyImportManifestName))
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessAgy,
+		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -66,7 +65,7 @@ func TestInstallAgyRequiresForceForForeignPlugin(t *testing.T) {
 	}
 
 	_, err := Run(Options{
-		Harness:      registry.HarnessAgy,
+		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -78,7 +77,7 @@ func TestInstallAgyRequiresForceForForeignPlugin(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessAgy,
+		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -125,8 +124,8 @@ func requireAgyPluginMarker(t *testing.T, dir string) {
 	if !strings.Contains(string(marker), managedMarker) {
 		t.Fatalf("expected managed marker, got %q", marker)
 	}
-	if !strings.Contains(string(marker), "AHT_INTEGRATION_VERSION=8") {
-		t.Fatalf("expected agy integration version 8 marker, got %q", marker)
+	if !strings.Contains(string(marker), "AHT_INTEGRATION_VERSION=9") {
+		t.Fatalf("expected agy integration version 9 marker, got %q", marker)
 	}
 }
 
@@ -169,7 +168,7 @@ func TestInstallClineWritesNativePlugin(t *testing.T) {
 	pluginDir := filepath.Join(clineDir, "plugins", "aht-state")
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessCline,
+		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -190,7 +189,7 @@ func TestInstallClineWritesNativePlugin(t *testing.T) {
 	requireClinePluginMarker(t, pluginDir)
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessCline,
+		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -247,7 +246,7 @@ func requireClineAgentPlugin(t *testing.T, pluginDir string) {
 		"ctx?.workspaceInfo?.rootPath",
 		"snapshot.runId",
 		"--pid",
-		"aht_integration=cline-plugin",
+		`"--reporter", "cline-plugin"`,
 	}, "Cline AgentPlugin")
 	if strings.Contains(text, "context.input") || strings.Contains(text, "context.result") || strings.Contains(text, "outputText") {
 		t.Fatalf("Cline plugin reads content-bearing fields: %q", text)
@@ -276,7 +275,7 @@ func TestInstallClineRequiresForceForForeignPlugin(t *testing.T) {
 	}
 
 	_, err := Run(Options{
-		Harness:      registry.HarnessCline,
+		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -285,38 +284,6 @@ func TestInstallClineRequiresForceForForeignPlugin(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unmanaged Cline plugin")
-	}
-}
-
-func TestInstallClineMigratesManagedLegacyHooks(t *testing.T) {
-	clineDir := filepath.Join(t.TempDir(), ".cline")
-	t.Setenv("CLINE_DIR", clineDir)
-	hooksDir := filepath.Join(clineDir, "hooks")
-	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	managedPath := filepath.Join(hooksDir, "TaskStart.sh")
-	managed := "#!/bin/sh\n# " + managedMarker + "\n# AHT_INTEGRATION_ID=cline\n# AHT_INTEGRATION_VERSION=3\n"
-	if err := os.WriteFile(managedPath, []byte(managed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	foreignPath := filepath.Join(hooksDir, "TaskResume.sh")
-	if err := os.WriteFile(foreignPath, []byte("#!/bin/sh\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := Run(Options{Harness: registry.HarnessCline, Binary: testInstallBinary})
-	if err != nil {
-		t.Fatalf("migrating Cline integration: %v", err)
-	}
-	if !result.Changed {
-		t.Fatal("expected migration to report a change")
-	}
-	if _, err := os.Stat(managedPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy managed hook still exists: %v", err)
-	}
-	if _, err := os.Stat(foreignPath); err != nil {
-		t.Fatalf("foreign legacy hook was removed: %v", err)
 	}
 }
 
@@ -333,7 +300,7 @@ func TestInstallGooseWritesPlugin(t *testing.T) {
 	}
 
 	result, err := Run(Options{
-		Harness:      registry.HarnessGoose,
+		Harness:      registry.Harness("goose"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -356,7 +323,7 @@ func TestInstallGooseWritesPlugin(t *testing.T) {
 	requireGoosePluginMarker(t, result.Path)
 
 	second, err := Run(Options{
-		Harness:      registry.HarnessGoose,
+		Harness:      registry.Harness("goose"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
 		DryRun:       false,
@@ -417,7 +384,7 @@ func requireGoosePluginScript(t *testing.T, dir string) {
 	requireTextContainsAll(t, text, []string{
 		managedMarker,
 		"--raw-stdin-defaults-only",
-		"aht_integration=goose-hook",
+		"--reporter goose-hook",
 		`--presence "$transition"`,
 		`--activity "$transition"`,
 		`--event "$event"`,

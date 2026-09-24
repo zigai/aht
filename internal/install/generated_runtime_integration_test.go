@@ -23,7 +23,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("command-hook", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		command := generatedCommandHook(t, registry.HarnessClaude)
+		command := generatedCommandHook(t, registry.Harness("claude"))
 		runGeneratedCommand(t, exec.Command("sh", "-c", command), `{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
 		requireCapturedArguments(t, capture.path, "report", "claude", "--activity", "idle")
 	})
@@ -31,7 +31,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("goose-shell-wrapper", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		script := writeRuntimeArtifact(t, "report.sh", generatedArtifactContent(t, registry.HarnessGoose, "scripts/report.sh"))
+		script := writeRuntimeArtifact(t, "report.sh", generatedArtifactContent(t, registry.Harness("goose"), "scripts/report.sh"))
 		runGeneratedCommand(t, exec.Command("sh", script, "running", "UserPromptSubmit"), `{"session_id":"goose-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
 		requireCapturedArguments(t, capture.path, "report", "goose", "--activity", "running")
 	})
@@ -39,7 +39,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("cline-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessCline, "index.js")
+		module := generatedArtifactContent(t, registry.Harness("cline"), "index.js")
 		runNodeRuntime(t, "index.js", module, runtimeScript(t, "node/cline-failed.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "cline", "--activity", "failed")
 	})
@@ -47,7 +47,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("openclaw-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessOpenClaw, "index.js")
+		module := generatedArtifactContent(t, registry.Harness("openclaw"), "index.js")
 		extra := map[string]string{
 			"node_modules/openclaw/package.json":    `{"name":"openclaw","type":"module","exports":{"./plugin-sdk/plugin-entry":"./plugin-entry.js"}}`,
 			"node_modules/openclaw/plugin-entry.js": runtimeScript(t, "node/openclaw-plugin-entry.mjs"),
@@ -64,7 +64,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("hermes-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessHermes, "__init__.py")
+		module := generatedArtifactContent(t, registry.Harness("hermes"), "__init__.py")
 		dir := t.TempDir()
 		modulePath := filepath.Join(dir, "aht_state.py")
 		writeTestFile(t, modulePath, module, 0o600)
@@ -78,7 +78,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("pi-extension", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessPi, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("pi"), "aht-state.ts")
 		runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/pi-failed.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "pi", "--activity", "failed")
 	})
@@ -86,7 +86,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("omp-extension", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessOmp, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 		runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-failed.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "failed")
 	})
@@ -94,7 +94,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("opencode-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessOpenCode, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("opencode"), "aht-state.ts")
 		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/opencode-session-error.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "failed")
 		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "idle")
@@ -103,7 +103,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("opencode-plugin-v2", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessOpenCode, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("opencode"), "aht-state.ts")
 		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/opencode-v2-session.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "failed")
 		requireCapturedArguments(t, capture.path, "report", "opencode", "--activity", "idle")
@@ -112,7 +112,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("kilo-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessKilo, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("kilo"), "aht-state.ts")
 		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/kilo-session-error.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "kilo", "--activity", "failed")
 		requireCapturedArguments(t, capture.path, "report", "kilo", "--activity", "idle")
@@ -121,7 +121,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("amp-plugin", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		module := generatedArtifactContent(t, registry.HarnessAmp, "aht-state.ts")
+		module := generatedArtifactContent(t, registry.Harness("amp"), "aht-state.ts")
 		runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/amp-failed.mjs"), nil)
 		requireCapturedArguments(t, capture.path, "report", "amp", "--activity", "failed")
 		requireCapturedArguments(t, capture.path, "report", "amp", "--activity", "idle")
@@ -151,14 +151,14 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 			return ""
 		}
 
-		runNodeRuntime(t, "opencode_absent.ts", renderAbsentModule(registry.HarnessOpenCode), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "opencode_v2_absent.ts", renderAbsentModule(registry.HarnessOpenCode), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "opencode_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "opencode_v2_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "kilo_absent.ts", renderAbsentModule(registry.HarnessKilo), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "kilo_absent.ts", renderAbsentModule(registry.Harness("kilo")), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "pi_absent.ts", renderAbsentModule(registry.HarnessPi), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "pi_absent.ts", renderAbsentModule(registry.Harness("pi")), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.HarnessOmp), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.HarnessAmp), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
 	})
 }

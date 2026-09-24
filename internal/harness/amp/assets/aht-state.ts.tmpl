@@ -1,7 +1,6 @@
 "{{MANAGED_MARKER}}";
 "AHT_INTEGRATION_ID={{INTEGRATION_ID}}";
 "AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}";
-"aht_integration_version={{INTEGRATION_VERSION}}";
 
 import { spawn } from "node:child_process";
 import type { PluginAPI, ThreadID } from "@ampcode/plugin";
@@ -45,8 +44,8 @@ export default function (amp: PluginAPI) {
     if (eventName) {
       args.push("--event", eventName);
     }
-    args.push("--attribute", "aht_integration_version={{INTEGRATION_VERSION}}");
-    args.push("--attribute", "aht_integration=" + source);
+    args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
+    args.push("--reporter", source);
 
     if (threadId) {
       args.push("--session-id", threadId);

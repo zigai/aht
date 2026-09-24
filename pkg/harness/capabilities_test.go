@@ -25,12 +25,12 @@ func TestCapabilitiesForUnsupported(t *testing.T) {
 
 func TestCapabilitiesForPi(t *testing.T) {
 	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.HarnessPi)
+	caps, ok := harness.CapabilitiesFor(registry.Harness("pi"))
 	if !ok {
 		t.Fatal("CapabilitiesFor(HarnessPi) returned false")
 	}
-	if caps.Harness != registry.HarnessPi {
-		t.Fatalf("Harness = %q, want %q", caps.Harness, registry.HarnessPi)
+	if caps.Harness != registry.Harness("pi") {
+		t.Fatalf("Harness = %q, want %q", caps.Harness, registry.Harness("pi"))
 	}
 	if caps.Authority != "hook" {
 		t.Fatalf("Authority = %q, want hook", caps.Authority)
@@ -51,7 +51,7 @@ func TestCapabilitiesForPi(t *testing.T) {
 
 func TestCapabilitiesForCodex(t *testing.T) {
 	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.HarnessCodex)
+	caps, ok := harness.CapabilitiesFor(registry.Harness("codex"))
 	if !ok {
 		t.Fatal("CapabilitiesFor(HarnessCodex) returned false")
 	}
@@ -69,18 +69,18 @@ func TestCapabilitiesForCodex(t *testing.T) {
 func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 	t.Parallel()
 	for _, id := range []registry.Harness{
-		registry.HarnessCodex, registry.HarnessPi, registry.HarnessOmp,
-		registry.HarnessCline, registry.HarnessKimiCode, registry.HarnessGrok,
-		registry.HarnessGoose, registry.HarnessAmp, registry.HarnessOpenCode,
-		registry.HarnessKilo, registry.HarnessDroid, registry.HarnessOpenClaw,
-		registry.HarnessHermes,
+		registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"),
+		registry.Harness("cline"), registry.Harness("kimi-code"), registry.Harness("grok"),
+		registry.Harness("goose"), registry.Harness("amp"), registry.Harness("opencode"),
+		registry.Harness("kilo"), registry.Harness("droid"), registry.Harness("openclaw"),
+		registry.Harness("hermes"),
 	} {
 		caps, ok := harness.CapabilitiesFor(id)
 		if !ok || !caps.TitleLookup {
 			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)
 		}
 	}
-	caps, ok := harness.CapabilitiesFor(registry.HarnessClaude)
+	caps, ok := harness.CapabilitiesFor(registry.Harness("claude"))
 	if !ok || caps.TitleLookup {
 		t.Fatalf("Claude title lookup capability = %t, %t", caps.TitleLookup, ok)
 	}
@@ -88,7 +88,7 @@ func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 
 func TestCapabilitiesForOpenClaw(t *testing.T) {
 	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.HarnessOpenClaw)
+	caps, ok := harness.CapabilitiesFor(registry.Harness("openclaw"))
 	if !ok {
 		t.Fatal("CapabilitiesFor(HarnessOpenClaw) returned false")
 	}
@@ -109,10 +109,10 @@ func TestAllCapabilities(t *testing.T) {
 	foundPi := false
 	foundCodex := false
 	for _, c := range all {
-		if c.Harness == registry.HarnessPi {
+		if c.Harness == registry.Harness("pi") {
 			foundPi = true
 		}
-		if c.Harness == registry.HarnessCodex {
+		if c.Harness == registry.Harness("codex") {
 			foundCodex = true
 		}
 		if c.Authority == "" {
@@ -126,7 +126,7 @@ func TestAllCapabilities(t *testing.T) {
 
 func TestCapabilitiesJSONCompatibility(t *testing.T) {
 	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.HarnessPi)
+	caps, ok := harness.CapabilitiesFor(registry.Harness("pi"))
 	if !ok {
 		t.Fatal("CapabilitiesFor failed")
 	}
@@ -167,29 +167,29 @@ func TestInspectRuntimeSeparatesStaticFromRuntime(t *testing.T) {
 	fakeBin := "/path/to/fake-aht"
 
 	// 1. Missing state
-	status, err := harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
+	status, err := harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
 	if err != nil {
 		t.Fatalf("unexpected error inspecting runtime: %v", err)
 	}
-	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, false, false, "missing")
+	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), false, false, "missing")
 
 	// 2. Current state after installation
-	if _, err := install.RunContext(ctx, install.Options{Harness: registry.HarnessPi, Binary: fakeBin, Force: true}); err != nil {
+	if _, err := install.RunContext(ctx, install.Options{Harness: registry.Harness("pi"), Binary: fakeBin, Force: true}); err != nil {
 		t.Fatalf("installing pi extension: %v", err)
 	}
-	status, err = harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
+	status, err = harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
 	if err != nil {
 		t.Fatalf("unexpected error inspecting runtime after install: %v", err)
 	}
-	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, true, true, "current")
+	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), true, true, "current")
 
 	// 3. Stale state when extension version is older
 	writeStalePiExtension(t, piDir)
-	status, err = harness.InspectRuntime(ctx, registry.HarnessPi, fakeBin)
+	status, err = harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
 	if err != nil {
 		t.Fatalf("unexpected error inspecting runtime after stale write: %v", err)
 	}
-	assertExpectedRuntimeStatus(t, status, registry.HarnessPi, true, false, "stale")
+	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), true, false, "stale")
 
 	// 4. Inspection error state for unsupported harness
 	errStatus, err := harness.InspectRuntime(ctx, "nonexistent", fakeBin)
@@ -210,7 +210,7 @@ func assertAllRuntimeStatusesContainsPiStale(t *testing.T, all []harness.Runtime
 	t.Helper()
 	foundPi := false
 	for _, st := range all {
-		if st.Harness == registry.HarnessPi {
+		if st.Harness == registry.Harness("pi") {
 			foundPi = true
 			if !st.Installed || st.Current || st.Status != "stale" {
 				t.Fatalf("AllRuntimeStatuses Pi entry = %#v, want stale", st)

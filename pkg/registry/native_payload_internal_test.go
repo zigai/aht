@@ -78,13 +78,13 @@ func TestNativePayloadValidationUsesFinalRetainedState(t *testing.T) {
 			last := payloadObservation("native", at.Add(time.Second), `{"valid":true}`)
 			switch name {
 			case "ignored after end":
-				first.RawPayload = last.RawPayload
-				first.Lifecycle = new(NativeLifecycleEnd)
-				first.Activity = nil
-				last.RawPayload = json.RawMessage("{")
+				first.Report().Payload = last.Report().Payload
+				first.Report().Lifecycle = new(NativeLifecycleEnd)
+				first.SetActivity(nil)
+				last.Report().Payload = json.RawMessage("{")
 			case "empty":
-				first.RawPayload = nil
-				last.RawPayload = json.RawMessage{}
+				first.Report().Payload = nil
+				last.Report().Payload = json.RawMessage{}
 			}
 			for _, store := range []Store{file, memory} {
 				if _, err := store.ObserveBatch(t.Context(), []Observation{first, last}); err != nil {
@@ -99,7 +99,7 @@ func TestNativePayloadValidationUsesFinalRetainedState(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Compare persisted representations: the encoder may indent raw JSON.
-			memorySessions, err := NewFileStore(memory.Path()).List(t.Context(), Filter{})
+			memorySessions, err := NewJournal(memory.Path(), fixtureRules{}).List(t.Context(), Filter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,10 +108,10 @@ func TestNativePayloadValidationUsesFinalRetainedState(t *testing.T) {
 	}
 }
 
-func payloadStores(t *testing.T) (*FileStore, *MemoryStore, time.Time) {
+func payloadStores(t *testing.T) (*Journal, *MemoryStore, time.Time) {
 	t.Helper()
-	file := NewFileStore(filepath.Join(t.TempDir(), "file.json"))
-	memory, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"))
+	file := NewJournal(filepath.Join(t.TempDir(), "file.json"), fixtureRules{})
+	memory, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +122,5 @@ func payloadStores(t *testing.T) (*FileStore, *MemoryStore, time.Time) {
 }
 
 func payloadObservation(id string, at time.Time, raw string) Observation {
-	return Observation{
-		Source: ObservationSourceNative, Evidence: ObservationEvidenceNativeEvent,
-		Harness: HarnessCodex, Identity: ObservationIdentity{SessionID: id},
-		Activity: new(ActivityRunning), NativeEvent: "test", ObservedAt: at,
-		RawPayload: json.RawMessage(raw),
-	}
+	return Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: id}, Evidence: &Report{Event: "test", Activity: new(ActivityRunning), Payload: json.RawMessage(raw)}}
 }

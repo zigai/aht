@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/client"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -21,15 +22,7 @@ func ExampleClient_List() {
 	storePath := filepath.Join(directory, "sessions.json")
 	presence := registry.PresenceLive
 	activity := registry.ActivityRunning
-	if _, err := registry.NewFileStore(storePath).Observe(context.Background(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "example"},
-		Presence:   &presence,
-		Activity:   &activity,
-		ObservedAt: time.Now().UTC(),
-	}); err != nil {
+	if _, err := registry.NewJournal(storePath, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "example"}, Evidence: &registry.Report{Claim: &presence, Activity: &activity}}); err != nil {
 		panic(err)
 	}
 
@@ -45,8 +38,8 @@ func ExampleClient_List() {
 		panic(err)
 	}
 
-	fmt.Printf("%s: %s\n", sessions[0].Harness, *sessions[0].Activity)
-	// Output: codex: running
+	fmt.Printf("%s: %s\n", sessions[0].Harness, *sessions[0].Activity())
+	// Output: pi: running
 }
 
 func ExampleClient_Wait() {
@@ -59,15 +52,7 @@ func ExampleClient_Wait() {
 	storePath := filepath.Join(directory, "sessions.json")
 	presence := registry.PresenceLive
 	activity := registry.ActivityIdle
-	observed, err := registry.NewFileStore(storePath).Observe(context.Background(), registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessCodex,
-		Identity:   registry.ObservationIdentity{SessionID: "wait-example"},
-		Presence:   &presence,
-		Activity:   &activity,
-		ObservedAt: time.Now().UTC(),
-	})
+	observed, err := registry.NewJournal(storePath, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "wait-example"}, Evidence: &registry.Report{Claim: &presence, Activity: &activity}})
 	if err != nil {
 		panic(err)
 	}
@@ -84,6 +69,6 @@ func ExampleClient_Wait() {
 		panic(err)
 	}
 
-	fmt.Printf("%s: %s\n", res.Session.Harness, *res.Session.Activity)
-	// Output: codex: idle
+	fmt.Printf("%s: %s\n", res.Session.Harness, *res.Session.Activity())
+	// Output: pi: idle
 }

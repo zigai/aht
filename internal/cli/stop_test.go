@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 	"github.com/zigai/aht/pkg/tmux"
 )
@@ -52,22 +53,14 @@ func TestStopRejectsInvalidSelection(t *testing.T) {
 
 func TestStopMultipleSessions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	now := time.Now().UTC()
 	live := registry.PresenceLive
-	s1, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "session-1"},
-		Presence: &live, NativeEvent: "start", ObservedAt: now,
-	})
+	s1, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: now, Subject: registry.ObservationIdentity{SessionID: "session-1"}, Evidence: &registry.Report{Event: "start", Claim: &live}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessClaude, Identity: registry.ObservationIdentity{SessionID: "session-2"},
-		Presence: &live, NativeEvent: "start", ObservedAt: now,
-	})
+	s2, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("claude"), At: now, Subject: registry.ObservationIdentity{SessionID: "session-2"}, Evidence: &registry.Report{Event: "start", Claim: &live}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,13 +101,9 @@ func TestStopAllConfirmationHandling(t *testing.T) {
 func createSkippedStopSession(t *testing.T) (string, registry.Session) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	present := true
-	session, err := store.Observe(context.Background(), registry.Observation{
-		Harness: registry.HarnessCodex, Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-		Identity: registry.ObservationIdentity{SessionID: "stop-session"}, ProcessPresent: &present,
-		Process: &registry.ProcessIdentity{PID: 1_000_000_000, StartIdentity: "missing:1000000000"}, ObservedAt: time.Now(),
-	})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now(), Subject: registry.ObservationIdentity{SessionID: "stop-session"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 1_000_000_000, StartIdentity: "missing:1000000000"}, Present: present}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +146,36 @@ func TestRunManageStopSessionsStopsUniqueValidatedLiveTargets(t *testing.T) {
 	t.Parallel()
 	signaler := &recordingStopSignaler{validation: stopTargetValidation{OK: true}}
 	sessions := []registry.Session{
-		{ID: "a", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}},
-		{ID: "b", Harness: registry.HarnessClaude, Presence: registry.PresenceLive, Tmux: registry.TmuxContext{ServerSocket: "-L:custom", PaneID: "%2"}},
-		{ID: "c", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}},
-		{ID: "d", Harness: registry.HarnessCodex, Presence: registry.PresenceGone, Process: &registry.ProcessIdentity{PID: 202}},
-		{ID: "e", Harness: registry.HarnessClaude, Presence: registry.PresenceLive, Tmux: registry.TmuxContext{ServerSocket: "-L:other", PaneID: "%2"}},
+		{
+			ID:       "a",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:       "b",
+			Harness:  registry.Harness("claude"),
+			Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:custom", PaneID: "%2"},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:       "c",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:       "d",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 202},
+			Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:       "e",
+			Harness:  registry.Harness("claude"),
+			Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:other", PaneID: "%2"},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
 	}
 	result, err := runManageStopSessions(context.Background(), sessions, manageStopAllOptions{signaler: signaler})
 	if err != nil {
@@ -191,10 +205,10 @@ func requireStopSignals(t *testing.T, signaler *recordingStopSignaler) {
 func TestTmuxStopTargetValidationChecksEveryServer(t *testing.T) {
 	t.Parallel()
 
-	session := registry.Session{Tmux: registry.TmuxContext{ServerSocket: "/tmp/correct", PaneID: "%1", PanePID: 42}}
+	session := registry.Session{Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/correct", PaneID: "%1", PanePID: 42}}
 	panes := []tmux.Pane{
-		{Tmux: registry.TmuxContext{ServerSocket: "/tmp/wrong", PaneID: "%1", PanePID: 41}},
-		{Tmux: registry.TmuxContext{ServerSocket: "/tmp/correct", PaneID: "%1", PanePID: 42}},
+		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/wrong", PaneID: "%1", PanePID: 41}},
+		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/correct", PaneID: "%1", PanePID: 42}},
 	}
 	if validation := tmuxStopTargetValidation(session, panes); !validation.OK {
 		t.Fatalf("matching pane on later server was rejected: %#v", validation)
@@ -204,9 +218,9 @@ func TestTmuxStopTargetValidationChecksEveryServer(t *testing.T) {
 func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 	t.Parallel()
 
-	session := registry.Session{Tmux: registry.TmuxContext{PaneID: "%1", PanePID: 42}}
+	session := registry.Session{Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PanePID: 42}}
 	panes := []tmux.Pane{
-		{Tmux: registry.TmuxContext{ServerSocket: "-L:custom", PaneID: "%1", PanePID: 42}},
+		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:custom", PaneID: "%1", PanePID: 42}},
 	}
 	if validation := tmuxStopTargetValidation(session, panes); validation.OK {
 		t.Fatalf("missing stored server identity approved a custom-server pane: %#v", validation)
@@ -224,21 +238,22 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
 	t.Parallel()
 
-	loc := registry.TmuxContext{
-		ServerSocket: "/tmp/aht-test.sock",
-		PaneID:       "%3",
-		PanePID:      200,
-		SessionID:    "$1",
-		WindowID:     "@1",
+	loc := registry.Location{
+		Kind:      registry.MultiplexerTmux,
+		ServerID:  "/tmp/aht-test.sock",
+		PaneID:    "%3",
+		PanePID:   200,
+		SessionID: "$1",
+		WindowID:  "@1",
 	}
 	session := registry.Session{
-		Presence: registry.PresenceLive,
-		Tmux:     loc,
+		Location: loc,
 		Process: &registry.ProcessIdentity{
 			PID:           201,
 			StartIdentity: "agent-201",
 			Foreground:    false,
 		},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
 	}
 	target, ok := stopTargetForSession(session)
 	if !ok || target.Method != "tmux-interrupt" {
@@ -262,8 +277,18 @@ func TestRunManageStopSessionsValidatesBeforeDeduplicating(t *testing.T) {
 		},
 	}
 	sessions := []registry.Session{
-		{ID: "a-stale", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}},
-		{ID: "b-current", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}},
+		{
+			ID:       "a-stale",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
+		{
+			ID:       "b-current",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
 	}
 	result, err := runManageStopSessions(context.Background(), sessions, manageStopAllOptions{signaler: signaler})
 	if err != nil {
@@ -279,7 +304,12 @@ func TestRunManageStopSessionsDryRunStillValidatesTargets(t *testing.T) {
 
 	signaler := &recordingStopSignaler{validation: stopTargetValidation{Reason: "process identity changed"}}
 	sessions := []registry.Session{
-		{ID: "stale", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}},
+		{
+			ID:       "stale",
+			Harness:  registry.Harness("codex"),
+			Process:  &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		},
 	}
 	result, err := runManageStopSessions(
 		context.Background(),
@@ -300,7 +330,12 @@ func TestRunManageStopSessionsDryRunStillValidatesTargets(t *testing.T) {
 func TestRunManageStopSessionsReportsSignalFailure(t *testing.T) {
 	t.Parallel()
 	signaler := &recordingStopSignaler{validation: stopTargetValidation{OK: true}, sendErr: errTestSignal}
-	sessions := []registry.Session{{ID: "a", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Process: &registry.ProcessIdentity{PID: 101}}}
+	sessions := []registry.Session{{
+		ID:       "a",
+		Harness:  registry.Harness("codex"),
+		Process:  &registry.ProcessIdentity{PID: 101},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+	}}
 	result, err := runManageStopSessions(context.Background(), sessions, manageStopAllOptions{signaler: signaler})
 	if !errors.Is(err, errManageStopAllFailed) || result.Failed != 1 || result.Stopped != 0 {
 		t.Fatalf("stop failure result = %+v, err=%v", result, err)

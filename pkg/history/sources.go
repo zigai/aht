@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/zigai/aht/internal/harness/catalog"
+
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -20,27 +22,6 @@ const (
 	maxScanWorkers = 16
 	minScanWorkers = 2
 )
-
-// Native history basenames, including retired OpenClaw transcript artifacts.
-var sourcePatterns = map[registry.Harness][]string{
-	registry.HarnessClaude:   {"*.jsonl"},
-	registry.HarnessCodex:    {"rollout-*.jsonl"},
-	registry.HarnessPi:       {"*.jsonl"},
-	registry.HarnessOmp:      {"*.jsonl"},
-	registry.HarnessCopilot:  {"events.jsonl"},
-	registry.HarnessKimiCode: {"context.jsonl"},
-	registry.HarnessCline:    {"*.messages.json"},
-	registry.HarnessOpenCode: {"opencode*.db"},
-	registry.HarnessKilo:     {"kilo*.db", "opencode*.db"},
-	registry.HarnessGoose:    {"sessions.db"},
-	registry.HarnessGrok:     {"grok.db"},
-	registry.HarnessHermes:   {"state.db"},
-	registry.HarnessOpenClaw: {"openclaw-agent.sqlite", "*.jsonl", "*.jsonl.deleted.*", "*.jsonl.reset.*"},
-	registry.HarnessAmp:      {"T-*.json", "*.json"},
-	registry.HarnessCursor:   nil,
-	registry.HarnessAgy:      nil,
-	registry.HarnessDroid:    nil,
-}
 
 var errSymlinkCycle = errors.New("too many levels of symbolic links")
 
@@ -52,48 +33,19 @@ func DefaultSources() ([]Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate history home: %w", err)
 	}
-	data := envPath("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
-	codex := envPath("CODEX_HOME", filepath.Join(home, ".codex"))
-	goose := filepath.Join(data, "goose")
-	if runtime.GOOS == "darwin" {
-		goose = filepath.Join(home, "Library", "Application Support", "Block", "goose")
+	var sources []Source
+	for _, adapter := range catalog.All() {
+		reader := catalog.TranscriptFor(adapter.Definition().ID)
+		if reader.Sources != nil {
+			for _, path := range reader.Sources(home) {
+				sources = append(sources, Source{Harness: adapter.Definition().ID, Path: path})
+			}
+		}
 	}
-	if root := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(root) {
-		goose = filepath.Join(root, "data")
-	}
-	opencode := databaseLocation(filepath.Join(data, "opencode"), "OPENCODE_DB")
-	kilo := databaseLocation(filepath.Join(data, "kilo"), "KILO_DB")
-	amp := envPath("AMP_DATA_DIR", filepath.Join(data, "amp"))
-	return []Source{
-		{Harness: registry.HarnessClaude, Path: filepath.Join(envPath("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude")), "projects")},
-		{Harness: registry.HarnessCodex, Path: filepath.Join(codex, "sessions")},
-		{Harness: registry.HarnessCodex, Path: filepath.Join(codex, "archived_sessions")},
-		{Harness: registry.HarnessPi, Path: filepath.Join(home, ".pi", "agent", "sessions")},
-		{Harness: registry.HarnessOmp, Path: filepath.Join(home, ".omp", "agent", "sessions")},
-		{Harness: registry.HarnessCopilot, Path: filepath.Join(home, ".copilot", "session-state")},
-		{Harness: registry.HarnessKimiCode, Path: filepath.Join(envPath("KIMI_SHARE_DIR", filepath.Join(home, ".kimi")), "sessions")},
-		{Harness: registry.HarnessOpenCode, Path: opencode},
-		{Harness: registry.HarnessKilo, Path: kilo},
-		{Harness: registry.HarnessAmp, Path: filepath.Join(amp, "threads")},
-		{Harness: registry.HarnessGoose, Path: filepath.Join(goose, "sessions", "sessions.db")},
-		{Harness: registry.HarnessGrok, Path: filepath.Join(home, ".grok", "grok.db")},
-		{Harness: registry.HarnessHermes, Path: filepath.Join(envPath("HERMES_HOME", filepath.Join(home, ".hermes")), "state.db")},
-		{Harness: registry.HarnessOpenClaw, Path: filepath.Join(envPath("OPENCLAW_STATE_DIR", filepath.Join(home, ".openclaw")), "agents")},
-		{Harness: registry.HarnessCline, Path: envPath("CLINE_SESSION_DATA_DIR", filepath.Join(envPath("CLINE_DATA_DIR", filepath.Join(home, ".cline", "data")), "sessions"))},
-		{Harness: registry.HarnessCursor, Path: filepath.Join(home, ".cursor")},
-		{Harness: registry.HarnessAgy, Path: filepath.Join(home, ".gemini", "antigravity-cli")},
-		{Harness: registry.HarnessDroid, Path: filepath.Join(home, ".factory", "sessions")},
-	}, nil
+	return sources, nil
 }
 
-func envPath(name, fallback string) string {
-	if path := os.Getenv(name); path != "" {
-		return path
-	}
-	return fallback
-}
-
-func supported(h registry.Harness) bool { return len(sourcePatterns[h]) > 0 }
+func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
 
 func (s *search) scanSource(ctx context.Context, source Source) {
 	status := SourceStatus{Source: source, Status: "searched", Files: 0}
@@ -106,9 +58,7 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 	path := source.Path
 	before := len(s.result.Issues) + s.result.OmittedIssues
 	if info.IsDir() {
-		if source.Harness == registry.HarnessKimiCode {
-			s.kimiDirs = s.kimiMetadata(source, path)
-		}
+		s.loadSourceMetadata(source, path, true)
 		s.scanDirectory(ctx, source, &status)
 	} else {
 		resolved, resolveErr := resolveSymlinkFile(path)
@@ -221,15 +171,7 @@ func (s *search) scanFile(ctx context.Context, source Source, path string, statu
 	if !info.Mode().IsRegular() {
 		return
 	}
-	if source.Harness == registry.HarnessKimiCode {
-		s.kimiDirs = nil
-		// Native files live at sessions/<work-dir-key>/<session-id>/context.jsonl.
-		// The caller resolves explicitly selected symlinks before reaching here.
-		sessionsDir := filepath.Dir(filepath.Dir(filepath.Dir(path)))
-		if filepath.Base(sessionsDir) == "sessions" {
-			s.kimiDirs = s.kimiMetadata(source, sessionsDir)
-		}
-	}
+	s.loadSourceMetadata(source, path, false)
 	if status != nil {
 		status.Files++
 	}
@@ -256,7 +198,7 @@ func isDatabase(path string) bool {
 }
 
 func historyFile(h registry.Harness, name string) bool {
-	for _, pattern := range sourcePatterns[h] {
+	for _, pattern := range catalog.TranscriptFor(h).Patterns {
 		matched, err := filepath.Match(pattern, name)
 		if err == nil && matched {
 			return true
@@ -306,14 +248,10 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 	if isIgnoredDirName(filepath.Base(path)) {
 		return true
 	}
-	if h == registry.HarnessOpenCode || h == registry.HarnessKilo {
-		return true
+	if skip := catalog.TranscriptFor(h).SkipDirectory; skip != nil {
+		return skip(path)
 	}
-	if h != registry.HarnessOpenClaw {
-		return false
-	}
-	parts := strings.Split(filepath.ToSlash(path), "/")
-	return len(parts) > 1 && parts[1] != "agent" && parts[1] != "sessions"
+	return false
 }
 
 // inspectSource resolves and stats a source before checking reader support, so an
@@ -371,17 +309,6 @@ func (s *search) checkScan(ctx context.Context) error {
 	return nil
 }
 
-func databaseLocation(root, variable string) string {
-	value := os.Getenv(variable)
-	if value == "" || value == ":memory:" {
-		return root
-	}
-	if filepath.IsAbs(value) {
-		return value
-	}
-	return filepath.Join(root, value)
-}
-
 // resolveSymlinkFile resolves symlinks for a single file source while preserving
 // the lexical directory path of non-symlink parents.
 func resolveSymlinkFile(path string) (string, error) {
@@ -403,4 +330,11 @@ func resolveSymlinkFile(path string) (string, error) {
 		path = filepath.Clean(target)
 	}
 	return "", errSymlinkCycle
+}
+
+func (s *search) loadSourceMetadata(source Source, path string, isDir bool) {
+	s.sourceMetadata = nil
+	if load := catalog.TranscriptFor(source.Harness).SourceMetadata; load != nil {
+		s.sourceMetadata = load(path, isDir, func(path string, err error) { s.issue(source, path, err) })
+	}
 }

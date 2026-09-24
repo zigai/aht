@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -51,7 +52,7 @@ func TestInfoValidatesReferenceAndExplanationFlags(t *testing.T) {
 
 func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	session := observeTestSession(t, store, "info-session", time.Now())
 	reference := shortRegistryID(session.ID)
 
@@ -76,14 +77,10 @@ func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/sessions.json"
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	at := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	activity := registry.ActivityIdle
-	session, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "session-1"},
-		NativeEvent: "Stop", Activity: &activity, ObservedAt: at,
-	})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: registry.ObservationIdentity{SessionID: "session-1"}, Evidence: &registry.Report{Event: "Stop", Activity: &activity}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,13 +109,13 @@ func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	at := time.Now().UTC()
 	process := registry.ProcessIdentity{PID: 654, ProcessGroupID: 654, Foreground: true, StartIdentity: "boot:654", Executable: "pi", TTY: "/dev/pts/not-live"}
 	presence := registry.PresenceLive
 	idle := registry.ActivityIdle
-	tmux := registry.TmuxContext{Inside: true, ServerSocket: "-L:not-live", SessionID: "$9", SessionName: "agents", WindowID: "@9", WindowIndex: "0", PaneID: "%99", PaneIndex: "0", PanePID: 654, PaneTTY: process.TTY}
-	_, err := store.Observe(context.Background(), registry.Observation{Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Harness: registry.HarnessPi, Identity: registry.ObservationIdentity{SessionID: "pi-inactive"}, Presence: &presence, Activity: &idle, NativeEvent: "agent_settled", Process: &process, Tmux: &tmux, Attributes: map[string]string{"aht_integration": "old-extension"}, ObservedAt: at})
+	tmux := registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:not-live", SessionID: "$9", SessionName: "agents", WindowID: "@9", WindowIndex: "0", PaneID: "%99", PaneIndex: "0", PanePID: 654, PaneTTY: process.TTY}
+	_, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionID: "pi-inactive"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "old-extension"}, Event: "agent_settled", Claim: &presence, Activity: &idle, Process: &process, Location: &tmux}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,14 +136,9 @@ func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 func TestInfoExplainWithoutLivePaneReportsUnavailableState(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	idle := registry.ActivityIdle
-	activityAuthoritative := false
-	session, err := store.Observe(context.Background(), registry.Observation{
-		Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness: registry.HarnessCodex, Identity: registry.ObservationIdentity{SessionID: "no-pane"},
-		NativeEvent: "turn_complete", Activity: &idle, ActivityAuthoritative: &activityAuthoritative, ObservedAt: time.Now().UTC(),
-	})
+	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "no-pane"}, Evidence: &registry.Report{Event: "turn_complete", Activity: &idle}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +159,13 @@ func TestInfoExplainWithoutLivePaneReportsUnavailableState(t *testing.T) {
 func createActivePiInfoSession(t *testing.T) string {
 	t.Helper()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	at := time.Now().UTC()
 	process := registry.ProcessIdentity{PID: 321, ProcessGroupID: 321, Foreground: true, StartIdentity: "boot:321", Executable: "pi", TTY: "/dev/pts/3"}
 	presence := registry.PresenceLive
 	idle := registry.ActivityIdle
-	tmux := registry.TmuxContext{Inside: true, ServerSocket: "default", SessionID: "$1", SessionName: "agents", WindowID: "@1", WindowIndex: "1", PaneID: "%3", PaneIndex: "1", PanePID: 10, PaneTTY: "/dev/pts/3"}
-	if _, err := store.Observe(context.Background(), registry.Observation{Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Harness: registry.HarnessPi, Identity: registry.ObservationIdentity{SessionID: "pi-session"}, Presence: &presence, Activity: &idle, NativeEvent: "agent_end", Process: &process, Tmux: &tmux, Attributes: map[string]string{"aht_integration": "pi-extension"}, ObservedAt: at}); err != nil {
+	tmux := registry.Location{Kind: registry.MultiplexerTmux, ServerID: "default", SessionID: "$1", SessionName: "agents", WindowID: "@1", WindowIndex: "1", PaneID: "%3", PaneIndex: "1", PanePID: 10, PaneTTY: "/dev/pts/3"}
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionID: "pi-session"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "pi-extension"}, Event: "agent_end", Claim: &presence, Activity: &idle, Process: &process, Location: &tmux}}); err != nil {
 		t.Fatal(err)
 	}
 	return path

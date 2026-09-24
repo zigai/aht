@@ -24,21 +24,20 @@ func TestExplainHookAuthority(t *testing.T) {
 	running := registry.ActivityRunning
 
 	session := registry.Session{
-		ID:          "s-hook",
-		Harness:     registry.HarnessPi,
-		Presence:    registry.PresenceLive,
-		Activity:    &running,
-		Process:     &process,
-		Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%1", PaneTTY: "/dev/pts/1"},
+		ID:       "s-hook",
+		Harness:  registry.Harness("pi"),
+		Process:  &process,
+		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PaneTTY: "/dev/pts/1"},
 		Observations: registry.Observations{
 			Native: &registry.NativeObservation{
 				Event:      "agent_start",
 				Activity:   &running,
 				Process:    process,
 				ObservedAt: now.Add(-2 * time.Second),
-				Attributes: map[string]string{"aht_integration": "pi-extension"},
+				Reporter:   registry.Reporter{Integration: "pi-extension"},
 			},
 		},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 	}
 
 	exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -73,21 +72,20 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 	running := registry.ActivityRunning
 
 	session := registry.Session{
-		ID:          "s-fallback",
-		Harness:     registry.HarnessPi,
-		Presence:    registry.PresenceLive,
-		Activity:    &running,
-		Process:     &process,
-		Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%1", PaneTTY: "/dev/pts/1"},
+		ID:       "s-fallback",
+		Harness:  registry.Harness("pi"),
+		Process:  &process,
+		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PaneTTY: "/dev/pts/1"},
 		Observations: registry.Observations{
 			Native: &registry.NativeObservation{
 				Event:      "agent_start",
 				Activity:   &running,
 				Process:    process,
 				ObservedAt: now.Add(-35 * time.Second), // Stale (exceeds 30s lease)
-				Attributes: map[string]string{"aht_integration": "pi-extension"},
+				Reporter:   registry.Reporter{Integration: "pi-extension"},
 			},
 		},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 	}
 
 	exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -116,12 +114,11 @@ func TestExplainScreenAuthorityDirectly(t *testing.T) {
 		Executable:    "codex",
 	}
 	session := registry.Session{
-		ID:          "s-screen",
-		Harness:     registry.HarnessCodex,
-		Presence:    registry.PresenceLive,
-		Activity:    &running,
-		Process:     &codexProc,
-		Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%2"},
+		ID:       "s-screen",
+		Harness:  registry.Harness("codex"),
+		Process:  &codexProc,
+		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%2"},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 	}
 
 	exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -150,20 +147,19 @@ func TestExplainExpiredAndFutureEvidence(t *testing.T) {
 	t.Run("future evidence rejected as inactive", func(t *testing.T) {
 		t.Parallel()
 		session := registry.Session{
-			ID:       "s-future",
-			Harness:  registry.HarnessPi,
-			Presence: registry.PresenceLive,
-			Activity: &running,
-			Process:  &process,
+			ID:      "s-future",
+			Harness: registry.Harness("pi"),
+			Process: &process,
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{
 					Event:      "agent_start",
 					Activity:   &running,
 					Process:    process,
 					ObservedAt: now.Add(10 * time.Second), // In future!
-					Attributes: map[string]string{"aht_integration": "pi-extension"},
+					Reporter:   registry.Reporter{Integration: "pi-extension"},
 				},
 			},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 		}
 
 		exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -184,20 +180,19 @@ func TestExplainExpiredAndFutureEvidence(t *testing.T) {
 	t.Run("expired evidence rejected as stale", func(t *testing.T) {
 		t.Parallel()
 		session := registry.Session{
-			ID:       "s-expired",
-			Harness:  registry.HarnessPi,
-			Presence: registry.PresenceLive,
-			Activity: &running,
-			Process:  &process,
+			ID:      "s-expired",
+			Harness: registry.Harness("pi"),
+			Process: &process,
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{
 					Event:      "agent_start",
 					Activity:   &running,
 					Process:    process,
 					ObservedAt: now.Add(-45 * time.Second), // Exceeds 30s lease
-					Attributes: map[string]string{"aht_integration": "pi-extension"},
+					Reporter:   registry.Reporter{Integration: "pi-extension"},
 				},
 			},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 		}
 
 		exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -227,20 +222,19 @@ func TestExplainIntegrationMismatchAndPIDReuse(t *testing.T) {
 			Executable:    "pi",
 		}
 		session := registry.Session{
-			ID:       "s-mismatch",
-			Harness:  registry.HarnessPi,
-			Presence: registry.PresenceLive,
-			Activity: &running,
-			Process:  &process,
+			ID:      "s-mismatch",
+			Harness: registry.Harness("pi"),
+			Process: &process,
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{
 					Event:      "agent_start",
 					Activity:   &running,
 					Process:    process,
 					ObservedAt: now.Add(-2 * time.Second),
-					Attributes: map[string]string{"aht_integration": "rogue-plugin"},
+					Reporter:   registry.Reporter{Integration: "rogue-plugin"},
 				},
 			},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 		}
 
 		exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -270,20 +264,19 @@ func TestExplainIntegrationMismatchAndPIDReuse(t *testing.T) {
 			Executable:    "pi",
 		}
 		session := registry.Session{
-			ID:       "s-pid-reuse",
-			Harness:  registry.HarnessPi,
-			Presence: registry.PresenceLive,
-			Activity: &running,
-			Process:  &currentProc,
+			ID:      "s-pid-reuse",
+			Harness: registry.Harness("pi"),
+			Process: &currentProc,
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{
 					Event:      "agent_start",
 					Activity:   &running,
 					Process:    staleHookProc,
 					ObservedAt: now.Add(-2 * time.Second),
-					Attributes: map[string]string{"aht_integration": "pi-extension"},
+					Reporter:   registry.Reporter{Integration: "pi-extension"},
 				},
 			},
+			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),
 		}
 
 		exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -322,11 +315,9 @@ func TestExplainEndedSessions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			sess := registry.Session{
-				ID:       "s-" + tc.name,
-				Harness:  registry.HarnessPi,
-				Presence: tc.presence,
-				Activity: &running,
-				Process:  &process,
+				ID:      "s-" + tc.name,
+				Harness: registry.Harness("pi"),
+				Process: &process,
 				Observations: registry.Observations{
 					Native: &registry.NativeObservation{
 						Event:      "agent_end",
@@ -334,9 +325,10 @@ func TestExplainEndedSessions(t *testing.T) {
 						Activity:   &running,
 						Process:    process,
 						ObservedAt: now.Add(-time.Second),
-						Attributes: map[string]string{"aht_integration": "pi-extension"},
+						Reporter:   registry.Reporter{Integration: "pi-extension"},
 					},
 				},
+				Liveness: registry.NewLiveness(tc.presence, registry.ActivityValue(&running), nil),
 			}
 
 			exp, err := manage.ExplainSession(context.Background(), sess, manage.ExplainOptions{Now: now})
@@ -364,12 +356,10 @@ func TestExplainDefensiveCopies(t *testing.T) {
 	}
 
 	session := registry.Session{
-		ID:               "s-defensive",
-		Harness:          registry.HarnessPi,
-		Presence:         registry.PresenceLive,
-		Activity:         &running,
-		ActivityDecision: &decision,
-		Process:          &process,
+		ID:       "s-defensive",
+		Harness:  registry.Harness("pi"),
+		Process:  &process,
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), &decision),
 	}
 
 	exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -400,12 +390,11 @@ func TestExplainJSONCompatibility(t *testing.T) {
 	process := registry.ProcessIdentity{PID: 500, StartIdentity: "boot:500", Executable: "codex"}
 
 	session := registry.Session{
-		ID:          "s-json",
-		Harness:     registry.HarnessCodex,
-		Presence:    registry.PresenceLive,
-		Activity:    &idle,
-		Process:     &process,
-		Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%5"},
+		ID:       "s-json",
+		Harness:  registry.Harness("codex"),
+		Process:  &process,
+		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%5"},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&idle), nil),
 	}
 
 	exp, err := manage.ExplainSession(context.Background(), session, manage.ExplainOptions{Now: now})
@@ -441,12 +430,11 @@ func TestExplainReadOnlyDoesNotSpawnScreenCapture(t *testing.T) {
 	process := registry.ProcessIdentity{PID: 500, StartIdentity: "boot:500", Executable: "codex"}
 
 	session := registry.Session{
-		ID:          "s-readonly",
-		Harness:     registry.HarnessCodex,
-		Presence:    registry.PresenceLive,
-		Activity:    &idle,
-		Process:     &process,
-		Multiplexer: registry.MultiplexerContext{Kind: registry.MultiplexerTmux, PaneID: "%999"}, // Non-existent pane
+		ID:       "s-readonly",
+		Harness:  registry.Harness("codex"),
+		Process:  &process,
+		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%999"},
+		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&idle), nil),
 	}
 
 	// LiveScreen: false (the default) must succeed without attempting tmux pane capture!

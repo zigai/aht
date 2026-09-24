@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/internal/brokerserver"
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -139,20 +140,10 @@ func TestBrokerStoreFallbackParity(t *testing.T) {
 
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "sessions.json")
-	fileStore := registry.NewFileStore(storePath)
+	fileStore := registry.NewJournal(storePath, catalog.Rules{})
 
 	running := registry.ActivityRunning
-	obs := registry.Observation{
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Harness:    registry.HarnessClaude,
-		Identity:   registry.ObservationIdentity{SessionID: "sess-fallback"},
-		Presence:   new(registry.PresenceLive),
-		Activity:   &running,
-		Catalog:    &registry.CatalogMetadata{ProjectRoot: "/fallback/project"},
-		Tmux:       &registry.TmuxContext{SessionName: "fallback-tmux"},
-		ObservedAt: time.Now().UTC(),
-	}
+	obs := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-fallback"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "fallback-tmux"}, Listing: &registry.Listing{ProjectRoot: "/fallback/project"}}}
 	if _, err := fileStore.Observe(t.Context(), obs); err != nil {
 		t.Fatal(err)
 	}
@@ -197,28 +188,8 @@ func TestBrokerOldJSONRequestDefaultsToMultiplexer(t *testing.T) {
 	// while project or harness grouping would give 2 summaries.
 	running := registry.ActivityRunning
 	now := time.Now().UTC()
-	obs1 := registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessClaude,
-		Identity:    registry.ObservationIdentity{SessionID: "sess-1"},
-		Presence:    new(registry.PresenceLive),
-		Activity:    &running,
-		Catalog:     &registry.CatalogMetadata{ProjectRoot: "/repo/one"},
-		Multiplexer: &registry.MultiplexerContext{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%1"},
-		ObservedAt:  now,
-	}
-	obs2 := registry.Observation{
-		Source:      registry.ObservationSourceNative,
-		Evidence:    registry.ObservationEvidenceNativeEvent,
-		Harness:     registry.HarnessCodex,
-		Identity:    registry.ObservationIdentity{SessionID: "sess-2"},
-		Presence:    new(registry.PresenceLive),
-		Activity:    &running,
-		Catalog:     &registry.CatalogMetadata{ProjectRoot: "/repo/two"},
-		Multiplexer: &registry.MultiplexerContext{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%2"},
-		ObservedAt:  now,
-	}
+	obs1 := registry.Observation{Harness: registry.Harness("claude"), At: now, Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%1"}, Listing: &registry.Listing{ProjectRoot: "/repo/one"}}}
+	obs2 := registry.Observation{Harness: registry.Harness("codex"), At: now, Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, ServerID: "srv1", SessionName: "work", PaneID: "%2"}, Listing: &registry.Listing{ProjectRoot: "/repo/two"}}}
 	if _, err := store.Observe(ctx, obs1); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +237,7 @@ func startBrokerServer(t *testing.T) (*registry.MemoryStore, string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,8 +335,8 @@ func responseServer(t *testing.T, respond func(id string) broker.Response) *brok
 func TestClientAppliesNewFiltersToOlderBrokerSnapshots(t *testing.T) {
 	t.Parallel()
 	sessions := []registry.Session{
-		{ID: "wanted", Harness: registry.HarnessCodex, ProjectRoot: "/project/one"},
-		{ID: "excluded", Harness: registry.HarnessClaude, ProjectRoot: "/project/two"},
+		{ID: "wanted", Harness: registry.Harness("codex"), ProjectRoot: "/project/one"},
+		{ID: "excluded", Harness: registry.Harness("claude"), ProjectRoot: "/project/two"},
 	}
 	filter := registry.Filter{Project: "/project/one"}
 	t.Run("list", func(t *testing.T) {
@@ -399,7 +370,7 @@ func TestClientAppliesNewFiltersToOlderBrokerSnapshots(t *testing.T) {
 			return broker.Response{Version: broker.ProtocolVersion, ID: id, Type: "result", Sessions: sessions}
 		})
 		got, err := c.SummaryWithOptions(t.Context(), filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByHarness})
-		if err != nil || len(got) != 1 || got[0].Harness != registry.HarnessCodex || got[0].Total != 1 {
+		if err != nil || len(got) != 1 || got[0].Harness != registry.Harness("codex") || got[0].Total != 1 {
 			t.Fatalf("filtered summary = %+v, err = %v", got, err)
 		}
 	})

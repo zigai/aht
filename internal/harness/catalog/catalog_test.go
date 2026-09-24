@@ -18,11 +18,11 @@ const testSessionID = "abc"
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
 
-	activity := harness.ReportHookCommand("aht", registry.HarnessCodex, registry.ActivityRunning, "turn", "test")
+	activity := harness.ReportHookCommand("aht", registry.Harness("codex"), registry.ActivityRunning, "turn", "test")
 	if !strings.Contains(activity, "--activity running") || strings.Contains(activity, "--presence") {
 		t.Fatalf("activity command = %q", activity)
 	}
-	presence := harness.ReportHookCommand("aht", registry.HarnessCodex, registry.PresenceGone, "stop", "test")
+	presence := harness.ReportHookCommand("aht", registry.Harness("codex"), registry.PresenceGone, "stop", "test")
 	if !strings.Contains(presence, "--presence gone") || strings.Contains(presence, "--activity") {
 		t.Fatalf("presence command = %q", presence)
 	}
@@ -36,7 +36,7 @@ func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
 		defer func() {
 			deferredPanic = recover() != nil
 		}()
-		_ = harness.ReportHookCommand("aht", registry.HarnessCodex, registry.Activity("bogus"), "turn", "test")
+		_ = harness.ReportHookCommand("aht", registry.Harness("codex"), registry.Activity("bogus"), "turn", "test")
 	}()
 	if !deferredPanic {
 		t.Fatal("ReportHookCommand accepted an invalid activity")
@@ -46,7 +46,7 @@ func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
 func TestPiIntegrationAdvertisesPromptWaiting(t *testing.T) {
 	t.Parallel()
 
-	adapter, ok := Find(registry.HarnessPi)
+	adapter, ok := Find(registry.Harness("pi"))
 	if !ok {
 		t.Fatal("Pi adapter not found")
 	}
@@ -67,119 +67,119 @@ func TestResumeCommandFor(t *testing.T) {
 	}{
 		{
 			name:        "claude",
-			harness:     registry.HarnessClaude,
+			harness:     registry.Harness("claude"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"claude", "--resume", testSessionID},
 		},
 		{
 			name:        "codex",
-			harness:     registry.HarnessCodex,
+			harness:     registry.Harness("codex"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"codex", "resume", testSessionID},
 		},
 		{
 			name:        "cursor",
-			harness:     registry.HarnessCursor,
+			harness:     registry.Harness("cursor"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"cursor-agent", "--resume", testSessionID},
 		},
 		{
 			name:        "copilot",
-			harness:     registry.HarnessCopilot,
+			harness:     registry.Harness("copilot"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"copilot", "--resume", testSessionID},
 		},
 		{
 			name:        "cline",
-			harness:     registry.HarnessCline,
+			harness:     registry.Harness("cline"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"cline", "--id", testSessionID},
 		},
 		{
 			name:        "kimi",
-			harness:     registry.HarnessKimiCode,
+			harness:     registry.Harness("kimi-code"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"kimi", "--session", testSessionID},
 		},
 		{
 			name:        "grok",
-			harness:     registry.HarnessGrok,
+			harness:     registry.Harness("grok"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"grok", "--resume", testSessionID},
 		},
 		{
 			name:        "goose",
-			harness:     registry.HarnessGoose,
+			harness:     registry.Harness("goose"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"goose", "session", "--resume", "--session-id", testSessionID},
 		},
 		{
 			name:        "pi path",
-			harness:     registry.HarnessPi,
+			harness:     registry.Harness("pi"),
 			sessionID:   testSessionID,
 			sessionPath: "/tmp/session.jsonl",
 			want:        []string{"pi", "--session", "/tmp/session.jsonl"},
 		},
 		{
 			name:        "omp path",
-			harness:     registry.HarnessOmp,
+			harness:     registry.Harness("omp"),
 			sessionID:   testSessionID,
 			sessionPath: "/tmp/omp-session.jsonl",
 			want:        []string{"omp", "--session", "/tmp/omp-session.jsonl"},
 		},
 		{
 			name:        "omp id",
-			harness:     registry.HarnessOmp,
+			harness:     registry.Harness("omp"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"omp", "--session", testSessionID},
 		},
 		{
 			name:        "opencode",
-			harness:     registry.HarnessOpenCode,
+			harness:     registry.Harness("opencode"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"opencode", "--session", testSessionID},
 		},
 		{
 			name:        "agy",
-			harness:     registry.HarnessAgy,
+			harness:     registry.Harness("agy"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"agy", "--conversation", testSessionID},
 		},
 		{
 			name:        "kilo",
-			harness:     registry.HarnessKilo,
+			harness:     registry.Harness("kilo"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"kilo", "--session", testSessionID},
 		},
 		{
 			name:        "droid",
-			harness:     registry.HarnessDroid,
+			harness:     registry.Harness("droid"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"droid", "--resume", testSessionID},
 		},
 		{
 			name:        "openclaw",
-			harness:     registry.HarnessOpenClaw,
+			harness:     registry.Harness("openclaw"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"openclaw", "tui", "--session", testSessionID},
 		},
 		{
 			name:        "amp",
-			harness:     registry.HarnessAmp,
+			harness:     registry.Harness("amp"),
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"amp", "threads", "continue", testSessionID},
@@ -206,44 +206,44 @@ func TestNormalize(t *testing.T) {
 		value string
 		want  registry.Harness
 	}{
-		{name: "codex", value: "codex", want: registry.HarnessCodex},
-		{name: "cursor alias binary", value: "cursor-agent", want: registry.HarnessCursor},
-		{name: "cursor alias cli hyphen", value: "cursor-cli", want: registry.HarnessCursor},
-		{name: "cursor alias cli underscore", value: "cursor_cli", want: registry.HarnessCursor},
-		{name: "copilot", value: "copilot", want: registry.HarnessCopilot},
-		{name: "copilot alias hyphen", value: "github-copilot-cli", want: registry.HarnessCopilot},
-		{name: "copilot alias underscore", value: "github_copilot", want: registry.HarnessCopilot},
-		{name: "cline", value: "cline", want: registry.HarnessCline},
-		{name: "claude alias hyphen", value: "claude-code", want: registry.HarnessClaude},
-		{name: "claude alias underscore", value: "claude_code", want: registry.HarnessClaude},
-		{name: "kimi-code", value: "kimi-code", want: registry.HarnessKimiCode},
-		{name: "omp", value: "omp", want: registry.HarnessOmp},
-		{name: "ohmypi alias", value: "ohmypi", want: registry.HarnessOmp},
-		{name: "oh-my-pi alias", value: "oh-my-pi", want: registry.HarnessOmp},
-		{name: "kimi alias", value: "kimi", want: registry.HarnessKimiCode},
-		{name: "kimi alias underscore", value: "kimi_code", want: registry.HarnessKimiCode},
-		{name: "kimi alias compact", value: "kimicode", want: registry.HarnessKimiCode},
-		{name: "grok alias hyphen", value: "grok-build", want: registry.HarnessGrok},
-		{name: "grok alias underscore", value: "grok_build", want: registry.HarnessGrok},
-		{name: "goose", value: "goose", want: registry.HarnessGoose},
-		{name: "opencode alias hyphen", value: "open-code", want: registry.HarnessOpenCode},
-		{name: "opencode alias underscore", value: "open_code", want: registry.HarnessOpenCode},
-		{name: "agy alias", value: "antigravity-cli", want: registry.HarnessAgy},
-		{name: "agy google alias", value: "google_antigravity", want: registry.HarnessAgy},
-		{name: "kilo", value: "kilo", want: registry.HarnessKilo},
-		{name: "kilo alias command", value: "kilocode", want: registry.HarnessKilo},
-		{name: "kilo alias hyphen", value: "kilo-code", want: registry.HarnessKilo},
-		{name: "kilo alias underscore", value: "kilo_code", want: registry.HarnessKilo},
-		{name: "droid", value: "droid", want: registry.HarnessDroid},
-		{name: "droid factory alias", value: "factory", want: registry.HarnessDroid},
-		{name: "droid factory cli alias", value: "factory_cli", want: registry.HarnessDroid},
-		{name: "openclaw", value: "openclaw", want: registry.HarnessOpenClaw},
-		{name: "hermes", value: "hermes", want: registry.HarnessHermes},
-		{name: "hermes agent alias", value: "hermes-agent", want: registry.HarnessHermes},
-		{name: "amp", value: "amp", want: registry.HarnessAmp},
-		{name: "amp alias code", value: "ampcode", want: registry.HarnessAmp},
-		{name: "amp alias hyphen", value: "amp-code", want: registry.HarnessAmp},
-		{name: "amp alias underscore", value: "amp_code", want: registry.HarnessAmp},
+		{name: "codex", value: "codex", want: registry.Harness("codex")},
+		{name: "cursor alias binary", value: "cursor-agent", want: registry.Harness("cursor")},
+		{name: "cursor alias cli hyphen", value: "cursor-cli", want: registry.Harness("cursor")},
+		{name: "cursor alias cli underscore", value: "cursor_cli", want: registry.Harness("cursor")},
+		{name: "copilot", value: "copilot", want: registry.Harness("copilot")},
+		{name: "copilot alias hyphen", value: "github-copilot-cli", want: registry.Harness("copilot")},
+		{name: "copilot alias underscore", value: "github_copilot", want: registry.Harness("copilot")},
+		{name: "cline", value: "cline", want: registry.Harness("cline")},
+		{name: "claude alias hyphen", value: "claude-code", want: registry.Harness("claude")},
+		{name: "claude alias underscore", value: "claude_code", want: registry.Harness("claude")},
+		{name: "kimi-code", value: "kimi-code", want: registry.Harness("kimi-code")},
+		{name: "omp", value: "omp", want: registry.Harness("omp")},
+		{name: "ohmypi alias", value: "ohmypi", want: registry.Harness("omp")},
+		{name: "oh-my-pi alias", value: "oh-my-pi", want: registry.Harness("omp")},
+		{name: "kimi alias", value: "kimi", want: registry.Harness("kimi-code")},
+		{name: "kimi alias underscore", value: "kimi_code", want: registry.Harness("kimi-code")},
+		{name: "kimi alias compact", value: "kimicode", want: registry.Harness("kimi-code")},
+		{name: "grok alias hyphen", value: "grok-build", want: registry.Harness("grok")},
+		{name: "grok alias underscore", value: "grok_build", want: registry.Harness("grok")},
+		{name: "goose", value: "goose", want: registry.Harness("goose")},
+		{name: "opencode alias hyphen", value: "open-code", want: registry.Harness("opencode")},
+		{name: "opencode alias underscore", value: "open_code", want: registry.Harness("opencode")},
+		{name: "agy alias", value: "antigravity-cli", want: registry.Harness("agy")},
+		{name: "agy google alias", value: "google_antigravity", want: registry.Harness("agy")},
+		{name: "kilo", value: "kilo", want: registry.Harness("kilo")},
+		{name: "kilo alias command", value: "kilocode", want: registry.Harness("kilo")},
+		{name: "kilo alias hyphen", value: "kilo-code", want: registry.Harness("kilo")},
+		{name: "kilo alias underscore", value: "kilo_code", want: registry.Harness("kilo")},
+		{name: "droid", value: "droid", want: registry.Harness("droid")},
+		{name: "droid factory alias", value: "factory", want: registry.Harness("droid")},
+		{name: "droid factory cli alias", value: "factory_cli", want: registry.Harness("droid")},
+		{name: "openclaw", value: "openclaw", want: registry.Harness("openclaw")},
+		{name: "hermes", value: "hermes", want: registry.Harness("hermes")},
+		{name: "hermes agent alias", value: "hermes-agent", want: registry.Harness("hermes")},
+		{name: "amp", value: "amp", want: registry.Harness("amp")},
+		{name: "amp alias code", value: "ampcode", want: registry.Harness("amp")},
+		{name: "amp alias hyphen", value: "amp-code", want: registry.Harness("amp")},
+		{name: "amp alias underscore", value: "amp_code", want: registry.Harness("amp")},
 	}
 
 	for _, test := range tests {
@@ -372,31 +372,31 @@ func TestFromCommand(t *testing.T) {
 		want    registry.Harness
 		wantOK  bool
 	}{
-		{command: "omp", want: registry.HarnessOmp, wantOK: true},
-		{command: "oh-my-pi", want: registry.HarnessOmp, wantOK: true},
-		{command: "/usr/bin/codex", want: registry.HarnessCodex, wantOK: true},
-		{command: "/usr/local/bin/cursor-agent", want: registry.HarnessCursor, wantOK: true},
-		{command: "/opt/bin/copilot", want: registry.HarnessCopilot, wantOK: true},
-		{command: "cline", want: registry.HarnessCline, wantOK: true},
+		{command: "omp", want: registry.Harness("omp"), wantOK: true},
+		{command: "oh-my-pi", want: registry.Harness("omp"), wantOK: true},
+		{command: "/usr/bin/codex", want: registry.Harness("codex"), wantOK: true},
+		{command: "/usr/local/bin/cursor-agent", want: registry.Harness("cursor"), wantOK: true},
+		{command: "/opt/bin/copilot", want: registry.Harness("copilot"), wantOK: true},
+		{command: "cline", want: registry.Harness("cline"), wantOK: true},
 		{command: "agent", want: "", wantOK: false},
-		{command: "claude", want: registry.HarnessClaude, wantOK: true},
-		{command: "kimi", want: registry.HarnessKimiCode, wantOK: true},
-		{command: "Kimi Code", want: registry.HarnessKimiCode, wantOK: true},
-		{command: "grok", want: registry.HarnessGrok, wantOK: true},
-		{command: "grok-build", want: registry.HarnessGrok, wantOK: true},
-		{command: "goose", want: registry.HarnessGoose, wantOK: true},
-		{command: "pi", want: registry.HarnessPi, wantOK: true},
-		{command: "opencode", want: registry.HarnessOpenCode, wantOK: true},
-		{command: "agy", want: registry.HarnessAgy, wantOK: true},
-		{command: "kilo", want: registry.HarnessKilo, wantOK: true},
-		{command: "kilocode", want: registry.HarnessKilo, wantOK: true},
-		{command: "kilo-code", want: registry.HarnessKilo, wantOK: true},
-		{command: "kilo_code", want: registry.HarnessKilo, wantOK: true},
-		{command: "droid", want: registry.HarnessDroid, wantOK: true},
-		{command: "openclaw", want: registry.HarnessOpenClaw, wantOK: true},
-		{command: "hermes", want: registry.HarnessHermes, wantOK: true},
-		{command: "hermes-agent", want: registry.HarnessHermes, wantOK: true},
-		{command: "amp", want: registry.HarnessAmp, wantOK: true},
+		{command: "claude", want: registry.Harness("claude"), wantOK: true},
+		{command: "kimi", want: registry.Harness("kimi-code"), wantOK: true},
+		{command: "Kimi Code", want: registry.Harness("kimi-code"), wantOK: true},
+		{command: "grok", want: registry.Harness("grok"), wantOK: true},
+		{command: "grok-build", want: registry.Harness("grok"), wantOK: true},
+		{command: "goose", want: registry.Harness("goose"), wantOK: true},
+		{command: "pi", want: registry.Harness("pi"), wantOK: true},
+		{command: "opencode", want: registry.Harness("opencode"), wantOK: true},
+		{command: "agy", want: registry.Harness("agy"), wantOK: true},
+		{command: "kilo", want: registry.Harness("kilo"), wantOK: true},
+		{command: "kilocode", want: registry.Harness("kilo"), wantOK: true},
+		{command: "kilo-code", want: registry.Harness("kilo"), wantOK: true},
+		{command: "kilo_code", want: registry.Harness("kilo"), wantOK: true},
+		{command: "droid", want: registry.Harness("droid"), wantOK: true},
+		{command: "openclaw", want: registry.Harness("openclaw"), wantOK: true},
+		{command: "hermes", want: registry.Harness("hermes"), wantOK: true},
+		{command: "hermes-agent", want: registry.Harness("hermes"), wantOK: true},
+		{command: "amp", want: registry.Harness("amp"), wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 
@@ -429,7 +429,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 	}{
 		{
 			name:       "claude",
-			harness:    registry.HarnessClaude,
+			harness:    registry.Harness("claude"),
 			payload:    `{"session_id":"claude-session","transcript_path":"/tmp/claude.jsonl","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup","model":"claude-sonnet-4-6"}`,
 			wantID:     "claude-session",
 			wantPath:   "/tmp/claude.jsonl",
@@ -441,7 +441,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "codex",
-			harness:    registry.HarnessCodex,
+			harness:    registry.Harness("codex"),
 			payload:    `{"session_id":"codex-session","transcript_path":"/tmp/codex.jsonl","cwd":"/tmp","hook_event_name":"UserPromptSubmit","model":"gpt-5-codex"}`,
 			wantID:     "codex-session",
 			wantPath:   "/tmp/codex.jsonl",
@@ -453,7 +453,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "grok",
-			harness:    registry.HarnessGrok,
+			harness:    registry.Harness("grok"),
 			payload:    `{"sessionId":"grok-session","cwd":"/tmp","workspaceRoot":"/repo","hookEventName":"UserPromptSubmit","toolName":"run_terminal_command"}`,
 			wantID:     "grok-session",
 			wantPath:   "",
@@ -465,7 +465,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "goose",
-			harness:    registry.HarnessGoose,
+			harness:    registry.Harness("goose"),
 			payload:    `{"event":"PreToolUse","session_id":"goose-session","working_dir":"/repo/goose","tool_name":"shell"}`,
 			wantID:     "goose-session",
 			wantPath:   "",
@@ -477,7 +477,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "cursor",
-			harness:    registry.HarnessCursor,
+			harness:    registry.Harness("cursor"),
 			payload:    `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":["/repo"],"hook_event_name":"beforeSubmitPrompt","model":"gpt-5.2","cursor_version":"1.7.2","composer_mode":"agent","is_background_agent":false}`,
 			wantID:     "cursor-session",
 			wantPath:   "/tmp/cursor.jsonl",
@@ -489,7 +489,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "copilot",
-			harness:    registry.HarnessCopilot,
+			harness:    registry.Harness("copilot"),
 			payload:    `{"sessionId":"copilot-session","timestamp":"2026-06-29T10:00:00Z","cwd":"/repo/copilot","toolName":"Bash"}`,
 			wantID:     "copilot-session",
 			wantPath:   "",
@@ -501,7 +501,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "cline",
-			harness:    registry.HarnessCline,
+			harness:    registry.Harness("cline"),
 			payload:    `{"clineVersion":"3.2.1","hookName":"PreToolUse","taskId":"cline-task","sessionContext":{"rootSessionId":"cline-root"},"workspaceRoots":["/repo/cline"],"tool_call":{"name":"execute_command"}}`,
 			wantID:     "cline-root",
 			wantPath:   filepath.Join(os.Getenv("HOME"), ".cline", "data", "sessions", "cline-root", "cline-root.messages.json"),
@@ -513,7 +513,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "kimi",
-			harness:    registry.HarnessKimiCode,
+			harness:    registry.Harness("kimi-code"),
 			payload:    `{"session_id":"kimi-payload-session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","tool_name":"Bash","turn_id":7}`,
 			wantID:     "kimi-payload-session-no-index",
 			wantPath:   "",
@@ -525,7 +525,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "agy",
-			harness:    registry.HarnessAgy,
+			harness:    registry.Harness("agy"),
 			payload:    `{"conversationId":"agy-session","transcriptPath":"/repo/.gemini/antigravity/transcript.jsonl","workspacePaths":["/repo"],"event":"PreToolUse","toolCall":{"name":"run_command","args":{"Cwd":"/repo/subdir"}}}`,
 			wantID:     "agy-session",
 			wantPath:   "/repo/.gemini/antigravity/transcript.jsonl",
@@ -537,7 +537,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 		},
 		{
 			name:       "droid",
-			harness:    registry.HarnessDroid,
+			harness:    registry.Harness("droid"),
 			payload:    `{"session_id":"droid-session","transcript_path":"/tmp/droid.jsonl","cwd":"/repo/droid","hook_event_name":"PreToolUse","tool_name":"Bash"}`,
 			wantID:     "droid-session",
 			wantPath:   "/tmp/droid.jsonl",
@@ -574,7 +574,7 @@ func TestDefaultsFromPayload(t *testing.T) {
 func TestDefaultsFromPayloadWithErrorRejectsMalformedPayload(t *testing.T) {
 	t.Parallel()
 
-	if _, err := DefaultsFromPayloadWithError(registry.HarnessCodex, json.RawMessage(`"not-an-object"`)); err == nil {
+	if _, err := DefaultsFromPayloadWithError(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
 		t.Fatal("DefaultsFromPayloadWithError accepted a non-object payload")
 	}
 }
@@ -589,7 +589,7 @@ func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
 	}
 
 	got, err := DefaultsFromPayloadWithError(
-		registry.HarnessKimiCode,
+		registry.Harness("kimi-code"),
 		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","source":"startup"}`),
 	)
 	if err != nil {
@@ -618,169 +618,169 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 	}{
 		{
 			name:    "claude accepts native hook payload",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts native hook payload",
-			harness: registry.HarnessCodex,
+			harness: registry.Harness("codex"),
 			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts null transcript path",
-			harness: registry.HarnessCodex,
+			harness: registry.Harness("codex"),
 			payload: `{"session_id":"codex-session","transcript_path":null,"cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts session end payload without model",
-			harness: registry.HarnessCodex,
+			harness: registry.Harness("codex"),
 			payload: `{"session_id":"codex-session","transcript_path":null,"cwd":"/repo","hook_event_name":"SessionEnd","reason":"other"}`,
 			want:    true,
 		},
 		{
 			name:    "cursor accepts native hook payload",
-			harness: registry.HarnessCursor,
+			harness: registry.Harness("cursor"),
 			payload: `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":null,"workspace_roots":["/repo"],"hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
 			want:    true,
 		},
 		{
 			name:    "copilot accepts native hook payload",
-			harness: registry.HarnessCopilot,
+			harness: registry.Harness("copilot"),
 			payload: `{"sessionId":"copilot-session","timestamp":"2026-06-29T10:00:00Z","cwd":"/repo","toolName":"Bash"}`,
 			want:    true,
 		},
 		{
 			name:    "cline accepts native hook payload",
-			harness: registry.HarnessCline,
+			harness: registry.Harness("cline"),
 			payload: `{"hookName":"TaskStart","taskId":"cline-task","sessionContext":{"rootSessionId":"cline-root"},"workspaceRoots":["/repo"]}`,
 			want:    true,
 		},
 		{
 			name:    "grok accepts native hook payload",
-			harness: registry.HarnessGrok,
+			harness: registry.Harness("grok"),
 			payload: `{"hookEventName":"stop","sessionId":"grok-session","cwd":"/repo","workspaceRoot":"/repo"}`,
 			want:    true,
 		},
 		{
 			name:    "grok accepts snake case hook payload",
-			harness: registry.HarnessGrok,
+			harness: registry.Harness("grok"),
 			payload: `{"hook_event_name":"stop","session_id":"grok-session","cwd":"/repo","workspace_root":"/repo"}`,
 			want:    true,
 		},
 		{
 			name:    "goose accepts native hook payload",
-			harness: registry.HarnessGoose,
+			harness: registry.Harness("goose"),
 			payload: `{"event":"Stop","session_id":"goose-session","working_dir":"/repo"}`,
 			want:    true,
 		},
 		{
 			name:    "kimi-code accepts native hook payload",
-			harness: registry.HarnessKimiCode,
+			harness: registry.Harness("kimi-code"),
 			payload: `{"session_id":"kimi-session","cwd":"/repo","hook_event_name":"PermissionRequest"}`,
 			want:    true,
 		},
 		{
 			name:    "agy accepts native hook payload",
-			harness: registry.HarnessAgy,
+			harness: registry.Harness("agy"),
 			payload: `{"conversationId":"agy-session","workspacePaths":["/repo"],"event":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "agy accepts snake case hook payload",
-			harness: registry.HarnessAgy,
+			harness: registry.Harness("agy"),
 			payload: `{"conversation_id":"agy-session","workspace_paths":["/repo"],"event":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "droid accepts native hook payload",
-			harness: registry.HarnessDroid,
+			harness: registry.Harness("droid"),
 			payload: `{"session_id":"droid-session","transcript_path":"/tmp/droid.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "claude rejects camel case hook payload",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"hookEventName":"stop","sessionId":"not-claude","cwd":"/repo","workspaceRoot":"/repo","promptId":"prompt"}`,
 			want:    false,
 		},
 		{
 			name:    "claude accepts cursor-compatible common payload",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":null,"cwd":"/repo","hook_event_name":"sessionEnd","cursor_version":"2026.06.15","workspace_roots":["/repo"]}`,
 			want:    true,
 		},
 		{
 			name:    "claude accepts configurable transcript path",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
 			name:    "claude accepts null transcript path",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"session_id":"claude-session","transcript_path":null,"cwd":"/repo","hook_event_name":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts configurable transcript path",
-			harness: registry.HarnessCodex,
+			harness: registry.Harness("codex"),
 			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
 			want:    true,
 		},
 		{
 			name:    "cursor rejects payload without cursor common fields",
-			harness: registry.HarnessCursor,
+			harness: registry.Harness("cursor"),
 			payload: `{"session_id":"cursor-session","hook_event_name":"sessionStart"}`,
 			want:    false,
 		},
 		{
 			name:    "cursor rejects string workspace roots",
-			harness: registry.HarnessCursor,
+			harness: registry.Harness("cursor"),
 			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":"/repo","hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
 			want:    false,
 		},
 		{
 			name:    "cursor rejects blank workspace roots",
-			harness: registry.HarnessCursor,
+			harness: registry.Harness("cursor"),
 			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":["  "],"hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
 			want:    false,
 		},
 		{
 			name:    "copilot rejects payload without cwd",
-			harness: registry.HarnessCopilot,
+			harness: registry.Harness("copilot"),
 			payload: `{"sessionId":"copilot-session"}`,
 			want:    false,
 		},
 		{
 			name:    "cline rejects payload without hook name",
-			harness: registry.HarnessCline,
+			harness: registry.Harness("cline"),
 			payload: `{"taskId":"cline-task","sessionContext":{"rootSessionId":"cline-root"}}`,
 			want:    false,
 		},
 		{
 			name:    "goose rejects payload without session id",
-			harness: registry.HarnessGoose,
+			harness: registry.Harness("goose"),
 			payload: `{"event":"Stop","working_dir":"/repo"}`,
 			want:    false,
 		},
 		{
 			name:    "droid rejects payload without event",
-			harness: registry.HarnessDroid,
+			harness: registry.Harness("droid"),
 			payload: `{"session_id":"droid-session","cwd":"/repo"}`,
 			want:    false,
 		},
 		{
 			name:    "claude rejects non-object json",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `"not an object"`,
 			want:    false,
 		},
 		{
 			name:    "claude rejects invalid json",
-			harness: registry.HarnessClaude,
+			harness: registry.Harness("claude"),
 			payload: `{"session_id":`,
 			want:    false,
 		},
@@ -901,7 +901,7 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	t.Helper()
 
 	result, ok := HandleHook(
-		registry.HarnessAgy,
+		registry.Harness("agy"),
 		test.event,
 		json.RawMessage(`{"test":true}`),
 		test.payload,
@@ -917,11 +917,11 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 		t.Fatalf("expected report ok %v, got %v", test.wantReport, result.ReportOK)
 	}
 	if result.ReportOK {
-		if result.Report.Activity == nil {
+		if result.Report.ActivityClaim() == nil {
 			t.Fatal("expected activity")
 		}
-		if *result.Report.Activity != test.wantActivity {
-			t.Fatalf("expected activity %q, got %q", test.wantActivity, *result.Report.Activity)
+		if *result.Report.ActivityClaim() != test.wantActivity {
+			t.Fatalf("expected activity %q, got %q", test.wantActivity, *result.Report.ActivityClaim())
 		}
 	}
 }
@@ -931,7 +931,7 @@ func TestHandleHookUnsupportedHarness(t *testing.T) {
 
 	var rawPayload json.RawMessage
 	var payload map[string]any
-	if _, ok := HandleHook(registry.HarnessCodex, "Stop", rawPayload, payload, nil); ok {
+	if _, ok := HandleHook(registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok {
 		t.Fatal("expected codex to have no managed hook adapter")
 	}
 }

@@ -14,7 +14,7 @@ import (
 // https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation
 func runPythonInterruption(t *testing.T, host isolatedHost, env []string) {
 	t.Helper()
-	if host.contract.ID != registry.HarnessHermes {
+	if host.contract.ID != registry.Harness("hermes") {
 		t.Fatalf("unsupported Python interruption host %s", host.contract.ID)
 	}
 	command := host.command(env, "acp", "--accept-hooks")

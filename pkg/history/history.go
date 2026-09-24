@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	native "github.com/zigai/aht/internal/harness/transcript"
+
 	"github.com/zigai/aht/internal/pathmatch"
 	"github.com/zigai/aht/pkg/harness"
 	"github.com/zigai/aht/pkg/registry"
@@ -23,7 +25,7 @@ import (
 const (
 	maxExcerpts    = 3
 	maxQueryBytes  = 4096
-	maxRecordBytes = 16 << 20
+	maxRecordBytes = native.MaxRecordBytes
 	maxIssues      = 100
 )
 
@@ -37,8 +39,8 @@ var (
 	ErrUnsupportedHarness = errors.New("local history reader unavailable for this harness")
 	// ErrInvalidSource indicates an empty source location.
 	ErrInvalidSource = errors.New("history source path must not be empty")
-	errRecordSize    = errors.New("history record exceeds 16 MiB")
-	errUnknownFormat = errors.New("unrecognized history format or missing native session identity")
+	errRecordSize    = native.ErrRecordSize
+	errUnknownFormat = native.ErrUnknownFormat
 )
 
 // Source identifies a harness's transcript directory or native SQLite database.
@@ -79,16 +81,7 @@ type Catalog struct {
 // Conversation identifies native history, including histories never seen by AHT.
 // Path is the transcript or database, not an AHT registry path. Unknown metadata
 // is omitted; timestamps are native timestamps, never inferred from file mtimes.
-type Conversation struct {
-	Harness     registry.Harness `json:"harness"`
-	SessionID   string           `json:"session_id"`
-	Path        string           `json:"path"`
-	Title       string           `json:"title,omitempty"`
-	CWD         string           `json:"cwd,omitempty"`
-	ProjectRoot string           `json:"project_root,omitempty"`
-	CreatedAt   time.Time        `json:"created_at,omitzero"`
-	UpdatedAt   time.Time        `json:"updated_at,omitzero"`
-}
+type Conversation = native.Conversation
 
 // Excerpt is a bounded window around the first literal match in a message.
 // Line is a one-based JSONL line, or zero for databases. MessageID is native when
@@ -153,7 +146,7 @@ type search struct {
 	writer          *indexWriter
 	indexErr        error
 	explicitSources bool
-	kimiDirs        map[string]string
+	sourceMetadata  map[string]string
 	query           Query
 	needle          string
 	needleASCII     bool
@@ -619,7 +612,7 @@ func liveMatches(c Conversation, sessions []registry.Session) []LiveState {
 		sameID := session.SessionID != "" && session.SessionID == c.SessionID
 		samePath := !isDatabase(c.Path) && session.SessionPath != "" && (filepath.Clean(session.SessionPath) == c.Path || registry.PathsEqual(session.SessionPath, c.Path))
 		if (sameID && (session.SessionPath == "" || samePath)) || (samePath && session.SessionID == "") {
-			result = append(result, LiveState{RegistryID: session.ID, Presence: session.Presence, UpdatedAt: session.UpdatedAt})
+			result = append(result, LiveState{RegistryID: session.ID, Presence: session.Presence(), UpdatedAt: session.UpdatedAt})
 		}
 	}
 	return result

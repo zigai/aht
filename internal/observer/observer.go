@@ -160,7 +160,7 @@ func New(opts Options) *Observer {
 		if storePath == "" {
 			storePath = registry.DefaultStorePath()
 		}
-		store = registry.NewFileStore(storePath)
+		store = registry.NewJournal(storePath, harness.Rules{})
 	} else if providedStorePath == "" {
 		storePath = ""
 	}
@@ -297,7 +297,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		result.Error = catalogErr.Error()
 	}
 	result.Catalog = len(catalog)
-	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", TmuxSession: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
+	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if sessionErr != nil {
 		return o.failCycle(at, "registry", sessionErr, "listing sessions for state detection", result)
 	}
@@ -359,10 +359,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 				SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
 			}
 		}
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // process evidence only
-			Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-			Harness: harnessID, Identity: identity, ProcessPresent: &present, Process: processIdentity(process), ObservedAt: at,
-		})
+		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: identity, Evidence: &registry.Sighting{Process: *processIdentity(process), Present: present}})
 		result.Present++
 	}
 	locationPIDs := make(map[int]bool)
@@ -381,18 +378,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if location.PaneTTY == "" {
 			location.PaneTTY = pane.ProcessTTY
 		}
-		if location.Kind == registry.MultiplexerTmux {
-			tmuxContext := location.TmuxContext()
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // tmux location only
-				Source: registry.ObservationSourceTmux, Evidence: registry.ObservationEvidenceTmuxLocation,
-				Harness: harnessID, Process: processIdentity(process), Tmux: &tmuxContext, ObservedAt: at,
-			})
-		} else {
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // multiplexer location only
-				Source: registry.ObservationSourceMultiplexer, Evidence: registry.ObservationEvidenceMultiplexerLocation,
-				Harness: harnessID, Process: processIdentity(process), Multiplexer: &location, ObservedAt: at,
-			})
-		}
+		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: location}})
 		screenObservation, detected, detectErr := o.detectScreenState(ctx, knownSessions, harnessID, process, pane, at)
 		if detected && o.screenDecisionReady(knownSessions, harnessID, process, screenObservation) {
 			observations = append(observations, screenObservation)
@@ -410,14 +396,10 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if entry.Harness == "" || entry.SessionID == "" {
 			continue
 		}
-		metadata := &registry.CatalogMetadata{ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD, ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current}
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // catalog metadata only
-			Source: registry.ObservationSourceCatalog, Evidence: registry.ObservationEvidenceCatalogMetadata,
-			Harness: entry.Harness, Identity: registry.ObservationIdentity{
-				SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
-			},
-			Catalog: metadata, ObservedAt: at,
-		})
+		metadata := &registry.Listing{ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD, ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current}
+		observations = append(observations, registry.Observation{Harness: entry.Harness, At: at, Subject: registry.ObservationIdentity{
+			SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
+		}, Evidence: metadata})
 	}
 	retiredKeys := make([]processKey, 0)
 	nextTracked := make(map[processKey]trackedProcess, len(current)+len(o.tracked))
@@ -436,10 +418,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		}
 		if eligible {
 			present := false
-			observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // process absence only
-				Source: registry.ObservationSourceProcess, Evidence: registry.ObservationEvidenceProcessPresence,
-				Harness: key.harness, ProcessPresent: &present, Process: processIdentity(old.process), ObservedAt: at,
-			})
+			observations = append(observations, registry.Observation{Harness: key.harness, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Sighting{Process: *processIdentity(old.process), Present: present}})
 			result.Gone++
 			nextTracked[key] = old
 			retiredKeys = append(retiredKeys, key)
@@ -607,11 +586,8 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 		}
 		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
 		process := processByPID[pid]
-		emptyContext := registry.MultiplexerContext{}             //nolint:exhaustruct_v5 // zero value means no multiplexer pane
-		observations = append(observations, registry.Observation{ //nolint:exhaustruct_v5 // location evidence only
-			Source: registry.ObservationSourceMultiplexer, Evidence: registry.ObservationEvidenceMultiplexerLocation,
-			Harness: harnessID, Process: processIdentity(process), Multiplexer: &emptyContext, ObservedAt: at,
-		})
+		emptyContext := registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
+		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: emptyContext}})
 		if !inspectScreen {
 			continue
 		}
@@ -629,23 +605,16 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 			return empty, false
 		}
 		present := false
-		return registry.Observation{ //nolint:exhaustruct_v5 // process absence only
-			Source:         registry.ObservationSourceProcess,
-			Evidence:       registry.ObservationEvidenceProcessPresence,
-			Harness:        session.Harness,
-			ProcessPresent: &present,
-			//nolint:exhaustruct_v5 // PID and start identity suffice
-			Process: &registry.ProcessIdentity{
-				PID:           session.Process.PID,
-				StartIdentity: session.Process.StartIdentity,
-			},
-			ObservedAt: at,
-		}, true
+		return registry.Observation{Harness: session.Harness, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{
+			PPID: 0, ProcessGroupID: 0, Foreground: false, Executable: "", CWD: "", TTY: "",
+			PID:           session.Process.PID,
+			StartIdentity: session.Process.StartIdentity,
+		}, Present: present}}, true
 	}
 
-	panePID := session.Multiplexer.PanePID
+	panePID := session.Location.PanePID
 	if panePID == 0 {
-		panePID = session.Tmux.PanePID
+		panePID = session.Location.PanePID
 	}
 	if session.Process == nil && panePID > 0 {
 		if _, ok := processByPID[panePID]; ok {
@@ -660,21 +629,17 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 		if native := session.Observations.Native; native != nil {
 			identity.Attributes = native.Attributes
 		}
-		return registry.Observation{ //nolint:exhaustruct_v5 // process absence only
-			Source:         registry.ObservationSourceProcess,
-			Evidence:       registry.ObservationEvidenceProcessPresence,
-			Harness:        session.Harness,
-			Identity:       identity,
-			ProcessPresent: &present,
-			ObservedAt:     at,
-		}, true
+		return registry.Observation{Harness: session.Harness, At: at, Subject: identity, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{PID: 0, PPID: 0, ProcessGroupID: 0, Foreground: false, StartIdentity: "", Executable: "", CWD: "", TTY: ""}, Present: present}}, true
 	}
 
 	return empty, false
 }
 
 func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, identity *registry.ProcessIdentity) registry.Session {
-	session := registry.Session{ //nolint:exhaustruct_v5 // policy inputs only
+	var incarnation registry.Incarnation
+	session := registry.Session{
+		Incarnation:   incarnation,
+		IdentityState: "", Liveness: nil, SchemaVersion: 0, ID: "", SessionID: "", SessionPath: "", ResumeCommand: nil, CWD: "", ProjectRoot: "", Location: registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, Observations: registry.Observations{Native: nil, Process: nil, Location: nil, Catalog: nil, Screen: nil}, CreatedAt: time.Time{}, UpdatedAt: time.Time{}, PresenceChangedAt: time.Time{}, ActivityChangedAt: time.Time{},
 		Harness: harnessID,
 		Process: identity,
 	}
@@ -687,11 +652,11 @@ func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, 
 }
 
 func screenFallbackMetadata(session registry.Session, harnessID registry.Harness, at time.Time) (string, string) {
-	policy := agentstate.PolicyFor(harnessID)
-	if policy.Primary != agentstate.AuthorityHook {
+	policy := (harness.Rules{}).Policy(harnessID)
+	if policy.Authority != registry.AuthorityHook {
 		return "", ""
 	}
-	return policy.IntegrationValue, agentstate.EvaluateHook(session, at).Reason
+	return policy.Reporter, registry.EvaluateHook(session, policy, at).Reason
 }
 
 func unavailableScreenState(manifestLoader agentstate.Loader, sessions []registry.Session, harnessID registry.Harness, process processinfo.Process, at time.Time, reason string) (registry.Observation, bool) {
@@ -707,11 +672,8 @@ func unavailableScreenState(manifestLoader agentstate.Loader, sessions []registr
 	}
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
 	unknown := registry.ActivityUnknown
-	screen := &registry.ScreenObservation{Activity: unknown, Authority: string(agentstate.AuthorityScreen), Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at}
-	observation := registry.Observation{ //nolint:exhaustruct_v5 // no terminal data available
-		Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
-		Activity: &unknown, Process: identity, Screen: screen, ObservedAt: at,
-	}
+	screen := &registry.ScreenObservation{Activity: unknown, Authority: registry.AuthorityScreen, Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at}
+	observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	return observation, true
 }
 
@@ -734,15 +696,12 @@ func (o *Observer) detectScreenState(ctx context.Context, sessions []registry.Se
 			reason = "multiplexer_agent_status"
 		}
 		screen := &registry.ScreenObservation{
-			Activity: *pane.Activity, Authority: string(pane.Location.Kind), Reason: reason,
+			Activity: *pane.Activity, Authority: registry.AuthorityScreen, Reason: reason,
 			RuleID: "", ManifestSource: "", ManifestVersion: 0,
 			FallbackForIntegration: fallback, FallbackReason: fallbackReason,
 			Process: *identity, ObservedAt: at,
 		}
-		observation := registry.Observation{ //nolint:exhaustruct_v5 // semantic state omits terminal contents
-			Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
-			Activity: pane.Activity, Process: identity, Screen: screen, ObservedAt: at,
-		}
+		observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 		return observation, true, nil
 	}
 	if o.disableScreenInspection {
@@ -760,9 +719,9 @@ func (o *Observer) screenDecisionReady(
 	observation registry.Observation,
 ) bool {
 	if !o.continuous ||
-		observation.Screen == nil ||
-		observation.Activity == nil ||
-		observation.Screen.Authority != string(agentstate.AuthorityScreen) {
+		observation.Reading() == nil ||
+		observation.ActivityClaim() == nil ||
+		observation.Reading().Authority != registry.AuthorityScreen {
 		return true
 	}
 
@@ -781,11 +740,11 @@ func (o *Observer) screenDecisionReady(
 
 	key := processKey{harness: harnessID, pid: process.PID, start: process.StartIdentity}
 	pending := o.screenPending[key]
-	if pending.activity != *observation.Activity ||
-		pending.ruleID != observation.Screen.RuleID {
+	if pending.activity != *observation.ActivityClaim() ||
+		pending.ruleID != observation.Reading().RuleID {
 		o.screenPending[key] = pendingScreenDecision{
-			activity:      *observation.Activity,
-			ruleID:        observation.Screen.RuleID,
+			activity:      *observation.ActivityClaim(),
+			ruleID:        observation.Reading().RuleID,
 			confirmations: 1,
 		}
 
@@ -814,11 +773,12 @@ func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedPro
 }
 
 func shouldDetectScreen(session registry.Session, at time.Time) bool {
-	if agentstate.SupportsScreen(session.Harness) {
-		return agentstate.ShouldDetectScreen(session, at)
+	if harness.SupportsScreen(session.Harness) {
+		authority, _ := registry.ActivityAuthority(session, (harness.Rules{}).Policy(session.Harness), at)
+		return authority == registry.AuthorityScreen
 	}
-	policy := agentstate.PolicyFor(session.Harness)
-	return policy.Primary == agentstate.AuthorityHook && !agentstate.HookIsActive(session, at)
+	policy := (harness.Rules{}).Policy(session.Harness)
+	return policy.Authority == registry.AuthorityHook && !registry.EvaluateHook(session, policy, at).Active
 }
 
 func screenObservationTime(cycleAt time.Time, capturedAt time.Time) time.Time {
@@ -866,7 +826,7 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 	if o.initialized {
 		return nil
 	}
-	sessions, err := o.store.List(ctx, registry.Filter{Harness: "", Presence: registry.PresenceLive, Activity: "", TmuxSession: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
+	sessions, err := o.store.List(ctx, registry.Filter{Harness: "", Presence: registry.PresenceLive, Activity: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if err != nil {
 		return fmt.Errorf("listing live sessions: %w", err)
 	}
@@ -1025,7 +985,7 @@ func (o *Observer) isProcessTracked(session registry.Session) bool {
 func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
 	observations := make([]registry.Observation, 0)
 	for _, session := range sessions {
-		if session.Presence == registry.PresenceGone {
+		if session.Presence() == registry.PresenceGone {
 			continue
 		}
 		if o.isProcessTracked(session) {
@@ -1052,18 +1012,15 @@ func (o *Observer) captureScreenState(ctx context.Context, session registry.Sess
 	decision := manifest.Evaluate(agentstate.NormalizeSnapshot(snapshot.Text, snapshot.Title))
 	if decision.Activity == registry.ActivityUnknown &&
 		decision.Reason == "no_rule_matched" &&
-		session.Activity != nil &&
-		*session.Activity != registry.ActivityUnknown {
+		session.Activity() != nil &&
+		*session.Activity() != registry.ActivityUnknown {
 		var empty registry.Observation
 		return empty, false, nil
 	}
 	observedAt := screenObservationTime(at, o.now().UTC())
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-	screen := &registry.ScreenObservation{Activity: decision.Activity, Authority: string(agentstate.AuthorityScreen), Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
-	observation := registry.Observation{ //nolint:exhaustruct_v5 // screen evidence omits terminal contents
-		Source: registry.ObservationSourceScreen, Evidence: registry.ObservationEvidenceScreenState, Harness: harnessID,
-		Activity: &decision.Activity, Process: identity, Screen: screen, ObservedAt: observedAt,
-	}
+	screen := &registry.ScreenObservation{Activity: decision.Activity, Authority: registry.AuthorityScreen, Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
+	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	if manifest.Warning != "" {
 		return observation, true, fmt.Errorf("%w: %s", errDetectionOverrideInvalid, manifest.Warning)
 	}

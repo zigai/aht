@@ -51,7 +51,7 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 	host.provider = newScriptedProvider(t, host.contract.Protocol, toolName, lifecycleToolArgs(host.contract.ID), "aht-compat-marker")
 	host.provider.checkpoints = make(chan int)
 	host.provider.release = make(chan struct{}, 1)
-	if host.contract.ID == registry.HarnessOpenClaw {
+	if host.contract.ID == registry.Harness("openclaw") {
 		host.provider.callID = "callcompat" // OpenClaw strips punctuation from tool IDs.
 	}
 	host.startTracker(t)
@@ -85,19 +85,19 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 func (host isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 	switch host.contract.ID {
-	case registry.HarnessDroid:
+	case registry.Harness("droid"):
 		host.runDroidRPC(t, command.Env, nil, true)
-	case registry.HarnessKimiCode:
+	case registry.Harness("kimi-code"):
 		host.runKimiWire(t, command, true)
-	case registry.HarnessOpenCode, registry.HarnessKilo:
+	case registry.Harness("opencode"), registry.Harness("kilo"):
 		host.runServerInterruption(t, command.Env)
-	case registry.HarnessPi, registry.HarnessOmp:
+	case registry.Harness("pi"), registry.Harness("omp"):
 		runRPCInterruption(t, host, command.Env)
-	case registry.HarnessHermes:
+	case registry.Harness("hermes"):
 		runPythonInterruption(t, host, command.Env)
-	case registry.HarnessCline:
+	case registry.Harness("cline"):
 		runCLIInterruption(t, host, command.Env)
-	case registry.HarnessGrok:
+	case registry.Harness("grok"):
 		host.runGrokInterruption(t, command)
 	default:
 		host.runHostCommand(t, command)
@@ -116,14 +116,14 @@ func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 
 func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
 	t.Helper()
-	if host.contract.ID == registry.HarnessDroid {
+	if host.contract.ID == registry.Harness("droid") {
 		return host.runDroidRPC(t, command.Env, nil, false)
 	}
-	if host.contract.ID == registry.HarnessKimiCode {
+	if host.contract.ID == registry.Harness("kimi-code") {
 		host.runKimiWire(t, command, false)
 		return nil
 	}
-	if host.contract.ID == registry.HarnessPi {
+	if host.contract.ID == registry.Harness("pi") {
 		host.runPiCompletion(t, command)
 		return nil
 	}
@@ -168,7 +168,7 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 				host.waitForActiveSession(t)
 			}
 			if host.interrupt {
-				if host.contract.ID == registry.HarnessOpenClaw {
+				if host.contract.ID == registry.Harness("openclaw") {
 					host.interruptOpenClaw(t)
 				} else if err := syscall.Kill(-command.Process.Pid, syscall.SIGINT); err != nil {
 					t.Fatalf("interrupting active host: %v", err)

@@ -27,9 +27,11 @@ type hookPayload struct {
 
 func New() codexHarness {
 	return codexHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessCodex,
-		Aliases:      nil,
-		ProcessNames: []string{"codex"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("codex"),
+		Aliases:          nil,
+		ProcessNames:     []string{"codex"},
 		Env: harness.EnvKeys{
 			SessionID:   []string{"CODEX_SESSION_ID"},
 			SessionPath: []string{"CODEX_SESSION_PATH"},
@@ -48,7 +50,7 @@ func New() codexHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  codexIntegrationSource,
-		StateAuthority:     harness.AuthorityScreen,
+		StateAuthority:     registry.AuthorityScreen,
 		ScreenFallback:     false,
 	})}
 }
@@ -66,52 +68,52 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 			{
 				Event:   harness.HookEventSessionStart,
 				Matcher: "startup|resume|clear|compact",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityIdle, harness.HookEventSessionStart, codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventSessionStart, codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityRunning, harness.HookEventUserPromptSubmit, codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, harness.HookEventUserPromptSubmit, codexIntegrationSource),
 			},
 			{
 				Event:   "PermissionRequest",
 				Matcher: "*",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityWaiting, "PermissionRequest", codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityWaiting, "PermissionRequest", codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventPostToolUse,
 				Matcher: "",
-				Command: harness.RawStdinDefaultsReportHookCommand(binary, registry.HarnessCodex, registry.ActivityRunning, harness.HookEventPostToolUse, codexIntegrationSource),
+				Command: harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, harness.HookEventPostToolUse, codexIntegrationSource),
 			},
 			{
 				Event:   "PreCompact",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityRunning, "PreCompact", codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "PreCompact", codexIntegrationSource),
 			},
 			{
 				Event:   "PostCompact",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityIdle, "PostCompact", codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "PostCompact", codexIntegrationSource),
 			},
 			{
 				Event:   "SubagentStart",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityRunning, "SubagentStart", codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "SubagentStart", codexIntegrationSource),
 			},
 			{
 				Event:   "SubagentStop",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityIdle, "SubagentStop", codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "SubagentStop", codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventStop,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.ActivityIdle, harness.HookEventStop, codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventStop, codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventSessionEnd,
 				Matcher: "other",
-				Command: harness.ReportHookCommand(binary, registry.HarnessCodex, registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
 			},
 		},
 	}}, harness.ShimAction{}}}
@@ -157,4 +159,19 @@ func codexHome() string {
 	}
 
 	return ".codex"
+}
+
+func (codexHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["codex_hook_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"))
+}
+
+func (codexHarness) HookTimeout(event string) int {
+	const endTimeout = 3
+	if event == harness.HookEventSessionEnd {
+		return endTimeout
+	}
+	return harness.HookTimeoutSeconds
 }

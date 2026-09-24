@@ -30,9 +30,9 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 			}
 			var command *exec.Cmd
 			switch contract.ID {
-			case registry.HarnessKimiCode:
+			case registry.Harness("kimi-code"):
 				command = host.kimiWireCommand(t, configured.Env, []string{"--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2"})
-			case registry.HarnessHermes:
+			case registry.Harness("hermes"):
 				command = host.command(configured.Env, "acp", "--accept-hooks")
 			default:
 				t.Fatalf("unsupported Python permission host %s", contract.ID)
@@ -42,13 +42,13 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 			promptMethod := "prompt"
 			promptParams := map[string]any{"user_input": compatibilityPrompt}
 			sessionID := ""
-			if contract.ID == registry.HarnessKimiCode {
+			if contract.ID == registry.Harness("kimi-code") {
 				// Kimi's root approval hub suppresses requests until initialize.
 				// No external tools or hook subscriptions are needed.
 				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocol_version": "1.10", "client": map[string]any{"name": "aht-compat", "version": "1"}}})
 				wire.response(t, "initialize")
 			}
-			if contract.ID == registry.HarnessHermes {
+			if contract.ID == registry.Harness("hermes") {
 				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
 				wire.response(t, "initialize")
 				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.work, "mcpServers": []any{}}})
@@ -73,7 +73,7 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 					t.Fatalf("native permission RPC error: %s", message.Error)
 				}
 				var result any
-				if contract.ID == registry.HarnessKimiCode {
+				if contract.ID == registry.Harness("kimi-code") {
 					var request struct {
 						Type    string `json:"type"`
 						Payload struct {
@@ -130,7 +130,7 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 				if err := json.Unmarshal(completed.Result, &finish); err != nil {
 					t.Fatal(err)
 				}
-				if contract.ID == registry.HarnessKimiCode && finish.Status != "finished" || contract.ID == registry.HarnessHermes && finish.StopReason != "end_turn" {
+				if contract.ID == registry.Harness("kimi-code") && finish.Status != "finished" || contract.ID == registry.Harness("hermes") && finish.StopReason != "end_turn" {
 					t.Fatalf("native permission turn did not finish: %s", completed.Result)
 				}
 				assertPermissionOutcome(t, host, waiting, allow)

@@ -157,8 +157,8 @@ def _report(event: str, transition: dict[str, str], values: dict[str, Any]) -> N
         "--observed-at", datetime.now(timezone.utc).isoformat(),
         "--cwd", cwd, "--project-root", cwd,
         "--quiet", "--no-tmux",
-        "--attribute", "aht_integration=hermes-plugin",
-        "--attribute", f"aht_integration_version={_INTEGRATION_VERSION}",
+        "--reporter", "hermes-plugin",
+        "--reporter-version", str(_INTEGRATION_VERSION),
     ]
     for flag in ("lifecycle", "presence", "activity"):
         if transition.get(flag):

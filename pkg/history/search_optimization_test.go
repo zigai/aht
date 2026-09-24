@@ -41,7 +41,7 @@ func TestWarmIndexExplicitSymlinkSource(t *testing.T) {
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	catalog.Sources = []history.Source{{Harness: registry.HarnessPi, Path: link}}
+	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: link}}
 	for range 2 {
 		result := requireIndexedMatches(t, catalog, history.Query{Text: "refresh", Limit: 1}, 1)
 		if result.Matches[0].Conversation.Path != path || len(result.Matches[0].Excerpts) == 0 {
@@ -55,7 +55,7 @@ func TestLimitedIndexMatchesUnlimitedDetails(t *testing.T) {
 	sources := orderingSources(t)
 	catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
 	query := history.Query{Text: "refresh token", Registry: []registry.Session{
-		{ID: "live", Harness: registry.HarnessPi, SessionID: "recently-updated", SessionPath: sources[1].Path},
+		{ID: "live", Harness: registry.Harness("pi"), SessionID: "recently-updated", SessionPath: sources[1].Path},
 	}}
 	for range 2 {
 		all := requireIndexedMatches(t, catalog, query, 2)
@@ -79,19 +79,19 @@ func TestIndexCleanupOnlyVisitsSelectedSources(t *testing.T) {
 	t.Parallel()
 	catalog, first := indexedFixture(t)
 	second := writeHistory(t, t.TempDir(), "other.jsonl", treeHistory)
-	catalog.Sources = append(catalog.Sources, history.Source{Harness: registry.HarnessPi, Path: second})
+	catalog.Sources = append(catalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: second})
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 2)
 	if err := os.Remove(second); err != nil {
 		t.Fatal(err)
 	}
-	catalog.Sources = []history.Source{{Harness: registry.HarnessPi, Path: first}}
+	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
 	db := openTestIndex(t, catalog.IndexPath)
 	var files int
 	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 2 {
 		t.Fatalf("unselected source was cleaned up: files=%d err=%v", files, err)
 	}
-	catalog.Sources = []history.Source{{Harness: registry.HarnessPi, Path: filepath.Dir(second)}}
+	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Dir(second)}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 0)
 	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 1 {
 		t.Fatalf("selected vanished source retained: files=%d err=%v", files, err)
@@ -111,7 +111,7 @@ func TestWarmIndexSymlinkedParentSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := history.Catalog{
-		Sources:   []history.Source{{Harness: registry.HarnessPi, Path: link}},
+		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: link}},
 		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
 	}
 	for range 2 {
@@ -137,10 +137,10 @@ func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
 {"type":"message","id":"u1","timestamp":"2026-09-19T00:00:01Z","message":{"role":"user","content":"refresh token"}}
 {"type":"message","id":"a1","timestamp":"2026-09-20T09:00:00Z","message":{"role":"assistant","content":"refresh token again"}}
 `)
-	sources := []history.Source{{Harness: registry.HarnessPi, Path: created}, {Harness: registry.HarnessPi, Path: updated}}
+	sources := []history.Source{{Harness: registry.Harness("pi"), Path: created}, {Harness: registry.Harness("pi"), Path: updated}}
 	catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
 	query := history.Query{Text: "refresh token", Limit: 1, Registry: []registry.Session{
-		{ID: "live", Harness: registry.HarnessPi, SessionID: "recently-updated", SessionPath: sources[1].Path},
+		{ID: "live", Harness: registry.Harness("pi"), SessionID: "recently-updated", SessionPath: sources[1].Path},
 	}}
 	limited := requireIndexedMatches(t, catalog, query, 1)
 	if len(limited.Matches[0].Live) != 1 {
@@ -158,14 +158,14 @@ func TestIndexCleanupSymlinkedParent(t *testing.T) {
 	first := writeHistory(t, symlinkRoot, "session.jsonl", treeHistory)
 	second := writeHistory(t, t.TempDir(), "other.jsonl", treeHistory)
 	catalog := history.Catalog{
-		Sources:   []history.Source{{Harness: registry.HarnessPi, Path: symlinkRoot}, {Harness: registry.HarnessPi, Path: second}},
+		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: symlinkRoot}, {Harness: registry.Harness("pi"), Path: second}},
 		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
 	}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 2)
 	if err := os.Remove(second); err != nil {
 		t.Fatal(err)
 	}
-	catalog.Sources = []history.Source{{Harness: registry.HarnessPi, Path: first}}
+	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
 	db := openTestIndex(t, catalog.IndexPath)
 	var files int

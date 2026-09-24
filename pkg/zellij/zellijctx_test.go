@@ -96,7 +96,7 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 		lines[index] = fmt.Sprintf("line-%03d", index)
 	}
 	snapshot, err := zellij.CapturePaneWithOptions(context.Background(), mux.Pane{
-		Location: registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
+		Location: registry.Location{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
 		Title:    "Codex",
 	}, zellij.CaptureOptions{Run: func(_ context.Context, args ...string) (string, error) {
 		got = append([]string(nil), args...)

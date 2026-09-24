@@ -38,8 +38,10 @@ func main() {
 
 By default, the client uses the local broker and falls back to saved registry
 state when it is unavailable. Set `Config.Mode` to `ModeRealtimeOnly` to require
-the broker, or `ModeDurableOnly` to use the registry file directly. `StorePath`
-and `SocketPath` select another local instance. Saved state may be stale.
+the broker, or `ModeDurableOnly` to read the snapshot plus pending journal entries.
+`StorePath` and `SocketPath` select another local instance. Offline writes are
+fsynced to the journal and reduced by the same rules as broker writes. Durable
+state reflects accepted observations; it cannot detect a process change by itself.
 
 ## Client methods
 
@@ -62,10 +64,11 @@ sessions. It uses each session's native `SessionID` and, where available,
 reader for that harness. The `TitleLookup` field returned by `Capabilities`
 distinguishes reader support from an unnamed session.
 
-Codex, Pi, and OMP currently have title readers. Codex resolves names from its
-state database and legacy name index. Lookup reads native metadata on demand
-and may return an error with partial titles. Cache Pi results when refreshing a
-view repeatedly, since Pi records names in its transcript.
+Title support comes from adapter capabilities. Codex resolves names from its
+state database and legacy name index; Pi and OMP share transcript metadata
+parsing with history. Other adapters may use native databases, indexes, plugin
+metadata, or native APIs. Lookup may return an error with partial titles. Cache
+results when refreshing a view repeatedly.
 
 ## Manage integrations and the tracker
 
@@ -145,3 +148,43 @@ func report(result aht.HistoryResult, err error) {
 ```
 
 Search returns partial results when some sources cannot be read.
+
+## Session and observation model
+
+Harness names are strings. Public name constants live in `pkg/aht`; the registry
+accepts names and activity policies through injected `registry.Rules`.
+
+A session has `Liveness` of type `Live`, `Gone`, or `Unknown`. Read
+`session.Presence()`, `session.Activity()`, and `session.Decision()` for rendering
+and filtering. Gone sessions return nil activity. Unknown presence can retain a
+known activity. `IdentityState` distinguishes process-only provisional sessions
+from sessions with native identity. `Incarnation` records the current process and
+sticky native-end state.
+
+`Location` contains the multiplexer kind, server, session, and pane identifiers.
+The separate `Tmux` field and `TmuxContext` type are removed. Use
+`Filter.MultiplexerSession` for terminal-session filtering.
+
+An observation contains `Harness`, `At`, `Subject`, and sealed `Evidence`:
+
+| Evidence | Meaning |
+| --- | --- |
+| `*Report` | Native lifecycle/activity, typed reporter identity, optional metadata. |
+| `*Sighting` | Process identity and presence. |
+| `*Placement` | Process identity and terminal location. |
+| `*Listing` | Native catalog metadata and resume command. |
+| `*Reading` | Screen activity and detection rule evidence. |
+
+`Reporter` owns `Integration`, `Version`, `Sequence`, and `MultiSession`.
+Use `Client.Observe` or `ObserveBatch` to submit observations. Low-level callers
+construct `registry.NewReducer(rules)`; `Apply` returns state and consumer-visible
+changes. `registry.NewJournal(path, rules)` provides durable mutations.
+`FileStore` only reads persisted state; it has no observation-write methods.
+The broker holds the live-owner lock, coalesces snapshots, and flushes on close.
+GC and reset are journal commands, so an unreachable broker cannot resurrect
+removed rows.
+
+Snapshots use schema 3; other schema versions are rejected. Broker protocol 2
+requires matching client and server versions; filters use snake_case JSON fields. Restart the tracker
+when upgrading. Session JSON uses `liveness` and `location`; observation JSON
+has `kind` and a corresponding `evidence` object.

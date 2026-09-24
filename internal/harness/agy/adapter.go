@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zigai/aht/internal/harness"
 	"github.com/zigai/aht/pkg/registry"
@@ -22,14 +23,15 @@ const (
 	agyIntegrationID               = "agy"
 	agyHookSource                  = "agy-hook"
 	agyHookAdditionalAttributeKeys = 3
-	integrationVersion             = 8
+	integrationVersion             = 9
 )
 
 type agyHarness struct{ harness.BaseAdapter }
 
 func New() agyHarness {
 	return agyHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID: registry.HarnessAgy,
+		ExclusiveProcess: true, CatalogCreates: false,
+		ID: registry.Harness("agy"),
 		Aliases: []string{
 			"antigravity",
 			"antigravity-cli",
@@ -56,7 +58,7 @@ func New() agyHarness {
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  agyHookSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -84,9 +86,8 @@ func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
 				JSONContent: nil,
 			},
 		},
-		SnippetOrder:  []string{"plugin.json", "hooks.json", agyMarkerFileName},
-		MarkerFile:    agyMarkerFileName,
-		ObsoleteFiles: nil,
+		SnippetOrder: []string{"plugin.json", "hooks.json", agyMarkerFileName},
+		MarkerFile:   agyMarkerFileName,
 		ImportManifest: &harness.ImportManifestInstallPlan{
 			Path:       filepath.Join(configDir, agyImportManifestName),
 			Name:       agyPluginName,
@@ -158,7 +159,7 @@ func agyHookCommand(binary string, event string) string {
 		harness.ShellQuote(binary),
 		"--json",
 		"hook",
-		string(registry.HarnessAgy),
+		string(registry.Harness("agy")),
 		"--event", harness.ShellQuote(event),
 	}, " ")
 }
@@ -232,28 +233,18 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 		return observation, false
 	}
 
-	return registry.Observation{ //nolint:exhaustruct_v5 // native activity and resume metadata only
-		Source:   registry.ObservationSourceNative,
-		Evidence: registry.ObservationEvidenceNativeEvent,
-		Harness:  registry.HarnessAgy,
-		Identity: registry.ObservationIdentity{
-			SessionID:   defaults.SessionID,
-			SessionPath: defaults.SessionPath,
-			CWD:         defaults.CWD,
-			Attributes:  defaults.Attributes,
-		},
-		Activity:    activity,
-		NativeEvent: invocation.Event,
-		Catalog: &registry.CatalogMetadata{
-			ResumeCommand: agyResumeCommand(defaults.SessionID),
-			CWD:           defaults.CWD,
-			ProjectRoot:   defaults.ProjectRoot,
-			ProcessPID:    0,
-			Current:       false,
-		},
-		Attributes: agyHookAttributes(defaults.Attributes, invocation.Event),
-		RawPayload: invocation.RawPayload,
-	}, true
+	return registry.Observation{Harness: registry.Harness("agy"), At: time.Time{}, Subject: registry.ObservationIdentity{
+		SessionID:   defaults.SessionID,
+		SessionPath: defaults.SessionPath,
+		CWD:         defaults.CWD,
+		Attributes:  defaults.Attributes,
+	}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Process: nil, Location: nil, Reporter: registry.Reporter{Sequence: nil, Integration: agyHookSource, Version: integrationVersion, MultiSession: false}, Event: invocation.Event, Activity: activity, Listing: &registry.Listing{
+		ResumeCommand: agyResumeCommand(defaults.SessionID),
+		CWD:           defaults.CWD,
+		ProjectRoot:   defaults.ProjectRoot,
+		ProcessPID:    0,
+		Current:       false,
+	}, Attributes: agyHookAttributes(defaults.Attributes, invocation.Event), Payload: invocation.RawPayload}}, true
 }
 
 func agyResumeCommand(sessionID string) []string {
@@ -306,8 +297,6 @@ func agyHookAttributes(defaultAttributes map[string]string, event string) map[st
 	if event != "" {
 		attributes["agy_hook_event"] = event
 	}
-	attributes["aht_integration"] = agyHookSource
-	attributes["aht_integration_version"] = strconv.Itoa(integrationVersion)
 	return attributes
 }
 

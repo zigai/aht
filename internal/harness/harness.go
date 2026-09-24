@@ -11,10 +11,7 @@ import (
 )
 
 const (
-	IntegrationVersion = 8
-
-	AuthorityHook   StateAuthority = "hook"
-	AuthorityScreen StateAuthority = "screen"
+	IntegrationVersion = 9
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
@@ -24,8 +21,7 @@ const (
 )
 
 type (
-	StateAuthority string
-	EnvField       string
+	EnvField string
 )
 
 type EnvKeys struct {
@@ -56,6 +52,8 @@ type Capabilities struct {
 }
 
 type Definition struct {
+	ExclusiveProcess   bool
+	CatalogCreates     bool
 	ID                 registry.Harness
 	Aliases            []string
 	ProcessNames       []string
@@ -63,7 +61,7 @@ type Definition struct {
 	Capabilities       Capabilities
 	IntegrationVersion int
 	IntegrationSource  string
-	StateAuthority     StateAuthority
+	StateAuthority     registry.Authority
 	ScreenFallback     bool
 }
 
@@ -101,7 +99,13 @@ type WireRunner interface {
 	RunWire(ctx context.Context, options WireOptions) error
 }
 
+type WireSink interface {
+	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
+	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
+}
+
 type WireOptions struct {
+	Sink      WireSink
 	Args      []string
 	StorePath string
 	Stdin     *os.File
@@ -123,6 +127,8 @@ func (adapter BaseAdapter) Definition() Definition {
 func cloneDefinition(definition Definition) Definition {
 	return Definition{
 		ID:                 definition.ID,
+		ExclusiveProcess:   definition.ExclusiveProcess,
+		CatalogCreates:     definition.CatalogCreates,
 		Aliases:            slices.Clone(definition.Aliases),
 		ProcessNames:       slices.Clone(definition.ProcessNames),
 		Env:                cloneEnvKeys(definition.Env),

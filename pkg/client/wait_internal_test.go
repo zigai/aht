@@ -36,7 +36,11 @@ func TestWaitRestartsStabilityForNewIncarnation(t *testing.T) {
 		c := New(Config{})
 		watcher := NewTestWatcher()
 		c.SetWatcherForTest(watcher)
-		session := registry.Session{ID: "session", Presence: PresenceLive, Activity: new(ActivityIdle), Process: &registry.ProcessIdentity{PID: 10, StartIdentity: "first"}}
+		session := registry.Session{
+			ID:       "session",
+			Process:  &registry.ProcessIdentity{PID: 10, StartIdentity: "first"},
+			Liveness: registry.NewLiveness(PresenceLive, registry.ActivityValue(new(ActivityIdle)), nil),
+		}
 		watcher.SendSessions(session)
 		start := time.Now()
 		go func() {

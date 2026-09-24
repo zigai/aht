@@ -3,6 +3,8 @@ package tmux_test
 import (
 	"fmt"
 
+	"github.com/zigai/aht/pkg/registry"
+
 	"github.com/zigai/aht/pkg/tmux"
 )
 
@@ -13,6 +15,6 @@ func ExampleContextFromEnv() {
 	}
 
 	context := tmux.ContextFromEnv(env)
-	fmt.Printf("Inside: %t, PaneID: %s\n", context.Inside, context.PaneID)
+	fmt.Printf("Inside: %t, PaneID: %s\n", (context.Kind == registry.MultiplexerTmux), context.PaneID)
 	// Output: Inside: true, PaneID: %0
 }

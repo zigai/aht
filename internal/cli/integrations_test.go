@@ -143,7 +143,7 @@ func requireCodexUpdateTrustJSON(t *testing.T, data []byte) {
 func TestAgentSelectionSupportsMultipleDeduplicatedAgentsAndAll(t *testing.T) {
 	t.Parallel()
 	selected, err := selectedHarnesses([]string{"codex", "claude", "codex"}, false)
-	if err != nil || len(selected) != 2 || selected[0] != registry.HarnessCodex || selected[1] != registry.HarnessClaude {
+	if err != nil || len(selected) != 2 || selected[0] != registry.Harness("codex") || selected[1] != registry.Harness("claude") {
 		t.Fatalf("selected agents = %v, %v", selected, err)
 	}
 	selected, err = selectedHarnesses([]string{"all"}, false)

@@ -24,7 +24,7 @@ func indexedFixture(t *testing.T) (history.Catalog, string) {
 	t.Helper()
 	root := t.TempDir()
 	path := writeHistory(t, root, "session.jsonl", treeHistory)
-	return history.Catalog{Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}, path
+	return history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}, path
 }
 
 func requireIndexedMatches(t *testing.T, c history.Catalog, q history.Query, count int) history.Result {
@@ -265,7 +265,7 @@ func TestIndexHealsUnusableDefaultCache(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeHistory(t, root, "session.jsonl", treeHistory)
-	c := history.Catalog{Sources: []history.Source{{Harness: registry.HarnessPi, Path: root}}}
+	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}}
 	path := filepath.Join(cache, "aht", "history-v1.sqlite")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestIndexHealsUnusableDefaultCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+
 	healed := openTestIndex(t, path)
 	var version, files int
 	if err := healed.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != indexSchemaVersion {
@@ -297,7 +297,7 @@ func TestIndexRefreshesSidecarMetadata(t *testing.T) {
 	root := t.TempDir()
 	writeHistory(t, root, "session.messages.json", `{"sessionId":"s","messages":[{"role":"user","content":"needle"}]}`)
 	manifest := writeHistory(t, root, "session.json", `{"session_id":"s","cwd":"/old","metadata":{"title":"old"}}`)
-	c := history.Catalog{Sources: []history.Source{{Harness: registry.HarnessCline, Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 	requireIndexedMatches(t, c, history.Query{Text: "needle", Dir: "/old"}, 1)
 	if err := os.WriteFile(manifest, []byte(`{"session_id":"s","cwd":"/new","metadata":{"title":"new"}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func TestIndexRefreshesSQLiteWALUpdatesAndDeletes(t *testing.T) {
 	t.Parallel()
 	db := databaseFixture(t, "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
 INSERT INTO sessions VALUES('s','title',1,2); INSERT INTO messages VALUES(1,'s','user','before',1);`)
-	c := history.Catalog{Sources: []history.Source{{Harness: registry.HarnessHermes, Path: databasePath(t, db)}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("hermes"), Path: databasePath(t, db)}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 	requireIndexedMatches(t, c, history.Query{Text: "before"}, 1)
 	if _, err := db.ExecContext(t.Context(), "UPDATE messages SET content='after'"); err != nil {
 		t.Fatal(err)
@@ -419,7 +419,7 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	root := t.TempDir()
 	manifest := writeHistory(t, root, "kimi.json", `{"work_dirs":[{"path":"/work/kimi-project","kaos":"local"}]}`)
 	path := writeHistory(t, root, "sessions/aaec326b87de6c65cbc919cff0fa048e/native/context.jsonl", `{"role":"user","content":"refresh token"}`)
-	c := history.Catalog{Sources: []history.Source{{Harness: registry.HarnessKimiCode, Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 	requireIndexedMatches(t, c, history.Query{Text: "refresh", Dir: "/work/kimi-project"}, 1)
 	if err := os.Remove(manifest); err != nil {
 		t.Fatal(err)

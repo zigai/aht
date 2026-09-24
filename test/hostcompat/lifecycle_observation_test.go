@@ -41,7 +41,7 @@ func (host isolatedHost) waitForActiveSession(t *testing.T) {
 	host.waitForObservation(t, "live native session at held provider request", func(session registry.Session) bool {
 		native := session.Observations.Native
 		return native != nil && native.SessionID != "" && nativeActivityMatches(session, registry.ActivityRunning) &&
-			session.Presence == registry.PresenceLive && filepath.Clean(session.CWD) == filepath.Clean(host.work) &&
+			session.Presence() == registry.PresenceLive && filepath.Clean(session.CWD) == filepath.Clean(host.work) &&
 			effectiveActivityMatches(session, registry.ActivityRunning)
 	})
 }
@@ -89,15 +89,15 @@ func (host isolatedHost) assertInterrupted(t *testing.T) {
 		if native == nil {
 			return false
 		}
-		if host.contract.ID == registry.HarnessOpenCode || host.contract.ID == registry.HarnessKilo {
+		if host.contract.ID == registry.Harness("opencode") || host.contract.ID == registry.Harness("kilo") {
 			// Their abort API ends the held turn with native idle, without
 			// deleting the durable session. Running was required before abort.
 			return terminalSession(host.contract.ID, session)
 		}
-		if host.contract.ID == registry.HarnessCopilot && session.Presence == registry.PresenceGone {
+		if host.contract.ID == registry.Harness("copilot") && session.Presence() == registry.PresenceGone {
 			return true
 		}
-		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence == registry.PresenceGone {
+		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone {
 			return true
 		}
 		return native.Activity != nil && *native.Activity == registry.ActivityInterrupted &&

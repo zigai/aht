@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -38,19 +39,19 @@ func TestManagedHookEmitsProtocolJSONWhenRequested(t *testing.T) {
 		t.Fatalf("expected empty response map for PreInvocation, got %#v", response)
 	}
 
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d, err=%v", len(sessions), err)
 	}
-	if sessions[0].Harness != registry.HarnessAgy || sessions[0].SessionID != "session-1" {
+	if sessions[0].Harness != registry.Harness("agy") || sessions[0].SessionID != "session-1" {
 		t.Fatalf("unexpected session: %#v", sessions[0])
 	}
 	if sessions[0].Observations.Native == nil || sessions[0].Observations.Native.Event != "PreInvocation" {
 		t.Fatalf("unexpected native observation: %#v", sessions[0].Observations.Native)
 	}
-	if sessions[0].Activity == nil || *sessions[0].Activity != registry.ActivityRunning {
-		t.Fatalf("unexpected activity for PreInvocation: %v", sessions[0].Activity)
+	if sessions[0].Activity() == nil || *sessions[0].Activity() != registry.ActivityRunning {
+		t.Fatalf("unexpected activity for PreInvocation: %v", sessions[0].Activity())
 	}
 }
 
@@ -86,19 +87,19 @@ func TestManagedHookGeneratedCommandExecutes(t *testing.T) {
 
 func assertStoredHookSession(t *testing.T, storePath, expectedID, expectedEvent string) {
 	t.Helper()
-	store := registry.NewFileStore(storePath)
+	store := registry.NewJournal(storePath, catalog.Rules{})
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d, err=%v", len(sessions), err)
 	}
-	if sessions[0].Harness != registry.HarnessAgy || sessions[0].SessionID != expectedID {
+	if sessions[0].Harness != registry.Harness("agy") || sessions[0].SessionID != expectedID {
 		t.Fatalf("unexpected session: %#v", sessions[0])
 	}
 	if sessions[0].Observations.Native == nil || sessions[0].Observations.Native.Event != expectedEvent {
 		t.Fatalf("unexpected native event: %#v", sessions[0].Observations.Native)
 	}
-	if sessions[0].Activity == nil || *sessions[0].Activity != registry.ActivityRunning {
-		t.Fatalf("unexpected activity for %s: %v", expectedEvent, sessions[0].Activity)
+	if sessions[0].Activity() == nil || *sessions[0].Activity() != registry.ActivityRunning {
+		t.Fatalf("unexpected activity for %s: %v", expectedEvent, sessions[0].Activity())
 	}
 }
 

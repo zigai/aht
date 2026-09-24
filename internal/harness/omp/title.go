@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/zigai/aht/internal/harness/titlefile"
+	"github.com/zigai/aht/internal/harness/transcript"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -64,12 +64,8 @@ func readSessionHeader(ctx context.Context, reader *bufio.Reader) (string, strin
 	if err != nil {
 		return "", "", false, fmt.Errorf("read OMP session header: %w", err)
 	}
-	var header struct {
-		Type  string `json:"type"`
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}
-	if err := json.Unmarshal(first, &header); err != nil {
+	header, err := transcript.ParseTree(first)
+	if err != nil {
 		return "", "", false, fmt.Errorf("decode OMP session header: %w", err)
 	}
 	if header.Type == "title" {
@@ -78,7 +74,8 @@ func readSessionHeader(ctx context.Context, reader *bufio.Reader) (string, strin
 		if err != nil {
 			return "", "", false, fmt.Errorf("read OMP session header: %w", err)
 		}
-		if err := json.Unmarshal(second, &header); err != nil {
+		header, err = transcript.ParseTree(second)
+		if err != nil {
 			return "", "", false, fmt.Errorf("decode OMP session header: %w", err)
 		}
 		if header.Type == "session" {
@@ -107,11 +104,8 @@ func scanLegacyTitle(ctx context.Context, reader *bufio.Reader, title string) (s
 		if !bytes.Contains(line, []byte(`"title_change"`)) {
 			continue
 		}
-		var entry struct {
-			Type  string `json:"type"`
-			Title string `json:"title"`
-		}
-		if json.Unmarshal(line, &entry) == nil && entry.Type == "title_change" {
+		entry, decodeErr := transcript.ParseTree(line)
+		if decodeErr == nil && entry.Type == "title_change" {
 			title = entry.Title
 		}
 	}

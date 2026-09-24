@@ -1,7 +1,6 @@
 "{{MANAGED_MARKER}}";
 "AHT_INTEGRATION_ID={{INTEGRATION_ID}}";
 "AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}";
-"aht_integration_version={{INTEGRATION_VERSION}}";
 
 import { spawn } from "node:child_process";
 
@@ -133,7 +132,7 @@ function createCore(initialRefs?: SessionRefs, client?: OpenCodeClient) {
 
     const args = ["report", "opencode", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
     addEvent(args, valueAt(event, ["type"]));
-    args.push("--attribute", `aht_integration_version={{INTEGRATION_VERSION}}`);
+    args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
     if (currentSessionId) {
       args.push("--session-id", currentSessionId);
     }
@@ -163,7 +162,7 @@ function createCore(initialRefs?: SessionRefs, client?: OpenCodeClient) {
         addAttribute(args, "opencode_title", firstPathString(session, [["title"], ["data", "title"]]));
       } catch {}
     }
-    addAttribute(args, "aht_integration", source);
+    args.push("--reporter", source);
 
     return enqueueCommand(args);
   }

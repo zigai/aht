@@ -32,9 +32,11 @@ type goosePayload struct {
 
 func New() gooseHarness {
 	return gooseHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ID:           registry.HarnessGoose,
-		Aliases:      nil,
-		ProcessNames: []string{"goose"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("goose"),
+		Aliases:          nil,
+		ProcessNames:     []string{"goose"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -53,7 +55,7 @@ func New() gooseHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  gooseIntegrationSource,
-		StateAuthority:     harness.AuthorityHook,
+		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
 	})}
 }
@@ -90,7 +92,6 @@ func (gooseHarness) InstallPlan(binary string) harness.InstallPlan {
 		},
 		SnippetOrder:   []string{"plugin.json", "hooks/hooks.json", "scripts/report.sh", gooseMarkerFileName},
 		MarkerFile:     gooseMarkerFileName,
-		ObsoleteFiles:  nil,
 		ImportManifest: nil,
 		Registration:   nil,
 	}}}}
@@ -190,9 +191,9 @@ func gooseReportScript(binary string) string {
 		"  exit 0",
 		"fi",
 		"if [ \"$transition\" = gone ]; then",
-		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.HarnessGoose)) + " --presence \"$transition\" --event \"$event\" --attribute " + harness.ShellQuote("aht_integration_version="+strconv.Itoa(harness.IntegrationVersion)) + " --attribute " + harness.ShellQuote("aht_integration="+gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.Harness("goose"))) + " --presence \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(strconv.Itoa(harness.IntegrationVersion)) + " --reporter " + harness.ShellQuote(gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
 		"else",
-		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.HarnessGoose)) + " --activity \"$transition\" --event \"$event\" --attribute " + harness.ShellQuote("aht_integration_version="+strconv.Itoa(harness.IntegrationVersion)) + " --attribute " + harness.ShellQuote("aht_integration="+gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.Harness("goose"))) + " --activity \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(strconv.Itoa(harness.IntegrationVersion)) + " --reporter " + harness.ShellQuote(gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
 		"fi",
 		"",
 	}, "\n")
@@ -214,4 +215,11 @@ func goosePluginsDir() string {
 	}
 
 	return filepath.Join(".agents", "plugins")
+}
+
+func (gooseHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+	if event == "" {
+		event = attributes["goose_event"]
+	}
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "goose_start_source", "source", "reason"))
 }

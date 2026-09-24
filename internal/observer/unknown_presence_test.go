@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/internal/processinfo"
 	"github.com/zigai/aht/pkg/mux"
 	"github.com/zigai/aht/pkg/registry"
@@ -27,14 +28,9 @@ func TestObserverReconcilesUnknownNativeSession(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "sessions.json")
 			at := time.Now().UTC().Add(-time.Hour)
-			store := registry.NewFileStore(path)
+			store := registry.NewJournal(path, catalog.Rules{})
 			activity := registry.ActivityIdle
-			session, err := store.Observe(t.Context(), registry.Observation{
-				Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent,
-				Harness: registry.HarnessOpenCode, Identity: registry.ObservationIdentity{SessionID: "native-idle"},
-				NativeEvent: "session.idle", Activity: &activity,
-				Tmux: &registry.TmuxContext{Inside: true, PaneID: "%9", PanePID: test.panePID}, ObservedAt: at,
-			})
+			session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("opencode"), At: at, Subject: registry.ObservationIdentity{SessionID: "native-idle"}, Evidence: &registry.Report{Event: "session.idle", Activity: &activity, Location: &registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%9", PanePID: test.panePID}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -51,10 +47,10 @@ func TestObserverReconcilesUnknownNativeSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Presence != test.want {
-				t.Fatalf("presence = %q, want %q", got.Presence, test.want)
+			if got.Presence() != test.want {
+				t.Fatalf("presence = %q, want %q", got.Presence(), test.want)
 			}
-			if test.want == registry.PresenceGone && got.Activity != nil {
+			if test.want == registry.PresenceGone && got.Activity() != nil {
 				t.Fatalf("retired session retains activity: %+v", got)
 			}
 		})

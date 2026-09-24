@@ -110,19 +110,20 @@ type herdrSessionItem struct {
 	Dead        bool   `json:"dead"`
 }
 
-func Current() registry.MultiplexerContext {
+func Current() registry.Location {
 	return CurrentWithEnv(Env{
 		Enabled: os.Getenv("HERDR_ENV"), SessionName: os.Getenv("HERDR_SESSION"), SocketPath: os.Getenv("HERDR_SOCKET_PATH"),
 		WorkspaceID: os.Getenv("HERDR_WORKSPACE_ID"), TabID: os.Getenv("HERDR_TAB_ID"), PaneID: os.Getenv("HERDR_PANE_ID"),
 	})
 }
 
-func CurrentWithEnv(env Env) registry.MultiplexerContext {
+func CurrentWithEnv(env Env) registry.Location {
 	if strings.TrimSpace(env.PaneID) == "" || (env.Enabled != "1" && strings.TrimSpace(env.SocketPath) == "") {
-		var empty registry.MultiplexerContext
+		var empty registry.Location
 		return empty
 	}
-	return registry.MultiplexerContext{ //nolint:exhaustruct_v5 // env exposes only Herdr identity
+	return registry.Location{
+		SessionID: "", WorkspaceName: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: "",
 		Kind: registry.MultiplexerHerdr, ServerID: env.SocketPath, SessionName: env.SessionName,
 		WorkspaceID: env.WorkspaceID, TabID: env.TabID, PaneID: env.PaneID,
 	}
@@ -361,7 +362,8 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 		label := cmp.Or(agent.Agent, agent.Name, agent.Label, item.Agent, item.AgentName)
 		title := cmp.Or(item.Title, item.PaneTitle, item.Label, label)
 
-		location := registry.MultiplexerContext{ //nolint:exhaustruct_v5 // snapshot lacks server, window, TTY, and process
+		location := registry.Location{
+			ServerID: "", SessionID: "", TabIndex: "", WindowID: "", WindowIndex: "", WindowName: "", PaneIndex: "", PanePID: 0, PaneTTY: "", ClientTTY: "",
 			Kind:            registry.MultiplexerHerdr,
 			SessionName:     session,
 			WorkspaceID:     item.WorkspaceID,

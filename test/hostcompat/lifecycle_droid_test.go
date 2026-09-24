@@ -149,7 +149,7 @@ func (host isolatedHost) runDroidRPC(t *testing.T, env []string, previous *regis
 			native := session.Observations.Native
 			return session.SessionID == sessionID && native != nil && native.SessionID == sessionID &&
 				nativeActivityMatches(session, registry.ActivityRunning) && effectiveActivityMatches(session, registry.ActivityRunning) &&
-				session.Presence == registry.PresenceLive &&
+				session.Presence() == registry.PresenceLive &&
 				(previous == nil || (session.ID == previous.ID && native.ObservedAt.After(previous.Observations.Native.ObservedAt)))
 		})
 		if !interrupt {

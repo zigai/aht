@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/broker"
 	"github.com/zigai/aht/pkg/registry"
 )
@@ -35,23 +36,6 @@ const (
 	ActivityFailed      Activity = registry.ActivityFailed
 	ActivityInterrupted Activity = registry.ActivityInterrupted
 	ActivityUnknown     Activity = registry.ActivityUnknown
-
-	HarnessClaude   Harness = registry.HarnessClaude
-	HarnessCodex    Harness = registry.HarnessCodex
-	HarnessCursor   Harness = registry.HarnessCursor
-	HarnessCopilot  Harness = registry.HarnessCopilot
-	HarnessCline    Harness = registry.HarnessCline
-	HarnessKimiCode Harness = registry.HarnessKimiCode
-	HarnessGrok     Harness = registry.HarnessGrok
-	HarnessGoose    Harness = registry.HarnessGoose
-	HarnessPi       Harness = registry.HarnessPi
-	HarnessOmp      Harness = registry.HarnessOmp
-	HarnessOpenCode Harness = registry.HarnessOpenCode
-	HarnessAgy      Harness = registry.HarnessAgy
-	HarnessKilo     Harness = registry.HarnessKilo
-	HarnessDroid    Harness = registry.HarnessDroid
-	HarnessOpenClaw Harness = registry.HarnessOpenClaw
-	HarnessHermes   Harness = registry.HarnessHermes
 
 	MultiplexerTmux                  MultiplexerKind = registry.MultiplexerTmux
 	MultiplexerZellij                MultiplexerKind = registry.MultiplexerZellij
@@ -99,11 +83,13 @@ type (
 	// Harness identifies a supported AI coding agent.
 	Harness = registry.Harness
 
-	// TmuxContext represents the tmux multiplexer location of a session.
-	TmuxContext = registry.TmuxContext
+	Liveness = registry.Liveness
+	Live     = registry.Live
+	Gone     = registry.Gone
+	Unknown  = registry.Unknown
 
-	// MultiplexerContext represents the unified multiplexer location of a session.
-	MultiplexerContext = registry.MultiplexerContext
+	// Location represents the unified multiplexer location of a session.
+	Location = registry.Location
 
 	// MultiplexerKind identifies a supported terminal multiplexer.
 	MultiplexerKind = registry.MultiplexerKind
@@ -138,7 +124,6 @@ type stateStore interface {
 	ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error)
 	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
 	Get(ctx context.Context, id string) (registry.Session, error)
-	SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error)
 	SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error)
 	GC(ctx context.Context, maxAge time.Duration) (registry.GCResult, error)
 	Reset(ctx context.Context) (registry.ResetResult, error)
@@ -165,6 +150,21 @@ type OperationError struct {
 
 // New returns a client for the configured local AHT instance. An unsupported
 // Mode makes all operations return ErrInvalidMode without performing I/O.
+type (
+	Evidence            = registry.Evidence
+	Report              = registry.Report
+	Reporter            = registry.Reporter
+	Sighting            = registry.Sighting
+	Placement           = registry.Placement
+	Listing             = registry.Listing
+	Reading             = registry.Reading
+	Incarnation         = registry.Incarnation
+	Authority           = registry.Authority
+	Lifecycle           = registry.NativeLifecycle
+	ProcessIdentity     = registry.ProcessIdentity
+	ObservationIdentity = registry.ObservationIdentity
+)
+
 func New(config Config) *Client {
 	mode := config.Mode
 	if mode == "" {
@@ -189,7 +189,7 @@ func New(config Config) *Client {
 	case ModeRealtimeOnly:
 		store = realtime
 	case ModeDurableOnly:
-		store = registry.NewFileStore(storePath)
+		store = registry.NewJournal(storePath, catalog.Rules{})
 	case ModeAuto:
 		store = broker.NewStoreForSocket(storePath, socketPath)
 	default:
@@ -304,11 +304,6 @@ func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter,
 // Summary returns aggregate session counts grouped by terminal-multiplexer session.
 func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
 	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
-}
-
-// SummaryByTmuxSession implements registry.Store.
-func (c *Client) SummaryByTmuxSession(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return c.Summary(ctx, filter)
 }
 
 // GC removes gone-session tombstones at least deleteAfter old.

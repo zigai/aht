@@ -54,7 +54,7 @@ func (host isolatedHost) runKimiWire(t *testing.T, command *exec.Cmd, interrupt 
 	if interrupt {
 		host.waitForObservation(t, "native Wire cancellation before EOF", func(session registry.Session) bool {
 			native := session.Observations.Native
-			return native != nil && native.Attributes["aht_integration"] == "kimi-wire" &&
+			return native != nil && native.Reporter.Integration == "kimi-wire" &&
 				native.Activity != nil && *native.Activity == registry.ActivityInterrupted
 		})
 	}

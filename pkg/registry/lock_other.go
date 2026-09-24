@@ -41,3 +41,14 @@ func (l *storeLock) Close() error {
 	}
 	return nil
 }
+
+func tryStoreLock(path string) (*storeLock, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if os.IsExist(err) {
+		return nil, ErrStoreOwned
+	}
+	if err != nil {
+		return nil, fmt.Errorf("opening owner lock: %w", err)
+	}
+	return &storeLock{file: file, path: path}, nil
+}

@@ -109,11 +109,6 @@ func installedNative(id registry.Harness, binary string) (bool, error) {
 		return false, err
 	}
 	paths := planPaths(plan)
-	for _, action := range plan.Actions {
-		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
-			paths = append(paths, plugin.Plan.ObsoleteFiles...)
-		}
-	}
 	for _, path := range paths {
 		status, err := classifyArtifactForHarness(path, id)
 		if err != nil {

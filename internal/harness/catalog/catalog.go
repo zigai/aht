@@ -76,19 +76,6 @@ func Find(harnessID registry.Harness) (harness.Adapter, bool) {
 	return nil, false
 }
 
-func PolicyFor(harnessID registry.Harness) (harness.StateAuthority, bool, string) {
-	adapter, ok := Find(harnessID)
-	if !ok {
-		return harness.AuthorityHook, false, ""
-	}
-	def := adapter.Definition()
-	auth := def.StateAuthority
-	if auth == "" {
-		auth = harness.AuthorityHook
-	}
-	return auth, def.ScreenFallback, def.IntegrationSource
-}
-
 func SupportsScreen(harnessID registry.Harness) bool {
 	adapter, ok := Find(harnessID)
 	if !ok {
@@ -224,23 +211,28 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 }
 
 func WithResumeCommand(observation registry.Observation) registry.Observation {
-	if observation.Catalog != nil && len(observation.Catalog.ResumeCommand) > 0 {
+	switch observation.Evidence.(type) {
+	case *registry.Report, *registry.Listing:
+	case *registry.Sighting, *registry.Placement, *registry.Reading, nil:
 		return observation
 	}
-	command := ResumeCommandFor(observation.Harness, observation.Identity.SessionID, observation.Identity.SessionPath)
+	if observation.Listing() != nil && len(observation.Listing().ResumeCommand) > 0 {
+		return observation
+	}
+	command := ResumeCommandFor(observation.Harness, observation.Subject.SessionID, observation.Subject.SessionPath)
 	if len(command) == 0 {
 		return observation
 	}
-	if observation.Catalog == nil {
-		observation.Catalog = &registry.CatalogMetadata{
+	if observation.Listing() == nil {
+		observation.SetListing(&registry.Listing{
 			ResumeCommand: nil,
 			CWD:           "",
 			ProjectRoot:   "",
 			ProcessPID:    0,
 			Current:       false,
-		}
+		})
 	}
-	observation.Catalog.ResumeCommand = command
+	observation.Listing().ResumeCommand = command
 	return observation
 }
 
@@ -269,6 +261,38 @@ func HandleHook(
 		result.Response = map[string]any{}
 	}
 	return result, true
+}
+
+func LifecycleFor(id registry.Harness, event string, attributes map[string]string) harness.LifecycleDefaults {
+	if adapter, ok := Find(id); ok {
+		if translator, ok := adapter.(harness.LifecycleAdapter); ok {
+			return translator.LifecycleDefaults(event, attributes)
+		}
+	}
+	return harness.TranslateLifecycle(event, "")
+}
+
+func PrepareObservation(observation registry.Observation) registry.Observation {
+	if observation.Kind() == "report" {
+		defaults := LifecycleFor(observation.Harness, observation.Report().Event, observation.Report().Attributes)
+		observation.Report().Event = defaults.Event
+		if observation.Report().Lifecycle == nil && defaults.Lifecycle != "" {
+			observation.Report().Lifecycle = &defaults.Lifecycle
+		}
+		if observation.Report().Claim == nil && defaults.Presence != "" {
+			observation.Report().Claim = &defaults.Presence
+		}
+	}
+	return WithResumeCommand(observation)
+}
+
+func HookTimeoutSecondsFor(id registry.Harness, event string) int {
+	if adapter, ok := Find(id); ok {
+		if policy, ok := adapter.(interface{ HookTimeout(event string) int }); ok {
+			return policy.HookTimeout(event)
+		}
+	}
+	return harness.HookTimeoutSeconds
 }
 
 func genericEnvNames(field harness.EnvField) []string {

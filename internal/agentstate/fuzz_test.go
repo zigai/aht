@@ -21,6 +21,6 @@ func FuzzParseManifest(f *testing.F) {
 	f.Add([]byte("version=1\nagent='codex'\n[[rules]]\nid='idle'\nstate='idle'\nany=['ready']\n"))
 	f.Add([]byte("not toml"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = ParseManifest(data, registry.HarnessCodex)
+		_, _ = ParseManifest(data, registry.Harness("codex"))
 	})
 }

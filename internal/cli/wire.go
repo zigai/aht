@@ -9,7 +9,6 @@ import (
 
 	"github.com/zigai/aht/internal/harness"
 	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
 )
 
 const wireHelp = `Run an owned Kimi Code process using its native Wire protocol.
@@ -55,7 +54,7 @@ func (app *application) validateWireArgs(cmd *cobra.Command, args []string) erro
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
 	harnessID, err := harnesscatalog.Normalize(args[0])
-	if err != nil || harnessID != registry.HarnessKimiCode {
+	if err != nil {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
 	if cmd.ArgsLenAtDash() != 1 {
@@ -91,6 +90,7 @@ func (app *application) runWire(cmd *cobra.Command, args []string) error {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
 	if err := runner.RunWire(cmd.Context(), harness.WireOptions{
+		Sink:      app.registryStore(),
 		Args:      args[1:],
 		StorePath: app.resolvedStorePath(),
 		Stdin:     inputFile,

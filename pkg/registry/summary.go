@@ -28,8 +28,6 @@ func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 	order := make([]summaryGroupKey, 0)
 
 	for _, session := range sessions {
-		populateMultiplexerProjection(&session)
-
 		key, label, keyStr := sessionGroupKey(session, groupBy)
 		summary := byKey[key]
 		if summary == nil {
@@ -62,32 +60,27 @@ func sessionGroupKey(session Session, groupBy SummaryGroupBy) (summaryGroupKey, 
 }
 
 func multiplexerSummaryKey(session Session) (summaryGroupKey, string, string) {
-	populateMultiplexerProjection(&session)
 	key := summaryGroupKey{
 		groupBy:     SummaryGroupByMultiplexerSession,
-		kind:        session.Multiplexer.Kind,
-		server:      session.Multiplexer.ServerID,
+		kind:        session.Location.Kind,
+		server:      session.Location.ServerID,
 		id:          "",
 		name:        "",
 		projectRoot: "",
 		harness:     "",
 	}
-	if session.Multiplexer.SessionID != "" {
-		key.id = session.Multiplexer.SessionID
+	if session.Location.SessionID != "" {
+		key.id = session.Location.SessionID
 	} else {
-		key.name = session.Multiplexer.SessionName
+		key.name = session.Location.SessionName
 	}
 
 	var label string
 	switch {
-	case session.Multiplexer.SessionName != "":
-		label = session.Multiplexer.SessionName
-	case session.Multiplexer.SessionID != "":
-		label = session.Multiplexer.SessionID
-	case session.Tmux.SessionName != "":
-		label = session.Tmux.SessionName
-	case session.Tmux.SessionID != "":
-		label = session.Tmux.SessionID
+	case session.Location.SessionName != "":
+		label = session.Location.SessionName
+	case session.Location.SessionID != "":
+		label = session.Location.SessionID
 	default:
 		label = "unknown"
 	}
@@ -174,8 +167,6 @@ func newSummaryForGroup(
 		MultiplexerServerID:    "",
 		MultiplexerSessionID:   "",
 		MultiplexerSessionName: "",
-		TmuxSessionID:          "",
-		TmuxSessionName:        "",
 		Total:                  0,
 		Live:                   0,
 		Gone:                   0,
@@ -197,12 +188,10 @@ func newSummaryForGroup(
 	case SummaryGroupByMultiplexerSession:
 		fallthrough
 	default:
-		summary.MultiplexerKind = session.Multiplexer.Kind
-		summary.MultiplexerServerID = session.Multiplexer.ServerID
-		summary.MultiplexerSessionID = session.Multiplexer.SessionID
-		summary.MultiplexerSessionName = session.Multiplexer.SessionName
-		summary.TmuxSessionID = session.Tmux.SessionID
-		summary.TmuxSessionName = session.Tmux.SessionName
+		summary.MultiplexerKind = session.Location.Kind
+		summary.MultiplexerServerID = session.Location.ServerID
+		summary.MultiplexerSessionID = session.Location.SessionID
+		summary.MultiplexerSessionName = session.Location.SessionName
 	}
 
 	return summary
@@ -240,8 +229,6 @@ func sortMultiplexerSummaries(summaries []Summary) {
 			cmp.Compare(a.MultiplexerServerID, b.MultiplexerServerID),
 			cmp.Compare(a.MultiplexerSessionName, b.MultiplexerSessionName),
 			cmp.Compare(a.MultiplexerSessionID, b.MultiplexerSessionID),
-			cmp.Compare(a.TmuxSessionName, b.TmuxSessionName),
-			cmp.Compare(a.TmuxSessionID, b.TmuxSessionID),
 			cmp.Compare(a.GroupKey, b.GroupKey),
 		)
 	})
@@ -286,7 +273,7 @@ func sortHarnessSummaries(summaries []Summary) {
 
 func (s *Summary) addSession(session Session) {
 	s.Total++
-	switch session.Presence {
+	switch session.Presence() {
 	case PresenceLive:
 		s.Live++
 	case PresenceGone:
@@ -296,10 +283,10 @@ func (s *Summary) addSession(session Session) {
 	default:
 		s.PresenceUnknown++
 	}
-	if session.Presence == PresenceGone {
+	if session.Presence() == PresenceGone {
 		return
 	}
-	s.addActivity(session.Activity)
+	s.addActivity(session.Activity())
 }
 
 func (s *Summary) addActivity(activity *Activity) {

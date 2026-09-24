@@ -79,3 +79,21 @@ func (l *storeLock) Close() error {
 
 	return nil
 }
+
+func tryStoreLock(path string) (*storeLock, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening owner lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		closeErr := file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			if closeErr != nil {
+				return nil, fmt.Errorf("closing contended owner lock: %w", closeErr)
+			}
+			return nil, ErrStoreOwned
+		}
+		return nil, errors.Join(fmt.Errorf("locking owner: %w", err), closeErr)
+	}
+	return &storeLock{file: file}, nil
+}

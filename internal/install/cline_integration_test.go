@@ -23,7 +23,7 @@ func TestIntegrationClineCLIDiscoversManagedPlugin(t *testing.T) {
 	clineDir := filepath.Join(home, ".cline")
 	t.Setenv("HOME", home)
 	t.Setenv("CLINE_DIR", clineDir)
-	result, err := Run(Options{Harness: registry.HarnessCline, Binary: testInstallBinary})
+	result, err := Run(Options{Harness: registry.Harness("cline"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("installing Cline plugin: %v", err)
 	}

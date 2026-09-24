@@ -14,36 +14,6 @@ import (
 	"github.com/zigai/aht/pkg/registry"
 )
 
-func TestTmuxFormatWithRealTmuxEscapedFields(t *testing.T) {
-	server := testtmux.New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
-	weirdValue := "value with spaces 'quote $dollar back\\slash and-more"
-	if err := server.Tmux.GlobalSessionOptions().SetUser(t.Context(), "@aht_weird", weirdValue); err != nil {
-		t.Fatal(err)
-	}
-	output, err := server.Session.Format(t.Context(), gotmux.Format(tmuxFormat([]string{"@aht_weird"})))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fields, err := parseTmuxFields(string(output), 1)
-	if err != nil {
-		t.Fatalf("parseTmuxFields returned error: %v; output=%q", err, output)
-	}
-	if len(fields) != 1 {
-		t.Fatalf("fields = %#v, want one field", fields)
-	}
-	if fields[0] != weirdValue {
-		t.Fatalf("field = %q, want %q", fields[0], weirdValue)
-	}
-}
-
-func tmuxFormat(fields []string) string {
-	parts := make([]string, 0, len(fields))
-	for _, field := range fields {
-		parts = append(parts, escapedFieldPrefix+"#{q:"+field+"}")
-	}
-	return strings.Join(parts, " ")
-}
-
 func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 	server := testtmux.New(t, gotmux.NewSessionOptions{Name: "gotmux-test", Program: gotmux.Exec("sh", "-c", "echo 'hello gotmux'; sleep 60")})
 	if _, err := server.Session.NewWindow(t.Context(), gotmux.NewWindowOptions{Program: gotmux.Exec("sleep", "60")}); err != nil {
@@ -57,12 +27,7 @@ func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 	pid := strconv.Itoa(server.Session.Identity().PID)
 
 	pane := Pane{
-		Tmux: registry.TmuxContext{
-			Inside:       true,
-			ServerSocket: server.Socket,
-			SessionName:  "gotmux-test",
-			PaneID:       paneID,
-		},
+		Tmux:           registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionName: "gotmux-test", PaneID: paneID},
 		ServerIdentity: server.Socket,
 		PanePID:        0,
 		PaneTTY:        "",

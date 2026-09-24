@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	native "github.com/zigai/aht/internal/harness/transcript"
 )
 
 const directoryScanThreshold = 32
@@ -243,7 +245,7 @@ func (index *historyIndex) readExcerpts(ctx context.Context, s *search, id int64
 		if err = rows.Scan(&excerpt.Role, &excerpt.Text, &excerpt.MessageID, &excerpt.Line, &timestamp); err != nil {
 			return fmt.Errorf("read indexed text: %w", err)
 		}
-		s.matchText(&t, excerpt.Role, excerpt.Text, excerpt.MessageID, excerpt.Line, nativeTime(timestamp))
+		s.matchText(&t, excerpt.Role, excerpt.Text, excerpt.MessageID, excerpt.Line, native.NativeTime(timestamp))
 	}
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("scan indexed text: %w", err)

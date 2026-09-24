@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	catalog "github.com/zigai/aht/internal/harness/catalog"
 	"github.com/zigai/aht/pkg/registry"
 )
 
@@ -25,9 +26,14 @@ func TestDiffWatchEventsSeparatesPresenceAndActivity(t *testing.T) {
 	at := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	oldActivity := registry.ActivityIdle
 	newActivity := registry.ActivityWaiting
-	old := registry.Session{ID: "s", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Activity: &oldActivity, UpdatedAt: at}
+	old := registry.Session{
+		ID:        "s",
+		Harness:   registry.Harness("codex"),
+		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&oldActivity), nil),
+	}
 	next := old
-	next.Activity = &newActivity
+	next.Liveness = registry.NewLiveness(next.Presence(), registry.ActivityValue(&newActivity), next.Decision())
 	next.ActivityChangedAt = at.Add(time.Minute)
 	next.UpdatedAt = at.Add(time.Minute)
 	events := diffWatchEvents(map[string]registry.Session{"s": old}, map[string]registry.Session{"s": next}, at.Add(2*time.Minute))
@@ -43,12 +49,17 @@ func TestDiffWatchEventsReportsMultiplexerLocationChanges(t *testing.T) {
 	t.Parallel()
 	at := time.Now().UTC()
 	activity := registry.ActivityIdle
-	old := registry.Session{ID: "s", Harness: registry.HarnessCodex, Presence: registry.PresenceLive, Activity: &activity, UpdatedAt: at}
+	old := registry.Session{
+		ID:        "s",
+		Harness:   registry.Harness("codex"),
+		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&activity), nil),
+	}
 	next := old
-	next.Multiplexer = registry.MultiplexerContext{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"}
+	next.Location = registry.Location{Kind: registry.MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"}
 	next.UpdatedAt = at.Add(time.Second)
 	events := diffWatchEvents(map[string]registry.Session{"s": old}, map[string]registry.Session{"s": next}, at.Add(2*time.Second))
-	if len(events) != 1 || events[0].Action != watchActionLocationChanged || events[0].Multiplexer != "zellij:work:terminal_7" {
+	if len(events) != 1 || events[0].Action != watchActionLocationChanged || events[0].Location != "zellij:work:terminal_7" {
 		t.Fatalf("multiplexer location events = %#v", events)
 	}
 }
@@ -58,12 +69,10 @@ func TestDiffWatchEventsIgnoresTransientWindowNameAndPathChanges(t *testing.T) {
 	at := time.Now().UTC()
 	activity := registry.ActivityIdle
 	old := registry.Session{
-		ID:       "s",
-		Harness:  registry.HarnessOmp,
-		Presence: registry.PresenceLive,
-		Activity: &activity,
-		Tmux: registry.TmuxContext{
-			Inside:          true,
+		ID:      "s",
+		Harness: registry.Harness("omp"),
+		Location: registry.Location{
+			Kind:            registry.MultiplexerTmux,
 			SessionName:     "0",
 			WindowIndex:     "2",
 			WindowName:      "zsh",
@@ -71,11 +80,12 @@ func TestDiffWatchEventsIgnoresTransientWindowNameAndPathChanges(t *testing.T) {
 			PaneCurrentPath: "/home/zigai/Projects/aht",
 		},
 		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&activity), nil),
 	}
 	// Only WindowName (fleeting command name) and PaneCurrentPath change
 	next := old
-	next.Tmux.WindowName = "git"
-	next.Tmux.PaneCurrentPath = "/home/zigai/Projects/aht/internal"
+	next.Location.WindowName = "git"
+	next.Location.PaneCurrentPath = "/home/zigai/Projects/aht/internal"
 	next.UpdatedAt = at.Add(time.Second)
 
 	events := diffWatchEvents(map[string]registry.Session{"s": old}, map[string]registry.Session{"s": next}, at.Add(2*time.Second))
@@ -89,11 +99,9 @@ func TestDiffWatchEventsIgnoresTransientMultiplexerTabNameChanges(t *testing.T) 
 	at := time.Now().UTC()
 	activity := registry.ActivityIdle
 	old := registry.Session{
-		ID:       "s2",
-		Harness:  registry.HarnessClaude,
-		Presence: registry.PresenceLive,
-		Activity: &activity,
-		Multiplexer: registry.MultiplexerContext{
+		ID:      "s2",
+		Harness: registry.Harness("claude"),
+		Location: registry.Location{
 			Kind:        registry.MultiplexerZellij,
 			SessionName: "main",
 			TabID:       "1",
@@ -101,9 +109,10 @@ func TestDiffWatchEventsIgnoresTransientMultiplexerTabNameChanges(t *testing.T) 
 			PaneID:      "terminal_1",
 		},
 		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&activity), nil),
 	}
 	next := old
-	next.Multiplexer.TabName = "running-editor"
+	next.Location.TabName = "running-editor"
 	next.UpdatedAt = at.Add(time.Second)
 
 	events := diffWatchEvents(map[string]registry.Session{"s2": old}, map[string]registry.Session{"s2": next}, at.Add(2*time.Second))
@@ -200,9 +209,9 @@ func TestWaitTestWatchReadyObservesStartupError(t *testing.T) {
 
 func TestWatchJSONModeEmitsJSONLinesOnlyWhenRequested(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	activity := registry.ActivityIdle
-	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "watch-json"}, Activity: &activity, ObservedAt: time.Now()}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now(), Subject: registry.ObservationIdentity{SessionID: "watch-json"}, Evidence: &registry.Report{Activity: &activity}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -228,9 +237,9 @@ func TestWatchJSONModeEmitsJSONLinesOnlyWhenRequested(t *testing.T) {
 
 func TestWatchDefaultsToHumanTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	activity := registry.ActivityIdle
-	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.HarnessCodex, Source: registry.ObservationSourceNative, Evidence: registry.ObservationEvidenceNativeEvent, Identity: registry.ObservationIdentity{SessionID: "watch-human"}, Activity: &activity, ObservedAt: time.Now()}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now(), Subject: registry.ObservationIdentity{SessionID: "watch-human"}, Evidence: &registry.Report{Activity: &activity}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -251,16 +260,9 @@ func TestWatchDefaultsToHumanTable(t *testing.T) {
 
 func TestWatchNoSnapshotSignalsReadyWithoutOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewFileStore(path)
+	store := registry.NewJournal(path, catalog.Rules{})
 	activity := registry.ActivityIdle
-	if _, err := store.Observe(context.Background(), registry.Observation{
-		Harness:    registry.HarnessCodex,
-		Source:     registry.ObservationSourceNative,
-		Evidence:   registry.ObservationEvidenceNativeEvent,
-		Identity:   registry.ObservationIdentity{SessionID: "watch-no-snapshot"},
-		Activity:   &activity,
-		ObservedAt: time.Now(),
-	}); err != nil {
+	if _, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now(), Subject: registry.ObservationIdentity{SessionID: "watch-no-snapshot"}, Evidence: &registry.Report{Activity: &activity}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,9 +285,14 @@ func TestDiffWatchEventsReportsProcessTransitions(t *testing.T) {
 	t.Parallel()
 	at := time.Now().UTC()
 	activity := registry.ActivityUnknown
-	old := registry.Session{ID: "s", Harness: registry.HarnessClaude, Presence: registry.PresenceUnknown, Activity: &activity, UpdatedAt: at}
+	old := registry.Session{
+		ID:        "s",
+		Harness:   registry.Harness("claude"),
+		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceUnknown, registry.ActivityValue(&activity), nil),
+	}
 	next := old
-	next.Presence = registry.PresenceLive
+	next.Liveness = registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(next.Activity()), next.Decision())
 	next.PresenceChangedAt = at.Add(time.Second)
 	next.UpdatedAt = at.Add(time.Second)
 	next.Process = &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
@@ -301,8 +308,10 @@ func TestDiffWatchEventsReportsProcessBindingWithoutPresenceChange(t *testing.T)
 	at := time.Now().UTC()
 	activity := registry.ActivityIdle
 	old := registry.Session{
-		ID: "s", Harness: registry.HarnessCodex, Presence: registry.PresenceLive,
-		Activity: &activity, UpdatedAt: at,
+		ID:        "s",
+		Harness:   registry.Harness("codex"),
+		UpdatedAt: at,
+		Liveness:  registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&activity), nil),
 	}
 	next := old
 	next.Process = &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
@@ -319,13 +328,13 @@ func TestDiffWatchEventsReportsProcessBindingWithoutPresenceChange(t *testing.T)
 
 func TestFormatWatchPlainUsesNullableActivity(t *testing.T) {
 	t.Parallel()
-	event := watchEvent{Time: time.Unix(0, 0), Action: watchActionRemoved, Harness: registry.HarnessCodex, Presence: registry.PresenceGone, Label: "gone"}
+	event := watchEvent{Time: time.Unix(0, 0), Action: watchActionRemoved, Harness: registry.Harness("codex"), Presence: registry.PresenceGone, Label: "gone"}
 	want := "1970-01-01T00:00:00Z removed codex gone null session=gone"
 	if got := formatWatchPlainEvent(event); got != want {
 		t.Fatalf("formatWatchPlainEvent(nil activity) = %q, want %q", got, want)
 	}
 	unknown := registry.ActivityUnknown
-	unknownEvent := watchEvent{Time: time.Unix(0, 0), Action: watchActionRemoved, Harness: registry.HarnessCodex, Presence: registry.PresenceGone, Activity: &unknown, Label: "gone"}
+	unknownEvent := watchEvent{Time: time.Unix(0, 0), Action: watchActionRemoved, Harness: registry.Harness("codex"), Presence: registry.PresenceGone, Activity: &unknown, Label: "gone"}
 	wantUnknown := "1970-01-01T00:00:00Z removed codex gone unknown session=gone"
 	if got := formatWatchPlainEvent(unknownEvent); got != wantUnknown {
 		t.Fatalf("formatWatchPlainEvent(unknown activity) = %q, want %q", got, wantUnknown)
@@ -352,7 +361,7 @@ func TestFormatWatchTableAlignsColumns(t *testing.T) {
 	ompEvent := watchEvent{
 		Time:     at,
 		Action:   watchActionSnapshot,
-		Harness:  registry.HarnessOmp,
+		Harness:  registry.Harness("omp"),
 		Presence: registry.PresenceLive,
 		Activity: &idle,
 		Label:    "Format watch command column alignment",
@@ -360,7 +369,7 @@ func TestFormatWatchTableAlignsColumns(t *testing.T) {
 	piEvent := watchEvent{
 		Time:     at,
 		Action:   watchActionSnapshot,
-		Harness:  registry.HarnessPi,
+		Harness:  registry.Harness("pi"),
 		Presence: registry.PresenceLive,
 		Activity: &idle,
 		Label:    "/home/zigai/.pi/agent/sessions/--home-zigai-Projects-config--/2026-08-27T20-…",
@@ -368,7 +377,7 @@ func TestFormatWatchTableAlignsColumns(t *testing.T) {
 	locationEvent := watchEvent{
 		Time:     at,
 		Action:   watchActionLocationChanged,
-		Harness:  registry.HarnessOmp,
+		Harness:  registry.Harness("omp"),
 		Presence: registry.PresenceLive,
 		Activity: &unknown,
 		Label:    "01a044e3-a40c-77dc-8593-f0f6a3a7c42f",

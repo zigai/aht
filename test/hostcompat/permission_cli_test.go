@@ -32,11 +32,11 @@ func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 				t.Fatal("unexpected CLI provider setup commands")
 			}
 			switch contract.ID {
-			case registry.HarnessClaude:
+			case registry.Harness("claude"):
 				runClaudePermission(t, host, configured.Env, allow)
-			case registry.HarnessCodex:
+			case registry.Harness("codex"):
 				runCodexPermission(t, host, configured.Env, allow)
-			case registry.HarnessCopilot:
+			case registry.Harness("copilot"):
 				env := make([]string, 0, len(configured.Env))
 				for _, value := range configured.Env {
 					if !strings.HasPrefix(value, "COPILOT_ALLOW_ALL=") {

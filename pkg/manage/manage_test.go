@@ -15,7 +15,7 @@ func TestSupportedHarnesses(t *testing.T) {
 	t.Parallel()
 
 	harnesses := manage.SupportedHarnesses()
-	for _, expected := range []registry.Harness{registry.HarnessClaude, registry.HarnessCodex, registry.HarnessOpenCode} {
+	for _, expected := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("opencode")} {
 		if !slices.Contains(harnesses, expected) {
 			t.Errorf("SupportedHarnesses() missing %s", expected)
 		}
@@ -34,12 +34,12 @@ func writeExecutableFixture(t *testing.T, path string, content []byte) {
 
 func assertMissingStatus(t *testing.T, mgr *manage.Manager, hookPath, shimPath string) {
 	t.Helper()
-	status, err := mgr.IntegrationStatus(context.Background(), registry.HarnessCodex)
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
 	if err != nil {
 		t.Fatalf("IntegrationStatus(Codex) missing error = %v", err)
 	}
-	if status.Harness != registry.HarnessCodex {
-		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.HarnessCodex)
+	if status.Harness != registry.Harness("codex") {
+		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.Harness("codex"))
 	}
 	if status.Status != manage.ArtifactMissing {
 		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactMissing)
@@ -58,7 +58,7 @@ func assertForeignStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatal(err)
 	}
 	writeExecutableFixture(t, shimPath, []byte("#!/bin/sh\n# custom user shim\nexit 0\n"))
-	status, err := mgr.IntegrationStatus(context.Background(), registry.HarnessCodex)
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
 	if err != nil {
 		t.Fatalf("IntegrationStatus(Codex) foreign error = %v", err)
 	}
@@ -72,7 +72,7 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 	if err := os.Remove(shimPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.InstallIntegration(context.Background(), registry.HarnessCodex, manage.IntegrationOptions{
+	if _, err := mgr.InstallIntegration(context.Background(), registry.Harness("codex"), manage.IntegrationOptions{
 		TargetBinary: "",
 		DryRun:       false,
 		Force:        true,
@@ -80,7 +80,7 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 	}); err != nil {
 		t.Fatalf("InstallIntegration(Codex) error = %v", err)
 	}
-	status, err := mgr.IntegrationStatus(context.Background(), registry.HarnessCodex)
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
 	if err != nil {
 		t.Fatalf("IntegrationStatus(Codex) current error = %v", err)
 	}

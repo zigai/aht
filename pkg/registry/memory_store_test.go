@@ -13,7 +13,7 @@ import (
 func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	t.Parallel()
 
-	store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,16 +29,7 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	}
 
 	running := ActivityRunning
-	observation := Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessOmp,
-		Identity:    ObservationIdentity{SessionID: "live"},
-		Activity:    &running,
-		NativeEvent: "agent_start",
-		Attributes:  map[string]string{"aht_integration": "omp-extension"},
-		ObservedAt:  base,
-	}
+	observation := Observation{Harness: HarnessOmp, At: base, Subject: ObservationIdentity{SessionID: "live"}, Evidence: &Report{Reporter: Reporter{Integration: "omp-extension"}, Event: "agent_start", Activity: &running}}
 	if _, err := store.Observe(t.Context(), observation); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +42,7 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 		t.Fatalf("changed state = %#v, want one session at revision 2", changed)
 	}
 
-	observation.ObservedAt = base.Add(time.Second)
+	observation.At = base.Add(time.Second)
 	if _, err := store.Observe(t.Context(), observation); err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +56,9 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	}
 
 	idle := ActivityIdle
-	observation.Activity = &idle
-	observation.NativeEvent = "agent_end"
-	observation.ObservedAt = base.Add(2 * time.Second)
+	observation.SetActivity(&idle)
+	observation.Report().Event = "agent_end"
+	observation.At = base.Add(2 * time.Second)
 	if _, err := store.Observe(t.Context(), observation); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +67,7 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settled.Revision != 3 || settled.Sessions[0].Activity == nil || *settled.Sessions[0].Activity != ActivityIdle {
+	if settled.Revision != 3 || settled.Sessions[0].Activity() == nil || *settled.Sessions[0].Activity() != ActivityIdle {
 		t.Fatalf("settled state = %#v, want idle revision 3", settled)
 	}
 }
@@ -84,66 +75,57 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 func TestSequencedNativeReportsRejectStaleAndUnsequencedUpdates(t *testing.T) {
 	t.Parallel()
 
-	store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"))
+	store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	store.setNowForTest(func() time.Time { return base.Add(time.Minute) })
-	reporter := map[string]string{"aht_integration": "omp-extension"}
+	reporter := Reporter{Integration: "omp-extension"}
 	running := ActivityRunning
 	sequence := uint64(20)
-	observation := Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessOmp,
-		Identity:    ObservationIdentity{SessionID: "sequenced"},
-		Activity:    &running,
-		Sequence:    &sequence,
-		NativeEvent: "agent_start",
-		Attributes:  reporter,
-		ObservedAt:  base.Add(10 * time.Second),
-	}
+	reporter.Sequence = &sequence
+	observation := Observation{Harness: HarnessOmp, At: base.Add(10 * time.Second), Subject: ObservationIdentity{SessionID: "sequenced"}, Evidence: &Report{Reporter: reporter, Event: "agent_start", Activity: &running}}
 	if _, err := store.Observe(t.Context(), observation); err != nil {
 		t.Fatal(err)
 	}
 
 	idle := ActivityIdle
 	staleSequence := uint64(19)
-	observation.Activity = &idle
-	observation.Sequence = &staleSequence
-	observation.ObservedAt = base.Add(20 * time.Second)
+	observation.SetActivity(&idle)
+	observation.Report().Reporter.Sequence = &staleSequence
+	observation.At = base.Add(20 * time.Second)
 	if _, err := store.Observe(t.Context(), observation); !errors.Is(err, ErrObservationConflict) {
 		t.Fatalf("stale sequence error = %v, want observation conflict", err)
 	}
 
-	observation.Sequence = nil
-	observation.ObservedAt = base.Add(30 * time.Second)
+	observation.Report().Reporter.Sequence = nil
+	observation.At = base.Add(30 * time.Second)
 	if _, err := store.Observe(t.Context(), observation); !errors.Is(err, ErrObservationConflict) {
 		t.Fatalf("unsequenced report error = %v, want observation conflict", err)
 	}
 
 	newSequence := uint64(21)
-	observation.Sequence = &newSequence
-	observation.ObservedAt = base
+	observation.Report().Reporter.Sequence = &newSequence
+	observation.At = base
 	session, err := store.Observe(context.Background(), observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Activity == nil || *session.Activity != ActivityIdle {
+	if session.Activity() == nil || *session.Activity() != ActivityIdle {
 		t.Fatalf("sequenced clock-regressed session = %#v, want idle", session)
 	}
-	if session.Observations.Native == nil || session.Observations.Native.Sequence == nil || *session.Observations.Native.Sequence != newSequence {
+	if session.Observations.Native == nil || session.Observations.Native.Reporter.Sequence == nil || *session.Observations.Native.Reporter.Sequence != newSequence {
 		t.Fatalf("native sequence = %#v, want %d", session.Observations.Native, newSequence)
 	}
 }
 
 func BenchmarkRegistryObserveWith65Sessions(b *testing.B) {
 	b.Run("file", func(b *testing.B) {
-		benchmarkRegistryObserve(b, NewFileStore(filepath.Join(b.TempDir(), "state.json")))
+		benchmarkRegistryObserve(b, NewJournal(filepath.Join(b.TempDir(), "state.json"), fixtureRules{}))
 	})
 	b.Run("memory", func(b *testing.B) {
-		store, err := OpenMemoryStore(filepath.Join(b.TempDir(), "state.json"))
+		store, err := OpenMemoryStore(filepath.Join(b.TempDir(), "state.json"), fixtureRules{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -158,16 +140,7 @@ func benchmarkRegistryObserve(b *testing.B, store Store) {
 	idle := ActivityIdle
 	seed := make([]Observation, 65)
 	for index := range seed {
-		seed[index] = Observation{
-			Source:      ObservationSourceNative,
-			Evidence:    ObservationEvidenceNativeEvent,
-			Harness:     HarnessOmp,
-			Identity:    ObservationIdentity{SessionID: "session-" + strconv.Itoa(index)},
-			Activity:    &idle,
-			NativeEvent: "session_start",
-			Attributes:  map[string]string{"aht_integration": "omp-extension"},
-			ObservedAt:  base.Add(time.Duration(index) * time.Nanosecond),
-		}
+		seed[index] = Observation{Harness: HarnessOmp, At: base.Add(time.Duration(index) * time.Nanosecond), Subject: ObservationIdentity{SessionID: "session-" + strconv.Itoa(index)}, Evidence: &Report{Reporter: Reporter{Integration: "omp-extension"}, Event: "session_start", Activity: &idle}}
 	}
 	if _, err := store.ObserveBatch(b.Context(), seed); err != nil {
 		b.Fatal(err)
@@ -175,14 +148,14 @@ func benchmarkRegistryObserve(b *testing.B, store Store) {
 
 	running := ActivityRunning
 	observation := seed[0]
-	observation.Activity = &running
-	observation.NativeEvent = "agent_start"
-	observation.ObservedAt = base.Add(time.Second)
+	observation.SetActivity(&running)
+	observation.Report().Event = "agent_start"
+	observation.At = base.Add(time.Second)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		observation.ObservedAt = observation.ObservedAt.Add(time.Nanosecond)
+		observation.At = observation.At.Add(time.Nanosecond)
 		if _, err := store.Observe(b.Context(), observation); err != nil {
 			b.Fatal(err)
 		}
@@ -193,29 +166,20 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "state.json")
-	s, err := OpenMemoryStore(path)
+	s, err := OpenMemoryStore(path, fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	s.setNowForTest(func() time.Time { return now })
-	saved, err := s.Observe(ctx, Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessPi,
-		Identity:    ObservationIdentity{SessionID: "reset-me"},
-		Presence:    new(PresenceLive),
-		Activity:    new(ActivityRunning),
-		NativeEvent: "agent_start",
-		ObservedAt:  now,
-	})
+	saved, err := s.Observe(ctx, Observation{Harness: HarnessPi, At: now, Subject: ObservationIdentity{SessionID: "reset-me"}, Evidence: &Report{Event: "agent_start", Claim: new(PresenceLive), Activity: new(ActivityRunning)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	disk := NewFileStore(path)
+	disk := NewJournal(path, fixtureRules{})
 	if _, err = disk.Reset(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -224,16 +188,7 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Second)
-	if _, err = s.Observe(ctx, Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessPi,
-		Identity:    ObservationIdentity{SessionID: "unrelated"},
-		Presence:    new(PresenceLive),
-		Activity:    new(ActivityRunning),
-		NativeEvent: "agent_start",
-		ObservedAt:  now,
-	}); err != nil {
+	if _, err = s.Observe(ctx, Observation{Harness: HarnessPi, At: now, Subject: ObservationIdentity{SessionID: "unrelated"}, Evidence: &Report{Event: "agent_start", Claim: new(PresenceLive), Activity: new(ActivityRunning)}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Flush(ctx); err != nil {
@@ -249,37 +204,19 @@ func TestMemoryStoreFlushPreservesExternalFallbackWrites(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "state.json")
-	s, err := OpenMemoryStore(path)
+	s, err := OpenMemoryStore(path, fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	s.setNowForTest(func() time.Time { return now })
-	disk := NewFileStore(path)
+	disk := NewJournal(path, fixtureRules{})
 	disk.setNowForTest(func() time.Time { return now })
-	saved, err := disk.Observe(ctx, Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessPi,
-		Identity:    ObservationIdentity{SessionID: "arrived-before-socket"},
-		Presence:    new(PresenceLive),
-		Activity:    new(ActivityRunning),
-		NativeEvent: "agent_start",
-		ObservedAt:  now,
-	})
+	saved, err := disk.Observe(ctx, Observation{Harness: HarnessPi, At: now, Subject: ObservationIdentity{SessionID: "arrived-before-socket"}, Evidence: &Report{Event: "agent_start", Claim: new(PresenceLive), Activity: new(ActivityRunning)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Observe(ctx, Observation{
-		Source:      ObservationSourceNative,
-		Evidence:    ObservationEvidenceNativeEvent,
-		Harness:     HarnessPi,
-		Identity:    ObservationIdentity{SessionID: "broker-update"},
-		Presence:    new(PresenceLive),
-		Activity:    new(ActivityRunning),
-		NativeEvent: "agent_start",
-		ObservedAt:  now,
-	}); err != nil {
+	if _, err = s.Observe(ctx, Observation{Harness: HarnessPi, At: now, Subject: ObservationIdentity{SessionID: "broker-update"}, Evidence: &Report{Event: "agent_start", Claim: new(PresenceLive), Activity: new(ActivityRunning)}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Flush(ctx); err != nil {
