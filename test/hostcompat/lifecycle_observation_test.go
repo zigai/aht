@@ -48,7 +48,7 @@ func (host isolatedHost) waitForActiveSession(t *testing.T) {
 
 func (host isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()

@@ -188,6 +188,9 @@ func TestObservedVersionMatchesPin(t *testing.T) {
 	if !checkedVersion("    test.go:1: current goose: goose version 1.50.0\n", "goose", "v1.50.0") {
 		t.Fatal("rejected goose version")
 	}
+	if !checkedVersion("    current_host_test.go:32: current amp: 0.0.1790236865-g40d640 (released 2026-09-24T08:01:05.000Z, 2h ago)\n", "amp", "0.0.1790236865-g40d640") {
+		t.Fatal("rejected amp git-suffixed version")
+	}
 	for _, value := range []string{"GitHub Copilot CLI 1.0.83.", "GitHub Copilot CLI 1.0.83. Run 'copilot update' to check for updates."} {
 		if !checkedVersion("    test.go:1: current copilot: "+value+"\n", "copilot", "1.0.83") {
 			t.Errorf("rejected punctuated version %q", value)

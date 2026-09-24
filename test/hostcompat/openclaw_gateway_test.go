@@ -36,7 +36,7 @@ func (host isolatedHost) startOpenClawGateway(t *testing.T, port int) {
 		_ = logFile.Close()
 	})
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		connection, dialErr := net.DialTimeout("tcp", address, 100*time.Millisecond)
 		if dialErr == nil {

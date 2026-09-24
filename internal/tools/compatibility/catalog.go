@@ -24,7 +24,7 @@ const (
 var (
 	errCompatibility       = errors.New("compatibility")
 	stableVersionPattern   = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-g[0-9a-fA-F]+)?$`)
-	observedVersionPattern = regexp.MustCompile(`v?[0-9]+\.[0-9]+\.[0-9]+`)
+	observedVersionPattern = regexp.MustCompile(`v?[0-9]+\.[0-9]+\.[0-9]+(?:-g[0-9a-fA-F]+)?`)
 
 	defaultCatalog = distributionCatalog()
 )
