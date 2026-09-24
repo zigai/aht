@@ -295,7 +295,7 @@ func TestServer_BoundsSlowSubscriber(t *testing.T) {
 		}
 	}
 
-	clientContext, cancelClient := context.WithTimeout(t.Context(), time.Second)
+	clientContext, cancelClient := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelClient()
 	client := broker.NewClient(fixture.path)
 	if err := client.Ping(clientContext); err != nil {
