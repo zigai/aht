@@ -48,11 +48,11 @@ func (r Reducer) retireConflictingProcessSessions(
 		}
 		if nativeReplacement {
 			if gone, ok := session.Liveness.(Gone); ok {
-				gone.Reason = "session_replaced"
+				gone.Reason = sessionReplacedReason
 				session.Liveness = gone
 			}
 			session.setDecision(&ActivityDecision{
-				Authority: "hook", Reason: "session_replaced", RuleID: "", ManifestSource: "",
+				Authority: "hook", Reason: sessionReplacedReason, RuleID: "", ManifestSource: "",
 				ManifestVersion: 0, FallbackReason: "", Process: *observation.ProcessIdentity(), ObservedAt: at,
 			})
 		}

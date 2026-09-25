@@ -114,19 +114,7 @@ func FuzzStoreParity(f *testing.F) {
 					assertEquivalent(t, label+" screen", fileSession, memorySession)
 				}
 			case 9:
-				process := ProcessIdentity{PID: int(word[1]) + 1, StartIdentity: fmt.Sprintf("conflict:%d", word[1]), Executable: "agent"}
-				live := PresenceLive
-				for _, id := range []string{fmt.Sprintf("conflict-%d-a", word[1]), fmt.Sprintf("conflict-%d-b", word[1])} {
-					observation := Observation{Harness: HarnessPi, At: base.Add(time.Duration(step) * time.Second), Subject: ObservationIdentity{SessionID: id}, Evidence: &Report{Event: "start", Claim: &live, Activity: new(ActivityRunning), Process: &process}}
-					fileSession, fileErr := journal.Observe(t.Context(), observation)
-					memorySession, memoryErr := memory.Observe(t.Context(), observation)
-					if !sameStoreError(fileErr, memoryErr) {
-						t.Fatalf("%s process conflict errors: file %v, memory %v", label, fileErr, memoryErr)
-					}
-					if fileErr == nil {
-						assertEquivalent(t, label+" process conflict", fileSession, memorySession)
-					}
-				}
+				exerciseReplacedSightingPair(t, journal, memory, base, uint64(word[1]), step, nil)
 			}
 			fileSessions := mustListParity(t, journal)
 			memorySessions := mustListParity(t, memory)

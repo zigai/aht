@@ -222,14 +222,14 @@ func TestActivityDecisionFollowsActivityAuthority(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // The regression checks retirement, absence, sighting, and native resume in sequence.
+//nolint:cyclop,gocognit // The regression checks both sighting identities and native resume from one tombstone.
 func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	process := ProcessIdentity{PID: 888, StartIdentity: "boot:888", Executable: "agent"}
 	running, live := ActivityRunning, PresenceLive
 	state := State{Sessions: make(map[string]Session)}
-	reducer := NewReducer(fixtureRules{})
+	reducer := NewReducer(fixtureRules{authority: AuthorityScreen})
 	for index, id := range []string{"old", "new"} {
 		at := base.Add(time.Duration(index) * time.Second)
 		observation := Observation{Harness: HarnessPi, At: at, Subject: ObservationIdentity{SessionID: id}, Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process}}
@@ -249,16 +249,40 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := base.Add(2 * time.Second)
-	sighting := Observation{Harness: HarnessPi, At: at, Subject: ObservationIdentity{SessionID: "old"}, Evidence: &Sighting{Process: process, Present: true}}
+	sameIdentity := process
+	sameIdentity.Executable = "different-path"
+	sighting := Observation{Harness: HarnessPi, At: at, Subject: ObservationIdentity{SessionID: "old"}, Evidence: &Sighting{Process: sameIdentity, Present: true}}
 	state, _, err = reducer.Apply(state, []Observation{sighting}, at)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertExclusiveProcesses(t, mapSessions(state.Sessions))
 	for _, session := range state.Sessions {
-		if session.SessionID == "old" && session.Presence() != PresenceGone {
-			t.Fatalf("retired session became %s after present sighting", session.Presence())
+		if session.SessionID == "old" {
+			if session.Presence() != PresenceGone {
+				t.Fatalf("retired session became %s after same-process sighting", session.Presence())
+			}
+			if decision := session.Decision(); decision == nil || decision.Reason != sessionReplacedReason || !decision.Process.Equal(process) {
+				t.Fatalf("replacement decision = %+v, want replacing process", decision)
+			}
 		}
+	}
+	newProcess := ProcessIdentity{PID: 889, StartIdentity: "boot:889", Executable: "agent"}
+	newAt := base.Add(3 * time.Second)
+	newSighting := Observation{Harness: HarnessPi, At: newAt, Subject: ObservationIdentity{SessionID: "old"}, Evidence: &Sighting{Process: newProcess, Present: true}}
+	newState, _, err := reducer.Apply(state, []Observation{newSighting}, newAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertExclusiveProcesses(t, mapSessions(newState.Sessions))
+	var revived bool
+	for _, session := range newState.Sessions {
+		if session.SessionID == "old" && session.Presence() == PresenceLive && session.Process != nil && session.Process.Equal(newProcess) {
+			revived = true
+		}
+	}
+	if !revived {
+		t.Fatal("different-process sighting did not revive replaced session")
 	}
 	resume := NativeLifecycleResume
 	resumeAt := base.Add(3 * time.Second)
