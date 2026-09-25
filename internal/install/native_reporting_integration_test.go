@@ -38,12 +38,6 @@ func TestPiReportingMissingBinaryAndUnwritableSessionAreNonfatal(t *testing.T) {
 	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, filepath.Join(t.TempDir(), "missing")), runtimeScript(t, "node/pi-missing-report-diagnostics.mjs"), nil)
 }
 
-func TestPiReportingRestoresLastFailureAfterReload(t *testing.T) {
-	capture := captureBinary(t)
-	t.Setenv("AHT_CAPTURE", capture.path)
-	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, capture.command), runtimeScript(t, "node/pi-restored-diagnostics.mjs"), nil)
-}
-
 func piReportingArtifact(t *testing.T, binary string) string {
 	t.Helper()
 	for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: binary}) {

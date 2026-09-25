@@ -56,6 +56,7 @@ func TestInstallPiWritesExtension(t *testing.T) {
 		`on("ui_prompt_end"`,
 		`report(ctx.isIdle?.() ? "idle" : "running", ctx, event)`,
 		"AHT_INTEGRATION_ID=pi",
+		"AHT_INTEGRATION_VERSION=17",
 		`"report", "pi"`,
 		`"--observed-at", observedAt`,
 		`addAttribute(args, "pi_prompt_kind", event?.kind)`,
@@ -64,6 +65,9 @@ func TestInstallPiWritesExtension(t *testing.T) {
 	}, "pi extension")
 	if strings.Contains(result.Snippet, `on("tool_approval_`) {
 		t.Fatalf("Pi extension must use documented UI prompt events: %q", result.Snippet)
+	}
+	if strings.Contains(result.Snippet, "registerCommand") || strings.Contains(result.Snippet, "aht-status") {
+		t.Fatalf("Pi extension must not register commands: %q", result.Snippet)
 	}
 }
 
