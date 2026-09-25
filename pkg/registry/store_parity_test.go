@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/zigai/aht/v2/internal/registrycheck/core" //nolint:depguard // Registry tests share the same rules as the public checker.
 )
 
 func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
@@ -17,6 +19,12 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 
 	seeds := uint64(8)
 	steps := 80
+	coverage := core.NewCoverage()
+	t.Cleanup(func() {
+		if missing := coverage.Missing("stale sequence", "conflicting batch", "native end", "waiting activity", "screen evidence", "reopen", "gc", "reset"); len(missing) != 0 {
+			t.Errorf("parity coverage missing: %v", missing)
+		}
+	})
 	if testing.Short() {
 		seeds = 4
 		steps = 40
@@ -28,12 +36,13 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 	for seed := range seeds {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			t.Parallel()
-			exerciseEquivalentStores(t, seed, steps)
+			exerciseEquivalentStores(t, seed, steps, coverage)
 		})
 	}
 }
 
-func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
+//nolint:gocognit,cyclop // A parity step intentionally checks every store operation and its resulting state.
+func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *core.Coverage) {
 	t.Helper()
 
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -43,6 +52,11 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := memoryStore.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	clock := base.Add(time.Hour)
 	fileStore.setNowForTest(func() time.Time { return clock })
 	memoryStore.setNowForTest(func() time.Time { return clock })
@@ -50,20 +64,61 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
 	generator := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)) //nolint:gosec // Reproducible property-test sequences are required.
 	sequences := map[string]uint64{}
 	for step := range steps {
-		// Semantic variation: inject conflicting batch periodically
 		if step%25 == 15 {
 			injectParityConflictBatch(t, fileStore, memoryStore, base, step)
+			coverage.Hit("conflicting batch")
+		}
+		if step > 0 && generator.IntN(16) == 0 {
+			assertReopenedFileStore(t, filePath, clock, step, mustListParity(t, memoryStore))
+			coverage.Hit("reopen")
+		}
+		if step > 0 && generator.IntN(20) == 0 {
+			deleteAfter := time.Duration(generator.IntN(3)-1) * time.Hour
+			before := mustListParity(t, fileStore)
+			fileGC, fileErr := fileStore.GC(t.Context(), deleteAfter)
+			memoryGC, memoryErr := memoryStore.GC(t.Context(), deleteAfter)
+			if !sameStoreError(fileErr, memoryErr) {
+				t.Fatalf("seed %d step %d gc errors: %v, %v", seed, step, fileErr, memoryErr)
+			}
+			if fileErr == nil {
+				assertEquivalent(t, fmt.Sprintf("seed %d step %d gc", seed, step), fileGC, memoryGC)
+				assertGCOnlyExpiredGone(t, before, mustListParity(t, fileStore), clock, deleteAfter)
+			}
+			coverage.Hit("gc")
+		}
+		if step > 0 && generator.IntN(35) == 0 {
+			fileReset, fileErr := fileStore.Reset(t.Context())
+			memoryReset, memoryErr := memoryStore.Reset(t.Context())
+			if !sameStoreError(fileErr, memoryErr) {
+				t.Fatalf("seed %d step %d reset errors: %v, %v", seed, step, fileErr, memoryErr)
+			}
+			if fileErr == nil {
+				assertEquivalent(t, fmt.Sprintf("seed %d step %d reset", seed, step), fileReset, memoryReset)
+			}
+			coverage.Hit("reset")
 		}
 
 		observation := generatedObservation(generator, sequences, base, step)
 		fileSession, fileErr := fileStore.Observe(t.Context(), observation)
 		memorySession, memoryErr := memoryStore.Observe(t.Context(), observation)
 		if !sameStoreError(fileErr, memoryErr) {
-			t.Fatalf("step %d observation %#v: file error %v, memory error %v", step, observation, fileErr, memoryErr)
+			t.Fatalf("seed %d step %d observation %#v: file error %v, memory error %v", seed, step, observation, fileErr, memoryErr)
+		}
+		if errors.Is(fileErr, ErrObservationConflict) && rejectedStaleSequence(t, fileStore, observation) {
+			coverage.Hit("stale sequence")
 		}
 		if fileErr == nil {
 			assertTerminalLifecycleOutcome(t, step, observation, fileSession, memorySession)
 			assertEquivalent(t, fmt.Sprintf("step %d session", step), fileSession, memorySession)
+			if lifecycle := observation.Report().Lifecycle; observation.Kind() == "report" && lifecycle != nil && *lifecycle == NativeLifecycleEnd {
+				coverage.Hit("native end")
+			}
+			if activity := fileSession.Activity(); activity != nil && *activity == ActivityWaiting {
+				coverage.Hit("waiting activity")
+			}
+			if decision := fileSession.Decision(); observation.Kind() == "reading" && decision != nil && decision.Authority == AuthorityScreen {
+				coverage.Hit("screen evidence")
+			}
 		}
 
 		fileSessions, fileStateErr := fileStore.List(t.Context(), Filter{})
@@ -72,12 +127,39 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
 			t.Fatalf("step %d list errors: file %v, memory %v", step, fileStateErr, memoryStateErr)
 		}
 		assertEquivalent(t, fmt.Sprintf("step %d sessions", step), fileSessions, memorySessions)
+		if err := checkInvariantSessions(fileSessions); err != nil {
+			t.Fatalf("seed %d step %d file invariants: %v", seed, step, err)
+		}
+		if err := checkInvariantSessions(memorySessions); err != nil {
+			t.Fatalf("seed %d step %d memory invariants: %v", seed, step, err)
+		}
+		assertExclusiveProcesses(t, fileSessions, fixtureRules{})
+	}
+}
 
-		// Semantic variation: reopen FileStore mid-sequence to verify persistence
-		if step == steps/2 {
-			assertReopenedFileStore(t, filePath, clock, step, memorySessions)
+func mustListParity(t *testing.T, store Store) []Session {
+	t.Helper()
+	sessions, err := store.List(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sessions
+}
+
+func rejectedStaleSequence(t *testing.T, store Store, observation Observation) bool {
+	t.Helper()
+	if observation.Kind() != "report" || observation.Report().Reporter.Sequence == nil {
+		return false
+	}
+	for _, session := range mustListParity(t, store) {
+		native := session.Observations.Native
+		if session.Harness == observation.Harness && session.SessionID == observation.Subject.SessionID && native != nil &&
+			native.Reporter.Integration == observation.Report().Reporter.Integration && native.Reporter.Sequence != nil &&
+			*observation.Report().Reporter.Sequence <= *native.Reporter.Sequence {
+			return true
 		}
 	}
+	return false
 }
 
 func injectParityConflictBatch(t *testing.T, fileStore Store, memStore Store, base time.Time, step int) {
