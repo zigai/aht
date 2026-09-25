@@ -15,6 +15,19 @@ help:
 test:
     go test ./...
 
+# Run extended simulations and bounded fuzz exploration
+explore fuzztime="30s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/catalog
+    for package in ./internal/agentstate ./internal/processinfo ./internal/harness/catalog ./pkg/tmux ./pkg/registry ./internal/harness/transcript ./internal/config ./internal/cli; do
+        targets=$(go test "$package" -list '^Fuzz')
+        while IFS= read -r target; do
+            [[ "$target" =~ ^Fuzz[A-Za-z0-9_]+$ ]] || continue
+            go test "$package" -run '^$' -fuzz "^${target}$" -fuzztime '{{ fuzztime }}' -parallel 2 -timeout 0
+        done <<< "$targets"
+    done
+
 # Run tests that require real local system boundaries
 integration:
     #!/usr/bin/env sh
