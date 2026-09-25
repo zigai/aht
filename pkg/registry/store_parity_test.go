@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/v2/internal/registrycheck/core" //nolint:depguard // Registry tests share the same rules as the public checker.
+	"github.com/zigai/aht/v2/internal/registrycheck/core"
 )
 
 func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
@@ -21,7 +21,7 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 	steps := 80
 	coverage := core.NewCoverage()
 	t.Cleanup(func() {
-		if missing := coverage.Missing("stale sequence", "conflicting batch", "native end", "waiting activity", "screen evidence", "reopen", "gc", "reset"); len(missing) != 0 {
+		if missing := coverage.Missing("stale sequence", "conflicting batch", "native end", "waiting activity", "screen evidence", "reopen", "gc", "reset", "same-process replaced sighting blocked", "different-process replaced sighting revived"); len(missing) != 0 {
 			t.Errorf("parity coverage missing: %v", missing)
 		}
 	})
@@ -62,8 +62,12 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 	memoryStore.setNowForTest(func() time.Time { return clock })
 
 	generator := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)) //nolint:gosec // Reproducible property-test sequences are required.
+	replacementStep := generator.IntN(steps)
 	sequences := map[string]uint64{}
 	for step := range steps {
+		if step == replacementStep {
+			exerciseReplacedSightingPair(t, fileStore, memoryStore, base, seed, step, coverage)
+		}
 		if step%25 == 15 {
 			injectParityConflictBatch(t, fileStore, memoryStore, base, step)
 			coverage.Hit("conflicting batch")
@@ -133,7 +137,55 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 		if err := checkInvariantSessions(memorySessions); err != nil {
 			t.Fatalf("seed %d step %d memory invariants: %v", seed, step, err)
 		}
-		assertExclusiveProcesses(t, fileSessions, fixtureRules{})
+		assertExclusiveProcesses(t, fileSessions)
+	}
+}
+
+//nolint:gocognit,cyclop // The fixture checks both stores and both replacement sighting outcomes after every observation.
+func exerciseReplacedSightingPair(t *testing.T, fileStore, memoryStore Store, base time.Time, seed uint64, step int, coverage *core.Coverage) {
+	t.Helper()
+	pid := 10000 + step
+	process := ProcessIdentity{PID: pid, StartIdentity: fmt.Sprintf("replacement:%d", pid), Executable: "agent"}
+	sameIdentity := process
+	sameIdentity.Executable = "other-agent-path"
+	newProcess := ProcessIdentity{PID: pid + 500000, StartIdentity: fmt.Sprintf("replacement:%d", pid+500000), Executable: "agent"}
+	oldID := fmt.Sprintf("replacement-%d-%d-old", seed, step)
+	newID := fmt.Sprintf("replacement-%d-%d-new", seed, step)
+	at := base.Add(time.Duration(step) * time.Millisecond)
+	live, running := PresenceLive, ActivityRunning
+	observations := []Observation{
+		{Harness: HarnessPi, At: at, Subject: ObservationIdentity{SessionID: oldID}, Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process}},
+		{Harness: HarnessPi, At: at.Add(time.Nanosecond), Subject: ObservationIdentity{SessionID: newID}, Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process}},
+		{Harness: HarnessPi, At: at.Add(2 * time.Nanosecond), Subject: ObservationIdentity{SessionID: oldID}, Evidence: &Sighting{Process: sameIdentity, Present: true}},
+		{Harness: HarnessPi, At: at.Add(3 * time.Nanosecond), Subject: ObservationIdentity{SessionID: oldID}, Evidence: &Sighting{Process: newProcess, Present: true}},
+	}
+	for index, observation := range observations {
+		fileSession, fileErr := fileStore.Observe(t.Context(), observation)
+		memorySession, memoryErr := memoryStore.Observe(t.Context(), observation)
+		if !sameStoreError(fileErr, memoryErr) || fileErr != nil {
+			t.Fatalf("replacement seed %d step %d operation %d errors: file %v, memory %v", seed, step, index, fileErr, memoryErr)
+		}
+		assertEquivalent(t, fmt.Sprintf("replacement seed %d step %d operation %d", seed, step, index), fileSession, memorySession)
+		fileSessions := mustListParity(t, fileStore)
+		assertEquivalent(t, "replacement sessions", fileSessions, mustListParity(t, memoryStore))
+		if err := checkInvariantSessions(fileSessions); err != nil {
+			t.Fatal(err)
+		}
+		assertExclusiveProcesses(t, fileSessions)
+		if index == 2 && fileSession.Presence() != PresenceGone {
+			t.Fatalf("same-process sighting revived replaced session %q", oldID)
+		}
+		if index == 3 && (fileSession.Presence() != PresenceLive || fileSession.Process == nil || !fileSession.Process.Equal(newProcess)) {
+			t.Fatalf("different-process sighting did not revive session %q", oldID)
+		}
+		if coverage != nil {
+			if index == 2 {
+				coverage.Hit("same-process replaced sighting blocked")
+			}
+			if index == 3 {
+				coverage.Hit("different-process replaced sighting revived")
+			}
+		}
 	}
 }
 
