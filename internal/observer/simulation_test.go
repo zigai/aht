@@ -14,6 +14,7 @@ import (
 	"github.com/zigai/aht/v2/internal/agentstate"
 	harness "github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/registrycheck"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -70,7 +71,7 @@ type simulationWorld struct {
 	paneErr     bool
 	catalogErr  bool
 	incarnation int
-	coverage    map[string]int
+	coverage    *registrycheck.Coverage
 	absentSince map[string]time.Time
 	recovering  *simulationProcess
 }
@@ -82,7 +83,7 @@ func TestObserverSeededWorld(t *testing.T) {
 	} else if os.Getenv("AHT_EXTENDED_PARITY") != "" {
 		seeds, steps = 16, 160
 	}
-	coverage := make(map[string]int)
+	coverage := registrycheck.NewCoverage()
 	allPassed := true
 	for seed := range seeds {
 		passed := t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
@@ -93,27 +94,22 @@ func TestObserverSeededWorld(t *testing.T) {
 	if !allPassed {
 		return
 	}
-	for _, name := range []string{simStart, simExit, simPaneClose, simPaneReuse, simPIDReuse, simHookStart, simHookRun, simHookWait, simHookEnd, simHookReplay, simHookStale, simScreen, simCatalog, simProcessErr, simPaneErr, simCatalogErr, "gone", "recovered", "hook-authority", "screen-reading", "stale-rejected", "replay-handled"} {
-		if coverage[name] == 0 {
-			t.Errorf("event or outcome %q was not covered: %v", name, coverage)
-		}
+	if missing := coverage.Missing(simStart, simExit, simPaneClose, simPaneReuse, simPIDReuse, simHookStart, simHookRun, simHookWait, simHookEnd, simHookReplay, simHookStale, simScreen, simCatalog, simProcessErr, simPaneErr, simCatalogErr, "gone", "recovered", "hook-authority", "screen-reading", "stale-rejected", "replay-handled"); len(missing) > 0 {
+		t.Errorf("events or outcomes not covered: %v", missing)
 	}
 }
 
-func runSimulationSeed(t *testing.T, seed uint64, steps int, coverage map[string]int) {
+func runSimulationSeed(t *testing.T, seed uint64, steps int, coverage *registrycheck.Coverage) {
 	t.Helper()
-	world := newSimulationWorld(t)
+	world := newSimulationWorld(t, coverage)
 	rng := rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)
 	trace := make([]string, 0, steps)
 	for step := range steps {
 		event, slot := simulationChoice(rng, step)
 		trace = append(trace, fmt.Sprintf("%d:%s/%d", step, event, slot))
 		world.step(t, seed, trace, event, slot)
-		world.coverage[event]++
+		world.coverage.Hit(event)
 		time.Sleep(time.Second)
-	}
-	for name, count := range world.coverage {
-		coverage[name] += count
 	}
 	if err := world.store.Close(); err != nil {
 		t.Fatalf("seed=%d: close store: %v", seed, err)
@@ -139,6 +135,9 @@ func (w *simulationWorld) step(t *testing.T, seed uint64, trace []string, event 
 	sessions, err := w.store.List(t.Context(), registry.Filter{})
 	if err != nil {
 		t.Fatalf("seed=%d trace=%v: list after: %v", seed, trace, err)
+	}
+	if err := registrycheck.Sessions(sessions); err != nil {
+		t.Fatalf("seed=%d trace=%v: shared session invariants: %v", seed, trace, err)
 	}
 	if err := w.check(before, sessions, event, result, time.Now()); err != nil {
 		t.Fatalf("seed=%d trace=%v: %v", seed, trace, err)
@@ -170,14 +169,14 @@ func simulationChoice(rng *rand.PCG, step int) (simulationEvent, int) {
 	return chosen, slot
 }
 
-func newSimulationWorld(t *testing.T) *simulationWorld {
+func newSimulationWorld(t *testing.T, coverage *registrycheck.Coverage) *simulationWorld {
 	t.Helper()
 	id, command, reporter := simulationHarness(t)
 	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), harness.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	world := &simulationWorld{store: store, harness: id, command: command, reporter: reporter, coverage: make(map[string]int), absentSince: make(map[string]time.Time)}
+	world := &simulationWorld{store: store, harness: id, command: command, reporter: reporter, coverage: coverage, absentSince: make(map[string]time.Time)}
 	world.observer = New(Options{Store: store, Now: time.Now, Interval: time.Second, GracePeriod: 2 * time.Second, ProcessList: world.listProcesses, PaneList: world.listPanes, CatalogList: world.listCatalog, ScreenCapture: world.captureScreen, DetectionConfigDir: t.TempDir()})
 	return world
 }
@@ -334,9 +333,9 @@ func (w *simulationWorld) report(ctx context.Context, event simulationEvent, slo
 func (w *simulationWorld) checkReplayedReport(event simulationEvent, err error, previousSequence uint64, report *registry.Report) error {
 	if errors.Is(err, registry.ErrObservationConflict) {
 		if event == simHookStale {
-			w.coverage["stale-rejected"]++
+			w.coverage.Hit("stale-rejected")
 		} else {
-			w.coverage["replay-handled"]++
+			w.coverage.Hit("replay-handled")
 		}
 		return nil
 	}
@@ -347,7 +346,7 @@ func (w *simulationWorld) checkReplayedReport(event simulationEvent, err error, 
 		return fmt.Errorf("recording replayed report: %w", err)
 	}
 	if event == simHookReplay {
-		w.coverage["replay-handled"]++
+		w.coverage.Hit("replay-handled")
 	}
 	return nil
 }
@@ -466,14 +465,14 @@ func (w *simulationWorld) check(before, after []registry.Session, event simulati
 		}
 	}
 	if result.Gone > 0 {
-		w.coverage["gone"]++
+		w.coverage.Hit("gone")
 	}
 	if err := w.checkRecovery(after); err != nil {
 		return err
 	}
 	for _, session := range after {
 		if session.Observations.Screen != nil {
-			w.coverage["screen-reading"]++
+			w.coverage.Hit("screen-reading")
 			break
 		}
 	}
@@ -499,7 +498,7 @@ func (w *simulationWorld) checkRecovery(sessions []registry.Session) error {
 	}
 	for _, session := range sessions {
 		if session.Process != nil && session.Process.Equal(*processIdentity(w.recovering.process)) && session.Presence() == registry.PresenceLive {
-			w.coverage["recovered"]++
+			w.coverage.Hit("recovered")
 			return nil
 		}
 	}
@@ -562,7 +561,7 @@ func (w *simulationWorld) checkHookAuthority(session registry.Session, now time.
 		return nil
 	}
 	if session.Observations.Screen != nil && *session.Observations.Native.Activity != session.Observations.Screen.Activity {
-		w.coverage["hook-authority"]++
+		w.coverage.Hit("hook-authority")
 	}
 	if activity := session.Activity(); activity == nil || *activity != *session.Observations.Native.Activity {
 		return simulationError("fresh hook activity lost for %s: got %v, report %v", session.ID, activity, session.Observations.Native.Activity)
