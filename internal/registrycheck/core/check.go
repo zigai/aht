@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrIdentity  = errors.New("session identity")
-	ErrTime      = errors.New("session timestamps")
-	ErrLiveness  = errors.New("session liveness")
-	ErrNativeEnd = errors.New("native end is terminal")
+	ErrIdentity     = errors.New("session identity")
+	ErrTime         = errors.New("session timestamps")
+	ErrLiveness     = errors.New("session liveness")
+	ErrNativeEnd    = errors.New("native end is terminal")
+	errGoneActivity = errors.New("gone session has no activity")
 )
 
 type Session struct {
@@ -50,6 +51,10 @@ func Sessions(sessions []Session) error {
 		}
 		if !session.HasLiveness || !session.ValidState {
 			violations = append(violations, fmt.Errorf("%w: session %q has invalid liveness", ErrLiveness, id))
+		}
+		// Gone.Activity() is nil, and the session codec rejects a gone activity value.
+		if session.Presence == "gone" && session.Activity != "" {
+			violations = append(violations, fmt.Errorf("%w: session %q has activity %s", errGoneActivity, id, session.Activity))
 		}
 		// lifecycleMachine.end clears activity and retains a gone tombstone.
 		if session.NativeEnded && (session.Presence != "gone" || session.Activity != "") {

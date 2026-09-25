@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/v2/internal/registrycheck/core" //nolint:depguard // Registry tests share the same rules as the public checker.
+	"github.com/zigai/aht/v2/internal/registrycheck/core"
 )
 
 func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
