@@ -4,6 +4,10 @@ import "github.com/zigai/aht/v2/pkg/registry"
 
 type Rules struct{}
 
+type nativeActivityRetainer interface {
+	RetainNativeActivity() bool
+}
+
 func (Rules) Known(id registry.Harness) bool {
 	_, ok := Find(id)
 	return ok
@@ -12,15 +16,20 @@ func (Rules) Known(id registry.Harness) bool {
 func (Rules) Policy(id registry.Harness) registry.Policy {
 	adapter, ok := Find(id)
 	if !ok {
-		return registry.Policy{ExclusiveProcess: false, Authority: registry.AuthorityHook, ScreenFallback: false, Reporter: "", CatalogCreates: false}
+		return registry.Policy{ExclusiveProcess: false, Authority: registry.AuthorityHook, ScreenFallback: false, RetainNativeActivity: false, Reporter: "", CatalogCreates: false}
 	}
 	definition := adapter.Definition()
+	retainNativeActivity := false
+	if retainer, ok := adapter.(nativeActivityRetainer); ok {
+		retainNativeActivity = retainer.RetainNativeActivity()
+	}
 	return registry.Policy{
-		ExclusiveProcess: definition.ExclusiveProcess,
-		Authority:        definition.StateAuthority,
-		ScreenFallback:   definition.ScreenFallback,
-		Reporter:         definition.IntegrationSource,
-		CatalogCreates:   definition.CatalogCreates,
+		ExclusiveProcess:     definition.ExclusiveProcess,
+		Authority:            definition.StateAuthority,
+		ScreenFallback:       definition.ScreenFallback,
+		RetainNativeActivity: retainNativeActivity,
+		Reporter:             definition.IntegrationSource,
+		CatalogCreates:       definition.CatalogCreates,
 	}
 }
 

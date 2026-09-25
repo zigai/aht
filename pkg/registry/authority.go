@@ -26,6 +26,9 @@ func ActivityAuthority(session Session, policy Policy, now time.Time) (Authority
 	}
 	evaluation := EvaluateHook(session, policy, now)
 	if policy.ScreenFallback && !evaluation.Active {
+		if policy.RetainNativeActivity && evaluation.Reason == "integration_report_stale" {
+			return AuthorityHook, evaluation.Reason
+		}
 		return AuthorityScreen, evaluation.Reason
 	}
 	return AuthorityHook, evaluation.Reason

@@ -19,11 +19,12 @@ type Rules interface {
 }
 
 type Policy struct {
-	ExclusiveProcess bool
-	Authority        Authority
-	ScreenFallback   bool
-	Reporter         string
-	CatalogCreates   bool
+	ExclusiveProcess     bool
+	Authority            Authority
+	ScreenFallback       bool
+	RetainNativeActivity bool
+	Reporter             string
+	CatalogCreates       bool
 }
 
 type Reducer struct {

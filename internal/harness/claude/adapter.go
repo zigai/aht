@@ -48,10 +48,12 @@ func New() claudeHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  claudeIntegrationSource,
-		StateAuthority:     registry.AuthorityScreen,
-		ScreenFallback:     false,
+		StateAuthority:     registry.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
+
+func (claudeHarness) RetainNativeActivity() bool { return true }
 
 func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{

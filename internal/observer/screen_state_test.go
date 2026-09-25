@@ -25,7 +25,7 @@ func TestObserverDetectsScreenStateForTargetAgents(t *testing.T) {
 		wantFallback bool
 	}{
 		{harness: registry.Harness("codex"), command: "codex", screen: "› next task\nContext 63% used", want: registry.ActivityIdle},
-		{harness: registry.Harness("claude"), command: "claude", screen: "Do you want to proceed?", want: registry.ActivityWaiting},
+		{harness: registry.Harness("claude"), command: "claude", screen: "Do you want to proceed?", want: registry.ActivityWaiting, wantFallback: true},
 		{harness: registry.Harness("opencode"), command: "opencode", screen: "Working · esc to interrupt", want: registry.ActivityRunning, wantFallback: true},
 		{harness: registry.Harness("pi"), command: "pi", screen: "Type a message · Enter to send", want: registry.ActivityIdle, wantFallback: true},
 		{harness: registry.Harness("omp"), command: "omp", screen: " ⠋ Working... (40s)", want: registry.ActivityRunning, wantFallback: true},

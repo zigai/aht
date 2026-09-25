@@ -8,12 +8,54 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const testSessionID = "abc"
+
+func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	process := registry.ProcessIdentity{PID: 123, StartIdentity: "boot:123", Executable: "claude"}
+	presence := registry.PresenceLive
+	running := registry.ActivityRunning
+	idle := registry.ActivityIdle
+	observations := []registry.Observation{
+		{
+			Harness: registry.Harness("claude"), At: at,
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{Integration: "claude-hook"},
+				Event:    "UserPromptSubmit", Claim: &presence, Activity: &running, Process: &process,
+			},
+		},
+		{
+			Harness: registry.Harness("claude"), At: at.Add(time.Minute),
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: (*registry.Reading)(&registry.ScreenObservation{
+				Activity: idle, Authority: registry.AuthorityScreen, Reason: "manifest_rule",
+				RuleID: "input_prompt", Process: process, ObservedAt: at.Add(time.Minute),
+			}),
+		},
+	}
+
+	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.Activity() == nil || *session.Activity() != running || session.Decision() == nil || session.Decision().Authority != registry.AuthorityHook {
+			t.Fatalf("activity = %v, decision = %v, want running from Claude hook", session.Activity(), session.Decision())
+		}
+	}
+}
 
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
