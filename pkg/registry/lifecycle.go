@@ -77,6 +77,9 @@ func (m lifecycleMachine) sighting(at time.Time) {
 		return
 	}
 	if process.Present {
+		if gone, ok := m.session.Liveness.(Gone); ok && gone.Reason == "session_replaced" {
+			return
+		}
 		m.claim(PresenceLive, at)
 		return
 	}

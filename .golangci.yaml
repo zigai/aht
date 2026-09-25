@@ -116,10 +116,18 @@ linters:
     depguard:
       rules:
         registry:
-          files: ["**/pkg/registry/*.go"]
+          files: ["**/pkg/registry/*.go", "!$test"]
           deny:
             - pkg: github.com/zigai/aht/v2/internal
               desc: Registry is a pure domain and persistence package; inject harness rules.
+        registry_tests:
+          list-mode: lax
+          files: ["**/pkg/registry/*_test.go"]
+          allow:
+            - github.com/zigai/aht/v2/internal/registrycheck/core$
+          deny:
+            - pkg: github.com/zigai/aht/v2/internal
+              desc: Registry tests may import only the shared registry checker core.
         adapter_consumers:
           list-mode: lax
           files: ["**/internal/cli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
