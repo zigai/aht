@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zigai/aht/internal/command"
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/command"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const defaultCaptureLines = 100

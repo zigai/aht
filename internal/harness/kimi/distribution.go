@@ -1,7 +1,7 @@
 package kimi
 
 import (
-	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func (kimiCodeHarness) Distribution() harness.Distribution {

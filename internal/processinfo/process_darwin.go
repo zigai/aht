@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/zigai/aht/internal/command"
+	"github.com/zigai/aht/v2/internal/command"
 )
 
 const darwinPSMinimumFieldCount = 6

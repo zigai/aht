@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 //nolint:cyclop // switch assertions cover both historical rows and subsequent process matching

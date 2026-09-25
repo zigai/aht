@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestSessionTitlesUsesLatestNativeNameAndIdentity(t *testing.T) {

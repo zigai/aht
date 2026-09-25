@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zigai/aht/internal/harness/titlefile"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/titlefile"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func (droidHarness) SessionTitles(ctx context.Context, identities []registry.ObservationIdentity) ([]string, error) {

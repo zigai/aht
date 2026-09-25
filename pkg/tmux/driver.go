@@ -5,8 +5,8 @@ import (
 	"errors"
 	"os/exec"
 
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var (

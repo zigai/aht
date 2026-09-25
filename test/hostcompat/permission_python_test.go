@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Both protocols expose the host's real approval gate over stdio; neither print

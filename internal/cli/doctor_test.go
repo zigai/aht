@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/internal/agentstate"
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/pkg/manage"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/agentstate"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestDoctorIsConciseUnlessVerbose(t *testing.T) {

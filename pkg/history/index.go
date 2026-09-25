@@ -16,7 +16,7 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

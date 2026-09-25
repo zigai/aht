@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/shlex"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Upgrade refreshes existing AHT-owned integrations through their native install

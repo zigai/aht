@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // TestWatcher provides a deterministic in-memory sessionWatcher for unit tests.

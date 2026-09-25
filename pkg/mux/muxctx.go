@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Driver represents a terminal multiplexer capable of discovering and capturing panes.

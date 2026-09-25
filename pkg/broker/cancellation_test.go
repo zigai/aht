@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestRequestsCancelBlockedResponse(t *testing.T) {

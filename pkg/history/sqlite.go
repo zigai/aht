@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/zigai/aht/internal/harness/catalog"
-	native "github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 
 	_ "modernc.org/sqlite" // Registers the CGO-free reader for native harness databases.
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

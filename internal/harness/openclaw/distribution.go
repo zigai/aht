@@ -1,7 +1,7 @@
 package openclaw
 
 import (
-	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func (openclawHarness) Distribution() harness.Distribution {

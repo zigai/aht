@@ -14,15 +14,15 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/internal/harness/catalog"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/internal/testtmux"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/tmux"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 type systemStopResult struct {

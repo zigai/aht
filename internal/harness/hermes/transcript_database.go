@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const nativeQuery = `SELECT s.id AS session_id, s.title AS title, '' AS cwd,

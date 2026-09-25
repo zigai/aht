@@ -3,7 +3,7 @@ package harness
 import (
 	"strings"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 type LifecycleDefaults struct {

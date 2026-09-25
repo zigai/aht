@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

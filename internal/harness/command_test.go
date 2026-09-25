@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/internal/command"
+	"github.com/zigai/aht/v2/internal/command"
 )
 
 func TestRunCommandOutputBudget(t *testing.T) {

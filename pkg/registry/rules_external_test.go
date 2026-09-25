@@ -1,6 +1,6 @@
 package registry_test
 
-import "github.com/zigai/aht/pkg/registry"
+import "github.com/zigai/aht/v2/pkg/registry"
 
 type behaviorRules struct{}
 

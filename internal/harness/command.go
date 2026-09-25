@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/internal/command"
+	"github.com/zigai/aht/v2/internal/command"
 )
 
 // RunCommand executes a command with bounded output and a caller-specified timeout.

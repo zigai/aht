@@ -9,9 +9,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/zigai/aht/internal/harness/titlefile"
-	"github.com/zigai/aht/internal/harness/transcript"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/titlefile"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // SessionTitles reads the last native session_info name from each Pi transcript.

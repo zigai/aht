@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/zigai/aht/pkg/manage"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestSupportedHarnesses(t *testing.T) {

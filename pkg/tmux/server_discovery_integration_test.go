@@ -13,7 +13,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/internal/testtmux"
+	"github.com/zigai/aht/v2/internal/testtmux"
 )
 
 func TestListPanesDiscoversRealNamedServer(t *testing.T) {

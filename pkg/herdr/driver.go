@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var _ mux.Driver = (*Driver)(nil)

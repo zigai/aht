@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestIntegrationUpgradeRewritesStaleArtifact(t *testing.T) {

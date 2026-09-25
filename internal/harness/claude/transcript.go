@@ -4,7 +4,7 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 func readTranscriptRecord(ctx context.Context, t *transcript.Decoder, r transcript.Record, line int) {

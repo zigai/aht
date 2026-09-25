@@ -1,7 +1,7 @@
 package omp
 
 import (
-	"github.com/zigai/aht/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func (ompHarness) Distribution() harness.Distribution {

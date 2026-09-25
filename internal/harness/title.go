@@ -3,7 +3,7 @@ package harness
 import (
 	"context"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // TitleReader is an optional adapter capability for native display names.

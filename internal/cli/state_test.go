@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 //nolint:cyclop // one sequential scenario proves both safety and explicit cleanup modes

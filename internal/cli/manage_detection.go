@@ -9,10 +9,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/agentstate"
-	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/detection"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/agentstate"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/detection"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

@@ -3,9 +3,9 @@ package observer
 import (
 	"testing"
 
-	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/tmux"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 func paneProcess(pane tmux.Pane, processes []processinfo.Process, byPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness) (processinfo.Process, registry.Harness, bool) {

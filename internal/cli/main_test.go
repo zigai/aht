@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zigai/aht/internal/config"
+	"github.com/zigai/aht/v2/internal/config"
 )
 
 func TestMain(m *testing.M) {

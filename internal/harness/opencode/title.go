@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func (opencodeHarness) SessionTitles(ctx context.Context, identities []registry.ObservationIdentity) ([]string, error) {

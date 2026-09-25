@@ -11,7 +11,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/processinfo"
 )
 
 func TestServerCleanupAndIsolation(t *testing.T) {

@@ -8,13 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/brokerserver"
-	"github.com/zigai/aht/internal/config"
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/internal/observer"
-	"github.com/zigai/aht/internal/service"
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/brokerserver"
+	"github.com/zigai/aht/v2/internal/config"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/observer"
+	"github.com/zigai/aht/v2/internal/service"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

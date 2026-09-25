@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/internal/agentstate"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/agentstate"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestManageDetectionTestHumanOutput(t *testing.T) {

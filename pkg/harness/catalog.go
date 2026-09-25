@@ -3,8 +3,8 @@ package harness
 import (
 	"fmt"
 
-	"github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Parse returns the supported harness identified by value. Harness names and

@@ -3,7 +3,7 @@ package harness_test
 import (
 	"fmt"
 
-	"github.com/zigai/aht/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/harness"
 )
 
 func ExampleParse() {

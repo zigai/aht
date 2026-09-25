@@ -20,8 +20,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const systemTestTimeout = 30 * time.Second

@@ -11,8 +11,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/zigai/aht/internal/harness/titlefile"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/titlefile"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // SessionTitles resolves native Codex names from its index and state database.

@@ -8,8 +8,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"pgregory.net/rapid"
 
-	"github.com/zigai/aht/internal/harness/kimi"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/kimi"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func host(t *testing.T, p *kimi.Protocol, line string, want registry.Activity) {

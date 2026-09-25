@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/internal/brokerserver"
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/client"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/brokerserver"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/client"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestClientListFallsBackToDurableRegistry(t *testing.T) {

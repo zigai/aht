@@ -1,8 +1,8 @@
 package catalog
 
 import (
-	"github.com/zigai/aht/internal/harness/transcript"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TranscriptFor(id registry.Harness) transcript.Reader {

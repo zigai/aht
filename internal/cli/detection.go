@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/zigai/aht/pkg/client"
-	"github.com/zigai/aht/pkg/manage"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/client"
+	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var errTmuxPaneNotLive = manage.ErrPaneNotLive

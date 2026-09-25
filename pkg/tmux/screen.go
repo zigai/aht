@@ -8,7 +8,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/mux"
 )
 
 const defaultCaptureLines = 100

@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestGoldenScreenFixtures(t *testing.T) {

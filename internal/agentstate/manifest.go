@@ -16,10 +16,10 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/zigai/aht/internal/config"
-	"github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/config"
+	"github.com/zigai/aht/v2/internal/harness"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

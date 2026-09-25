@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/broker"
 )
 
 type isolatedHost struct {

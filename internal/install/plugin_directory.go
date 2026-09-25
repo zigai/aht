@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 )
 
 var (

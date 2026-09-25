@@ -12,8 +12,8 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/text"
 
-	"github.com/zigai/aht/pkg/client"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/client"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const defaultWatchDebounce = 100 * time.Millisecond

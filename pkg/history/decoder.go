@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	native "github.com/zigai/aht/internal/harness/transcript"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 func (s *search) decoder(source Source, t *transcript) *native.Decoder {

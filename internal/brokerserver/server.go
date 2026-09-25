@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zigai/aht/internal/cancelclose"
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/cancelclose"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

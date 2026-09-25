@@ -13,7 +13,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/internal/testtmux"
+	"github.com/zigai/aht/v2/internal/testtmux"
 )
 
 // Grok 1.0.3 advertises ACP session/close and acknowledges it, but neither

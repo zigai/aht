@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	native "github.com/zigai/aht/internal/harness/transcript"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const directoryScanThreshold = 32

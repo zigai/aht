@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 type fakeHermesCLI struct {

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle string) {

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/internal/service"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/internal/service"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestUpgradeReportsPartialFailureAndStillRestartsTracker(t *testing.T) {

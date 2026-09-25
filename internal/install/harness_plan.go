@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 type importManifest struct {

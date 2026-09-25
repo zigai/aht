@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // ACP cancellation is a notification; the original prompt returns cancelled:

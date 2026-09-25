@@ -18,7 +18,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestReportingPluginsBoundAndReapChildren(t *testing.T) {

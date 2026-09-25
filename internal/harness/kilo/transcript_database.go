@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 func transcriptQuery(ctx context.Context, db *sql.DB) (string, transcript.RowReader, error) {

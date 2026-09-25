@@ -20,11 +20,11 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
-	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/tmux"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 const (

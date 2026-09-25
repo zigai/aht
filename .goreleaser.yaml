@@ -18,9 +18,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/zigai/aht/internal/cli.version={{.Version}}
-      - -X github.com/zigai/aht/internal/cli.commit={{.ShortCommit}}
-      - -X github.com/zigai/aht/internal/cli.date={{.Date}}
+      - -X github.com/zigai/aht/v2/internal/cli.version={{.Version}}
+      - -X github.com/zigai/aht/v2/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/zigai/aht/v2/internal/cli.date={{.Date}}
 
 archives:
   - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

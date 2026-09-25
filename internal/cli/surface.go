@@ -14,11 +14,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zigai/strata"
 
-	"github.com/zigai/aht/internal/config"
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/internal/service"
-	"github.com/zigai/aht/pkg/client"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/config"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/internal/service"
+	"github.com/zigai/aht/v2/pkg/client"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

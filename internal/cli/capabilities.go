@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/pkg/harness"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 type capabilitiesOptions struct {

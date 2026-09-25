@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestUnclassifiedRemoteErrorsRemainOperationErrors(t *testing.T) {

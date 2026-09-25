@@ -10,9 +10,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
-	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func (app *application) newIntegrationsCommand() *cobra.Command {

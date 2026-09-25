@@ -3,7 +3,7 @@ package aht
 import (
 	"context"
 
-	"github.com/zigai/aht/pkg/history"
+	"github.com/zigai/aht/v2/pkg/history"
 )
 
 var (

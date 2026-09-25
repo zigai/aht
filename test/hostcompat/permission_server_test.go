@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Both hosts publish these HTTP operations in their native SDK. Polling the

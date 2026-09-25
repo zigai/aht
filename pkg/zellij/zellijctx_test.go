@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/zellij"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 var (

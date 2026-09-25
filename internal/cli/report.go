@@ -15,15 +15,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/harness"
-	harnesspkg "github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
 
-	"github.com/zigai/aht/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/processinfo"
 
-	"github.com/zigai/aht/pkg/herdr"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/tmux"
-	"github.com/zigai/aht/pkg/zellij"
+	"github.com/zigai/aht/v2/pkg/herdr"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
+	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 type reportOptions struct {

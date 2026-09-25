@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/config"
+	"github.com/zigai/aht/v2/internal/config"
 )
 
 func TestCLIConfigPublicationSkipsInvalidCommands(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func (host isolatedHost) kimiWireCommand(t *testing.T, env, nativeArgs []string) *exec.Cmd {

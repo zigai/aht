@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/pkg/history"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/history"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // searchCLIHome isolates HOME and the cache directory, returning HOME so tests

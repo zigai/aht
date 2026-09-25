@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/pkg/detection"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/detection"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestInspectUsesNormalizedBoundedScreen(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/install"
+	"github.com/zigai/aht/v2/internal/install"
 )
 
 func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {

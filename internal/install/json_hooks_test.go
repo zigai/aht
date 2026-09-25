@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	codexpkg "github.com/zigai/aht/internal/harness/codex"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	codexpkg "github.com/zigai/aht/v2/internal/harness/codex"
 )
 
 func TestInstallClaudeWritesHooks(t *testing.T) {

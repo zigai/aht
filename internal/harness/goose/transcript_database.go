@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const nativeQuery = `SELECT s.id AS session_id, s.name AS title, s.working_dir AS cwd,

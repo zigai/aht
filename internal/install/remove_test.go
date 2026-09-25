@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var errTestManifestWrite = errors.New("manifest write failed")

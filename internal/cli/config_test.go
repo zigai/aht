@@ -13,9 +13,9 @@ import (
 
 	"github.com/zigai/strata"
 
-	"github.com/zigai/aht/internal/config"
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/config"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 //nolint:cyclop // integration test verifying full flag precedence matrix

@@ -10,8 +10,8 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/internal/testtmux"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestGotmuxCapturePaneAndCurrent(t *testing.T) {

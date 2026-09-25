@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const compatibilityPrompt = "Use the available shell tool exactly once to run printf aht-compat-marker, then reply done."

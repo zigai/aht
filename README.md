@@ -6,7 +6,7 @@ retained conversations across harnesses.
 
 [![CI](https://github.com/zigai/aht/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/zigai/aht/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zigai/aht?color=blue)](https://github.com/zigai/aht/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/zigai/aht/pkg/aht.svg)](https://pkg.go.dev/github.com/zigai/aht/pkg/aht)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zigai/aht/v2/pkg/aht.svg)](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht)
 [![Go version](https://img.shields.io/github/go-mod/go-version/zigai/aht)](https://github.com/zigai/aht/blob/master/go.mod)
 [![License: MIT](https://img.shields.io/github/license/zigai/aht)](https://github.com/zigai/aht/blob/master/LICENSE)
 
@@ -30,7 +30,7 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 ## Installation
 
 ```sh
-go install github.com/zigai/aht@latest
+go install github.com/zigai/aht/v2@latest
 ```
 
 Supports Linux and macOS. Building from source requires Go 1.27.1 or newer.
@@ -72,10 +72,10 @@ lists commands to inspect and change them.
 ## Go library
 
 ```sh
-go get github.com/zigai/aht
+go get github.com/zigai/aht/v2
 ```
 
-See the [package documentation](https://pkg.go.dev/github.com/zigai/aht/pkg/aht) for the
+See the [package documentation](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht) for the
 API guide and examples.
 
 ## Hook Installation

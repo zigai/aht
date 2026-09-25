@@ -13,9 +13,9 @@ import (
 
 	"github.com/sethvargo/go-retry"
 
-	"github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

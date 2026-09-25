@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 func readTranscriptDocument(ctx context.Context, t *transcript.Decoder, data []byte) error {

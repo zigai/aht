@@ -3,7 +3,7 @@ package manage_test
 import (
 	"fmt"
 
-	"github.com/zigai/aht/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/manage"
 )
 
 func ExampleSupportedHarnesses() {

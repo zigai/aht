@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/internal/command"
+	"github.com/zigai/aht/v2/internal/command"
 )
 
 const (

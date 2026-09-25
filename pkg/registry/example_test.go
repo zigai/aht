@@ -3,7 +3,7 @@ package registry_test
 import (
 	"fmt"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func ExampleNormalizeActivity() {

@@ -1,4 +1,4 @@
-module github.com/zigai/aht
+module github.com/zigai/aht/v2
 
 go 1.27.1
 

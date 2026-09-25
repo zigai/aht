@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
 func TestIntegrationManagedArtifactsUseV2Reports(t *testing.T) {

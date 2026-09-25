@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/zigai/aht/pkg/harness"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestProcessNames(t *testing.T) {

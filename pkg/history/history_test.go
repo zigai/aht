@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/pkg/history"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/history"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const treeHistory = `{"type":"session","version":3,"id":"native-session","cwd":"/work/project/sub","timestamp":"2026-09-01T00:00:00Z"}

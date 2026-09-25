@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/install"
-	"github.com/zigai/aht/internal/service"
+	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/internal/service"
 )
 
 type upgradeResult struct {

@@ -23,7 +23,7 @@ func buildCompatibilityOracle(t *testing.T) string {
 	oracle := filepath.Join(t.TempDir(), "aht-compat-oracle")
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	command := exec.Command("go", "build", "-ldflags", "-X github.com/zigai/aht/internal/cli.version=compat-oracle", "-o", oracle, ".")
+	command := exec.Command("go", "build", "-ldflags", "-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle", "-o", oracle, ".")
 	command.Dir = filepath.Clean(filepath.Join(sourceDirectory(), "..", ".."))
 	if output, err := compatibilityOutput(ctx, command); err != nil {
 		t.Fatalf("building compatibility oracle: %v\n%s", err, output)

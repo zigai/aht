@@ -5,7 +5,7 @@ import (
 	"maps"
 	"reflect"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 )
 
 func commandHookGroup(command string, matcher string, statusMessage string, timeoutSeconds int) map[string]any {

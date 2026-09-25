@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
 const (

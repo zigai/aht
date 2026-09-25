@@ -3,9 +3,9 @@ package tmux_test
 import (
 	"fmt"
 
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/registry"
 
-	"github.com/zigai/aht/pkg/tmux"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 func ExampleContextFromEnv() {

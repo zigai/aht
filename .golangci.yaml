@@ -10,7 +10,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/zigai/aht
+        - github.com/zigai/aht/v2
 
 linters:
   enable:
@@ -118,16 +118,16 @@ linters:
         registry:
           files: ["**/pkg/registry/*.go"]
           deny:
-            - pkg: github.com/zigai/aht/internal
+            - pkg: github.com/zigai/aht/v2/internal
               desc: Registry is a pure domain and persistence package; inject harness rules.
         adapter_consumers:
           list-mode: lax
           files: ["**/internal/cli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
           allow:
-            - github.com/zigai/aht/internal/harness/catalog$
-            - github.com/zigai/aht/internal/harness/transcript
+            - github.com/zigai/aht/v2/internal/harness/catalog$
+            - github.com/zigai/aht/v2/internal/harness/transcript
           deny:
-            - pkg: github.com/zigai/aht/internal/harness/
+            - pkg: github.com/zigai/aht/v2/internal/harness/
               desc: Dispatch through the catalog and shared transcript capability.
     forbidigo:
       analyze-types: true

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/pkg/aht"
+	"github.com/zigai/aht/v2/pkg/aht"
 )
 
 func BenchmarkLookupTitlesCodexBatch(b *testing.B) {

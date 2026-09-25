@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/herdr"
-	"github.com/zigai/aht/pkg/mux"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/zellij"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/herdr"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {

@@ -14,9 +14,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/config"
-	catalog "github.com/zigai/aht/internal/harness/catalog"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/config"
+	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestCommandsRejectUnexpectedArgumentsBeforeSideEffects(t *testing.T) {

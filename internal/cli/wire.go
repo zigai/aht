@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/internal/harness"
-	harnesscatalog "github.com/zigai/aht/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
 const wireHelp = `Run an owned Kimi Code process using its native Wire protocol.

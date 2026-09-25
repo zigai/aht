@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/zigai/aht/pkg/broker"
-	"github.com/zigai/aht/pkg/client"
-	"github.com/zigai/aht/pkg/harness"
-	"github.com/zigai/aht/pkg/manage"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/broker"
+	"github.com/zigai/aht/v2/pkg/client"
+	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

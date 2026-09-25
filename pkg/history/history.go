@@ -15,11 +15,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	native "github.com/zigai/aht/internal/harness/transcript"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 
-	"github.com/zigai/aht/internal/pathmatch"
-	"github.com/zigai/aht/pkg/harness"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/pathmatch"
+	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

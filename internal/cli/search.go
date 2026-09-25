@@ -14,9 +14,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/pkg/harness"
-	"github.com/zigai/aht/pkg/history"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/history"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (

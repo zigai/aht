@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	harnesspkg "github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/registry"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Remove deletes only artifacts owned by aht for one harness.

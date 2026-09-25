@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zigai/aht/internal/processinfo"
-	"github.com/zigai/aht/pkg/herdr"
-	"github.com/zigai/aht/pkg/registry"
-	"github.com/zigai/aht/pkg/tmux"
-	"github.com/zigai/aht/pkg/zellij"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/herdr"
+	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
+	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 // CurrentContextOptions identifies the process whose enclosing agent session is requested.

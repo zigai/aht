@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/internal/harness"
-	"github.com/zigai/aht/pkg/registry"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
