@@ -16,10 +16,9 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/registrycheck"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-var errLocalSessionInvariant = errors.New("invalid registry session")
 
 type nativeEventCase struct {
 	event    string
@@ -28,17 +27,14 @@ type nativeEventCase struct {
 }
 
 type nativeSequenceRunner struct {
-	store             *registry.MemoryStore
-	definition        harness.Definition
-	id                registry.Harness
-	base              time.Time
-	sequences         map[string]uint64
-	coverage          map[registry.NativeLifecycle]bool
-	acceptedSessions  map[string]bool
-	tick              int
-	accepted          int
-	permissionReached bool
-	sequenced         bool
+	store      *registry.MemoryStore
+	definition harness.Definition
+	id         registry.Harness
+	base       time.Time
+	sequences  map[string]uint64
+	coverage   *registrycheck.Coverage
+	tick       int
+	sequenced  bool
 }
 
 func TestNativeEventSequencesPreserveRegistryProperties(t *testing.T) {
@@ -111,14 +107,14 @@ func runNativeHookAdapter(t *testing.T, id registry.Harness) {
 	if !PayloadCompatibleWithHarness(id, raw) {
 		t.Fatal("hook payload incompatible with adapter")
 	}
-	accepted := 0
+	coverage := registrycheck.NewCoverage()
 	for step, event := range []string{"PostToolUse", "PreToolUse", "PreToolUse", "PostToolUse"} {
 		if applyNativeHook(t, store, id, event, step, payload, raw) {
-			accepted++
+			coverage.Hit("hook-report")
 		}
 	}
-	if accepted == 0 {
-		t.Fatal("hook handler produced no accepted reports")
+	if missing := coverage.Missing("hook-report"); len(missing) > 0 {
+		t.Fatalf("missing hook coverage: %v", missing)
 	}
 }
 
@@ -140,7 +136,7 @@ func applyNativeHook(t *testing.T, store *registry.MemoryStore, id registry.Harn
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := localSessions(sessions); err != nil {
+	if err := registrycheck.Sessions(sessions); err != nil {
 		t.Fatalf("hook event %q: %v", event, err)
 	}
 	return true
@@ -168,8 +164,7 @@ func runNativeEventInput(t *testing.T, name string, input []byte, sequenced bool
 	runner := &nativeSequenceRunner{
 		store: store, definition: adapter.Definition(), id: id,
 		base: time.Now().UTC().Add(-time.Minute), sequenced: sequenced,
-		sequences: map[string]uint64{}, coverage: map[registry.NativeLifecycle]bool{},
-		acceptedSessions: map[string]bool{},
+		sequences: map[string]uint64{}, coverage: registrycheck.NewCoverage(),
 	}
 	rapid.MakeFuzz(func(rt *rapid.T) { runner.exercise(rt, steps) })(t, input)
 	runner.assertCoverage(t)
@@ -232,7 +227,7 @@ func (runner *nativeSequenceRunner) observeEvent(rt *rapid.T, sessionID string, 
 	if err != nil {
 		rt.Fatal(err)
 	}
-	if err := localSessions(after); err != nil {
+	if err := registrycheck.Sessions(after); err != nil {
 		rt.Fatalf("registry invariant after %q: %v", event.event, err)
 	}
 	if stale && runner.sequenced && storedSequence(before, sessionID) > 0 && observeErr == nil {
@@ -313,10 +308,10 @@ func (runner *nativeSequenceRunner) recordAccepted(rt *rapid.T, sessionID string
 	if session.Observations.Native != nil && session.Observations.Native.Reporter.Sequence != nil {
 		runner.sequences[sessionID] = *session.Observations.Native.Reporter.Sequence
 	}
-	runner.accepted++
-	runner.acceptedSessions[sessionID] = true
+	runner.coverage.Hit("accepted")
+	runner.coverage.Hit("session:" + sessionID)
 	if lifecycle := observation.Report().Lifecycle; lifecycle != nil {
-		runner.coverage[*lifecycle] = true
+		runner.coverage.Hit(string(*lifecycle))
 		if *lifecycle == registry.NativeLifecycleEnd && (session.Presence() != registry.PresenceGone || session.Activity() != nil) {
 			rt.Fatalf("end left presence %s and activity %v", session.Presence(), session.Activity())
 		}
@@ -366,7 +361,7 @@ func (runner *nativeSequenceRunner) assertWaitingEvidence(rt *rapid.T, event str
 	if runner.definition.StateAuthority == registry.AuthorityHook && (session.Activity() == nil || *session.Activity() != registry.ActivityWaiting) {
 		rt.Fatalf("permission request %q did not enter waiting", event)
 	}
-	runner.permissionReached = true
+	runner.coverage.Hit("permission")
 }
 
 func (runner *nativeSequenceRunner) assertResolvedEvidence(rt *rapid.T, event string, session registry.Session, before []registry.Session) {
@@ -391,20 +386,21 @@ func priorHadWaitingEvidence(prior, session registry.Session) bool {
 func (runner *nativeSequenceRunner) assertCoverage(t *testing.T) {
 	t.Helper()
 	capabilities := runner.definition.Capabilities
-	if runner.accepted == 0 {
-		t.Fatal("adapter produced no accepted events")
+	required := []string{"accepted"}
+	if capabilities.SessionStart {
+		required = append(required, string(registry.NativeLifecycleStart), string(registry.NativeLifecycleResume))
 	}
-	if capabilities.SessionStart && (!runner.coverage[registry.NativeLifecycleStart] || !runner.coverage[registry.NativeLifecycleResume]) {
-		t.Fatalf("start/resume lifecycle coverage = %v", runner.coverage)
+	if capabilities.SessionEnd {
+		required = append(required, string(registry.NativeLifecycleEnd))
 	}
-	if capabilities.SessionEnd && !runner.coverage[registry.NativeLifecycleEnd] {
-		t.Fatalf("end lifecycle coverage = %v", runner.coverage)
+	if capabilities.WaitingPermission {
+		required = append(required, "permission")
 	}
-	if capabilities.WaitingPermission && !runner.permissionReached {
-		t.Fatal("permission waiting was not reached")
+	if !runner.definition.ExclusiveProcess {
+		required = append(required, "session:session-a", "session:session-b")
 	}
-	if !runner.definition.ExclusiveProcess && len(runner.acceptedSessions) < 2 {
-		t.Fatalf("multi-session reporter accepted %d identities", len(runner.acceptedSessions))
+	if missing := runner.coverage.Missing(required...); len(missing) > 0 {
+		t.Fatalf("missing adapter event coverage: %v", missing)
 	}
 }
 
@@ -444,25 +440,4 @@ func lifecycleBytes(seed uint64) []byte {
 		copy(data[offset:], digest[:])
 	}
 	return data
-}
-
-// Temporary local invariant helper until internal/registrycheck.Sessions is merged.
-func localSessions(sessions []registry.Session) error {
-	seen := make(map[string]bool, len(sessions))
-	for _, session := range sessions {
-		if session.ID == "" || seen[session.ID] {
-			return fmt.Errorf("empty or repeated session id %q: %w", session.ID, errLocalSessionInvariant)
-		}
-		seen[session.ID] = true
-		if session.Harness == "" || session.CreatedAt.IsZero() || session.UpdatedAt.Before(session.CreatedAt) {
-			return fmt.Errorf("invalid identity or timestamps for %q: %w", session.ID, errLocalSessionInvariant)
-		}
-		if session.Presence() == registry.PresenceGone && session.Activity() != nil {
-			return fmt.Errorf("gone session %q has activity: %w", session.ID, errLocalSessionInvariant)
-		}
-		if activity := session.Activity(); activity != nil && !activity.IsValid() {
-			return fmt.Errorf("invalid activity for %q: %w", session.ID, errLocalSessionInvariant)
-		}
-	}
-	return nil
 }
