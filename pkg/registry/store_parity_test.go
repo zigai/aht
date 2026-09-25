@@ -133,7 +133,7 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 		if err := checkInvariantSessions(memorySessions); err != nil {
 			t.Fatalf("seed %d step %d memory invariants: %v", seed, step, err)
 		}
-		assertExclusiveProcesses(t, fileSessions, fixtureRules{})
+		assertExclusiveProcesses(t, fileSessions)
 	}
 }
 
