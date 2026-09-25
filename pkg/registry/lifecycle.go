@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const sessionReplacedReason = "session_replaced"
+
 type Incarnation struct {
 	ObservedAt    time.Time       `json:"observed_at"`
 	NativeProcess ProcessIdentity `json:"native_process,omitzero"`
@@ -76,14 +78,23 @@ func (m lifecycleMachine) sighting(at time.Time) {
 	if process == nil {
 		return
 	}
-	if process.Present {
+	if !process.Present {
+		if !at.Before(m.session.Incarnation.ObservedAt) {
+			m.end(at)
+		}
+		return
+	}
+	if !m.replacedTombstone() {
 		m.claim(PresenceLive, at)
 		return
 	}
-	if at.Before(m.session.Incarnation.ObservedAt) {
+	if m.session.Decision().Process.Equal(process.Process) {
 		return
 	}
-	m.end(at)
+	m.claim(PresenceLive, at)
+	if m.session.Presence() == PresenceLive {
+		m.session.setDecision(&ActivityDecision{Authority: AuthorityProcess, Reason: "process_replaced", RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "", Process: process.Process, ObservedAt: at})
+	}
 }
 
 func (m lifecycleMachine) reading(policy Policy, at time.Time) {
@@ -103,14 +114,25 @@ func (m lifecycleMachine) acceptsActivity(at time.Time) bool {
 }
 
 func (m lifecycleMachine) processReplaced(process ProcessIdentity, at time.Time) {
-	m.session.setActivity(new(ActivityUnknown))
-	m.session.setDecision(&ActivityDecision{Authority: AuthorityProcess, Reason: "process_replaced", RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "", Process: process, ObservedAt: at})
+	if !m.replacedTombstone() {
+		m.session.setActivity(new(ActivityUnknown))
+		m.session.setDecision(&ActivityDecision{Authority: AuthorityProcess, Reason: "process_replaced", RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "", Process: process, ObservedAt: at})
+	}
 	m.session.Observations.Screen = nil
 	m.session.Incarnation.ObservedAt = at
 }
 
+func (m lifecycleMachine) replacedTombstone() bool {
+	gone, ok := m.session.Liveness.(Gone)
+	decision := m.session.Decision()
+	return ok && gone.Reason == sessionReplacedReason && decision != nil && decision.Reason == sessionReplacedReason
+}
+
 func (m lifecycleMachine) end(at time.Time) {
 	if at.Before(m.session.PresenceChangedAt) {
+		return
+	}
+	if m.replacedTombstone() {
 		return
 	}
 	hadActivity := m.session.Activity() != nil
