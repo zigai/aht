@@ -29,7 +29,7 @@ id = "error_prompt"
 state = "failed"
 priority = 350
 region = "bottom:30"
-any = ["API error", "Failed to execute", "Rate limit reached", "Authentication failed", "Context length exceeded", "Request failed"]
+any = ["API error", "Failed to execute", "Rate limit reached", "Authentication failed", "Context length exceeded", "Request failed", "Automatic reconnect could not restore this session", "app-server session could not be restored"]
 none = ["esc to interrupt"]
 
 [[rules]]

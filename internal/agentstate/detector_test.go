@@ -111,6 +111,24 @@ func TestBundledManifestScenarioBoundaries(t *testing.T) {
 		rule    string
 	}{
 		{
+			name: "codex terminal reconnect failure", harness: registry.Harness("codex"),
+			screen: "Connection lost. Attempting to reconnect…\n" +
+				"Automatic reconnect could not restore this session. Your draft is still editable.\n" +
+				"app-server session could not be restored\n" +
+				"Reconnect failed – check the endpoint, then relaunch",
+			want: registry.ActivityFailed, rule: "error_prompt",
+		},
+		{
+			name: "codex app-server session cannot be restored", harness: registry.Harness("codex"),
+			screen: "app-server session could not be restored",
+			want:   registry.ActivityFailed, rule: "error_prompt",
+		},
+		{
+			name: "codex temporary connection loss", harness: registry.Harness("codex"),
+			screen: "Connection lost. Attempting to reconnect…",
+			want:   registry.ActivityUnknown,
+		},
+		{
 			name: "codex case insensitive permission", harness: registry.Harness("codex"),
 			screen: "would you like to run the following command?", want: registry.ActivityWaiting, rule: "permission_prompt",
 		},
