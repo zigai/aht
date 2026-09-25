@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,59 +33,37 @@ type registryFS interface {
 type osRegistryFS struct{}
 
 func (osRegistryFS) Open(path string) (registryFile, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
-	}
-	return file, nil
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.Open(path)
 }
 
 func (osRegistryFS) OpenFile(path string, flag int, mode os.FileMode) (registryFile, error) {
-	file, err := os.OpenFile(path, flag, mode)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
-	}
-	return file, nil
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.OpenFile(path, flag, mode)
 }
 
 func (osRegistryFS) CreateTemp(dir, pattern string) (registryFile, error) {
-	file, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return nil, fmt.Errorf("creating temporary store in %s: %w", dir, err)
-	}
-	return file, nil
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.CreateTemp(dir, pattern)
 }
 
 func (osRegistryFS) Rename(oldPath, newPath string) error {
-	if err := os.Rename(oldPath, newPath); err != nil {
-		return fmt.Errorf("renaming %s: %w", oldPath, err)
-	}
-	return nil
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.Rename(oldPath, newPath)
 }
 
 func (osRegistryFS) Remove(path string) error {
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("removing %s: %w", path, err)
-	}
-	return nil
+	//nolint:wrapcheck // Preserve os.PathError text on best-effort cleanup.
+	return os.Remove(path)
 }
 
 func (osRegistryFS) MkdirAll(path string, mode os.FileMode) error {
-	if err := os.MkdirAll(path, mode); err != nil {
-		return fmt.Errorf("creating directory %s: %w", path, err)
-	}
-	return nil
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.MkdirAll(path, mode)
 }
 
 func registryFSFor(path string) registryFS {
-	if value, ok := registryFSByDir.Load(filepath.Dir(path)); ok {
-		fs, valid := value.(registryFS)
-		if !valid {
-			panic("registry filesystem has invalid type")
-		}
-		return fs
-	}
-	return osRegistryFS{}
+	return registryFSForDir(filepath.Dir(path))
 }
 
 func registryFSForDir(dir string) registryFS {
