@@ -124,7 +124,7 @@ func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request 
 		return
 	}
 
-	if request.Method == http.MethodPost && provider.validPath(request.URL.Path) && (strings.Contains(string(body), "You are a title generator") || strings.Contains(string(body), "ultra-short dashboard line") || strings.Contains(string(body), "generate_session_title") || strings.Contains(string(body), "Generate a session title") || strings.Contains(string(body), "Write the title in the predominant language") || requestAdvertisesTool(body, "session_title")) {
+	if request.Method == http.MethodPost && provider.validPath(request.URL.Path) && requestWantsTitle(body) {
 		provider.writeFinal(writer, body)
 		return
 	}
@@ -296,6 +296,17 @@ func (provider *scriptedProvider) fail(err error) {
 	if provider.err == nil {
 		provider.err = err
 	}
+}
+
+func requestWantsTitle(body []byte) bool {
+	text := string(body)
+	return strings.Contains(text, "You are a title generator") ||
+		strings.Contains(text, "ultra-short dashboard line") ||
+		strings.Contains(text, "generate_session_title") ||
+		strings.Contains(text, "Generate a session title") ||
+		strings.Contains(text, "Write the title in the predominant language") ||
+		strings.Contains(text, "Generate a short, descriptive title") ||
+		requestAdvertisesTool(body, "session_title")
 }
 
 func requestAdvertisesTool(body []byte, toolName string) bool {
@@ -543,6 +554,31 @@ func TestScriptedProviderRootProbeDoesNotAdvanceConversation(t *testing.T) {
 		}
 		postProviderRequest(t, provider.URL()+"/v1/responses", body, http.StatusOK)
 	}
+	if err := provider.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Requests()) != 2 {
+		t.Fatalf("model request count = %d, want 2", len(provider.Requests()))
+	}
+}
+
+func TestScriptedProviderTitlePromptDoesNotAdvanceConversation(t *testing.T) {
+	provider := newScriptedProvider(t, protocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
+	titleRequest := `{"messages":[{"role":"system","content":"Generate a short, descriptive title (3-7 words) for a conversation that starts with the following exchange."}]}`
+	postProviderRequest(t, provider.URL()+"/v1/chat/completions", titleRequest, http.StatusOK)
+	if len(provider.Requests()) != 0 {
+		t.Fatalf("title request recorded in conversation requests: %v", provider.Requests())
+	}
+	if err := provider.Error(); err != nil {
+		t.Fatal(err)
+	}
+
+	first := `{"stream":false,"tools":[{"type":"function","function":{"name":"shell"}}]}`
+	second := `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"marker"}]}`
+	postProviderRequest(t, provider.URL()+"/v1/chat/completions", first, http.StatusOK)
+	postProviderRequest(t, provider.URL()+"/v1/chat/completions", titleRequest, http.StatusOK)
+	postProviderRequest(t, provider.URL()+"/v1/chat/completions", second, http.StatusOK)
+	postProviderRequest(t, provider.URL()+"/v1/chat/completions", titleRequest, http.StatusOK)
 	if err := provider.Error(); err != nil {
 		t.Fatal(err)
 	}
