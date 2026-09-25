@@ -4,15 +4,32 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadSnapshotFileMissingPreservesPathError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	_, err := readSnapshotFile(path)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read missing snapshot: %v, want os.ErrNotExist", err)
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || pathErr.Path != path {
+		t.Fatalf("read missing snapshot: %v, want PathError for %s", err, path)
+	}
+	if strings.Count(err.Error(), path) != 1 {
+		t.Fatalf("read missing snapshot repeats path: %v", err)
+	}
+}
 
 type crashFile struct {
 	live   []byte
