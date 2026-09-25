@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type (
@@ -14,7 +15,7 @@ type (
 )
 
 func MessageParts(raw json.RawMessage, role string, tools bool) []TextPart {
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && plainJSONString(raw[1:len(raw)-1]) {
 		return []TextPart{{Role: role, Text: string(raw[1 : len(raw)-1])}}
 	}
 	var body string
@@ -170,4 +171,15 @@ func StoredTime(value string) time.Time {
 func ToolBlockText(r Record) string {
 	state := Obj(r, "state")
 	return FirstString(r, "tool", "name") + " " + string(state["input"]) + " " + Str(state, "output") + " " + ContentText(state["content"]) + " " + Str(state, "error") + " " + Str(Obj(state, "error"), "message")
+}
+
+func plainJSONString(body []byte) bool {
+	nonASCII := false
+	for _, b := range body {
+		if b < ' ' || b == '"' || b == '\\' {
+			return false
+		}
+		nonASCII = nonASCII || b >= utf8.RuneSelf
+	}
+	return !nonASCII || utf8.Valid(body)
 }

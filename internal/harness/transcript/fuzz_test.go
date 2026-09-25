@@ -3,8 +3,8 @@ package transcript
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"testing"
-	"unicode/utf8"
 )
 
 func FuzzMessageParts(f *testing.F) {
@@ -16,6 +16,8 @@ func FuzzMessageParts(f *testing.F) {
 		[]byte(`{"content":"wrong shape"}`),
 		[]byte(`[{"type":"text","text":`),
 		{'"', 0xff, '"'},
+		{'"', 0x1f, '"'},
+		[]byte(`"a"b"`),
 	} {
 		f.Add(seed)
 	}
@@ -41,13 +43,38 @@ func checkMessageParts(t *testing.T, data []byte) {
 func checkDirectMessageParts(t *testing.T, data []byte, parts []TextPart) {
 	t.Helper()
 	var direct string
-	if json.Unmarshal(data, &direct) == nil {
-		if !utf8.Valid(data) && len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
-			t.Skip("known invalid UTF-8 fast-path mismatch: seed with quoted 0xff reproduces it")
-		}
+	if err := json.Unmarshal(data, &direct); err == nil {
 		if len(parts) != 1 || parts[0].Role != "assistant" || parts[0].Text != direct {
 			t.Fatalf("seed=%q: direct string changed: %#v, want %q", data, parts, direct)
 		}
+	} else if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' && len(parts) != 0 {
+		t.Fatalf("seed=%q: accepted invalid quoted string: %#v", data, parts)
+	}
+}
+
+func TestMessagePartsQuotedString(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "plain", raw: []byte(`"hello"`)},
+		{name: "unicode", raw: []byte(`"Grüße"`)},
+		{name: "escaped", raw: []byte(`"line\nnext"`)},
+		{name: "invalid UTF-8", raw: []byte{'"', 0xff, '"'}},
+		{name: "control", raw: []byte{'"', 0x1f, '"'}},
+		{name: "unescaped quote", raw: []byte(`"a"b"`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded string
+			err := json.Unmarshal(tc.raw, &decoded)
+			var want []TextPart
+			if err == nil {
+				want = []TextPart{{Role: "assistant", Text: decoded}}
+			}
+			if got := MessageParts(tc.raw, "assistant", true); !slices.Equal(got, want) {
+				t.Fatalf("raw=%q: MessageParts = %#v, slow path = %#v (error: %v)", tc.raw, got, want, err)
+			}
+		})
 	}
 }
 
