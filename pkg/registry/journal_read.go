@@ -26,8 +26,10 @@ func (s *FileStore) loadContext(ctx context.Context) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, closeStoreLock(lock, err)
 	}
-	err = s.reducer.foldJournal(ctx, &snap, entries)
-	return snap, closeStoreLock(lock, err)
+	if err := s.reducer.foldJournal(ctx, &snap, entries); err != nil {
+		return snapshot{}, closeStoreLock(lock, err)
+	}
+	return snap, closeStoreLock(lock, validateSnapshot(snap))
 }
 
 func (s *MemoryStore) drainLocked(ctx context.Context) error {
