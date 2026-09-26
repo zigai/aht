@@ -172,7 +172,7 @@ ignore_paths = ["/tmp/scratch"]
 	}
 }
 
-func TestCLIConfigRetentionAutoCleanFallback(t *testing.T) {
+func TestCLIStateCleanDefaultsToConfiguredTombstoneTTL(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
@@ -194,10 +194,10 @@ func TestCLIConfigRetentionAutoCleanFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Config: max_gone_age = "24h"
+	// Config: tombstone_ttl = "24h"
 	cfgContent := `
 [retention]
-max_gone_age = "24h"
+tombstone_ttl = "24h"
 `
 	if err := os.WriteFile(configPath, []byte(cfgContent), 0o600); err != nil {
 		t.Fatal(err)
@@ -516,20 +516,17 @@ func TestCLIManageConfigInit(t *testing.T) {
 	}
 }
 
-func TestAutoCleanCLIFlagHonorsConfiguredMaxGoneAge(t *testing.T) {
+func TestTrackerConfigAppliesTombstoneTTL(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Config{
-		Retention: config.RetentionConfig{
-			AutoClean:  new(false),
-			MaxGoneAge: "7d",
-		},
-	}
+	cfg := config.Defaults()
+	cfg.Retention.TombstoneTTL = "45m"
 	var opts observeOptions
-	applyTrackerAutoClean(&opts, cfg)
-	opts.autoClean = true
-	if opts.maxGoneAge != 7*24*time.Hour {
-		t.Fatalf("enabling --auto-clean after loading default config uses %v retention, want 7d", opts.maxGoneAge)
+	if err := applyTrackerConfig(&opts, (&application{}).newTrackerRunCommand(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if opts.tombstoneTTL != 45*time.Minute {
+		t.Fatalf("tracker tombstone TTL = %v, want 45m", opts.tombstoneTTL)
 	}
 }
 

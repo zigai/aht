@@ -29,12 +29,23 @@
 // which source decided the activity. For exhaustive handling, switch on
 // Session.Liveness, which is [Live], [Gone], or [Unknown].
 //
+// The registry holds current state, not history. When a session ends, the
+// tracker removes it: at once if AHT knew it only by its process, or after
+// the configured tombstone TTL (retention.tombstone_ttl, 10 minutes by
+// default) if it has a native session ID or transcript path. Keep your own
+// records of ended sessions if you need them, and use [SearchHistory] for past
+// conversations. A process AHT finds only by its command name becomes a
+// session after it has run for a few seconds, unless a native report or
+// catalog entry confirms it sooner.
+//
 // # Following changes
 //
 // [client.Client.Watch] calls a function with the current state and after every change
 // until the context is canceled. [client.Client.Subscribe] provides the same stream as
-// channels. [client.Client.Wait] blocks until one session reaches a presence or
-// activity, optionally for a minimum duration.
+// channels. A session the tracker removes is absent from the next snapshot.
+// [client.Client.Wait] blocks until one session reaches a presence or
+// activity, optionally for a minimum duration; removal of a session it has
+// seen satisfies a wait for [PresenceGone].
 //
 // # Titles and history
 //

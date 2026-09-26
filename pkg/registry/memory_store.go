@@ -13,6 +13,13 @@ import (
 const (
 	defaultPersistenceSettle   = 25 * time.Millisecond
 	defaultPersistenceMaxDelay = 250 * time.Millisecond
+	// defaultBackgroundPersistInterval bounds how long state that consumers
+	// cannot see, such as refreshed evidence timestamps, stays memory-only.
+	defaultBackgroundPersistInterval = time.Minute
+
+	// DefaultTombstoneTTL is how long a MemoryStore keeps an identified gone
+	// session so late native reports from the ended incarnation are rejected.
+	DefaultTombstoneTTL = 10 * time.Minute
 )
 
 var _ Store = (*MemoryStore)(nil)
@@ -26,26 +33,57 @@ type StateSnapshot struct {
 	Sessions  []Session `json:"sessions"`
 }
 
+// MemoryStoreOptions configures an in-memory authoritative store.
+type MemoryStoreOptions struct {
+	// TombstoneTTL is how long an identified gone session stays in the registry
+	// to reject late native reports from its ended incarnation. Values <= 0 use
+	// DefaultTombstoneTTL. Process-only gone sessions are removed immediately.
+	TombstoneTTL time.Duration
+}
+
 // MemoryStore keeps the authoritative registry in memory while retaining the
 // same evidence reducer and query contract as FileStore.
+//
+// The registry holds current state only. A gone session with only process
+// identity is removed when it goes gone; an identified gone session is removed
+// once it has been gone for the tombstone TTL. Expiry runs when the store
+// opens, after every command, and from RunPersistence.
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	reducer           Reducer
-	path              string
-	now               func() time.Time
-	snapshot          snapshot
-	revision          uint64
-	storageRevision   uint64
-	persistedRevision uint64
-	stateChanged      chan struct{}
-	owner             *storeLock
-	dirty             chan struct{}
-	flush             chan struct{}
+	reducer      Reducer
+	path         string
+	now          func() time.Time
+	tombstoneTTL time.Duration
+	snapshot     snapshot
+	revision     uint64
+	// storageRevision counts every in-memory change. visibleRevision is the
+	// storageRevision of the latest consumer-visible change; only those
+	// schedule a prompt snapshot write.
+	storageRevision           uint64
+	visibleRevision           uint64
+	persistedRevision         uint64
+	persistedAt               time.Time
+	backgroundPersistInterval time.Duration
+	stateChanged              chan struct{}
+	owner                     *storeLock
+	dirty                     chan struct{}
+	flush                     chan struct{}
 }
 
-// OpenMemoryStore loads path once and returns an in-memory authoritative store.
+// OpenMemoryStore loads path once and returns an in-memory authoritative store
+// that uses DefaultTombstoneTTL.
 func OpenMemoryStore(path string, rules Rules) (*MemoryStore, error) {
+	return OpenMemoryStoreWithOptions(path, rules, MemoryStoreOptions{TombstoneTTL: 0})
+}
+
+// OpenMemoryStoreWithOptions loads path once, removes expired tombstones, and
+// returns an in-memory authoritative store.
+func OpenMemoryStoreWithOptions(path string, rules Rules, options MemoryStoreOptions) (*MemoryStore, error) {
+	ttl := options.TombstoneTTL
+	if ttl <= 0 {
+		ttl = DefaultTombstoneTTL
+	}
 	fileStore := NewFileStore(path, rules)
 	if err := os.MkdirAll(filepath.Dir(fileStore.Path()), 0o700); err != nil {
 		return nil, fmt.Errorf("creating state directory: %w", err)
@@ -58,7 +96,13 @@ func OpenMemoryStore(path string, rules Rules) (*MemoryStore, error) {
 	if err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
-	store := &MemoryStore{mu: sync.RWMutex{}, storageRevision: 1, persistedRevision: 0, path: fileStore.Path(), reducer: NewReducer(rules), now: func() time.Time { return time.Now().UTC() }, snapshot: cloneRegistrySnapshot(loaded), revision: 1, stateChanged: make(chan struct{}), dirty: make(chan struct{}, 1), owner: owner, flush: make(chan struct{}, 1)}
+	store := &MemoryStore{
+		mu: sync.RWMutex{}, reducer: NewReducer(rules), path: fileStore.Path(), now: func() time.Time { return time.Now().UTC() },
+		tombstoneTTL: ttl, snapshot: cloneRegistrySnapshot(loaded), revision: 1,
+		storageRevision: 1, visibleRevision: 1, persistedRevision: 0, persistedAt: time.Time{}, backgroundPersistInterval: defaultBackgroundPersistInterval,
+		stateChanged: make(chan struct{}), owner: owner, dirty: make(chan struct{}, 1), flush: make(chan struct{}, 1),
+	}
+	expireTombstones(store.snapshot.Sessions, store.now(), ttl)
 	if err := store.Flush(context.Background()); err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
@@ -231,8 +275,18 @@ func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
 	}
 }
 
-// Flush atomically persists the latest in-memory snapshot.
+// Flush atomically persists the latest in-memory snapshot, including state
+// that is not visible to consumers.
 func (s *MemoryStore) Flush(ctx context.Context) error {
+	return s.persist(ctx, true)
+}
+
+// persist checkpoints the snapshot and truncates the journal. Unless force is
+// set, it writes only after a consumer-visible change or, for evidence-only
+// refreshes, once the background interval has elapsed since the last write.
+//
+//nolint:funcorder // persistence policy stays beside Flush
+func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 	select {
 	case s.flush <- struct{}{}:
 		defer func() { <-s.flush }()
@@ -251,7 +305,8 @@ func (s *MemoryStore) Flush(ctx context.Context) error {
 	if err := s.consumeJournalLocked(ctx); err != nil {
 		return closeStoreLock(lock, err)
 	}
-	if s.storageRevision <= s.persistedRevision {
+	s.expireTombstonesLocked()
+	if !s.persistDueLocked(force) {
 		return closeStoreLock(lock, nil)
 	}
 	if err := ctx.Err(); err != nil {
@@ -261,7 +316,31 @@ func (s *MemoryStore) Flush(ctx context.Context) error {
 		return closeStoreLock(lock, err)
 	}
 	s.persistedRevision = s.storageRevision
+	s.persistedAt = time.Now()
 	return closeStoreLock(lock, nil)
+}
+
+//nolint:funcorder // persistence policy stays beside Flush
+func (s *MemoryStore) persistDueLocked(force bool) bool {
+	if s.storageRevision <= s.persistedRevision {
+		return false
+	}
+	if force || s.visibleRevision > s.persistedRevision {
+		return true
+	}
+	return time.Since(s.persistedAt) >= s.backgroundPersistInterval
+}
+
+//nolint:funcorder // lock-scoped expiry stays beside persistence
+func (s *MemoryStore) expireTombstonesLocked() {
+	now := s.now().UTC()
+	if !hasExpiredTombstones(s.snapshot.Sessions, now, s.tombstoneTTL) {
+		return
+	}
+	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
+	expireTombstones(candidate.Sessions, now, s.tombstoneTTL)
+	changes := stateChanges(State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}, State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt})
+	s.acceptSnapshotLocked(candidate, changes)
 }
 
 func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
@@ -272,8 +351,12 @@ func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
 	return result.reset, s.Flush(ctx)
 }
 
-// RunPersistence coalesces bursts of observations into durable atomic snapshots.
-// The caller owns this loop and must cancel ctx before discarding the store.
+// RunPersistence coalesces bursts of consumer-visible changes into durable
+// atomic snapshots and expires tombstones. Evidence-only refreshes, such as
+// observer heartbeats, are neither journaled nor written promptly; they are
+// persisted with the next visible change, on a slow background interval, or on
+// shutdown. The caller owns this loop and must cancel ctx before discarding the
+// store.
 func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay time.Duration) error {
 	settle, maximumDelay = normalizePersistenceOptions(settle, maximumDelay)
 
@@ -283,8 +366,11 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 			return s.flushOnShutdown(ctx)
 		case <-s.dirty:
 		case <-time.After(defaultPersistenceMaxDelay):
-			if err := s.Flush(ctx); err != nil {
-				return err
+			if err := s.persist(ctx, false); err != nil {
+				if ctx.Err() != nil {
+					return s.flushOnShutdown(ctx)
+				}
+				return fmt.Errorf("persisting registry snapshot: %w", err)
 			}
 			continue
 		}
@@ -292,7 +378,7 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 		if err := s.coalescePersistence(ctx, settle, maximumDelay); err != nil {
 			return s.flushOnShutdown(ctx)
 		}
-		if err := s.Flush(ctx); err != nil {
+		if err := s.persist(ctx, false); err != nil {
 			if ctx.Err() != nil {
 				return s.flushOnShutdown(ctx)
 			}

@@ -106,8 +106,7 @@ absolute_time = true
 time_format = "absolute"
 
 [retention]
-auto_clean = true
-max_gone_age = "7d"
+tombstone_ttl = "30m"
 
 [filter]
 ignore_harnesses = ["copilot", "gemini"]
@@ -154,11 +153,8 @@ screen_inspection = false
 	}
 
 	// Retention
-	if cfg.Retention.AutoClean == nil || !*cfg.Retention.AutoClean {
-		t.Errorf("Retention.AutoClean = %v, want true", cfg.Retention.AutoClean)
-	}
-	if cfg.Retention.MaxGoneAge != "7d" {
-		t.Errorf("Retention.MaxGoneAge = %q, want '7d'", cfg.Retention.MaxGoneAge)
+	if cfg.Retention.TombstoneTTL != "30m" {
+		t.Errorf("Retention.TombstoneTTL = %q, want '30m'", cfg.Retention.TombstoneTTL)
 	}
 
 	// Filter
@@ -257,15 +253,21 @@ time_format = "rfc3339"`,
 			errSub: "invalid ui.time_format",
 		},
 		{
-			name: "negative max gone age",
+			name: "negative tombstone ttl",
 			toml: `[retention]
-max_gone_age = "-5s"`,
-			errSub: "retention.max_gone_age must be non-negative",
+tombstone_ttl = "-5s"`,
+			errSub: "retention.tombstone_ttl must be positive",
 		},
 		{
-			name: "invalid max gone age unit",
+			name: "zero tombstone ttl",
 			toml: `[retention]
-max_gone_age = "10"`,
+tombstone_ttl = "0s"`,
+			errSub: "retention.tombstone_ttl must be positive",
+		},
+		{
+			name: "invalid tombstone ttl unit",
+			toml: `[retention]
+tombstone_ttl = "10"`,
 			errSub: "missing unit suffix",
 		},
 		{
@@ -362,7 +364,7 @@ func TestMaxFileSizeLimit(t *testing.T) {
 	}
 }
 
-//nolint:cyclop,gocognit // test verifies all fields of default configuration template
+//nolint:cyclop // test verifies all fields of default configuration template
 func TestDefaultConfigTemplateValid(t *testing.T) {
 	isolateConfigEnv(t)
 	tempDir := t.TempDir()
@@ -396,11 +398,8 @@ func TestDefaultConfigTemplateValid(t *testing.T) {
 	if cfg.UI.TimeFormat != "relative" {
 		t.Errorf("expected UI.TimeFormat='relative', got %q", cfg.UI.TimeFormat)
 	}
-	if cfg.Retention.AutoClean == nil || *cfg.Retention.AutoClean {
-		t.Errorf("expected Retention.AutoClean=false, got %v", cfg.Retention.AutoClean)
-	}
-	if cfg.Retention.MaxGoneAge != "7d" {
-		t.Errorf("expected Retention.MaxGoneAge='7d', got %q", cfg.Retention.MaxGoneAge)
+	if cfg.Retention.TombstoneTTL != "10m" {
+		t.Errorf("expected Retention.TombstoneTTL='10m', got %q", cfg.Retention.TombstoneTTL)
 	}
 	if len(cfg.Filter.IgnoreHarnesses) != 0 {
 		t.Errorf("expected empty IgnoreHarnesses, got %v", cfg.Filter.IgnoreHarnesses)
@@ -529,8 +528,8 @@ sort = "created"
 	if cfg.UI.DefaultPresence != "all" {
 		t.Errorf("expected UI.DefaultPresence='all', got %q", cfg.UI.DefaultPresence)
 	}
-	if cfg.Retention.MaxGoneAge != "7d" {
-		t.Errorf("expected Retention.MaxGoneAge='7d', got %q", cfg.Retention.MaxGoneAge)
+	if cfg.Retention.TombstoneTTL != "10m" {
+		t.Errorf("expected Retention.TombstoneTTL='10m', got %q", cfg.Retention.TombstoneTTL)
 	}
 	if cfg.Tracker.Interval != "300ms" {
 		t.Errorf("expected Tracker.Interval='300ms', got %q", cfg.Tracker.Interval)
@@ -762,5 +761,30 @@ func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
 	cfg, resolved, err := Load(path)
 	if err != nil || resolved != path || cfg.UI.Sort != "updated" {
 		t.Fatalf("Load(%q): sort = %q, resolved = %q, error = %v", path, cfg.UI.Sort, resolved, err)
+	}
+}
+
+func TestLoadAcceptsDeprecatedRetentionKeys(t *testing.T) {
+	isolateConfigEnv(t)
+	// Config files written before tombstone_ttl existed must keep loading.
+	content := `
+[retention]
+auto_clean = false
+max_gone_age = "7d"
+`
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load with deprecated retention keys failed: %v", err)
+	}
+	if cfg.Retention.TombstoneTTL != "10m" {
+		t.Fatalf("Retention.TombstoneTTL = %q, want default '10m'", cfg.Retention.TombstoneTTL)
+	}
+	ttl, err := TombstoneTTL(cfg)
+	if err != nil || ttl != 10*time.Minute {
+		t.Fatalf("TombstoneTTL() = %v, %v, want 10m", ttl, err)
 	}
 }

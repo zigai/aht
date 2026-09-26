@@ -148,6 +148,14 @@ func emptyFilter() registry.Filter {
 // Wait waits for a session condition to be met, optionally requiring the condition
 // to hold across observed snapshots for options.StableFor before returning.
 //
+// The tracker removes a session from the registry once it no longer needs a
+// tombstone: immediately for sessions known only by their process, and after
+// the tombstone TTL for sessions with a native identity. A session that
+// disappears after Wait has seen it satisfies a gone presence condition; the
+// result is the last observed session with a Gone liveness whose reason is
+// "session_removed". For any other condition it returns ErrSessionDisappeared.
+// A session missing from the first snapshot returns registry.ErrSessionNotFound.
+//
 //nolint:cyclop,gocognit // Wait coordinates multiple lifecycle events: timers, context, stream, and condition matching.
 func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, error) {
 	if c.configErr != nil {
@@ -177,6 +185,7 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 	var stableTimer *time.Timer
 	var stableTimerCh <-chan time.Time
 	var candidateSession *registry.Session
+	var lastSeen *registry.Session
 	seenInitial := false
 	stableReady := false
 
@@ -249,9 +258,14 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 		}
 
 		if currentSession == nil {
-			resetStableTimer()
-			return WaitResult{}, registry.ErrSessionNotFound
+			if lastSeen == nil {
+				resetStableTimer()
+				return WaitResult{}, registry.ErrSessionNotFound
+			}
+			removed := removedSession(*lastSeen, time.Now().UTC())
+			currentSession = &removed
 		}
+		lastSeen = currentSession
 
 		matched, outcomeErr := evaluateCondition(*currentSession, options)
 		if outcomeErr != nil {
@@ -275,6 +289,17 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 			resetStableTimer()
 		}
 	}
+}
+
+// removedSession describes a session the registry deleted after Wait saw it.
+// Deletion only follows the gone transition, so the session is gone.
+func removedSession(session registry.Session, at time.Time) registry.Session {
+	if session.Presence() == PresenceGone {
+		return session
+	}
+	session.Liveness = registry.Gone{At: at, Reason: "session_removed", Decision: session.Decision()}
+	session.PresenceChangedAt = at
+	return session
 }
 
 func (c *Client) startWatcher(ctx context.Context) (sessionWatcher, error) {

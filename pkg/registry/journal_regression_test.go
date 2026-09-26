@@ -11,7 +11,8 @@ func TestFallbackReportSurvivesNewerMemoryHeartbeat(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.json")
 	durable := NewJournal(path, fixtureRules{})
-	base := time.Now().UTC().Add(-time.Hour)
+	// Younger than the broker's tombstone TTL, so only the fallback GC removes it.
+	base := time.Now().UTC().Add(-5 * time.Minute)
 	running, waiting := ActivityRunning, ActivityWaiting
 	process := ProcessIdentity{PID: 123, StartIdentity: "boot:123"}
 	report := Observation{Harness: HarnessPi, At: base, Subject: ObservationIdentity{SessionID: "fallback"}, Evidence: &Report{Activity: &running, Process: &process}}
@@ -52,7 +53,8 @@ func TestFallbackGCCannotBeResurrectedByMemoryFlush(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.json")
 	durable := NewJournal(path, fixtureRules{})
-	base := time.Now().UTC().Add(-time.Hour)
+	// Younger than the broker's tombstone TTL, so only the fallback GC removes it.
+	base := time.Now().UTC().Add(-5 * time.Minute)
 	durable.setNowForTest(func() time.Time { return base })
 	end, idle := NativeLifecycleEnd, ActivityIdle
 	ended, err := durable.Observe(t.Context(), Observation{Harness: HarnessPi, At: base, Subject: ObservationIdentity{SessionID: "expired"}, Evidence: &Report{Lifecycle: &end}})

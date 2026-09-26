@@ -213,7 +213,7 @@ func newSnapshot() snapshot {
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	data, err := json.Marshal(snap)
 	if err != nil {
 		return fmt.Errorf("encoding store: %w", err)
 	}

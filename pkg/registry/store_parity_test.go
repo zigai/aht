@@ -39,7 +39,8 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int) {
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	filePath := filepath.Join(t.TempDir(), "file.json")
 	fileStore := NewJournal(filePath, fixtureRules{})
-	memoryStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
+	// Reducer parity ignores owner-side tombstone expiry, which has its own tests.
+	memoryStore, err := OpenMemoryStoreWithOptions(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{}, MemoryStoreOptions{TombstoneTTL: 24 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestStoreBackendsRemainEquivalentOnTerminalLifecycleSequence(t *testing.T) 
 
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	fileStore := NewJournal(filepath.Join(t.TempDir(), "file.json"), fixtureRules{})
-	memStore, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
+	memStore, err := OpenMemoryStoreWithOptions(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{}, MemoryStoreOptions{TombstoneTTL: 24 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}

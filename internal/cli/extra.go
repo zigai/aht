@@ -28,17 +28,11 @@ var (
 )
 
 type observeOptions struct {
-	once       bool
-	quiet      bool
-	interval   time.Duration
-	grace      time.Duration
-	autoClean  bool
-	maxGoneAge time.Duration
-	store      goneCollector
-}
-
-type goneCollector interface {
-	GC(ctx context.Context, maxAge time.Duration) (registry.GCResult, error)
+	once         bool
+	quiet        bool
+	interval     time.Duration
+	grace        time.Duration
+	tombstoneTTL time.Duration
 }
 
 type trackerComponentResult struct {
@@ -54,7 +48,7 @@ type serviceOptions struct {
 
 func (app *application) newTrackerRunCommand() *cobra.Command {
 	o := observeOptions{interval: observeDefaultInterval}
-	var autoClean bool
+	var deprecatedAutoClean bool
 	screenInspection := true
 	var disableScreenInspection bool
 	command := &cobra.Command{
@@ -70,9 +64,6 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 			}
 			if err := applyTrackerConfig(&o, cmd, cfg); err != nil {
 				return err
-			}
-			if cmd.Flags().Changed("auto-clean") {
-				o.autoClean = autoClean
 			}
 			disableScreenInspection = cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection
 			if cmd.Flags().Changed("screen-inspection") {
@@ -98,11 +89,10 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 					DetectionConfigDir:      cfg.Detection.ManifestsDir,
 					DisableScreenInspection: disableScreenInspection,
 				})
-				o.store = app.store()
 				return app.runObserver(cmd.Context(), o, watcher)
 			}
 
-			store, err := registry.OpenMemoryStore(app.resolvedStorePath(), catalog.Rules{})
+			store, err := registry.OpenMemoryStoreWithOptions(app.resolvedStorePath(), catalog.Rules{}, registry.MemoryStoreOptions{TombstoneTTL: o.tombstoneTTL})
 			if err != nil {
 				return fmt.Errorf("opening in-memory registry: %w", err)
 			}
@@ -125,7 +115,6 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 				Store:      store,
 				SocketPath: broker.SocketPath(store.Path()),
 			})
-			o.store = store
 			return app.runRealtimeObserver(cmd.Context(), o, watcher, store, server)
 		},
 	}
@@ -134,7 +123,8 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	flags.DurationVar(&o.interval, "interval", o.interval, "reconciliation `<duration>`")
 	flags.DurationVar(&o.grace, "grace-period", o.grace, "absence grace `<duration>`")
 	flags.BoolVarP(&o.quiet, "quiet", "q", false, "suppress human cycle output and diagnostics")
-	flags.BoolVar(&autoClean, "auto-clean", false, "automatically clean expired gone sessions")
+	flags.BoolVar(&deprecatedAutoClean, "auto-clean", false, "ignored; gone sessions always expire after retention.tombstone_ttl")
+	_ = flags.MarkDeprecated("auto-clean", "gone sessions always expire after retention.tombstone_ttl")
 	flags.BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
 	return command
 }
@@ -146,7 +136,11 @@ func applyTrackerConfig(o *observeOptions, cmd *cobra.Command, cfg config.Config
 	if !cmd.Flags().Changed("quiet") && cfg.Tracker.Quiet != nil {
 		o.quiet = *cfg.Tracker.Quiet
 	}
-	applyTrackerAutoClean(o, cfg)
+	ttl, err := config.TombstoneTTL(cfg)
+	if err != nil {
+		return exitCode(fmt.Errorf("parsing retention tombstone TTL: %w", err), exitCodeUsage)
+	}
+	o.tombstoneTTL = ttl
 	return nil
 }
 
@@ -166,18 +160,6 @@ func applyTrackerIntervals(o *observeOptions, cmd *cobra.Command, cfg config.Con
 		o.grace = d
 	}
 	return nil
-}
-
-func applyTrackerAutoClean(o *observeOptions, cfg config.Config) {
-	if cfg.Retention.MaxGoneAge != "" {
-		d, err := config.ParseDuration(cfg.Retention.MaxGoneAge)
-		if err == nil && d >= 0 {
-			o.maxGoneAge = d
-		}
-	}
-	if cfg.Retention.AutoClean != nil && *cfg.Retention.AutoClean {
-		o.autoClean = true
-	}
 }
 
 func (app *application) runRealtimeObserver(
@@ -226,16 +208,7 @@ func (app *application) runObserver(ctx context.Context, options observeOptions,
 	if !options.quiet {
 		app.warnf("observer started interval=%s grace-period=%s\n", options.interval, options.grace)
 	}
-	store := options.store
-	if store == nil {
-		store = app.store()
-	}
 	handle := func(result observer.Result) error {
-		if options.autoClean {
-			if _, err := store.GC(ctx, options.maxGoneAge); err != nil {
-				return fmt.Errorf("clean gone sessions: %w", err)
-			}
-		}
 		if app.outputJSON {
 			return app.writeJSONLine(result)
 		}
@@ -245,7 +218,7 @@ func (app *application) runObserver(ctx context.Context, options observeOptions,
 		return app.writeObserverResult(result)
 	}
 	var err error
-	if options.quiet && !app.outputJSON && !options.autoClean {
+	if options.quiet && !app.outputJSON {
 		err = watcher.Run(ctx)
 	} else {
 		err = watcher.RunWithResults(ctx, handle)
@@ -260,15 +233,6 @@ func (app *application) runObserverOnce(ctx context.Context, options observeOpti
 	result, err := watcher.RunOnce(ctx)
 	if err != nil {
 		return fmt.Errorf("observer run once: %w", err)
-	}
-	if options.autoClean {
-		store := options.store
-		if store == nil {
-			store = app.store()
-		}
-		if _, err := store.GC(ctx, options.maxGoneAge); err != nil {
-			return fmt.Errorf("clean gone sessions: %w", err)
-		}
 	}
 	var writeErr error
 	if app.outputJSON {

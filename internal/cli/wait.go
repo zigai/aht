@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,7 +40,7 @@ func (app *application) newWaitCommand() *cobra.Command {
 
 	cmdFlags := command.Flags()
 	cmdFlags.StringVar(&flags.activity, "activity", "", "wait for activity `<val>`: running, waiting, idle, failed, interrupted, unknown")
-	cmdFlags.StringVar(&flags.presence, "presence", "", "wait for presence `<val>`: live, gone, unknown")
+	cmdFlags.StringVar(&flags.presence, "presence", "", "wait for presence `<val>`: live, gone (also met when the tracker removes the session), unknown")
 	cmdFlags.DurationVar(&flags.timeout, "timeout", 0, "maximum time to wait `<duration>`")
 	cmdFlags.DurationVar(&flags.stableFor, "stable-for", 0, "duration condition must hold continuously `<duration>`")
 
@@ -70,6 +71,11 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 
 	ahtClient := app.registryStore()
 	res, err := ahtClient.Wait(ctx, options)
+	if errors.Is(err, registry.ErrSessionNotFound) && options.Presence == registry.PresenceGone {
+		// The tracker removed the session between resolution and the first
+		// snapshot. Removal only follows the gone transition.
+		res, err = client.WaitResult{Session: removedWaitSession(session, time.Now().UTC()), Initial: true}, nil
+	}
 	if err != nil {
 		return fmt.Errorf("waiting for session: %w", err)
 	}
@@ -78,6 +84,15 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 		return app.writeJSON(res.Session)
 	}
 	return app.writeSessionDetails(res.Session)
+}
+
+func removedWaitSession(session registry.Session, at time.Time) registry.Session {
+	if session.Presence() == registry.PresenceGone {
+		return session
+	}
+	session.Liveness = registry.Gone{At: at, Reason: "session_removed", Decision: session.Decision()}
+	session.PresenceChangedAt = at
+	return session
 }
 
 func parseWaitConditions(flags waitFlags) (client.WaitOptions, error) {

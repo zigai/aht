@@ -229,3 +229,56 @@ func deleteExpiredGoneSessions(
 
 	return deleted
 }
+
+// removeGoneProcessOnlySessions drops gone sessions that have only process
+// identity. No native report can match them and a process start identity never
+// recurs, so their tombstones protect nothing. Removal runs after a whole
+// batch, so matching within the batch still sees them.
+func removeGoneProcessOnlySessions(sessions map[string]Session) int {
+	removed := 0
+	for id, session := range sessions {
+		if session.Presence() == PresenceGone && processOnlySession(session) {
+			delete(sessions, id)
+			removed++
+		}
+	}
+	return removed
+}
+
+func hasExpiredTombstones(sessions map[string]Session, now time.Time, ttl time.Duration) bool {
+	for _, session := range sessions {
+		if session.Presence() == PresenceGone && (processOnlySession(session) || now.Sub(goneSince(session)) >= ttl) {
+			return true
+		}
+	}
+	return false
+}
+
+func goneSince(session Session) time.Time {
+	if session.PresenceChangedAt.IsZero() {
+		return session.UpdatedAt
+	}
+	return session.PresenceChangedAt
+}
+
+// expireTombstones removes gone process-only sessions and identified gone
+// sessions that have been gone for at least ttl. The ttl window keeps late
+// native reports from an ended incarnation from reviving the session.
+func expireTombstones(sessions map[string]Session, now time.Time, ttl time.Duration) int {
+	removed := removeGoneProcessOnlySessions(sessions)
+	for id, session := range sessions {
+		if session.Presence() != PresenceGone {
+			continue
+		}
+		if now.Sub(goneSince(session)) < ttl {
+			continue
+		}
+		delete(sessions, id)
+		removed++
+	}
+	return removed
+}
+
+func processOnlySession(session Session) bool {
+	return session.IdentityState == Provisional && session.Observations.Native == nil && session.SessionID == "" && session.SessionPath == ""
+}

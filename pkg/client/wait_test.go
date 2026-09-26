@@ -557,11 +557,55 @@ func TestWaitSessionNotFoundAndDeleted(t *testing.T) {
 			synctest.Wait()
 			wg.Wait()
 
-			if !errors.Is(waitErr, registry.ErrSessionNotFound) {
-				t.Fatalf("Wait() error = %v, want ErrSessionNotFound", waitErr)
+			if !errors.Is(waitErr, client.ErrSessionDisappeared) {
+				t.Fatalf("Wait() error = %v, want ErrSessionDisappeared", waitErr)
 			}
 		})
 	})
+}
+
+func TestWaitPresenceGoneSucceedsWhenSessionIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		stableFor time.Duration
+		sequence  [][]registry.Session
+	}{
+		{name: "removed while live", sequence: [][]registry.Session{nil}},
+		{name: "gone then removed", sequence: [][]registry.Session{{makeTestSession("removed-sess", registry.PresenceGone, "")}, nil}},
+		{name: "removed with stable-for", stableFor: time.Second, sequence: [][]registry.Session{nil, nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				tw := client.NewTestWatcher()
+				tw.SendSessions(makeTestSession("removed-sess", registry.PresenceLive, registry.ActivityRunning))
+				c := client.New(client.Config{})
+				c.SetWatcherForTest(tw)
+
+				var res client.WaitResult
+				var waitErr error
+				var wg sync.WaitGroup
+				wg.Go(func() {
+					res, waitErr = c.Wait(context.Background(), client.WaitOptions{ID: "removed-sess", Presence: client.PresenceGone, StableFor: tc.stableFor})
+				})
+				synctest.Wait()
+				for _, sessions := range tc.sequence {
+					tw.SendSessions(sessions...)
+					synctest.Wait()
+				}
+				wg.Wait()
+
+				if waitErr != nil {
+					t.Fatalf("Wait() error = %v, want removal to satisfy gone", waitErr)
+				}
+				if res.Initial || res.Session.ID != "removed-sess" || res.Session.Presence() != registry.PresenceGone {
+					t.Fatalf("Wait() result = %#v, want non-initial gone session", res)
+				}
+			})
+		})
+	}
 }
 
 func TestWaitBrokerDisconnect(t *testing.T) {

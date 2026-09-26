@@ -105,6 +105,19 @@ func requireOnlySessionPresence(t *testing.T, store Store, want registry.Presenc
 	}
 }
 
+// requireNoSessions asserts that a process-only session was removed from the
+// registry when it went gone.
+func requireNoSessions(t *testing.T, store Store) {
+	t.Helper()
+	sessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions = %#v, want gone process-only session removed", sessions)
+	}
+}
+
 func assertDegradedResult(t *testing.T, result Result, err error, targetErr error, expectedSubstrings ...string) {
 	t.Helper()
 	if !errors.Is(err, targetErr) || !result.Degraded || !strings.Contains(result.Error, targetErr.Error()) {
@@ -189,12 +202,9 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 	if third.Gone != 1 {
 		t.Fatalf("second miss did not mark gone: %#v", third)
 	}
-	session, err = registry.NewJournal(path, catalog.Rules{}).Get(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if session.Presence() != registry.PresenceGone || session.Activity() != nil {
-		t.Fatalf("gone session: %#v", session)
+	// A gone process-only session protects nothing, so it is removed.
+	if _, err := registry.NewJournal(path, catalog.Rules{}).Get(context.Background(), session.ID); !errors.Is(err, registry.ErrSessionNotFound) {
+		t.Fatalf("gone process-only session lookup error = %v, want not found", err)
 	}
 }
 
@@ -235,7 +245,7 @@ func TestObserverRetriesFailedGoneObservationAndEvictsTrackedProcess(t *testing.
 		t.Fatal(err)
 	}
 	assertGoneAndTrackedCounts(t, retried, 1, watcher, 0)
-	requireOnlySessionPresence(t, baseStore, registry.PresenceGone)
+	requireNoSessions(t, baseStore)
 }
 
 func TestObserverConflictDoesNotBlockIndependentObservation(t *testing.T) {
@@ -387,11 +397,10 @@ func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if session.Process != nil && session.Process.PID == 5678 && session.Presence() == registry.PresenceGone {
-			return
+		if session.Process != nil && session.Process.PID == 5678 {
+			t.Fatalf("independent process was not retired after disappearing: %#v", sessions)
 		}
 	}
-	t.Fatalf("independent process was not retired after disappearing: %#v", sessions)
 }
 
 func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) {
@@ -439,7 +448,7 @@ func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) 
 	if retried.Gone != 1 || len(watcher.tracked) != 0 {
 		t.Fatalf("successful absence retry = %#v, tracked=%#v", retried, watcher.tracked)
 	}
-	requireOnlySessionPresence(t, baseStore, registry.PresenceGone)
+	requireNoSessions(t, baseStore)
 }
 
 func TestObserverRejectsConcurrentRunsOnOneInstance(t *testing.T) {
@@ -542,8 +551,8 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone || sessions[0].Activity() != nil || sessions[0].Decision() == nil || sessions[0].Decision().Reason != "process_gone" || sessions[0].Decision().Process.StartIdentity != process.StartIdentity {
-		t.Fatalf("sessions after restart: %#v", sessions)
+	if len(sessions) != 0 {
+		t.Fatalf("sessions after restart = %#v, want gone process-only session removed", sessions)
 	}
 }
 

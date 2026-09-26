@@ -18,8 +18,12 @@
 // when moving or backing up an instance.
 //
 //   - [MemoryStore] is the live state held by the tracker. It applies pending
-//     journal entries before each operation and writes coalesced snapshots
-//     (25 ms settle, 250 ms maximum) and a final one on shutdown.
+//     journal entries before each operation. It journals consumer-visible
+//     changes, native reports, and administrative commands, and writes
+//     coalesced compact snapshots after consumer-visible changes (25 ms settle,
+//     250 ms maximum) and a final one on shutdown. Heartbeats that only
+//     refresh evidence timestamps are neither journaled nor written promptly;
+//     they are persisted with the next visible change or at most once a minute.
 //   - [Journal] records writes while no tracker is reachable. Entries are fsynced
 //     and the journal is limited to 64 MiB. Without a tracker, a writer folds the
 //     snapshot and journal under the store lock and checkpoints the result.
@@ -28,4 +32,13 @@
 //
 // GC and reset are journal commands too, so an unreachable tracker cannot
 // restore removed sessions. Snapshots with another schema version are rejected.
+//
+// # Retention
+//
+// The registry is the current state. A gone session with only process
+// identity is removed as part of the batch that ends it, because no native
+// report can match it. A gone session with a native identity stays as a
+// tombstone so late native reports from the ended incarnation are rejected;
+// [MemoryStore] removes it after [MemoryStoreOptions].TombstoneTTL
+// ([DefaultTombstoneTTL] by default), including when it opens an older store.
 package registry

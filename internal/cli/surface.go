@@ -292,10 +292,10 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 			if options.all && options.ageSet {
 				return exitCode(errCleanSelection, exitCodeUsage)
 			}
-			if !options.all && !options.ageSet && cfg.Retention.MaxGoneAge != "" {
-				d, err := config.ParseDuration(cfg.Retention.MaxGoneAge)
+			if !options.all && !options.ageSet && cfg.Retention.TombstoneTTL != "" {
+				d, err := config.TombstoneTTL(cfg)
 				if err != nil {
-					return fmt.Errorf("parsing max gone age: %w", err)
+					return fmt.Errorf("parsing tombstone TTL: %w", err)
 				}
 				options.olderThan = d
 				options.ageSet = true
@@ -611,8 +611,7 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 						"ui.sort_desc",
 						"ui.absolute_time",
 						"ui.time_format",
-						"retention.auto_clean",
-						"retention.max_gone_age",
+						"retention.tombstone_ttl",
 						"filter.ignore_harnesses",
 						"filter.ignore_paths",
 						"tracker.interval",
@@ -656,8 +655,7 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 					"ui.sort_desc",
 					"ui.absolute_time",
 					"ui.time_format",
-					"retention.auto_clean",
-					"retention.max_gone_age",
+					"retention.tombstone_ttl",
 					"filter.ignore_harnesses",
 					"filter.ignore_paths",
 					"tracker.interval",
@@ -774,13 +772,8 @@ func getConfigValue(cfg config.Config, key string) (any, bool) {
 		return false, true
 	case "ui.time_format":
 		return cfg.UI.TimeFormat, true
-	case "retention.auto_clean":
-		if cfg.Retention.AutoClean != nil {
-			return *cfg.Retention.AutoClean, true
-		}
-		return false, true
-	case "retention.max_gone_age":
-		return cfg.Retention.MaxGoneAge, true
+	case "retention.tombstone_ttl":
+		return cfg.Retention.TombstoneTTL, true
 	case "filter.ignore_harnesses":
 		return cfg.Filter.IgnoreHarnesses, true
 	case "filter.ignore_paths":

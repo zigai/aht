@@ -32,7 +32,7 @@ var (
 	ErrInvalidSort         = errors.New("invalid ui.sort")
 	ErrInvalidPresence     = errors.New("invalid ui.default_presence")
 	ErrInvalidTimeFormat   = errors.New("invalid ui.time_format")
-	ErrNegativeAge         = errors.New("retention.max_gone_age must be non-negative")
+	ErrNonPositiveTTL      = errors.New("retention.tombstone_ttl must be positive")
 	ErrNonPositiveInterval = errors.New("tracker.interval must be positive")
 	ErrNegativeGracePeriod = errors.New("tracker.grace_period must be non-negative")
 	ErrConfigIsDirectory   = strata.ErrPathIsDirectory
@@ -82,10 +82,23 @@ type UIConfig struct {
 	TimeFormat      string `json:"time_format,omitempty"      toml:"time_format"`
 }
 
-// RetentionConfig controls state retention and tombstone cleanup defaults.
+// RetentionConfig controls how long the tracker keeps gone-session tombstones.
 type RetentionConfig struct {
-	AutoClean  *bool  `json:"auto_clean,omitempty"   toml:"auto_clean"`
-	MaxGoneAge string `json:"max_gone_age,omitempty" toml:"max_gone_age"`
+	// TombstoneTTL is how long an identified gone session stays in the registry
+	// so late native reports from its ended process are rejected. Gone sessions
+	// with only process identity are removed immediately.
+	TombstoneTTL string `json:"tombstone_ttl,omitempty" toml:"tombstone_ttl"`
+
+	// AutoClean is accepted so existing config files keep loading. It is
+	// ignored: the tracker always expires tombstones after TombstoneTTL.
+	//
+	// Deprecated: use TombstoneTTL.
+	AutoClean *bool `json:"-" toml:"auto_clean"`
+	// MaxGoneAge is accepted so existing config files keep loading. It is
+	// ignored.
+	//
+	// Deprecated: use TombstoneTTL.
+	MaxGoneAge string `json:"-" toml:"max_gone_age"`
 }
 
 // FilterConfig controls default session visibility exclusions.
@@ -143,8 +156,9 @@ func Defaults() Config {
 			TimeFormat:      "relative",
 		},
 		Retention: RetentionConfig{
-			AutoClean:  new(false),
-			MaxGoneAge: "7d",
+			TombstoneTTL: "10m",
+			AutoClean:    nil,
+			MaxGoneAge:   "",
 		},
 		Filter: FilterConfig{
 			IgnoreHarnesses: []string{},
@@ -216,11 +230,11 @@ absolute_time = false
 time_format = "relative"
 
 [retention]
-# Automatically clean up expired gone sessions in background tracker
-auto_clean = false
-
-# Maximum age of gone sessions before tombstone cleanup, e.g. "7d", "24h"
-max_gone_age = "7d"
+# How long the tracker keeps an ended session that has a native session id, so
+# late hook reports cannot revive it, e.g. "10m", "1h". Ended sessions known
+# only by their process are removed immediately. Conversation history is
+# searched with aht search, not kept in the registry.
+tombstone_ttl = "10m"
 
 [filter]
 # List of harnesses to omit from default session listings unless explicitly requested via --agent
@@ -373,22 +387,22 @@ func (c *Config) validateTimeFormat(meta *strata.Metadata) error {
 }
 
 func (c *Config) validateRetention(meta *strata.Metadata) error {
-	if c.Retention.MaxGoneAge == "" {
+	if c.Retention.TombstoneTTL == "" {
 		return nil
 	}
-	d, err := ParseDuration(c.Retention.MaxGoneAge)
+	d, err := ParseDuration(c.Retention.TombstoneTTL)
 	if err != nil {
-		valErr := fmt.Errorf("invalid retention.max_gone_age %q: %w", c.Retention.MaxGoneAge, err)
+		valErr := fmt.Errorf("invalid retention.tombstone_ttl %q: %w", c.Retention.TombstoneTTL, err)
 		if meta != nil {
-			return meta.NewConfigError("retention.max_gone_age", valErr)
+			return meta.NewConfigError("retention.tombstone_ttl", valErr)
 		}
 		return valErr
 	}
-	if d < 0 {
+	if d <= 0 {
 		if meta != nil {
-			return meta.NewConfigError("retention.max_gone_age", ErrNegativeAge)
+			return meta.NewConfigError("retention.tombstone_ttl", ErrNonPositiveTTL)
 		}
-		return ErrNegativeAge
+		return ErrNonPositiveTTL
 	}
 	return nil
 }
@@ -440,6 +454,14 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 		return ErrNegativeGracePeriod
 	}
 	return nil
+}
+
+// TombstoneTTL returns the configured tombstone TTL, or zero when unset.
+func TombstoneTTL(cfg Config) (time.Duration, error) {
+	if cfg.Retention.TombstoneTTL == "" {
+		return 0, nil
+	}
+	return ParseDuration(cfg.Retention.TombstoneTTL)
 }
 
 // Load loads, parses, and validates the configuration file from path.
@@ -539,7 +561,7 @@ func isValidationOrDurationError(err error) bool {
 	return errors.Is(err, ErrInvalidPresence) ||
 		errors.Is(err, ErrInvalidSort) ||
 		errors.Is(err, ErrInvalidTimeFormat) ||
-		errors.Is(err, ErrNegativeAge) ||
+		errors.Is(err, ErrNonPositiveTTL) ||
 		errors.Is(err, ErrNonPositiveInterval) ||
 		errors.Is(err, ErrNegativeGracePeriod) ||
 		errors.Is(err, ErrInvalidDuration) ||
