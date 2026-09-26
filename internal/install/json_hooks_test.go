@@ -65,8 +65,6 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 		"PermissionRequest",
 		"PermissionDenied",
 		"Notification",
-		"SubagentStart",
-		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
 		hookEventStop,
@@ -76,6 +74,65 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 		if _, ok := hooks[event]; !ok {
 			t.Fatalf("expected %s hook", event)
 		}
+	}
+	for _, event := range []string{"SubagentStart", "SubagentStop"} {
+		if _, ok := hooks[event]; ok {
+			t.Fatalf("expected no %s hook: subagent events do not describe the main turn", event)
+		}
+	}
+}
+
+func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+	userCommand := "notify-send subagent-finished"
+	oldConfig := `{"hooks":{` +
+		`"SubagentStart":[{"hooks":[{"type":"command","command":"aht report claude --activity running --event SubagentStart --reporter-version 9 --reporter claude-hook --raw-stdin --quiet"}]}],` +
+		`"SubagentStop":[{"hooks":[` +
+		`{"type":"command","command":"aht report claude --activity idle --event SubagentStop --reporter-version 9 --reporter claude-hook --raw-stdin --quiet"},` +
+		`{"type":"command","command":"` + userCommand + `"}]}]}}`
+	if err := os.WriteFile(path, []byte(oldConfig), 0o600); err != nil {
+		t.Fatalf("writing old hooks: %v", err)
+	}
+
+	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
+	options.DryRun = true
+	dryRun, err := Run(options)
+	if err != nil {
+		t.Fatalf("dry run returned error: %v", err)
+	}
+	if !dryRun.Changed {
+		t.Fatal("expected stale managed subagent hooks to make the integration differ")
+	}
+	options.DryRun = false
+	if _, err := Run(options); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	data := readTestFile(t, path, "reading claude hooks")
+	config := decodeTestJSONObject(t, data, "claude hooks")
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hooks object")
+	}
+	if _, ok := hooks["SubagentStart"]; ok {
+		t.Fatalf("expected managed SubagentStart hook to be removed: %s", data)
+	}
+	text := string(data)
+	if !strings.Contains(text, userCommand) {
+		t.Fatalf("expected user SubagentStop hook to be preserved: %s", data)
+	}
+	if strings.Contains(text, "--event SubagentStop") {
+		t.Fatalf("expected managed SubagentStop hook to be removed: %s", data)
+	}
+
+	second, err := Run(options)
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal("expected second claude install to be idempotent")
 	}
 }
 

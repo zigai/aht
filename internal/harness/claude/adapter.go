@@ -105,16 +105,9 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "permission_prompt",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "Notification", claudeIntegrationSource),
 			},
-			{
-				Event:   "SubagentStart",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "SubagentStart", claudeIntegrationSource),
-			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "SubagentStop", claudeIntegrationSource),
-			},
+			// SubagentStart and SubagentStop describe child agents, including
+			// Claude Code's internal prompt-suggestion agents, not the main
+			// turn. Stop reports whether delegated work keeps the turn running.
 			{
 				Event:   "PreCompact",
 				Matcher: "",

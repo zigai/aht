@@ -5,7 +5,7 @@ import "testing"
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
-	current := `{"command":"aht report codex --reporter-version 9 --reporter codex-hook"}`
+	current := `{"command":"aht report codex --reporter-version 10 --reporter codex-hook"}`
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current source metadata classified as %q", status)
 	}

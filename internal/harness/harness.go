@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	IntegrationVersion = 9
+	IntegrationVersion = 10
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
@@ -88,6 +89,12 @@ type Resumable interface {
 type PayloadAdapter interface {
 	PayloadCompatible(rawPayload json.RawMessage) bool
 	PayloadDefaults(payload map[string]any) (PayloadDefaults, error)
+}
+
+// PayloadActivityAdapter refines the activity a generated hook declares when
+// the native payload distinguishes states that the hook event alone cannot.
+type PayloadActivityAdapter interface {
+	PayloadActivity(event string, activity registry.Activity, payload map[string]any, at time.Time) registry.Activity
 }
 
 type ProcessFilter interface {

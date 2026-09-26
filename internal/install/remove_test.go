@@ -122,6 +122,29 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 	}
 }
 
+func TestRemoveDeletesManagedHooksFromDroppedEvents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+	userCommand := "custom-tool"
+	initial := `{"hooks":{"SubagentStop":[{"hooks":[` +
+		`{"type":"command","command":"aht report claude --activity idle --event SubagentStop --reporter-version 9 --reporter claude-hook --raw-stdin --quiet"},` +
+		`{"type":"command","command":"` + userCommand + `"}]}]}}`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Remove(Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), userCommand) || strings.Contains(string(data), "--reporter claude-hook") {
+		t.Fatalf("managed hook from a dropped event was not removed cleanly: %s", data)
+	}
+}
+
 func TestInspectReportsManagedCommandWithUnexpectedBinaryAsStale(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)

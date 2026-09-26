@@ -148,7 +148,7 @@ func applyJSONCommandHooks(
 		changed := false
 		hooks := harnessConfig
 		if plan.HooksAtRoot {
-			changed = removeWrappedCommandHooks(harnessConfig, plan, isManaged)
+			changed = removeWrappedCommandHooks(harnessConfig, isManaged)
 		} else {
 			var ok bool
 			hooks, ok = harnessConfig["hooks"].(map[string]any)
@@ -165,6 +165,13 @@ func applyJSONCommandHooks(
 				isManaged,
 			)
 			changed = changed || updated
+		}
+		for event := range hooks {
+			if _, desired := desiredByEvent[event]; desired {
+				continue
+			}
+			removed := removeManagedJSONHookEvent(hooks, event, isManaged, removeManagedCommandHookGroups)
+			changed = changed || removed
 		}
 
 		return changed

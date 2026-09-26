@@ -242,6 +242,10 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
 	}
+	activity, err = harnesspkg.ActivityFromPayload(harness, options.event, activity, defaultsPayload, observedAt)
+	if err != nil {
+		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
+	}
 	sequence, sequenceSet, err := parseReportSequence(options.sequence)
 	if err != nil {
 		return preparedReport{}, exitCode(err, exitCodeUsage)

@@ -107,27 +107,32 @@ func removePlanAction(ctx context.Context, opts Options, harnessID registry.Harn
 func removeJSONCommandHooks(opts Options, harnessID registry.Harness, plan harnesspkg.JSONCommandHookInstallPlan) (Result, error) {
 	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
 		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID))
-		changed := removeWrappedCommandHooks(harnessConfig, plan, isManaged)
+		changed := removeWrappedCommandHooks(harnessConfig, isManaged)
 		if plan.HooksAtRoot {
-			for _, spec := range plan.Hooks {
-				changed = removeManagedJSONHookEvent(harnessConfig, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
-			}
+			changed = removeManagedCommandHookEvents(harnessConfig, isManaged) || changed
 		}
 		return changed
 	})
 }
 
-func removeWrappedCommandHooks(harnessConfig map[string]any, plan harnesspkg.JSONCommandHookInstallPlan, isManaged func(string) bool) bool {
+func removeWrappedCommandHooks(harnessConfig map[string]any, isManaged func(string) bool) bool {
 	hooks, ok := harnessConfig["hooks"].(map[string]any)
 	if !ok {
 		return false
 	}
-	changed := false
-	for _, spec := range plan.Hooks {
-		changed = removeManagedJSONHookEvent(hooks, spec.Event, isManaged, removeManagedCommandHookGroups) || changed
-	}
+	changed := removeManagedCommandHookEvents(hooks, isManaged)
 	if changed && len(hooks) == 0 {
 		delete(harnessConfig, "hooks")
+	}
+	return changed
+}
+
+// removeManagedCommandHookEvents removes managed commands from every event,
+// including events that earlier integration versions installed.
+func removeManagedCommandHookEvents(hooks map[string]any, isManaged func(string) bool) bool {
+	changed := false
+	for event := range hooks {
+		changed = removeManagedJSONHookEvent(hooks, event, isManaged, removeManagedCommandHookGroups) || changed
 	}
 	return changed
 }

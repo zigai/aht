@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/agy"
@@ -181,6 +182,33 @@ func DefaultsFromPayloadWithError(harnessID registry.Harness, rawPayload json.Ra
 		return emptyPayloadDefaults, fmt.Errorf("deriving harness payload defaults: %w", err)
 	}
 	return defaults, nil
+}
+
+// ActivityFromPayload returns the activity a report records after the harness
+// refines the generated hook's declared activity from its native payload.
+func ActivityFromPayload(
+	harnessID registry.Harness,
+	event string,
+	activity registry.Activity,
+	rawPayload json.RawMessage,
+	at time.Time,
+) (registry.Activity, error) {
+	if len(rawPayload) == 0 || activity == "" {
+		return activity, nil
+	}
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return activity, nil
+	}
+	activityAdapter, ok := adapter.(harness.PayloadActivityAdapter)
+	if !ok {
+		return activity, nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return activity, fmt.Errorf("decoding hook payload activity: %w", err)
+	}
+	return activityAdapter.PayloadActivity(event, activity, payload, at), nil
 }
 
 func PayloadCompatibleWithHarness(harnessID registry.Harness, rawPayload json.RawMessage) bool {

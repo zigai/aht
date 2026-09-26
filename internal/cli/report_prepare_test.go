@@ -362,3 +362,37 @@ func TestPrepareReportAcceptsLargeCodexPostToolUseDefaults(t *testing.T) {
 		t.Fatalf("PostToolUse raw payload was retained: %d bytes", len(prepared.observation.Report().Payload))
 	}
 }
+
+func TestPrepareReportKeepsClaudeStopRunningWhileBackgroundWorkIsInFlight(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		payload string
+		want    registry.Activity
+	}{
+		"background subagent": {
+			payload: `{"session_id":"s","cwd":"/work","hook_event_name":"Stop","background_tasks":[{"id":"a1","type":"subagent","status":"running","agent_type":"Explore"}],"session_crons":[]}`,
+			want:    registry.ActivityRunning,
+		},
+		"long-lived shell only": {
+			payload: `{"session_id":"s","cwd":"/work","hook_event_name":"Stop","background_tasks":[{"id":"b1","type":"shell","status":"running","command":"npm run dev"}],"session_crons":[]}`,
+			want:    registry.ActivityIdle,
+		},
+		"nothing in flight": {
+			payload: `{"session_id":"s","cwd":"/work","hook_event_name":"Stop","background_tasks":[],"session_crons":[]}`,
+			want:    registry.ActivityIdle,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			prepared, err := prepareReport(strings.NewReader(test.payload), reportOptions{
+				harness: "claude", activity: "idle", event: "Stop", rawStdin: true,
+			}, reportRuntimeContext{defaultObservedAt: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claim := prepared.observation.ActivityClaim(); claim == nil || *claim != test.want {
+				t.Fatalf("activity = %v, want %s", claim, test.want)
+			}
+		})
+	}
+}
