@@ -27,8 +27,11 @@ var (
 	ErrHarnessRequired     = errors.New("harness is required")
 	ErrObservationIdentity = errors.New("observation requires identity")
 	ErrObservationConflict = errors.New("observation conflicts with accepted evidence")
-	ErrCorruptStore        = errors.New("corrupt registry store")
-	ErrStoreTooLarge       = errors.New("registry store exceeds size limit")
+	// ErrProcessEnded reports a native report dropped because its process
+	// already ended and its process-only session was removed.
+	ErrProcessEnded  = errors.New("reporting process already ended")
+	ErrCorruptStore  = errors.New("corrupt registry store")
+	ErrStoreTooLarge = errors.New("registry store exceeds size limit")
 
 	_ Store = (*Journal)(nil)
 )
@@ -43,6 +46,10 @@ type snapshot struct {
 	SchemaVersion   int                `json:"schema_version"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	Sessions        map[string]Session `json:"sessions"`
+	// EndedProcesses maps endedProcessKey to the time a removed process-only
+	// session went gone. A process start identity never recurs, so native
+	// reports from these processes are late and must not create sessions.
+	EndedProcesses map[string]time.Time `json:"ended_processes,omitempty"`
 }
 
 type GCResult struct {
@@ -209,7 +216,7 @@ func readSnapshotFile(path string) ([]byte, error) {
 }
 
 func newSnapshot() snapshot {
-	return snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session)}
+	return snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session), EndedProcesses: nil}
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {

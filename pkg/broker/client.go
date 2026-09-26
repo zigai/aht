@@ -438,6 +438,8 @@ func (e *RemoteError) Unwrap() error {
 		return registry.ErrSessionNotFound
 	case "observation_conflict":
 		return registry.ErrObservationConflict
+	case "process_ended":
+		return registry.ErrProcessEnded
 	default:
 		return nil
 	}

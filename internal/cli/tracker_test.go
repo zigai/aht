@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,40 @@ func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 	var result map[string]any
 	if err := json.Unmarshal(machine.Bytes(), &result); err != nil {
 		t.Fatalf("tracker run JSON = %q, %v", machine.String(), err)
+	}
+}
+
+func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "sessions.json")
+	store := registry.NewJournal(storePath, catalog.Rules{})
+	now := time.Now().UTC()
+	for index, goneAt := range []time.Time{now.Add(-time.Hour), now.Add(-time.Minute)} {
+		process := registry.ProcessIdentity{PID: 900000 + index, StartIdentity: "boot:" + strconv.Itoa(index)}
+		running := registry.ActivityRunning
+		report := registry.Observation{Harness: registry.Harness("codex"), At: goneAt.Add(-time.Second), Subject: registry.ObservationIdentity{SessionID: "tombstone-" + strconv.Itoa(index)}, Evidence: &registry.Report{Event: "start", Activity: &running, Process: &process}}
+		gone := registry.Observation{Harness: registry.Harness("codex"), At: goneAt, Evidence: &registry.Sighting{Process: process, Present: false}}
+		if _, err := store.ObserveBatch(t.Context(), []registry.Observation{report, gone}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := runTestCLI(t.Context(), []string{"--store", storePath, "manage", "tracker", "run", "--once", "--quiet"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil && !errors.Is(err, errObserverRunDegraded) {
+		t.Fatal(err)
+	}
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The cycle also records any real agents on the host; only the seeded
+	// tombstones matter here.
+	var tombstones []string
+	for _, session := range sessions {
+		if strings.HasPrefix(session.SessionID, "tombstone-") {
+			tombstones = append(tombstones, session.SessionID+"/"+string(session.Presence()))
+		}
+	}
+	if len(tombstones) != 1 || tombstones[0] != "tombstone-1/gone" {
+		t.Fatalf("tombstones after --once = %v, want only tombstone-1/gone", tombstones)
 	}
 }
 

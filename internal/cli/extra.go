@@ -234,6 +234,15 @@ func (app *application) runObserverOnce(ctx context.Context, options observeOpti
 	if err != nil {
 		return fmt.Errorf("observer run once: %w", err)
 	}
+	// A running tracker expires tombstones continuously; a single cycle has
+	// to do it explicitly or its fallback writes would keep them forever.
+	ttl := options.tombstoneTTL
+	if ttl <= 0 {
+		ttl = registry.DefaultTombstoneTTL
+	}
+	if _, err := app.registryStore().GC(ctx, ttl); err != nil {
+		return fmt.Errorf("expiring tombstones: %w", err)
+	}
 	var writeErr error
 	if app.outputJSON {
 		writeErr = app.writeJSON(result)

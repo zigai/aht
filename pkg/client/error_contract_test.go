@@ -56,11 +56,27 @@ func errorContractBroker(t *testing.T) (client.Config, registry.Session, registr
 	if err != nil {
 		t.Fatal(err)
 	}
+	endProcessOnlySession(t, store)
 	if err := store.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	stop := startErrorContractBroker(t, store, socketPath)
 	return client.Config{StorePath: storePath, SocketPath: socketPath}, accepted, observation, stop
+}
+
+var endedProcess = registry.ProcessIdentity{PID: 4242, StartIdentity: "boot:4242", Executable: "/usr/bin/pi"}
+
+// endProcessOnlySession records a process-only session and its exit, which
+// removes the session and leaves its process recorded as ended.
+func endProcessOnlySession(t *testing.T, store *registry.MemoryStore) {
+	t.Helper()
+	at := time.Now().UTC().Add(-time.Second)
+	for index, present := range []bool{true, false} {
+		sighting := registry.Observation{Harness: registry.Harness("pi"), At: at.Add(time.Duration(index) * time.Millisecond), Evidence: &registry.Sighting{Process: endedProcess, Present: present}}
+		if _, err := store.Observe(t.Context(), sighting); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func startErrorContractBroker(t *testing.T, store *registry.MemoryStore, socketPath string) func() {
@@ -106,6 +122,12 @@ func assertRegistryFailures(t *testing.T, c *client.Client, accepted registry.Se
 	observation.At = observation.At.Add(-time.Second)
 	_, err = c.Observe(t.Context(), observation)
 	assertRegistryError(t, err, registry.ErrObservationConflict, "observation_conflict", online)
+
+	late := runningObservation("late-from-ended-process")
+	process := endedProcess
+	late.SetProcess(&process)
+	_, err = c.Observe(t.Context(), late)
+	assertRegistryError(t, err, registry.ErrProcessEnded, "process_ended", online)
 
 	current, err := c.Get(t.Context(), accepted.ID)
 	if err != nil {

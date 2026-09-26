@@ -102,7 +102,7 @@ func OpenMemoryStoreWithOptions(path string, rules Rules, options MemoryStoreOpt
 		storageRevision: 1, visibleRevision: 1, persistedRevision: 0, persistedAt: time.Time{}, backgroundPersistInterval: defaultBackgroundPersistInterval,
 		stateChanged: make(chan struct{}), owner: owner, dirty: make(chan struct{}, 1), flush: make(chan struct{}, 1),
 	}
-	expireTombstones(store.snapshot.Sessions, store.now(), ttl)
+	expireTombstones(&store.snapshot, store.now(), ttl)
 	if err := store.Flush(context.Background()); err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
@@ -125,12 +125,15 @@ func (s *MemoryStore) Path() string { return s.path }
 
 // Observe records one observation atomically.
 func (s *MemoryStore) Observe(ctx context.Context, observation Observation) (Session, error) {
-	sessions, err := s.ObserveBatch(ctx, []Observation{observation})
+	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: []Observation{observation}, DeleteAfter: nil, Reset: false})
 	if err != nil {
 		return Session{}, err
 	}
-	if len(sessions) > 0 {
-		return sessions[0], nil
+	if len(result.sessions) > 0 {
+		return cloneSessionValue(result.sessions[0]), nil
+	}
+	if result.ended > 0 {
+		return Session{}, ErrProcessEnded
 	}
 
 	s.mu.RLock()
@@ -334,11 +337,11 @@ func (s *MemoryStore) persistDueLocked(force bool) bool {
 //nolint:funcorder // lock-scoped expiry stays beside persistence
 func (s *MemoryStore) expireTombstonesLocked() {
 	now := s.now().UTC()
-	if !hasExpiredTombstones(s.snapshot.Sessions, now, s.tombstoneTTL) {
+	if !hasExpiredTombstones(s.snapshot, now, s.tombstoneTTL) {
 		return
 	}
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
-	expireTombstones(candidate.Sessions, now, s.tombstoneTTL)
+	expireTombstones(&candidate, now, s.tombstoneTTL)
 	changes := stateChanges(State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}, State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt})
 	s.acceptSnapshotLocked(candidate, changes)
 }

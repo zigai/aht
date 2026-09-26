@@ -428,3 +428,126 @@ func TestSnapshotIsCompactJSONAndLegacyIndentedSnapshotsLoad(t *testing.T) {
 		t.Fatalf("compact snapshot reload = %#v, %v", loaded, err)
 	}
 }
+
+// endedProcessOnlySession records a process-only session for process and then
+// its exit, which removes the session and records the process as ended.
+func endedProcessOnlySession(t *testing.T, store Store, process ProcessIdentity, at time.Time) {
+	t.Helper()
+	for index, present := range []bool{true, false} {
+		sighting := Observation{Harness: HarnessCodex, At: at.Add(time.Duration(index) * time.Second), Evidence: &Sighting{Process: process, Present: present}}
+		if _, err := store.Observe(t.Context(), sighting); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func lateReport(process ProcessIdentity, sessionID string, at time.Time) Observation {
+	running := ActivityRunning
+	return Observation{Harness: HarnessCodex, At: at, Subject: ObservationIdentity{SessionID: sessionID}, Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process}}
+}
+
+func assertNoSessions(t *testing.T, store Store) {
+	t.Helper()
+	listed, err := store.List(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("sessions = %#v, want none", listed)
+	}
+}
+
+func TestLateReportFromEndedProcessIsDroppedAcrossRestart(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC()
+	process := retentionProcess(7000)
+	endedProcessOnlySession(t, store, process, base)
+
+	if _, err := store.Observe(t.Context(), lateReport(process, "native-late", base.Add(3*time.Second))); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report error = %v, want ErrProcessEnded", err)
+	}
+	assertNoSessions(t, store)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if _, err := reopened.Observe(t.Context(), lateReport(process, "native-late", base.Add(4*time.Second))); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report after restart error = %v, want ErrProcessEnded", err)
+	}
+	assertNoSessions(t, reopened)
+
+	reused := process
+	reused.StartIdentity = "boot:reused"
+	session, err := reopened.Observe(t.Context(), lateReport(reused, "native-reused-pid", base.Add(5*time.Second)))
+	if err != nil {
+		t.Fatalf("report from a reused pid = %v, want accepted", err)
+	}
+	if session.SessionID != "native-reused-pid" {
+		t.Fatalf("reused pid session = %q, want native-reused-pid", session.SessionID)
+	}
+}
+
+func TestEndedProcessesExpireWithTombstoneTTL(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenMemoryStoreWithOptions(path, fixtureRules{}, MemoryStoreOptions{TombstoneTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	base := time.Now().UTC()
+	clock := base
+	store.setNowForTest(func() time.Time { return clock })
+	endedProcessOnlySession(t, store, retentionProcess(7100), base)
+	if err := store.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || !bytes.Contains(data, []byte(`"ended_processes"`)) {
+		t.Fatalf("snapshot before TTL = %q, %v; want ended process recorded", data, err)
+	}
+
+	clock = base.Add(2 * time.Minute)
+	if err := store.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || bytes.Contains(data, []byte(`"ended_processes"`)) {
+		t.Fatalf("snapshot after TTL = %q, %v; want ended process forgotten", data, err)
+	}
+}
+
+func TestFallbackJournalDropsLateReportAndGCForgetsEndedProcess(t *testing.T) {
+	t.Parallel()
+	journal := NewJournal(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
+	base := time.Now().UTC().Add(-time.Minute)
+	process := retentionProcess(7200)
+	endedProcessOnlySession(t, journal, process, base)
+
+	if _, err := journal.Observe(t.Context(), lateReport(process, "native-late", base.Add(3*time.Second))); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report error = %v, want ErrProcessEnded", err)
+	}
+	assertNoSessions(t, journal)
+
+	if _, err := journal.GC(t.Context(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.Observe(t.Context(), lateReport(process, "native-late", base.Add(4*time.Second))); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report after unexpired GC = %v, want ErrProcessEnded", err)
+	}
+
+	if _, err := journal.GC(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.Observe(t.Context(), lateReport(process, "native-late", base.Add(5*time.Second))); err != nil {
+		t.Fatalf("report after GC forgot the process = %v, want accepted", err)
+	}
+}

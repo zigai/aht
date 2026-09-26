@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -160,19 +161,27 @@ func (app *application) runReport(ctx context.Context, stdin io.Reader, opts rep
 		return err
 	}
 	if prepared.ignored {
-		if app.outputJSON {
-			return app.writeJSON(map[string]string{statusCommandName: "ignored", "harness": string(prepared.harness)})
-		}
-		if opts.quiet {
-			return nil
-		}
-		return app.writef("ignored %s report: hook payload does not match harness\n", prepared.harness)
+		return app.writeReportIgnored(prepared.harness, "payload_mismatch", "hook payload does not match harness", opts.quiet)
 	}
 	session, err := app.registryStore().Observe(ctx, prepared.observation)
+	if errors.Is(err, registry.ErrProcessEnded) {
+		// A late hook from an exited process is expected, not a hook failure.
+		return app.writeReportIgnored(prepared.harness, "process_ended", "reporting process already ended", opts.quiet)
+	}
 	if err != nil {
 		return fmt.Errorf("recording observation: %w", err)
 	}
 	return app.writeReportResult(session, opts.quiet)
+}
+
+func (app *application) writeReportIgnored(harness registry.Harness, reason, detail string, quiet bool) error {
+	if app.outputJSON {
+		return app.writeJSON(map[string]string{statusCommandName: "ignored", "harness": string(harness), "reason": reason})
+	}
+	if quiet {
+		return nil
+	}
+	return app.writef("ignored %s report: %s\n", harness, detail)
 }
 
 //nolint:gocognit,cyclop,nestif // report preparation validates independent evidence dimensions in order

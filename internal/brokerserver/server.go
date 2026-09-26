@@ -346,6 +346,8 @@ func operationErrorResponse(id string, err error) broker.Response {
 		code = "not_found"
 	case errors.Is(err, registry.ErrObservationConflict):
 		code = "observation_conflict"
+	case errors.Is(err, registry.ErrProcessEnded):
+		code = "process_ended"
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		code = "canceled"
 	}

@@ -36,9 +36,12 @@
 // # Retention
 //
 // The registry is the current state. A gone session with only process
-// identity is removed as part of the batch that ends it, because no native
-// report can match it. A gone session with a native identity stays as a
-// tombstone so late native reports from the ended incarnation are rejected;
-// [MemoryStore] removes it after [MemoryStoreOptions].TombstoneTTL
-// ([DefaultTombstoneTTL] by default), including when it opens an older store.
+// identity is removed as part of the batch that ends it, and its process is
+// remembered as ended: a later native report from that process matches no
+// session and fails with [ErrProcessEnded] instead of creating one. A gone
+// session with a native identity stays as a tombstone so late native reports
+// from the ended incarnation are rejected. [MemoryStore] forgets both after
+// [MemoryStoreOptions].TombstoneTTL ([DefaultTombstoneTTL] by default),
+// including when it opens an older store; GC with the same age does the same
+// without a tracker.
 package registry

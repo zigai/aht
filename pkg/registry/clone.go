@@ -43,7 +43,8 @@ func cloneRegistrySnapshotForMutation(source snapshot) snapshot {
 		// The reducer treats Session values as copy-on-write and replaces every
 		// nested pointer or slice it changes, so cloning the map is sufficient
 		// for atomic rollback without copying every unaffected session.
-		Sessions: maps.Clone(source.Sessions),
+		Sessions:       maps.Clone(source.Sessions),
+		EndedProcesses: maps.Clone(source.EndedProcesses),
 	}
 }
 
@@ -53,6 +54,7 @@ func cloneRegistrySnapshot(source snapshot) snapshot {
 		JournalSequence: source.JournalSequence,
 		UpdatedAt:       source.UpdatedAt,
 		Sessions:        make(map[string]Session, len(source.Sessions)),
+		EndedProcesses:  maps.Clone(source.EndedProcesses),
 	}
 	for id, session := range source.Sessions {
 		cloned.Sessions[id] = cloneSessionValue(session)

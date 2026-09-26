@@ -119,7 +119,7 @@ func (s *MemoryStore) commandLocked(ctx context.Context, entry journalEntry) (jo
 		// fallback writers that fold the on-disk snapshot and journal.
 		candidate.JournalSequence = s.snapshot.JournalSequence
 	}
-	if expireTombstones(candidate.Sessions, entry.ReceivedAt, s.tombstoneTTL) > 0 {
+	if expireTombstones(&candidate, entry.ReceivedAt, s.tombstoneTTL) > 0 {
 		result.changes = stateChanges(State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}, State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt})
 	}
 	s.acceptSnapshotLocked(candidate, result.changes)

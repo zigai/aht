@@ -35,6 +35,8 @@ type journalResult struct {
 	sessions []Session
 	gc       GCResult
 	reset    ResetResult
+	// ended counts reports dropped because their process already ended.
+	ended int
 }
 
 func NewJournal(path string, rules Rules) *Journal {
@@ -42,12 +44,15 @@ func NewJournal(path string, rules Rules) *Journal {
 }
 
 func (s *Journal) Observe(ctx context.Context, observation Observation) (Session, error) {
-	sessions, err := s.Append(ctx, []Observation{observation})
+	result, err := s.transact(ctx, journalEntry{Sequence: 0, ReceivedAt: s.now().UTC(), Observations: []Observation{observation}, DeleteAfter: nil, Reset: false})
 	if err != nil {
 		return Session{}, err
 	}
-	if len(sessions) > 0 {
-		return sessions[0], nil
+	if len(result.sessions) > 0 {
+		return result.sessions[0], nil
+	}
+	if result.ended > 0 {
+		return Session{}, ErrProcessEnded
 	}
 	snap, err := s.loadContext(ctx)
 	if err != nil {
@@ -140,15 +145,19 @@ func (r Reducer) applyJournalEntry(ctx context.Context, snap *snapshot, entry jo
 		snap.UpdatedAt = entry.ReceivedAt
 	case entry.DeleteAfter != nil:
 		result.gc.Deleted = deleteExpiredGoneSessions(snap.Sessions, entry.ReceivedAt, *entry.DeleteAfter, func(session Session) time.Time { return session.PresenceChangedAt })
+		if *entry.DeleteAfter >= 0 {
+			pruneEndedProcesses(snap, entry.ReceivedAt, *entry.DeleteAfter)
+		}
 		result.gc.Remaining = len(snap.Sessions)
 		snap.UpdatedAt = maxTime(snap.UpdatedAt, entry.ReceivedAt)
 	default:
-		saved, err := r.applyObservationBatch(ctx, snap, entry.Observations, entry.ReceivedAt)
+		saved, ended, err := r.applyObservationBatch(ctx, snap, entry.Observations, entry.ReceivedAt)
 		if err != nil {
 			return journalResult{}, err
 		}
-		removeGoneProcessOnlySessions(snap.Sessions)
+		removeGoneProcessOnlySessions(snap)
 		result.sessions = saved
+		result.ended = ended
 	}
 	snap.JournalSequence = entry.Sequence
 	result.changes = stateChanges(before, State{Sessions: snap.Sessions, UpdatedAt: snap.UpdatedAt})
