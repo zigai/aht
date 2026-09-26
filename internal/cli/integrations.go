@@ -232,6 +232,9 @@ func (app *application) writeIntegrationResults(results []install.Result, showCo
 	rows := make([][]string, 0, len(results))
 	for _, result := range results {
 		message := result.Message
+		if !result.Changed && strings.HasSuffix(strings.TrimSpace(result.Message), "already installed") {
+			message = "already installed"
+		}
 		if result.Error != "" {
 			message = result.Error
 		}

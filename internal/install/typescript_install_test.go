@@ -126,6 +126,9 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 	if reinstalled.Changed {
 		t.Fatal("reinstalling the current OMP extension must be idempotent")
 	}
+	if reinstalled.Message != "already installed" {
+		t.Fatalf("reinstalled message = %q, want 'already installed'", reinstalled.Message)
+	}
 }
 
 func TestPiAndOmpRefuseToOverwriteSharedExtension(t *testing.T) {

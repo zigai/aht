@@ -43,7 +43,7 @@ func installShim(options Options, harness registry.Harness) (Result, error) {
 
 	message := fmt.Sprintf("%s shim installed; put %s before the real harness binary in PATH", harness, dir)
 	if !changed {
-		message = fmt.Sprintf("%s shim already installed", harness)
+		message = "already installed"
 	}
 
 	if options.DryRun {

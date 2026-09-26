@@ -115,7 +115,7 @@ func installJSONCommandHooks(
 		CreateDirError:          "creating " + configLabel + " directory",
 		WriteError:              "writing " + label,
 		InstalledMessage:        label + " installed",
-		AlreadyInstalledMessage: label + " already installed",
+		AlreadyInstalledMessage: "already installed",
 		DryRunMessage:           "dry run: " + label + " not written",
 	})
 }
@@ -194,7 +194,7 @@ func installCursorJSONHooks(
 		CreateDirError:          "creating " + configLabel + " directory",
 		WriteError:              "writing " + label,
 		InstalledMessage:        label + " installed",
-		AlreadyInstalledMessage: label + " already installed",
+		AlreadyInstalledMessage: "already installed",
 		DryRunMessage:           "dry run: " + label + " not written",
 	})
 }
@@ -415,7 +415,7 @@ func installRenderedPlan(
 		CreateDirError:          "creating " + configLabel + " directory",
 		WriteError:              "writing " + label,
 		InstalledMessage:        label + " installed",
-		AlreadyInstalledMessage: label + " already installed",
+		AlreadyInstalledMessage: "already installed",
 		DryRunMessage:           "dry run: " + label + " not written",
 	})
 }
@@ -757,7 +757,7 @@ func installMessage(label string, changed bool, dryRun bool) string {
 		return "dry run: " + label + " not written"
 	}
 	if !changed {
-		return label + " already installed"
+		return "already installed"
 	}
 
 	return label + " installed"
