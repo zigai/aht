@@ -24,8 +24,14 @@ import (
 )
 
 const (
-	defaultObserverInterval    = time.Second
-	defaultMissingSnapshots    = 2
+	defaultObserverInterval = time.Second
+	defaultMissingSnapshots = 2
+	// defaultProcessConfirmation is how long a process found only by command
+	// name must keep running before it becomes a registry session.
+	defaultProcessConfirmation = 3 * time.Second
+	// healthWriteInterval bounds how stale the health file may get while the
+	// observer status and error category stay unchanged.
+	healthWriteInterval        = 30 * time.Second
 	commandArgumentPrefixCount = 2
 	initialScreenConfirmations = 2
 )
@@ -72,9 +78,15 @@ type Options struct {
 	// Native multiplexer activity remains available without reading screen text.
 	DisableScreenInspection bool
 	DetectionConfigDir      string
-	Now                     func() time.Time
-	ErrorWriter             io.Writer
-	Quiet                   bool
+	// ProcessConfirmation is how long a continuously running observer waits
+	// before recording a process discovered only by its command name. Native
+	// reports, current catalog entries, and existing sessions confirm a process
+	// at once. Zero uses a 3 second default; a negative value confirms at once.
+	// Single-cycle runs confirm at once because they have no history.
+	ProcessConfirmation time.Duration
+	Now                 func() time.Time
+	ErrorWriter         io.Writer
+	Quiet               bool
 }
 
 type Result struct {
@@ -137,11 +149,13 @@ type Observer struct {
 	now                     func() time.Time
 	errorWriter             io.Writer
 	quiet                   bool
+	confirmAfter            time.Duration
 
 	mu              sync.Mutex
 	startedAt       time.Time
 	initialized     bool
 	tracked         map[processKey]trackedProcess
+	candidates      map[processKey]time.Time
 	screenPending   map[processKey]pendingScreenDecision
 	health          Health
 	lastHealthWrite time.Time
@@ -200,13 +214,17 @@ func New(opts Options) *Observer {
 	if screenCapture == nil {
 		screenCapture = captureMultiplexerPane
 	}
+	confirmAfter := opts.ProcessConfirmation
+	if confirmAfter == 0 {
+		confirmAfter = defaultProcessConfirmation
+	}
 	return &Observer{
 		store: store, interval: interval, grace: opts.GracePeriod,
 		healthPath: healthPath, processList: processList, paneList: paneList, catalogList: catalogList,
 		screenCapture: screenCapture, manifestLoader: agentstate.Loader{ConfigDir: opts.DetectionConfigDir},
 		disableScreenInspection: opts.DisableScreenInspection,
-		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet,
-		tracked: make(map[processKey]trackedProcess), screenPending: make(map[processKey]pendingScreenDecision),
+		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet, confirmAfter: confirmAfter,
+		tracked: make(map[processKey]trackedProcess), candidates: make(map[processKey]time.Time), screenPending: make(map[processKey]pendingScreenDecision),
 		mu: sync.Mutex{}, startedAt: time.Time{}, initialized: false, health: Health{PID: 0, StartIdentity: "", Interval: 0, GracePeriod: 0, StartedAt: time.Time{}, LastAttemptAt: time.Time{}, LastSuccessAt: time.Time{}, LastEnumerationErrorCategory: "", LastEnumerationError: "", Cycles: 0, Observations: 0, Sessions: 0, Degraded: false},
 		lastHealthWrite: time.Time{}, lockPath: lockPath, lockFile: nil, running: false, continuous: false,
 	}
@@ -345,6 +363,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 			delete(harnessByPID, process.PID)
 		}
 	}
+	o.holdUnconfirmedProcesses(knownSessions, catalogByPID, processByPID, harnessByPID, at)
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
 		if !ok {
@@ -476,6 +495,59 @@ func joinObserverHealthError(primary, healthErr error) error {
 	}
 
 	return errors.Join(primary, fmt.Errorf("recording observer health: %w", healthErr))
+}
+
+// holdUnconfirmedProcesses removes processes matched only by command name from
+// this cycle until they are confirmed, so short-lived commands that share a
+// harness executable name never become registry sessions.
+//
+//nolint:funcorder // confirmation runs as part of reconciliation near its call site
+func (o *Observer) holdUnconfirmedProcesses(
+	sessions []registry.Session,
+	catalogByPID map[int]CatalogEntry,
+	processByPID map[int]processinfo.Process,
+	harnessByPID map[int]registry.Harness,
+	at time.Time,
+) {
+	pending := make(map[processKey]time.Time)
+	for pid, harnessID := range harnessByPID {
+		key := processKey{harness: harnessID, pid: pid, start: processByPID[pid].StartIdentity}
+		if o.processConfirmed(key, sessions, catalogByPID, at) {
+			continue
+		}
+		firstSeen, ok := o.candidates[key]
+		if !ok {
+			firstSeen = at
+		}
+		pending[key] = firstSeen
+		delete(harnessByPID, pid)
+	}
+	o.candidates = pending
+}
+
+// processConfirmed reports whether a harness process may create or update a
+// registry session. A process is confirmed by an existing session for the same
+// process (native reports create one), by a current catalog entry, by earlier
+// tracking, or by running for the confirmation period.
+//
+//nolint:funcorder // confirmation runs as part of reconciliation near its call site
+func (o *Observer) processConfirmed(key processKey, sessions []registry.Session, catalogByPID map[int]CatalogEntry, at time.Time) bool {
+	if !o.continuous || o.confirmAfter < 0 {
+		return true
+	}
+	if _, ok := o.tracked[key]; ok {
+		return true
+	}
+	if entry, ok := catalogByPID[key.pid]; ok && entry.Harness == key.harness {
+		return true
+	}
+	for _, session := range sessions {
+		if session.Harness == key.harness && session.Process != nil && session.Process.PID == key.pid && session.Process.StartIdentity == key.start {
+			return true
+		}
+	}
+	firstSeen, ok := o.candidates[key]
+	return ok && at.Sub(firstSeen) >= o.confirmAfter
 }
 
 func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
