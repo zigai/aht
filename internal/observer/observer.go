@@ -977,6 +977,7 @@ func (o *Observer) releaseLock() {
 func (o *Observer) recordHealth(at time.Time, degraded bool, category string, err error, result Result) error {
 	o.mu.Lock()
 	wasDegraded := o.health.Degraded
+	previousCategory := o.health.LastEnumerationErrorCategory
 	if o.startedAt.IsZero() {
 		o.startedAt = at
 		o.health.PID = os.Getpid()
@@ -998,7 +999,10 @@ func (o *Observer) recordHealth(at time.Time, degraded bool, category string, er
 		o.health.LastEnumerationError = ""
 	}
 	health := o.health
-	shouldWrite := o.lastHealthWrite.IsZero() || at.Sub(o.lastHealthWrite) >= 30*time.Second || err != nil || degraded != wasDegraded
+	// Rewrite only on a status or error-category change, or on the slow
+	// interval, so steady and persistently degraded cycles do not write.
+	shouldWrite := o.lastHealthWrite.IsZero() || at.Sub(o.lastHealthWrite) >= healthWriteInterval ||
+		degraded != wasDegraded || o.health.LastEnumerationErrorCategory != previousCategory
 	o.mu.Unlock()
 	if !shouldWrite || o.healthPath == "" {
 		return nil
