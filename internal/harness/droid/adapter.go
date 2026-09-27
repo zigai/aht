@@ -104,11 +104,8 @@ func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "",
 				Command: droidHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
 			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: droidHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
-			},
+			// SubagentStop fires when a Task sub-droid finishes while the
+			// parent turn keeps running until Stop.
 			{
 				Event:   "PreCompact",
 				Matcher: "",

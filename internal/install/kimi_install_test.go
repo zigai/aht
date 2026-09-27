@@ -44,8 +44,6 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 		"PostToolUseFailure",
 		hookEventStop,
 		"StopFailure",
-		"SubagentStart",
-		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
 		"SessionEnd",
@@ -66,14 +64,29 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 		"--activity running --event PreToolUse",
 		"--activity failed --event StopFailure",
 		"--presence gone --event SessionEnd",
+		// Automatic compaction continues the running turn; only manual
+		// compaction, including manual-with-prompt, returns to idle.
+		`event = "PostCompact"` + "\nmatcher = \"^manual\"\ncommand = \"/usr/local/bin/aht report kimi-code --activity idle --event PostCompact",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in snippet: %s", want, text)
 		}
 	}
+	requireNoKimiSubagentHooks(t, text)
 	for _, forbidden := range []string{"statusMessage", "hooks =", "type ="} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unexpected unsupported Kimi hook field %q in snippet: %s", forbidden, text)
+		}
+	}
+}
+
+// requireNoKimiSubagentHooks asserts that child-agent events, which fire while
+// the parent turn keeps running, never report the main session's activity.
+func requireNoKimiSubagentHooks(t *testing.T, text string) {
+	t.Helper()
+	for _, event := range []string{"SubagentStart", "SubagentStop"} {
+		if strings.Contains(text, `event = "`+event+`"`) {
+			t.Fatalf("expected no %s hook: subagent events do not describe the main turn: %s", event, text)
 		}
 	}
 }

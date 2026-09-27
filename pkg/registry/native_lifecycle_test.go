@@ -353,3 +353,46 @@ func TestV2NativeTerminalAndResumeReduction(t *testing.T) {
 		t.Fatalf("process did not bind resumed generation: %#v", session)
 	}
 }
+
+func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
+	ctx := context.Background()
+	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	identity := registry.ObservationIdentity{SessionID: "compacting-session"}
+	process := &registry.ProcessIdentity{PID: 86, StartIdentity: "boot:86"}
+	reporter := registry.Reporter{Integration: "codex-extension"}
+	start := registry.NativeLifecycleStart
+	live := registry.PresenceLive
+	running := registry.ActivityRunning
+
+	if _, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: identity, Evidence: &registry.Report{Reporter: reporter, Event: "UserPromptSubmit", Activity: &running, Process: process}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Second), Subject: identity, Evidence: &registry.Report{Reporter: reporter, Event: "PreCompact", Activity: &running, Process: process}}); err != nil {
+		t.Fatal(err)
+	}
+	// Automatic compaction fires SessionStart with source "compact" inside the
+	// running turn; generated hooks report it as a presence claim alone.
+	session, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("codex"), At: at.Add(2 * time.Second), Subject: identity, Evidence: &registry.Report{Reporter: reporter, Event: "SessionStart", Lifecycle: &start, Claim: &live, Process: process}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	policy := (behaviorRules{}).Policy(session.Harness)
+	if authority, reason := registry.ActivityAuthority(session, policy, at.Add(3*time.Second)); authority != registry.AuthorityHook || reason != "matching_live_process_report" {
+		t.Errorf("activity authority = %s (%s), want hook (matching_live_process_report)", authority, reason)
+	}
+	session, err = store.Observe(ctx, registry.Observation{Harness: session.Harness, At: at.Add(3 * time.Second), Subject: identity, Evidence: &registry.Reading{Activity: registry.ActivityUnknown, Authority: registry.AuthorityScreen, Reason: "screen_not_in_supported_multiplexer", Process: *process}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityRunning {
+		t.Fatalf("session state = presence:%s activity:%v, want live/running", session.Presence(), session.Activity())
+	}
+	if !session.ActivityChangedAt.Equal(at) {
+		t.Fatalf("ActivityChangedAt = %s, want turn start %s", session.ActivityChangedAt, at)
+	}
+}

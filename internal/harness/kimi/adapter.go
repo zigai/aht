@@ -177,27 +177,19 @@ func kimiCodeHookBlock(binary string) string {
 			command: kimiCodeHookCommand(binary, registry.ActivityFailed, "StopFailure"),
 			timeout: harness.HookTimeoutSeconds,
 		},
-		{
-			event:   "SubagentStart",
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, "SubagentStart"),
-			timeout: harness.HookTimeoutSeconds,
-		},
-		{
-			event:   "SubagentStop",
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
-			timeout: harness.HookTimeoutSeconds,
-		},
+		// SubagentStart and SubagentStop fire for child agents while the
+		// parent turn keeps running until Stop.
 		{
 			event:   "PreCompact",
 			matcher: "",
 			command: kimiCodeHookCommand(binary, registry.ActivityRunning, "PreCompact"),
 			timeout: harness.HookTimeoutSeconds,
 		},
+		// Automatic compaction continues the running turn; only manual
+		// compaction, including manual-with-prompt, returns the session to idle.
 		{
 			event:   "PostCompact",
-			matcher: "",
+			matcher: "^manual",
 			command: kimiCodeHookCommand(binary, registry.ActivityIdle, "PostCompact"),
 			timeout: harness.HookTimeoutSeconds,
 		},

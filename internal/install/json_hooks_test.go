@@ -75,11 +75,75 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 			t.Fatalf("expected %s hook", event)
 		}
 	}
-	for _, event := range []string{"SubagentStart", "SubagentStop"} {
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
+	requireManualPostCompactIdle(t, hooks, "manual")
+}
+
+// requireNoSubagentHooks asserts that child-agent events, which fire while the
+// parent turn keeps running, never report the main session's activity.
+func requireNoSubagentHooks(t *testing.T, hooks map[string]any, events ...string) {
+	t.Helper()
+	for _, event := range events {
 		if _, ok := hooks[event]; ok {
 			t.Fatalf("expected no %s hook: subagent events do not describe the main turn", event)
 		}
 	}
+}
+
+// requireCompactionKeepsTurnRunning asserts that SessionStart reports idle only
+// for real session starts, while compaction-sourced SessionStart, which also
+// fires after automatic compaction inside a running turn, claims presence alone.
+func requireCompactionKeepsTurnRunning(t *testing.T, hooks map[string]any, idleMatcher string) {
+	t.Helper()
+	commands := requireTestHookMatcherCommands(t, hooks, hookEventSessionStart)
+	if len(commands) != 2 {
+		t.Fatalf("expected idle and compact SessionStart hooks, got %#v", commands)
+	}
+	if command := commands[idleMatcher]; !strings.Contains(command, "--activity idle --event SessionStart") {
+		t.Fatalf("SessionStart %q hook = %q, want idle report", idleMatcher, command)
+	}
+	compact := commands["compact"]
+	if !strings.Contains(compact, "--presence live --event SessionStart") || strings.Contains(compact, "--activity") {
+		t.Fatalf("SessionStart compact hook = %q, want presence-only report", compact)
+	}
+}
+
+// requireManualPostCompactIdle asserts that only manual compaction returns the
+// session to idle; automatic compaction continues the running turn.
+func requireManualPostCompactIdle(t *testing.T, hooks map[string]any, manualMatcher string) {
+	t.Helper()
+	commands := requireTestHookMatcherCommands(t, hooks, "PostCompact")
+	if len(commands) != 1 || !strings.Contains(commands[manualMatcher], "--activity idle --event PostCompact") {
+		t.Fatalf("PostCompact hooks = %#v, want one idle report matching %q", commands, manualMatcher)
+	}
+}
+
+func requireTestHookMatcherCommands(t *testing.T, hooks map[string]any, event string) map[string]string {
+	t.Helper()
+	groups, ok := hooks[event].([]any)
+	if !ok {
+		t.Fatalf("expected %s hook groups, got %#v", event, hooks[event])
+	}
+	commands := make(map[string]string, len(groups))
+	for _, value := range groups {
+		group, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook group object, got %#v", event, value)
+		}
+		matcher, _ := group["matcher"].(string)
+		handlers, ok := group["hooks"].([]any)
+		if !ok || len(handlers) != 1 {
+			t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
+		}
+		handler, ok := handlers[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
+		}
+		command, _ := handler["command"].(string)
+		commands[matcher] = command
+	}
+	return commands
 }
 
 func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
@@ -259,11 +323,14 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	if !hasUserPrompt {
 		t.Fatal("expected UserPromptSubmit hook")
 	}
-	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", harnesspkg.HookEventSessionEnd} {
+	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", harnesspkg.HookEventSessionEnd} {
 		if _, ok := hooks[event]; !ok {
 			t.Fatalf("expected %s hook", event)
 		}
 	}
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
+	requireManualPostCompactIdle(t, hooks, "manual")
 	postToolCommand := requireTestHookCommand(t, hooks, "PostToolUse")
 	if !strings.Contains(postToolCommand, "--raw-stdin-defaults-only") || strings.Contains(postToolCommand, "--raw-stdin ") {
 		t.Fatalf("Codex PostToolUse hook stores full tool output: %q", postToolCommand)
@@ -552,10 +619,10 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		"PostToolUse",
 		"Notification",
 		hookEventStop,
-		"SubagentStop",
 		"PreCompact",
 		"SessionEnd",
 	})
+	requireNoSubagentHooks(t, hooks, "SubagentStop")
 	text := string(data)
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
@@ -620,8 +687,6 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 		"PostToolUse",
 		"PostToolUseFailure",
 		"PermissionDenied",
-		"SubagentStart",
-		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
 		hookEventStop,
@@ -632,6 +697,8 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 			t.Fatalf("expected %s hook", event)
 		}
 	}
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireManualPostCompactIdle(t, hooks, "manual")
 
 	text := string(data)
 	if !strings.Contains(text, "--raw-stdin") || !strings.Contains(text, "--quiet") {

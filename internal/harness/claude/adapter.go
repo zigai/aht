@@ -67,8 +67,15 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
-				Matcher: "startup|resume|clear|compact",
+				Matcher: "startup|resume|clear",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, harness.HookEventSessionStart, claudeIntegrationSource),
+			},
+			// Automatic compaction also fires SessionStart inside a turn that
+			// keeps running, so compaction reports presence without activity.
+			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "compact",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceLive, harness.HookEventSessionStart, claudeIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
@@ -113,9 +120,11 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "PreCompact", claudeIntegrationSource),
 			},
+			// Automatic compaction continues the running turn; only manual
+			// compaction returns the session to idle.
 			{
 				Event:   "PostCompact",
-				Matcher: "",
+				Matcher: "manual",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PostCompact", claudeIntegrationSource),
 			},
 			{

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	IntegrationVersion = 10
+	IntegrationVersion = 11
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"

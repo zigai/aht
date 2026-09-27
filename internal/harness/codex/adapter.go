@@ -67,8 +67,15 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
-				Matcher: "startup|resume|clear|compact",
+				Matcher: "startup|resume|clear",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventSessionStart, codexIntegrationSource),
+			},
+			// Automatic compaction also fires SessionStart inside a turn that
+			// keeps running, so compaction reports presence without activity.
+			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "compact",
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceLive, harness.HookEventSessionStart, codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
@@ -90,21 +97,15 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "PreCompact", codexIntegrationSource),
 			},
+			// Automatic compaction continues the running turn; only manual
+			// compaction returns the session to idle.
 			{
 				Event:   "PostCompact",
-				Matcher: "",
+				Matcher: "manual",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "PostCompact", codexIntegrationSource),
 			},
-			{
-				Event:   "SubagentStart",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "SubagentStart", codexIntegrationSource),
-			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "SubagentStop", codexIntegrationSource),
-			},
+			// SubagentStart and SubagentStop describe child agents inside the
+			// parent turn, which keeps running until Stop.
 			{
 				Event:   harness.HookEventStop,
 				Matcher: "",
