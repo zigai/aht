@@ -72,6 +72,8 @@ jobs:
     with:
       harness: ${{ matrix.harness }}
       version: ${{ matrix.version }}
+      # A single flaky failure must not be recorded as a release regression.
+      attempts: 2
 
   record:
     if: always() && needs.detect.result == 'success'
