@@ -2,7 +2,7 @@ name: Release compatibility
 
 on:
   schedule:
-    - cron: "32 * * * *"
+    - cron: "32 */6 * * *"
   workflow_dispatch:
     inputs:
       harness:
