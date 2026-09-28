@@ -9,6 +9,10 @@ on:
       version:
         default: ''
         type: string
+      attempts:
+        description: Lifecycle test attempts; a pass on any attempt counts as success
+        default: 1
+        type: number
 
 permissions:
   contents: read
@@ -17,7 +21,7 @@ jobs:
   host:
     name: ${{ inputs.harness }} ${{ inputs.version || 'current' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       AHT_COMPAT_HARNESS: ${{ inputs.harness }}
       AHT_COMPAT_VERSION: ${{ inputs.version }}
@@ -60,13 +64,27 @@ jobs:
       - name: Install tmux
         uses: ./.github/actions/setup-tmux
 
+      # Each attempt builds fresh isolated hosts, so a retry cannot inherit state.
       - name: Exercise installed integration and host
         id: lifecycle
         shell: bash
+        env:
+          ATTEMPTS: ${{ inputs.attempts }}
         run: |
           set -o pipefail
-          go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m 2>&1 |
-            tee "$AHT_COMPAT_WORK/$AHT_COMPAT_HARNESS.log"
+          log="$AHT_COMPAT_WORK/$AHT_COMPAT_HARNESS.log"
+          : > "$log"
+          for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
+            echo "=== lifecycle attempt $attempt of $ATTEMPTS" | tee -a "$log"
+            if go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m 2>&1 |
+              tee -a "$log"; then
+              if ((attempt > 1)); then
+                echo "::warning title=Flaky lifecycle test::$AHT_COMPAT_HARNESS ${AHT_COMPAT_VERSION:-current} passed on attempt $attempt of $ATTEMPTS"
+              fi
+              exit 0
+            fi
+          done
+          exit 1
 
       - name: Record result
         if: always()

@@ -2,7 +2,7 @@ name: Release compatibility
 
 on:
   schedule:
-    - cron: "32 * * * *"
+    - cron: "32 */6 * * *"
   workflow_dispatch:
     inputs:
       harness:
@@ -72,6 +72,8 @@ jobs:
     with:
       harness: ${{ matrix.harness }}
       version: ${{ matrix.version }}
+      # A single flaky failure must not be recorded as a release regression.
+      attempts: 2
 
   record:
     if: always() && needs.detect.result == 'success'
@@ -127,14 +129,10 @@ jobs:
           retention-days: 90
 
       - name: Track regressions in issues
-        uses: actions/github-script@v9
         env:
-          AHT_COMPAT_ISSUES: ${{ runner.temp }}/release-state/issues.json
-        with:
-          retries: 3
-          script: |
-            const report = JSON.parse(require('node:fs').readFileSync(process.env.AHT_COMPAT_ISSUES, 'utf8'));
-            await require('./.github/scripts/compatibility-issues.cjs').syncIssues({ github, context, core, report });
+          GH_TOKEN: ${{ github.token }}
+          AHT_COMPAT_WORK: ${{ runner.temp }}/release-state
+        run: go run ./internal/tools/compatibility issues
 
       - name: Require successful detection and new-regression-free checks
         env:

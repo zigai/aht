@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verify-tag:
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
@@ -41,14 +41,16 @@ jobs:
           fi
           echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
 
-      - name: Require successful CI for the tag commit
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          AHT_RELEASE_SHA: ${{ steps.tag.outputs.commit }}
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
         with:
-          retries: 3
-          script: |
-            await require('./.github/scripts/release.cjs').requireCI({ github, context, core, sha: process.env.AHT_RELEASE_SHA });
+          profile: artifacts
+
+      - name: Require successful CI for the tag commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AHT_RELEASE_SHA: ${{ steps.tag.outputs.commit }}
+        run: go run ./internal/tools/release require-ci
 
   build-release:
     needs:
@@ -180,11 +182,10 @@ jobs:
 
       - name: Prepare owned draft after native validation
         id: draft
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const notes = require('node:fs').readFileSync('dist/CHANGELOG.md', 'utf8');
-            await require('./.github/scripts/release.cjs').prepareDraft({ github, context, core, sha: process.env.AHT_RELEASE_SHA, notes });
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AHT_RELEASE_NOTES: dist/CHANGELOG.md
+        run: go run ./internal/tools/release prepare-draft
 
       - name: Upload tested release assets
         if: steps.draft.outputs.published != 'true'
@@ -222,12 +223,10 @@ jobs:
 
       - name: Publish verified release
         if: steps.draft.outputs.published != 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           AHT_RELEASE_ID: ${{ steps.draft.outputs.release-id }}
-        with:
-          script: |
-            await require('./.github/scripts/release.cjs').publishDraft({ github, context, core, sha: process.env.AHT_RELEASE_SHA, releaseID: Number(process.env.AHT_RELEASE_ID) });
+        run: go run ./internal/tools/release publish-draft
 
   cleanup-failed-draft:
     if: ${{ always() && needs.verify-tag.result == 'success' && needs.publish-release.result != 'success' }}
@@ -244,10 +243,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Reconcile and delete only this run's unpublished draft
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          AHT_RELEASE_SHA: ${{ needs.verify-tag.outputs.commit }}
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
         with:
-          script: |
-            await require('./.github/scripts/release.cjs').cleanupDraft({ github, context, core, sha: process.env.AHT_RELEASE_SHA });
+          profile: artifacts
+
+      - name: Reconcile and delete only this run's unpublished draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AHT_RELEASE_SHA: ${{ needs.verify-tag.outputs.commit }}
+        run: go run ./internal/tools/release cleanup-draft

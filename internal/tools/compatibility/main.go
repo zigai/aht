@@ -54,7 +54,7 @@ func runCommandLine() error {
 
 func (a application) run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("%w: usage: compatibility probe|changes|detect|weekly|install|result|finish", errCompatibility)
+		return fmt.Errorf("%w: usage: compatibility probe|changes|detect|weekly|install|result|finish|issues", errCompatibility)
 	}
 	switch args[0] {
 	case "probe":
@@ -71,6 +71,8 @@ func (a application) run(ctx context.Context, args []string) error {
 		return a.recordResult()
 	case "finish":
 		return a.finish(ctx)
+	case "issues":
+		return a.issues(ctx)
 	default:
 		return fmt.Errorf("%w: unknown command %q", errCompatibility, args[0])
 	}
@@ -254,7 +256,7 @@ func trackedIssues(state releaseState) issueReport {
 			status.Reason = "passed"
 			report.Resolved = append(report.Resolved, status)
 		case record.Outcome == "failure":
-			status.Reason = "above supported maximum"
+			status.Reason = reasonAboveMaximum
 			report.Resolved = append(report.Resolved, status)
 		}
 	}

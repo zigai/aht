@@ -25,14 +25,10 @@ integration:
     fi
     go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
 
-# Test release detection, state transitions, and workflow wiring
+# Test CI tooling, release detection, state transitions, and workflow wiring
 compatibility-tests:
-    go test ./internal/tools/compatibility
+    go test ./internal/tools/...
     go test -count=1 -race -tags=compatibility ./test/hostcompat -skip '^TestCurrentHarnessLifecycle$'
-
-# Verify release guards and CI orchestration without remote mutations
-ci-tests:
-    node --test .github/scripts/*.test.cjs
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
@@ -74,7 +70,7 @@ lint:
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # Run all required non-mutating verification
-check: lint test race integration compatibility-tests ci-tests source-checks
+check: lint test race integration compatibility-tests source-checks
 
 # Verify formatting, dependency consistency, builds, and workflow syntax
 source-checks:

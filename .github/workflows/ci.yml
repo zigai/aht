@@ -118,9 +118,6 @@ jobs:
       - name: Compatibility helper tests
         run: just compatibility-tests
 
-      - name: Release guard tests
-        run: just ci-tests
-
       - name: Source consistency
         run: just source-checks
 
