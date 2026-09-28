@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
+# Install the golangci-lint release pinned in the Justfile into $AHT_LINT_DIRECTORY,
+# verifying the archive against .github/golangci-lint-checksums.txt.
 set -euo pipefail
 
-: "${AHT_LINT_DIRECTORY:?Set a local installation directory}"
-aht_lint_version=$(just --evaluate golangci_lint_version)
-aht_lint_name="golangci-lint-${aht_lint_version#v}-$(go env GOOS)-$(go env GOARCH)"
-aht_lint_checksum=$(awk -v name="$aht_lint_name.tar.gz" '$2 == name {print $1}' .github/golangci-lint-checksums.txt)
-test "${#aht_lint_checksum}" = 64
-aht_lint_work=$(mktemp -d)
-trap 'rm -rf "$aht_lint_work"' EXIT
-cd "$aht_lint_work"
-curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
-  -o "$aht_lint_name.tar.gz" "https://github.com/golangci/golangci-lint/releases/download/$aht_lint_version/$aht_lint_name.tar.gz"
-echo "$aht_lint_checksum  $aht_lint_name.tar.gz" | shasum -a 256 --check
-tar -xzf "$aht_lint_name.tar.gz"
-mkdir -p "$AHT_LINT_DIRECTORY"
-install -m 0755 "$aht_lint_name/golangci-lint" "$AHT_LINT_DIRECTORY/golangci-lint"
+readonly INSTALL_DIR="${AHT_LINT_DIRECTORY:?Set a local installation directory}"
+readonly CHECKSUMS_FILE="$PWD/.github/golangci-lint-checksums.txt"
+VERSION=$(just --evaluate golangci_lint_version)
+readonly VERSION
+readonly NAME="golangci-lint-${VERSION#v}-$(go env GOOS)-$(go env GOARCH)"
+readonly ARCHIVE="$NAME.tar.gz"
+readonly URL="https://github.com/golangci/golangci-lint/releases/download/$VERSION/$ARCHIVE"
+
+expected_checksum() {
+    awk -v archive="$ARCHIVE" '$2 == archive { print $1 }' "$CHECKSUMS_FILE"
+}
+
+checksum=$(expected_checksum)
+if [[ ${#checksum} -ne 64 ]]; then
+    echo "error: no SHA-256 checksum for $ARCHIVE in $CHECKSUMS_FILE" >&2
+    exit 1
+fi
+
+work_dir=$(mktemp -d)
+trap 'rm -rf "$work_dir"' EXIT
+cd "$work_dir"
+
+curl --fail --silent --show-error --location \
+    --retry 5 --retry-all-errors --retry-delay 2 \
+    --output "$ARCHIVE" \
+    "$URL"
+echo "$checksum  $ARCHIVE" | shasum --algorithm 256 --check
+
+tar -xzf "$ARCHIVE"
+mkdir -p "$INSTALL_DIR"
+install -m 0755 "$NAME/golangci-lint" "$INSTALL_DIR/golangci-lint"
