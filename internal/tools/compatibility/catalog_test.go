@@ -9,37 +9,38 @@ import (
 	"testing"
 )
 
-func TestMajorMinorSelection(t *testing.T) {
+func TestNewerReleaseSelection(t *testing.T) {
 	spec := testHarness(t, "claude")
 	tests := []struct {
 		before, after string
 		want          bool
 	}{
 		{"1.2.3", "1.2.3", false},
-		{"1.2.3", "1.2.99", false},
+		{"1.2.3", "1.2.4", true},
+		{"1.2.3", "1.2.99", true},
 		{"1.2.3", "1.3.0", true},
-		{"1.2.3", "1.3.2", true},
 		{"1.2.3", "2.0.0", true},
 		{"1.9.0", "1.10.0", true},
-		{"0.9.0", "0.10.0", true},
 		{"2.0.0", "1.99.0", false},
-		{"v1.2.3", "1.2.4", false},
-		{"2026.9.3", "2026.9.9", false},
-		{"2026.9.3", "2026.10.0", true},
+		{"1.2.3", "1.2.2", false},
+		{"v1.2.3", "1.2.3", false},
+		{"v1.2.3", "1.2.4", true},
+		{"2026.9.3", "2026.9.9", true},
 		{"0.0.100", "0.0.101", true},
-		{"0.0.100", "0.0.100", false},
 		{"0.0.100", "0.0.99", false},
 		{"0.0.1790236865-g40d640", "0.0.1790236866-gaaaaaa", true},
 		{"0.0.1790236865-g40d640", "0.0.1790236865-gbbbbbb", false},
-		{"0.0.1790236865-g40d640", "0.0.1790236864-gcccccc", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.before+"_to_"+tt.after, func(t *testing.T) {
-			got, err := needsCheck(spec, tt.after, checkedRelease{Source: spec.sourceKey(), Version: tt.before}, false)
-			if err != nil || got != tt.want {
-				t.Fatalf("needsCheck = %v, %v; want %v", got, err, tt.want)
-			}
-		})
+		for _, outcome := range []string{"success", "failure"} {
+			t.Run(outcome+"/"+tt.before+"_to_"+tt.after, func(t *testing.T) {
+				previous := checkedRelease{Source: spec.sourceKey(), Version: tt.before, Outcome: outcome}
+				got, err := needsCheck(spec, tt.after, previous, false)
+				if err != nil || got != tt.want {
+					t.Fatalf("needsCheck = %v, %v; want %v", got, err, tt.want)
+				}
+			})
+		}
 	}
 	for _, previous := range []checkedRelease{{}, {Source: "npm:old-package", Version: "1.2.3"}} {
 		got, err := needsCheck(spec, "1.2.3", previous, false)
@@ -48,13 +49,38 @@ func TestMajorMinorSelection(t *testing.T) {
 		}
 	}
 	previous := checkedRelease{Source: spec.sourceKey(), Version: "1.2.3", Outcome: "failure"}
-	got, err := needsCheck(spec, "1.2.4", previous, false)
-	if err != nil || got {
-		t.Fatalf("patch must not retry failure: %v, %v", got, err)
-	}
-	got, err = needsCheck(spec, "1.2.4", previous, true)
+	got, err := needsCheck(spec, "1.2.3", previous, true)
 	if err != nil || !got {
 		t.Fatalf("manual retry = %v, %v", got, err)
+	}
+}
+
+func TestRegressionExcludesFailuresAboveMaximum(t *testing.T) {
+	spec := testHarness(t, "claude")
+	spec.MaxVersion = "1.51.0"
+	tests := []struct {
+		name   string
+		record checkedRelease
+		want   bool
+	}{
+		{"failure below maximum", checkedRelease{Source: spec.sourceKey(), Version: "1.50.9", Outcome: "failure"}, true},
+		{"failure at maximum", checkedRelease{Source: spec.sourceKey(), Version: "1.51.0", Outcome: "failure"}, true},
+		{"failure above maximum", checkedRelease{Source: spec.sourceKey(), Version: "1.52.0", Outcome: "failure"}, false},
+		{"success", checkedRelease{Source: spec.sourceKey(), Version: "1.50.0", Outcome: "success"}, false},
+		{"infrastructure retry", checkedRelease{Source: spec.sourceKey(), Version: "1.50.0", Outcome: "infrastructure"}, false},
+		{"previous source", checkedRelease{Source: "npm:old-package", Version: "1.50.0", Outcome: "failure"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := regression(spec, tt.record); got != tt.want {
+				t.Fatalf("regression = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	uncapped := testHarness(t, "claude")
+	uncapped.MaxVersion = ""
+	if !regression(uncapped, checkedRelease{Source: uncapped.sourceKey(), Version: "9.0.0", Outcome: "failure"}) {
+		t.Fatal("uncapped failure was not a regression")
 	}
 }
 
@@ -121,7 +147,7 @@ func TestTargetedDetectionAndEmptyMatrix(t *testing.T) {
 		if selected.ID != "droid" {
 			return "", fmt.Errorf("%w: queried an unselected harness", errCompatibility)
 		}
-		return "1.2.4", nil
+		return "1.2.3", nil
 	}
 	for _, force := range []bool{false, true} {
 		plan, err := detect(t.Context(), state, "droid", force, latest)

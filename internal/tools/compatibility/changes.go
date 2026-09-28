@@ -75,7 +75,7 @@ func commitID(ctx context.Context, ref string) (string, error) {
 }
 
 func changedPaths(ctx context.Context, event, base, head string) ([]string, error) {
-	if event != "pull_request" && event != "push" && event != "merge_group" {
+	if event != "pull_request" && event != "push" {
 		return nil, fmt.Errorf("%w: unsupported change event %q", errCompatibility, event)
 	}
 	headID, err := commitID(ctx, head)
@@ -120,6 +120,7 @@ func (a application) changes(ctx context.Context) error {
 	}
 	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}}
 	client := a.releaseClient()
+	var state *releaseState
 	for _, id := range affectedHosts(paths) {
 		spec, err := findHarness(id)
 		if err != nil {
@@ -129,8 +130,23 @@ func (a application) changes(ctx context.Context) error {
 			plan.Matrix.Include = append(plan.Matrix.Include, candidate{Harness: id, Version: ""})
 			continue
 		}
-		// Like probe, use an empty state and never restore or publish the hourly
-		// cache. Resolve each selected distribution once, then pin the host job.
+		if state == nil {
+			restored := a.knownGoodState(ctx)
+			state = &restored
+		}
+		// Test changes against the newest release the scheduled workflow proved,
+		// so upstream releases cannot turn a change check red on their own.
+		version, ok, err := knownGood(spec, *state)
+		if err != nil {
+			return err
+		}
+		if ok {
+			plan.Matrix.Include = append(plan.Matrix.Include, candidate{Harness: id, Version: version})
+			plan.Observations = append(plan.Observations, observation{Harness: id, Version: version, Error: "", Selected: true})
+			continue
+		}
+		// Without proven history, resolve each selected distribution once and
+		// pin the host job to the current supported release.
 		resolved, err := detect(ctx, emptyState(), id, false, client.supported)
 		if err != nil {
 			return err
@@ -148,6 +164,35 @@ func (a application) changes(ctx context.Context) error {
 		return err
 	}
 	return a.output("selected", len(plan.Matrix.Include) > 0)
+}
+
+// knownGoodState reads the scheduled workflow's history without writing it. An
+// unavailable history only loses pinning, so change checks fall back to the
+// current supported releases instead of failing.
+func (a application) knownGoodState(ctx context.Context) releaseState {
+	state, err := a.restore(ctx)
+	if err != nil {
+		_, _ = fmt.Fprintf(a.stderr, "warning: release state unavailable; using current supported releases: %v\n", err)
+		return emptyState()
+	}
+	return state
+}
+
+// knownGood returns the newest successful release for spec, capped at its
+// supported maximum.
+func knownGood(spec harnessSpec, state releaseState) (string, bool, error) {
+	record := state.Successful[spec.ID]
+	if record.Source != spec.sourceKey() {
+		return "", false, nil
+	}
+	above, err := aboveMaximum(spec, record.Version)
+	if err != nil {
+		return "", false, err
+	}
+	if above {
+		return spec.MaxVersion, true, nil
+	}
+	return record.Version, true, nil
 }
 
 func selectRelatedHosts(selected map[string]bool, id string) {

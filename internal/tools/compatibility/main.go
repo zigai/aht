@@ -17,6 +17,20 @@ import (
 
 var markdownEscaper = strings.NewReplacer("|", "\\|", "\r", " ", "\n", " ")
 
+type issueReport struct {
+	Open     []issueStatus `json:"open"`
+	Resolved []issueStatus `json:"resolved"`
+}
+
+type issueStatus struct {
+	Harness    string `json:"harness"`
+	Version    string `json:"version"`
+	Successful string `json:"successful,omitempty"`
+	MaxVersion string `json:"max_version,omitempty"`
+	RunURL     string `json:"run_url"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 type application struct {
 	client *releaseClient
 	getenv func(string) string
@@ -192,28 +206,71 @@ func (a application) finish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	runURL := ""
-	if runID := a.getenv("GITHUB_RUN_ID"); runID != "" {
-		server := a.getenv("GITHUB_SERVER_URL")
-		if server == "" {
-			server = "https://github.com"
-		}
-		if repo := a.getenv("GITHUB_REPOSITORY"); repo != "" {
-			runURL = server + "/" + repo + "/actions/runs/" + runID
-		}
-	}
-	next, incomplete, err := mergeResults(state, plan.Matrix.Include, results, runURL)
+	next, incomplete, err := mergeResults(state, plan.Matrix.Include, results, a.runURL())
 	if err != nil {
 		return err
 	}
 	if err := a.writeJSON("state.json", next); err != nil {
 		return err
 	}
-	if err := a.summary(releaseSummary(plan, next, incomplete)); err != nil {
+	if err := a.writeJSON("issues.json", trackedIssues(next)); err != nil {
 		return err
 	}
-	failed := planHasErrors(plan) || len(incomplete) > 0 || unresolvedFailure(next)
+	regressions := newRegressions(state, next)
+	if err := a.summary(releaseSummary(plan, next, incomplete, regressions)); err != nil {
+		return err
+	}
+	// Known regressions stay visible as issues instead of failing every run.
+	failed := planHasErrors(plan) || len(incomplete) > 0 || len(regressions) > 0
 	return a.output("failed", failed)
+}
+
+func (a application) runURL() string {
+	runID, repo := a.getenv("GITHUB_RUN_ID"), a.getenv("GITHUB_REPOSITORY")
+	if runID == "" || repo == "" {
+		return ""
+	}
+	return cmp.Or(a.getenv("GITHUB_SERVER_URL"), "https://github.com") + "/" + repo + "/actions/runs/" + runID
+}
+
+// trackedIssues lists the issue state implied by the latest attempted release
+// of each version-tracked harness. Harnesses without a conclusive current-source
+// result are omitted so their issues are left unchanged.
+func trackedIssues(state releaseState) issueReport {
+	report := issueReport{Open: []issueStatus{}, Resolved: []issueStatus{}}
+	for _, spec := range defaultCatalog {
+		record := state.Harnesses[spec.ID]
+		if spec.Source == "weekly" || record.Source != spec.sourceKey() {
+			continue
+		}
+		status := issueStatus{Harness: spec.ID, Version: record.Version, Successful: "", MaxVersion: spec.MaxVersion, RunURL: record.RunURL, Reason: ""}
+		if successful := state.Successful[spec.ID]; successful.Source == spec.sourceKey() {
+			status.Successful = successful.Version
+		}
+		switch {
+		case regression(spec, record):
+			report.Open = append(report.Open, status)
+		case record.Outcome == "success":
+			status.Reason = "passed"
+			report.Resolved = append(report.Resolved, status)
+		case record.Outcome == "failure":
+			status.Reason = "above supported maximum"
+			report.Resolved = append(report.Resolved, status)
+		}
+	}
+	return report
+}
+
+// newRegressions returns harnesses that regressed in this run. A regression
+// already recorded before the run is tracked by its issue.
+func newRegressions(previous, next releaseState) []string {
+	var regressions []string
+	for _, spec := range defaultCatalog {
+		if regression(spec, next.Harnesses[spec.ID]) && !regression(spec, previous.Harnesses[spec.ID]) {
+			regressions = append(regressions, spec.ID)
+		}
+	}
+	return regressions
 }
 
 func readResults(directory string, plan releasePlan) ([]hostResult, error) {
@@ -232,19 +289,9 @@ func readResults(directory string, plan releasePlan) ([]hostResult, error) {
 	return results, nil
 }
 
-func unresolvedFailure(state releaseState) bool {
-	for _, spec := range defaultCatalog {
-		previous := state.Harnesses[spec.ID]
-		if previous.Source == spec.sourceKey() && previous.Outcome != "success" {
-			return true
-		}
-	}
-	return false
-}
-
-func releaseSummary(plan releasePlan, state releaseState, incomplete []string) string {
+func releaseSummary(plan releasePlan, state releaseState, incomplete, regressions []string) string {
 	var report strings.Builder
-	fmt.Fprintf(&report, "## Release compatibility\n\n%d harness(es) selected; major/minor changes and infrastructure retries. Unresolved failures keep this check failing.\n\n", len(plan.Matrix.Include))
+	fmt.Fprintf(&report, "## Release compatibility\n\n%d harness(es) selected; new releases and infrastructure retries. New regressions fail this check; known regressions are tracked in issues.\n\n", len(plan.Matrix.Include))
 	report.WriteString("| Harness | Latest observed | Last attempted | Last successful | Result | Supported maximum |\n| --- | --- | --- | --- | --- | --- |\n")
 	for _, spec := range defaultCatalog {
 		if spec.Source == "weekly" {
@@ -254,12 +301,18 @@ func releaseSummary(plan releasePlan, state releaseState, incomplete []string) s
 		version, outcome := "none", "not checked"
 		if previous := state.Harnesses[spec.ID]; previous.Source == spec.sourceKey() {
 			version, outcome = previous.Version, previous.Outcome
+			if outcome == "failure" && !regression(spec, previous) {
+				outcome = "failure (above supported maximum)"
+			}
 		}
 		successful := "none"
 		if previous := state.Successful[spec.ID]; previous.Source == spec.sourceKey() {
 			successful = previous.Version
 		}
 		fmt.Fprintf(&report, "| %s | %s | %s | %s | %s | %s |\n", spec.ID, markdownCell(latest), version, successful, outcome, cmp.Or(spec.MaxVersion, "latest"))
+	}
+	if len(regressions) > 0 {
+		report.WriteString("\nNew regressions: " + strings.Join(regressions, ", ") + ".\n")
 	}
 	if len(incomplete) > 0 {
 		report.WriteString("\nIncomplete (will retry): " + strings.Join(incomplete, ", ") + ".\n")

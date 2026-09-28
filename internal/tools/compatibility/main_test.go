@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -90,6 +92,7 @@ func TestWorkflowOutputsAndStateRoundTrip(t *testing.T) {
 	}
 	runTestCommand(t, app, "finish")
 	assertOutputs(t, output, "changed=true\n", "failed=true\n")
+	assertOpenIssues(t, directory, []string{"droid"})
 	stateData := readTestFile(t, filepath.Join(directory, "state.json"))
 	archive := stateZip(t, stateData)
 	saved.Store(&archive)
@@ -99,7 +102,74 @@ func TestWorkflowOutputsAndStateRoundTrip(t *testing.T) {
 	runTestCommand(t, app, "detect")
 	assertOutputs(t, output, "matrix={\"include\":[]}\n", "changed=false\n")
 	runTestCommand(t, app, "finish")
-	assertOutputs(t, output, "failed=true\n")
+	// The known regression stays tracked by its issue instead of failing again.
+	assertOutputs(t, output, "failed=false\n")
+	assertOpenIssues(t, directory, []string{"droid"})
+}
+
+func assertOpenIssues(t *testing.T, directory string, want []string) {
+	t.Helper()
+	var report issueReport
+	if err := readJSON(filepath.Join(directory, "issues.json"), &report); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(report.Open))
+	for _, item := range report.Open {
+		got = append(got, item.Harness)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("open issues = %v, want %v", got, want)
+	}
+}
+
+func TestTrackedIssues(t *testing.T) {
+	grok, kimi, codex := testHarness(t, "grok"), testHarness(t, "kimi-code"), testHarness(t, "codex")
+	state := emptyState()
+	state.Harnesses["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.41", Outcome: "failure", RunURL: "grok-run"}
+	state.Successful["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.39", Outcome: "success"}
+	state.Harnesses["kimi-code"] = checkedRelease{Source: kimi.sourceKey(), Version: "1.52.0", Outcome: "failure", RunURL: "kimi-run"}
+	state.Harnesses["codex"] = checkedRelease{Source: codex.sourceKey(), Version: "0.157.0", Outcome: "success", RunURL: "codex-run"}
+	state.Harnesses["claude"] = checkedRelease{Source: testHarness(t, "claude").sourceKey(), Version: "2.1.0", Outcome: "infrastructure"}
+	state.Harnesses["droid"] = checkedRelease{Source: "npm:old-package", Version: "1.0.0", Outcome: "failure"}
+	want := issueReport{
+		Open: []issueStatus{{Harness: "grok", Version: "1.0.41", Successful: "1.0.39", RunURL: "grok-run"}},
+		Resolved: []issueStatus{
+			{Harness: "codex", Version: "0.157.0", RunURL: "codex-run", Reason: "passed"},
+			{Harness: "kimi-code", Version: "1.52.0", MaxVersion: kimi.MaxVersion, RunURL: "kimi-run", Reason: "above supported maximum"},
+		},
+	}
+	got := trackedIssues(state)
+	slices.SortFunc(got.Resolved, func(a, b issueStatus) int { return strings.Compare(a.Harness, b.Harness) })
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("issues = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestNewRegressions(t *testing.T) {
+	spec := testHarness(t, "grok")
+	failed := checkedRelease{Source: spec.sourceKey(), Version: "1.0.41", Outcome: "failure"}
+	tests := []struct {
+		name     string
+		previous checkedRelease
+		want     []string
+	}{
+		{"after success", checkedRelease{Source: spec.sourceKey(), Version: "1.0.40", Outcome: "success"}, []string{"grok"}},
+		{"first observation", checkedRelease{}, []string{"grok"}},
+		{"after infrastructure retry", checkedRelease{Source: spec.sourceKey(), Version: "1.0.41", Outcome: "infrastructure"}, []string{"grok"}},
+		{"already failing", checkedRelease{Source: spec.sourceKey(), Version: "1.0.40", Outcome: "failure"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previous, next := emptyState(), emptyState()
+			if tt.previous.Source != "" {
+				previous.Harnesses["grok"] = tt.previous
+			}
+			next.Harnesses["grok"] = failed
+			if got := newRegressions(previous, next); !slices.Equal(got, tt.want) {
+				t.Fatalf("new regressions = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestResultOutcomes(t *testing.T) {

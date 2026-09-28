@@ -57,49 +57,110 @@ func TestAffectedHosts(t *testing.T) {
 	}
 }
 
-func TestChangesResolveWithoutReleaseState(t *testing.T) {
+func TestChangesPinLastSuccessfulRelease(t *testing.T) {
+	codex, kimi := testHarness(t, "codex"), testHarness(t, "kimi-code")
+	successful := func(spec harnessSpec, version string) string {
+		return fmt.Sprintf(`"%s":{"source":%q,"version":%q,"outcome":"success","run_url":"run"}`, spec.ID, spec.sourceKey(), version)
+	}
+	tests := []struct {
+		name, path, successful string
+		repository             string
+		want                   candidate
+		lookups                int32
+		warning                bool
+	}{
+		{name: "pins proven release", path: "internal/harness/codex/adapter.go", successful: successful(codex, "1.2.0"), repository: "owner/repo", want: candidate{Harness: "codex", Version: "1.2.0"}},
+		{name: "caps proven release at maximum", path: "internal/harness/kimi/adapter.go", successful: successful(kimi, "1.52.0"), repository: "owner/repo", want: candidate{Harness: "kimi-code", Version: kimi.MaxVersion}},
+		{name: "resolves without history", path: "internal/harness/codex/adapter.go", repository: "owner/repo", want: candidate{Harness: "codex", Version: "1.2.3"}, lookups: 1},
+		{name: "resolves when state is unavailable", path: "internal/harness/codex/adapter.go", want: candidate{Harness: "codex", Version: "1.2.3"}, lookups: 1, warning: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := changeRepository(t)
+			base := commitChange(t, dir, "README.md", "base")
+			head := commitChange(t, dir, tc.path, "changed")
+			t.Chdir(dir)
+			var lookups atomic.Int32
+			server := successfulStateServer(t, tc.successful, &lookups)
+			work := t.TempDir()
+			env := map[string]string{"GITHUB_EVENT_NAME": "push", "AHT_COMPAT_BASE": base, "AHT_COMPAT_HEAD": head, "AHT_COMPAT_WORK": work, "GITHUB_OUTPUT": filepath.Join(work, "output"), "GITHUB_REPOSITORY": tc.repository, "AHT_DEFAULT_BRANCH": "master"}
+			var stdout, stderr bytes.Buffer
+			app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: &stderr}
+			runTestCommand(t, app, "changes")
+			var plan releasePlan
+			if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(plan.Matrix.Include, []candidate{tc.want}) {
+				t.Fatalf("plan = %+v", plan)
+			}
+			if lookups.Load() != tc.lookups {
+				t.Fatalf("release lookups = %d, want %d", lookups.Load(), tc.lookups)
+			}
+			if got := strings.Contains(stderr.String(), "warning: release state unavailable"); got != tc.warning {
+				t.Fatalf("warning = %v, stderr = %q", got, stderr.String())
+			}
+			// Change checks only read release history; they never publish it.
+			if _, err := os.Stat(filepath.Join(work, "state.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("wrote release state: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(work, "plan.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("persisted release plan: %v", err)
+			}
+		})
+	}
+}
+
+// successfulStateServer serves a trusted state artifact with the given
+// successful records, or no artifact when successful is empty, and counts codex
+// release lookups.
+func successfulStateServer(t *testing.T, successful string, lookups *atomic.Int32) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/github/repos/owner/repo/actions/artifacts":
+			if successful == "" || r.URL.Query().Get("name") != stateArtifact {
+				_, _ = fmt.Fprint(w, `{"artifacts":[]}`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"artifacts":[{"id":1,"workflow_run":{"id":10,"head_branch":"master"}}]}`)
+		case "/github/repos/owner/repo/actions/runs/10":
+			_, _ = fmt.Fprint(w, `{"path":".github/workflows/compatibility-releases.yml","event":"schedule"}`)
+		case "/github/repos/owner/repo/actions/artifacts/1/zip":
+			_, _ = w.Write(stateZip(t, `{"schema":2,"harnesses":{},"successful":{`+successful+`}}`))
+		case "/npm/@openai/codex/latest":
+			lookups.Add(1)
+			_, _ = fmt.Fprint(w, `{"name":"@openai/codex","version":"1.2.3"}`)
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestWeeklyChangesSkipReleaseState(t *testing.T) {
 	dir := changeRepository(t)
 	base := commitChange(t, dir, "README.md", "base")
-	head := commitChange(t, dir, "internal/harness/codex/adapter.go", "changed")
+	head := commitChange(t, dir, "internal/harness/cursor/adapter.go", "changed")
 	t.Chdir(dir)
-	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		if r.URL.Path != "/npm/@openai/codex/latest" {
-			t.Errorf("unexpected request, especially release-state access: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = fmt.Fprint(w, `{"name":"@openai/codex","version":"1.2.3"}`)
+		t.Errorf("unpinned weekly harness made request %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(server.Close)
 	work := t.TempDir()
-	state := filepath.Join(work, "state.json")
-	if err := os.WriteFile(state, []byte("must remain untouched"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := map[string]string{"GITHUB_EVENT_NAME": "push", "AHT_COMPAT_BASE": base, "AHT_COMPAT_HEAD": head, "AHT_COMPAT_WORK": work, "GITHUB_OUTPUT": filepath.Join(work, "output")}
+	env := map[string]string{"GITHUB_EVENT_NAME": "push", "AHT_COMPAT_BASE": base, "AHT_COMPAT_HEAD": head, "GITHUB_OUTPUT": filepath.Join(work, "output"), "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master"}
 	var stdout bytes.Buffer
 	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard}
-	for range 2 {
-		stdout.Reset()
-		runTestCommand(t, app, "changes")
-		var plan releasePlan
-		if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Equal(plan.Matrix.Include, []candidate{{Harness: "codex", Version: "1.2.3"}}) {
-			t.Fatalf("plan = %+v", plan)
-		}
+	runTestCommand(t, app, "changes")
+	var plan releasePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
 	}
-	if requests.Load() != 2 {
-		t.Fatalf("resolved %d times; want once each invocation despite unchanged version", requests.Load())
-	}
-	if got := readTestFile(t, state); got != "must remain untouched" {
-		t.Fatalf("release state changed: %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(work, "plan.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("persisted release plan: %v", err)
+	if !slices.Equal(plan.Matrix.Include, []candidate{{Harness: "cursor", Version: ""}}) {
+		t.Fatalf("plan = %+v", plan)
 	}
 }
 
@@ -138,7 +199,7 @@ func TestChangedPathsComparison(t *testing.T) {
 	runChangeGit(t, dir, "commit", "-qm", "rename")
 	head := runChangeGit(t, dir, "rev-parse", "HEAD")
 	t.Chdir(dir)
-	for _, event := range []string{"push", "pull_request", "merge_group"} {
+	for _, event := range []string{"push", "pull_request"} {
 		paths, err := changedPaths(t.Context(), event, base, head)
 		if err != nil {
 			t.Fatal(err)
@@ -191,7 +252,8 @@ func TestCompatibilityUtilityProcess(t *testing.T) {
 		selected, failure       bool
 	}{
 		{name: "empty succeeds", event: "push", base: base, head: docs},
-		{name: "cursor remains unpinned", event: "merge_group", base: docs, head: head, selected: true},
+		{name: "cursor remains unpinned", event: "pull_request", base: docs, head: head, selected: true},
+		{name: "merge queue is unsupported", event: "merge_group", base: docs, head: head, failure: true},
 		{name: "missing base fails", event: "push", base: "missing", head: head, failure: true},
 		{name: "missing head fails", event: "push", base: base, head: "missing", failure: true},
 		{name: "unsupported event fails", event: "schedule", base: base, head: head, failure: true},

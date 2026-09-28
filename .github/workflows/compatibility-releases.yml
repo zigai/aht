@@ -10,7 +10,7 @@ on:
         default: all
         type: string
       force:
-        description: 'Retest the current stable version even if its major/minor was checked'
+        description: 'Retest the current stable version even if it was already checked'
         default: false
         type: boolean
 
@@ -33,7 +33,7 @@ jobs:
       changed: ${{ steps.detect.outputs.changed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -42,7 +42,7 @@ jobs:
         with:
           profile: selector
 
-      - name: Detect new major/minor versions
+      - name: Detect new releases
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,7 +53,7 @@ jobs:
         run: go run ./internal/tools/compatibility detect
 
       - name: Save release plan
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: compatibility-release-plan
           path: ${{ runner.temp }}/release-plan/plan.json
@@ -78,9 +78,14 @@ jobs:
     needs: [detect, hosts]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      # Known regressions are tracked as issues instead of failing every run.
+      issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -90,7 +95,7 @@ jobs:
           profile: selector
 
       - name: Download plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: compatibility-release-plan
           path: ${{ runner.temp }}/release-state
@@ -98,7 +103,7 @@ jobs:
       - name: Download host results
         if: needs.detect.outputs.changed == 'true'
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: current-*-diagnostics
           path: ${{ runner.temp }}/release-state
@@ -113,7 +118,7 @@ jobs:
         run: go run ./internal/tools/compatibility finish
 
       - name: Persist release state
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: compatibility-release-state-v2
           path: ${{ runner.temp }}/release-state/state.json
@@ -121,7 +126,17 @@ jobs:
           overwrite: true
           retention-days: 90
 
-      - name: Require successful detection and selected checks
+      - name: Track regressions in issues
+        uses: actions/github-script@v9
+        env:
+          AHT_COMPAT_ISSUES: ${{ runner.temp }}/release-state/issues.json
+        with:
+          retries: 3
+          script: |
+            const report = JSON.parse(require('node:fs').readFileSync(process.env.AHT_COMPAT_ISSUES, 'utf8'));
+            await require('./.github/scripts/compatibility-issues.cjs').syncIssues({ github, context, core, report });
+
+      - name: Require successful detection and new-regression-free checks
         env:
           FAILED: ${{ steps.record.outputs.failed }}
           HOSTS_RESULT: ${{ needs.hosts.result }}

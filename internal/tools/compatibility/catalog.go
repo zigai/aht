@@ -17,7 +17,6 @@ import (
 
 const (
 	versionComponents = 3
-	seriesComponents  = 2
 	stateSchema       = 2
 )
 
@@ -131,10 +130,35 @@ func needsCheck(spec harnessSpec, version string, previous checkedRelease, force
 	if err != nil {
 		return false, err
 	}
-	if current[0] == 0 && current[1] == 0 {
-		return current[2] > before[2], nil
+	// Every newer release is checked: patch releases can break integrations,
+	// may fix a failure, and keep the known-good pin used by CI current.
+	return slices.Compare(current[:], before[:]) > 0, nil
+}
+
+// aboveMaximum reports whether version exceeds the adapter's declared cap.
+func aboveMaximum(spec harnessSpec, version string) (bool, error) {
+	if spec.MaxVersion == "" {
+		return false, nil
 	}
-	return slices.Compare(current[:seriesComponents], before[:seriesComponents]) > 0, nil
+	maximum, err := parseVersion(spec.MaxVersion)
+	if err != nil {
+		return false, err
+	}
+	current, err := parseVersion(version)
+	if err != nil {
+		return false, err
+	}
+	return slices.Compare(current[:], maximum[:]) > 0, nil
+}
+
+// regression reports a current-source failure within the supported range. A
+// failure above MaxVersion is the documented reason for that cap.
+func regression(spec harnessSpec, record checkedRelease) bool {
+	if record.Source != spec.sourceKey() || record.Outcome != "failure" {
+		return false
+	}
+	above, err := aboveMaximum(spec, record.Version)
+	return err != nil || !above
 }
 
 func detect(ctx context.Context, state releaseState, selection string, force bool, latest func(context.Context, harnessSpec) (string, error)) (releasePlan, error) {

@@ -115,8 +115,8 @@ func TestLegacyStateMigration(t *testing.T) {
 		t.Fatalf("lost failed observation: %+v", previous)
 	}
 	check, err := needsCheck(testHarness(t, "codex"), previous.Version, previous, false)
-	if err != nil || !check || !unresolvedFailure(state) {
-		t.Fatalf("legacy failure must remain visible and retryable: %v, %v", check, err)
+	if err != nil || !check {
+		t.Fatalf("legacy failure must remain retryable: %v, %v", check, err)
 	}
 }
 
@@ -190,7 +190,7 @@ func TestAttemptHistoryAndRecovery(t *testing.T) {
 			if outcome == "success" {
 				wantSuccess = attempt
 			}
-			if next.Successful[spec.ID] != wantSuccess || unresolvedFailure(next) != (outcome != "success") {
+			if next.Successful[spec.ID] != wantSuccess || regression(spec, next.Harnesses[spec.ID]) != (outcome == "failure") {
 				t.Fatalf("successful history or failure visibility = %+v", next)
 			}
 			if state.Harnesses[spec.ID] != prior || state.Successful[spec.ID] != prior {
@@ -213,7 +213,7 @@ func assertAttempt(t *testing.T, spec harnessSpec, result hostResult, attempt ch
 	}
 }
 
-func TestSupportedOlderSuccessPreservesNewerFailure(t *testing.T) {
+func TestSupportedOlderSuccessPreservesFailureAboveMaximum(t *testing.T) {
 	spec := testHarness(t, "kimi-code")
 	state := emptyState()
 	latest := checkedRelease{Source: spec.sourceKey(), Version: "1.52.0", Outcome: "failure", RunURL: "upstream-run"}
@@ -224,8 +224,11 @@ func TestSupportedOlderSuccessPreservesNewerFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Harnesses[spec.ID] != latest || next.Successful[spec.ID].Version != spec.MaxVersion || !unresolvedFailure(next) {
+	if next.Harnesses[spec.ID] != latest || next.Successful[spec.ID].Version != spec.MaxVersion {
 		t.Fatalf("supported success hid upstream failure: %+v", next)
+	}
+	if regression(spec, next.Harnesses[spec.ID]) {
+		t.Fatal("failure above the supported maximum was reported as a regression")
 	}
 }
 
@@ -234,7 +237,7 @@ func assertRecovery(t *testing.T, state releaseState, id string) {
 	selected := []candidate{{Harness: id, Version: "1.3.0"}}
 	result := hostResult{Harness: id, Version: "1.3.0", Outcome: "success", Revision: "recovery-sha"}
 	recovered, _, err := mergeResults(state, selected, []hostResult{result}, "recovery")
-	if err != nil || unresolvedFailure(recovered) || recovered.Successful[id].Version != result.Version {
+	if err != nil || regression(testHarness(t, id), recovered.Harnesses[id]) || recovered.Successful[id].Version != result.Version {
 		t.Fatalf("recovery = %+v, %v", recovered, err)
 	}
 	older := []candidate{{Harness: id, Version: "1.1.0"}}

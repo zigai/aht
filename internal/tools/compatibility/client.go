@@ -169,18 +169,14 @@ func (c *releaseClient) pypiVersion(ctx context.Context, spec harnessSpec) (stri
 // latest directly so an upstream release beyond that cap remains visible.
 func (c *releaseClient) supported(ctx context.Context, spec harnessSpec) (string, error) {
 	version, err := c.latest(ctx, spec)
-	if err != nil || spec.MaxVersion == "" {
-		return version, err
-	}
-	maximum, err := parseVersion(spec.MaxVersion)
 	if err != nil {
 		return "", err
 	}
-	current, err := parseVersion(version)
+	above, err := aboveMaximum(spec, version)
 	if err != nil {
 		return "", err
 	}
-	if slices.Compare(current[:], maximum[:]) > 0 {
+	if above {
 		return spec.MaxVersion, nil
 	}
 	return version, nil

@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - master
-  merge_group:
 
 permissions:
   contents: read
@@ -18,12 +17,16 @@ jobs:
   affected-hosts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reads the scheduled release-compatibility state to pin known-good versions.
+      actions: read
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       selected: ${{ steps.select.outputs.selected }}
     steps:
       - name: Checkout comparison history
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -37,8 +40,9 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          AHT_COMPAT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          AHT_COMPAT_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          AHT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AHT_COMPAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          AHT_COMPAT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: go run ./internal/tools/compatibility changes
 
   changed-hosts:
@@ -80,7 +84,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -88,12 +92,12 @@ jobs:
           profile: verify
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Set up pinned linter
         uses: ./.github/actions/setup-lint
@@ -104,9 +108,7 @@ jobs:
       - name: Lint
         run: just lint
 
-      - name: Unit tests
-        run: just test
-
+      # Race tests run the full unit suite, so a separate plain run adds no coverage.
       - name: Race tests
         run: just race
 
@@ -127,7 +129,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -135,12 +137,12 @@ jobs:
           profile: verify
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Set up pinned linter
         uses: ./.github/actions/setup-lint
@@ -168,7 +170,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -178,21 +180,24 @@ jobs:
           profile: package
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
+
+      - name: Read GoReleaser version
+        id: goreleaser
+        run: echo "version=$(just --evaluate goreleaser_version)" >> "$GITHUB_OUTPUT"
 
       - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: v2.13.3
+          version: ${{ steps.goreleaser.outputs.version }}
           install-only: true
-
 
       - name: Build snapshot
         run: just snapshot
 
       - name: Upload snapshot
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: snapshot-${{ github.sha }}
           path: dist
@@ -215,7 +220,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -223,10 +228,10 @@ jobs:
           profile: artifacts
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Download snapshot
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: snapshot-${{ github.sha }}
           path: dist
@@ -243,7 +248,7 @@ jobs:
 
       - name: Upload failed validation evidence
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: snapshot-validation-${{ matrix.target }}-${{ github.sha }}
           path: |
