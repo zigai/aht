@@ -1,0 +1,9 @@
+# Pinned without adding lefthook to go.mod, where its dependencies would reach
+# consumers of the aht module. Install the hooks once per clone with:
+#   go run github.com/evilmartians/lefthook/v2@v2.1.14 install
+lefthook: go run github.com/evilmartians/lefthook/v2@v2.1.14
+
+pre-push:
+  jobs:
+    - name: check
+      run: just check

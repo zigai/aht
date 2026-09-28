@@ -1,3 +1,5 @@
+# Actions are pinned to commit SHAs here because this workflow can publish
+# releases; a moved tag must not change what builds or uploads user binaries.
 name: Release
 
 on:
@@ -23,7 +25,7 @@ jobs:
       commit: ${{ steps.tag.outputs.commit }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -40,7 +42,7 @@ jobs:
           echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
 
       - name: Require successful CI for the tag commit
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           AHT_RELEASE_SHA: ${{ steps.tag.outputs.commit }}
         with:
@@ -55,7 +57,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -65,20 +67,24 @@ jobs:
           profile: package
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Read GoReleaser version
+        id: goreleaser
+        run: echo "version=$(just --evaluate goreleaser_version)" >> "$GITHUB_OUTPUT"
 
       - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: v2.13.3
+          version: ${{ steps.goreleaser.outputs.version }}
           install-only: true
 
       - name: Build release before publication
         run: just release-build
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ github.sha }}
           path: dist
@@ -105,7 +111,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -113,10 +119,10 @@ jobs:
           profile: artifacts
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ github.sha }}
           path: dist
@@ -133,7 +139,7 @@ jobs:
 
       - name: Upload failed validation evidence
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-validation-${{ matrix.target }}-${{ github.sha }}
           path: |
@@ -156,7 +162,7 @@ jobs:
       AHT_RELEASE_SHA: ${{ needs.verify-tag.outputs.commit }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -164,17 +170,17 @@ jobs:
           profile: artifacts
 
       - name: Set up Just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Download tested artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ github.sha }}
           path: dist
 
       - name: Prepare owned draft after native validation
         id: draft
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const notes = require('node:fs').readFileSync('dist/CHANGELOG.md', 'utf8');
@@ -216,7 +222,7 @@ jobs:
 
       - name: Publish verified release
         if: steps.draft.outputs.published != 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           AHT_RELEASE_ID: ${{ steps.draft.outputs.release-id }}
         with:
@@ -234,12 +240,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Reconcile and delete only this run's unpublished draft
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           AHT_RELEASE_SHA: ${{ needs.verify-tag.outputs.commit }}
         with:

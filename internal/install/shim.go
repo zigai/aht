@@ -144,7 +144,10 @@ func lookPathExcludingShimDir(file string, shimDir string) (string, error) {
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(filepath.Clean(path))
+	// PATH lookup like exec.LookPath: candidates come from the invoking user's own
+	// PATH and are stat'ed with that user's privileges, so no trusted root exists
+	// to confine them to and no privilege boundary is crossed.
+	info, err := os.Stat(filepath.Clean(path)) //nolint:gosec // G703: see comment above.
 	if err != nil || info.IsDir() {
 		return false
 	}

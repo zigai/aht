@@ -1,8 +1,8 @@
-golangci_lint_version := "v2.13.2"
+golangci_lint_version := "v2.14.0"
 golangci_lint := env("AHT_GOLANGCI_LINT", "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@" + golangci_lint_version)
 actionlint_version := "v1.7.12"
 actionlint := "go run github.com/rhysd/actionlint/cmd/actionlint@" + actionlint_version
-goreleaser_version := "v2.13.3"
+goreleaser_version := "v2.18.2"
 
 _:
     @just help
@@ -127,10 +127,6 @@ _goreleaser-version-check:
 snapshot: _goreleaser-version-check
     goreleaser release --snapshot --clean
 
-# Build and upload a draft release
-release-draft: _goreleaser-version-check
-    goreleaser release --clean
-
 # Build tagged release artifacts for native validation before draft creation
 release-build: _goreleaser-version-check
     goreleaser release --clean --skip=publish
@@ -174,7 +170,8 @@ release-patch: _release-check _goreleaser-version-check
     new="v${major}.${minor}.$((patch + 1))"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # The tagged commit already passed the pre-push check and CI on master.
+    git push --no-verify origin "$new"
 
 # Release a new minor version
 release-minor: _release-check _goreleaser-version-check
@@ -186,7 +183,8 @@ release-minor: _release-check _goreleaser-version-check
     new="v${major}.$((minor + 1)).0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # The tagged commit already passed the pre-push check and CI on master.
+    git push --no-verify origin "$new"
 
 # Release a new major version
 release-major: _release-check _goreleaser-version-check
@@ -197,7 +195,8 @@ release-major: _release-check _goreleaser-version-check
     new="v$((major + 1)).0.0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # The tagged commit already passed the pre-push check and CI on master.
+    git push --no-verify origin "$new"
 
 alias release := release-patch
 

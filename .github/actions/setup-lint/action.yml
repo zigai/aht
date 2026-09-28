@@ -10,7 +10,7 @@ runs:
         echo "version=$(just --evaluate golangci_lint_version)" >> "$GITHUB_OUTPUT"
         echo "directory=$HOME/.local/share/aht-ci/golangci-lint" >> "$GITHUB_OUTPUT"
         echo "analysis=$HOME/.cache/aht-golangci-lint" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+    - uses: actions/cache@v6
       id: binary
       with:
         path: ${{ steps.tool.outputs.directory }}
@@ -30,7 +30,7 @@ runs:
         "$AHT_LINT_DIRECTORY/golangci-lint" version
         echo "AHT_GOLANGCI_LINT=$AHT_LINT_DIRECTORY/golangci-lint" >> "$GITHUB_ENV"
         echo "GOLANGCI_LINT_CACHE=$AHT_LINT_ANALYSIS" >> "$GITHUB_ENV"
-    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+    - uses: actions/cache@v6
       with:
         path: ${{ steps.tool.outputs.analysis }}
         key: aht-lint-analysis-${{ runner.os }}-${{ runner.arch }}-${{ steps.tool.outputs.version }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yaml') }}-${{ github.sha }}

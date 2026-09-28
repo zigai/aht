@@ -20,7 +20,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -51,7 +51,7 @@ jobs:
       matrix: ${{ steps.weekly.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -80,7 +80,7 @@ jobs:
     steps:
       - name: Download host diagnostics
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: current-*-diagnostics
           path: diagnostics
@@ -107,7 +107,7 @@ jobs:
             echo "| --- | --- | --- |"
             for harness in "${harnesses[@]}"; do
               coverage=lifecycle
-              if [[ "$harness" == cursor || "$harness" == agy ]]; then
+              if [[ "$harness" == cursor ]]; then
                 coverage=discovery
               fi
               version=unavailable

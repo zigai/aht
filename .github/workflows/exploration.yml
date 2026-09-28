@@ -35,7 +35,7 @@ jobs:
             target: FuzzParseListPanes
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         id: go
@@ -44,7 +44,7 @@ jobs:
           profile: fuzz-${{ matrix.target }}
 
       - name: Restore target corpus
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.go.outputs.build-cache }}/fuzz
           key: aht-fuzz-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -57,7 +57,7 @@ jobs:
 
       - name: Preserve minimized failures and replay evidence
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-${{ matrix.target }}-${{ github.run_attempt }}
           path: |
@@ -69,7 +69,7 @@ jobs:
 
       - name: Save target corpus after exploration
         if: always() && steps.go.outcome == 'success'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.go.outputs.build-cache }}/fuzz
           key: aht-fuzz-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -79,12 +79,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
         with:
           profile: vulnerabilities
 
+      - name: Set up Just
+        uses: extractions/setup-just@v4
+
       - name: Scan reachable vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: just vuln

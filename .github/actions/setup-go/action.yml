@@ -1,3 +1,4 @@
+# SHA-pinned because the release workflow runs this action; see release.yml.
 name: Set up Go with a workload cache
 description: Keep selector, verification, host, and release build caches independent.
 inputs:
@@ -11,7 +12,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v6
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       id: go
       with:
         go-version-file: go.mod
@@ -25,7 +26,7 @@ runs:
         mkdir -p "$(go env GOCACHE)" "$(go env GOMODCACHE)"
     # PR writes remain scoped to their merge ref by the Actions cache service.
     # A new source revision can save useful work even if dependencies did not change.
-    - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ${{ steps.paths.outputs.build }}

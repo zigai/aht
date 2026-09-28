@@ -89,5 +89,4 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
    - Resume commands in `internal/harness/catalog/catalog_test.go`, history
      fixtures in `pkg/history/history_test.go`, and title capability in
      `pkg/harness/capabilities_test.go` when those capabilities exist.
-7. Verify with `just lint`, `go test ./...`, `just integration`, and
-   `just compatibility-tests`.
+7. Verify with `just check`.
