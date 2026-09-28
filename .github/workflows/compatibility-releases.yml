@@ -129,14 +129,10 @@ jobs:
           retention-days: 90
 
       - name: Track regressions in issues
-        uses: actions/github-script@v9
         env:
-          AHT_COMPAT_ISSUES: ${{ runner.temp }}/release-state/issues.json
-        with:
-          retries: 3
-          script: |
-            const report = JSON.parse(require('node:fs').readFileSync(process.env.AHT_COMPAT_ISSUES, 'utf8'));
-            await require('./.github/scripts/compatibility-issues.cjs').syncIssues({ github, context, core, report });
+          GH_TOKEN: ${{ github.token }}
+          AHT_COMPAT_WORK: ${{ runner.temp }}/release-state
+        run: go run ./internal/tools/compatibility issues
 
       - name: Require successful detection and new-regression-free checks
         env:
