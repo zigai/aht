@@ -63,25 +63,6 @@ func decodeStateArchive(body []byte) (releaseState, error) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return state, fmt.Errorf("decode state.json: %w", err)
 	}
-	if decoded.Schema == 1 {
-		// V1 did not distinguish install failures or retain earlier successes.
-		// Preserve all observations; only successful records can seed that history.
-		decoded.Schema = stateSchema
-		decoded.Successful = map[string]checkedRelease{}
-		for id, record := range decoded.Harnesses {
-			if record.Outcome != "success" && record.Outcome != "failure" {
-				return state, fmt.Errorf("%w: invalid legacy result", errCompatibility)
-			}
-			if record.Outcome == "success" {
-				decoded.Successful[id] = record
-			} else {
-				// A legacy failure may be an installation failure. Retry once
-				// under V2 to classify it without erasing the failed observation.
-				record.Outcome = "incomplete"
-				decoded.Harnesses[id] = record
-			}
-		}
-	}
 	return decoded, validateState(decoded)
 }
 

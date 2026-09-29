@@ -212,11 +212,9 @@ func (c *releaseClient) restoreState(ctx context.Context, repository, branch, ru
 		return state, fmt.Errorf("%w: GITHUB_REPOSITORY and AHT_DEFAULT_BRANCH are required", errCompatibility)
 	}
 	base := c.githubBase + "/repos/" + repository + "/actions"
-	for _, name := range []string{stateArtifact, "compatibility-release-state-v1"} {
-		restored, found, err := c.restoreArtifactState(ctx, base, name, branch, runID)
-		if err != nil || found {
-			return restored, err
-		}
+	restored, found, err := c.restoreArtifactState(ctx, base, stateArtifact, branch, runID)
+	if err != nil || found {
+		return restored, err
 	}
 	return state, nil
 }
