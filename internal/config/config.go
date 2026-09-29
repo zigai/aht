@@ -88,17 +88,6 @@ type RetentionConfig struct {
 	// so late native reports from its ended process are rejected. Gone sessions
 	// with only process identity are removed immediately.
 	TombstoneTTL string `json:"tombstone_ttl,omitempty" toml:"tombstone_ttl"`
-
-	// AutoClean is accepted so existing config files keep loading. It is
-	// ignored: the tracker always expires tombstones after TombstoneTTL.
-	//
-	// Deprecated: use TombstoneTTL.
-	AutoClean *bool `json:"-" toml:"auto_clean"`
-	// MaxGoneAge is accepted so existing config files keep loading. It is
-	// ignored.
-	//
-	// Deprecated: use TombstoneTTL.
-	MaxGoneAge string `json:"-" toml:"max_gone_age"`
 }
 
 // FilterConfig controls default session visibility exclusions.
@@ -157,8 +146,6 @@ func Defaults() Config {
 		},
 		Retention: RetentionConfig{
 			TombstoneTTL: "10m",
-			AutoClean:    nil,
-			MaxGoneAge:   "",
 		},
 		Filter: FilterConfig{
 			IgnoreHarnesses: []string{},

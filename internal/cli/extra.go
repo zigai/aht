@@ -48,7 +48,6 @@ type serviceOptions struct {
 
 func (app *application) newTrackerRunCommand() *cobra.Command {
 	o := observeOptions{interval: observeDefaultInterval}
-	var deprecatedAutoClean bool
 	screenInspection := true
 	var disableScreenInspection bool
 	command := &cobra.Command{
@@ -123,8 +122,6 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	flags.DurationVar(&o.interval, "interval", o.interval, "reconciliation `<duration>`")
 	flags.DurationVar(&o.grace, "grace-period", o.grace, "absence grace `<duration>`")
 	flags.BoolVarP(&o.quiet, "quiet", "q", false, "suppress human cycle output and diagnostics")
-	flags.BoolVar(&deprecatedAutoClean, "auto-clean", false, "ignored; gone sessions always expire after retention.tombstone_ttl")
-	_ = flags.MarkDeprecated("auto-clean", "gone sessions always expire after retention.tombstone_ttl")
 	flags.BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
 	return command
 }

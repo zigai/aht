@@ -764,27 +764,15 @@ func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsDeprecatedRetentionKeys(t *testing.T) {
+func TestLoadRejectsRemovedRetentionKeys(t *testing.T) {
 	isolateConfigEnv(t)
-	// Config files written before tombstone_ttl existed must keep loading.
-	content := `
-[retention]
-auto_clean = false
-max_gone_age = "7d"
-`
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load with deprecated retention keys failed: %v", err)
-	}
-	if cfg.Retention.TombstoneTTL != "10m" {
-		t.Fatalf("Retention.TombstoneTTL = %q, want default '10m'", cfg.Retention.TombstoneTTL)
-	}
-	ttl, err := TombstoneTTL(cfg)
-	if err != nil || ttl != 10*time.Minute {
-		t.Fatalf("TombstoneTTL() = %v, %v, want 10m", ttl, err)
+	for _, key := range []string{`auto_clean = false`, `max_gone_age = "7d"`} {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte("[retention]\n"+key+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(configPath); err == nil {
+			t.Fatalf("Load accepted removed retention key %q", key)
+		}
 	}
 }
