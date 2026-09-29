@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -21,14 +22,23 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 		t.Skip("real tmux integration test")
 	}
 	name := fmt.Sprintf("aht-discovery-%d-%d", os.Getpid(), time.Now().UnixNano())
-	testtmux.NewNamed(t, name, gotmux.NewSessionOptions{Name: "discovery", Program: gotmux.Exec("sleep", "30")})
+	server := testtmux.NewNamed(t, name, gotmux.NewSessionOptions{Name: "discovery", Program: gotmux.Exec("sleep", "30")})
+	t.Setenv("PATH", filepath.Dir(testtmux.Executable(t))+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		sockets, err := gotmux.DiscoverSockets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sockets = slices.DeleteFunc(sockets, func(socket string) bool {
+			return filepath.Dir(socket) != filepath.Dir(server.Socket)
+		})
 		panes, err := ListPanesWithOptions(ctx, ListOptions{
+			SocketPaths: sockets,
 			// Standard sockets must be discoverable even when process arguments
 			// are unavailable or the caller is outside tmux.
 			ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
