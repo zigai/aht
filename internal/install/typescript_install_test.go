@@ -389,7 +389,7 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 		`amp.on("tool.call"`,
 		`amp.on("agent.end"`,
 		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=3"`,
+		`"AHT_INTEGRATION_VERSION=4"`,
 		`"--observed-at", observedAt`,
 		`"report", "amp"`,
 		"amp.threads.get(threadId as ThreadID).title.get()",

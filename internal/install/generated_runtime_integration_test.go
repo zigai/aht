@@ -209,3 +209,23 @@ func TestGeneratedWaitingDetailsAndCorrelatedResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestAmpTitleReportsMetadataWithoutReplacingWaitingEvidence(t *testing.T) {
+	capture := captureBinary(t)
+	t.Setenv("AHT_CAPTURE", capture.path)
+	module := generatedArtifactContent(t, registry.Harness("amp"), "aht-state.ts")
+	runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/amp-title-metadata.mjs"), nil)
+	data, err := os.ReadFile(capture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocations := parseCapturedInvocations(string(data))
+	if len(invocations) != 3 || !matchInvocation(invocations[1], []string{"--activity", "waiting"}) || !matchInvocation(invocations[2], []string{"--event", "thread.title"}) {
+		t.Fatalf("Amp reports = %v", invocations)
+	}
+	for _, arg := range invocations[2] {
+		if arg == "--activity" || arg == "--presence" || arg == "--detail" {
+			t.Fatal("title metadata replaced state evidence")
+		}
+	}
+}
