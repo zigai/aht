@@ -215,6 +215,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 		`"session.deleted"`,
 		`state === "gone" ? "--presence"`,
 		`"--observed-at", observedAt`,
+		`client.session.get({ path: { id: currentSessionId } })`,
 	}, "opencode plugin")
 }
 
@@ -391,6 +392,7 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 		`"AHT_INTEGRATION_VERSION=3"`,
 		`"--observed-at", observedAt`,
 		`"report", "amp"`,
+		"amp.threads.get(threadId as ThreadID).title.get()",
 		`"--reporter", source`,
 	}, "amp snippet")
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,8 +42,13 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 	}
 }
 
+var unresolvedPlaceholder = regexp.MustCompile(`\{\{[A-Z0-9_]+\}\}`)
+
 func validateGeneratedArtifact(t *testing.T, artifact generatedArtifact) {
 	t.Helper()
+	if match := unresolvedPlaceholder.FindString(artifact.content); match != "" {
+		t.Fatalf("generated artifact contains unresolved placeholder %q:\n%s", match, artifact.content)
+	}
 	path := strings.ToLower(artifact.path)
 	switch {
 	case strings.HasSuffix(path, ".json"):

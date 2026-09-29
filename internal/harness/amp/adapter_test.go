@@ -1,44 +1,10 @@
 package amp
 
 import (
-	"regexp"
-	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-func TestPluginTemplateRendersCleanly(t *testing.T) {
-	t.Parallel()
-
-	h := New()
-	plan := h.InstallPlan("/usr/local/bin/aht")
-	if len(plan.Actions) == 0 {
-		t.Fatal("expected at least one install action")
-	}
-	action, ok := plan.Actions[0].(harness.RenderedFileAction)
-	if !ok {
-		t.Fatalf("expected harness.RenderedFileAction, got %T", plan.Actions[0])
-	}
-	rendered := action.Plan.Content
-	if strings.TrimSpace(rendered) == "" {
-		t.Fatal("rendered amp template is empty")
-	}
-	placeholderPattern := regexp.MustCompile(`\{\{[A-Z0-9_]+\}\}`)
-	if match := placeholderPattern.FindString(rendered); match != "" {
-		t.Fatalf("rendered amp template contains unresolved placeholder %q:\n%s", match, rendered)
-	}
-	if !strings.Contains(rendered, "AHT_INTEGRATION_ID=amp") {
-		t.Fatalf("expected AHT_INTEGRATION_ID=amp in rendered template:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, `"report", "amp"`) {
-		t.Fatalf("expected report amp in rendered template:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "amp.threads.get(threadId as ThreadID).title.get()") {
-		t.Fatalf("expected native Amp thread title lookup in rendered template:\n%s", rendered)
-	}
-}
 
 func TestResumeCommand(t *testing.T) {
 	t.Parallel()
