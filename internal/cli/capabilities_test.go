@@ -81,7 +81,7 @@ func TestManageCapabilitiesSingleHarness(t *testing.T) {
 		if err := json.Unmarshal(stdout.Bytes(), &c); err != nil {
 			t.Fatalf("failed to decode single capability JSON: %v\noutput: %s", err, stdout.String())
 		}
-		if c.Harness != "codex" || c.Authority != "screen" || !c.ScreenSupport {
+		if c.Harness != "codex" || c.Authority != "hook" || !c.ScreenSupport {
 			t.Fatalf("unexpected codex capabilities: %+v", c)
 		}
 	})

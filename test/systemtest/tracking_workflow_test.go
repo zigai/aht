@@ -98,8 +98,8 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	assertPhaseOneSession(t, reported, maliciousSessionID, maliciousCWD)
 
 	observed := receiveSessionWatchEvent(t, watchCommand, watchEvents, reported.SessionID)
-	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityUnknown {
-		t.Fatalf("watch event = %#v, want live Codex session with screen-authoritative activity pending", observed)
+	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityRunning {
+		t.Fatalf("watch event = %#v, want live Codex session running from native report", observed)
 	}
 	stopSystemTestCommand(t, watchCommand)
 
@@ -368,8 +368,8 @@ func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID str
 	if session.SchemaVersion != 3 || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
 		t.Fatalf("session identity = %#v, want schema-v3 phase-one Codex session", session)
 	}
-	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityUnknown {
-		t.Fatalf("effective session state = presence %q activity %v, want live/unknown until screen evidence", session.Presence(), session.Activity())
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityRunning {
+		t.Fatalf("effective session state = presence %q activity %v, want live/running from native report", session.Presence(), session.Activity())
 	}
 	if session.Observations.Native == nil || session.Observations.Native.Activity == nil || *session.Observations.Native.Activity != registry.ActivityRunning {
 		t.Fatalf("reported activity = %#v, want running native observation", session.Observations.Native)
@@ -384,6 +384,9 @@ func assertSamePhaseOneSession(t *testing.T, want registry.Session, got registry
 	assertPhaseOneSession(t, got, want.SessionID, want.CWD)
 	if got.ID != want.ID || !got.CreatedAt.Equal(want.CreatedAt) || got.UpdatedAt.Before(want.UpdatedAt) {
 		t.Fatalf("session changed across surfaces: want=%#v got=%#v", want, got)
+	}
+	if !got.ActivityChangedAt.Equal(want.ActivityChangedAt) {
+		t.Fatalf("activity clock = %s, want %s", got.ActivityChangedAt, want.ActivityChangedAt)
 	}
 }
 

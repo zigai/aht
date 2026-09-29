@@ -55,8 +55,11 @@ func TestCapabilitiesForCodex(t *testing.T) {
 	if !ok {
 		t.Fatal("CapabilitiesFor(HarnessCodex) returned false")
 	}
-	if caps.Authority != "screen" {
-		t.Fatalf("Codex Authority = %q, want screen", caps.Authority)
+	if caps.Authority != "hook" {
+		t.Fatalf("Codex Authority = %q, want hook", caps.Authority)
+	}
+	if !caps.ScreenFallback {
+		t.Fatal("Codex should fall back to screen without native evidence")
 	}
 	if !caps.ScreenSupport {
 		t.Fatal("Codex should have screen support")

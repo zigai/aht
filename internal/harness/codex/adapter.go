@@ -50,10 +50,12 @@ func New() codexHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  codexIntegrationSource,
-		StateAuthority:     registry.AuthorityScreen,
-		ScreenFallback:     false,
+		StateAuthority:     registry.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
+
+func (codexHarness) RetainNativeActivity() bool { return true }
 
 func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
@@ -110,6 +112,11 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Event:   harness.HookEventStop,
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventStop, codexIntegrationSource),
+			},
+			{
+				Event:   "Interrupt",
+				Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityInterrupted, "Interrupt", codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventSessionEnd,
@@ -170,9 +177,9 @@ func (codexHarness) LifecycleDefaults(event string, attributes map[string]string
 }
 
 func (codexHarness) HookTimeout(event string) int {
-	const endTimeout = 3
-	if event == harness.HookEventSessionEnd {
-		return endTimeout
+	const terminalTimeout = 3
+	if event == harness.HookEventSessionEnd || event == "Interrupt" {
+		return terminalTimeout
 	}
 	return harness.HookTimeoutSeconds
 }

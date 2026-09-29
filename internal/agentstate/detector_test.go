@@ -400,8 +400,8 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
 		t.Fatalf("stale integration evaluation = %#v", evaluation)
 	}
-	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityScreen {
-		t.Fatal("Codex must be screen authoritative")
+	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityHook {
+		t.Fatal("Codex native hooks must own activity")
 	}
 }
 
