@@ -100,12 +100,22 @@ func (s *FileStore) Watch(ctx context.Context, options WatchOptions, yield func(
 }
 
 func (watch *fileStoreWatch) scan(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 	if err := watch.ensureDirectoryWatch(); err != nil {
 		return watch.yieldError(err)
 	}
 	sessions, updatedAt, err := watch.store.watchSnapshot(ctx, watch.options.Filter)
 	if err != nil {
-		return watch.yieldError(err)
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			return watch.yieldError(err)
+		}
 	}
 	initial := !watch.haveBaseline
 	unchanged := watch.haveBaseline && watchSessionsEqual(watch.baseline, sessions)
@@ -144,12 +154,13 @@ func (watch *fileStoreWatch) run(ctx context.Context) error {
 	defer reconcile.Stop()
 
 	state := watchRunState{watch: watch, debounceTimer: debounceTimer, debounce: nil, reconcile: reconcile.C}
-	for {
+	for ctx.Err() == nil {
 		done, err := state.step(ctx)
 		if err != nil || done {
 			return err
 		}
 	}
+	return nil
 }
 
 func (state *watchRunState) step(ctx context.Context) (bool, error) {
