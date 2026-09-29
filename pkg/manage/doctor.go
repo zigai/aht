@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,7 +105,7 @@ func (m *Manager) checkStoreSchema(ctx context.Context, add func(string, DoctorS
 			add("store.schema", DoctorStatusError, err.Error())
 		}
 	} else {
-		add("store.schema", DoctorStatusOK, "schema_version=2")
+		add("store.schema", DoctorStatusOK, "schema_version="+strconv.Itoa(registry.StoreSchemaVersion))
 	}
 }
 

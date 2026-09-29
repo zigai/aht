@@ -12,8 +12,10 @@ import (
 	"time"
 )
 
+const StoreSchemaVersion = 3
+
 const (
-	storeSchemaVersion      = 3
+	storeSchemaVersion      = StoreSchemaVersion
 	maxObservedAtFutureSkew = 5 * time.Minute
 	maxSnapshotBytes        = 64 << 20
 
