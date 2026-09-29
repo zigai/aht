@@ -301,17 +301,29 @@ func LifecycleFor(id registry.Harness, event string, attributes map[string]strin
 }
 
 func PrepareObservation(observation registry.Observation) registry.Observation {
-	if observation.Kind() == "report" {
-		defaults := LifecycleFor(observation.Harness, observation.Report().Event, observation.Report().Attributes)
-		observation.Report().Event = defaults.Event
-		if observation.Report().Lifecycle == nil && defaults.Lifecycle != "" {
-			observation.Report().Lifecycle = &defaults.Lifecycle
-		}
-		if observation.Report().Claim == nil && defaults.Presence != "" {
-			observation.Report().Claim = &defaults.Presence
+	if observation.Kind() != "report" {
+		return observation
+	}
+	report := observation.Report()
+	defaults := LifecycleFor(observation.Harness, report.Event, report.Attributes)
+	report.Event = defaults.Event
+	if report.Lifecycle == nil && defaults.Lifecycle != "" {
+		report.Lifecycle = &defaults.Lifecycle
+	}
+	if report.Claim == nil && defaults.Presence != "" {
+		report.Claim = &defaults.Presence
+	}
+	prepareDetail(observation)
+	return WithResumeCommand(observation)
+}
+
+func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
+	if adapter, ok := Find(id); ok {
+		if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
+			return detailAdapter.DetailCapabilities()
 		}
 	}
-	return WithResumeCommand(observation)
+	return registry.DetailCapabilities{Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}, Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}}
 }
 
 func HookTimeoutSecondsFor(id registry.Harness, event string) int {
@@ -383,4 +395,18 @@ func containsNormalizedToken(values []string, normalized string) bool {
 		}
 	}
 	return false
+}
+
+func prepareDetail(observation registry.Observation) {
+	report := observation.Report()
+	if report.Detail != nil || report.Activity == nil {
+		return
+	}
+	adapter, ok := Find(observation.Harness)
+	if !ok {
+		return
+	}
+	if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
+		report.Detail = detailAdapter.ActivityDetail(report.Event, *report.Activity, report.Attributes)
+	}
 }

@@ -180,8 +180,8 @@ async function* generateEvents() {
   const events = [
     { type: "session.created", data: { sessionID: "s1" } },
     { type: "session.execution.started", data: { sessionID: "s1" } },
-    { type: "permission.asked", data: { sessionID: "s1" } },
-    { type: "permission.replied", data: { sessionID: "s1" } },
+    { type: "permission.asked", data: { sessionID: "s1", id: "per_one" } },
+    { type: "permission.replied", data: { sessionID: "s1", requestID: "per_one" } },
     { type: "session.status", data: { sessionID: "s1", status: { type: "busy" } } },
     { type: "session.status", data: { sessionID: "s1", status: { type: "retry" } } },
     { type: "session.status", data: { sessionID: "s1", status: { type: "idle" } } },

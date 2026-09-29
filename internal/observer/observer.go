@@ -713,7 +713,7 @@ func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, 
 		Incarnation:   incarnation,
 		IdentityState: "", Liveness: nil, SchemaVersion: 0, ID: "", SessionID: "", SessionPath: "", ResumeCommand: nil, CWD: "", ProjectRoot: "", Location: registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, Observations: registry.Observations{Native: nil, Process: nil, Location: nil, Catalog: nil, Screen: nil}, CreatedAt: time.Time{}, UpdatedAt: time.Time{}, PresenceChangedAt: time.Time{}, ActivityChangedAt: time.Time{},
 		Harness: harnessID,
-		Process: identity,
+		Process: identity, Detail: nil,
 	}
 	for _, candidate := range sessions {
 		if candidate.Harness == harnessID && candidate.Process != nil && candidate.Process.Equal(*identity) {
@@ -744,7 +744,7 @@ func unavailableScreenState(manifestLoader agentstate.Loader, sessions []registr
 	}
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
 	unknown := registry.ActivityUnknown
-	screen := &registry.ScreenObservation{Activity: unknown, Authority: registry.AuthorityScreen, Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at}
+	screen := &registry.ScreenObservation{Activity: unknown, Authority: registry.AuthorityScreen, Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at, Detail: ""}
 	observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	return observation, true
 }
@@ -771,7 +771,7 @@ func (o *Observer) detectScreenState(ctx context.Context, sessions []registry.Se
 			Activity: *pane.Activity, Authority: registry.AuthorityScreen, Reason: reason,
 			RuleID: "", ManifestSource: "", ManifestVersion: 0,
 			FallbackForIntegration: fallback, FallbackReason: fallbackReason,
-			Process: *identity, ObservedAt: at,
+			Process: *identity, ObservedAt: at, Detail: "",
 		}
 		observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 		return observation, true, nil
@@ -1095,7 +1095,7 @@ func (o *Observer) captureScreenState(ctx context.Context, session registry.Sess
 	}
 	observedAt := screenObservationTime(at, o.now().UTC())
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-	screen := &registry.ScreenObservation{Activity: decision.Activity, Authority: registry.AuthorityScreen, Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
+	screen := &registry.ScreenObservation{Activity: decision.Activity, Detail: decision.Detail, Authority: registry.AuthorityScreen, Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
 	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	if manifest.Warning != "" {
 		return observation, true, fmt.Errorf("%w: %s", errDetectionOverrideInvalid, manifest.Warning)

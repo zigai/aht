@@ -45,6 +45,31 @@ func begin(t *testing.T, p *kimi.Protocol) {
 	host(t, p, event("TurnBegin", `{"user_input":"hello"}`), registry.ActivityRunning)
 }
 
+func TestPendingRequestsPreserveTypedAndMixedWaitingReasons(t *testing.T) {
+	var p kimi.Protocol
+	begin(t, &p)
+	for _, step := range []struct {
+		frame    string
+		activity registry.Activity
+		detail   *registry.ActivityDetail
+	}{
+		{request("ApprovalRequest", "a", "tool-a", ""), registry.ActivityWaiting, new(registry.DetailPermission)},
+		{request("QuestionRequest", "q", "tool-q", ""), registry.ActivityWaiting, new(registry.ActivityDetail(""))},
+		{event("StepRetry", `{}`), registry.ActivityWaiting, new(registry.ActivityDetail(""))},
+		{event("ApprovalResponse", `{"request_id":"a","response":"approve"}`), registry.ActivityWaiting, new(registry.DetailQuestion)},
+		{event("ToolResult", `{"tool_call_id":"tool-q"}`), registry.ActivityRunning, nil},
+		{event("TurnEnd", `{}`), registry.ActivityIdle, nil},
+	} {
+		update, changed, err := p.ObserveHost([]byte(step.frame))
+		if err != nil || !changed || update.Activity != step.activity {
+			t.Fatalf("update = %+v, changed=%v, err=%v", update, changed, err)
+		}
+		if diff := cmp.Diff(step.detail, detailValue(update.Detail)); diff != "" {
+			t.Fatalf("detail differs (-want +got):\n%s", diff)
+		}
+	}
+}
+
 func TestConcurrentApprovalsRequireNativeResolution(t *testing.T) {
 	var p kimi.Protocol
 	begin(t, &p)
@@ -222,4 +247,24 @@ func TestPendingRequestLimitFailsInsteadOfLosingWaitingCorrelation(t *testing.T)
 		t.Fatalf("pending limit: changed=%v error=%v", changed, err)
 	}
 	host(t, &p, `{"jsonrpc":"2.0","id":"turn","result":{"status":"canceled"}}`, registry.ActivityInterrupted)
+}
+
+func detailValue(evidence *registry.DetailEvidence) *registry.ActivityDetail {
+	if evidence == nil {
+		return nil
+	}
+	return &evidence.Value
+}
+
+func TestWireStateRefreshPreservesOriginalRequestTime(t *testing.T) {
+	var p kimi.Protocol
+	begin(t, &p)
+	first, _, err := p.ObserveHost([]byte(request("ApprovalRequest", "a", "tool-a", "")))
+	if err != nil || first.Detail == nil || first.Detail.ObservedAt.IsZero() {
+		t.Fatalf("request = %+v, %v", first, err)
+	}
+	refresh, _, err := p.ObserveHost([]byte(event("StepRetry", `{}`)))
+	if err != nil || refresh.Detail == nil || !refresh.Detail.ObservedAt.Equal(first.Detail.ObservedAt) {
+		t.Fatalf("refresh = %+v, %v", refresh, err)
+	}
 }

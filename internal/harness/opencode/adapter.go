@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 12
+	integrationVersion        = 13
 	opencodePluginName        = "aht-state.ts"
 	opencodeIntegrationID     = "opencode"
 	opencodeIntegrationSource = "opencode-plugin"

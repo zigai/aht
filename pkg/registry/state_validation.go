@@ -20,6 +20,9 @@ func storedSessionCorruption(id string, session Session) string {
 	if reason := storedSessionStateCorruption(session); reason != "" {
 		return reason
 	}
+	if !validStateDetail(session.Detail, session.Activity()) {
+		return "invalid activity detail"
+	}
 	return storedObservationCorruption(session.Observations)
 }
 
@@ -95,6 +98,8 @@ func validStoredCatalogObservation(observation CatalogObservation) bool {
 
 func validStoredNativeObservation(observation NativeObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
+		validDetailEvidence(observation.Detail, observation.Activity) &&
+		(observation.Detail == nil || !observation.Detail.ObservedAt.After(observation.ObservedAt)) &&
 		validStoredProcess(observation.Process, true) &&
 		validStoredLifecycle(observation.Lifecycle) &&
 		validStoredOptionalPresence(observation.Presence) &&
@@ -103,6 +108,7 @@ func validStoredNativeObservation(observation NativeObservation) bool {
 
 func validStoredScreenObservation(observation ScreenObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
+		(observation.Detail == "" || observation.Detail.ValidFor(observation.Activity)) &&
 		validStoredProcess(observation.Process, false) &&
 		observation.Activity.IsValid() &&
 		observation.ManifestVersion >= 0

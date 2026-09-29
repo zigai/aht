@@ -82,3 +82,51 @@ function stateForEvent(event: unknown): string | undefined {
       return undefined;
   }
 }
+
+function createPendingState(questions = false) {
+  const sessions = new Map<string, { pending: Map<string, { reason: "permission" | "question"; observedAt: string }>; uncertain: boolean }>();
+  let overflow = false;
+  return (event: unknown): { activity: string; detail?: string; detailObservedAt?: string } | undefined => {
+    const type = valueAt(event, ["type"]);
+    const questionEvent = type === "question.asked" || type === "question.replied" || type === "question.rejected";
+    if (questionEvent && !questions) return undefined;
+    let activity = questionEvent ? (type === "question.asked" ? "waiting" : "running") : stateForEvent(event);
+    if (!activity) return undefined;
+    const session = firstPathString(event, [["properties", "sessionID"], ["properties", "info", "id"], ["sessionID"], ["data", "sessionID"]]);
+    if (!session || session.length > 1024) return { activity, detail: activity === "waiting" ? "clear" : undefined };
+    if (["idle", "gone", "failed", "interrupted"].includes(activity)) {
+      sessions.delete(session);
+      return { activity };
+    }
+    let state = sessions.get(session);
+    const request = type === "permission.asked" || type === "question.asked";
+    if (request && !state) {
+      if (sessions.size >= 128) overflow = true;
+      else { state = { pending: new Map(), uncertain: false }; sessions.set(session, state); }
+    }
+    const detail = questionEvent ? "question" : "permission";
+    const id = firstPathString(event, request ? [["properties", "id"], ["id"], ["data", "id"]] : [["properties", "requestID"], ["requestID"], ["data", "requestID"]]);
+    if (state && request) {
+      if (!id || id.length > 1024 || state.pending.size >= 1024 && !state.pending.has(`${detail}:${id}`)) state.uncertain = true;
+      else if (!state.pending.has(`${detail}:${id}`)) state.pending.set(`${detail}:${id}`, { reason: detail, observedAt: new Date().toISOString() });
+    } else if (state && (type === "permission.replied" || type === "question.replied" || type === "question.rejected")) {
+      if (id && id.length <= 1024) state.pending.delete(`${detail}:${id}`);
+    }
+    const resolution = type === "permission.replied" || type === "question.replied" || type === "question.rejected";
+    if (overflow && !state && (request || resolution) || state?.uncertain || state && state.pending.size > 0) {
+      activity = "waiting";
+      const values = Array.from(state?.pending.values() ?? []);
+      const reasons = new Set(values.map((value) => value.reason));
+      const resolvedDetail = !state?.uncertain && reasons.size === 1 ? reasons.values().next().value : "clear";
+      let detailObservedAt: string | undefined;
+      if (resolvedDetail && resolvedDetail !== "clear") {
+        for (const value of values) {
+          if (!detailObservedAt || value.observedAt < detailObservedAt) detailObservedAt = value.observedAt;
+        }
+      }
+      return { activity, detail: resolvedDetail, detailObservedAt };
+    }
+    if (state && !state.uncertain) sessions.delete(session);
+    return { activity, detail: activity === "waiting" ? "clear" : undefined };
+  };
+}

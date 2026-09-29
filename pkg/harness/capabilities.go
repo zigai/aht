@@ -13,22 +13,23 @@ import (
 type (
 	// Capabilities describes the static capabilities and supported features of an agent harness.
 	Capabilities struct {
-		Harness            registry.Harness `json:"harness"`
-		SessionStart       bool             `json:"session_start"`
-		SessionEnd         bool             `json:"session_end"`
-		RunningIdle        bool             `json:"running_idle"`
-		WaitingPermission  bool             `json:"waiting_permission"`
-		ProcessIdentity    bool             `json:"process_identity"`
-		NativeCatalog      bool             `json:"native_catalog"`
-		TTYTmuxContext     bool             `json:"tty_tmux_context"`
-		Installable        bool             `json:"installable"`
-		Resumable          bool             `json:"resumable"`
-		TitleLookup        bool             `json:"title_lookup"`
-		ScreenSupport      bool             `json:"screen_support"`
-		ScreenFallback     bool             `json:"screen_fallback"`
-		Authority          string           `json:"authority"`
-		IntegrationSource  string           `json:"integration_source,omitempty"`
-		IntegrationVersion int              `json:"integration_version,omitempty"`
+		Details            registry.DetailCapabilities `json:"details"`
+		Harness            registry.Harness            `json:"harness"`
+		SessionStart       bool                        `json:"session_start"`
+		SessionEnd         bool                        `json:"session_end"`
+		RunningIdle        bool                        `json:"running_idle"`
+		WaitingPermission  bool                        `json:"waiting_permission"`
+		ProcessIdentity    bool                        `json:"process_identity"`
+		NativeCatalog      bool                        `json:"native_catalog"`
+		TTYTmuxContext     bool                        `json:"tty_tmux_context"`
+		Installable        bool                        `json:"installable"`
+		Resumable          bool                        `json:"resumable"`
+		TitleLookup        bool                        `json:"title_lookup"`
+		ScreenSupport      bool                        `json:"screen_support"`
+		ScreenFallback     bool                        `json:"screen_fallback"`
+		Authority          string                      `json:"authority"`
+		IntegrationSource  string                      `json:"integration_source,omitempty"`
+		IntegrationVersion int                         `json:"integration_version,omitempty"`
 	}
 
 	// RuntimeStatus describes the installed/runtime state of a harness integration on the local system.
@@ -63,6 +64,10 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 			Authority:          "",
 			IntegrationSource:  "",
 			IntegrationVersion: 0,
+			Details: registry.DetailCapabilities{
+				Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+				Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+			},
 		}, false
 	}
 	definition := adapter.Definition()
@@ -73,6 +78,7 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 	policy := (catalog.Rules{}).Policy(harnessID)
 
 	return Capabilities{
+		Details:            catalog.DetailCapabilitiesFor(harnessID),
 		Harness:            definition.ID,
 		SessionStart:       definition.Capabilities.SessionStart,
 		SessionEnd:         definition.Capabilities.SessionEnd,

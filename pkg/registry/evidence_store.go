@@ -146,7 +146,8 @@ func storeNativeObservation(session *Session, observation Observation, at time.T
 	}
 	reporter := observation.Report().Reporter
 	reporter.Sequence = clonePtr(reporter.Sequence)
-	session.Observations.Native = &NativeObservation{Reporter: reporter, Event: observation.Report().Event, Lifecycle: clonePtr(observation.Report().Lifecycle), Presence: clonePtr(observation.Report().Claim), Activity: session.nativeActivity(observation.Report(), process), SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ObservedAt: at, Attributes: cloneAttributes(observation.Report().Attributes), RawPayload: cloneRaw(observation.Report().Payload), Process: process}
+	detail := session.nativeDetail(observation.Report(), process, at)
+	session.Observations.Native = &NativeObservation{Reporter: reporter, Event: observation.Report().Event, Lifecycle: clonePtr(observation.Report().Lifecycle), Presence: clonePtr(observation.Report().Claim), Activity: session.nativeActivity(observation.Report(), process), SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ObservedAt: at, Attributes: cloneAttributes(observation.Report().Attributes), RawPayload: cloneRaw(observation.Report().Payload), Process: process, Detail: detail}
 }
 
 func (s Session) nativeActivity(report *Report, process ProcessIdentity) *Activity {

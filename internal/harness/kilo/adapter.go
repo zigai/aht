@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion = 9
+	integrationVersion = 10
 	kiloCommand        = "kilo"
 	kiloSessionFlag    = "--session"
 )

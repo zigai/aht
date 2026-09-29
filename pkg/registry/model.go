@@ -109,6 +109,7 @@ type Reporter struct {
 }
 
 type NativeObservation struct {
+	Detail      *DetailEvidence   `json:"detail,omitempty"`
 	Reporter    Reporter          `json:"reporter"`
 	Event       string            `json:"event,omitempty"`
 	Lifecycle   *NativeLifecycle  `json:"lifecycle,omitempty"`
@@ -123,6 +124,7 @@ type NativeObservation struct {
 }
 
 type ScreenObservation struct {
+	Detail                 ActivityDetail  `json:"detail,omitempty"`
 	Activity               Activity        `json:"activity"`
 	Authority              Authority       `json:"authority"`
 	Reason                 string          `json:"reason"`
@@ -178,6 +180,7 @@ type Observations struct {
 
 //nolint:recvcheck // Value marshaling must also apply to sessions stored in maps.
 type Session struct {
+	Detail            *StateDetail     `json:"detail,omitempty"`
 	Incarnation       Incarnation      `json:"incarnation"`
 	IdentityState     IdentityState    `json:"identity_state"`
 	Liveness          Liveness         `json:"-"`

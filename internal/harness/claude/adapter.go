@@ -103,6 +103,14 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "PermissionRequest", claudeIntegrationSource),
 			},
 			{
+				Event: "Elicitation", Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "Elicitation", claudeIntegrationSource),
+			},
+			{
+				Event: "ElicitationResult", Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "ElicitationResult", claudeIntegrationSource),
+			},
+			{
 				Event:   "PermissionDenied",
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PermissionDenied", claudeIntegrationSource),
@@ -160,6 +168,10 @@ func (claudeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
+	switch kind := harness.PayloadString(payload, "error"); kind {
+	case "rate_limit", "billing_error":
+		attributes["claude_error_type"] = kind
+	}
 	harness.AddAttributeString(attributes, "claude_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "claude_start_source", harness.PayloadString(payload, "source"))
 	harness.AddAttributeString(attributes, "claude_permission_mode", harness.PayloadString(payload, "permission_mode"))

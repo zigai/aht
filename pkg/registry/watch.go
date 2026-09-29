@@ -300,8 +300,10 @@ func (s *FileStore) watchSnapshot(ctx context.Context, filter Filter) ([]Session
 		return nil, time.Time{}, err
 	}
 	sessions := make([]Session, 0, len(snap.Sessions))
+	now := s.now().UTC()
 	for _, session := range snap.Sessions {
 		session.SchemaVersion = storeSchemaVersion
+		session.resolveDetail(s.reducer.rules.Policy(session.Harness), now)
 		sessions = append(sessions, session)
 	}
 	return FilterSessions(sessions, filter), snap.UpdatedAt, nil
