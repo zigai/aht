@@ -3,10 +3,12 @@
 package hostcompat
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -132,6 +134,14 @@ func (host isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd)
 	case registry.Harness("opencode"), registry.Harness("kilo"):
 		configDir := filepath.Join(host.root, string(host.contract.ID))
 		host.writeFile(t, filepath.Join(configDir, "opencode.json"), opencodeConfigJSON(baseURL))
+		if host.contract.ID == registry.Harness("opencode") {
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			output, err := compatibilityOutput(ctx, host.command(env, "debug", "config"))
+			cancel()
+			if err != nil {
+				t.Fatalf("%s native configuration and plugin dependency setup failed: %v\n%s", host.contract.ID, err, output)
+			}
+		}
 		args = []string{"run", "--model", "aht-compat/compat", "--auto", "--dir", host.work, compatibilityPrompt}
 	case registry.Harness("hermes"):
 		config := fmt.Sprintf("model:\n  default: compat\n  provider: custom\n  base_url: %q\n  api_key: compat\n  api_mode: chat_completions\napprovals:\n  mode: manual\nplugins:\n  enabled:\n    - aht-state\n", baseURL)
