@@ -868,7 +868,7 @@ func (app *application) configEditPath() (string, error) {
 	} else {
 		options = append(options, strata.WithAppName("aht"))
 	}
-	path, err := strata.ConfigEditPath(options...)
+	path, err := strata.EditPath(options...)
 	if err != nil {
 		return "", fmt.Errorf("select config edit path: %w", err)
 	}

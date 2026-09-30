@@ -184,7 +184,7 @@ func DefaultPath() string {
 	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
 		return val
 	}
-	if path, err := strata.ConfigEditPath(strata.WithAppName("aht"), strata.WithFormats(".toml")); err == nil {
+	if path, err := strata.EditPath(strata.WithAppName("aht"), strata.WithFormats(".toml")); err == nil {
 		return path
 	}
 	if dir := UserConfigDir(); dir != "" {
@@ -482,7 +482,7 @@ func strataLoadOptions(opts Options) ([]strata.Option, string) {
 		strata.WithStrict(),
 	}
 	if opts.NoConfig {
-		return append(strataOpts, strata.WithoutFiles()), ""
+		return append(strataOpts, strata.WithoutFileDiscovery()), ""
 	}
 
 	targetPath := opts.Path
@@ -505,7 +505,7 @@ func strataLoadOptions(opts Options) ([]strata.Option, string) {
 }
 
 func validateTOMLPath(path string) error {
-	_, err := strata.ConfigEditPath(strata.WithPath(path), strata.WithFormats(".toml"))
+	_, err := strata.EditPath(strata.WithPath(path), strata.WithFormats(".toml"))
 	if err != nil {
 		return fmt.Errorf("select TOML config path %s: %w", path, err)
 	}
