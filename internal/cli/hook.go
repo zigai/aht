@@ -73,7 +73,7 @@ func (app *application) runManagedHook(
 	if !app.outputJSON {
 		return exitCode(errManagedHookJSONRequired, exitCodeUsage)
 	}
-	harness, err := harnesspkg.Normalize(harnessName)
+	harnessID, err := harnesspkg.Normalize(harnessName)
 	if err != nil {
 		return fmt.Errorf("normalizing hook harness: %w", err)
 	}
@@ -85,12 +85,12 @@ func (app *application) runManagedHook(
 	rawPayload := rawPayloadFromHookBytes(data)
 	payload := hookPayloadObject(rawPayload)
 	parentArgs := parentProcessArgs(ctx)
-	result, ok := harnesspkg.HandleHook(harness, options.event, rawPayload, payload, parentArgs)
+	result, ok := harnesspkg.HandleHook(harnessID, options.event, rawPayload, payload, parentArgs)
 	if !ok {
-		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harness)
+		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harnessID)
 	}
 	if result.ReportOK {
-		result.Report.SetProcess(reportProcessIdentity(harness, reportProcessAncestors(ctx, 0)))
+		result.Report.SetProcess(reportProcessIdentity(harnessID, reportProcessAncestors(ctx, 0)))
 	}
 
 	if err := reportManagedHook(ctx, app.registryStore(), result); err != nil {

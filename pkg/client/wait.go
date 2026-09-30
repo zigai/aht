@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )

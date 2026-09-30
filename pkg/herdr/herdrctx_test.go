@@ -19,9 +19,9 @@ var (
 
 func TestCurrentWithEnvUsesManagedPaneIdentity(t *testing.T) {
 	t.Parallel()
-	context := herdr.CurrentWithEnv(herdr.Env{Enabled: "1", SessionName: "work", SocketPath: "/tmp/herdr.sock", WorkspaceID: "w1", TabID: "w1:t1", PaneID: "w1:p1"})
-	if context.Kind != registry.MultiplexerHerdr || context.ServerID != "/tmp/herdr.sock" || context.SessionName != "work" || context.WorkspaceID != "w1" || context.TabID != "w1:t1" || context.PaneID != "w1:p1" {
-		t.Fatalf("CurrentWithEnv() = %#v", context)
+	location := herdr.CurrentWithEnv(herdr.Env{Enabled: "1", SessionName: "work", SocketPath: "/tmp/herdr.sock", WorkspaceID: "w1", TabID: "w1:t1", PaneID: "w1:p1"})
+	if location.Kind != registry.MultiplexerHerdr || location.ServerID != "/tmp/herdr.sock" || location.SessionName != "work" || location.WorkspaceID != "w1" || location.TabID != "w1:t1" || location.PaneID != "w1:p1" {
+		t.Fatalf("CurrentWithEnv() = %#v", location)
 	}
 	if got := herdr.CurrentWithEnv(herdr.Env{PaneID: "w1:p1"}); !got.Empty() {
 		t.Fatalf("unmanaged environment produced context: %#v", got)

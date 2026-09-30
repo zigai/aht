@@ -190,34 +190,34 @@ func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
 	}
 }
 
-func readTestFile(t *testing.T, path string, context string) []byte {
+func readTestFile(t *testing.T, path string, description string) []byte {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%s: %v", context, err)
+		t.Fatalf("%s: %v", description, err)
 	}
 
 	return data
 }
 
-func decodeTestJSONObject(t *testing.T, data []byte, context string) map[string]any {
+func decodeTestJSONObject(t *testing.T, data []byte, description string) map[string]any {
 	t.Helper()
 
 	var config map[string]any
 	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("invalid JSON for %s: %v", context, err)
+		t.Fatalf("invalid JSON for %s: %v", description, err)
 	}
 
 	return config
 }
 
-func requireTextContainsAll(t *testing.T, text string, values []string, context string) {
+func requireTextContainsAll(t *testing.T, text string, values []string, description string) {
 	t.Helper()
 
 	for _, value := range values {
 		if !strings.Contains(text, value) {
-			t.Fatalf("expected %q in %s: %s", value, context, text)
+			t.Fatalf("expected %q in %s: %s", value, description, text)
 		}
 	}
 }

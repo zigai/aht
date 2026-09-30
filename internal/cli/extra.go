@@ -10,7 +10,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
 	"github.com/zigai/aht/v2/internal/config"
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/observer"
 	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/broker"

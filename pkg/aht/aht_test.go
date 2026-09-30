@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/aht"
 	"github.com/zigai/aht/v2/pkg/registry"
 )

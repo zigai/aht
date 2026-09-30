@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )

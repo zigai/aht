@@ -178,14 +178,14 @@ func (app *application) runReport(ctx context.Context, stdin io.Reader, opts rep
 	return app.writeReportResult(session, opts.quiet)
 }
 
-func (app *application) writeReportIgnored(harness registry.Harness, reason, detail string, quiet bool) error {
+func (app *application) writeReportIgnored(harnessID registry.Harness, reason, detail string, quiet bool) error {
 	if app.outputJSON {
-		return app.writeJSON(map[string]string{statusCommandName: "ignored", "harness": string(harness), "reason": reason})
+		return app.writeJSON(map[string]string{statusCommandName: "ignored", "harness": string(harnessID), "reason": reason})
 	}
 	if quiet {
 		return nil
 	}
-	return app.writef("ignored %s report: %s\n", harness, detail)
+	return app.writef("ignored %s report: %s\n", harnessID, detail)
 }
 
 //nolint:gocognit,cyclop,nestif // report preparation validates independent evidence dimensions in order
@@ -196,7 +196,7 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	if strings.TrimSpace(options.harness) == "" {
 		return preparedReport{}, exitCode(errMissingReportHarness, exitCodeUsage)
 	}
-	harness, err := harnesspkg.Normalize(options.harness)
+	harnessID, err := harnesspkg.Normalize(options.harness)
 	if err != nil {
 		return preparedReport{}, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
 	}
@@ -208,17 +208,17 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	if err != nil {
 		return preparedReport{}, err
 	}
-	if !harnesspkg.PayloadCompatibleWithHarness(harness, defaultsPayload) {
-		return preparedReport{harness: harness, ignored: true}, nil
+	if !harnesspkg.PayloadCompatibleWithHarness(harnessID, defaultsPayload) {
+		return preparedReport{harness: harnessID, ignored: true}, nil
 	}
-	defaults, err := harnesspkg.DefaultsFromPayloadWithError(harness, defaultsPayload)
+	defaults, err := harnesspkg.DefaultsFromPayloadWithError(harnessID, defaultsPayload)
 	if err != nil {
 		return preparedReport{}, fmt.Errorf("derive payload defaults: %w", err)
 	}
 	applyPayloadDefaults(&options, attrs, defaults)
 	applyReportRuntimeDefaults(&options)
 	if !strings.EqualFold(options.evidence, "process") {
-		translated := harnesspkg.LifecycleFor(harness, options.event, attrs)
+		translated := harnesspkg.LifecycleFor(harnessID, options.event, attrs)
 		options.event = translated.Event
 		if options.lifecycle == "" {
 			options.lifecycle = string(translated.Lifecycle)
@@ -255,7 +255,7 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
 	}
-	activity, err = harnesspkg.ActivityFromPayload(harness, options.event, activity, defaultsPayload, observedAt)
+	activity, err = harnesspkg.ActivityFromPayload(harnessID, options.event, activity, defaultsPayload, observedAt)
 	if err != nil {
 		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
 	}
@@ -283,9 +283,9 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 			return preparedReport{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
 		}
 		present := presence != registry.PresenceGone
-		observation = registry.Observation{Harness: harness, At: observedAt, Subject: identity, Evidence: &registry.Sighting{Process: *process, Present: present}}
+		observation = registry.Observation{Harness: harnessID, At: observedAt, Subject: identity, Evidence: &registry.Sighting{Process: *process, Present: present}}
 	} else {
-		observation = nativeReportObservation(harness, identity, options, runtime, attrs, rawPayload, presence, activity, lifecycle, observedAt)
+		observation = nativeReportObservation(harnessID, identity, options, runtime, attrs, rawPayload, presence, activity, lifecycle, observedAt)
 		if sequenceSet {
 			observation.Report().Reporter.Sequence = &sequence
 		}
@@ -317,11 +317,11 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 		}
 		observation.Report().DetailObservedAt = &detailAt
 	}
-	return preparedReport{harness: harness, observation: observation}, nil
+	return preparedReport{harness: harnessID, observation: observation}, nil
 }
 
 func nativeReportObservation(
-	harness registry.Harness,
+	harnessID registry.Harness,
 	identity registry.ObservationIdentity,
 	options reportOptions,
 	runtime reportRuntimeContext,
@@ -332,13 +332,13 @@ func nativeReportObservation(
 	lifecycle registry.NativeLifecycle,
 	observedAt time.Time,
 ) registry.Observation {
-	observation := registry.Observation{Harness: harness, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: options.reporter, Version: options.reporterVersion, MultiSession: options.multiSession}, Event: options.event, Process: reportProcessIdentity(harness, runtime.processes), Attributes: attributes, Payload: rawPayload, Detail: nil}}
+	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: options.reporter, Version: options.reporterVersion, MultiSession: options.multiSession}, Event: options.event, Process: reportProcessIdentity(harnessID, runtime.processes), Attributes: attributes, Payload: rawPayload, Detail: nil}}
 	if lifecycle != "" {
 		observation.Report().Lifecycle = &lifecycle
 	}
 	if !runtime.tmux.Empty() {
-		tmux := runtime.tmux
-		observation.SetLocation(&tmux)
+		location := runtime.tmux
+		observation.SetLocation(&location)
 	}
 	if !runtime.multiplexer.Empty() {
 		multiplexer := runtime.multiplexer
@@ -468,9 +468,9 @@ func reportProcessAncestors(ctx context.Context, pid int) []processinfo.Process 
 	return processes
 }
 
-func reportProcessIdentity(harness registry.Harness, processes []processinfo.Process) *registry.ProcessIdentity {
+func reportProcessIdentity(harnessID registry.Harness, processes []processinfo.Process) *registry.ProcessIdentity {
 	for _, process := range processes {
-		if !reportProcessMatchesHarness(process, harness) {
+		if !reportProcessMatchesHarness(process, harnessID) {
 			continue
 		}
 		return &registry.ProcessIdentity{
@@ -488,12 +488,12 @@ func reportProcessIdentity(harness registry.Harness, processes []processinfo.Pro
 }
 
 func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
-	if harness, ok := harnesspkg.FromCommand(process.Executable); ok {
-		return harness == expected
+	if harnessID, ok := harnesspkg.FromCommand(process.Executable); ok {
+		return harnessID == expected
 	}
 	for _, arg := range process.Args[:min(reportProcessArgumentPrefixCount, len(process.Args))] {
-		if harness, ok := harnesspkg.FromCommand(arg); ok {
-			return harness == expected
+		if harnessID, ok := harnesspkg.FromCommand(arg); ok {
+			return harnessID == expected
 		}
 	}
 	return false

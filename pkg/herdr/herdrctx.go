@@ -414,20 +414,20 @@ func parseProcessInfo(output string) ([]mux.ProcessRef, int, error) {
 		if item.PID <= 0 {
 			continue
 		}
-		command := cmp.Or(item.Cmdline, item.Command, item.Name)
-		if command == "" {
+		commandLine := cmp.Or(item.Cmdline, item.Command, item.Name)
+		if commandLine == "" {
 			argv := item.Argv
 			if len(argv) == 0 {
 				argv = item.Args
 			}
 			if len(argv) > 0 {
-				command = strings.Join(argv, " ")
+				commandLine = strings.Join(argv, " ")
 			}
 		}
 		refs = append(refs, mux.ProcessRef{
 			PID:            item.PID,
 			ProcessGroupID: processGroupID,
-			Command:        command,
+			Command:        commandLine,
 			CWD:            item.CWD,
 		})
 	}

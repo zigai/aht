@@ -1095,12 +1095,12 @@ func (app *application) writeSessionDetails(session registry.Session) error {
 
 func sortListSessions(ss []registry.Session, o listOptions) error {
 	key := normalizeListSort(o.sortBy)
-	cmp, e := listSortLess(key)
+	compare, e := listSortLess(key)
 	if e != nil {
 		return e
 	}
 	sort.SliceStable(ss, func(i, j int) bool {
-		v := cmp(ss[i], ss[j])
+		v := compare(ss[i], ss[j])
 		if o.desc {
 			return v > 0
 		}

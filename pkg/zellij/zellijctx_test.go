@@ -20,9 +20,9 @@ var (
 
 func TestCurrentWithEnvNormalizesTerminalPaneID(t *testing.T) {
 	t.Parallel()
-	context := zellij.CurrentWithEnv(zellij.Env{SessionName: "work", PaneID: "7"})
-	if context.Kind != registry.MultiplexerZellij || context.SessionName != "work" || context.PaneID != "terminal_7" {
-		t.Fatalf("CurrentWithEnv() = %#v", context)
+	location := zellij.CurrentWithEnv(zellij.Env{SessionName: "work", PaneID: "7"})
+	if location.Kind != registry.MultiplexerZellij || location.SessionName != "work" || location.PaneID != "terminal_7" {
+		t.Fatalf("CurrentWithEnv() = %#v", location)
 	}
 	if got := zellij.CurrentWithEnv(zellij.Env{SessionName: "work"}); !got.Empty() {
 		t.Fatalf("incomplete environment produced context: %#v", got)
