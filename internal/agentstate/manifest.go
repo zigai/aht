@@ -48,19 +48,20 @@ type Manifest struct {
 }
 
 type Rule struct {
-	ID            string   `json:"id"                        toml:"id"`
-	State         string   `json:"state"                     toml:"state"`
-	Priority      int      `json:"priority"                  toml:"priority"`
-	Region        string   `json:"region"                    toml:"region"`
-	CaseSensitive bool     `json:"case_sensitive"            toml:"case_sensitive"`
-	All           []string `json:"all,omitempty"             toml:"all"`
-	Any           []string `json:"any,omitempty"             toml:"any"`
-	None          []string `json:"none,omitempty"            toml:"none"`
-	RegexAll      []string `json:"regex_all,omitempty"       toml:"regex_all"`
-	RegexAny      []string `json:"regex_any,omitempty"       toml:"regex_any"`
-	RegexNone     []string `json:"regex_none,omitempty"      toml:"regex_none"`
-	TitleAny      []string `json:"title_any,omitempty"       toml:"title_any"`
-	TitleRegexAny []string `json:"title_regex_any,omitempty" toml:"title_regex_any"`
+	Detail        registry.ActivityDetail `json:"detail,omitempty"          toml:"detail"`
+	ID            string                  `json:"id"                        toml:"id"`
+	State         string                  `json:"state"                     toml:"state"`
+	Priority      int                     `json:"priority"                  toml:"priority"`
+	Region        string                  `json:"region"                    toml:"region"`
+	CaseSensitive bool                    `json:"case_sensitive"            toml:"case_sensitive"`
+	All           []string                `json:"all,omitempty"             toml:"all"`
+	Any           []string                `json:"any,omitempty"             toml:"any"`
+	None          []string                `json:"none,omitempty"            toml:"none"`
+	RegexAll      []string                `json:"regex_all,omitempty"       toml:"regex_all"`
+	RegexAny      []string                `json:"regex_any,omitempty"       toml:"regex_any"`
+	RegexNone     []string                `json:"regex_none,omitempty"      toml:"regex_none"`
+	TitleAny      []string                `json:"title_any,omitempty"       toml:"title_any"`
+	TitleRegexAny []string                `json:"title_regex_any,omitempty" toml:"title_regex_any"`
 
 	regexAllCompiled      []*regexp.Regexp
 	regexAnyCompiled      []*regexp.Regexp
@@ -339,6 +340,9 @@ func (rule Rule) validate() error {
 	activity, err := registry.NormalizeActivity(rule.State)
 	if err != nil || activity == registry.ActivityUnknown || activity == "" {
 		return fmt.Errorf("%w: rule %q has unsupported state %q", errManifestInvalid, rule.ID, rule.State)
+	}
+	if rule.Detail != "" && !rule.Detail.ValidFor(activity) {
+		return fmt.Errorf("%w: rule %q has invalid activity detail", errManifestInvalid, rule.ID)
 	}
 	if _, err := selectRegion(rule.Region, nil); err != nil {
 		return fmt.Errorf("%w: rule %q: %w", errManifestInvalid, rule.ID, err)

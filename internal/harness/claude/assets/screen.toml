@@ -4,6 +4,7 @@ agent = "claude"
 [[rules]]
 id = "permission_prompt"
 state = "waiting"
+detail = "permission"
 priority = 300
 region = "bottom:30"
 any = ["Do you want to proceed?", "Allow this action?", "Yes, and don't ask again", "Esc to cancel"]
@@ -11,6 +12,7 @@ any = ["Do you want to proceed?", "Allow this action?", "Yes, and don't ask agai
 [[rules]]
 id = "question_prompt"
 state = "waiting"
+detail = "question"
 priority = 250
 region = "bottom:30"
 any = ["Claude has a question", "How should Claude proceed?", "Select an option"]
@@ -32,8 +34,18 @@ any = ["? for shortcuts", "Claude Code", "shift+tab to cycle"]
 none = ["esc to interrupt"]
 
 [[rules]]
+id = "usage_limit_prompt"
+state = "failed"
+detail = "usage_limit"
+priority = 360
+region = "bottom:30"
+any = ["Rate limit exceeded", "Credit balance too low"]
+none = ["esc to interrupt"]
+
+[[rules]]
 id = "error_prompt"
 state = "failed"
+detail = "general"
 priority = 350
 region = "bottom:30"
 any = ["API Error", "Rate limit exceeded", "Failed to run", "Request failed", "Credit balance too low"]

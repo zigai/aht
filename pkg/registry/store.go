@@ -12,8 +12,10 @@ import (
 	"time"
 )
 
+const StoreSchemaVersion = 3
+
 const (
-	storeSchemaVersion      = 3
+	storeSchemaVersion      = StoreSchemaVersion
 	maxObservedAtFutureSkew = 5 * time.Minute
 	maxSnapshotBytes        = 64 << 20
 
@@ -107,6 +109,7 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 		return Session{}, ErrSessionNotFound
 	}
 	session.SchemaVersion = storeSchemaVersion
+	session.resolveDetail(s.reducer.rules.Policy(session.Harness), s.now().UTC())
 	return session, nil
 }
 

@@ -238,13 +238,16 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 		SessionPath: defaults.SessionPath,
 		CWD:         defaults.CWD,
 		Attributes:  defaults.Attributes,
-	}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Process: nil, Location: nil, Reporter: registry.Reporter{Sequence: nil, Integration: agyHookSource, Version: integrationVersion, MultiSession: false}, Event: invocation.Event, Activity: activity, Listing: &registry.Listing{
-		ResumeCommand: agyResumeCommand(defaults.SessionID),
-		CWD:           defaults.CWD,
-		ProjectRoot:   defaults.ProjectRoot,
-		ProcessPID:    0,
-		Current:       false,
-	}, Attributes: agyHookAttributes(defaults.Attributes, invocation.Event), Payload: invocation.RawPayload}}, true
+	}, Evidence: &registry.Report{
+		DetailObservedAt: nil,
+		Lifecycle:        nil, Claim: nil, Process: nil, Location: nil, Reporter: registry.Reporter{Sequence: nil, Integration: agyHookSource, Version: integrationVersion, MultiSession: false}, Event: invocation.Event, Activity: activity, Listing: &registry.Listing{
+			ResumeCommand: agyResumeCommand(defaults.SessionID),
+			CWD:           defaults.CWD,
+			ProjectRoot:   defaults.ProjectRoot,
+			ProcessPID:    0,
+			Current:       false,
+		}, Attributes: agyHookAttributes(defaults.Attributes, invocation.Event), Payload: invocation.RawPayload, Detail: nil,
+	}}, true
 }
 
 func agyResumeCommand(sessionID string) []string {

@@ -111,7 +111,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 		`on("session_stop"`,
 		`on("session_shutdown"`,
 		`export default function`,
-		"AHT_INTEGRATION_VERSION=17",
+		"AHT_INTEGRATION_VERSION=18",
 	}, "oh-my-pi extension")
 	if strings.Contains(result.Snippet, `on("input"`) {
 		t.Fatalf("OMP extension must not treat local interactive input as agent activity: %q", result.Snippet)
@@ -204,7 +204,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	}
 	requireTextContainsAll(t, result.Snippet, []string{
 		"AHT_INTEGRATION_ID=opencode",
-		"AHT_INTEGRATION_VERSION=12",
+		"AHT_INTEGRATION_VERSION=13",
 		`export default { id: "aht-state", setup, server };`,
 		`async function server(ctx: V1PluginContext)`,
 		`async function setup(ctx: V2PluginContext)`,
@@ -215,6 +215,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 		`"session.deleted"`,
 		`state === "gone" ? "--presence"`,
 		`"--observed-at", observedAt`,
+		`client.session.get({ path: { id: currentSessionId } })`,
 	}, "opencode plugin")
 }
 
@@ -299,7 +300,7 @@ func TestInstallKiloWritesPlugin(t *testing.T) {
 		`"permission.asked"`,
 		`"session.deleted"`,
 		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=9"`,
+		`"AHT_INTEGRATION_VERSION=10"`,
 		`"--observed-at", observedAt`,
 		`"kilo_status"`,
 		`"--reporter", source`,
@@ -388,9 +389,10 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 		`amp.on("tool.call"`,
 		`amp.on("agent.end"`,
 		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=3"`,
+		`"AHT_INTEGRATION_VERSION=4"`,
 		`"--observed-at", observedAt`,
 		`"report", "amp"`,
+		"amp.threads.get(threadId as ThreadID).title.get()",
 		`"--reporter", source`,
 	}, "amp snippet")
 }

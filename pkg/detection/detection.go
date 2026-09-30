@@ -46,13 +46,14 @@ type Inspection struct {
 
 // Decision records the first matching rule in manifest priority order.
 type Decision struct {
-	Activity        registry.Activity `json:"activity"`
-	Reason          string            `json:"reason"`
-	RuleID          string            `json:"rule_id,omitempty"`
-	ManifestSource  string            `json:"manifest_source"`
-	ManifestVersion int               `json:"manifest_version"`
-	Warning         string            `json:"warning,omitempty"`
-	Evidence        []RuleEvidence    `json:"evidence"`
+	Activity        registry.Activity       `json:"activity"`
+	Detail          registry.ActivityDetail `json:"detail,omitempty"`
+	Reason          string                  `json:"reason"`
+	RuleID          string                  `json:"rule_id,omitempty"`
+	ManifestSource  string                  `json:"manifest_source"`
+	ManifestVersion int                     `json:"manifest_version"`
+	Warning         string                  `json:"warning,omitempty"`
+	Evidence        []RuleEvidence          `json:"evidence"`
 }
 
 // RuleEvidence records a rule considered before or at the winning rule.
@@ -122,7 +123,7 @@ func inspectionFromRaw(raw agentstate.Inspection) Inspection {
 		Harness: raw.Harness, ManifestSource: raw.ManifestSource, ManifestVersion: raw.ManifestVersion,
 		Warning: raw.Warning, LinesEvaluated: raw.LinesEvaluated, Title: raw.Title,
 		Decision: Decision{
-			Activity: decision.Activity, Reason: decision.Reason, RuleID: decision.RuleID,
+			Activity: decision.Activity, Detail: decision.Detail, Reason: decision.Reason, RuleID: decision.RuleID,
 			ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion,
 			Warning: decision.Warning, Evidence: make([]RuleEvidence, 0, len(decision.Evidence)),
 		},

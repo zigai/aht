@@ -64,11 +64,11 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 	}{
 		{registry.Harness("codex"), "› implement this\nContext 63% used", registry.ActivityIdle, "input_prompt"},
 		{registry.Harness("codex"), "Would you like to run the following command?", registry.ActivityWaiting, "permission_prompt"},
-		{registry.Harness("codex"), "API error: Rate limit reached", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("codex"), "API error: Rate limit reached", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("codex"), "Operation cancelled by user", registry.ActivityInterrupted, "interrupted_prompt"}, //nolint:misspell // Fixture mirrors Codex output.
 		{registry.Harness("claude"), "Thinking… esc to interrupt", registry.ActivityRunning, "working_interruptible"},
 		{registry.Harness("claude"), "❯ \n? for shortcuts", registry.ActivityIdle, "input_prompt"},
-		{registry.Harness("claude"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("claude"), "API Error: Rate limit exceeded", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("claude"), "Claude was interrupted", registry.ActivityInterrupted, "interrupted_prompt"},
 		{registry.Harness("opencode"), "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
 		{registry.Harness("opencode"), "Ask anything", registry.ActivityIdle, "input_prompt"},
@@ -76,12 +76,12 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 		{registry.Harness("opencode"), "Stopped by user", registry.ActivityInterrupted, "interrupted_prompt"},
 		{registry.Harness("pi"), "Working · esc to interrupt", registry.ActivityRunning, "working_interruptible"},
 		{registry.Harness("pi"), "Type a message · Enter to send", registry.ActivityIdle, "input_prompt"},
-		{registry.Harness("pi"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("pi"), "API Error: Rate limit exceeded", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("pi"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
 		{registry.Harness("omp"), " ⠋ Working... (40s)", registry.ActivityRunning, "custom_working"},
 		{registry.Harness("omp"), " ~/Projects/sesh · Codex · GPT-5.6 Sol · medium 7.1%/1M" + strings.Repeat("\n ", 20), registry.ActivityIdle, "custom_input_prompt"},
 		{registry.Harness("omp"), "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
-		{registry.Harness("omp"), "API Error: Rate limit exceeded", registry.ActivityFailed, "error_prompt"},
+		{registry.Harness("omp"), "API Error: Rate limit exceeded", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("omp"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
 	}
 	for _, test := range tests {
@@ -400,8 +400,8 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
 		t.Fatalf("stale integration evaluation = %#v", evaluation)
 	}
-	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityScreen {
-		t.Fatal("Codex must be screen authoritative")
+	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityHook {
+		t.Fatal("Codex native hooks must own activity")
 	}
 }
 

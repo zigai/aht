@@ -3,6 +3,7 @@
 package install
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -161,4 +162,70 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
 		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
 	})
+}
+
+func TestGeneratedWaitingDetailsAndCorrelatedResolution(t *testing.T) {
+	for _, id := range []registry.Harness{registry.Harness("omp"), registry.Harness("opencode"), registry.Harness("kilo")} {
+		t.Run(string(id), func(t *testing.T) {
+			capture := captureBinary(t)
+			t.Setenv("AHT_CAPTURE", capture.path)
+			module := generatedArtifactContent(t, id, "aht-state.ts")
+			driver := "node/plugin-waiting-details.mjs"
+			filename := "plugin.ts"
+			expected := []string{"idle:", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "idle:", "running:", "running:", "failed:", "running:"}
+			if id == registry.Harness("opencode") {
+				t.Setenv("AHT_TEST_QUESTIONS", "1")
+				expected = []string{"idle:", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "idle:", "running:", "waiting:clear", "waiting:question", "running:", "failed:", "running:"}
+			} else {
+				t.Setenv("AHT_TEST_QUESTIONS", "0")
+			}
+			if id == registry.Harness("omp") {
+				driver, filename = "node/omp-waiting-details.mjs", "extension.ts"
+				expected = []string{"idle:", "running:", "waiting:permission", "waiting:clear", "waiting:question", "running:"}
+			}
+			runNodeRuntime(t, filename, module, runtimeScript(t, driver), nil)
+			data, err := os.ReadFile(capture.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var states []string
+			for _, invocation := range parseCapturedInvocations(string(data)) {
+				activity, detail := "", ""
+				for i := 0; i+1 < len(invocation); i++ {
+					switch invocation[i] {
+					case "--activity":
+						activity = invocation[i+1]
+					case "--detail":
+						detail = invocation[i+1]
+					}
+				}
+				if activity != "" {
+					states = append(states, activity+":"+detail)
+				}
+			}
+			if strings.Join(states, ",") != strings.Join(expected, ",") {
+				t.Fatalf("generated states = %v, want %v", states, expected)
+			}
+		})
+	}
+}
+
+func TestAmpTitleReportsMetadataWithoutReplacingWaitingEvidence(t *testing.T) {
+	capture := captureBinary(t)
+	t.Setenv("AHT_CAPTURE", capture.path)
+	module := generatedArtifactContent(t, registry.Harness("amp"), "aht-state.ts")
+	runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/amp-title-metadata.mjs"), nil)
+	data, err := os.ReadFile(capture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocations := parseCapturedInvocations(string(data))
+	if len(invocations) != 3 || !matchInvocation(invocations[1], []string{"--activity", "waiting"}) || !matchInvocation(invocations[2], []string{"--event", "thread.title"}) {
+		t.Fatalf("Amp reports = %v", invocations)
+	}
+	for _, arg := range invocations[2] {
+		if arg == "--activity" || arg == "--presence" || arg == "--detail" {
+			t.Fatal("title metadata replaced state evidence")
+		}
+	}
 }

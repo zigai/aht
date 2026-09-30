@@ -65,6 +65,7 @@ func cloneRegistrySnapshot(source snapshot) snapshot {
 
 func cloneSessionValue(source Session) Session {
 	cloned := source
+	cloned.Detail = clonePtr(source.Detail)
 	cloned.setActivity(clonePtr(source.Activity()))
 	cloned.ResumeCommand = append([]string(nil), source.ResumeCommand...)
 	if source.Process != nil {
@@ -84,6 +85,7 @@ func cloneObservations(source Observations) Observations {
 	var cloned Observations
 	if source.Native != nil {
 		native := *source.Native
+		native.Detail = clonePtr(source.Native.Detail)
 		native.Lifecycle = clonePtr(source.Native.Lifecycle)
 		native.Presence = clonePtr(source.Native.Presence)
 		native.Activity = clonePtr(source.Native.Activity)

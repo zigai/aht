@@ -112,6 +112,7 @@ func newSession(id string, harness Harness, now time.Time) Session {
 		PresenceChangedAt: time.Time{},
 		ActivityChangedAt: time.Time{},
 		Liveness:          NewLiveness(PresenceUnknown, ActivityValue(&activity), nil),
+		Detail:            nil,
 	}
 }
 
@@ -141,6 +142,7 @@ func (r Reducer) applyObservation(session *Session, observation Observation, at,
 	}
 	machine := lifecycleMachine{session: session}
 	machine.apply(observation, r.rules.Policy(session.Harness), at)
+	session.resolveDetail(r.rules.Policy(session.Harness), receivedAt)
 	session.SchemaVersion = storeSchemaVersion
 	session.UpdatedAt = maxTime(session.UpdatedAt, receivedAt)
 	if session.Presence() != previousPresence {

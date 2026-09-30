@@ -4,6 +4,7 @@ agent = "codex"
 [[rules]]
 id = "permission_prompt"
 state = "waiting"
+detail = "permission"
 priority = 300
 region = "bottom:30"
 any = ["Would you like to run the following command?", "Do you want to continue?", "Press enter to confirm or esc to cancel", "Allow command"]
@@ -25,8 +26,18 @@ regex_any = ["context left", "context [0-9]{1,3}% used", "[?] for shortcuts", "t
 none = ["esc to interrupt"]
 
 [[rules]]
+id = "usage_limit_prompt"
+state = "failed"
+detail = "usage_limit"
+priority = 360
+region = "bottom:30"
+any = ["Rate limit reached"]
+none = ["esc to interrupt"]
+
+[[rules]]
 id = "error_prompt"
 state = "failed"
+detail = "general"
 priority = 350
 region = "bottom:30"
 any = ["API error", "Failed to execute", "Rate limit reached", "Authentication failed", "Context length exceeded", "Request failed", "Automatic reconnect could not restore this session", "app-server session could not be restored"]

@@ -19,6 +19,8 @@ type Rules interface {
 }
 
 type Policy struct {
+	DetailReporters      []string
+	Details              DetailCapabilities
 	ExclusiveProcess     bool
 	Authority            Authority
 	ScreenFallback       bool

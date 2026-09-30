@@ -192,7 +192,7 @@ func TestOmpApprovalReportsWaitingState(t *testing.T) {
 	t.Setenv("AHT_CAPTURE", capture.path)
 	module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 	runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-approval.mjs"), nil)
-	requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "waiting", "--session-id", "approval-session", "--event", "tool_approval_requested", "--attribute", "omp_approval_reason=Run command?", "--attribute", "agent_state_message=Run command?")
+	requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "waiting", "--detail", "permission", "--session-id", "approval-session", "--event", "tool_approval_requested", "--attribute", "omp_approval_reason=Run command?", "--attribute", "agent_state_message=Run command?")
 }
 
 func TestExtensionsReportNativeInteractionMode(t *testing.T) {

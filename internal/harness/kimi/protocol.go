@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -36,11 +37,14 @@ var (
 
 // Update is activity evidence from a native Wire message, not client intent.
 type Update struct {
+	Detail   *registry.DetailEvidence
 	Event    string
 	Activity registry.Activity
 }
 
 type pendingRequest struct {
+	observedAt time.Time
+	detail     registry.ActivityDetail
 	tool       string
 	background bool
 }
@@ -140,18 +144,18 @@ func (p *Protocol) ObserveHost(line []byte) (Update, bool, error) {
 		return p.response(msg)
 	}
 	if msg.Method != "event" && msg.Method != "request" {
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 	if p.streamMethod == "replay" {
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 	var event wireEnvelope
 	if json.Unmarshal(msg.Params, &event) != nil || event.Type == "" {
-		return Update{Event: "", Activity: ""}, false, errInvalidEventEnvelope
+		return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidEventEnvelope
 	}
 	if msg.Method == "request" {
 		if event.Type != "ApprovalRequest" && event.Type != "QuestionRequest" {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		var request struct {
 			ID     string `json:"id"`
@@ -161,17 +165,22 @@ func (p *Protocol) ObserveHost(line []byte) (Update, bool, error) {
 		if json.Unmarshal(event.Payload, &request) != nil || !validID(msg.ID) ||
 			!validID(request.ID) || !validID(request.Tool) ||
 			(request.Source != "" && request.Source != "foreground_turn" && request.Source != "background_agent") {
-			return Update{Event: "", Activity: ""}, false, errInvalidWaitingRequest
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidWaitingRequest
 		}
-		pending := pendingRequest{tool: request.Tool, background: request.Source == "background_agent"}
+		detail := registry.DetailPermission
+		if event.Type == "QuestionRequest" {
+			detail = registry.DetailQuestion
+		}
+		pending := pendingRequest{observedAt: time.Now().UTC(), detail: detail, tool: request.Tool, background: request.Source == "background_agent"}
 		if previous, exists := p.pending[request.ID]; exists {
+			pending.observedAt = previous.observedAt
 			if previous != pending {
-				return Update{Event: "", Activity: ""}, false, errConflictingWaitingRequest
+				return Update{Event: "", Activity: "", Detail: nil}, false, errConflictingWaitingRequest
 			}
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		if len(p.pending) >= maxProtocolEntries {
-			return Update{Event: "", Activity: ""}, false, errTooManyWaitingRequests
+			return Update{Event: "", Activity: "", Detail: nil}, false, errTooManyWaitingRequests
 		}
 		if p.pending == nil {
 			p.pending = make(map[string]pendingRequest)
@@ -186,22 +195,22 @@ func (p *Protocol) ObserveHost(line []byte) (Update, bool, error) {
 func (p *Protocol) response(msg rpcMessage) (Update, bool, error) {
 	method, tracked := p.operations[msg.ID]
 	if !tracked {
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 	if len(msg.Error) != 0 && string(msg.Error) != "null" {
 		var rpcError struct {
 			Code *int `json:"code"`
 		}
 		if json.Unmarshal(msg.Error, &rpcError) != nil || rpcError.Code == nil || len(msg.Result) != 0 {
-			return Update{Event: "", Activity: ""}, false, errInvalidOperationError
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidOperationError
 		}
 		delete(p.operations, msg.ID)
 		if msg.ID != p.streamID {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		p.streamID, p.streamMethod = "", ""
 		if method == "replay" || *rpcError.Code == -32000 || *rpcError.Code == -32602 {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		p.clearForeground()
 		return p.transition("prompt.error", registry.ActivityFailed)
@@ -212,15 +221,15 @@ func (p *Protocol) response(msg rpcMessage) (Update, bool, error) {
 	if json.Unmarshal(msg.Result, &result) != nil ||
 		//nolint:misspell // Kimi Wire protocol specifies "cancelled" with double-l; tolerate both spellings
 		(result.Status != "finished" && result.Status != "cancelled" && result.Status != "canceled" && (method != "prompt" || result.Status != "max_steps_reached")) {
-		return Update{Event: "", Activity: ""}, false, errInvalidOperationResult
+		return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidOperationResult
 	}
 	delete(p.operations, msg.ID)
 	if msg.ID != p.streamID {
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 	p.streamID, p.streamMethod = "", ""
 	if method == "replay" {
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 	p.clearForeground()
 	if result.Status != "finished" {
@@ -232,7 +241,7 @@ func (p *Protocol) response(msg rpcMessage) (Update, bool, error) {
 //nolint:gocognit,cyclop // event routes native wire events and lifecycle transitions
 func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bool, error) {
 	if depth > maxSubagentNesting {
-		return Update{Event: "", Activity: ""}, false, errSubagentNestingLimit
+		return Update{Event: "", Activity: "", Detail: nil}, false, errSubagentNestingLimit
 	}
 	switch event.Type {
 	case "SubagentEvent":
@@ -240,7 +249,7 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 			Event wireEnvelope `json:"event"`
 		}
 		if json.Unmarshal(event.Payload, &child) != nil || child.Event.Type == "" {
-			return Update{Event: "", Activity: ""}, false, errInvalidSubagentEvent
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidSubagentEvent
 		}
 		return p.event(child.Event, true, depth+1)
 	case "ApprovalResponse":
@@ -250,10 +259,10 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 		}
 		if json.Unmarshal(event.Payload, &response) != nil || !validID(response.ID) ||
 			(response.Response != "approve" && response.Response != "approve_for_session" && response.Response != "reject") {
-			return Update{Event: "", Activity: ""}, false, errInvalidApprovalResponse
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidApprovalResponse
 		}
 		if _, exists := p.pending[response.ID]; !exists {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		delete(p.pending, response.ID)
 		return p.transition(event.Type, registry.ActivityRunning)
@@ -262,7 +271,7 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 			Tool string `json:"tool_call_id"`
 		}
 		if json.Unmarshal(event.Payload, &result) != nil || !validID(result.Tool) {
-			return Update{Event: "", Activity: ""}, false, errInvalidToolResult
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidToolResult
 		}
 		resolved := false
 		for id, request := range p.pending {
@@ -272,15 +281,15 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 			}
 		}
 		if !resolved {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		return p.transition(event.Type, registry.ActivityRunning)
 	case "TurnEnd", "StepInterrupted", "TurnBegin", "StepBegin", "CompactionBegin", "CompactionEnd", "StepRetry":
 		if len(event.Payload) == 0 || event.Payload[0] != '{' {
-			return Update{Event: "", Activity: ""}, false, errInvalidLifecyclePayload
+			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidLifecyclePayload
 		}
 		if nested {
-			return Update{Event: "", Activity: ""}, false, nil
+			return Update{Event: "", Activity: "", Detail: nil}, false, nil
 		}
 		switch event.Type {
 		case "TurnEnd":
@@ -293,7 +302,7 @@ func (p *Protocol) event(event wireEnvelope, nested bool, depth int) (Update, bo
 			return p.transition(event.Type, registry.ActivityRunning)
 		}
 	default:
-		return Update{Event: "", Activity: ""}, false, nil
+		return Update{Event: "", Activity: "", Detail: nil}, false, nil
 	}
 }
 
@@ -306,11 +315,26 @@ func (p *Protocol) clearForeground() {
 }
 
 func (p *Protocol) transition(event string, activity registry.Activity) (Update, bool, error) {
+	var detail *registry.DetailEvidence
 	if len(p.pending) != 0 {
 		activity = registry.ActivityWaiting
+		value := registry.ActivityDetail("")
+		var observedAt time.Time
+		for _, pending := range p.pending {
+			if observedAt.IsZero() || pending.observedAt.Before(observedAt) {
+				observedAt = pending.observedAt
+			}
+			if value == "" {
+				value = pending.detail
+			} else if value != pending.detail {
+				value = ""
+				break
+			}
+		}
+		detail = &registry.DetailEvidence{Value: value, ObservedAt: observedAt}
 	}
 	// Native hooks can publish between Wire frames. Refresh state-bearing
 	// evidence even when the last Wire activity matches, so a foreground Stop
 	// hook cannot hide an unresolved background approval.
-	return Update{Event: event, Activity: activity}, true, nil
+	return Update{Event: event, Activity: activity, Detail: detail}, true, nil
 }

@@ -1,13 +1,22 @@
 package install
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/zigai/aht/v2/internal/harness"
+)
 
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
-	current := `{"command":"aht report codex --reporter-version 11 --reporter codex-hook"}`
+	current := fmt.Sprintf(`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`, harness.IntegrationVersion)
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current source metadata classified as %q", status)
+	}
+	previous := fmt.Sprintf(`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`, harness.IntegrationVersion-1)
+	if status := classifyArtifactContent(previous); status != ArtifactStale {
+		t.Fatalf("previous source metadata classified as %q", status)
 	}
 
 	stale := `{"command":"aht report codex --attribute aht_integration_version=7 --attribute aht_integration=codex-hook"}`

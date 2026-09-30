@@ -64,6 +64,8 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 		"PostToolUseFailure",
 		"PermissionRequest",
 		"PermissionDenied",
+		"Elicitation",
+		"ElicitationResult",
 		"Notification",
 		"PreCompact",
 		"PostCompact",

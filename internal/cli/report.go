@@ -28,35 +28,37 @@ import (
 )
 
 type reportOptions struct {
-	reporter        string
-	reporterVersion int
-	multiSession    bool
-	harness         string
-	presence        string
-	activity        string
-	lifecycle       string
-	sessionID       string
-	sessionPath     string
-	cwd             string
-	cwdAuto         bool
-	projectRoot     string
-	projectRootAuto bool
-	pid             int
-	ppid            int
-	processGroupID  int
-	startIdentity   string
-	executable      string
-	tty             string
-	event           string
-	observedAt      string
-	sequence        string
-	attributes      []string
-	rawStdin        bool
-	rawDefaultsOnly bool
-	noTmux          bool
-	quiet           bool
-	resumeCommand   []string
-	evidence        string
+	detailObservedAt string
+	detail           string
+	reporter         string
+	reporterVersion  int
+	multiSession     bool
+	harness          string
+	presence         string
+	activity         string
+	lifecycle        string
+	sessionID        string
+	sessionPath      string
+	cwd              string
+	cwdAuto          bool
+	projectRoot      string
+	projectRootAuto  bool
+	pid              int
+	ppid             int
+	processGroupID   int
+	startIdentity    string
+	executable       string
+	tty              string
+	event            string
+	observedAt       string
+	sequence         string
+	attributes       []string
+	rawStdin         bool
+	rawDefaultsOnly  bool
+	noTmux           bool
+	quiet            bool
+	resumeCommand    []string
+	evidence         string
 }
 
 type preparedReport struct {
@@ -103,6 +105,8 @@ func (app *application) newReportCommand() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&options.detailObservedAt, "detail-observed-at", "", "original detail evidence RFC3339 timestamp")
+	f.StringVar(&options.detail, "detail", "", "activity detail: permission, question, general, usage_limit, or clear")
 	f.StringVar(&options.reporter, "reporter", options.reporter, "reporting integration identity")
 	f.IntVar(&options.reporterVersion, "reporter-version", options.reporterVersion, "reporting integration version")
 	f.BoolVar(&options.multiSession, "multi-session", options.multiSession, "reporter supports multiple sessions per process")
@@ -290,6 +294,29 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 		observation.SetListing(&registry.Listing{ResumeCommand: append([]string(nil), options.resumeCommand...), CWD: options.cwd, ProjectRoot: options.projectRoot})
 	}
 	observation = harnesspkg.PrepareObservation(observation)
+	if options.detail != "" {
+		if observation.Kind() != "report" {
+			return preparedReport{}, exitCode(fmt.Errorf("%w: detail requires a native report", registry.ErrInvalidObservation), exitCodeUsage)
+		}
+		detail := registry.ActivityDetail(options.detail)
+		if options.detail == "clear" {
+			detail = ""
+		}
+		if detail != "" && !detail.ValidFor(activity) {
+			return preparedReport{}, exitCode(fmt.Errorf("%w: detail does not match activity", registry.ErrInvalidObservation), exitCodeUsage)
+		}
+		observation.Report().Detail = &detail
+	}
+	if options.detailObservedAt != "" {
+		detailAt, err := parseObservedAt(options.detailObservedAt)
+		if err != nil || detailAt.IsZero() || detailAt.After(observedAt) {
+			return preparedReport{}, exitCode(fmt.Errorf("%w: invalid detail timestamp", registry.ErrInvalidObservation), exitCodeUsage)
+		}
+		if observation.Kind() != "report" || observation.Report().Detail == nil || *observation.Report().Detail == "" {
+			return preparedReport{}, exitCode(fmt.Errorf("%w: detail timestamp requires specific detail", registry.ErrInvalidObservation), exitCodeUsage)
+		}
+		observation.Report().DetailObservedAt = &detailAt
+	}
 	return preparedReport{harness: harness, observation: observation}, nil
 }
 
@@ -305,7 +332,7 @@ func nativeReportObservation(
 	lifecycle registry.NativeLifecycle,
 	observedAt time.Time,
 ) registry.Observation {
-	observation := registry.Observation{Harness: harness, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: options.reporter, Version: options.reporterVersion, MultiSession: options.multiSession}, Event: options.event, Process: reportProcessIdentity(harness, runtime.processes), Attributes: attributes, Payload: rawPayload}}
+	observation := registry.Observation{Harness: harness, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: options.reporter, Version: options.reporterVersion, MultiSession: options.multiSession}, Event: options.event, Process: reportProcessIdentity(harness, runtime.processes), Attributes: attributes, Payload: rawPayload, Detail: nil}}
 	if lifecycle != "" {
 		observation.Report().Lifecycle = &lifecycle
 	}

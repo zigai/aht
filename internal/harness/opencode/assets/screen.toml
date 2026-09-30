@@ -4,6 +4,7 @@ agent = "opencode"
 [[rules]]
 id = "permission_prompt"
 state = "waiting"
+detail = "permission"
 priority = 300
 region = "bottom:30"
 all = ["permission"]
@@ -12,6 +13,7 @@ any = ["allow", "approve", "deny", "reject"]
 [[rules]]
 id = "question_prompt"
 state = "waiting"
+detail = "question"
 priority = 250
 region = "bottom:30"
 any = ["Question requires input", "Select an option", "Waiting for input"]
@@ -34,6 +36,7 @@ none = ["esc to interrupt", "permission"]
 [[rules]]
 id = "error_prompt"
 state = "failed"
+detail = "general"
 priority = 350
 region = "bottom:30"
 any = ["API error", "Execution error", "Failed to run"]

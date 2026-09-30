@@ -27,6 +27,7 @@ type NativeEvent = {
   readonly status?: string | undefined;
   readonly kind?: string | undefined;
   readonly toolName?: string | undefined;
+  readonly toolCallId?: string | undefined;
   readonly approvalMode?: string | undefined;
   readonly approved?: boolean | undefined;
   readonly interrupted?: boolean | undefined;
@@ -51,7 +52,7 @@ function parseEvent(value: unknown): NativeEvent {
   return {
     type: stringField("type"), reason: stringField("reason"),
     status: stringField("status"), kind: stringField("kind"),
-    toolName: stringField("toolName"), approvalMode: stringField("approvalMode"),
+    toolName: stringField("toolName"), toolCallId: stringField("toolCallId"), approvalMode: stringField("approvalMode"),
     approved: typeof fields.approved === "boolean" ? fields.approved : undefined,
     interrupted: fields.interrupted === true, willContinue: fields.willContinue === true,
     error: typeof error === "string" ? error :
@@ -88,6 +89,8 @@ type SessionRef = {
 };
 type ReportState = {
   readonly activity?: Activity | undefined;
+  readonly detail?: "permission" | "question" | "clear" | undefined;
+  readonly detailObservedAt?: string | undefined;
   readonly presence?: "live" | "gone" | undefined;
   readonly lifecycle?: "start" | "resume" | "end" | undefined;
   readonly message?: string | undefined;
@@ -185,6 +188,8 @@ function report(snapshot: ReportSnapshot | undefined): Promise<void> {
   ];
   if (presence) args.push("--presence", presence);
   if (activity) args.push("--activity", activity);
+  if (snapshot.detail) args.push("--detail", snapshot.detail);
+  if (snapshot.detailObservedAt) args.push("--detail-observed-at", snapshot.detailObservedAt);
   if (lifecycle) args.push("--lifecycle", lifecycle);
   if (snapshot.eventType) {
     args.push("--event", snapshot.eventType);
@@ -246,6 +251,10 @@ export default function (pi: ExtensionAPI) {
   let failureActive = false;
   let failureMessage: string | undefined;
   let blockedCount = 0;
+  const pendingPrompts = new Map<string, { reason: "permission" | "question"; observedAt: string }>();
+  let blockedUncertain = false;
+  let lastDetail: ReportState["detail"];
+  let lastDetailObservedAt: string | undefined;
   let blockedMessage: string | undefined;
   let lastActivity: Activity | undefined;
   let lastMessage: string | undefined;
@@ -286,17 +295,27 @@ export default function (pi: ExtensionAPI) {
   }
 
   function desiredState(): { activity: Activity; message?: string | undefined } {
-    if (blockedCount > 0) return { activity: "waiting", message: blockedMessage };
+    if (blockedCount > 0 || blockedUncertain) return { activity: "waiting", message: blockedMessage };
     if (agentActive || retryHoldActive) return { activity: "running" };
     if (failureActive) return { activity: "failed", message: failureMessage };
     return { activity: "idle" };
   }
 
   function queueState(activity: Activity, message?: string, event?: NativeEvent, force = false): void {
-    if (!force && activity === lastActivity && message === lastMessage) return;
-    const snapshot = captureReport({ activity, message }, currentContext, event);
+    const reasons = new Set(Array.from(pendingPrompts.values(), (value) => value.reason));
+    const detail = activity === "waiting" ? (!blockedUncertain && reasons.size === 1 ? reasons.values().next().value : "clear") : undefined;
+    let detailObservedAt: string | undefined;
+    if (detail && detail !== "clear") {
+      for (const value of pendingPrompts.values()) {
+        if (!detailObservedAt || value.observedAt < detailObservedAt) detailObservedAt = value.observedAt;
+      }
+    }
+    if (!force && activity === lastActivity && message === lastMessage && detail === lastDetail && detailObservedAt === lastDetailObservedAt) return;
+    const snapshot = captureReport({ activity, message, detail, detailObservedAt }, currentContext, event);
     if (!snapshot) return;
     lastActivity = activity;
+    lastDetail = detail;
+    lastDetailObservedAt = detailObservedAt;
     lastMessage = message;
     pendingState = snapshot;
     if (!stateSendInFlight) stateDrain = drainStateQueue().catch(warnReporting);
@@ -336,18 +355,27 @@ export default function (pi: ExtensionAPI) {
     failureActive = false;
     failureMessage = undefined;
     blockedCount = 0;
+    pendingPrompts.clear();
+    blockedUncertain = false;
     blockedMessage = undefined;
   }
 
   function activateBlocked(message?: string, event?: NativeEvent): void {
     clearTimers();
-    blockedCount += 1;
+    const reason = event?.type === "tool_approval_requested" ? "permission" : "question";
+    const id = event?.toolCallId;
+    const key = `${reason}:${id}`;
+    if (!id || id.length > 1024 || pendingPrompts.size >= 1024 && !pendingPrompts.has(key)) blockedUncertain = true;
+    else if (!pendingPrompts.has(key)) pendingPrompts.set(key, { reason, observedAt: new Date().toISOString() });
+    blockedCount = pendingPrompts.size;
     blockedMessage = message;
     publishDesired(event);
   }
 
   function deactivateBlocked(event?: NativeEvent): void {
-    blockedCount = Math.max(0, blockedCount - 1);
+    const reason = event?.type === "tool_approval_resolved" ? "permission" : "question";
+    if (event?.toolCallId) pendingPrompts.delete(`${reason}:${event.toolCallId}`);
+    blockedCount = pendingPrompts.size;
     if (blockedCount === 0) blockedMessage = undefined;
     publishDesired(event);
   }

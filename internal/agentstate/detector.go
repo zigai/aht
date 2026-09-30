@@ -24,13 +24,14 @@ type RuleEvidence struct {
 }
 
 type Decision struct {
-	Activity        registry.Activity `json:"activity"`
-	Reason          string            `json:"reason"`
-	RuleID          string            `json:"rule_id,omitempty"`
-	ManifestSource  string            `json:"manifest_source"`
-	ManifestVersion int               `json:"manifest_version"`
-	Warning         string            `json:"warning,omitempty"`
-	Evidence        []RuleEvidence    `json:"evidence"`
+	Activity        registry.Activity       `json:"activity"`
+	Detail          registry.ActivityDetail `json:"detail,omitempty"`
+	Reason          string                  `json:"reason"`
+	RuleID          string                  `json:"rule_id,omitempty"`
+	ManifestSource  string                  `json:"manifest_source"`
+	ManifestVersion int                     `json:"manifest_version"`
+	Warning         string                  `json:"warning,omitempty"`
+	Evidence        []RuleEvidence          `json:"evidence"`
 }
 
 type MatcherInspection struct {
@@ -80,6 +81,7 @@ func (manifest *Manifest) Evaluate(snapshot Snapshot) Decision {
 		activity, _ := registry.NormalizeActivity(rule.State)
 		decision.Activity = activity
 		decision.Reason = "manifest_rule"
+		decision.Detail = rule.Detail
 		decision.RuleID = rule.ID
 		return decision
 	}
@@ -100,6 +102,7 @@ func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
 			if winner {
 				decision.Activity, _ = registry.NormalizeActivity(rule.State)
 				decision.Reason = "manifest_rule"
+				decision.Detail = rule.Detail
 				decision.RuleID = rule.ID
 				winnerPriority = rule.Priority
 			}
@@ -150,7 +153,7 @@ func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
 }
 
 func (manifest *Manifest) initialDecision() Decision {
-	return Decision{Activity: registry.ActivityUnknown, Reason: "no_rule_matched", RuleID: "", ManifestSource: manifest.Source, ManifestVersion: manifest.Version, Warning: manifest.Warning, Evidence: make([]RuleEvidence, 0, len(manifest.Rules))}
+	return Decision{Activity: registry.ActivityUnknown, Reason: "no_rule_matched", RuleID: "", ManifestSource: manifest.Source, ManifestVersion: manifest.Version, Warning: manifest.Warning, Evidence: make([]RuleEvidence, 0, len(manifest.Rules)), Detail: ""}
 }
 
 func (rule Rule) inspect(snapshot Snapshot) (bool, []MatcherInspection, string) {

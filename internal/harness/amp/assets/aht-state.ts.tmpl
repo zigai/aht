@@ -39,7 +39,8 @@ export default function (amp: PluginAPI) {
     extraAttrs?: Record<string, string>,
   ): Promise<void> {
     const observedAt = new Date().toISOString();
-    const args = ["report", "amp", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+    const args = ["report", "amp", "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+    if (eventName !== "thread.title") args.push(state === "gone" ? "--presence" : "--activity", state);
 
     if (eventName) {
       args.push("--event", eventName);
@@ -99,15 +100,7 @@ export default function (amp: PluginAPI) {
       if (typeof thread?.title?.subscribe === "function") {
         thread.title.subscribe(async () => {
           try {
-            const threadState = await thread.state.get();
-            const state = threadState === "running"
-              ? "running"
-              : threadState === "awaiting-approval"
-                ? "waiting"
-                : threadState === "error"
-                  ? "failed"
-                  : "idle";
-            await report(state, id, "thread.title");
+            await report("", id, "thread.title");
           } catch {}
         });
       }

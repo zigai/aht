@@ -21,6 +21,7 @@ type PluginContext = {
 };
 type PluginHooks = { event(input: { readonly event: unknown }): Promise<void> };
 async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
+  const pendingState = createPendingState(false);
   let currentSessionId: string | undefined;
   let currentSessionPath: string | undefined;
   let currentCwd: string | undefined;
@@ -82,12 +83,14 @@ function addEvent(args: string[], value: unknown): void {
   }
 }
 
-  function report(state: string, event: unknown): Promise<void> {
+  function report(state: string, event: unknown, detail?: string, detailObservedAt?: string): Promise<void> {
     const observedAt = new Date().toISOString();
     refreshSessionRef(event);
 
     const args = ["report", "kilo", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
     addEvent(args, valueAt(event, ["type"]));
+    if (detail) args.push("--detail", detail);
+    if (detailObservedAt) args.push("--detail-observed-at", detailObservedAt);
     args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
     if (currentSessionId) {
       args.push("--session-id", currentSessionId);
@@ -117,12 +120,12 @@ function addEvent(args: string[], value: unknown): void {
 
   return {
     event: async ({ event }) => {
-      const state = stateForEvent(event);
+      const state = pendingState(event);
       if (state === undefined) {
         return;
       }
 
-      await report(state, event);
+      await report(state.activity, event, state.detail, state.detailObservedAt);
     },
   };
 }

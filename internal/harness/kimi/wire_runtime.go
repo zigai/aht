@@ -284,9 +284,17 @@ func publish(ctx context.Context, sink harness.WireSink, process registry.Proces
 	if err != nil {
 		return err
 	}
+	var detail *registry.ActivityDetail
+	var detailAt *time.Time
+	if update.Detail != nil {
+		detail = &update.Detail.Value
+		if *detail != "" {
+			detailAt = &update.Detail.ObservedAt
+		}
+	}
 	reporter := registry.Reporter{Sequence: nil, Integration: "kimi-wire", Version: harness.IntegrationVersion, MultiSession: false}
 	//nolint:exhaustruct_v5 // native Wire observes activity transitions on existing native sessions
-	_, err = sink.Observe(operationCtx, registry.Observation{Harness: registry.Harness("kimi-code"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{CWD: "", Attributes: nil, SessionID: session.SessionID, SessionPath: session.SessionPath}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Attributes: nil, Payload: nil, Reporter: reporter, Event: update.Event, Activity: &update.Activity, Process: session.Process, Location: &session.Location, Listing: &registry.Listing{ResumeCommand: session.ResumeCommand, CWD: session.CWD, ProjectRoot: session.ProjectRoot}}})
+	_, err = sink.Observe(operationCtx, registry.Observation{Harness: registry.Harness("kimi-code"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{CWD: "", Attributes: nil, SessionID: session.SessionID, SessionPath: session.SessionPath}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Attributes: nil, Payload: nil, Reporter: reporter, Event: update.Event, Detail: detail, DetailObservedAt: detailAt, Activity: &update.Activity, Process: session.Process, Location: &session.Location, Listing: &registry.Listing{ResumeCommand: session.ResumeCommand, CWD: session.CWD, ProjectRoot: session.ProjectRoot}}})
 	if err != nil {
 		return errPublishActivity
 	}

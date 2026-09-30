@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	IntegrationVersion = 11
+	IntegrationVersion = 13
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
@@ -95,6 +95,11 @@ type PayloadAdapter interface {
 // the native payload distinguishes states that the hook event alone cannot.
 type PayloadActivityAdapter interface {
 	PayloadActivity(event string, activity registry.Activity, payload map[string]any, at time.Time) registry.Activity
+}
+
+type ActivityDetailAdapter interface {
+	ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail
+	DetailCapabilities() registry.DetailCapabilities
 }
 
 type ProcessFilter interface {

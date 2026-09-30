@@ -38,7 +38,11 @@ func (s *MemoryStore) drainLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return closeStoreLock(lock, s.consumeJournalLocked(ctx))
+	err = closeStoreLock(lock, s.consumeJournalLocked(ctx))
+	if err == nil {
+		s.refreshDetailsLocked()
+	}
+	return err
 }
 
 func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {

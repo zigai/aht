@@ -55,8 +55,11 @@ func TestCapabilitiesForCodex(t *testing.T) {
 	if !ok {
 		t.Fatal("CapabilitiesFor(HarnessCodex) returned false")
 	}
-	if caps.Authority != "screen" {
-		t.Fatalf("Codex Authority = %q, want screen", caps.Authority)
+	if caps.Authority != "hook" {
+		t.Fatalf("Codex Authority = %q, want hook", caps.Authority)
+	}
+	if !caps.ScreenFallback {
+		t.Fatal("Codex should fall back to screen without native evidence")
 	}
 	if !caps.ScreenSupport {
 		t.Fatal("Codex should have screen support")
@@ -73,16 +76,12 @@ func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 		registry.Harness("cline"), registry.Harness("kimi-code"), registry.Harness("grok"),
 		registry.Harness("goose"), registry.Harness("amp"), registry.Harness("opencode"),
 		registry.Harness("kilo"), registry.Harness("droid"), registry.Harness("openclaw"),
-		registry.Harness("hermes"),
+		registry.Harness("hermes"), registry.Harness("claude"),
 	} {
 		caps, ok := harness.CapabilitiesFor(id)
 		if !ok || !caps.TitleLookup {
 			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)
 		}
-	}
-	caps, ok := harness.CapabilitiesFor(registry.Harness("claude"))
-	if !ok || caps.TitleLookup {
-		t.Fatalf("Claude title lookup capability = %t, %t", caps.TitleLookup, ok)
 	}
 }
 

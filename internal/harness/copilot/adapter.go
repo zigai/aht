@@ -77,6 +77,7 @@ func (copilotHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (copilotHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "copilot_notification_type", harness.PayloadStringAny(payload, "notificationType", "notification_type"))
 	harness.AddAttributeString(attributes, "copilot_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"))
 	harness.AddAttributeString(attributes, "copilot_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
 	harness.AddAttributeString(attributes, "copilot_start_source", harness.PayloadString(payload, "source"))

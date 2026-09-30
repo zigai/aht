@@ -3,6 +3,7 @@ package registry
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (o Observation) Validate(rules Rules) error {
@@ -15,7 +16,7 @@ func (o Observation) Validate(rules Rules) error {
 	if o.At.IsZero() {
 		return fmt.Errorf("%w: at is required", ErrInvalidObservation)
 	}
-	if err := validateEvidence(o.Evidence); err != nil {
+	if err := validateEvidenceAt(o.Evidence, o.At); err != nil {
 		return err
 	}
 	if process := o.ProcessIdentity(); process != nil && !validStoredProcess(*process, false) {
@@ -27,11 +28,17 @@ func (o Observation) Validate(rules Rules) error {
 	return nil
 }
 
-func validateEvidence(evidence Evidence) error {
+func validateEvidenceAt(evidence Evidence, at time.Time) error {
 	if evidence == nil {
 		return fmt.Errorf("%w: evidence is required", ErrInvalidObservation)
 	}
-	return evidence.validate()
+	if err := evidence.validate(); err != nil {
+		return err
+	}
+	if report, ok := evidence.(*Report); ok && report.DetailObservedAt != nil && report.DetailObservedAt.After(at) {
+		return fmt.Errorf("%w: detail timestamp follows report", ErrInvalidObservation)
+	}
+	return nil
 }
 
 func (r *Report) validate() error {
@@ -66,10 +73,16 @@ func (r *Reading) validate() error {
 	if r == nil || !r.Process.Complete() || !r.Activity.IsValid() {
 		return fmt.Errorf("%w: incomplete reading", ErrInvalidObservation)
 	}
+	if r.Detail != "" && !r.Detail.ValidFor(r.Activity) {
+		return fmt.Errorf("%w: invalid reading detail", ErrInvalidObservation)
+	}
 	return nil
 }
 
 func validateReport(report Report) error {
+	if !validReportDetail(report) {
+		return fmt.Errorf("%w: invalid activity detail", ErrInvalidObservation)
+	}
 	if !validStoredLifecycle(report.Lifecycle) || !validStoredOptionalPresence(report.Claim) || !validStoredOptionalActivity(report.Activity) {
 		return fmt.Errorf("%w: invalid report state", ErrInvalidObservation)
 	}
