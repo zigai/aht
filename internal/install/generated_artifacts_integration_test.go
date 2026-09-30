@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -35,7 +35,7 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 		})
 		seenHarnesses[artifact.harness] = true
 	}
-	for _, harness := range AllHarnesses() {
+	for _, harness := range Harnesses() {
 		if !seenHarnesses[harness] {
 			t.Fatalf("generated artifact validation missed harness %q", harness)
 		}
@@ -94,7 +94,7 @@ type generatedArtifact struct {
 func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generatedArtifact {
 	t.Helper()
 	artifacts := make([]generatedArtifact, 0)
-	for _, adapter := range harnesscatalog.All() {
+	for _, adapter := range catalog.All() {
 		installer, ok := adapter.(harnesspkg.Installable)
 		if !ok {
 			continue
@@ -127,7 +127,7 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 					artifacts = append(artifacts, generatedArtifact{harness: harness, path: file.Name, content: content})
 				}
 			case harnesspkg.ShimAction:
-				artifacts = append(artifacts, generatedArtifact{harness: harness, path: string(harness) + ".sh", content: shimScript(binary.command, string(harness), "/usr/bin/true", harnesscatalog.IntegrationVersionFor(harness))})
+				artifacts = append(artifacts, generatedArtifact{harness: harness, path: string(harness) + ".sh", content: shimScript(binary.command, string(harness), "/usr/bin/true", catalog.IntegrationVersionFor(harness))})
 			default:
 				t.Fatalf("unvalidated install action for %s: %T", harness, action)
 			}
@@ -147,7 +147,7 @@ func generatedJSONArtifact(t *testing.T, harness registry.Harness, path string, 
 
 func generatedCommandHook(t *testing.T, harness registry.Harness) string {
 	t.Helper()
-	adapter, ok := harnesscatalog.Find(harness)
+	adapter, ok := catalog.Find(harness)
 	if !ok {
 		t.Fatalf("find harness %s", harness)
 	}

@@ -6,7 +6,7 @@ import (
 
 func (ampHarness) ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail {
 	if activity == registry.ActivityWaiting && event == "thread.state" && attributes["amp_thread_state"] == "awaiting-approval" {
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	}
 	return nil
 }

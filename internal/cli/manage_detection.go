@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/detection"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -82,7 +82,7 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 			if options.manifestPath == "" && !cmd.Flags().Changed("config-dir") {
 				options.configDir = cfg.Detection.ManifestsDir
 			}
-			harnessID, err = harnesspkg.Normalize(args[0])
+			harnessID, err = catalog.Parse(args[0])
 			if err != nil {
 				if options.manifestPath == "" {
 					return exitCode(err, exitCodeUsage)
@@ -188,11 +188,11 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 	}
 	rows := make([][]string, 0, len(candidates))
 	for _, c := range candidates {
-		matchStr := "no"
+		matchLabel := "no"
 		if c.Winner {
-			matchStr = "winner"
+			matchLabel = "winner"
 		} else if c.Matched {
-			matchStr = "match"
+			matchLabel = "match"
 		}
 		region := c.Region
 		if region == "" {
@@ -203,7 +203,7 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 			c.State,
 			strconv.Itoa(c.Priority),
 			region,
-			matchStr,
+			matchLabel,
 			c.Reason,
 		})
 	}

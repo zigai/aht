@@ -10,7 +10,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -101,7 +101,7 @@ func (app *application) newIntegrationsRemoveCommand() *cobra.Command {
 			results := make([]install.Result, 0, len(harnesses))
 			var failures []error
 			for _, harnessID := range harnesses {
-				result, removeErr := install.RemoveContext(cmd.Context(), install.Options{Harness: harnessID, Binary: options.binary, DryRun: options.dryRun})
+				result, removeErr := install.Remove(cmd.Context(), install.Options{Harness: harnessID, Binary: options.binary, DryRun: options.dryRun})
 				if removeErr != nil {
 					result = failedIntegrationResult(harnessID, "remove failed", removeErr)
 					failures = append(failures, removeErr)
@@ -161,7 +161,7 @@ func inspectIntegrationStatuses(ctx context.Context, harnesses []registry.Harnes
 	results := make([]install.IntegrationStatus, 0, len(harnesses))
 	failed := false
 	for _, harnessID := range harnesses {
-		status, err := install.InspectContext(ctx, harnessID, binary)
+		status, err := install.Inspect(ctx, harnessID, binary)
 		if err != nil {
 			failed = true
 			status = install.IntegrationStatus{
@@ -206,7 +206,7 @@ func installIntegrations(ctx context.Context, args []string, opts integrationCom
 	results := make([]install.Result, 0, len(harnesses))
 	var failures []error
 	for _, harnessID := range harnesses {
-		result, installErr := install.RunContext(ctx, install.Options{Harness: harnessID, Binary: opts.binary, TargetBinary: opts.targetBinary, DryRun: opts.dryRun, Force: opts.force, UseShim: opts.shim})
+		result, installErr := install.Run(ctx, install.Options{Harness: harnessID, Binary: opts.binary, TargetBinary: opts.targetBinary, DryRun: opts.dryRun, Force: opts.force, UseShim: opts.shim})
 		if installErr != nil {
 			result = failedIntegrationResult(harnessID, "install failed", installErr)
 			failures = append(failures, installErr)
@@ -338,12 +338,12 @@ func allocateIntegrationResultWidths(pathNeeded, resultNeeded, available int) (i
 func selectedHarnesses(args []string, emptyMeansAll bool) ([]registry.Harness, error) {
 	if len(args) == 0 {
 		if emptyMeansAll {
-			return install.AllHarnesses(), nil
+			return install.Harnesses(), nil
 		}
 		return nil, errAgentRequired
 	}
 	if len(args) == 1 && strings.EqualFold(args[0], "all") {
-		return install.AllHarnesses(), nil
+		return install.Harnesses(), nil
 	}
 	for _, arg := range args {
 		if strings.EqualFold(arg, "all") {
@@ -353,7 +353,7 @@ func selectedHarnesses(args []string, emptyMeansAll bool) ([]registry.Harness, e
 	seen := make(map[registry.Harness]bool)
 	result := make([]registry.Harness, 0, len(args))
 	for _, arg := range args {
-		harnessID, err := harnesspkg.Normalize(arg)
+		harnessID, err := catalog.Parse(arg)
 		if err != nil {
 			return nil, fmt.Errorf("normalize agent: %w", err)
 		}

@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
 
@@ -139,7 +139,7 @@ func (app *application) newReportCommand() *cobra.Command {
 }
 
 func defaultReportOptionsFromEnv() reportOptions {
-	return reportOptions{harness: firstEnv("AHT_HARNESS", "AGENT_HARNESS"), sessionID: firstEnv(harnesspkg.EnvNames(harness.EnvSessionID)...), sessionPath: firstEnv(harnesspkg.EnvNames(harness.EnvSessionPath)...), cwdAuto: true, projectRoot: firstEnv(harnesspkg.EnvNames(harness.EnvProjectRoot)...), pid: firstEnvInt(harnesspkg.EnvNames(harness.EnvPID)...), ppid: firstEnvInt("AHT_PPID", "AGENT_PPID"), tty: firstEnv("AHT_TTY", "TTY"), event: firstEnv(harnesspkg.EnvNames(harness.EnvEvent)...), sequence: firstEnv("AHT_SEQUENCE")}
+	return reportOptions{harness: firstEnv("AHT_HARNESS", "AGENT_HARNESS"), sessionID: firstEnv(catalog.EnvNames(harness.EnvSessionID)...), sessionPath: firstEnv(catalog.EnvNames(harness.EnvSessionPath)...), cwdAuto: true, projectRoot: firstEnv(catalog.EnvNames(harness.EnvProjectRoot)...), pid: firstEnvInt(catalog.EnvNames(harness.EnvPID)...), ppid: firstEnvInt("AHT_PPID", "AGENT_PPID"), tty: firstEnv("AHT_TTY", "TTY"), event: firstEnv(catalog.EnvNames(harness.EnvEvent)...), sequence: firstEnv("AHT_SEQUENCE")}
 }
 
 func parseReportSequence(value string) (uint64, bool, error) {
@@ -157,8 +157,8 @@ func parseReportSequence(value string) (uint64, bool, error) {
 
 func (app *application) runReport(ctx context.Context, stdin io.Reader, opts reportOptions) error {
 	prepared, err := prepareReport(stdin, opts, reportRuntimeContext{
-		tmux:        reportTmuxContext(ctx, opts.noTmux),
-		multiplexer: reportMultiplexerContext(),
+		tmux:        reportTmuxLocation(ctx, opts.noTmux),
+		multiplexer: reportMultiplexerLocation(),
 		processes:   reportProcessAncestors(ctx, opts.pid),
 	})
 	if err != nil {
@@ -189,63 +189,63 @@ func (app *application) writeReportIgnored(harnessID registry.Harness, reason, d
 }
 
 //nolint:gocognit,cyclop,nestif // report preparation validates independent evidence dimensions in order
-func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntimeContext) (preparedReport, error) {
-	if options.rawStdin && options.rawDefaultsOnly {
+func prepareReport(stdin io.Reader, opts reportOptions, runtime reportRuntimeContext) (preparedReport, error) {
+	if opts.rawStdin && opts.rawDefaultsOnly {
 		return preparedReport{}, exitCode(errConflictingReportStdin, exitCodeUsage)
 	}
-	if strings.TrimSpace(options.harness) == "" {
+	if strings.TrimSpace(opts.harness) == "" {
 		return preparedReport{}, exitCode(errMissingReportHarness, exitCodeUsage)
 	}
-	harnessID, err := harnesspkg.Normalize(options.harness)
+	harnessID, err := catalog.Parse(opts.harness)
 	if err != nil {
 		return preparedReport{}, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
 	}
-	attrs, err := parseAttributes(options.attributes)
+	attrs, err := parseAttributes(opts.attributes)
 	if err != nil {
 		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
-	rawPayload, defaultsPayload, err := readStdinPayloadData(stdin, options.rawStdin, options.rawDefaultsOnly)
+	rawPayload, defaultsPayload, err := readStdinPayloadData(stdin, opts.rawStdin, opts.rawDefaultsOnly)
 	if err != nil {
 		return preparedReport{}, err
 	}
-	if !harnesspkg.PayloadCompatibleWithHarness(harnessID, defaultsPayload) {
+	if !catalog.PayloadCompatible(harnessID, defaultsPayload) {
 		return preparedReport{harness: harnessID, ignored: true}, nil
 	}
-	defaults, err := harnesspkg.DefaultsFromPayloadWithError(harnessID, defaultsPayload)
+	defaults, err := catalog.PayloadDefaults(harnessID, defaultsPayload)
 	if err != nil {
 		return preparedReport{}, fmt.Errorf("derive payload defaults: %w", err)
 	}
-	applyPayloadDefaults(&options, attrs, defaults)
-	applyReportRuntimeDefaults(&options)
-	if !strings.EqualFold(options.evidence, "process") {
-		translated := harnesspkg.LifecycleFor(harnessID, options.event, attrs)
-		options.event = translated.Event
-		if options.lifecycle == "" {
-			options.lifecycle = string(translated.Lifecycle)
+	applyPayloadDefaults(&opts, attrs, defaults)
+	applyReportRuntimeDefaults(&opts)
+	if !strings.EqualFold(opts.evidence, "process") {
+		translated := catalog.LifecycleFor(harnessID, opts.event, attrs)
+		opts.event = translated.Event
+		if opts.lifecycle == "" {
+			opts.lifecycle = string(translated.Lifecycle)
 		}
-		if options.presence == "" {
-			options.presence = string(translated.Presence)
+		if opts.presence == "" {
+			opts.presence = string(translated.Presence)
 		}
 	}
-	presence, err := registry.NormalizePresence(options.presence)
+	presence, err := registry.NormalizePresence(opts.presence)
 	if err != nil {
 		return preparedReport{}, exitCode(fmt.Errorf("normalize presence: %w", err), exitCodeUsage)
 	}
-	activity, err := registry.NormalizeActivity(options.activity)
+	activity, err := registry.NormalizeActivity(opts.activity)
 	if err != nil {
 		return preparedReport{}, exitCode(fmt.Errorf("normalize activity: %w", err), exitCodeUsage)
 	}
 	if presence == registry.PresenceGone && activity != "" {
 		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
-	lifecycle, err := normalizeReportLifecycle(options.lifecycle)
+	lifecycle, err := normalizeReportLifecycle(opts.lifecycle)
 	if err != nil {
 		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
 	if lifecycle == registry.NativeLifecycleEnd && activity != "" {
 		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
-	observedAt, err := parseObservedAt(options.observedAt)
+	observedAt, err := parseObservedAt(opts.observedAt)
 	if err != nil {
 		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
@@ -255,21 +255,21 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
 	}
-	activity, err = harnesspkg.ActivityFromPayload(harnessID, options.event, activity, defaultsPayload, observedAt)
+	activity, err = catalog.ActivityFromPayload(harnessID, opts.event, activity, defaultsPayload, observedAt)
 	if err != nil {
 		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
 	}
-	sequence, sequenceSet, err := parseReportSequence(options.sequence)
+	sequence, sequenceSet, err := parseReportSequence(opts.sequence)
 	if err != nil {
 		return preparedReport{}, exitCode(err, exitCodeUsage)
 	}
-	if presence == "" && activity == "" && lifecycle == "" && options.event == "" && options.sessionID == "" && options.sessionPath == "" {
+	if presence == "" && activity == "" && lifecycle == "" && opts.event == "" && opts.sessionID == "" && opts.sessionPath == "" {
 		return preparedReport{}, exitCode(errMissingReportIdentity, exitCodeUsage)
 	}
-	identity := registry.ObservationIdentity{CWD: "", Attributes: nil, SessionID: options.sessionID, SessionPath: options.sessionPath}
+	identity := registry.ObservationIdentity{CWD: "", Attributes: nil, SessionID: opts.sessionID, SessionPath: opts.sessionPath}
 	var observation registry.Observation
-	if strings.EqualFold(options.evidence, "process") {
-		if options.pid <= 0 {
+	if strings.EqualFold(opts.evidence, "process") {
+		if opts.pid <= 0 {
 			return preparedReport{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
 		}
 		if activity != "" {
@@ -278,28 +278,28 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 		if sequenceSet {
 			return preparedReport{}, exitCode(errProcessEvidenceSequence, exitCodeUsage)
 		}
-		process := processEvidenceIdentity(options, runtime.processes)
+		process := processEvidenceIdentity(opts, runtime.processes)
 		if process == nil || !process.Complete() {
 			return preparedReport{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
 		}
 		present := presence != registry.PresenceGone
 		observation = registry.Observation{Harness: harnessID, At: observedAt, Subject: identity, Evidence: &registry.Sighting{Process: *process, Present: present}}
 	} else {
-		observation = nativeReportObservation(harnessID, identity, options, runtime, attrs, rawPayload, presence, activity, lifecycle, observedAt)
+		observation = nativeReportObservation(harnessID, identity, opts, runtime, attrs, rawPayload, presence, activity, lifecycle, observedAt)
 		if sequenceSet {
 			observation.Report().Reporter.Sequence = &sequence
 		}
 	}
-	if options.cwd != "" || options.projectRoot != "" || len(options.resumeCommand) > 0 {
-		observation.SetListing(&registry.Listing{ResumeCommand: append([]string(nil), options.resumeCommand...), CWD: options.cwd, ProjectRoot: options.projectRoot})
+	if opts.cwd != "" || opts.projectRoot != "" || len(opts.resumeCommand) > 0 {
+		observation.SetListing(&registry.Listing{ResumeCommand: append([]string(nil), opts.resumeCommand...), CWD: opts.cwd, ProjectRoot: opts.projectRoot})
 	}
-	observation = harnesspkg.PrepareObservation(observation)
-	if options.detail != "" {
+	observation = catalog.PrepareObservation(observation)
+	if opts.detail != "" {
 		if observation.Kind() != "report" {
 			return preparedReport{}, exitCode(fmt.Errorf("%w: detail requires a native report", registry.ErrInvalidObservation), exitCodeUsage)
 		}
-		detail := registry.ActivityDetail(options.detail)
-		if options.detail == "clear" {
+		detail := registry.ActivityDetail(opts.detail)
+		if opts.detail == "clear" {
 			detail = ""
 		}
 		if detail != "" && !detail.ValidFor(activity) {
@@ -307,8 +307,8 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 		}
 		observation.Report().Detail = &detail
 	}
-	if options.detailObservedAt != "" {
-		detailAt, err := parseObservedAt(options.detailObservedAt)
+	if opts.detailObservedAt != "" {
+		detailAt, err := parseObservedAt(opts.detailObservedAt)
 		if err != nil || detailAt.IsZero() || detailAt.After(observedAt) {
 			return preparedReport{}, exitCode(fmt.Errorf("%w: invalid detail timestamp", registry.ErrInvalidObservation), exitCodeUsage)
 		}
@@ -323,7 +323,7 @@ func prepareReport(stdin io.Reader, options reportOptions, runtime reportRuntime
 func nativeReportObservation(
 	harnessID registry.Harness,
 	identity registry.ObservationIdentity,
-	options reportOptions,
+	opts reportOptions,
 	runtime reportRuntimeContext,
 	attributes map[string]string,
 	rawPayload json.RawMessage,
@@ -332,7 +332,7 @@ func nativeReportObservation(
 	lifecycle registry.NativeLifecycle,
 	observedAt time.Time,
 ) registry.Observation {
-	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: options.reporter, Version: options.reporterVersion, MultiSession: options.multiSession}, Event: options.event, Process: reportProcessIdentity(harnessID, runtime.processes), Attributes: attributes, Payload: rawPayload, Detail: nil}}
+	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: identity, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Activity: nil, Location: nil, Listing: nil, Reporter: registry.Reporter{Sequence: nil, Integration: opts.reporter, Version: opts.reporterVersion, MultiSession: opts.multiSession}, Event: opts.event, Process: reportProcessIdentity(harnessID, runtime.processes), Attributes: attributes, Payload: rawPayload, Detail: nil}}
 	if lifecycle != "" {
 		observation.Report().Lifecycle = &lifecycle
 	}
@@ -369,12 +369,12 @@ func normalizeReportLifecycle(value string) (registry.NativeLifecycle, error) {
 	return lifecycle, nil
 }
 
-func processEvidenceIdentity(options reportOptions, processes []processinfo.Process) *registry.ProcessIdentity {
-	if options.startIdentity != "" {
-		return &registry.ProcessIdentity{Foreground: false, PID: options.pid, PPID: options.ppid, ProcessGroupID: options.processGroupID, StartIdentity: options.startIdentity, Executable: options.executable, CWD: options.cwd, TTY: options.tty}
+func processEvidenceIdentity(opts reportOptions, processes []processinfo.Process) *registry.ProcessIdentity {
+	if opts.startIdentity != "" {
+		return &registry.ProcessIdentity{Foreground: false, PID: opts.pid, PPID: opts.ppid, ProcessGroupID: opts.processGroupID, StartIdentity: opts.startIdentity, Executable: opts.executable, CWD: opts.cwd, TTY: opts.tty}
 	}
 	for _, process := range processes {
-		if process.PID != options.pid {
+		if process.PID != opts.pid {
 			continue
 		}
 		return &registry.ProcessIdentity{
@@ -421,7 +421,7 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 	if native := session.Observations.Native; native != nil && native.Activity != nil {
 		reportedActivity = string(*native.Activity)
 		authoritative = "yes"
-		if (harnesspkg.Rules{}).Policy(session.Harness).Authority == registry.AuthorityScreen {
+		if (catalog.Rules{}).Policy(session.Harness).Authority == registry.AuthorityScreen {
 			authoritative = "no"
 		}
 	}
@@ -431,7 +431,7 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 	)
 }
 
-func reportTmuxContext(ctx context.Context, noTmux bool) registry.Location {
+func reportTmuxLocation(ctx context.Context, noTmux bool) registry.Location {
 	if noTmux {
 		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
 	}
@@ -442,9 +442,9 @@ func reportTmuxContext(ctx context.Context, noTmux bool) registry.Location {
 	return t
 }
 
-func reportMultiplexerContext() registry.Location {
-	if ctx := herdr.Current(); !ctx.Empty() {
-		return ctx
+func reportMultiplexerLocation() registry.Location {
+	if location := herdr.Current(); !location.Empty() {
+		return location
 	}
 	return zellij.Current()
 }
@@ -488,11 +488,11 @@ func reportProcessIdentity(harnessID registry.Harness, processes []processinfo.P
 }
 
 func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
-	if harnessID, ok := harnesspkg.FromCommand(process.Executable); ok {
+	if harnessID, ok := catalog.FromCommand(process.Executable); ok {
 		return harnessID == expected
 	}
 	for _, arg := range process.Args[:min(reportProcessArgumentPrefixCount, len(process.Args))] {
-		if harnessID, ok := harnesspkg.FromCommand(arg); ok {
+		if harnessID, ok := catalog.FromCommand(arg); ok {
 			return harnessID == expected
 		}
 	}
@@ -527,41 +527,41 @@ func psProcessArgs(ctx context.Context, pid int) []string {
 	return strings.Fields(strings.TrimSpace(string(out)))
 }
 
-func applyPayloadDefaults(o *reportOptions, a map[string]string, d harness.PayloadDefaults) {
-	if o.sessionID == "" {
-		o.sessionID = d.SessionID
+func applyPayloadDefaults(opts *reportOptions, a map[string]string, d harness.PayloadDefaults) {
+	if opts.sessionID == "" {
+		opts.sessionID = d.SessionID
 	}
-	if o.sessionPath == "" {
-		o.sessionPath = d.SessionPath
+	if opts.sessionPath == "" {
+		opts.sessionPath = d.SessionPath
 	}
-	if o.event == "" {
-		o.event = d.Event
+	if opts.event == "" {
+		opts.event = d.Event
 	}
-	applyCWDDefault(o, d.CWD)
-	applyProjectRootDefault(o, d.ProjectRoot)
+	applyCWDDefault(opts, d.CWD)
+	applyProjectRootDefault(opts, d.ProjectRoot)
 	maps.Copy(a, d.Attributes)
 }
 
-func applyReportRuntimeDefaults(o *reportOptions) {
-	if o.cwd == "" && o.cwdAuto {
+func applyReportRuntimeDefaults(opts *reportOptions) {
+	if opts.cwd == "" && opts.cwdAuto {
 		if wd, err := os.Getwd(); err == nil {
-			o.cwd = wd
+			opts.cwd = wd
 		}
 	}
-	if o.projectRoot == "" && o.projectRootAuto {
-		o.projectRoot = findProjectRoot(o.cwd)
+	if opts.projectRoot == "" && opts.projectRootAuto {
+		opts.projectRoot = findProjectRoot(opts.cwd)
 	}
 }
 
-func applyCWDDefault(o *reportOptions, v string) {
-	if v != "" && o.cwdAuto && o.cwd == "" {
-		o.cwd = v
-		o.projectRoot = findProjectRoot(v)
+func applyCWDDefault(opts *reportOptions, v string) {
+	if v != "" && opts.cwdAuto && opts.cwd == "" {
+		opts.cwd = v
+		opts.projectRoot = findProjectRoot(v)
 	}
 }
 
-func applyProjectRootDefault(o *reportOptions, v string) {
-	if v != "" && o.projectRootAuto && o.projectRoot == "" {
-		o.projectRoot = v
+func applyProjectRootDefault(opts *reportOptions, v string) {
+	if v != "" && opts.projectRootAuto && opts.projectRoot == "" {
+		opts.projectRoot = v
 	}
 }

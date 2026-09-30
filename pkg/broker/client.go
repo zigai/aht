@@ -131,7 +131,7 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 
 // SummaryWithOptions returns filtered summaries with options.
 func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
-	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", registry.ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 	if needsSnapshotFiltering(filter) {
@@ -207,13 +207,13 @@ func (s *Subscription) Close() {
 
 // Subscribe returns the initial snapshot followed by strictly newer revisions.
 func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscription, error) {
-	subscriptionContext, cancel := context.WithCancel(ctx)
-	connection, err := c.dial(subscriptionContext)
+	subscriptionCtx, cancel := context.WithCancel(ctx)
+	connection, err := c.dial(subscriptionCtx)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	cleanup := cancelclose.OnCancel(subscriptionContext, connection)
+	cleanup := cancelclose.OnCancel(subscriptionCtx, connection)
 	transferred := false
 	defer func() {
 		if !transferred {
@@ -226,13 +226,13 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	request.Filter = filter.NormalizePaths()
 	request = request.prepare()
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return nil, fmt.Errorf("sending subscribe request: %w", contextError(subscriptionContext, err))
+		return nil, fmt.Errorf("sending subscribe request: %w", contextError(subscriptionCtx, err))
 	}
 
 	decoder := responseScanner(connection)
 	first, err := readResponse(decoder)
 	if err != nil {
-		return nil, fmt.Errorf("reading subscribe response: %w", contextError(subscriptionContext, err))
+		return nil, fmt.Errorf("reading subscribe response: %w", contextError(subscriptionCtx, err))
 	}
 	if err := validateResponse(request, first); err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 		defer close(done)
 		defer cancel()
 		defer cleanup()
-		runSubscription(subscriptionContext, decoder, request, snapshots, errorsChannel)
+		runSubscription(subscriptionCtx, decoder, request, snapshots, errorsChannel)
 	}()
 
 	return &Subscription{Snapshots: snapshots, Errors: errorsChannel, cancel: cancel, done: done}, nil
@@ -360,14 +360,14 @@ func contextError(ctx context.Context, err error) error {
 }
 
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
-	dialContext := ctx
+	dialCtx := ctx
 	cancel := func() {}
 	if _, ok := ctx.Deadline(); !ok && c.dialTimeout > 0 {
-		dialContext, cancel = context.WithTimeout(ctx, c.dialTimeout)
+		dialCtx, cancel = context.WithTimeout(ctx, c.dialTimeout)
 	}
 	defer cancel()
 
-	connection, err := new(net.Dialer).DialContext(dialContext, "unix", c.socketPath)
+	connection, err := new(net.Dialer).DialContext(dialCtx, "unix", c.socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w at %s: %w", ErrUnavailable, c.socketPath, err)
 	}

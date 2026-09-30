@@ -21,7 +21,7 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	host.provider.step = 0
 	host.provider.requests = nil
 	host.provider.callID = "callresume"
-	if host.contract.Protocol == protocolAnthropicMessages {
+	if host.contract.Protocol == providerProtocolAnthropicMessages {
 		host.provider.callID = "tool_resume"
 	}
 	host.provider.mu.Unlock()

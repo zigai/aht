@@ -282,8 +282,8 @@ func (s *Server) serveSubscription(
 
 	revision := state.Revision
 	for {
-		waitContext, cancel := context.WithTimeout(ctx, heartbeatInterval)
-		next, waitErr := s.store.WaitForRevision(waitContext, revision, request.Filter)
+		waitCtx, cancel := context.WithTimeout(ctx, heartbeatInterval)
+		next, waitErr := s.store.WaitForRevision(waitCtx, revision, request.Filter)
 		cancel()
 		if waitErr != nil {
 			if ctx.Err() != nil {

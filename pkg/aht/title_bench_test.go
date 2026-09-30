@@ -11,7 +11,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/aht"
 )
 
-func BenchmarkLookupTitlesCodexBatch(b *testing.B) {
+func BenchmarkSessionTitlesCodexBatch(b *testing.B) {
 	home := b.TempDir()
 	var index strings.Builder
 	sessions := make([]aht.Session, 100)
@@ -26,13 +26,13 @@ func BenchmarkLookupTitlesCodexBatch(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := aht.LookupTitles(b.Context(), sessions); err != nil {
+		if _, err := aht.SessionTitles(b.Context(), sessions); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkLookupTitlesCodexStateBatch(b *testing.B) {
+func BenchmarkSessionTitlesCodexStateBatch(b *testing.B) {
 	home := b.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite"))
 	if err != nil {
@@ -53,13 +53,13 @@ func BenchmarkLookupTitlesCodexStateBatch(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := aht.LookupTitles(b.Context(), sessions); err != nil {
+		if _, err := aht.SessionTitles(b.Context(), sessions); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkLookupTitlesOMPSlot(b *testing.B) {
+func BenchmarkSessionTitlesOMPSlot(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "session.jsonl")
 	if err := os.WriteFile(path, []byte(`{"type":"title","title":"Named session"}`+"\n"+`{"type":"session","id":"native"}`+"\n"), 0o600); err != nil {
 		b.Fatal(err)
@@ -68,13 +68,13 @@ func BenchmarkLookupTitlesOMPSlot(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := aht.LookupTitles(b.Context(), sessions); err != nil {
+		if _, err := aht.SessionTitles(b.Context(), sessions); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkLookupTitlesPiTranscript(b *testing.B) {
+func BenchmarkSessionTitlesPiTranscript(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "session.jsonl")
 	var transcript strings.Builder
 	transcript.WriteString(`{"type":"session","id":"native"}` + "\n")
@@ -89,7 +89,7 @@ func BenchmarkLookupTitlesPiTranscript(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := aht.LookupTitles(b.Context(), sessions); err != nil {
+		if _, err := aht.SessionTitles(b.Context(), sessions); err != nil {
 			b.Fatal(err)
 		}
 	}

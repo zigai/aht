@@ -94,22 +94,22 @@ type Excerpt struct {
 	Timestamp time.Time `json:"timestamp,omitzero"`
 }
 
-// LiveState is evidence from the caller's registry snapshot, not a fresh process
+// RegistryState is evidence from the caller's registry snapshot, not a fresh process
 // probe. Several tracked incarnations may refer to one historical conversation.
-type LiveState struct {
+type RegistryState struct {
 	RegistryID string            `json:"registry_id"`
 	Presence   registry.Presence `json:"presence"`
 	UpdatedAt  time.Time         `json:"updated_at"`
 }
 
 // Match groups up to three matching message excerpts from one native history.
-// MatchingParts counts matching message text segments in that history. No Live entries
-// means presence is unknown, not that the conversation has terminated.
+// MatchingParts counts matching message text segments in that history. No RegistryStates
+// entries mean presence is unknown, not that the conversation has terminated.
 type Match struct {
-	Conversation  Conversation `json:"conversation"`
-	Excerpts      []Excerpt    `json:"excerpts"`
-	MatchingParts int          `json:"matching_parts"`
-	Live          []LiveState  `json:"live"`
+	Conversation   Conversation    `json:"conversation"`
+	Excerpts       []Excerpt       `json:"excerpts"`
+	MatchingParts  int             `json:"matching_parts"`
+	RegistryStates []RegistryState `json:"live"`
 }
 
 // SourceStatus reports a source's coverage: searched, skipped, missing,
@@ -552,7 +552,7 @@ func (s *search) finalize() Result {
 		return cmp.Compare(a.Message, b.Message)
 	})
 	for i := range ordered {
-		ordered[i].Live = liveMatches(ordered[i].Conversation, s.query.Registry)
+		ordered[i].RegistryStates = registryStates(ordered[i].Conversation, s.query.Registry)
 	}
 	s.result.Matches = ordered
 	return s.result
@@ -603,8 +603,8 @@ func dedupeSources(sources []Source) []Source {
 	return unique
 }
 
-func liveMatches(c Conversation, sessions []registry.Session) []LiveState {
-	result := []LiveState{}
+func registryStates(c Conversation, sessions []registry.Session) []RegistryState {
+	result := []RegistryState{}
 	for _, session := range sessions {
 		if session.Harness != c.Harness {
 			continue
@@ -612,7 +612,7 @@ func liveMatches(c Conversation, sessions []registry.Session) []LiveState {
 		sameID := session.SessionID != "" && session.SessionID == c.SessionID
 		samePath := !isDatabase(c.Path) && session.SessionPath != "" && (filepath.Clean(session.SessionPath) == c.Path || registry.PathsEqual(session.SessionPath, c.Path))
 		if (sameID && (session.SessionPath == "" || samePath)) || (samePath && session.SessionID == "") {
-			result = append(result, LiveState{RegistryID: session.ID, Presence: session.Presence(), UpdatedAt: session.UpdatedAt})
+			result = append(result, RegistryState{RegistryID: session.ID, Presence: session.Presence(), UpdatedAt: session.UpdatedAt})
 		}
 	}
 	return result

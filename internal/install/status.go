@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -27,14 +27,9 @@ type inspectedArtifact struct {
 	status ArtifactStatus
 }
 
-// Inspect reports whether a harness integration or its shim fallback is current.
-func Inspect(harnessID registry.Harness, binary string) (IntegrationStatus, error) {
-	return InspectContext(context.Background(), harnessID, binary)
-}
-
-// InspectContext reports whether a harness integration is current, honoring
-// cancellation while consulting native harness CLIs.
-func InspectContext(ctx context.Context, harnessID registry.Harness, binary string) (IntegrationStatus, error) {
+// Inspect reports whether a harness integration or its shim fallback is
+// current, honoring cancellation while consulting native harness CLIs.
+func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (IntegrationStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return IntegrationStatus{}, fmt.Errorf("inspect integration context: %w", err)
 	}
@@ -70,7 +65,7 @@ func InspectContext(ctx context.Context, harnessID registry.Harness, binary stri
 }
 
 func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspkg.InstallPlan, harnesspkg.InstallAdvisor, error) {
-	adapter, ok := harnesscatalog.Find(harnessID)
+	adapter, ok := catalog.Find(harnessID)
 	if !ok {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
@@ -104,7 +99,7 @@ func markDesiredIntegrationState(ctx context.Context, harnessID registry.Harness
 	if result.Status != ArtifactCurrent {
 		return nil
 	}
-	dryRun, err := RunContext(ctx, Options{
+	dryRun, err := Run(ctx, Options{
 		Harness:      harnessID,
 		Binary:       binary,
 		TargetBinary: "",

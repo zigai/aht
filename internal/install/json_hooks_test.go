@@ -16,7 +16,7 @@ import (
 func TestInstallClaudeWritesHooks(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -164,7 +164,7 @@ func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
 
 	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
 	options.DryRun = true
-	dryRun, err := Run(options)
+	dryRun, err := Run(t.Context(), options)
 	if err != nil {
 		t.Fatalf("dry run returned error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
 		t.Fatal("expected stale managed subagent hooks to make the integration differ")
 	}
 	options.DryRun = false
-	if _, err := Run(options); err != nil {
+	if _, err := Run(t.Context(), options); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
 		t.Fatalf("expected managed SubagentStop hook to be removed: %s", data)
 	}
 
-	second, err := Run(options)
+	second, err := Run(t.Context(), options)
 	if err != nil {
 		t.Fatalf("second Run returned error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 
-	first, err := Run(Options{
+	first, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -260,7 +260,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 		t.Fatalf("writing modified hooks: %v", err)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -285,7 +285,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 func TestInstallCodexMergesHooks(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("codex"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -337,8 +337,8 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	if !strings.Contains(postToolCommand, "--raw-stdin-defaults-only") || strings.Contains(postToolCommand, "--raw-stdin ") {
 		t.Fatalf("Codex PostToolUse hook stores full tool output: %q", postToolCommand)
 	}
-	if timeout := requireTestHookTimeout(t, hooks, harnesspkg.HookEventSessionEnd); timeout != 3 {
-		t.Fatalf("Codex SessionEnd hook timeout = %v, want 3", timeout)
+	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, harnesspkg.HookEventSessionEnd); timeoutSeconds != 3 {
+		t.Fatalf("Codex SessionEnd hook timeout = %v, want 3", timeoutSeconds)
 	}
 	if !strings.Contains(string(data), "--presence gone --event SessionEnd") || !strings.Contains(string(data), `"matcher": "other"`) {
 		t.Fatalf("Codex SessionEnd hook is incomplete: %s", data)
@@ -382,7 +382,7 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatalf("creating symlink: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness: registry.Harness("codex"),
 		Binary:  "/bin/aht-test",
 	})
@@ -423,7 +423,7 @@ func TestInstallCursorWritesHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -478,7 +478,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("writing old hooks: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -505,7 +505,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("expected user hook to be preserved: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -525,7 +525,7 @@ func TestInstallCopilotWritesHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("COPILOT_HOME", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("copilot"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -586,7 +586,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -634,7 +634,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		t.Fatalf("expected Droid hooks not to include unsupported statusMessage field: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -653,7 +653,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 func TestInstallGrokWritesHooks(t *testing.T) {
 	t.Setenv("GROK_HOME", t.TempDir())
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -726,7 +726,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("writing old hooks: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -750,7 +750,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("expected old managed hook to be removed: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -786,7 +786,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Install Droid hooks
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -809,7 +809,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Second install should be idempotent (no change needed despite 5.0 vs float64(5))
-	secondResult, err := Run(Options{
+	secondResult, err := Run(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -821,7 +821,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Remove hooks
-	removeResult, err := Remove(Options{
+	removeResult, err := Remove(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -837,10 +837,10 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	assertLargeNumbersPreserved(t, cleanedData, "during removal")
 }
 
-func assertLargeNumbersPreserved(t *testing.T, data []byte, context string) {
+func assertLargeNumbersPreserved(t *testing.T, data []byte, phase string) {
 	t.Helper()
 	text := string(data)
 	if !strings.Contains(text, "9007199254740993") || !strings.Contains(text, "9007199254740995") {
-		t.Fatalf("large integers were corrupted %s: %s", context, data)
+		t.Fatalf("large integers were corrupted %s: %s", phase, data)
 	}
 }

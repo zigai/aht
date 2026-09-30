@@ -240,7 +240,7 @@ func TestResumeCommandFor(t *testing.T) {
 	}
 }
 
-func TestNormalize(t *testing.T) {
+func TestParse(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -292,9 +292,9 @@ func TestNormalize(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Normalize(test.value)
+			got, err := Parse(test.value)
 			if err != nil {
-				t.Fatalf("Normalize returned error: %v", err)
+				t.Fatalf("Parse returned error: %v", err)
 			}
 			if got != test.want {
 				t.Fatalf("expected %q, got %q", test.want, got)
@@ -454,7 +454,7 @@ func TestFromCommand(t *testing.T) {
 	}
 }
 
-func TestDefaultsFromPayload(t *testing.T) {
+func TestPayloadDefaults(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -595,9 +595,9 @@ func TestDefaultsFromPayload(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := DefaultsFromPayloadWithError(test.harness, json.RawMessage(test.payload))
+			got, err := PayloadDefaults(test.harness, json.RawMessage(test.payload))
 			if err != nil {
-				t.Fatalf("unexpected error from DefaultsFromPayloadWithError: %v", err)
+				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 			}
 			if got.SessionID != test.wantID ||
 				got.SessionPath != test.wantPath ||
@@ -613,15 +613,15 @@ func TestDefaultsFromPayload(t *testing.T) {
 	}
 }
 
-func TestDefaultsFromPayloadWithErrorRejectsMalformedPayload(t *testing.T) {
+func TestPayloadDefaultsRejectsMalformedPayload(t *testing.T) {
 	t.Parallel()
 
-	if _, err := DefaultsFromPayloadWithError(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
-		t.Fatal("DefaultsFromPayloadWithError accepted a non-object payload")
+	if _, err := PayloadDefaults(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
+		t.Fatal("PayloadDefaults accepted a non-object payload")
 	}
 }
 
-func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
+func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KIMI_SHARE_DIR", home)
 
@@ -630,12 +630,12 @@ func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
 		t.Fatalf("creating Kimi session directory: %v", err)
 	}
 
-	got, err := DefaultsFromPayloadWithError(
+	got, err := PayloadDefaults(
 		registry.Harness("kimi-code"),
 		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","source":"startup"}`),
 	)
 	if err != nil {
-		t.Fatalf("unexpected error from DefaultsFromPayloadWithError: %v", err)
+		t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 	}
 
 	if got.SessionID != "kimi-index-session" ||
@@ -649,7 +649,7 @@ func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
 	}
 }
 
-func TestPayloadCompatibleWithHarness(t *testing.T) {
+func TestPayloadCompatible(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -832,7 +832,7 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := PayloadCompatibleWithHarness(test.harness, json.RawMessage(test.payload))
+			got := PayloadCompatible(test.harness, json.RawMessage(test.payload))
 			if got != test.want {
 				t.Fatalf("expected %t, got %t", test.want, got)
 			}

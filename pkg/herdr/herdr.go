@@ -134,22 +134,22 @@ func ListPanes(ctx context.Context) ([]mux.Pane, error) {
 }
 
 //nolint:gocognit,cyclop // native session, snapshot, and process responses are intentionally joined here
-func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane, error) {
+func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list herdr panes: %w", err)
 	}
-	lookPath := options.LookPath
+	lookPath := opts.LookPath
 	if lookPath == nil {
 		lookPath = exec.LookPath
 	}
-	if options.Run == nil {
+	if opts.Run == nil {
 		if _, err := lookPath("herdr"); err != nil {
 			//nolint:nilerr // an optional unavailable multiplexer contributes no panes
 			return nil, nil
 		}
-		options.Run = runHerdr
+		opts.Run = runHerdr
 	}
-	sessionOutput, err := options.Run(ctx, nil, "session", "list", "--json")
+	sessionOutput, err := opts.Run(ctx, nil, "session", "list", "--json")
 	if err != nil {
 		if herdrUnavailable(sessionOutput) {
 			return nil, nil
@@ -164,7 +164,7 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane,
 	var listErrors []error
 	for _, session := range sessions {
 		env := map[string]string{"HERDR_SESSION": session}
-		output, snapshotErr := options.Run(ctx, env, "api", "snapshot")
+		output, snapshotErr := opts.Run(ctx, env, "api", "snapshot")
 		if snapshotErr != nil {
 			listErrors = append(listErrors, fmt.Errorf("read herdr session %q snapshot: %w", session, snapshotErr))
 			continue
@@ -174,7 +174,7 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane,
 			return nil, parseErr
 		}
 		for index := range sessionPanes {
-			processOutput, processErr := options.Run(ctx, env, "pane", "process-info", "--pane", sessionPanes[index].Location.PaneID)
+			processOutput, processErr := opts.Run(ctx, env, "pane", "process-info", "--pane", sessionPanes[index].Location.PaneID)
 			if processErr != nil {
 				listErrors = append(listErrors, fmt.Errorf("read herdr pane process info: %w", processErr))
 				continue
@@ -202,11 +202,11 @@ func CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error)
 	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Run: nil})
 }
 
-func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, options CaptureOptions) (mux.ScreenSnapshot, error) {
+func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, opts CaptureOptions) (mux.ScreenSnapshot, error) {
 	if pane.Location.Kind != registry.MultiplexerHerdr || pane.Location.PaneID == "" {
 		return mux.ScreenSnapshot{}, errPaneRequired
 	}
-	run := options.Run
+	run := opts.Run
 	if run == nil {
 		run = runHerdr
 	}
@@ -276,12 +276,12 @@ func parseContainerSessions(output string) ([]string, bool) {
 }
 
 func parseListSessions(output string) ([]string, bool) {
-	var rawList []json.RawMessage
-	if err := json.Unmarshal([]byte(output), &rawList); err != nil {
+	var rawSessions []json.RawMessage
+	if err := json.Unmarshal([]byte(output), &rawSessions); err != nil {
 		return nil, false
 	}
 	var sessions []string
-	for _, item := range rawList {
+	for _, item := range rawSessions {
 		var str string
 		if err := json.Unmarshal(item, &str); err == nil && strings.TrimSpace(str) != "" {
 			sessions = append(sessions, strings.TrimSpace(str))

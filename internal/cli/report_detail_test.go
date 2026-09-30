@@ -17,14 +17,14 @@ func TestReportDetailValidationAndNativePayload(t *testing.T) {
 		want                            registry.ActivityDetail
 		invalid                         bool
 	}{
-		{"permission", "waiting", "permission", "", "", registry.DetailPermission, false},
-		{"question", "waiting", "question", "", "", registry.DetailQuestion, false},
-		{"limit", "failed", "usage_limit", "", "", registry.DetailUsageLimit, false},
+		{"permission", "waiting", "permission", "", "", registry.ActivityDetailPermission, false},
+		{"question", "waiting", "question", "", "", registry.ActivityDetailQuestion, false},
+		{"limit", "failed", "usage_limit", "", "", registry.ActivityDetailUsageLimit, false},
 		{"clear", "waiting", "clear", "", "", "", false},
 		{"wrong state", "running", "permission", "", "", "", true},
 		{"unknown type", "waiting", "plan", "", "", "", true},
-		{"native permission", "waiting", "", `{"session_id":"s","cwd":"/work","hook_event_name":"PermissionRequest","permission_mode":"plan"}`, "PermissionRequest", registry.DetailPermission, false},
-		{"terminal limit", "failed", "", `{"session_id":"s","cwd":"/work","hook_event_name":"StopFailure","error":"rate_limit","error_details":"SECRET"}`, "StopFailure", registry.DetailUsageLimit, false},
+		{"native permission", "waiting", "", `{"session_id":"s","cwd":"/work","hook_event_name":"PermissionRequest","permission_mode":"plan"}`, "PermissionRequest", registry.ActivityDetailPermission, false},
+		{"terminal limit", "failed", "", `{"session_id":"s","cwd":"/work","hook_event_name":"StopFailure","error":"rate_limit","error_details":"SECRET"}`, "StopFailure", registry.ActivityDetailUsageLimit, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			options := reportOptions{harness: "claude", sessionID: "s", activity: test.activity, detail: test.detail, event: test.event, rawDefaultsOnly: test.payload != ""}

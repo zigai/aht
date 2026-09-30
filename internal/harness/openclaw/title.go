@@ -84,7 +84,7 @@ func (openclawHarness) SessionTitles(ctx context.Context, identities []registry.
 		if identity.SessionID == "" {
 			continue
 		}
-		title, err := lookupOpenClawSessionTitle(ctx, binary, identity)
+		title, err := readOpenClawSessionTitle(ctx, binary, identity)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("lookup OpenClaw title for session %q: %w", identity.SessionID, err))
 			continue
@@ -94,7 +94,7 @@ func (openclawHarness) SessionTitles(ctx context.Context, identities []registry.
 	return titles, errors.Join(failures...)
 }
 
-func lookupOpenClawSessionTitle(ctx context.Context, binary string, identity registry.ObservationIdentity) (string, error) {
+func readOpenClawSessionTitle(ctx context.Context, binary string, identity registry.ObservationIdentity) (string, error) {
 	sessionID := identity.SessionID
 	resolved, err := resolveOpenClawSession(ctx, binary, identity)
 	if err != nil {

@@ -126,7 +126,7 @@ func TestMemoryStoreConcurrentFlushPersistsLatestState(t *testing.T) {
 		})
 	}
 	group.Wait()
-	persisted, err := NewJournal(store.Path(), fixtureRules{}).load()
+	persisted, err := NewJournal(store.Path(), fixtureRules{}).load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

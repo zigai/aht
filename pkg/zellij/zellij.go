@@ -66,22 +66,22 @@ func ListPanes(ctx context.Context) ([]mux.Pane, error) {
 	return ListPanesWithOptions(ctx, ListOptions{Run: nil, LookPath: nil})
 }
 
-func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane, error) {
+func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list zellij panes: %w", err)
 	}
-	lookPath := options.LookPath
+	lookPath := opts.LookPath
 	if lookPath == nil {
 		lookPath = exec.LookPath
 	}
-	if options.Run == nil {
+	if opts.Run == nil {
 		if _, err := lookPath("zellij"); err != nil {
 			//nolint:nilerr // an optional unavailable multiplexer contributes no panes
 			return nil, nil
 		}
-		options.Run = runZellij
+		opts.Run = runZellij
 	}
-	sessionOutput, err := options.Run(ctx, "list-sessions", "--no-formatting")
+	sessionOutput, err := opts.Run(ctx, "list-sessions", "--no-formatting")
 	if err != nil {
 		if strings.Contains(strings.ToLower(sessionOutput), "no active zellij sessions") {
 			return nil, nil
@@ -95,7 +95,7 @@ func ListPanesWithOptions(ctx context.Context, options ListOptions) ([]mux.Pane,
 	panes := make([]mux.Pane, 0)
 	var listErrors []error
 	for _, session := range sessions {
-		output, listErr := options.Run(ctx, "--session", session, "action", "list-panes", "--all", "--json")
+		output, listErr := opts.Run(ctx, "--session", session, "action", "list-panes", "--all", "--json")
 		if listErr != nil {
 			listErrors = append(listErrors, fmt.Errorf("list zellij session %q panes: %w", session, listErr))
 			continue
@@ -113,11 +113,11 @@ func CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error)
 	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Run: nil})
 }
 
-func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, options CaptureOptions) (mux.ScreenSnapshot, error) {
+func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, opts CaptureOptions) (mux.ScreenSnapshot, error) {
 	if pane.Location.Kind != registry.MultiplexerZellij || pane.Location.SessionName == "" || pane.Location.PaneID == "" {
 		return mux.ScreenSnapshot{}, errPaneRequired
 	}
-	run := options.Run
+	run := opts.Run
 	if run == nil {
 		run = runZellij
 	}

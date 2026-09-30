@@ -418,7 +418,7 @@ func TestSearchMatchTTY(t *testing.T) {
 			Path:      "/work/project/session.jsonl",
 			UpdatedAt: now,
 		},
-		Live: []history.LiveState{
+		RegistryStates: []history.RegistryState{
 			{Presence: registry.PresenceLive},
 		},
 		Excerpts: []history.Excerpt{

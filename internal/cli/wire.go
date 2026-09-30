@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
 const wireHelp = `Run an owned Kimi Code process using its native Wire protocol.
@@ -53,14 +53,14 @@ func (app *application) validateWireArgs(cmd *cobra.Command, args []string) erro
 	if len(args) == 0 {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
-	harnessID, err := harnesscatalog.Normalize(args[0])
+	harnessID, err := catalog.Parse(args[0])
 	if err != nil {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
 	if cmd.ArgsLenAtDash() != 1 {
 		return exitCode(errWireMissingDashBoundary, exitCodeUsage)
 	}
-	runner, ok := harnesscatalog.WireRunnerFor(harnessID)
+	runner, ok := catalog.WireRunnerFor(harnessID)
 	if !ok {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
@@ -81,11 +81,11 @@ func (app *application) runWire(cmd *cobra.Command, args []string) error {
 	if !inputOK || !outputOK || !errorOK {
 		return errWireRequiresOSStreams
 	}
-	harnessID, err := harnesscatalog.Normalize(args[0])
+	harnessID, err := catalog.Parse(args[0])
 	if err != nil {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}
-	runner, ok := harnesscatalog.WireRunnerFor(harnessID)
+	runner, ok := catalog.WireRunnerFor(harnessID)
 	if !ok {
 		return exitCode(errWireUnsupportedHarness, exitCodeUsage)
 	}

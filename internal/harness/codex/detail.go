@@ -6,7 +6,7 @@ import (
 
 func (codexHarness) ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail {
 	if activity == registry.ActivityWaiting && event == "PermissionRequest" {
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	}
 	return nil
 }

@@ -49,7 +49,7 @@
 //
 // # Titles and history
 //
-// [LookupTitles] reads display names from harness files on demand; cache the
+// [SessionTitles] reads display names from harness files on demand; cache the
 // results when refreshing often. [SearchHistory] searches past conversations on
 // disk, including ones AHT never tracked, and does not need the tracker. It
 // returns partial results with [ErrHistoryIncomplete] when some sources cannot

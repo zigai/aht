@@ -26,7 +26,7 @@ func writeTitleFixture(t *testing.T, root, name, body string) string {
 	return path
 }
 
-func TestLookupTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
+func TestSessionTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	generated := writeTitleFixture(t, root, "generated.jsonl", `{"type":"ai-title","sessionId":"generated","aiTitle":"Generated title"}
@@ -34,7 +34,7 @@ func TestLookupTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
 	manual := writeTitleFixture(t, root, "manual.jsonl", `{"type":"custom-title","sessionId":"manual","customTitle":"Manual title"}
 {"type":"ai-title","sessionId":"manual","aiTitle":"Later generated title"}
 `)
-	titles, err := aht.LookupTitles(t.Context(), []aht.Session{
+	titles, err := aht.SessionTitles(t.Context(), []aht.Session{
 		{Harness: aht.HarnessClaude, SessionID: "generated", SessionPath: generated},
 		{Harness: aht.HarnessClaude, SessionID: "manual", SessionPath: manual},
 	})
@@ -46,7 +46,7 @@ func TestLookupTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
 	}
 }
 
-func TestLookupTitlesReadsHarnessNativeNames(t *testing.T) {
+func TestSessionTitlesReadsHarnessNativeNames(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex")
@@ -76,7 +76,7 @@ func TestLookupTitlesReadsHarnessNativeNames(t *testing.T) {
 		{Harness: aht.HarnessClaude, SessionID: "claude-1", SessionPath: claude},
 		{Harness: aht.HarnessAmp, SessionID: "T-amp", Observations: registry.Observations{Native: &registry.NativeObservation{Attributes: map[string]string{"amp_title": "Amp title"}}}},
 	}
-	titles, err := aht.LookupTitles(t.Context(), sessions)
+	titles, err := aht.SessionTitles(t.Context(), sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +86,14 @@ func TestLookupTitlesReadsHarnessNativeNames(t *testing.T) {
 	}
 }
 
-func TestLookupTitlesPreservesSuccessfulNamesOnReadFailure(t *testing.T) {
+func TestSessionTitlesPreservesSuccessfulNamesOnReadFailure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	pi := writeTitleFixture(t, root, "pi.jsonl", `{"type":"session","id":"pi"}
 {"type":"session_info","name":"Present"}
 `)
 	bad := writeTitleFixture(t, root, "bad.jsonl", strings.Repeat("x", 65<<10))
-	titles, err := aht.LookupTitles(t.Context(), []aht.Session{
+	titles, err := aht.SessionTitles(t.Context(), []aht.Session{
 		{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: pi},
 		{Harness: aht.HarnessOmp, SessionID: "omp", SessionPath: bad},
 	})
@@ -105,17 +105,17 @@ func TestLookupTitlesPreservesSuccessfulNamesOnReadFailure(t *testing.T) {
 	}
 }
 
-func TestLookupTitlesHonorsCancellation(t *testing.T) {
+func TestSessionTitlesHonorsCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := aht.LookupTitles(ctx, []aht.Session{{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: "ignored"}})
+	_, err := aht.SessionTitles(ctx, []aht.Session{{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: "ignored"}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lookup error = %v", err)
 	}
 }
 
-func TestLookupTitlesSupportIsDiscoverableThroughAHT(t *testing.T) {
+func TestSessionTitlesSupportIsDiscoverableThroughAHT(t *testing.T) {
 	t.Parallel()
 	for _, id := range []aht.Harness{
 		aht.HarnessCodex, aht.HarnessPi, aht.HarnessOmp,

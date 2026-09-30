@@ -64,7 +64,7 @@ func TestLimitedIndexMatchesUnlimitedDetails(t *testing.T) {
 		if diff := cmp.Diff(all.Matches[:1], limited.Matches); diff != "" {
 			t.Fatalf("limited details (-unlimited +limited):\n%s", diff)
 		}
-		if !limited.Truncated || len(limited.Matches[0].Live) != 1 {
+		if !limited.Truncated || len(limited.Matches[0].RegistryStates) != 1 {
 			t.Fatalf("limited result = %#v", limited)
 		}
 		query.Limit = 0
@@ -143,8 +143,8 @@ func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
 		{ID: "live", Harness: registry.Harness("pi"), SessionID: "recently-updated", SessionPath: sources[1].Path},
 	}}
 	limited := requireIndexedMatches(t, catalog, query, 1)
-	if len(limited.Matches[0].Live) != 1 {
-		t.Fatalf("live match failed under symlink parent: %#v", limited.Matches[0].Live)
+	if len(limited.Matches[0].RegistryStates) != 1 {
+		t.Fatalf("live match failed under symlink parent: %#v", limited.Matches[0].RegistryStates)
 	}
 }
 

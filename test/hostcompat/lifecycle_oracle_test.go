@@ -13,7 +13,7 @@ import (
 )
 
 func (host isolatedHost) validateSession(session registry.Session) bool {
-	if host.contract.Level == compatibilityDiscovery {
+	if host.contract.Level == compatibilityLevelDiscovery {
 		return true
 	}
 	if session.Observations.Native == nil {
@@ -40,7 +40,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 			Present: true,
 		},
 	}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)}
-	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLifecycle}}
+	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
 	if host.validateSession(processOnly) {
 		t.Fatal("oracle accepted process-only session for non-exempt harness")
 	}
@@ -79,7 +79,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		t.Fatal("oracle accepted session with mismatched native session ID")
 	}
 
-	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityDiscovery}}
+	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
 	if !cursorHost.validateSession(processOnly) {
 		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
 	}

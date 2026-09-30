@@ -19,7 +19,7 @@ import (
 func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) {
 	results := make([]Result, 0)
 	var failures []error
-	for _, id := range AllHarnesses() {
+	for _, id := range Harnesses() {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			break
@@ -88,7 +88,7 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 		}
 		return result, err
 	}
-	return RunContext(ctx, opts)
+	return Run(ctx, opts)
 }
 
 func appendUpgradeResult(results []Result, id registry.Harness, result Result, err error) []Result {

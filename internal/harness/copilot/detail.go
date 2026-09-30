@@ -9,7 +9,7 @@ func (copilotHarness) ActivityDetail(event string, activity registry.Activity, a
 		return nil
 	}
 	if event == "permissionRequest" || event == "notification" && attributes["copilot_notification_type"] == "permission_prompt" {
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	}
 	return nil
 }

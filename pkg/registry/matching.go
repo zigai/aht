@@ -7,7 +7,7 @@ import (
 
 func reconcileResumedProcessSession(sessions map[string]Session, session *Session, observation Observation) {
 	for id, provisional := range sessions {
-		if id == session.ID || provisional.Harness != session.Harness || provisional.IdentityState != Provisional || provisional.Observations.Native != nil || provisional.Process == nil || !provisional.Process.Equal(*observation.ProcessIdentity()) {
+		if id == session.ID || provisional.Harness != session.Harness || provisional.IdentityState != IdentityProvisional || provisional.Observations.Native != nil || provisional.Process == nil || !provisional.Process.Equal(*observation.ProcessIdentity()) {
 			continue
 		}
 		// Carry location and process evidence, not the provisional activity or
@@ -132,7 +132,7 @@ func findAndReconcileMatchingSession(sessions map[string]Session, observation Ob
 	processID := findProcessMatchingSession(sessions, observation)
 	if observation.Kind() == "report" && identityID != "" && processID != "" &&
 		identityID != processID && sessions[identityID].Process != nil &&
-		sessions[identityID].Presence() == PresenceGone && sessions[processID].IdentityState == Provisional && sessions[processID].Observations.Native == nil {
+		sessions[identityID].Presence() == PresenceGone && sessions[processID].IdentityState == IdentityProvisional && sessions[processID].Observations.Native == nil {
 		return identityID
 	}
 	if identityID != "" && processID != "" && identityID != processID {
@@ -296,7 +296,7 @@ func mergeProvisionalSession(target Session, provisional Session) Session {
 	}
 	target.UpdatedAt = maxTime(target.UpdatedAt, provisional.UpdatedAt)
 	if target.SessionID != "" || target.SessionPath != "" {
-		target.IdentityState = Identified
+		target.IdentityState = IdentityIdentified
 	}
 	target.Incarnation = incarnationFromEvidence(target)
 	return target

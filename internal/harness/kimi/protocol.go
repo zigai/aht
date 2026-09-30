@@ -167,9 +167,9 @@ func (p *Protocol) ObserveHost(line []byte) (Update, bool, error) {
 			(request.Source != "" && request.Source != "foreground_turn" && request.Source != "background_agent") {
 			return Update{Event: "", Activity: "", Detail: nil}, false, errInvalidWaitingRequest
 		}
-		detail := registry.DetailPermission
+		detail := registry.ActivityDetailPermission
 		if event.Type == "QuestionRequest" {
-			detail = registry.DetailQuestion
+			detail = registry.ActivityDetailQuestion
 		}
 		pending := pendingRequest{observedAt: time.Now().UTC(), detail: detail, tool: request.Tool, background: request.Source == "background_agent"}
 		if previous, exists := p.pending[request.ID]; exists {

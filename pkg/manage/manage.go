@@ -105,7 +105,7 @@ func New(config Config) *Manager {
 	return &Manager{config: config}
 }
 
-func (s ArtifactStatus) IsValid() bool {
+func (s ArtifactStatus) Valid() bool {
 	switch s {
 	case ArtifactMissing, ArtifactCurrent, ArtifactStale, ArtifactForeign:
 		return true
@@ -113,24 +113,24 @@ func (s ArtifactStatus) IsValid() bool {
 	return false
 }
 
-// SupportedHarnesses returns the harnesses with managed integrations.
-func SupportedHarnesses() []registry.Harness {
-	return install.AllHarnesses()
+// InstallableHarnesses returns the harnesses with managed integrations.
+func InstallableHarnesses() []registry.Harness {
+	return install.Harnesses()
 }
 
 // InstallIntegration idempotently installs or updates one harness integration.
 func (m *Manager) InstallIntegration(
 	ctx context.Context,
 	harness registry.Harness,
-	options IntegrationOptions,
+	opts IntegrationOptions,
 ) (IntegrationResult, error) {
-	result, err := install.RunContext(ctx, install.Options{
+	result, err := install.Run(ctx, install.Options{
 		Harness:      harness,
 		Binary:       m.config.Binary,
-		TargetBinary: options.TargetBinary,
-		DryRun:       options.DryRun,
-		Force:        options.Force,
-		UseShim:      options.UseShim,
+		TargetBinary: opts.TargetBinary,
+		DryRun:       opts.DryRun,
+		Force:        opts.Force,
+		UseShim:      opts.UseShim,
 	})
 	if err != nil {
 		return integrationResult(result), fmt.Errorf("installing %s integration: %w", harness, err)
@@ -142,15 +142,15 @@ func (m *Manager) InstallIntegration(
 func (m *Manager) RemoveIntegration(
 	ctx context.Context,
 	harness registry.Harness,
-	options IntegrationOptions,
+	opts IntegrationOptions,
 ) (IntegrationResult, error) {
-	result, err := install.RemoveContext(ctx, install.Options{
+	result, err := install.Remove(ctx, install.Options{
 		Harness:      harness,
 		Binary:       m.config.Binary,
-		TargetBinary: options.TargetBinary,
-		DryRun:       options.DryRun,
-		Force:        options.Force,
-		UseShim:      options.UseShim,
+		TargetBinary: opts.TargetBinary,
+		DryRun:       opts.DryRun,
+		Force:        opts.Force,
+		UseShim:      opts.UseShim,
 	})
 	if err != nil {
 		return integrationResult(result), fmt.Errorf("removing %s integration: %w", harness, err)
@@ -163,7 +163,7 @@ func (m *Manager) IntegrationStatus(
 	ctx context.Context,
 	harness registry.Harness,
 ) (IntegrationStatus, error) {
-	status, err := install.InspectContext(ctx, harness, m.config.Binary)
+	status, err := install.Inspect(ctx, harness, m.config.Binary)
 	if err != nil {
 		return IntegrationStatus{}, fmt.Errorf("inspecting %s integration: %w", harness, err)
 	}
@@ -177,14 +177,14 @@ func (m *Manager) IntegrationStatus(
 }
 
 // EnableTracker installs, updates, and starts background agent-session tracking.
-func (m *Manager) EnableTracker(ctx context.Context, options TrackerOptions) (TrackerResult, error) {
-	result, err := service.Update(ctx, m.serviceOptions(options))
+func (m *Manager) EnableTracker(ctx context.Context, opts TrackerOptions) (TrackerResult, error) {
+	result, err := service.Update(ctx, m.serviceOptions(opts))
 	return trackerResult(result), trackerError("enabling tracker", err)
 }
 
 // DisableTracker stops and removes background agent-session tracking.
-func (m *Manager) DisableTracker(ctx context.Context, options TrackerOptions) (TrackerResult, error) {
-	result, err := service.Uninstall(ctx, m.serviceOptions(options))
+func (m *Manager) DisableTracker(ctx context.Context, opts TrackerOptions) (TrackerResult, error) {
+	result, err := service.Uninstall(ctx, m.serviceOptions(opts))
 	return trackerResult(result), trackerError("disabling tracker", err)
 }
 
@@ -194,13 +194,13 @@ func (m *Manager) TrackerStatus(ctx context.Context) (TrackerResult, error) {
 	return trackerResult(result), trackerError("checking tracker status", err)
 }
 
-func (m *Manager) serviceOptions(options TrackerOptions) service.Options {
+func (m *Manager) serviceOptions(opts TrackerOptions) service.Options {
 	return service.Options{
 		Binary:      m.config.Binary,
 		StorePath:   m.config.StorePath,
 		Interval:    m.config.TrackerInterval,
 		GracePeriod: m.config.TrackerGracePeriod,
-		DryRun:      options.DryRun,
+		DryRun:      opts.DryRun,
 	}
 }
 

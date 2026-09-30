@@ -106,13 +106,13 @@ func ExampleClient_Watch() {
 }
 
 //nolint:testableexamples // titles come from machine-specific harness files, so this example is compiled but not run.
-func ExampleLookupTitles() {
+func ExampleSessionTitles() {
 	ctx := context.Background()
 	sessions, err := aht.New(aht.Config{}).List(ctx, aht.Filter{Presence: aht.PresenceLive})
 	if err != nil {
 		log.Fatal(err)
 	}
-	titles, err := aht.LookupTitles(ctx, sessions)
+	titles, err := aht.SessionTitles(ctx, sessions)
 	if err != nil {
 		log.Print(err) // titles still holds every title that was read
 	}

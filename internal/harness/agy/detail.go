@@ -8,9 +8,9 @@ func (agyHarness) ActivityDetail(event string, activity registry.Activity, attri
 	if activity == registry.ActivityWaiting && event == "PreToolUse" {
 		switch attributes["agy_tool_name"] {
 		case "ask_permission":
-			return new(registry.DetailPermission)
+			return new(registry.ActivityDetailPermission)
 		case "ask_question":
-			return new(registry.DetailQuestion)
+			return new(registry.ActivityDetailQuestion)
 		}
 	}
 	return nil

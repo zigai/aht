@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -28,9 +28,9 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 		name string
 		run  func() error
 	}{
-		{name: "install", run: func() error { _, err := RunContext(ctx, options); return err }},
-		{name: "remove", run: func() error { _, err := RemoveContext(ctx, options); return err }},
-		{name: "inspect", run: func() error { _, err := InspectContext(ctx, options.Harness, options.Binary); return err }},
+		{name: "install", run: func() error { _, err := Run(ctx, options); return err }},
+		{name: "remove", run: func() error { _, err := Remove(ctx, options); return err }},
+		{name: "inspect", run: func() error { _, err := Inspect(ctx, options.Harness, options.Binary); return err }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.run(); !errors.Is(err, context.Canceled) {
@@ -53,10 +53,10 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	t.Setenv("AGY_CLI_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 
-	harnesses := AllHarnesses()
+	harnesses := Harnesses()
 	results := make([]Result, 0, len(harnesses))
 	for _, h := range harnesses {
-		res, err := RunContext(context.Background(), Options{
+		res, err := Run(context.Background(), Options{
 			Harness:      h,
 			Binary:       defaultBinary,
 			TargetBinary: "/usr/bin/opencode",
@@ -65,7 +65,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 			UseShim:      false,
 		})
 		if err != nil {
-			t.Fatalf("RunContext for %s returned error: %v", h, err)
+			t.Fatalf("Run for %s returned error: %v", h, err)
 		}
 		results = append(results, res)
 	}
@@ -83,32 +83,32 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 	t.Parallel()
 
-	for _, adapter := range harnesscatalog.All() {
+	for _, adapter := range catalog.All() {
 		if _, ok := adapter.(harnesspkg.Installable); !ok {
 			t.Fatalf("harness %q has no install plan", adapter.Definition().ID)
 		}
 	}
 
-	for _, harness := range AllHarnesses() {
-		adapter, ok := harnesscatalog.Find(harness)
+	for _, harness := range Harnesses() {
+		adapter, ok := catalog.Find(harness)
 		if !ok {
-			t.Fatalf("AllHarnesses contains unknown harness %q", harness)
+			t.Fatalf("Harnesses contains unknown harness %q", harness)
 		}
 		if _, installable := adapter.(harnesspkg.Installable); !installable {
-			t.Fatalf("AllHarnesses contains %q without install plan", harness)
+			t.Fatalf("Harnesses contains %q without install plan", harness)
 		}
 	}
 }
 
-func TestAllHarnesses(t *testing.T) {
+func TestHarnesses(t *testing.T) {
 	t.Parallel()
 
-	harnesses := AllHarnesses()
+	harnesses := Harnesses()
 	if len(harnesses) == 0 {
 		t.Fatal("expected installable harnesses")
 	}
 	if !slices.Contains(harnesses, registry.Harness("codex")) {
-		t.Fatalf("AllHarnesses() = %v, want codex", harnesses)
+		t.Fatalf("Harnesses() = %v, want codex", harnesses)
 	}
 }
 
@@ -147,7 +147,7 @@ type managedReplacementCase struct {
 func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
 	t.Helper()
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      test.Harness,
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -171,7 +171,7 @@ func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
 	}
 	requireTextContainsAll(t, text, test.RequiredText, "installed hooks")
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      test.Harness,
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -265,14 +265,14 @@ func requireTestHookCommand(t *testing.T, hooks map[string]any, event string) st
 	return command
 }
 
-func requireTestHookTimeout(t *testing.T, hooks map[string]any, event string) float64 {
+func requireTestHookTimeoutSeconds(t *testing.T, hooks map[string]any, event string) float64 {
 	t.Helper()
 	handler := requireTestHookHandler(t, hooks, event)
-	timeout, ok := handler["timeout"].(float64)
+	timeoutSeconds, ok := handler["timeout"].(float64)
 	if !ok {
 		t.Fatalf("expected %s hook timeout, got %#v", event, handler["timeout"])
 	}
-	return timeout
+	return timeoutSeconds
 }
 
 func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) map[string]any {

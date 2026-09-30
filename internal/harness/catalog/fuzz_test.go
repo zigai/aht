@@ -17,13 +17,13 @@ func FuzzPayloadAdapters(f *testing.F) {
 	f.Add("claude", []byte(`{"session_id":"s","cwd":"/w","hook_event_name":"Stop","background_tasks":[{"type":"subagent"}],"session_crons":[{"schedule":"*/5 1-3,7 */2 * 0-7"}]}`))
 
 	f.Fuzz(func(t *testing.T, harnessName string, payload []byte) {
-		harness, err := Normalize(harnessName)
+		harness, err := Parse(harnessName)
 		if err != nil {
 			return
 		}
 		raw := json.RawMessage(payload)
-		_ = PayloadCompatibleWithHarness(harness, raw)
-		_, _ = DefaultsFromPayloadWithError(harness, raw)
+		_ = PayloadCompatible(harness, raw)
+		_, _ = PayloadDefaults(harness, raw)
 		_, _ = ActivityFromPayload(harness, "Stop", registry.ActivityIdle, raw, time.Unix(0, 0))
 	})
 }

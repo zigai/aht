@@ -11,13 +11,13 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestSupportedHarnesses(t *testing.T) {
+func TestInstallableHarnesses(t *testing.T) {
 	t.Parallel()
 
-	harnesses := manage.SupportedHarnesses()
+	harnesses := manage.InstallableHarnesses()
 	for _, expected := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("opencode")} {
 		if !slices.Contains(harnesses, expected) {
-			t.Errorf("SupportedHarnesses() missing %s", expected)
+			t.Errorf("InstallableHarnesses() missing %s", expected)
 		}
 	}
 }

@@ -14,7 +14,7 @@ func TestInstallAgyWritesPlugin(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -37,7 +37,7 @@ func TestInstallAgyWritesPlugin(t *testing.T) {
 	requireAgyPluginMarker(t, result.Path)
 	requireAgyImportManifest(t, filepath.Join(home, ".gemini", "antigravity-cli", agyImportManifestName))
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -64,7 +64,7 @@ func TestInstallAgyRequiresForceForForeignPlugin(t *testing.T) {
 		t.Fatalf("writing foreign plugin manifest: %v", err)
 	}
 
-	_, err := Run(Options{
+	_, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -76,7 +76,7 @@ func TestInstallAgyRequiresForceForForeignPlugin(t *testing.T) {
 		t.Fatal("expected error for unmanaged agy plugin")
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("agy"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -167,7 +167,7 @@ func TestInstallClineWritesNativePlugin(t *testing.T) {
 	t.Setenv("CLINE_DIR", clineDir)
 	pluginDir := filepath.Join(clineDir, "plugins", "aht-state")
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -188,7 +188,7 @@ func TestInstallClineWritesNativePlugin(t *testing.T) {
 	requireClineAgentPlugin(t, pluginDir)
 	requireClinePluginMarker(t, pluginDir)
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -274,7 +274,7 @@ func TestInstallClineRequiresForceForForeignPlugin(t *testing.T) {
 		t.Fatalf("writing foreign Cline plugin: %v", err)
 	}
 
-	_, err := Run(Options{
+	_, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cline"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -299,7 +299,7 @@ func TestInstallGooseWritesPlugin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("goose"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -322,7 +322,7 @@ func TestInstallGooseWritesPlugin(t *testing.T) {
 	requireGoosePluginScript(t, result.Path)
 	requireGoosePluginMarker(t, result.Path)
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("goose"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",

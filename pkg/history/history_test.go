@@ -131,7 +131,7 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 		t.Fatalf("search = %#v, %v", result, err)
 	}
 	m := result.Matches[0]
-	if m.Conversation.Title != "Authentication work" || m.Conversation.CreatedAt.IsZero() || len(m.Live) != 1 || m.Live[0].RegistryID != "live" {
+	if m.Conversation.Title != "Authentication work" || m.Conversation.CreatedAt.IsZero() || len(m.RegistryStates) != 1 || m.RegistryStates[0].RegistryID != "live" {
 		t.Fatalf("metadata = %#v", m)
 	}
 	q.Dir = "/work/proj"
@@ -265,7 +265,7 @@ func assertNativeTextPolicy(t *testing.T, h registry.Harness, file, body string)
 	if (h == registry.Harness("omp") || h == registry.Harness("pi")) && result.Matches[0].Conversation.Title != "Authentication work" {
 		t.Fatalf("%s conversation title = %q, want %q", h, result.Matches[0].Conversation.Title, "Authentication work")
 	}
-	if result.Matches[0].Live == nil || len(result.Matches[0].Live) != 0 {
+	if result.Matches[0].RegistryStates == nil || len(result.Matches[0].RegistryStates) != 0 {
 		t.Fatal("untracked historical session should have unknown presence")
 	}
 	if h == registry.Harness("codex") && result.Matches[0].MatchingParts != 1 {

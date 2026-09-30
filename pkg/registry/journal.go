@@ -54,7 +54,7 @@ func (s *Journal) Observe(ctx context.Context, observation Observation) (Session
 	if result.ended > 0 {
 		return Session{}, ErrProcessEnded
 	}
-	snap, err := s.loadContext(ctx)
+	snap, err := s.load(ctx)
 	if err != nil {
 		return Session{}, err
 	}

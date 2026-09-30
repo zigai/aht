@@ -70,7 +70,7 @@ func (l *Listing) validate() error {
 }
 
 func (r *Reading) validate() error {
-	if r == nil || !r.Process.Complete() || !r.Activity.IsValid() {
+	if r == nil || !r.Process.Complete() || !r.Activity.Valid() {
 		return fmt.Errorf("%w: incomplete reading", ErrInvalidObservation)
 	}
 	if r.Detail != "" && !r.Detail.ValidFor(r.Activity) {
@@ -112,7 +112,7 @@ func validateLocation(location *Location) error {
 	if location == nil {
 		return nil
 	}
-	if location.PanePID < 0 || (!location.Empty() && !location.Kind.IsValid()) {
+	if location.PanePID < 0 || (!location.Empty() && !location.Kind.Valid()) {
 		return fmt.Errorf("%w: invalid location", ErrInvalidObservation)
 	}
 	return nil

@@ -108,7 +108,7 @@ type ProcessFilter interface {
 
 type WireRunner interface {
 	ValidateWireArgs(args []string) error
-	RunWire(ctx context.Context, options WireOptions) error
+	RunWire(ctx context.Context, opts WireOptions) error
 }
 
 type WireSink interface {

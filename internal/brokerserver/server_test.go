@@ -295,20 +295,20 @@ func TestServer_BoundsSlowSubscriber(t *testing.T) {
 		}
 	}
 
-	clientContext, cancelClient := context.WithTimeout(t.Context(), 5*time.Second)
+	clientCtx, cancelClient := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelClient()
 	client := broker.NewClient(fixture.path)
-	if err := client.Ping(clientContext); err != nil {
+	if err := client.Ping(clientCtx); err != nil {
 		t.Fatalf("slow subscriber blocked another client: %v", err)
 	}
-	session, err := client.Observe(clientContext, registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "healthy-client"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence}})
+	session, err := client.Observe(clientCtx, registry.Observation{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "healthy-client"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence}})
 	if err != nil || session.SessionID != "healthy-client" {
 		t.Fatalf("healthy client observe = %#v, %v", session, err)
 	}
 	if err := connection.Close(); err != nil {
 		t.Fatalf("disconnect slow subscriber: %v", err)
 	}
-	if err := client.Ping(clientContext); err != nil {
+	if err := client.Ping(clientCtx); err != nil {
 		t.Fatalf("disconnected subscriber affected broker: %v", err)
 	}
 

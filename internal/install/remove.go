@@ -12,13 +12,9 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// Remove deletes only artifacts owned by aht for one harness.
-func Remove(opts Options) (Result, error) {
-	return RemoveContext(context.Background(), opts)
-}
-
-// RemoveContext removes one integration while honoring caller cancellation.
-func RemoveContext(ctx context.Context, opts Options) (Result, error) {
+// Remove deletes only artifacts owned by aht for one harness while honoring
+// caller cancellation.
+func Remove(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("remove integration context: %w", err)
 	}
@@ -192,22 +188,22 @@ func removeJSONHooks(opts Options, harnessID registry.Harness, path string, appl
 	return removeResult(harnessID, path, changed, opts.DryRun), nil
 }
 
-func removeTextBlock(options Options, harnessID registry.Harness, plan harnesspkg.ManagedTextBlockInstallPlan) (Result, error) {
+func removeTextBlock(opts Options, harnessID registry.Harness, plan harnesspkg.ManagedTextBlockInstallPlan) (Result, error) {
 	current, err := readTextFile(plan.Path)
 	if err != nil {
 		return Result{}, err
 	}
 	next := removeManagedTextBlock(current, plan.StartMarker, plan.EndMarker)
 	changed := next != current
-	if changed && !options.DryRun {
+	if changed && !opts.DryRun {
 		if err := writeFileAtomic(plan.Path, []byte(next), "creating config directory", "writing cleaned config"); err != nil {
 			return Result{}, err
 		}
 	}
-	return removeResult(harnessID, plan.Path, changed, options.DryRun), nil
+	return removeResult(harnessID, plan.Path, changed, opts.DryRun), nil
 }
 
-func removeOwnedFiles(options Options, harnessID registry.Harness, paths []string, resultPath string) (Result, error) {
+func removeOwnedFiles(opts Options, harnessID registry.Harness, paths []string, resultPath string) (Result, error) {
 	managed := make([]string, 0, len(paths))
 	for _, path := range paths {
 		status, err := classifyArtifactForHarness(path, harnessID)
@@ -223,18 +219,18 @@ func removeOwnedFiles(options Options, harnessID registry.Harness, paths []strin
 			managed = append(managed, path)
 		}
 	}
-	if !options.DryRun {
+	if !opts.DryRun {
 		for _, path := range managed {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return Result{}, fmt.Errorf("removing managed integration %s: %w", path, err)
 			}
 		}
 	}
-	return removeResult(harnessID, resultPath, len(managed) > 0, options.DryRun), nil
+	return removeResult(harnessID, resultPath, len(managed) > 0, opts.DryRun), nil
 }
 
 //nolint:cyclop // removal handles both native registrations and import manifests
-func removePluginDirectory(ctx context.Context, options Options, harnessID registry.Harness, plan harnesspkg.PluginDirectoryInstallPlan) (Result, error) {
+func removePluginDirectory(ctx context.Context, opts Options, harnessID registry.Harness, plan harnesspkg.PluginDirectoryInstallPlan) (Result, error) {
 	plugin := newPluginDirectoryInstall(plan, nil)
 	managed, err := plugin.managed()
 	if err != nil {
@@ -249,7 +245,7 @@ func removePluginDirectory(ctx context.Context, options Options, harnessID regis
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, plan.Dir)
 	}
 	if plan.Registration != nil {
-		return removeRegisteredPlugin(ctx, options, harnessID, plan, exists)
+		return removeRegisteredPlugin(ctx, opts, harnessID, plan, exists)
 	}
 	manifestChanged := false
 	var manifest importManifest
@@ -261,12 +257,12 @@ func removePluginDirectory(ctx context.Context, options Options, harnessID regis
 		manifest, manifestChanged = removeImport(manifest, plan.ImportManifest.Name)
 	}
 	changed := exists || manifestChanged
-	if changed && !options.DryRun {
+	if changed && !opts.DryRun {
 		if err := applyPluginRemoval(plan, exists, manifestChanged, manifest); err != nil {
 			return Result{}, err
 		}
 	}
-	return removeResult(harnessID, plan.Dir, changed, options.DryRun), nil
+	return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
 }
 
 func applyPluginRemoval(plan harnesspkg.PluginDirectoryInstallPlan, exists bool, manifestChanged bool, manifest importManifest) error {

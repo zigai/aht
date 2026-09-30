@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -74,7 +74,7 @@ exit 2
 func TestHermesInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 	fake := installFakeHermesCLI(t)
 
-	first, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	first, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("installing Hermes plugin: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestHermesInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 		}
 	}
 
-	second, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	second, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("reinstalling Hermes plugin: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestHermesInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 //nolint:cyclop // assertions cover each documented hook and privacy boundary independently
 func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.T) {
 	t.Setenv("HERMES_HOME", t.TempDir())
-	adapter, ok := harnesscatalog.Find(registry.Harness("hermes"))
+	adapter, ok := catalog.Find(registry.Harness("hermes"))
 	if !ok {
 		t.Fatal("Hermes adapter not found")
 	}
@@ -163,14 +163,14 @@ func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.
 
 func TestHermesRepairsDisabledPlugin(t *testing.T) {
 	fake := installFakeHermesCLI(t)
-	if _, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary}); err != nil {
+	if _, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(fake.state, "enabled")); err != nil {
 		t.Fatal(err)
 	}
 
-	repaired, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	repaired, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("repairing disabled Hermes plugin: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestHermesManagedModeFailsBeforeWriting(t *testing.T) {
 	t.Setenv("HERMES_MANAGED", "nixos")
 	pluginPath := filepath.Join(fake.home, "plugins", "aht-state")
 
-	_, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err == nil || !strings.Contains(err.Error(), "package-manager-managed") {
 		t.Fatalf("expected managed mode error, got %v", err)
 	}
@@ -206,11 +206,11 @@ func TestHermesRefusesForeignPluginDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("expected foreign plugin refusal, got %v", err)
 	}
-	replaced, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary, Force: true})
+	replaced, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary, Force: true})
 	if err != nil || !replaced.Changed {
 		t.Fatalf("forced Hermes replacement = %+v, %v", replaced, err)
 	}
@@ -218,11 +218,11 @@ func TestHermesRefusesForeignPluginDirectory(t *testing.T) {
 
 func TestHermesRemoveUsesNativePluginCLI(t *testing.T) {
 	fake := installFakeHermesCLI(t)
-	installed, err := Run(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	installed, err := Run(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
-	removed, err := Remove(Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
+	removed, err := Remove(t.Context(), Options{Harness: registry.Harness("hermes"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}

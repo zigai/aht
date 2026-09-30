@@ -207,8 +207,8 @@ func TestTmuxStopTargetValidationChecksEveryServer(t *testing.T) {
 
 	session := registry.Session{Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/correct", PaneID: "%1", PanePID: 42}}
 	panes := []tmux.Pane{
-		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/wrong", PaneID: "%1", PanePID: 41}},
-		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/correct", PaneID: "%1", PanePID: 42}},
+		{Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/wrong", PaneID: "%1", PanePID: 41}},
+		{Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "/tmp/correct", PaneID: "%1", PanePID: 42}},
 	}
 	if validation := tmuxStopTargetValidation(session, panes); !validation.OK {
 		t.Fatalf("matching pane on later server was rejected: %#v", validation)
@@ -220,7 +220,7 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 
 	session := registry.Session{Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PanePID: 42}}
 	panes := []tmux.Pane{
-		{Tmux: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:custom", PaneID: "%1", PanePID: 42}},
+		{Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: "-L:custom", PaneID: "%1", PanePID: 42}},
 	}
 	if validation := tmuxStopTargetValidation(session, panes); validation.OK {
 		t.Fatalf("missing stored server identity approved a custom-server pane: %#v", validation)
@@ -259,7 +259,7 @@ func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
 	if !ok || target.Method != "tmux-interrupt" {
 		t.Fatalf("unexpected target: %#v", target)
 	}
-	result := tmuxStopTargetValidation(session, []tmux.Pane{{Tmux: loc, PanePID: 200}})
+	result := tmuxStopTargetValidation(session, []tmux.Pane{{Location: loc, PanePID: 200}})
 	if result.OK {
 		t.Fatal("unchanged shell pane accepted tmux interrupt even though tracked agent was not foreground")
 	}

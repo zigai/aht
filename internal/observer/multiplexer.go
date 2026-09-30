@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	harness "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/herdr"
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -211,7 +211,7 @@ func commandPaneKey(pane mux.Pane) (string, registry.Harness, bool) {
 	if len(fields) == 0 {
 		return "", "", false
 	}
-	paneHarness, ok := harness.FromCommand(filepath.Base(fields[0]))
+	paneHarness, ok := catalog.FromCommand(filepath.Base(fields[0]))
 	if !ok {
 		return "", "", false
 	}

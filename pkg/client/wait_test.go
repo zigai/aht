@@ -139,7 +139,7 @@ func TestWaitInitiallySatisfied(t *testing.T) {
 	if res.Session.ID != "sess-init" {
 		t.Errorf("res.Session.ID = %q, want sess-init", res.Session.ID)
 	}
-	if !tw.IsClosed() {
+	if !tw.Closed() {
 		t.Error("expected watcher to be closed after wait")
 	}
 }
@@ -178,7 +178,7 @@ func TestWaitInitiallySatisfiedWithStableFor(t *testing.T) {
 		if res.Session.ID != "sess-stable" {
 			t.Errorf("res.Session.ID = %q, want sess-stable", res.Session.ID)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed")
 		}
 	})
@@ -340,7 +340,7 @@ func TestWaitTimeout(t *testing.T) {
 		if !errors.Is(waitErr, client.ErrWaitTimeout) {
 			t.Fatalf("Wait() error = %v, want ErrWaitTimeout", waitErr)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed after timeout")
 		}
 	})
@@ -374,7 +374,7 @@ func TestWaitCallerCancellation(t *testing.T) {
 		if !errors.Is(waitErr, context.Canceled) {
 			t.Fatalf("Wait() error = %v, want context.Canceled", waitErr)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed after cancellation")
 		}
 	})
@@ -760,7 +760,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("watcher was not closed on success")
 		}
 	})
@@ -787,7 +787,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 			synctest.Wait()
 			wg.Wait()
 
-			if !tw.IsClosed() {
+			if !tw.Closed() {
 				t.Error("watcher was not closed on timeout")
 			}
 		})
@@ -809,7 +809,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("watcher was not closed on error")
 		}
 	})

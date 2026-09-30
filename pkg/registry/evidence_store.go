@@ -171,7 +171,7 @@ func storeProcessObservation(session *Session, observation Observation, at time.
 }
 
 func storeMultiplexerObservation(session *Session, observation Observation, at time.Time) {
-	session.Observations.Location = &MultiplexerObservation{Process: *observation.ProcessIdentity(), Context: *observation.Location(), ObservedAt: at}
+	session.Observations.Location = &MultiplexerObservation{Process: *observation.ProcessIdentity(), Location: *observation.Location(), ObservedAt: at}
 }
 
 func storeCatalogObservation(session *Session, observation Observation, at time.Time) {

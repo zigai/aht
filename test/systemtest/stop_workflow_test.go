@@ -130,8 +130,8 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 
 	targetPane := requireTmuxPane(t, targetServer.Socket)
 	controlPane := requireTmuxPane(t, controlServer.Socket)
-	if targetPane.Tmux.PaneID != controlPane.Tmux.PaneID {
-		t.Fatalf("tmux fixtures must share a pane id across distinct servers: target=%q control=%q", targetPane.Tmux.PaneID, controlPane.Tmux.PaneID)
+	if targetPane.Location.PaneID != controlPane.Location.PaneID {
+		t.Fatalf("tmux fixtures must share a pane id across distinct servers: target=%q control=%q", targetPane.Location.PaneID, controlPane.Location.PaneID)
 	}
 
 	registryPath := filepath.Join(stateDir, "tmux-stop-sessions.json")
@@ -141,7 +141,7 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 
 	stopOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", registryPath, "--json", "stop", targetSession.ID)
 	stopped := decodeSystemStopResult(t, stopOutput)
-	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Method != "tmux-interrupt" || stopped.Results[0].Target != targetPane.Tmux.PaneID {
+	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Method != "tmux-interrupt" || stopped.Results[0].Target != targetPane.Location.PaneID {
 		t.Fatalf("tmux stop result = %#v", stopped)
 	}
 	waitForTmuxSessionExit(t, targetServer, "target")
@@ -253,7 +253,7 @@ func requireTmuxPane(t *testing.T, socket string) tmux.Pane {
 		panes, err := tmux.ListPanes(t.Context())
 		if err == nil {
 			for _, pane := range panes {
-				if pane.ServerIdentity == socket {
+				if pane.Location.ServerID == socket {
 					return pane
 				}
 			}
@@ -278,7 +278,7 @@ func seedTmuxStopSession(t *testing.T, store *registry.Journal, sessionID string
 	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Sighting{Process: *process, Present: present}}); err != nil {
 		t.Fatalf("record tmux process observation: %v", err)
 	}
-	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Nanosecond), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: pane.Tmux}})
+	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Nanosecond), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: pane.Location}})
 	if err != nil {
 		t.Fatalf("record tmux location observation: %v", err)
 	}

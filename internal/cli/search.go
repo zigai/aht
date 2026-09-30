@@ -142,26 +142,26 @@ func (options *searchOptions) validateRole() error {
 	return nil
 }
 
-func (app *application) runSearch(ctx context.Context, options searchOptions, sources []history.Source) error {
+func (app *application) runSearch(ctx context.Context, opts searchOptions, sources []history.Source) error {
 	cfg := app.cfg
-	options.query.IgnoreHarnesses = configuredIgnoreHarnesses(cfg.Filter.IgnoreHarnesses, sources)
-	options.query.IgnorePaths = cfg.Filter.IgnorePaths
+	opts.query.IgnoreHarnesses = configuredIgnoreHarnesses(cfg.Filter.IgnoreHarnesses, sources)
+	opts.query.IgnorePaths = cfg.Filter.IgnorePaths
 	// History search works without creating a live registry or observer lock.
 	if _, statErr := os.Stat(app.resolvedStorePath()); statErr == nil {
 		sessions, listErr := app.registryStore().List(ctx, registry.Filter{})
 		if listErr == nil {
-			options.query.Registry = sessions
+			opts.query.Registry = sessions
 		} else {
 			app.warnf("warning: live status unavailable: %s\n", sanitizeHumanText(listErr.Error()))
 		}
 	}
 	catalog := history.Catalog{Sources: sources}
-	result, searchErr := catalog.Search(ctx, options.query)
+	result, searchErr := catalog.Search(ctx, opts.query)
 	if app.outputJSON {
 		if err := app.writeSearchJSON(result); err != nil {
 			return err
 		}
-	} else if err := app.writeSearchResults(result, searchErr, options); err != nil {
+	} else if err := app.writeSearchResults(result, searchErr, opts); err != nil {
 		return err
 	}
 	return searchFailure(searchErr)
@@ -269,7 +269,7 @@ func (app *application) writeSearchUnsupported(sources []history.SourceStatus) {
 
 func (app *application) writeSearchMatch(match history.Match) error {
 	c := match.Conversation
-	state := searchPresence(match.Live)
+	state := searchPresence(match.RegistryStates)
 	if err := app.writef("%s %s [%s]\n", c.Harness, sanitizeHumanText(c.SessionID), state); err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func (app *application) writeSearchMatchTTY(match history.Match, query history.Q
 	}
 	prefix := fmt.Sprintf("\x1b[2m%-7s  %s\x1b[0m", c.Harness, dispID)
 	var presence string
-	if searchPresence(match.Live) == "live (last observed)" {
+	if searchPresence(match.RegistryStates) == "live (last observed)" {
 		presence = "  \x1b[1;32m● live\x1b[0m"
 	}
 	var cwd string
@@ -524,7 +524,7 @@ func (app *application) writeSearchJSON(result history.Result) error {
 	return app.writeln(safe.String())
 }
 
-func searchPresence(evidence []history.LiveState) string {
+func searchPresence(evidence []history.RegistryState) string {
 	allGone := len(evidence) > 0
 	for _, state := range evidence {
 		if state.Presence == registry.PresenceLive {

@@ -12,7 +12,7 @@ import (
 
 func installRegisteredPlugin(
 	ctx context.Context,
-	options Options,
+	opts Options,
 	harnessID registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	plugin pluginDirectoryInstall,
@@ -23,14 +23,14 @@ func installRegisteredPlugin(
 	if err != nil {
 		return Result{}, fmt.Errorf("inspecting %s registration: %w", registration.ID(), err)
 	}
-	if state == harnesspkg.PluginRegistrationForeign && !options.Force {
+	if state == harnesspkg.PluginRegistrationForeign && !opts.Force {
 		return Result{}, fmt.Errorf("%w: %s; pass --force to replace it", errForeignFile, registration.Label())
 	}
 
 	changed := pluginChanged || state != harnesspkg.PluginRegistrationCurrent
 	label := installLabel(plan.Label, harnessID, "plugin")
-	result := Result{Harness: string(harnessID), Path: plan.Dir, Changed: changed, Message: installMessage(label, changed, options.DryRun), NextStep: "", Snippet: plugin.snippet(), Error: ""}
-	if !changed || options.DryRun {
+	result := Result{Harness: string(harnessID), Path: plan.Dir, Changed: changed, Message: installMessage(label, changed, opts.DryRun), NextStep: "", Snippet: plugin.snippet(), Error: ""}
+	if !changed || opts.DryRun {
 		return result, nil
 	}
 	if err := applyRegisteredPlugin(ctx, registration, state, plan.Dir, plugin, pluginChanged); err != nil {
@@ -76,7 +76,7 @@ func applyRegisteredPlugin(
 
 func removeRegisteredPlugin(
 	ctx context.Context,
-	options Options,
+	opts Options,
 	harnessID registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	exists bool,
@@ -91,8 +91,8 @@ func removeRegisteredPlugin(
 	}
 	registered := state != harnesspkg.PluginRegistrationMissing
 	changed := exists || registered
-	if !changed || options.DryRun {
-		return removeResult(harnessID, plan.Dir, changed, options.DryRun), nil
+	if !changed || opts.DryRun {
+		return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
 	}
 	if err := registration.EnsureMutable(plan.Dir); err != nil {
 		return Result{}, fmt.Errorf("checking whether %s registration is mutable: %w", registration.ID(), err)

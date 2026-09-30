@@ -26,7 +26,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/pathmatch"
 
 	"github.com/zigai/aht/v2/pkg/client"
@@ -346,7 +346,7 @@ func (app *application) resolvedStorePath() string {
 }
 
 func (app *application) store() *registry.Journal {
-	return registry.NewJournal(app.resolvedStorePath(), harnesspkg.Rules{})
+	return registry.NewJournal(app.resolvedStorePath(), catalog.Rules{})
 }
 
 func (app *application) registryStore() *client.Client {
@@ -457,43 +457,43 @@ func (app *application) newListCommand() *cobra.Command {
 	return cmd
 }
 
-func configureSessionFilterFlags(f *pflag.FlagSet, o *listOptions) {
-	f.StringVar(&o.harness, "harness", "", "filter by harness `<name>`")
-	f.StringVar(&o.harness, "agent", "", "filter by harness `<name>` (alias for --harness)")
+func configureSessionFilterFlags(f *pflag.FlagSet, opts *listOptions) {
+	f.StringVar(&opts.harness, "harness", "", "filter by harness `<name>`")
+	f.StringVar(&opts.harness, "agent", "", "filter by harness `<name>` (alias for --harness)")
 	_ = f.MarkHidden("agent")
-	f.StringVar(&o.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
-	f.StringVar(&o.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
-	f.StringVar(&o.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
-	f.StringVar(&o.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
-	f.StringVar(&o.project, "project", "", "filter by project `<dir>`")
-	f.BoolVar(&o.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
-	f.StringVar(&o.cwd, "cwd", "", "filter by session working directory `<dir>`")
-	f.StringVar(&o.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
-	f.StringVar(&o.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
-	f.StringVar(&o.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
+	f.StringVar(&opts.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
+	f.StringVar(&opts.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
+	f.StringVar(&opts.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
+	f.StringVar(&opts.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
+	f.StringVar(&opts.project, "project", "", "filter by project `<dir>`")
+	f.BoolVar(&opts.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
+	f.StringVar(&opts.cwd, "cwd", "", "filter by session working directory `<dir>`")
+	f.StringVar(&opts.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
+	f.StringVar(&opts.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
+	f.StringVar(&opts.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
 }
 
-func applyListConfig(o *listOptions, cmd *cobra.Command, cfg config.Config) {
+func applyListConfig(opts *listOptions, cmd *cobra.Command, cfg config.Config) {
 	f := cmd.Flags()
 	if !f.Changed("presence") && cfg.UI.DefaultPresence != "" {
-		o.presence = cfg.UI.DefaultPresence
+		opts.presence = cfg.UI.DefaultPresence
 	}
 	if !f.Changed("sort") && cfg.UI.Sort != "" {
-		o.sortBy = cfg.UI.Sort
+		opts.sortBy = cfg.UI.Sort
 	}
-	o.sortSet = f.Changed("sort")
+	opts.sortSet = f.Changed("sort")
 	if !f.Changed("desc") && cfg.UI.SortDesc != nil {
-		o.desc = *cfg.UI.SortDesc
+		opts.desc = *cfg.UI.SortDesc
 	}
-	o.descSet = f.Changed("desc")
-	o.groupBySet = f.Changed("group-by")
+	opts.descSet = f.Changed("desc")
+	opts.groupBySet = f.Changed("group-by")
 	if !f.Changed("absolute-time") {
 		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
 			cfg.UI.TimeFormat == "absolute" || cfg.UI.TimeFormat == "iso8601" {
-			o.absoluteTime = true
+			opts.absoluteTime = true
 		}
 	} else {
-		o.absoluteSet = f.Changed("absolute-time")
+		opts.absoluteSet = f.Changed("absolute-time")
 	}
 }
 
@@ -532,48 +532,48 @@ func validateListSummaryOptions(opts listOptions) error {
 	return nil
 }
 
-func buildFilter(o listOptions) (registry.Filter, error) {
+func buildFilter(opts listOptions) (registry.Filter, error) {
 	f := registry.Filter{
 		Harness:            "",
 		Presence:           "",
 		Activity:           "",
-		MultiplexerSession: cmp.Or(o.multiplexerSession, o.tmuxSession),
-		Project:            o.project,
-		ProjectSubtree:     o.projectSubtree,
-		CWD:                o.cwd,
+		MultiplexerSession: cmp.Or(opts.multiplexerSession, opts.tmuxSession),
+		Project:            opts.project,
+		ProjectSubtree:     opts.projectSubtree,
+		CWD:                opts.cwd,
 		MultiplexerKind:    "",
-		MultiplexerServer:  o.multiplexerServer,
-		MultiplexerPane:    o.multiplexerPane,
+		MultiplexerServer:  opts.multiplexerServer,
+		MultiplexerPane:    opts.multiplexerPane,
 	}
-	if o.multiplexerKind != "" {
-		kind := registry.MultiplexerKind(strings.ToLower(strings.TrimSpace(o.multiplexerKind)))
+	if opts.multiplexerKind != "" {
+		kind := registry.MultiplexerKind(strings.ToLower(strings.TrimSpace(opts.multiplexerKind)))
 		switch kind {
 		case registry.MultiplexerTmux, registry.MultiplexerZellij, registry.MultiplexerHerdr:
 			f.MultiplexerKind = kind
 		default:
-			return f, fmt.Errorf("%w: %q", errInvalidMultiplexerKind, o.multiplexerKind)
+			return f, fmt.Errorf("%w: %q", errInvalidMultiplexerKind, opts.multiplexerKind)
 		}
 	}
-	if o.harness != "" {
-		h, e := harnesspkg.Normalize(o.harness)
+	if opts.harness != "" {
+		h, e := catalog.Parse(opts.harness)
 		if e != nil {
 			return f, fmt.Errorf("normalize harness: %w", e)
 		}
 		f.Harness = h
 	}
-	if o.presence != "" {
-		if strings.EqualFold(o.presence, "all") {
+	if opts.presence != "" {
+		if strings.EqualFold(opts.presence, "all") {
 			f.Presence = ""
 		} else {
-			p, e := registry.NormalizePresence(o.presence)
+			p, e := registry.NormalizePresence(opts.presence)
 			if e != nil {
 				return f, fmt.Errorf("normalize presence: %w", e)
 			}
 			f.Presence = p
 		}
 	}
-	if o.activity != "" {
-		a, e := registry.NormalizeActivity(o.activity)
+	if opts.activity != "" {
+		a, e := registry.NormalizeActivity(opts.activity)
 		if e != nil {
 			return f, fmt.Errorf("normalize activity: %w", e)
 		}
@@ -582,13 +582,13 @@ func buildFilter(o listOptions) (registry.Filter, error) {
 	return f, nil
 }
 
-func (app *application) runListSessions(ctx context.Context, o listOptions, f registry.Filter) error {
+func (app *application) runListSessions(ctx context.Context, opts listOptions, f registry.Filter) error {
 	ss, e := app.registryStore().List(ctx, f)
 	if e != nil {
 		return fmt.Errorf("listing sessions: %w", e)
 	}
-	ss = applyConfigFilter(ss, app.cfg.Filter, o.harness)
-	if e = sortListSessions(ss, o); e != nil {
+	ss = applyConfigFilter(ss, app.cfg.Filter, opts.harness)
+	if e = sortListSessions(ss, opts); e != nil {
 		return exitCode(e, exitCodeUsage)
 	}
 	if app.outputJSON {
@@ -596,22 +596,22 @@ func (app *application) runListSessions(ctx context.Context, o listOptions, f re
 	}
 	now := time.Now().UTC()
 	var displayIDs map[string]string
-	if !o.full {
+	if !opts.full {
 		displayIDs = abbreviatedRegistryIDs(ss)
 	}
 	rows := make([][]string, 0, len(ss))
 	for _, s := range ss {
 		id := s.ID
-		if !o.full {
+		if !opts.full {
 			id = displayIDs[s.ID]
 		}
 		rows = append(rows, []string{
 			id, string(s.Harness), sessionDisplayLabel(s), string(s.Presence()), listActivity(s),
-			watchMultiplexerLabel(s.Location), formatHumanPath(s.CWD), formatUpdatedAt(s.UpdatedAt, now, o.absoluteTime),
+			watchMultiplexerLabel(s.Location), formatHumanPath(s.CWD), formatUpdatedAt(s.UpdatedAt, now, opts.absoluteTime),
 		})
 	}
 	maxWidth := app.maxLineWidth()
-	if o.full {
+	if opts.full {
 		columns, fits := listFullTableColumns(rows, maxWidth)
 		if !fits {
 			return app.writeStackedHumanRows(columns, rows)
@@ -637,18 +637,18 @@ func applyConfigFilter(sessions []registry.Session, filter config.FilterConfig, 
 	if len(sessions) == 0 {
 		return sessions
 	}
-	ignoreHarnessMap := make(map[string]struct{}, len(filter.IgnoreHarnesses))
+	ignoredHarnesses := make(map[string]struct{}, len(filter.IgnoreHarnesses))
 	for _, h := range filter.IgnoreHarnesses {
 		norm := strings.ToLower(strings.TrimSpace(h))
 		if norm != "" {
-			ignoreHarnessMap[norm] = struct{}{}
+			ignoredHarnesses[norm] = struct{}{}
 		}
 	}
 
 	result := make([]registry.Session, 0, len(sessions))
 	for _, s := range sessions {
-		if agentExplicit == "" && len(ignoreHarnessMap) > 0 {
-			if _, ignored := ignoreHarnessMap[strings.ToLower(string(s.Harness))]; ignored {
+		if agentExplicit == "" && len(ignoredHarnesses) > 0 {
+			if _, ignored := ignoredHarnesses[strings.ToLower(string(s.Harness))]; ignored {
 				continue
 			}
 		}
@@ -910,8 +910,8 @@ func formatSessionPathLabel(path string) string {
 	return base
 }
 
-func (app *application) runListSummary(ctx context.Context, o listOptions, f registry.Filter) error {
-	groupBy := registry.SummaryGroupBy(o.groupBy)
+func (app *application) runListSummary(ctx context.Context, opts listOptions, f registry.Filter) error {
+	groupBy := registry.SummaryGroupBy(opts.groupBy)
 	if groupBy == "" {
 		groupBy = registry.SummaryGroupByMultiplexerSession
 	}
@@ -922,7 +922,7 @@ func (app *application) runListSummary(ctx context.Context, o listOptions, f reg
 	if app.outputJSON {
 		return app.writeJSON(s)
 	}
-	return app.writeSummaryTableForGroup(s, groupBy, o.full)
+	return app.writeSummaryTableForGroup(s, groupBy, opts.full)
 }
 
 func (app *application) writeSummaryTableForGroup(ss []registry.Summary, groupBy registry.SummaryGroupBy, full bool) error {
@@ -1093,15 +1093,15 @@ func (app *application) writeSessionDetails(session registry.Session) error {
 	return app.writeHumanDetails(rows)
 }
 
-func sortListSessions(ss []registry.Session, o listOptions) error {
-	key := normalizeListSort(o.sortBy)
+func sortListSessions(ss []registry.Session, opts listOptions) error {
+	key := normalizeListSort(opts.sortBy)
 	compare, e := listSortLess(key)
 	if e != nil {
 		return e
 	}
 	sort.SliceStable(ss, func(i, j int) bool {
 		v := compare(ss[i], ss[j])
-		if o.desc {
+		if opts.desc {
 			return v > 0
 		}
 		return v < 0
@@ -1226,39 +1226,39 @@ func sessionLabel(name, id string) string {
 	return "-"
 }
 
-func tmuxWindowLabel(ctx registry.Location) string {
-	if ctx.WindowIndex != "" && ctx.WindowName != "" {
-		return ctx.WindowIndex + ":" + ctx.WindowName
+func tmuxWindowLabel(location registry.Location) string {
+	if location.WindowIndex != "" && location.WindowName != "" {
+		return location.WindowIndex + ":" + location.WindowName
 	}
-	if ctx.WindowName != "" {
-		return ctx.WindowName
+	if location.WindowName != "" {
+		return location.WindowName
 	}
-	if ctx.WindowIndex != "" {
-		return ctx.WindowIndex
+	if location.WindowIndex != "" {
+		return location.WindowIndex
 	}
 	return "-"
 }
 
-func multiplexerSessionLabel(ctx registry.Location) string {
-	return sessionLabel(ctx.SessionName, ctx.SessionID)
+func multiplexerSessionLabel(location registry.Location) string {
+	return sessionLabel(location.SessionName, location.SessionID)
 }
 
-func multiplexerContainerLabel(ctx registry.Location) string {
-	if ctx.Kind == registry.MultiplexerTmux {
-		return tmuxWindowLabel(ctx)
+func multiplexerContainerLabel(location registry.Location) string {
+	if location.Kind == registry.MultiplexerTmux {
+		return tmuxWindowLabel(location)
 	}
 	var parts []string
-	if ctx.WorkspaceName != "" {
-		parts = append(parts, ctx.WorkspaceName)
-	} else if ctx.WorkspaceID != "" {
-		parts = append(parts, ctx.WorkspaceID)
+	if location.WorkspaceName != "" {
+		parts = append(parts, location.WorkspaceName)
+	} else if location.WorkspaceID != "" {
+		parts = append(parts, location.WorkspaceID)
 	}
-	tab := ctx.TabName
+	tab := location.TabName
 	if tab == "" {
-		tab = ctx.TabID
+		tab = location.TabID
 	}
 	if tab == "" {
-		tab = ctx.TabIndex
+		tab = location.TabIndex
 	}
 	if tab != "" {
 		parts = append(parts, tab)

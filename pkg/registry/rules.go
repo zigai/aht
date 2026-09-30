@@ -52,7 +52,7 @@ func (r Reducer) Apply(state State, batch []Observation, receivedAt time.Time) (
 	return result, stateChanges(state, result), nil
 }
 
-func (a Authority) IsValid() bool {
+func (a Authority) Valid() bool {
 	switch a {
 	case AuthorityHook, AuthorityScreen, AuthorityProcess:
 		return true

@@ -9,12 +9,12 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestContextFromEnvBuildsMinimalContext(t *testing.T) {
+func TestLocationFromEnvBuildsMinimalLocation(t *testing.T) {
 	t.Parallel()
 
-	ctx := ContextFromEnv(Env{TMUX: "/tmp/tmux-1000/default,123,0", TMUXPane: "%4"})
-	if (ctx.Kind != registry.MultiplexerTmux) || ctx.ServerID != "/tmp/tmux-1000/default" || ctx.PaneID != "%4" {
-		t.Fatalf("unexpected minimal tmux context: %#v", ctx)
+	location := LocationFromEnv(Env{TMUX: "/tmp/tmux-1000/default,123,0", TMUXPane: "%4"})
+	if (location.Kind != registry.MultiplexerTmux) || location.ServerID != "/tmp/tmux-1000/default" || location.PaneID != "%4" {
+		t.Fatalf("unexpected minimal tmux context: %#v", location)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestAppendCanonicalPanesDeduplicates(t *testing.T) {
 	const socket = "/tmp/tmux-1000/default"
 	seen := make(map[string]struct{})
 	pane := Pane{
-		Tmux: registry.Location{
+		Location: registry.Location{
 			Kind:            registry.MultiplexerTmux,
 			ServerID:        socket,
 			SessionID:       "",
@@ -152,9 +152,8 @@ func TestAppendCanonicalPanesDeduplicates(t *testing.T) {
 			PaneTTY:         "/dev/pts/1",
 			ClientTTY:       "",
 		},
-		ServerIdentity: socket,
-		PanePID:        100,
-		PaneTTY:        "/dev/pts/1",
+		PanePID: 100,
+		PaneTTY: "/dev/pts/1",
 	}
 	panes := appendCanonicalPanes(nil, []Pane{pane}, socket, seen)
 	panes = appendCanonicalPanes(panes, []Pane{pane}, socket, seen)

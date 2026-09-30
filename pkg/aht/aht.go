@@ -212,8 +212,8 @@ type (
 	// SessionLister captures the session query capability required to resolve selectors.
 	SessionLister = client.SessionLister
 
-	// CurrentContextOptions identifies the process whose enclosing session is requested.
-	CurrentContextOptions = client.CurrentContextOptions
+	// CurrentOptions identifies the process whose enclosing session is requested.
+	CurrentOptions = client.CurrentOptions
 
 	// AmbiguousSessionError provides detailed information about ambiguous session matches.
 	AmbiguousSessionError = client.AmbiguousSessionError
@@ -374,8 +374,8 @@ func Current(ctx context.Context, c *Client) (Session, error) {
 }
 
 // ExplainSession returns an Explanation for the given session.
-func ExplainSession(ctx context.Context, session Session, options ExplainOptions) (Explanation, error) {
-	return manage.ExplainSession(ctx, session, options) //nolint:wrapcheck // facade forwards manage error unchanged
+func ExplainSession(ctx context.Context, session Session, opts ExplainOptions) (Explanation, error) {
+	return manage.ExplainSession(ctx, session, opts) //nolint:wrapcheck // facade forwards manage error unchanged
 }
 
 // ReadTrackerHealth reads and evaluates the tracker health sidecar at path.

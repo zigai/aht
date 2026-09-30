@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
 func TestIntegrationManagedArtifactsUseV2Reports(t *testing.T) {
 	t.Parallel()
-	for _, adapter := range harnesscatalog.All() {
+	for _, adapter := range catalog.All() {
 		definition := adapter.Definition()
 		installable, ok := adapter.(harness.Installable)
 		if !ok {

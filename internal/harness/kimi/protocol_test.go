@@ -53,10 +53,10 @@ func TestPendingRequestsPreserveTypedAndMixedWaitingReasons(t *testing.T) {
 		activity registry.Activity
 		detail   *registry.ActivityDetail
 	}{
-		{request("ApprovalRequest", "a", "tool-a", ""), registry.ActivityWaiting, new(registry.DetailPermission)},
+		{request("ApprovalRequest", "a", "tool-a", ""), registry.ActivityWaiting, new(registry.ActivityDetailPermission)},
 		{request("QuestionRequest", "q", "tool-q", ""), registry.ActivityWaiting, new(registry.ActivityDetail(""))},
 		{event("StepRetry", `{}`), registry.ActivityWaiting, new(registry.ActivityDetail(""))},
-		{event("ApprovalResponse", `{"request_id":"a","response":"approve"}`), registry.ActivityWaiting, new(registry.DetailQuestion)},
+		{event("ApprovalResponse", `{"request_id":"a","response":"approve"}`), registry.ActivityWaiting, new(registry.ActivityDetailQuestion)},
 		{event("ToolResult", `{"tool_call_id":"tool-q"}`), registry.ActivityRunning, nil},
 		{event("TurnEnd", `{}`), registry.ActivityIdle, nil},
 	} {

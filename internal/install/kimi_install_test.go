@@ -13,7 +13,7 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KIMI_SHARE_DIR", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -115,7 +115,7 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 		t.Fatalf("writing old config: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -144,7 +144,7 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 		t.Fatalf("expected old managed hook to be removed: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -164,7 +164,7 @@ func TestInstallKimiCodeDryRunDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KIMI_SHARE_DIR", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kimi-code"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",

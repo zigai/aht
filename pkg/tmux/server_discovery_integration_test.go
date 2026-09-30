@@ -45,10 +45,10 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 		})
 		if err == nil {
 			for _, pane := range panes {
-				if pane.Tmux.SessionName != "discovery" || filepath.Base(pane.ServerIdentity) != name {
+				if pane.Location.SessionName != "discovery" || filepath.Base(pane.Location.ServerID) != name {
 					continue
 				}
-				if pane.ServerIdentity == "-L:"+name || !filepath.IsAbs(pane.ServerIdentity) || pane.Tmux.ServerID != pane.ServerIdentity {
+				if pane.Location.ServerID == "-L:"+name || !filepath.IsAbs(pane.Location.ServerID) {
 					t.Fatalf("named server identity was not canonical: %#v", pane)
 				}
 				return
@@ -74,7 +74,7 @@ func TestListPanesDiscoversCustomSocketFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pane := range panes {
-		if pane.ServerIdentity == server.Socket && pane.Tmux.SessionName == "custom" {
+		if pane.Location.ServerID == server.Socket && pane.Location.SessionName == "custom" {
 			return
 		}
 	}

@@ -176,10 +176,10 @@ func (codexHarness) LifecycleDefaults(event string, attributes map[string]string
 	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"))
 }
 
-func (codexHarness) HookTimeout(event string) int {
-	const terminalTimeout = 3
+func (codexHarness) HookTimeoutSeconds(event string) int {
+	const terminalTimeoutSeconds = 3
 	if event == harness.HookEventSessionEnd || event == "Interrupt" {
-		return terminalTimeout
+		return terminalTimeoutSeconds
 	}
 	return harness.HookTimeoutSeconds
 }

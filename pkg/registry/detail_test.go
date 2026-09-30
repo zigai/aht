@@ -43,7 +43,7 @@ func TestDetailSurvivesMetadataWithoutRenewingEvidence(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Second)
 	clock := at
 	store.setNowForTest(func() time.Time { return clock })
-	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(DetailPermission)))
+	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(ActivityDetailPermission)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestDetailSurvivesMetadataWithoutRenewingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, current, DetailPermission, DetailCurrent, at)
+	requireDetail(t, current, ActivityDetailPermission, DetailQualityCurrent, at)
 	state, err := store.State(t.Context(), Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -69,8 +69,8 @@ func TestDetailSurvivesMetadataWithoutRenewingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, expired.Sessions[0], DetailPermission, DetailStale, at)
-	heartbeat := detailReport(clock, new(ActivityWaiting), new(DetailPermission))
+	requireDetail(t, expired.Sessions[0], ActivityDetailPermission, DetailQualityStale, at)
+	heartbeat := detailReport(clock, new(ActivityWaiting), new(ActivityDetailPermission))
 	heartbeat.Report().DetailObservedAt = &at
 	if _, err := store.Observe(t.Context(), heartbeat); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestDetailSurvivesMetadataWithoutRenewingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, loaded, DetailPermission, DetailStale, at)
+	requireDetail(t, loaded, ActivityDetailPermission, DetailQualityStale, at)
 	if !loaded.ActivityChangedAt.Equal(at) {
 		t.Fatal("detail aging changed activity age")
 	}
@@ -99,10 +99,10 @@ func TestNativeDetailClearingAndIsolation(t *testing.T) {
 		want    ActivityDetail
 		quality DetailQuality
 	}{
-		{"generic wait", func(o *Observation) { o.Report().Detail = nil }, "", DetailMissing},
-		{"explicit clear", func(o *Observation) { o.Report().Detail = new(ActivityDetail("")) }, "", DetailMissing},
-		{"new question", func(o *Observation) { o.Report().Detail = new(DetailQuestion) }, DetailQuestion, DetailCurrent},
-		{"wrong reporter", func(o *Observation) { o.Report().Reporter.Integration = "foreign" }, "", DetailMissing},
+		{"generic wait", func(o *Observation) { o.Report().Detail = nil }, "", DetailQualityMissing},
+		{"explicit clear", func(o *Observation) { o.Report().Detail = new(ActivityDetail("")) }, "", DetailQualityMissing},
+		{"new question", func(o *Observation) { o.Report().Detail = new(ActivityDetailQuestion) }, ActivityDetailQuestion, DetailQualityCurrent},
+		{"wrong reporter", func(o *Observation) { o.Report().Reporter.Integration = "foreign" }, "", DetailQualityMissing},
 		{"running", func(o *Observation) { o.Report().Activity = new(ActivityRunning); o.Report().Detail = nil }, "", ""},
 		{"idle", func(o *Observation) { o.Report().Activity = new(ActivityIdle); o.Report().Detail = nil }, "", ""},
 		{"interrupted", func(o *Observation) { o.Report().Activity = new(ActivityInterrupted); o.Report().Detail = nil }, "", ""},
@@ -115,17 +115,17 @@ func TestNativeDetailClearingAndIsolation(t *testing.T) {
 		{"new incarnation", func(o *Observation) {
 			o.Report().Process.StartIdentity = "boot:43"
 			o.Report().Lifecycle = new(NativeLifecycleStart)
-		}, "", DetailMissing},
+		}, "", DetailQualityMissing},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			at := time.Now().UTC().Add(-time.Second)
 			store := NewJournal(t.TempDir()+"/state.json", detailRules{policy: detailPolicy(AuthorityHook)})
-			if _, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(DetailPermission))); err != nil {
+			if _, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(ActivityDetailPermission))); err != nil {
 				t.Fatal(err)
 			}
-			observation := detailReport(at.Add(time.Millisecond), new(ActivityWaiting), new(DetailPermission))
+			observation := detailReport(at.Add(time.Millisecond), new(ActivityWaiting), new(ActivityDetailPermission))
 			test.change(&observation)
 			session, err := store.Observe(t.Context(), observation)
 			if err != nil {
@@ -138,7 +138,7 @@ func TestNativeDetailClearingAndIsolation(t *testing.T) {
 				return
 			}
 			observed := time.Time{}
-			if test.quality == DetailCurrent {
+			if test.quality == DetailQualityCurrent {
 				observed = observation.At
 			}
 			requireDetail(t, session, test.want, test.quality, observed)
@@ -150,14 +150,14 @@ func TestDetailRejectsInvalidBatchAndIgnoresOlderReports(t *testing.T) {
 	t.Parallel()
 	at := time.Now().UTC().Add(-time.Second)
 	store := NewJournal(t.TempDir()+"/state.json", detailRules{policy: detailPolicy(AuthorityHook)})
-	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(DetailPermission)))
+	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(ActivityDetailPermission)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Observe(t.Context(), detailReport(at.Add(-time.Second), new(ActivityWaiting), new(DetailQuestion))); !errors.Is(err, ErrObservationConflict) {
+	if _, err := store.Observe(t.Context(), detailReport(at.Add(-time.Second), new(ActivityWaiting), new(ActivityDetailQuestion))); !errors.Is(err, ErrObservationConflict) {
 		t.Fatal(err)
 	}
-	_, err = store.ObserveBatch(t.Context(), []Observation{detailReport(at.Add(time.Second), new(ActivityWaiting), new(DetailQuestion)), detailReport(at.Add(2*time.Second), new(ActivityRunning), new(DetailUsageLimit))})
+	_, err = store.ObserveBatch(t.Context(), []Observation{detailReport(at.Add(time.Second), new(ActivityWaiting), new(ActivityDetailQuestion)), detailReport(at.Add(2*time.Second), new(ActivityRunning), new(ActivityDetailUsageLimit))})
 	if !errors.Is(err, ErrInvalidObservation) {
 		t.Fatalf("invalid batch = %v", err)
 	}
@@ -165,14 +165,14 @@ func TestDetailRejectsInvalidBatchAndIgnoresOlderReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, loaded, DetailPermission, DetailCurrent, at)
-	loaded.Detail.Value = DetailQuestion
-	loaded.Observations.Native.Detail.Value = DetailQuestion
+	requireDetail(t, loaded, ActivityDetailPermission, DetailQualityCurrent, at)
+	loaded.Detail.Value = ActivityDetailQuestion
+	loaded.Observations.Native.Detail.Value = ActivityDetailQuestion
 	loaded, err = store.Get(t.Context(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, loaded, DetailPermission, DetailCurrent, at)
+	requireDetail(t, loaded, ActivityDetailPermission, DetailQualityCurrent, at)
 	data, err := json.Marshal(loaded)
 	if err != nil {
 		t.Fatal(err)
@@ -190,19 +190,19 @@ func TestDetailUsesSelectedScreenAuthority(t *testing.T) {
 	t.Parallel()
 	at := time.Now().UTC().Add(-time.Second)
 	store := NewJournal(t.TempDir()+"/state.json", detailRules{policy: detailPolicy(AuthorityScreen)})
-	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(DetailPermission)))
+	session, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(ActivityDetailPermission)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if session.Detail != nil {
 		t.Fatal("native detail leaked into unknown screen state")
 	}
-	reading := ScreenObservation{Activity: ActivityWaiting, Detail: DetailQuestion, Authority: AuthorityScreen, Reason: "manifest_rule", Process: *session.Process, ObservedAt: at}
+	reading := ScreenObservation{Activity: ActivityWaiting, Detail: ActivityDetailQuestion, Authority: AuthorityScreen, Reason: "manifest_rule", Process: *session.Process, ObservedAt: at}
 	session, err = store.Observe(t.Context(), Observation{Harness: HarnessClaude, At: at, Subject: ObservationIdentity{SessionID: session.SessionID}, Evidence: (*Reading)(&reading)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, session, DetailQuestion, DetailCurrent, at)
+	requireDetail(t, session, ActivityDetailQuestion, DetailQualityCurrent, at)
 	if session.Detail.Authority != AuthorityScreen {
 		t.Fatal("wrong detail authority")
 	}
@@ -212,7 +212,7 @@ func TestDetailUsesSelectedScreenAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireDetail(t, session, "", DetailMissing, time.Time{})
+	requireDetail(t, session, "", DetailQualityMissing, time.Time{})
 }
 
 func TestFailureDetailAndUnsupportedWaiting(t *testing.T) {
@@ -223,9 +223,9 @@ func TestFailureDetailAndUnsupportedWaiting(t *testing.T) {
 		value    ActivityDetail
 		quality  DetailQuality
 	}{
-		{ActivityWaiting, nil, "", DetailUnsupported},
-		{ActivityFailed, nil, DetailGeneral, DetailCurrent},
-		{ActivityFailed, new(DetailUsageLimit), DetailUsageLimit, DetailCurrent},
+		{ActivityWaiting, nil, "", DetailQualityUnsupported},
+		{ActivityFailed, nil, ActivityDetailGeneral, DetailQualityCurrent},
+		{ActivityFailed, new(ActivityDetailUsageLimit), ActivityDetailUsageLimit, DetailQualityCurrent},
 	} {
 		t.Run(string(test.activity)+string(test.value), func(t *testing.T) {
 			policy := detailPolicy(AuthorityHook)
@@ -237,7 +237,7 @@ func TestFailureDetailAndUnsupportedWaiting(t *testing.T) {
 				t.Fatal(err)
 			}
 			observed := time.Time{}
-			if test.quality == DetailCurrent {
+			if test.quality == DetailQualityCurrent {
 				observed = at
 			}
 			requireDetail(t, session, test.value, test.quality, observed)
@@ -251,7 +251,7 @@ func TestFileWatchPublishesDetailExpiryWithoutNewObservation(t *testing.T) {
 	clock := at
 	store := NewJournal(t.TempDir()+"/state.json", detailRules{policy: detailPolicy(AuthorityHook)})
 	store.setNowForTest(func() time.Time { return clock })
-	if _, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(DetailQuestion))); err != nil {
+	if _, err := store.Observe(t.Context(), detailReport(at, new(ActivityWaiting), new(ActivityDetailQuestion))); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -263,10 +263,10 @@ func TestFileWatchPublishesDetailExpiryWithoutNewObservation(t *testing.T) {
 		}
 		count++
 		if count == 1 {
-			requireDetail(t, result.Sessions[0], DetailQuestion, DetailCurrent, at)
+			requireDetail(t, result.Sessions[0], ActivityDetailQuestion, DetailQualityCurrent, at)
 			clock = at.Add(IntegrationActivityLease + time.Second)
 		} else {
-			requireDetail(t, result.Sessions[0], DetailQuestion, DetailStale, at)
+			requireDetail(t, result.Sessions[0], ActivityDetailQuestion, DetailQualityStale, at)
 			cancel()
 		}
 		return nil
@@ -285,7 +285,7 @@ func TestDetailTimestampRequiresMatchingEvidenceAndCannotFollowReport(t *testing
 	for _, observation := range []Observation{
 		detailReport(at, new(ActivityWaiting), nil),
 		detailReport(at, new(ActivityWaiting), new(ActivityDetail(""))),
-		detailReport(at, new(ActivityWaiting), new(DetailPermission)),
+		detailReport(at, new(ActivityWaiting), new(ActivityDetailPermission)),
 	} {
 		future := at.Add(time.Second)
 		observation.Report().DetailObservedAt = &future

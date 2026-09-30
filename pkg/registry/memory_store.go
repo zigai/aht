@@ -79,8 +79,8 @@ func OpenMemoryStore(path string, rules Rules) (*MemoryStore, error) {
 
 // OpenMemoryStoreWithOptions loads path once, removes expired tombstones, and
 // returns an in-memory authoritative store.
-func OpenMemoryStoreWithOptions(path string, rules Rules, options MemoryStoreOptions) (*MemoryStore, error) {
-	ttl := options.TombstoneTTL
+func OpenMemoryStoreWithOptions(path string, rules Rules, opts MemoryStoreOptions) (*MemoryStore, error) {
+	ttl := opts.TombstoneTTL
 	if ttl <= 0 {
 		ttl = DefaultTombstoneTTL
 	}
@@ -92,7 +92,7 @@ func OpenMemoryStoreWithOptions(path string, rules Rules, options MemoryStoreOpt
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := fileStore.load()
+	loaded, err := fileStore.load(context.Background())
 	if err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
@@ -198,9 +198,14 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 	return session, nil
 }
 
+// Summary returns multiplexer-session summaries computed from one in-memory snapshot.
+func (s *MemoryStore) Summary(ctx context.Context, filter Filter) ([]Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+}
+
 // SummaryWithOptions returns summaries computed from one in-memory snapshot with options.
 func (s *MemoryStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
-	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 	sessions, err := s.List(ctx, filter)

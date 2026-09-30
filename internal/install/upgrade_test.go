@@ -38,7 +38,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(user), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
+	old, err := Run(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,21 +103,21 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 
 func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	isolateUpgradeHome(t)
-	claude, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
+	claude, err := Run(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(claude.Path, []byte(`{"aht managed integration":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"}); err != nil {
+	if _, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"}); err != nil {
 		t.Fatal(err)
 	}
 	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
 	if err == nil || len(results) != 2 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	status, err := InspectContext(t.Context(), registry.Harness("codex"), "/bin/new-aht")
+	status, err := Inspect(t.Context(), registry.Harness("codex"), "/bin/new-aht")
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("healthy integration was not upgraded: %+v, %v", status, err)
 	}
@@ -133,11 +133,11 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	isolateUpgradeHome(t)
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
-	for _, id := range AllHarnesses() {
+	for _, id := range Harnesses() {
 		// pi and omp intentionally share the explicit PI_CODING_AGENT_DIR; exercise
 		// one at a time to verify that ownership does not select the other adapter.
 		t.Run(string(id), func(t *testing.T) {
-			if _, err := RunContext(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
+			if _, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
 				t.Fatal(err)
 			}
 			firstResults, err := Upgrade(t.Context(), "/bin/new-aht", false)
@@ -155,7 +155,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 			}
 			assertUpgradeNextStep(t, id, firstResults[0], repeatedResults[0])
 			assertUpgradeArtifactsUntouched(t, before)
-			if _, err := RemoveContext(t.Context(), Options{Harness: id, Binary: "/bin/new-aht"}); err != nil {
+			if _, err := Remove(t.Context(), Options{Harness: id, Binary: "/bin/new-aht"}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -167,7 +167,7 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 	hermes := installFakeHermesCLI(t)
 	openclaw := installFakeOpenClawCLI(t)
 	for _, id := range []registry.Harness{registry.Harness("hermes"), registry.Harness("openclaw")} {
-		if _, err := RunContext(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
+		if _, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -280,7 +280,7 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("old binary"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	installed, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: binary})
+	installed, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: binary})
 	if err != nil {
 		t.Fatal(err)
 	}

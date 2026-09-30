@@ -36,13 +36,13 @@ type jsonHookFileInstall struct {
 	DryRunMessage           string
 }
 
-func installRenderedFile(options Options, file renderedFileInstall) (Result, error) {
-	changed, err := fileNeedsUpdate(file.Path, file.Content, options.Force)
+func installRenderedFile(opts Options, file renderedFileInstall) (Result, error) {
+	changed, err := fileNeedsUpdate(file.Path, file.Content, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
 
-	if err := writeInstallFile(file.Path, []byte(file.Content), changed, options.DryRun, file.CreateDirError, file.WriteError); err != nil {
+	if err := writeInstallFile(file.Path, []byte(file.Content), changed, opts.DryRun, file.CreateDirError, file.WriteError); err != nil {
 		return Result{}, err
 	}
 
@@ -50,7 +50,7 @@ func installRenderedFile(options Options, file renderedFileInstall) (Result, err
 		Harness:  string(file.Harness),
 		Path:     file.Path,
 		Changed:  changed,
-		Message:  installStatusMessage(changed, options.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
+		Message:  installStatusMessage(changed, opts.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
 		NextStep: "",
 		Snippet:  file.Content,
 		Error:    "",

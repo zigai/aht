@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/pkg/broker"
@@ -105,16 +105,16 @@ type (
 // capturing screens or modifying registry state.
 // When options.LiveScreen is true and authority is "screen", it additionally performs
 // live terminal multiplexer screen capture and manifest re-evaluation.
-func ExplainSession(ctx context.Context, session registry.Session, options ExplainOptions) (Explanation, error) {
+func ExplainSession(ctx context.Context, session registry.Session, opts ExplainOptions) (Explanation, error) {
 	if err := ctx.Err(); err != nil {
 		var empty Explanation
 		return empty, fmt.Errorf("explain session: %w", err)
 	}
-	now := options.Now
+	now := opts.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	policy := (harnesscatalog.Rules{}).Policy(session.Harness)
+	policy := (catalog.Rules{}).Policy(session.Harness)
 	hookEvaluation := registry.EvaluateHook(session, policy, now)
 	selected, reason := registry.ActivityAuthority(session, policy, now)
 	authority := string(selected)
@@ -126,7 +126,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 	result := buildBaseExplanation(session, now, authority, fallbackReason, hookEvaluation)
 	populateStoredScreenDecision(&result, session)
 
-	if !options.LiveScreen {
+	if !opts.LiveScreen {
 		if session.Decision() != nil {
 			result.SelectedAuthority = string(session.Decision().Authority)
 			result.FallbackReason = ""
@@ -139,7 +139,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 		return result, nil
 	}
 
-	screen, finalActivity, screenErr := evaluateExplanationScreen(ctx, session, options.ConfigDir, authority, result.FinalActivity)
+	screen, finalActivity, screenErr := evaluateExplanationScreen(ctx, session, opts.ConfigDir, authority, result.FinalActivity)
 	result.Screen = screen
 	result.FinalActivity = finalActivity
 	if screenErr != nil {
@@ -149,7 +149,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 }
 
 // Explain returns an Explanation for the session identified by sessionID.
-func (m *Manager) Explain(ctx context.Context, sessionID string, options ExplainOptions) (Explanation, error) {
+func (m *Manager) Explain(ctx context.Context, sessionID string, opts ExplainOptions) (Explanation, error) {
 	storePath := m.config.StorePath
 	if storePath == "" {
 		storePath = registry.DefaultStorePath()
@@ -173,7 +173,7 @@ func (m *Manager) Explain(ctx context.Context, sessionID string, options Explain
 			RegistryDecision:  nil,
 		}, fmt.Errorf("get session for explanation: %w", err)
 	}
-	return ExplainSession(ctx, session, options)
+	return ExplainSession(ctx, session, opts)
 }
 
 func buildBaseExplanation(
@@ -421,7 +421,7 @@ func evaluateTmuxLiveScreen(
 		}, false, fmt.Errorf("list tmux panes: %w", err)
 	}
 	for _, pane := range panes {
-		if pane.Tmux.PaneID != session.Location.PaneID || !sameTmuxServer(pane.ServerIdentity, session.Location.ServerID) {
+		if pane.Location.PaneID != session.Location.PaneID || !sameTmuxServer(pane.Location.ServerID, session.Location.ServerID) {
 			continue
 		}
 		snapshot, captureErr := tmux.CapturePane(ctx, pane)

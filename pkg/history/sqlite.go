@@ -97,7 +97,7 @@ func (s *search) databaseRows(ctx context.Context, source Source, path string, p
 			s.add(ctx, t.match)
 			t.match.Excerpts = nil
 			t.match.MatchingParts = 0
-			t.match.Live = nil
+			t.match.RegistryStates = nil
 			t.recognized = true
 			t.match.Conversation = Conversation{Harness: source.Harness, SessionID: row.SessionID, Path: path, Title: row.Title, CWD: row.CWD, ProjectRoot: "", CreatedAt: native.StoredTime(row.Created), UpdatedAt: native.StoredTime(row.Updated)}
 		}

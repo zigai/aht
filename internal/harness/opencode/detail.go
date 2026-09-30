@@ -6,10 +6,10 @@ import (
 
 func (opencodeHarness) ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail {
 	if activity == registry.ActivityWaiting && event == "question.asked" {
-		return new(registry.DetailQuestion)
+		return new(registry.ActivityDetailQuestion)
 	}
 	if activity == registry.ActivityWaiting && event == "permission.asked" {
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	}
 	return nil
 }

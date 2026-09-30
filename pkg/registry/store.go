@@ -100,7 +100,7 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 	if err := ctx.Err(); err != nil {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
-	snap, err := s.loadContext(ctx)
+	snap, err := s.load(ctx)
 	if err != nil {
 		return Session{}, err
 	}
@@ -113,11 +113,17 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 	return session, nil
 }
 
+// Summary returns filtered multiplexer-session summaries.
+func (s *FileStore) Summary(ctx context.Context, filter Filter) ([]Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+}
+
+// SummaryWithOptions returns filtered summaries grouped according to opts.
 func (s *FileStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
 	}
-	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 	sessions, _, err := s.watchSnapshot(ctx, filter)

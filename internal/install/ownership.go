@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -34,7 +34,7 @@ var (
 // up to date, an older managed generation, or owned by somebody else.
 type ArtifactStatus string
 
-func (s ArtifactStatus) IsValid() bool {
+func (s ArtifactStatus) Valid() bool {
 	switch s {
 	case ArtifactMissing, ArtifactCurrent, ArtifactStale, ArtifactForeign:
 		return true
@@ -95,11 +95,11 @@ func expectedIntegrationVersion(content string) int {
 	if len(match) != integrationCaptureGroups {
 		return managedIntegrationVersion
 	}
-	id, err := harnesscatalog.Normalize(match[1])
+	id, err := catalog.Parse(match[1])
 	if err != nil {
 		return managedIntegrationVersion
 	}
-	return harnesscatalog.IntegrationVersionFor(id)
+	return catalog.IntegrationVersionFor(id)
 }
 
 func integrationIDFromContent(content string) string {
@@ -107,7 +107,7 @@ func integrationIDFromContent(content string) string {
 	if len(match) != integrationCaptureGroups {
 		return ""
 	}
-	id, err := harnesscatalog.Normalize(match[1])
+	id, err := catalog.Parse(match[1])
 	if err != nil {
 		return strings.ToLower(match[1])
 	}

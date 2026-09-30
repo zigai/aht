@@ -114,7 +114,7 @@ func AllCapabilities() []Capabilities {
 
 // InspectRuntime inspects the runtime installation status of a harness integration.
 func InspectRuntime(ctx context.Context, id registry.Harness, binary string) (RuntimeStatus, error) {
-	status, err := install.InspectContext(ctx, id, binary)
+	status, err := install.Inspect(ctx, id, binary)
 	if err != nil {
 		return RuntimeStatus{
 			Harness:   id,

@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	harness "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -174,7 +174,7 @@ func New(opts Options) *Observer {
 		if storePath == "" {
 			storePath = registry.DefaultStorePath()
 		}
-		store = registry.NewJournal(storePath, harness.Rules{})
+		store = registry.NewJournal(storePath, catalog.Rules{})
 	} else if providedStorePath == "" {
 		storePath = ""
 	}
@@ -309,24 +309,24 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		return cmp.Compare(multiplexerPriority(right.Location.Kind), multiplexerPriority(left.Location.Kind))
 	})
 	paneCommandCounts := commandPaneCounts(panes)
-	catalog, catalogErr := o.catalogList(ctx)
+	catalogEntries, catalogErr := o.catalogList(ctx)
 	if catalogErr != nil {
 		result.Degraded = true
 		result.Error = catalogErr.Error()
 	}
-	result.Catalog = len(catalog)
+	result.Catalog = len(catalogEntries)
 	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if sessionErr != nil {
 		return o.failCycle(at, "registry", sessionErr, "listing sessions for state detection", result)
 	}
 
 	catalogByPID := make(map[int]CatalogEntry)
-	for _, entry := range catalog {
+	for _, entry := range catalogEntries {
 		if entry.Current && entry.ProcessPID > 0 {
 			catalogByPID[entry.ProcessPID] = entry
 		}
 	}
-	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalog))
+	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalogEntries))
 	current := make(map[processKey]trackedProcess)
 	processByPID := make(map[int]processinfo.Process, len(processes))
 	harnessByPID := make(map[int]registry.Harness, len(processes))
@@ -411,7 +411,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	if paneErr == nil {
 		observations = append(observations, observationsForUnlocatedProcesses(o.manifestLoader, knownSessions, processByPID, harnessByPID, locationPIDs, at, !o.disableScreenInspection)...)
 	}
-	for _, entry := range catalog {
+	for _, entry := range catalogEntries {
 		if entry.Harness == "" || entry.SessionID == "" {
 			continue
 		}
@@ -552,22 +552,22 @@ func (o *Observer) processConfirmed(key processKey, sessions []registry.Session,
 
 func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
 	if process.AgentHint != "" {
-		if harnessID, err := harness.Normalize(process.AgentHint); err == nil {
+		if harnessID, err := catalog.Parse(process.AgentHint); err == nil {
 			return observableHarness(process, harnessID)
 		}
 	}
-	if harnessID, ok := harness.FromCommand(process.Executable); ok {
+	if harnessID, ok := catalog.FromCommand(process.Executable); ok {
 		return observableHarness(process, harnessID)
 	}
 	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if harnessID, ok := harness.FromCommand(arg); ok {
+		if harnessID, ok := catalog.FromCommand(arg); ok {
 			return observableHarness(process, harnessID)
 		}
 	}
 	if isAgentWrapper(process) {
 		start := min(commandArgumentPrefixCount, len(process.Args))
 		for _, arg := range process.Args[start:] {
-			if harnessID, ok := harness.FromCommand(arg); ok {
+			if harnessID, ok := catalog.FromCommand(arg); ok {
 				return observableHarness(process, harnessID)
 			}
 		}
@@ -584,7 +584,7 @@ func observableHarness(process processinfo.Process, harnessID registry.Harness) 
 			return "", false
 		}
 	}
-	if filter, ok := harness.ProcessFilterFor(harnessID); ok {
+	if filter, ok := catalog.ProcessFilterFor(harnessID); ok {
 		if !filter.ObservableProcess(process) {
 			return "", false
 		}
@@ -658,8 +658,8 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 		}
 		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
 		process := processByPID[pid]
-		emptyContext := registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
-		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: emptyContext}})
+		emptyLocation := registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
+		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: emptyLocation}})
 		if !inspectScreen {
 			continue
 		}
@@ -724,7 +724,7 @@ func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, 
 }
 
 func screenFallbackMetadata(session registry.Session, harnessID registry.Harness, at time.Time) (string, string) {
-	policy := (harness.Rules{}).Policy(harnessID)
+	policy := (catalog.Rules{}).Policy(harnessID)
 	if policy.Authority != registry.AuthorityHook {
 		return "", ""
 	}
@@ -845,11 +845,11 @@ func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedPro
 }
 
 func shouldDetectScreen(session registry.Session, at time.Time) bool {
-	if harness.SupportsScreen(session.Harness) {
-		authority, _ := registry.ActivityAuthority(session, (harness.Rules{}).Policy(session.Harness), at)
+	if catalog.SupportsScreen(session.Harness) {
+		authority, _ := registry.ActivityAuthority(session, (catalog.Rules{}).Policy(session.Harness), at)
 		return authority == registry.AuthorityScreen
 	}
-	policy := (harness.Rules{}).Policy(session.Harness)
+	policy := (catalog.Rules{}).Policy(session.Harness)
 	return policy.Authority == registry.AuthorityHook && !registry.EvaluateHook(session, policy, at).Active
 }
 
@@ -878,11 +878,11 @@ func isDirectAgentProcess(process processinfo.Process) bool {
 	if isAgentWrapper(process) {
 		return false
 	}
-	if _, ok := harness.FromCommand(process.Executable); ok {
+	if _, ok := catalog.FromCommand(process.Executable); ok {
 		return true
 	}
 	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if _, ok := harness.FromCommand(arg); ok {
+		if _, ok := catalog.FromCommand(arg); ok {
 			return true
 		}
 	}

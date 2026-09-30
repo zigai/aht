@@ -28,11 +28,11 @@ func CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error) {
 	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Lines: 0})
 }
 
-func CapturePaneWithOptions(ctx context.Context, pane Pane, options CaptureOptions) (ScreenSnapshot, error) {
-	if strings.TrimSpace(pane.Tmux.PaneID) == "" {
+func CapturePaneWithOptions(ctx context.Context, pane Pane, opts CaptureOptions) (ScreenSnapshot, error) {
+	if strings.TrimSpace(pane.Location.PaneID) == "" {
 		return ScreenSnapshot{}, errMissingCapturePane
 	}
-	cfg, err := gotmuxConfigForIdentity(pane.ServerIdentity)
+	cfg, err := gotmuxConfigForIdentity(pane.Location.ServerID)
 	if err != nil {
 		return ScreenSnapshot{}, err
 	}
@@ -40,11 +40,11 @@ func CapturePaneWithOptions(ctx context.Context, pane Pane, options CaptureOptio
 	if err != nil {
 		return ScreenSnapshot{}, fmt.Errorf("init tmux client: %w", err)
 	}
-	paneHandle, err := server.PaneHandle(gotmux.PaneID(pane.Tmux.PaneID))
+	paneHandle, err := server.PaneHandle(gotmux.PaneID(pane.Location.PaneID))
 	if err != nil {
-		return ScreenSnapshot{}, fmt.Errorf("resolve tmux pane %s: %w", pane.Tmux.PaneID, err)
+		return ScreenSnapshot{}, fmt.Errorf("resolve tmux pane %s: %w", pane.Location.PaneID, err)
 	}
-	lines := min(options.Lines, defaultCaptureLines)
+	lines := min(opts.Lines, defaultCaptureLines)
 	captureOpts := gotmux.CaptureOptions{ //nolint:exhaustruct_v5 // remaining options default to empty
 		JoinWrapped:    true,
 		IncludeEscapes: true,
@@ -55,7 +55,7 @@ func CapturePaneWithOptions(ctx context.Context, pane Pane, options CaptureOptio
 	}
 	res, err := paneHandle.CaptureWithTitle(ctx, captureOpts)
 	if err != nil {
-		return ScreenSnapshot{}, fmt.Errorf("capturing pane %s: %w", pane.Tmux.PaneID, err)
+		return ScreenSnapshot{}, fmt.Errorf("capturing pane %s: %w", pane.Location.PaneID, err)
 	}
 	text := string(res.Output)
 	if lines > 0 {

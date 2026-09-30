@@ -11,31 +11,31 @@ func TestToolResultAcceptsHostOutputEnvelopes(t *testing.T) {
 		body     string
 	}{
 		{
-			name: "claude", protocol: protocolAnthropicMessages,
+			name: "claude", protocol: providerProtocolAnthropicMessages,
 			body: `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_compat","content":[{"type":"text","text":"aht-compat-marker\n"}]}]}]}`,
 		},
 		{
-			name: "codex", protocol: protocolOpenAIResponses,
+			name: "codex", protocol: providerProtocolOpenAIResponses,
 			body: `{"input":[{"type":"function_call_output","call_id":"call_compat","output":"Chunk ID: 702c5d\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\naht-compat-marker"}]}`,
 		},
 		{
-			name: "copilot", protocol: protocolOpenAIChat,
+			name: "copilot", protocol: providerProtocolOpenAIChat,
 			body: `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"aht-compat-marker\n<shellId: 0 completed with exit code 0>"}]}`,
 		},
 		{
-			name: "cline", protocol: protocolOpenAIChat,
+			name: "cline", protocol: providerProtocolOpenAIChat,
 			body: `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"[{\"query\":\"printf aht-compat-marker\",\"result\":\"aht-compat-marker\",\"success\":true}]"}]}`,
 		},
 		{
-			name: "kimi-code", protocol: protocolOpenAIResponses,
+			name: "kimi-code", protocol: providerProtocolOpenAIResponses,
 			body: `{"input":[{"type":"function_call_output","call_id":"call_compat","output":"aht-compat-marker\n"}]}`,
 		},
 		{
-			name: "droid", protocol: protocolOpenAIChat,
+			name: "droid", protocol: providerProtocolOpenAIChat,
 			body: `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"aht-compat-marker\n\n[Process exited with code 0]"}]}`,
 		},
 		{
-			name: "hermes", protocol: protocolOpenAIChat,
+			name: "hermes", protocol: providerProtocolOpenAIChat,
 			body: `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"{\"output\": \"aht-compat-marker\", \"exit_code\": 0, \"error\": null}"}]}`,
 		},
 	}

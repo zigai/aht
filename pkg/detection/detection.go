@@ -85,7 +85,7 @@ type MatcherInspection struct {
 // rules as live tracking. Only the last 100 normalized lines are evaluated.
 // An explicit manifest fails on invalid input; ambient overrides retain the
 // tracker's bundled fallback policy. Custom harness names require an explicit manifest.
-func Inspect(ctx context.Context, harness registry.Harness, screen string, options Options) (Inspection, error) {
+func Inspect(ctx context.Context, harness registry.Harness, screen string, opts Options) (Inspection, error) {
 	var empty Inspection
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
@@ -93,15 +93,15 @@ func Inspect(ctx context.Context, harness registry.Harness, screen string, optio
 	if len(screen) > MaxScreenBytes {
 		return empty, ErrScreenTooLarge
 	}
-	if options.ManifestPath != "" && options.ConfigDir != "" {
+	if opts.ManifestPath != "" && opts.ConfigDir != "" {
 		return empty, ErrManifestOptions
 	}
 	var manifest agentstate.Manifest
 	var err error
-	if options.ManifestPath != "" {
-		manifest, err = agentstate.LoadExplicitManifest(options.ManifestPath, harness)
+	if opts.ManifestPath != "" {
+		manifest, err = agentstate.LoadExplicitManifest(opts.ManifestPath, harness)
 	} else {
-		manifest, err = (agentstate.Loader{ConfigDir: options.ConfigDir}).Load(harness)
+		manifest, err = (agentstate.Loader{ConfigDir: opts.ConfigDir}).Load(harness)
 	}
 	if err != nil {
 		return empty, fmt.Errorf("load detection manifest: %w", err)
@@ -109,9 +109,9 @@ func Inspect(ctx context.Context, harness registry.Harness, screen string, optio
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
 	}
-	raw := manifest.Inspect(agentstate.NormalizeSnapshot(screen, options.Title))
+	raw := manifest.Inspect(agentstate.NormalizeSnapshot(screen, opts.Title))
 	result := inspectionFromRaw(raw)
-	if options.IncludeScreen {
+	if opts.IncludeScreen {
 		result.Screen = screen
 	}
 	return result, nil

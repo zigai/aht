@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -44,17 +44,13 @@ type Result struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// AllHarnesses returns a snapshot of the installable harness catalog.
-func AllHarnesses() []registry.Harness {
+// Harnesses returns a snapshot of the installable harness catalog.
+func Harnesses() []registry.Harness {
 	return slices.Clone(allHarnesses)
 }
 
-func Run(opts Options) (Result, error) {
-	return RunContext(context.Background(), opts)
-}
-
-// RunContext installs one integration while honoring caller cancellation.
-func RunContext(ctx context.Context, opts Options) (Result, error) {
+// Run installs one integration while honoring caller cancellation.
+func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("install integration context: %w", err)
 	}
@@ -66,8 +62,8 @@ func RunContext(ctx context.Context, opts Options) (Result, error) {
 }
 
 func installableHarnesses() []registry.Harness {
-	harnesses := make([]registry.Harness, 0, len(harnesscatalog.All()))
-	for _, adapter := range harnesscatalog.All() {
+	harnesses := make([]registry.Harness, 0, len(catalog.All()))
+	for _, adapter := range catalog.All() {
 		if _, ok := adapter.(harnesspkg.Installable); ok {
 			harnesses = append(harnesses, adapter.Definition().ID)
 		}

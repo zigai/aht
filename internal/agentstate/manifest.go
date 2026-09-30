@@ -18,7 +18,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -86,7 +86,7 @@ func DefaultConfigDir() string {
 }
 
 func (l Loader) Supports(harnessID registry.Harness) bool {
-	if harnesscatalog.SupportsScreen(harnessID) {
+	if catalog.SupportsScreen(harnessID) {
 		return true
 	}
 	_, err := os.Stat(l.overridePath(harnessID))
@@ -192,7 +192,7 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 
 func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
-	if harnesscatalog.SupportsScreen(harnessID) {
+	if catalog.SupportsScreen(harnessID) {
 		var err error
 		bundled, err = loadBundled(harnessID)
 		if err != nil {
@@ -200,7 +200,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 		}
 	}
 	if path == "" {
-		if harnesscatalog.SupportsScreen(harnessID) {
+		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
 		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
@@ -208,13 +208,13 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 
 	data, readErr := readManifestFile(path)
 	if errors.Is(readErr, os.ErrNotExist) {
-		if harnesscatalog.SupportsScreen(harnessID) {
+		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
 		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
 	}
 	if readErr != nil {
-		if !harnesscatalog.SupportsScreen(harnessID) {
+		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("reading local override %s: %w", path, readErr)
 		}
 		bundled.Warning = fmt.Sprintf("reading local override %s: %v", path, readErr)
@@ -223,7 +223,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 
 	local, parseErr := ParseManifest(data, harnessID)
 	if parseErr != nil {
-		if !harnesscatalog.SupportsScreen(harnessID) {
+		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("loading local override %s: %w", path, parseErr)
 		}
 		bundled.Warning = fmt.Sprintf("ignoring invalid local override %s: %v", path, parseErr)
@@ -300,7 +300,7 @@ func compileRuleExpressions(expressions []string, caseSensitive bool) ([]*regexp
 }
 
 func loadBundled(harnessID registry.Harness) (Manifest, error) {
-	adapter, ok := harnesscatalog.Find(harnessID)
+	adapter, ok := catalog.Find(harnessID)
 	if !ok {
 		return Manifest{}, fmt.Errorf("reading bundled manifest for %s: %w", harnessID, errBundledManifestNotFound)
 	}

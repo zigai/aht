@@ -45,7 +45,7 @@ func storedSessionStateCorruption(session Session) string {
 	if session.Liveness == nil {
 		return "missing liveness"
 	}
-	if activity := session.Activity(); activity != nil && !activity.IsValid() {
+	if activity := session.Activity(); activity != nil && !activity.Valid() {
 		return "invalid activity"
 	}
 	switch {
@@ -53,7 +53,7 @@ func storedSessionStateCorruption(session Session) string {
 		return "invalid process identity"
 	case session.Location.PanePID < 0:
 		return "invalid multiplexer pane pid"
-	case !session.Location.Empty() && !session.Location.Kind.IsValid():
+	case !session.Location.Empty() && !session.Location.Kind.Valid():
 		return "invalid multiplexer kind"
 	case session.Decision() != nil && !validStoredActivityDecision(*session.Decision()):
 		return "invalid activity decision"
@@ -88,8 +88,8 @@ func validStoredProcessObservation(observation ProcessObservation) bool {
 func validStoredMultiplexerObservation(observation MultiplexerObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
 		validStoredProcess(observation.Process, false) &&
-		observation.Context.PanePID >= 0 &&
-		(observation.Context.Empty() || observation.Context.Kind.IsValid())
+		observation.Location.PanePID >= 0 &&
+		(observation.Location.Empty() || observation.Location.Kind.Valid())
 }
 
 func validStoredCatalogObservation(observation CatalogObservation) bool {
@@ -110,7 +110,7 @@ func validStoredScreenObservation(observation ScreenObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
 		(observation.Detail == "" || observation.Detail.ValidFor(observation.Activity)) &&
 		validStoredProcess(observation.Process, false) &&
-		observation.Activity.IsValid() &&
+		observation.Activity.Valid() &&
 		observation.ManifestVersion >= 0
 }
 
@@ -119,15 +119,15 @@ func validStoredActivityDecision(decision ActivityDecision) bool {
 }
 
 func validStoredLifecycle(lifecycle *NativeLifecycle) bool {
-	return lifecycle == nil || lifecycle.IsValid()
+	return lifecycle == nil || lifecycle.Valid()
 }
 
 func validStoredOptionalPresence(presence *Presence) bool {
-	return presence == nil || presence.IsValid()
+	return presence == nil || presence.Valid()
 }
 
 func validStoredOptionalActivity(activity *Activity) bool {
-	return activity == nil || activity.IsValid()
+	return activity == nil || activity.Valid()
 }
 
 func validStoredProcess(process ProcessIdentity, allowZero bool) bool {

@@ -3,14 +3,14 @@ package aht
 import "github.com/zigai/aht/v2/pkg/registry"
 
 const (
-	DetailPermission  = registry.DetailPermission
-	DetailQuestion    = registry.DetailQuestion
-	DetailGeneral     = registry.DetailGeneral
-	DetailUsageLimit  = registry.DetailUsageLimit
-	DetailCurrent     = registry.DetailCurrent
-	DetailStale       = registry.DetailStale
-	DetailMissing     = registry.DetailMissing
-	DetailUnsupported = registry.DetailUnsupported
+	ActivityDetailPermission = registry.ActivityDetailPermission
+	ActivityDetailQuestion   = registry.ActivityDetailQuestion
+	ActivityDetailGeneral    = registry.ActivityDetailGeneral
+	ActivityDetailUsageLimit = registry.ActivityDetailUsageLimit
+	DetailQualityCurrent     = registry.DetailQualityCurrent
+	DetailQualityStale       = registry.DetailQualityStale
+	DetailQualityMissing     = registry.DetailQualityMissing
+	DetailQualityUnsupported = registry.DetailQualityUnsupported
 )
 
 type (

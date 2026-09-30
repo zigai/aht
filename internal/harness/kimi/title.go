@@ -35,7 +35,7 @@ var (
 	errKimiSessionMatchesMultipleWorkspaces = errors.New("kimi code session matched multiple workspaces")
 )
 
-type kimiACPSessionInfo struct {
+type kimiACPSessionTitle struct {
 	SessionID string
 	Title     string
 }
@@ -206,7 +206,7 @@ func addKimiFallbackGroups(groups map[string]*kimiTitleGroup, fallback kimiSessi
 func applyKimiSessionTitles(
 	group *kimiTitleGroup,
 	fallback kimiSessionTitleFallback,
-	sessions []kimiACPSessionInfo,
+	sessions []kimiACPSessionTitle,
 	titles []string,
 	fallbackTitles map[int][]string,
 ) {
@@ -261,7 +261,7 @@ func readKimiMetadata(ctx context.Context) (kimiMetadata, error) {
 	return metadata, nil
 }
 
-func listKimiACPSessions(ctx context.Context, binary, cwd string) ([]kimiACPSessionInfo, bool, error) {
+func listKimiACPSessions(ctx context.Context, binary, cwd string) ([]kimiACPSessionTitle, bool, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, kimiACPRequestTimeout)
 	defer cancel()
 	command := exec.CommandContext(requestCtx, binary, "acp")
@@ -340,7 +340,7 @@ func requestKimiACPSessions(
 	stdin io.Writer,
 	reader *bufio.Reader,
 	cwd string,
-) ([]kimiACPSessionInfo, error) {
+) ([]kimiACPSessionTitle, error) {
 	if err := writeKimiACPMessage(stdin, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      kimiACPSessionListRequestID,
@@ -385,20 +385,20 @@ func kimiACPHasSessionList(response json.RawMessage) (bool, error) {
 	return len(list) > 0 && !bytes.Equal(list, []byte("null")), nil
 }
 
-func decodeKimiACPSessions(response json.RawMessage) ([]kimiACPSessionInfo, error) {
+func decodeKimiACPSessions(response json.RawMessage) ([]kimiACPSessionTitle, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return nil, fmt.Errorf("decode Kimi ACP session list: %w", err)
 	}
 	sessionRaw, ok := envelope["sessions"]
 	if !ok {
-		return []kimiACPSessionInfo{}, nil
+		return []kimiACPSessionTitle{}, nil
 	}
 	var records []json.RawMessage
 	if err := json.Unmarshal(sessionRaw, &records); err != nil {
 		return nil, fmt.Errorf("decode Kimi ACP session records: %w", err)
 	}
-	sessions := make([]kimiACPSessionInfo, 0, len(records))
+	sessions := make([]kimiACPSessionTitle, 0, len(records))
 	for _, record := range records {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(record, &fields); err != nil {
@@ -412,7 +412,7 @@ func decodeKimiACPSessions(response json.RawMessage) ([]kimiACPSessionInfo, erro
 		if err != nil {
 			return nil, fmt.Errorf("decode Kimi ACP session title: %w", err)
 		}
-		sessions = append(sessions, kimiACPSessionInfo{SessionID: sessionID, Title: title})
+		sessions = append(sessions, kimiACPSessionTitle{SessionID: sessionID, Title: title})
 	}
 	return sessions, nil
 }

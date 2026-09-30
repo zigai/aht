@@ -18,9 +18,9 @@ import (
 type providerProtocol string
 
 const (
-	protocolAnthropicMessages providerProtocol = "anthropic-messages"
-	protocolOpenAIChat        providerProtocol = "openai-chat"
-	protocolOpenAIResponses   providerProtocol = "openai-responses"
+	providerProtocolAnthropicMessages providerProtocol = "anthropic-messages"
+	providerProtocolOpenAIChat        providerProtocol = "openai-chat"
+	providerProtocolOpenAIResponses   providerProtocol = "openai-responses"
 )
 
 var errInvalidProviderRequest = errors.New("invalid scripted provider request")
@@ -58,7 +58,7 @@ func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName strin
 		callID:   "call_compat",
 		requests: make([]providerRequest, 0, 2),
 	}
-	if protocol == protocolAnthropicMessages {
+	if protocol == providerProtocolAnthropicMessages {
 		provider.callID = "tool_compat"
 	}
 	provider.server = httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
@@ -183,11 +183,11 @@ func (provider *scriptedProvider) validToolContinuation(body []byte) bool {
 
 func (provider *scriptedProvider) validPath(path string) bool {
 	switch provider.protocol {
-	case protocolAnthropicMessages:
+	case providerProtocolAnthropicMessages:
 		return strings.HasSuffix(path, "/messages")
-	case protocolOpenAIChat:
+	case providerProtocolOpenAIChat:
 		return strings.HasSuffix(path, "/chat/completions")
-	case protocolOpenAIResponses:
+	case providerProtocolOpenAIResponses:
 		return strings.HasSuffix(path, "/responses")
 	default:
 		return false
@@ -198,7 +198,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 	arguments := mustJSON(provider.toolArgs)
 	stream := requestWantsStream(body)
 	switch provider.protocol {
-	case protocolAnthropicMessages:
+	case providerProtocolAnthropicMessages:
 		if stream {
 			writeSSE(writer,
 				`{"type":"message_start","message":{"id":"msg_compat","type":"message","role":"assistant","content":[],"model":"compat","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -211,7 +211,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 			return
 		}
 		writeJSON(writer, map[string]any{"id": "msg_compat", "type": "message", "role": "assistant", "model": "compat", "content": []any{map[string]any{"type": "tool_use", "id": provider.callID, "name": provider.toolName, "input": provider.toolArgs}}, "stop_reason": "tool_use", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}})
-	case protocolOpenAIChat:
+	case providerProtocolOpenAIChat:
 		call := map[string]any{"index": 0, "id": provider.callID, "type": "function", "function": map[string]any{"name": provider.toolName, "arguments": arguments}}
 		if stream {
 			writeSSE(writer,
@@ -222,7 +222,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 			return
 		}
 		writeJSON(writer, map[string]any{"id": "chatcmpl_compat", "object": "chat.completion", "created": 1, "model": "compat", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
-	case protocolOpenAIResponses:
+	case providerProtocolOpenAIResponses:
 		item := map[string]any{"id": "fc_compat", "type": "function_call", "call_id": provider.callID, "name": provider.toolName, "arguments": arguments, "status": "completed"}
 		if stream {
 			writeSSE(writer,
@@ -239,7 +239,7 @@ func (provider *scriptedProvider) writeToolCall(writer http.ResponseWriter, body
 func (provider *scriptedProvider) writeFinal(writer http.ResponseWriter, body []byte) {
 	stream := requestWantsStream(body)
 	switch provider.protocol {
-	case protocolAnthropicMessages:
+	case providerProtocolAnthropicMessages:
 		if stream {
 			writeSSE(writer,
 				`{"type":"message_start","message":{"id":"msg_final","type":"message","role":"assistant","content":[],"model":"compat","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -252,7 +252,7 @@ func (provider *scriptedProvider) writeFinal(writer http.ResponseWriter, body []
 			return
 		}
 		writeJSON(writer, map[string]any{"id": "msg_final", "type": "message", "role": "assistant", "model": "compat", "content": []any{map[string]string{"type": "text", "text": "compat complete"}}, "stop_reason": "end_turn", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}})
-	case protocolOpenAIChat:
+	case providerProtocolOpenAIChat:
 		if stream {
 			writeSSE(writer,
 				`{"id":"chatcmpl_final","object":"chat.completion.chunk","created":1,"model":"compat","choices":[{"index":0,"delta":{"role":"assistant","content":"compat complete"},"finish_reason":null}]}`,
@@ -262,7 +262,7 @@ func (provider *scriptedProvider) writeFinal(writer http.ResponseWriter, body []
 			return
 		}
 		writeJSON(writer, map[string]any{"id": "chatcmpl_final", "object": "chat.completion", "created": 1, "model": "compat", "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "compat complete"}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
-	case protocolOpenAIResponses:
+	case providerProtocolOpenAIResponses:
 		message := map[string]any{"id": "msg_final", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "compat complete", "annotations": []any{}}}}
 		if stream {
 			writeSSE(writer,
@@ -453,11 +453,11 @@ func requestContainsToolResult(protocol providerProtocol, body []byte, callID st
 		return false
 	}
 	switch protocol {
-	case protocolAnthropicMessages:
+	case providerProtocolAnthropicMessages:
 		return anthropicContainsToolResult(value, callID, marker)
-	case protocolOpenAIChat:
+	case providerProtocolOpenAIChat:
 		return openAIChatContainsToolResult(value, callID, marker)
-	case protocolOpenAIResponses:
+	case providerProtocolOpenAIResponses:
 		return openAIResponsesContainsToolResult(value, callID, marker)
 	}
 	return false
@@ -521,7 +521,7 @@ func mustJSON(value any) string {
 }
 
 func TestScriptedProviderRequiresToolResult(t *testing.T) {
-	provider := newScriptedProvider(t, protocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
+	provider := newScriptedProvider(t, providerProtocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
 	requestBody := `{"stream":false,"tools":[{"type":"function","function":{"name":"shell"}}]}`
 	postProviderRequest(t, provider.URL()+"/v1/chat/completions", requestBody, http.StatusOK)
 	postProviderRequest(t, provider.URL()+"/v1/chat/completions", `{"messages":[],"tools":[{"type":"function","function":{"name":"shell"}}]}`, http.StatusBadRequest)
@@ -534,7 +534,7 @@ func TestScriptedProviderRequiresToolResult(t *testing.T) {
 }
 
 func TestScriptedProviderRootProbeDoesNotAdvanceConversation(t *testing.T) {
-	provider := newScriptedProvider(t, protocolOpenAIResponses, "run_terminal_command", map[string]any{"command": "printf marker"}, "marker")
+	provider := newScriptedProvider(t, providerProtocolOpenAIResponses, "run_terminal_command", map[string]any{"command": "printf marker"}, "marker")
 	first := `{"tools":[{"type":"function","name":"run_terminal_command"}]}`
 	second := `{"input":[{"type":"function_call_output","call_id":"call_compat","output":"marker"}]}`
 	for _, body := range []string{first, second} {
@@ -563,7 +563,7 @@ func TestScriptedProviderRootProbeDoesNotAdvanceConversation(t *testing.T) {
 }
 
 func TestScriptedProviderTitlePromptDoesNotAdvanceConversation(t *testing.T) {
-	provider := newScriptedProvider(t, protocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
+	provider := newScriptedProvider(t, providerProtocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
 	titleRequest := `{"messages":[{"role":"system","content":"Generate a short, descriptive title (3-7 words) for a conversation that starts with the following exchange."}]}`
 	postProviderRequest(t, provider.URL()+"/v1/chat/completions", titleRequest, http.StatusOK)
 	if len(provider.Requests()) != 0 {
@@ -597,17 +597,17 @@ func TestScriptedProviderCompletesEveryProtocolAfterToolResult(t *testing.T) {
 		second   string
 	}{
 		{
-			name: "anthropic", protocol: protocolAnthropicMessages, path: "/v1/messages", tool: "Bash",
+			name: "anthropic", protocol: providerProtocolAnthropicMessages, path: "/v1/messages", tool: "Bash",
 			first:  `{"stream":false,"tools":[{"name":"Bash"}]}`,
 			second: `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_compat","content":"marker"}]}]}`,
 		},
 		{
-			name: "openai-chat", protocol: protocolOpenAIChat, path: "/v1/chat/completions", tool: "shell",
+			name: "openai-chat", protocol: providerProtocolOpenAIChat, path: "/v1/chat/completions", tool: "shell",
 			first:  `{"stream":false,"tools":[{"type":"function","function":{"name":"shell"}}]}`,
 			second: `{"messages":[{"role":"tool","tool_call_id":"call_compat","content":"marker"}]}`,
 		},
 		{
-			name: "openai-responses", protocol: protocolOpenAIResponses, path: "/v1/responses", tool: "shell",
+			name: "openai-responses", protocol: providerProtocolOpenAIResponses, path: "/v1/responses", tool: "shell",
 			first:  `{"stream":false,"tools":[{"type":"function","name":"shell"}]}`,
 			second: `{"input":[{"type":"function_call_output","call_id":"call_compat","output":"marker"}]}`,
 		},
@@ -629,7 +629,7 @@ func TestScriptedProviderCompletesEveryProtocolAfterToolResult(t *testing.T) {
 }
 
 func TestScriptedProviderRejectsPromptOnlyMarker(t *testing.T) {
-	provider := newScriptedProvider(t, protocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
+	provider := newScriptedProvider(t, providerProtocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
 	first := `{"stream":false,"tools":[{"type":"function","function":{"name":"shell"}}]}`
 	postProviderRequest(t, provider.URL()+"/v1/chat/completions", first, http.StatusOK)
 	promptOnly := `{"messages":[{"role":"user","content":"please print marker"}],"tools":[{"type":"function","function":{"name":"shell"}}],"tool_calls":[]}`
@@ -640,7 +640,7 @@ func TestScriptedProviderRejectsPromptOnlyMarker(t *testing.T) {
 }
 
 func TestScriptedProviderRejectsToolDeclarationInNonToolField(t *testing.T) {
-	provider := newScriptedProvider(t, protocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
+	provider := newScriptedProvider(t, providerProtocolOpenAIChat, "shell", map[string]any{"command": "printf marker"}, "marker")
 	nonTool := `{"stream":false,"prompt":"run shell","tools":[]}`
 	postProviderRequest(t, provider.URL()+"/v1/chat/completions", nonTool, http.StatusBadRequest)
 	if provider.Error() == nil {

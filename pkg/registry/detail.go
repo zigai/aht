@@ -7,17 +7,17 @@ import (
 )
 
 const (
-	DetailPermission ActivityDetail = "permission"
-	DetailQuestion   ActivityDetail = "question"
-	DetailGeneral    ActivityDetail = "general"
-	DetailUsageLimit ActivityDetail = "usage_limit"
+	ActivityDetailPermission ActivityDetail = "permission"
+	ActivityDetailQuestion   ActivityDetail = "question"
+	ActivityDetailGeneral    ActivityDetail = "general"
+	ActivityDetailUsageLimit ActivityDetail = "usage_limit"
 )
 
 const (
-	DetailCurrent     DetailQuality = "current"
-	DetailStale       DetailQuality = "stale"
-	DetailMissing     DetailQuality = "missing"
-	DetailUnsupported DetailQuality = "unsupported"
+	DetailQualityCurrent     DetailQuality = "current"
+	DetailQualityStale       DetailQuality = "stale"
+	DetailQualityMissing     DetailQuality = "missing"
+	DetailQualityUnsupported DetailQuality = "unsupported"
 )
 
 type (
@@ -51,9 +51,9 @@ type StateDetail struct {
 func (d ActivityDetail) ValidFor(activity Activity) bool {
 	switch activity {
 	case ActivityWaiting:
-		return d == DetailPermission || d == DetailQuestion
+		return d == ActivityDetailPermission || d == ActivityDetailQuestion
 	case ActivityFailed:
-		return d == DetailGeneral || d == DetailUsageLimit
+		return d == ActivityDetailGeneral || d == ActivityDetailUsageLimit
 	case ActivityRunning, ActivityIdle, ActivityInterrupted, ActivityUnknown:
 		return false
 	}
@@ -76,21 +76,21 @@ func (s *Session) resolveDetail(policy Policy, now time.Time) {
 	}
 	decision := s.Decision()
 	if decision == nil || s.Process == nil || !decision.Process.Equal(*s.Process) {
-		s.Detail = &StateDetail{Value: "", Quality: DetailMissing, Authority: "", ObservedAt: time.Time{}}
+		s.Detail = &StateDetail{Value: "", Quality: DetailQualityMissing, Authority: "", ObservedAt: time.Time{}}
 		return
 	}
 	evidence, support := s.selectedDetail(policy, *activity, decision.Authority)
-	detail := StateDetail{Value: "", Quality: DetailMissing, Authority: decision.Authority, ObservedAt: time.Time{}}
+	detail := StateDetail{Value: "", Quality: DetailQualityMissing, Authority: decision.Authority, ObservedAt: time.Time{}}
 	if !support.Supports(*activity) {
-		detail.Quality = DetailUnsupported
+		detail.Quality = DetailQualityUnsupported
 	}
 	if *activity == ActivityFailed {
-		detail.Value = DetailGeneral
+		detail.Value = ActivityDetailGeneral
 	}
 	if evidence != nil && evidence.Value.ValidFor(*activity) {
-		detail.Value, detail.ObservedAt, detail.Quality = evidence.Value, evidence.ObservedAt, DetailCurrent
+		detail.Value, detail.ObservedAt, detail.Quality = evidence.Value, evidence.ObservedAt, DetailQualityCurrent
 		if invalidHookTimeReason(evidence.ObservedAt, now) != "" {
-			detail.Quality = DetailStale
+			detail.Quality = DetailQualityStale
 		}
 	}
 	s.Detail = &detail
@@ -137,7 +137,7 @@ func (s Session) nativeDetail(report *Report, process ProcessIdentity, at time.T
 		return &DetailEvidence{Value: *report.Detail, ObservedAt: at}
 	}
 	if report.Activity != nil && *report.Activity == ActivityFailed {
-		return &DetailEvidence{Value: DetailGeneral, ObservedAt: at}
+		return &DetailEvidence{Value: ActivityDetailGeneral, ObservedAt: at}
 	}
 	if report.Activity != nil || !s.retainNativeDetail(report, process) {
 		return nil
@@ -176,10 +176,10 @@ func validStateDetail(detail *StateDetail, activity *Activity) bool {
 		return false
 	}
 	switch detail.Quality {
-	case DetailCurrent, DetailStale:
+	case DetailQualityCurrent, DetailQualityStale:
 		return detail.Value != "" && !detail.ObservedAt.IsZero() && detail.Authority != ""
-	case DetailMissing, DetailUnsupported:
-		return detail.ObservedAt.IsZero() && (detail.Value == "" || detail.Value == DetailGeneral)
+	case DetailQualityMissing, DetailQualityUnsupported:
+		return detail.ObservedAt.IsZero() && (detail.Value == "" || detail.Value == ActivityDetailGeneral)
 	}
 	return false
 }

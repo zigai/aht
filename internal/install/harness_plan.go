@@ -66,26 +66,26 @@ func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
 	return false
 }
 
-func installPlanAction(ctx context.Context, options Options, harness registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
+func installPlanAction(ctx context.Context, opts Options, harness registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		result, err := installJSONCommandHooks(options, harness, typed.Plan)
+		result, err := installJSONCommandHooks(opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.CursorJSONHooksAction:
-		result, err := installCursorJSONHooks(options, harness, typed.Plan)
+		result, err := installCursorJSONHooks(opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.ManagedTextBlockAction:
-		result, err := installManagedTextBlock(options, harness, typed.Plan)
+		result, err := installManagedTextBlock(opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.RenderedFileAction:
-		result, err := installRenderedPlan(options, harness, typed.Plan)
+		result, err := installRenderedPlan(opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.PluginDirectoryAction:
-		result, err := installPluginDirectory(ctx, options, harness, typed.Plan)
+		result, err := installPluginDirectory(ctx, opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.ShimAction:
@@ -100,14 +100,14 @@ func installPlanAction(ctx context.Context, options Options, harness registry.Ha
 }
 
 func installJSONCommandHooks(
-	options Options,
+	opts Options,
 	harness registry.Harness,
 	plan harnesspkg.JSONCommandHookInstallPlan,
 ) (Result, error) {
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
 
-	return installJSONHookFile(options, jsonHookFileInstall{
+	return installJSONHookFile(opts, jsonHookFileInstall{
 		Harness:                 harness,
 		Path:                    plan.Path,
 		Apply:                   applyJSONCommandHooks(harness, plan),
@@ -179,14 +179,14 @@ func applyJSONCommandHooks(
 }
 
 func installCursorJSONHooks(
-	options Options,
+	opts Options,
 	harness registry.Harness,
 	plan harnesspkg.CursorJSONHookInstallPlan,
 ) (Result, error) {
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
 
-	return installJSONHookFile(options, jsonHookFileInstall{
+	return installJSONHookFile(opts, jsonHookFileInstall{
 		Harness:                 harness,
 		Path:                    plan.Path,
 		Apply:                   applyCursorJSONHooks(harness, plan),
@@ -301,7 +301,7 @@ func removeManagedCursorHooks(definitions []any, isManaged func(string) bool) ([
 }
 
 func installManagedTextBlock(
-	options Options,
+	opts Options,
 	harness registry.Harness,
 	plan harnesspkg.ManagedTextBlockInstallPlan,
 ) (Result, error) {
@@ -319,7 +319,7 @@ func installManagedTextBlock(
 		plan.Path,
 		[]byte(next),
 		changed,
-		options.DryRun,
+		opts.DryRun,
 		"creating "+configLabel+" directory",
 		"writing "+label,
 	); err != nil {
@@ -330,7 +330,7 @@ func installManagedTextBlock(
 		Harness:  string(harness),
 		Path:     plan.Path,
 		Changed:  changed,
-		Message:  installMessage(label, changed, options.DryRun),
+		Message:  installMessage(label, changed, opts.DryRun),
 		NextStep: "",
 		Snippet:  next,
 		Error:    "",
@@ -396,7 +396,7 @@ func appendManagedTextBlock(current string, block string) string {
 }
 
 func installRenderedPlan(
-	options Options,
+	opts Options,
 	harness registry.Harness,
 	plan harnesspkg.RenderedFileInstallPlan,
 ) (Result, error) {
@@ -408,7 +408,7 @@ func installRenderedPlan(
 	label := installLabel(plan.Label, harness, "artifact")
 	configLabel := installLabel(plan.ConfigLabel, harness, "artifact")
 
-	return installRenderedFile(options, renderedFileInstall{
+	return installRenderedFile(opts, renderedFileInstall{
 		Harness:                 harness,
 		Path:                    plan.Path,
 		Content:                 content,
@@ -435,7 +435,7 @@ func renderInstallContent(content string, jsonContent any) (string, error) {
 
 func installPluginDirectory(
 	ctx context.Context,
-	options Options,
+	opts Options,
 	harness registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (Result, error) {
@@ -445,7 +445,7 @@ func installPluginDirectory(
 	}
 	plugin := newPluginDirectoryInstall(plan, files)
 
-	if err := plugin.ensureManaged(options.Force); err != nil {
+	if err := plugin.ensureManaged(opts.Force); err != nil {
 		return Result{}, err
 	}
 
@@ -454,7 +454,7 @@ func installPluginDirectory(
 		return Result{}, err
 	}
 	if plan.Registration != nil {
-		return installRegisteredPlugin(ctx, options, harness, plan, plugin, pluginChanged)
+		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged)
 	}
 
 	manifest, manifestChanged, err := plannedImportManifest(plan.ImportManifest, time.Now().UTC())
@@ -464,7 +464,7 @@ func installPluginDirectory(
 
 	changed := pluginChanged || manifestChanged
 
-	if changed && !options.DryRun {
+	if changed && !opts.DryRun {
 		if err := writePluginDirectoryChanges(plugin, plan.ImportManifest, manifest, pluginChanged, manifestChanged); err != nil {
 			return Result{}, err
 		}
@@ -476,7 +476,7 @@ func installPluginDirectory(
 		Harness:  string(harness),
 		Path:     plugin.dir,
 		Changed:  changed,
-		Message:  installMessage(label, changed, options.DryRun),
+		Message:  installMessage(label, changed, opts.DryRun),
 		NextStep: "",
 		Snippet:  plugin.snippet(),
 		Error:    "",

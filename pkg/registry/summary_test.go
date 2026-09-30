@@ -25,7 +25,7 @@ func TestSummarySeparatesServersAndCountsAllActivities(t *testing.T) {
 			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil),
 		},
 	}
-	summaries := summariesForSessions(sessions)
+	summaries := Summaries(sessions)
 	if len(summaries) != 2 {
 		t.Fatalf("summaries = %#v, want distinct servers", summaries)
 	}

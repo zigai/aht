@@ -22,7 +22,7 @@ func storedSession(id string, pid int, sessionID string, createdAt time.Time) Se
 	process := retentionProcess(pid)
 	session.Process = &process
 	if sessionID != "" {
-		session.IdentityState = Identified
+		session.IdentityState = IdentityIdentified
 		session.SessionID = sessionID
 	}
 	session.setPresence(PresenceLive)
@@ -200,7 +200,7 @@ func TestProcessOnlySessionIsRemovedWhenItGoesGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.IdentityState != Provisional {
+	if session.IdentityState != IdentityProvisional {
 		t.Fatalf("identity = %q, want provisional", session.IdentityState)
 	}
 	live, err := store.State(t.Context(), Filter{})

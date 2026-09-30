@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -34,7 +34,7 @@ func TestGoldenScreenFixtures(t *testing.T) {
 	for _, fixture := range fixtures {
 		t.Run(fixture.Agent+"/"+fixture.Name, func(t *testing.T) {
 			t.Parallel()
-			harness, err := harnesscatalog.Normalize(fixture.Agent)
+			harness, err := catalog.Parse(fixture.Agent)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -378,29 +378,29 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 		Observations: registry.Observations{Native: &registry.NativeObservation{Activity: &running, Reporter: registry.Reporter{Integration: "pi-extension"}, Process: process, ObservedAt: now}},
 		Liveness:     registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
 	}
-	if !registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now).Active || detectScreenForTest(session, now) {
+	if !registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now).Active || detectScreenForTest(session, now) {
 		t.Fatal("matching Pi extension report was not authoritative")
 	}
 	session.Observations.Native.Process.StartIdentity = "old"
-	if registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now).Active || !detectScreenForTest(session, now) {
+	if registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now).Active || !detectScreenForTest(session, now) {
 		t.Fatal("stale Pi extension report did not fall back to screen")
 	}
 	session.Observations.Native.Process = process
 	gone := registry.PresenceGone
 	session.Observations.Native.Presence = &gone
-	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Reason != "integration_ended" {
+	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Reason != "integration_ended" {
 		t.Fatalf("ended integration evaluation = %#v", evaluation)
 	}
 	session.Observations.Native.Presence = nil
 	session.Observations.Native.ObservedAt = now.Add(time.Second)
-	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || !evaluation.ProcessMatches || evaluation.Reason != "integration_observation_from_future" {
+	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || !evaluation.ProcessMatches || evaluation.Reason != "integration_observation_from_future" {
 		t.Fatalf("future integration evaluation = %#v", evaluation)
 	}
 	session.Observations.Native.ObservedAt = now.Add(-registry.IntegrationActivityLease - time.Second)
-	if evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
+	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
 		t.Fatalf("stale integration evaluation = %#v", evaluation)
 	}
-	if (harnesscatalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityHook {
+	if (catalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityHook {
 		t.Fatal("Codex native hooks must own activity")
 	}
 }
@@ -410,11 +410,11 @@ func TestOmpHookAuthorityUsesNativeIntegration(t *testing.T) {
 	now := time.Now().UTC()
 	session := ompSession(now)
 
-	policy := (harnesscatalog.Rules{}).Policy(registry.Harness("omp"))
+	policy := (catalog.Rules{}).Policy(registry.Harness("omp"))
 	if policy.Authority != registry.AuthorityHook || !policy.ScreenFallback || policy.Reporter != "omp-extension" {
 		t.Fatalf("OMP policy = %#v", policy)
 	}
-	evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
+	evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now)
 	if !evaluation.Active || !evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "matching_live_process_report" {
 		t.Fatalf("OMP hook evaluation = %#v", evaluation)
 	}
@@ -428,7 +428,7 @@ func TestOmpHookAuthorityFallsBackToScreenWhenStale(t *testing.T) {
 	now := time.Now().UTC()
 	session := ompSession(now.Add(-registry.IntegrationActivityLease - time.Second))
 
-	evaluation := registry.EvaluateHook(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
+	evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now)
 	if evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" {
 		t.Fatalf("stale OMP hook evaluation = %#v", evaluation)
 	}
@@ -894,6 +894,6 @@ func TestDefaultConfigDir(t *testing.T) {
 }
 
 func detectScreenForTest(session registry.Session, now time.Time) bool {
-	authority, _ := registry.ActivityAuthority(session, (harnesscatalog.Rules{}).Policy(session.Harness), now)
+	authority, _ := registry.ActivityAuthority(session, (catalog.Rules{}).Policy(session.Harness), now)
 	return authority == registry.AuthorityScreen
 }

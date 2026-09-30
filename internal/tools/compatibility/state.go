@@ -68,10 +68,10 @@ func decodeStateArchive(body []byte) (releaseState, error) {
 
 func mergeResults(state releaseState, candidates []candidate, results []hostResult, runURL string) (releaseState, []string, error) {
 	next := releaseState{Schema: state.Schema, Harnesses: maps.Clone(state.Harnesses), Successful: maps.Clone(state.Successful)}
-	resultMap := make(map[string]hostResult, len(results))
+	resultsByRelease := make(map[string]hostResult, len(results))
 	for _, res := range results {
 		if recordedOutcome(res.Outcome) {
-			resultMap[res.Harness+":"+res.Version] = res
+			resultsByRelease[res.Harness+":"+res.Version] = res
 		}
 	}
 	var incomplete []string
@@ -80,7 +80,7 @@ func mergeResults(state releaseState, candidates []candidate, results []hostResu
 		if err != nil {
 			return next, incomplete, err
 		}
-		result, ok := resultMap[selected.Harness+":"+selected.Version]
+		result, ok := resultsByRelease[selected.Harness+":"+selected.Version]
 		if !ok {
 			result = hostResult{Harness: selected.Harness, Version: selected.Version, Outcome: "incomplete", Revision: ""}
 		}

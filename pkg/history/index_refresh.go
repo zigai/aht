@@ -98,7 +98,7 @@ func (index *historyIndex) transcript(ctx context.Context, s *search, source Sou
 		writer.checkpoint.Extra = extra
 		writer.checkpoint.Size = info.Size()
 		if catalog.TranscriptFor(source.Harness).Document == nil && !strings.HasSuffix(path, ".zst") {
-			if err := writer.tryAppend(ctx, file, previous, info); err != nil {
+			if err := writer.prepareAppendResume(ctx, file, previous, info); err != nil {
 				return err
 			}
 		}
@@ -352,7 +352,7 @@ func (checkpoint indexCheckpoint) resumable(writer *indexWriter, info os.FileInf
 		checkpoint.Tools == writer.includeTools
 }
 
-func (writer *indexWriter) tryAppend(ctx context.Context, file *os.File, previous indexedFile, info os.FileInfo) error {
+func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.File, previous indexedFile, info os.FileInfo) error {
 	writer.hash = sha256.New()
 	var checkpoint indexCheckpoint
 	if previous.checkpoint == "" {

@@ -27,10 +27,9 @@ func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 	pid := strconv.Itoa(server.Session.ServerIdentity().PID)
 
 	pane := Pane{
-		Tmux:           registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionName: "gotmux-test", PaneID: paneID},
-		ServerIdentity: server.Socket,
-		PanePID:        0,
-		PaneTTY:        "",
+		Location: registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionName: "gotmux-test", PaneID: paneID},
+		PanePID:  0,
+		PaneTTY:  "",
 	}
 
 	deadline := time.Now().Add(3 * time.Second)

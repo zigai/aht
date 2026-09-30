@@ -8,7 +8,7 @@ func (claudeHarness) ActivityDetail(event string, activity registry.Activity, at
 	if activity == registry.ActivityFailed && event == "StopFailure" {
 		switch attributes["claude_error_type"] {
 		case "rate_limit", "billing_error":
-			return new(registry.DetailUsageLimit)
+			return new(registry.ActivityDetailUsageLimit)
 		}
 	}
 	return hookActivityDetail(event, activity, attributes["claude_notification_type"])
@@ -24,15 +24,15 @@ func hookActivityDetail(event string, activity registry.Activity, notification s
 	}
 	switch event {
 	case "PermissionRequest":
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	case "Elicitation":
-		return new(registry.DetailQuestion)
+		return new(registry.ActivityDetailQuestion)
 	case "Notification":
 		switch notification {
 		case "permission_prompt":
-			return new(registry.DetailPermission)
+			return new(registry.ActivityDetailPermission)
 		case "elicitation_dialog", "elicitation_url_dialog":
-			return new(registry.DetailQuestion)
+			return new(registry.ActivityDetailQuestion)
 		}
 	}
 	return nil

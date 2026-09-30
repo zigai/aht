@@ -57,7 +57,7 @@ type DoctorOptions struct {
 // Doctor performs a comprehensive diagnostic evaluation of the AHT installation,
 // storage, background tracker, process enumeration, detection manifests, configuration,
 // and harness integrations.
-func (m *Manager) Doctor(ctx context.Context, options DoctorOptions) DoctorResult {
+func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	const initialCheckCapacity = 16
 	result := DoctorResult{
 		OK:           true,
@@ -76,10 +76,10 @@ func (m *Manager) Doctor(ctx context.Context, options DoctorOptions) DoctorResul
 	m.checkPlatform(add)
 	m.checkProcessEnumeration(ctx, add)
 	m.checkService(ctx, add)
-	m.checkReconciliation(options.MaxHealthAge, add)
+	m.checkReconciliation(opts.MaxHealthAge, add)
 	m.CheckManifests(add)
-	m.checkConfigFile(options.ConfigPath, add)
-	m.checkIntegrations(ctx, options.IncludeAll, &result, add)
+	m.checkConfigFile(opts.ConfigPath, add)
+	m.checkIntegrations(ctx, opts.IncludeAll, &result, add)
 
 	result.OK = true
 	for _, check := range result.Checks {

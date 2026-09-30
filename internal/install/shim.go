@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -16,16 +16,16 @@ const shimFileMode = 0o700
 
 var errRecursiveShimTarget = errors.New("target binary resolves to managed shim")
 
-func installShim(options Options, harness registry.Harness) (Result, error) {
+func installShim(opts Options, harness registry.Harness) (Result, error) {
 	dir := filepath.Join(registry.DefaultStateDir(), "shims")
 	path := filepath.Join(dir, string(harness))
-	target, err := resolveShimTarget(options.TargetBinary, string(harness), dir, path)
+	target, err := resolveShimTarget(opts.TargetBinary, string(harness), dir, path)
 	if err != nil {
 		return Result{}, err
 	}
-	script := shimScript(options.Binary, string(harness), target, harnesscatalog.IntegrationVersionFor(harness))
+	script := shimScript(opts.Binary, string(harness), target, catalog.IntegrationVersionFor(harness))
 
-	contentChanged, err := fileNeedsUpdate(path, script, options.Force)
+	contentChanged, err := fileNeedsUpdate(path, script, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
@@ -35,7 +35,7 @@ func installShim(options Options, harness registry.Harness) (Result, error) {
 	}
 	changed := contentChanged || modeChanged
 
-	if changed && !options.DryRun {
+	if changed && !opts.DryRun {
 		if err := writeShimChanges(path, script, contentChanged); err != nil {
 			return Result{}, err
 		}
@@ -46,7 +46,7 @@ func installShim(options Options, harness registry.Harness) (Result, error) {
 		message = "already installed"
 	}
 
-	if options.DryRun {
+	if opts.DryRun {
 		message = fmt.Sprintf("dry run: %s shim not written", harness)
 	}
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -132,7 +132,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		const absentBinary = "/nonexistent/binary/absent-aht"
 		renderAbsentModule := func(h registry.Harness) string {
 			t.Helper()
-			adapter, ok := harnesscatalog.Find(h)
+			adapter, ok := catalog.Find(h)
 			if !ok {
 				t.Fatalf("find harness %s", h)
 			}

@@ -149,7 +149,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Location != *location || session.Observations.Location == nil || session.Observations.Location.Context != *location {
+	if session.Location != *location || session.Observations.Location == nil || session.Observations.Location.Location != *location {
 		t.Fatalf("stored session = %#v", session)
 	}
 }
@@ -280,7 +280,7 @@ func TestSummariesCountIndependentPresenceAndActivity(t *testing.T) {
 			Liveness: NewLiveness(PresenceUnknown, ActivityValue(activity(ActivityUnknown)), nil),
 		},
 	}
-	summaries := summariesForSessions(sessions)
+	summaries := Summaries(sessions)
 	if len(summaries) != 2 {
 		t.Fatalf("summaries = %#v, want work and unknown groups", summaries)
 	}
@@ -297,7 +297,7 @@ func TestSummariesCountIndependentPresenceAndActivity(t *testing.T) {
 func TestSummariesGroupNativeMultiplexerSessions(t *testing.T) {
 	t.Parallel()
 	activity := ActivityWaiting
-	summaries := summariesForSessions([]Session{{
+	summaries := Summaries([]Session{{
 		Location: Location{Kind: MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
 		Liveness: NewLiveness(PresenceLive, ActivityValue(&activity), nil),
 	}})

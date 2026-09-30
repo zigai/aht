@@ -12,7 +12,7 @@ import (
 func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 
-	result, err := Run(Options{Harness: registry.Harness("codex"), Binary: defaultBinary})
+	result, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: defaultBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
 	if !strings.Contains(command, "--activity interrupted --event Interrupt") || !strings.Contains(command, "--quiet") {
 		t.Fatalf("Interrupt command = %q", command)
 	}
-	if timeout := requireTestHookTimeout(t, hooks, "Interrupt"); timeout != 3 {
-		t.Fatalf("Interrupt timeout = %v, want 3", timeout)
+	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, "Interrupt"); timeoutSeconds != 3 {
+		t.Fatalf("Interrupt timeout = %v, want 3", timeoutSeconds)
 	}
 }

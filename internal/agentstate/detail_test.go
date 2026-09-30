@@ -22,7 +22,7 @@ all = ["choose"]
 	}
 	snapshot := NormalizeSnapshot("choose", "")
 	decision := manifest.Evaluate(snapshot)
-	if decision.Detail != registry.DetailQuestion {
+	if decision.Detail != registry.ActivityDetailQuestion {
 		t.Fatalf("detail = %s", decision.Detail)
 	}
 	if !reflect.DeepEqual(decision, manifest.Inspect(snapshot).Decision) {

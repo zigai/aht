@@ -173,7 +173,7 @@ func TestInspectRuntimeSeparatesStaticFromRuntime(t *testing.T) {
 	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), false, false, "missing")
 
 	// 2. Current state after installation
-	if _, err := install.RunContext(ctx, install.Options{Harness: registry.Harness("pi"), Binary: fakeBin, Force: true}); err != nil {
+	if _, err := install.Run(ctx, install.Options{Harness: registry.Harness("pi"), Binary: fakeBin, Force: true}); err != nil {
 		t.Fatalf("installing pi extension: %v", err)
 	}
 	status, err = harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)

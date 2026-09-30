@@ -31,7 +31,7 @@ func TestInstallPiWritesExtension(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", dir)
 	path := writeStalePiExtension(t, dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("pi"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -83,7 +83,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("omp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -119,7 +119,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 	if strings.Contains(result.Snippet, `"--queue"`) {
 		t.Fatalf("OMP extension must report through the broker hot path: %q", result.Snippet)
 	}
-	reinstalled, err := Run(Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
+	reinstalled, err := Run(t.Context(), Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestPiAndOmpRefuseToOverwriteSharedExtension(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", dir)
 
-	piResult, err := Run(Options{Harness: registry.Harness("pi"), Binary: testInstallBinary})
+	piResult, err := Run(t.Context(), Options{Harness: registry.Harness("pi"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestPiAndOmpRefuseToOverwriteSharedExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Run(Options{Harness: registry.Harness("omp"), Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
+	if _, err := Run(t.Context(), Options{Harness: registry.Harness("omp"), Binary: testInstallBinary}); !errors.Is(err, errForeignFile) {
 		t.Fatalf("OMP overwrite error = %v, want errForeignFile", err)
 	}
 	current, err := os.ReadFile(piResult.Path)
@@ -163,7 +163,7 @@ func TestInstallOmpUsesProfileAgentDir(t *testing.T) {
 	t.Setenv("OMP_PROFILE", "work")
 	t.Setenv("PI_PROFILE", "")
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("omp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -185,7 +185,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -233,7 +233,7 @@ const old = "old-aht";
 		t.Fatalf("writing old plugin: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -256,7 +256,7 @@ const old = "old-aht";
 	if strings.Contains(text, "old-aht") {
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -276,7 +276,7 @@ func TestInstallKiloWritesPlugin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -321,7 +321,7 @@ const old = "old-aht";
 		t.Fatalf("writing old plugin: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -344,7 +344,7 @@ const old = "old-aht";
 	if strings.Contains(text, "old-aht") {
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("kilo"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -364,7 +364,7 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -411,7 +411,7 @@ const old = "old-aht";
 		t.Fatalf("writing old plugin: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -434,7 +434,7 @@ const old = "old-aht";
 	if strings.Contains(text, "old-aht") {
 		t.Fatalf("expected old managed plugin to be removed: %s", text)
 	}
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("amp"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",

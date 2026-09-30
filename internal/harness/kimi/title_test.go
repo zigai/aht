@@ -30,7 +30,7 @@ func TestKimiFallbackTitlesRequireOneWorkspaceMatch(t *testing.T) {
 	fallback := kimiSessionTitleFallback{indices: map[int]bool{0: true}}
 	fallbackTitles := make(map[int][]string)
 	group := &kimiTitleGroup{indicesByID: map[string][]int{"session-1": {0}}}
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionInfo{{SessionID: "session-1", Title: "Workspace title"}}, titles, fallbackTitles)
+	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "Workspace title"}}, titles, fallbackTitles)
 	if err := resolveKimiFallbackTitles(fallbackTitles, titles); err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +40,8 @@ func TestKimiFallbackTitlesRequireOneWorkspaceMatch(t *testing.T) {
 
 	titles[0] = ""
 	fallbackTitles = make(map[int][]string)
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionInfo{{SessionID: "session-1", Title: "First title"}}, titles, fallbackTitles)
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionInfo{{SessionID: "session-1", Title: "Second title"}}, titles, fallbackTitles)
+	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "First title"}}, titles, fallbackTitles)
+	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "Second title"}}, titles, fallbackTitles)
 	if err := resolveKimiFallbackTitles(fallbackTitles, titles); !errors.Is(err, errKimiSessionMatchesMultipleWorkspaces) {
 		t.Fatalf("ambiguous fallback error = %v, want multiple-workspaces sentinel", err)
 	}

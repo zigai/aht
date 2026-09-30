@@ -32,10 +32,10 @@ type hookPayload struct {
 }
 
 type kimiCodeHookSpec struct {
-	event   string
-	matcher string
-	command string
-	timeout int
+	event          string
+	matcher        string
+	command        string
+	timeoutSeconds int
 }
 
 func New() kimiCodeHarness {
@@ -136,68 +136,68 @@ func (kimiCodeHarness) RunWire(ctx context.Context, opts harness.WireOptions) er
 func kimiCodeHookBlock(binary string) string {
 	specs := []kimiCodeHookSpec{
 		{
-			event:   harness.HookEventSessionStart,
-			matcher: "startup|resume",
-			command: kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventSessionStart,
+			matcher:        "startup|resume",
+			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   harness.HookEventUserPromptSubmit,
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventUserPromptSubmit,
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   harness.HookEventPreToolUse,
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventPreToolUse,
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   harness.HookEventPostToolUse,
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventPostToolUse,
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   harness.HookEventPostToolUseFailure,
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventPostToolUseFailure,
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   harness.HookEventStop,
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
-			timeout: harness.HookTimeoutSeconds,
+			event:          harness.HookEventStop,
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   "StopFailure",
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityFailed, "StopFailure"),
-			timeout: harness.HookTimeoutSeconds,
+			event:          "StopFailure",
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityFailed, "StopFailure"),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		// SubagentStart and SubagentStop fire for child agents while the
 		// parent turn keeps running until Stop.
 		{
-			event:   "PreCompact",
-			matcher: "",
-			command: kimiCodeHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-			timeout: harness.HookTimeoutSeconds,
+			event:          "PreCompact",
+			matcher:        "",
+			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, "PreCompact"),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		// Automatic compaction continues the running turn; only manual
 		// compaction, including manual-with-prompt, returns the session to idle.
 		{
-			event:   "PostCompact",
-			matcher: "^manual",
-			command: kimiCodeHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-			timeout: harness.HookTimeoutSeconds,
+			event:          "PostCompact",
+			matcher:        "^manual",
+			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, "PostCompact"),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 		{
-			event:   "SessionEnd",
-			matcher: "exit",
-			command: kimiCodeHookCommand(binary, registry.PresenceGone, "SessionEnd"),
-			timeout: harness.HookTimeoutSeconds,
+			event:          "SessionEnd",
+			matcher:        "exit",
+			command:        kimiCodeHookCommand(binary, registry.PresenceGone, "SessionEnd"),
+			timeoutSeconds: harness.HookTimeoutSeconds,
 		},
 	}
 
@@ -222,7 +222,7 @@ func kimiCodeHookBlock(binary string) string {
 		builder.WriteString(tomlQuoteString(spec.command))
 		builder.WriteByte('\n')
 		builder.WriteString("timeout = ")
-		builder.WriteString(strconv.Itoa(spec.timeout))
+		builder.WriteString(strconv.Itoa(spec.timeoutSeconds))
 		builder.WriteByte('\n')
 	}
 	builder.WriteByte('\n')

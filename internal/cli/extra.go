@@ -126,47 +126,47 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	return command
 }
 
-func applyTrackerConfig(o *observeOptions, cmd *cobra.Command, cfg config.Config) error {
-	if err := applyTrackerIntervals(o, cmd, cfg); err != nil {
+func applyTrackerConfig(opts *observeOptions, cmd *cobra.Command, cfg config.Config) error {
+	if err := applyTrackerIntervals(opts, cmd, cfg); err != nil {
 		return err
 	}
 	if !cmd.Flags().Changed("quiet") && cfg.Tracker.Quiet != nil {
-		o.quiet = *cfg.Tracker.Quiet
+		opts.quiet = *cfg.Tracker.Quiet
 	}
 	ttl, err := config.TombstoneTTL(cfg)
 	if err != nil {
 		return exitCode(fmt.Errorf("parsing retention tombstone TTL: %w", err), exitCodeUsage)
 	}
-	o.tombstoneTTL = ttl
+	opts.tombstoneTTL = ttl
 	return nil
 }
 
-func applyTrackerIntervals(o *observeOptions, cmd *cobra.Command, cfg config.Config) error {
+func applyTrackerIntervals(opts *observeOptions, cmd *cobra.Command, cfg config.Config) error {
 	if !cmd.Flags().Changed("interval") && cfg.Tracker.Interval != "" {
 		d, err := config.ParseDuration(cfg.Tracker.Interval)
 		if err != nil {
 			return exitCode(fmt.Errorf("parsing tracker interval: %w", err), exitCodeUsage)
 		}
-		o.interval = d
+		opts.interval = d
 	}
 	if !cmd.Flags().Changed("grace-period") && cfg.Tracker.GracePeriod != "" {
 		d, err := config.ParseDuration(cfg.Tracker.GracePeriod)
 		if err != nil {
 			return exitCode(fmt.Errorf("parsing tracker grace period: %w", err), exitCodeUsage)
 		}
-		o.grace = d
+		opts.grace = d
 	}
 	return nil
 }
 
 func (app *application) runRealtimeObserver(
 	ctx context.Context,
-	options observeOptions,
+	opts observeOptions,
 	watcher *observer.Observer,
 	store *registry.MemoryStore,
 	server *brokerserver.Server,
 ) error {
-	runContext, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	results := make(chan trackerComponentResult, realtimeComponentCount)
@@ -175,11 +175,11 @@ func (app *application) runRealtimeObserver(
 			results <- trackerComponentResult{name: name, err: operation()}
 		}()
 	}
-	run("broker", func() error { return server.Serve(runContext) })
+	run("broker", func() error { return server.Serve(runCtx) })
 	run("persistence", func() error {
-		return store.RunPersistence(runContext, 0, 0)
+		return store.RunPersistence(runCtx, 0, 0)
 	})
-	run("observer", func() error { return app.runObserver(runContext, options, watcher) })
+	run("observer", func() error { return app.runObserver(runCtx, opts, watcher) })
 
 	first := <-results
 	cancel()
@@ -198,24 +198,24 @@ func (app *application) runRealtimeObserver(
 	return nil
 }
 
-func (app *application) runObserver(ctx context.Context, options observeOptions, watcher *observer.Observer) error {
-	if options.once {
-		return app.runObserverOnce(ctx, options, watcher)
+func (app *application) runObserver(ctx context.Context, opts observeOptions, watcher *observer.Observer) error {
+	if opts.once {
+		return app.runObserverOnce(ctx, opts, watcher)
 	}
-	if !options.quiet {
-		app.warnf("observer started interval=%s grace-period=%s\n", options.interval, options.grace)
+	if !opts.quiet {
+		app.warnf("observer started interval=%s grace-period=%s\n", opts.interval, opts.grace)
 	}
 	handle := func(result observer.Result) error {
 		if app.outputJSON {
 			return app.writeJSONLine(result)
 		}
-		if options.quiet {
+		if opts.quiet {
 			return nil
 		}
 		return app.writeObserverResult(result)
 	}
 	var err error
-	if options.quiet && !app.outputJSON {
+	if opts.quiet && !app.outputJSON {
 		err = watcher.Run(ctx)
 	} else {
 		err = watcher.RunWithResults(ctx, handle)
@@ -226,14 +226,14 @@ func (app *application) runObserver(ctx context.Context, options observeOptions,
 	return nil
 }
 
-func (app *application) runObserverOnce(ctx context.Context, options observeOptions, watcher *observer.Observer) error {
+func (app *application) runObserverOnce(ctx context.Context, opts observeOptions, watcher *observer.Observer) error {
 	result, err := watcher.RunOnce(ctx)
 	if err != nil {
 		return fmt.Errorf("observer run once: %w", err)
 	}
 	// A running tracker expires tombstones continuously; a single cycle has
 	// to do it explicitly or its fallback writes would keep them forever.
-	ttl := options.tombstoneTTL
+	ttl := opts.tombstoneTTL
 	if ttl <= 0 {
 		ttl = registry.DefaultTombstoneTTL
 	}
@@ -243,7 +243,7 @@ func (app *application) runObserverOnce(ctx context.Context, options observeOpti
 	var writeErr error
 	if app.outputJSON {
 		writeErr = app.writeJSON(result)
-	} else if !options.quiet {
+	} else if !opts.quiet {
 		writeErr = app.writeObserverResult(result)
 	}
 	if writeErr != nil {

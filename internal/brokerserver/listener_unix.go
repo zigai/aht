@@ -22,8 +22,8 @@ func listenLocal(ctx context.Context, path string) (net.Listener, error) {
 
 	listener, err := new(net.ListenConfig).Listen(ctx, "unix", path)
 	if err != nil && errors.Is(err, syscall.EADDRINUSE) {
-		probeContext, cancel := context.WithTimeout(ctx, staleSocketProbeTimeout)
-		connection, dialErr := new(net.Dialer).DialContext(probeContext, "unix", path)
+		probeCtx, cancel := context.WithTimeout(ctx, staleSocketProbeTimeout)
+		connection, dialErr := new(net.Dialer).DialContext(probeCtx, "unix", path)
 		cancel()
 		if dialErr == nil {
 			_ = connection.Close()

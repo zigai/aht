@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 )
 
-func (s *FileStore) load() (snapshot, error) { return s.loadContext(context.Background()) }
-
-func (s *FileStore) loadContext(ctx context.Context) (snapshot, error) {
+func (s *FileStore) load(ctx context.Context) (snapshot, error) {
 	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
 		return newSnapshot(), nil
 	}

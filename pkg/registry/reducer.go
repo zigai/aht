@@ -95,7 +95,7 @@ func newSession(id string, harness Harness, now time.Time) Session {
 	var incarnation Incarnation
 	activity := ActivityUnknown
 	return Session{
-		Incarnation: incarnation, IdentityState: Provisional, SchemaVersion: storeSchemaVersion,
+		Incarnation: incarnation, IdentityState: IdentityProvisional, SchemaVersion: storeSchemaVersion,
 		ID:            id,
 		Harness:       harness,
 		SessionID:     "",
@@ -167,7 +167,7 @@ func validateIncomingProcessTime(session Session, observation Observation, at ti
 
 func applyIdentity(session *Session, observation Observation) {
 	if observationHasIdentity(observation) {
-		session.IdentityState = Identified
+		session.IdentityState = IdentityIdentified
 	}
 	if observation.Subject.SessionID != "" {
 		session.SessionID = observation.Subject.SessionID
@@ -335,5 +335,5 @@ func expireTombstones(snap *snapshot, now time.Time, ttl time.Duration) int {
 }
 
 func processOnlySession(session Session) bool {
-	return session.IdentityState == Provisional && session.Observations.Native == nil && session.SessionID == "" && session.SessionPath == ""
+	return session.IdentityState == IdentityProvisional && session.Observations.Native == nil && session.SessionID == "" && session.SessionPath == ""
 }

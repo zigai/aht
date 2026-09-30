@@ -6,7 +6,7 @@ import (
 
 func (droidHarness) ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail {
 	if activity == registry.ActivityWaiting && event == "Notification" && attributes["droid_notification_type"] == "permission_prompt" {
-		return new(registry.DetailPermission)
+		return new(registry.ActivityDetailPermission)
 	}
 	return nil
 }

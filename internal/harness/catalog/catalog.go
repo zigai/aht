@@ -112,7 +112,7 @@ func IntegrationVersionFor(harnessID registry.Harness) int {
 	return adapter.Definition().IntegrationVersion
 }
 
-func Normalize(value string) (registry.Harness, error) {
+func Parse(value string) (registry.Harness, error) {
 	normalized := normalizeToken(value)
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
@@ -161,7 +161,7 @@ func ProcessNames(harnessID registry.Harness) []string {
 	return adapter.Definition().ProcessNames
 }
 
-func DefaultsFromPayloadWithError(harnessID registry.Harness, rawPayload json.RawMessage) (harness.PayloadDefaults, error) {
+func PayloadDefaults(harnessID registry.Harness, rawPayload json.RawMessage) (harness.PayloadDefaults, error) {
 	if len(rawPayload) == 0 {
 		return emptyPayloadDefaults, nil
 	}
@@ -211,7 +211,7 @@ func ActivityFromPayload(
 	return activityAdapter.PayloadActivity(event, activity, payload, at), nil
 }
 
-func PayloadCompatibleWithHarness(harnessID registry.Harness, rawPayload json.RawMessage) bool {
+func PayloadCompatible(harnessID registry.Harness, rawPayload json.RawMessage) bool {
 	if len(rawPayload) == 0 {
 		return true
 	}
@@ -328,8 +328,8 @@ func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 
 func HookTimeoutSecondsFor(id registry.Harness, event string) int {
 	if adapter, ok := Find(id); ok {
-		if policy, ok := adapter.(interface{ HookTimeout(event string) int }); ok {
-			return policy.HookTimeout(event)
+		if policy, ok := adapter.(interface{ HookTimeoutSeconds(event string) int }); ok {
+			return policy.HookTimeoutSeconds(event)
 		}
 	}
 	return harness.HookTimeoutSeconds
