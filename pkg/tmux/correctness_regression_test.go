@@ -24,7 +24,7 @@ func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 		t.Fatalf("server.Tmux.Panes error = %v, len = %d", err, len(panes))
 	}
 	paneID := string(panes[0].ID)
-	pid := strconv.Itoa(server.Session.Identity().PID)
+	pid := strconv.Itoa(server.Session.ServerIdentity().PID)
 
 	pane := Pane{
 		Tmux:           registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionName: "gotmux-test", PaneID: paneID},

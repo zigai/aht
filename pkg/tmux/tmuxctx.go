@@ -88,7 +88,7 @@ func CurrentWithEnv(ctx context.Context, env Env) (registry.Location, error) {
 		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, ErrNoTmuxContext
 	}
 
-	info, err := gotmux.CurrentWithEnv(ctx, gotmux.Environment{TMUX: env.TMUX, TMUXPane: env.TMUXPane})
+	info, err := gotmux.CurrentFrom(ctx, gotmux.TmuxVars{TMUX: env.TMUX, TMUXPane: env.TMUXPane})
 	if err == nil {
 		return contextFromCurrentInfo(info, tmuxServerSocket(env.TMUX)), nil
 	}
@@ -275,7 +275,7 @@ func paneFromGotmux(p gotmux.PaneInfo, fallbackIdentity string) Pane {
 	if wname, ok := p.WindowName.Get(); ok {
 		windowName = wname
 	}
-	serverIdentity := p.Handle().Identity().ReportedSocket
+	serverIdentity := p.Handle().ServerIdentity().ReportedSocket
 	if serverIdentity == "" {
 		serverIdentity = fallbackIdentity
 	}
@@ -345,7 +345,7 @@ func tmuxServerSocket(tmuxEnv string) string {
 	if tmuxEnv == "" {
 		return ""
 	}
-	if hints, err := gotmux.ParseEnvironment(gotmux.Environment{TMUX: tmuxEnv, TMUXPane: ""}); err == nil {
+	if hints, err := gotmux.ParseTmuxVars(gotmux.TmuxVars{TMUX: tmuxEnv, TMUXPane: ""}); err == nil {
 		return hints.SocketPath
 	}
 

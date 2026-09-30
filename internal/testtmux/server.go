@@ -174,7 +174,7 @@ func (server *Server) killTmuxServer(ctx context.Context) error {
 		server.pid = server.identity.PID
 		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	}
-	if err := server.Tmux.KillIfIdentity(ctx, server.identity); err != nil && !errors.Is(err, gotmux.ErrNoServer) {
+	if err := server.Tmux.KillMatching(ctx, server.identity); err != nil && !errors.Is(err, gotmux.ErrNoServer) {
 		return fmt.Errorf("stop test tmux: %w", err)
 	}
 	return nil
@@ -198,11 +198,11 @@ func (server *Server) start(ctx context.Context, t *testing.T, name string, opti
 	}
 	server.Tmux = gotmuxServer
 
-	options.Start = gotmux.AllowStart
+	options.Start = gotmux.StartPolicyAllowStart
 	session, err := server.Tmux.NewSession(ctx, options)
 	if session.Valid() {
 		server.Session = session
-		server.identity = session.Identity()
+		server.identity = session.ServerIdentity()
 		server.pid = server.identity.PID
 		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	}
