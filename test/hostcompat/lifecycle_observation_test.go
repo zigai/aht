@@ -100,6 +100,11 @@ func (host isolatedHost) assertInterrupted(t *testing.T) {
 		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone {
 			return true
 		}
+		// Grok's TUI quit must publish SessionEnd after Esc canceled the turn.
+		// An earlier interrupted Stop alone does not prove clean shutdown.
+		if host.contract.ID == registry.Harness("grok") {
+			return false
+		}
 		return native.Activity != nil && *native.Activity == registry.ActivityInterrupted &&
 			effectiveActivityMatches(session, registry.ActivityInterrupted)
 	})

@@ -104,11 +104,20 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 			t.Fatal(err)
 		}
 		status, known := state.DeadStatus.Get()
-		if state.Dead && known && status == 0 {
+		if state.Dead {
+			if known && status != 0 {
+				t.Fatalf("native Grok quit with status %d", status)
+			}
+			// The CI pane displayed status 0 while pane_dead_status was
+			// unavailable. The caller still requires SessionEnd and gone
+			// presence, so a terminated process alone cannot pass.
+			if !known {
+				t.Log("native Grok pane has no reported exit status; checking SessionEnd")
+			}
 			break
 		}
-		if state.Dead || time.Now().After(deadline) {
-			t.Fatalf("native Grok did not quit successfully: dead=%t status=%v", state.Dead, state.DeadStatus)
+		if time.Now().After(deadline) {
+			t.Fatalf("native Grok did not quit within 15s: dead=%t status=%v", state.Dead, state.DeadStatus)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
