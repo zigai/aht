@@ -1,7 +1,6 @@
 package history
 
 import (
-	"bytes"
 	"cmp"
 	"container/heap"
 	"context"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	native "github.com/zigai/aht/v2/internal/harness/transcript"
 
@@ -149,9 +147,6 @@ type search struct {
 	sourceMetadata  map[string]string
 	query           Query
 	needle          string
-	needleASCII     bool
-	needleEscaped   bool
-	needleBytes     []byte
 	matched         int
 	recent          matchHeap
 	result          Result
@@ -385,9 +380,6 @@ func (s *search) prepare() error {
 	if !s.query.CaseSensitive {
 		s.needle = fold(s.needle)
 	}
-	s.needleBytes = []byte(s.needle)
-	s.needleASCII = isASCII(s.needle)
-	s.needleEscaped = hasJSONEscapes(s.needle)
 	if s.query.Role == "agent" {
 		s.query.Role = "assistant"
 	}
@@ -395,40 +387,6 @@ func (s *search) prepare() error {
 		s.query.Role = ""
 	}
 	return nil
-}
-
-func hasJSONEscapes(s string) bool {
-	for i := range len(s) {
-		if s[i] < 0x20 || s[i] == '"' || s[i] == '\\' {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *search) containsNeedle(data []byte) bool {
-	if s.needleEscaped {
-		return true
-	}
-	if s.query.CaseSensitive {
-		return bytes.Contains(data, s.needleBytes)
-	}
-	if s.needleASCII && containsFoldASCII(data, s.needle) {
-		return true
-	}
-	if hasNonASCIIBytes(data) {
-		return strings.Contains(fold(string(data)), s.needle)
-	}
-	return false
-}
-
-func hasNonASCIIBytes(b []byte) bool {
-	for _, c := range b {
-		if c >= utf8.RuneSelf {
-			return true
-		}
-	}
-	return false
 }
 
 // reset clears the result state so a discarded attempt cannot leak matches,

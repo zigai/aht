@@ -47,8 +47,30 @@ func titleRecord(r transcript.Record) (string, string, bool) {
 	return kind, title, true
 }
 
+// Claude has no published JSONL schema. Only known records already ignored by
+// readTranscriptRecord use this path; unrecognized shapes keep the full reader.
+func readFastRecord(_ context.Context, _ *transcript.Decoder, data []byte, _ int) bool {
+	if !transcript.HasRecordHint(data, []byte(`"type":"progress"`)) &&
+		!transcript.HasRecordHint(data, []byte(`"type":"file-history-snapshot"`)) &&
+		!transcript.HasRecordHint(data, []byte(`"type":"queue-operation"`)) &&
+		!transcript.HasRecordHint(data, []byte(`"type":"system"`)) {
+		return false
+	}
+	var entry struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(data, &entry) != nil {
+		return false
+	}
+	switch entry.Type {
+	case "progress", "file-history-snapshot", "queue-operation", "system":
+		return true
+	}
+	return false
+}
+
 func (claudeHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil}
 }
 
 func transcriptSources(home string) []string {

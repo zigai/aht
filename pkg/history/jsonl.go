@@ -2,7 +2,6 @@ package history
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -75,6 +73,8 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 
 func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int) (int, bool) {
 	complete := false
+	readerSpec := catalog.TranscriptFor(source.Harness)
+	decoder := s.decoder(source, t)
 	for line := lines + 1; ; line++ {
 		data, readErr := readRecordLine(ctx, reader)
 		if errors.Is(readErr, io.EOF) || ctx.Err() != nil {
@@ -92,8 +92,7 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		if len(strings.TrimSpace(string(data))) == 0 {
 			continue
 		}
-		if s.canQuickUpdate(t, data) {
-			s.quickUpdateMetadata(t, data)
+		if readerSpec.FastRecord != nil && readerSpec.FastRecord(ctx, decoder, data, line) {
 			continue
 		}
 		var r native.Record
@@ -101,8 +100,8 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 			s.issue(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
 			continue
 		}
-		if parse := catalog.TranscriptFor(source.Harness).Record; parse != nil {
-			parse(ctx, s.decoder(source, t), r, line)
+		if readerSpec.Record != nil {
+			readerSpec.Record(ctx, decoder, r, line)
 		}
 	}
 	return lines, complete
@@ -254,89 +253,7 @@ func cleanPromptTitle(body string) string {
 	return text
 }
 
-func isSessionHeader(data []byte) bool {
-	return bytes.Contains(data, []byte(`"session"`)) ||
-		bytes.Contains(data, []byte(`"session_meta"`)) ||
-		bytes.Contains(data, []byte(`"session_info"`)) ||
-		bytes.Contains(data, []byte(`"title"`)) ||
-		bytes.Contains(data, []byte(`"custom-title"`)) ||
-		bytes.Contains(data, []byte(`"sessionId"`)) ||
-		bytes.Contains(data, []byte(`"cwd"`))
-}
-
-func (s *search) quickUpdateMetadata(t *transcript, data []byte) {
-	if ts := extractLineTimestamp(data); !ts.IsZero() {
-		c := &t.match.Conversation
-		if c.CreatedAt.IsZero() || ts.Before(c.CreatedAt) {
-			c.CreatedAt = ts
-		}
-		if ts.After(c.UpdatedAt) {
-			c.UpdatedAt = ts
-		}
-	}
-}
-
-func extractLineTimestamp(data []byte) time.Time {
-	_, after, ok := bytes.Cut(data, []byte(`"timestamp"`))
-	if !ok {
-		return time.Time{}
-	}
-	rest := bytes.TrimLeft(after, " \t:")
-	if len(rest) == 0 {
-		return time.Time{}
-	}
-	if rest[0] == '"' {
-		return extractStringTimestamp(rest)
-	}
-	return extractNumericTimestamp(rest)
-}
-
-func extractStringTimestamp(rest []byte) time.Time {
-	end := bytes.IndexByte(rest[1:], '"')
-	if end < 0 {
-		return time.Time{}
-	}
-	raw := rest[1 : end+1]
-	if bytes.IndexByte(raw, '\\') < 0 {
-		return native.NativeTime(string(raw))
-	}
-	var text string
-	if json.Unmarshal(rest[:end+2], &text) == nil {
-		return native.NativeTime(text)
-	}
-	return time.Time{}
-}
-
-func extractNumericTimestamp(rest []byte) time.Time {
-	end := 0
-	for end < len(rest) && (rest[end] >= '0' && rest[end] <= '9' || rest[end] == '.') {
-		end++
-	}
-	if end == 0 {
-		return time.Time{}
-	}
-	number, err := strconv.ParseFloat(string(rest[:end]), 64)
-	if err != nil || !(number > 0) {
-		return time.Time{}
-	}
-	const millisThreshold = 1e11
-	const millisPerSecond = 1000
-	if number >= millisThreshold {
-		number /= millisPerSecond
-	}
-	const latestUnixSecond = 253402300799
-	if number > latestUnixSecond {
-		return time.Time{}
-	}
-	seconds := int64(number)
-	return time.Unix(seconds, int64((number-float64(seconds))*float64(time.Second))).UTC()
-}
-
 func (s *search) handleLineReadError(source Source, path string, line int, err error) bool {
 	s.issue(source, path, fmt.Errorf("line %d: %w", line, err))
 	return errors.Is(err, errRecordSize)
-}
-
-func (s *search) canQuickUpdate(t *transcript, data []byte) bool {
-	return s.writer == nil && !s.containsNeedle(data) && t.identified() && !isSessionHeader(data) && t.match.Conversation.Title != ""
 }

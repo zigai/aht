@@ -13,11 +13,88 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestDirectScanChecksEscapedTextAndMalformedRecords(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	body := `{"type":"session","id":"s","cwd":"/work"}` + "\n" +
+		`{"type":"message","message":{"role":"user","content":"starter"}}` + "\n" +
+		`{"type":"message","message":{"role":"user","content":"\u006eeedle"}}` + "\n" +
+		"{broken\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	query := Query{Text: "needle"}
+	got, err := c.searchDirect(t.Context(), query)
+	if !errors.Is(err, ErrIncomplete) || len(got.Matches) != 1 || len(got.Issues) != 1 {
+		t.Fatalf("direct search: matches=%d issues=%d err=%v", len(got.Matches), len(got.Issues), err)
+	}
+	compareIndexedSearch(t, c, query)
+}
+
+func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, filename, body, updated string
+		harness                       registry.Harness
+		tools                         int
+	}{
+		{"pi", "session.jsonl", `{"type":"session","id":"s","cwd":"/work","timestamp":"2026-09-01T10:00:00Z"}
+{"type":"message","id":"u","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"needle"}}
+{"type":"message","id":"t","timestamp":"2026-09-01T10:03:00Z","message":{"role":"toolResult","content":[{"type":"text","text":"needle"}]}}
+{"type":"compaction","timestamp":"2026-09-01T10:04:00Z","summary":"needle"}
+{"type":"compaction","summary":
+`, "2026-09-01T10:03:00Z", registry.Harness("pi"), 2},
+		{"omp", "session.jsonl", `{"type":"session","id":"s","cwd":"/work","timestamp":"2026-09-01T10:00:00Z"}
+{"type":"message","id":"u","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"needle"}}
+{"type":"message","id":"t","timestamp":"2026-09-01T10:03:00Z","message":{"role":"toolResult","content":[{"type":"text","text":"needle"}]}}
+{"type":"custom","timestamp":"2026-09-01T10:04:00Z","data":{"needle":"needle"}}
+{"type":"custom","data":
+`, "2026-09-01T10:03:00Z", registry.Harness("omp"), 2},
+		{"codex", "rollout-s.jsonl", `{"type":"session_meta","payload":{"id":"s","cwd":"/work","timestamp":"2026-09-01T10:00:00Z"}}
+{"type":"response_item","timestamp":"2026-09-01T10:01:00Z","payload":{"type":"message","role":"user","content":"needle"}}
+{"type":"response_item","timestamp":"2026-09-01T10:03:00Z","payload":{"type":"function_call_output","call_id":"t","output":"needle"}}
+{"type":"response_item","timestamp":"2026-09-01T10:04:00Z","payload":{"type":"message","channel":"analysis","role":"assistant","content":"needle"}}
+{"type":"event_msg","timestamp":"2026-09-01T10:05:00Z","payload":{"message":"needle"}}
+{"type":"event_msg","payload":
+`, "2026-09-01T10:03:00Z", registry.Harness("codex"), 2},
+		{"claude", "session.jsonl", `{"type":"user","sessionId":"s","cwd":"/work","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"needle"}}
+{"type":"assistant","sessionId":"s","timestamp":"2026-09-01T10:02:00Z","message":{"role":"assistant","content":"reply"}}
+{"type":"progress","timestamp":"2026-09-01T10:04:00Z","data":{"needle":"needle"}}
+{"type":"progress","data":
+`, "2026-09-01T10:02:00Z", registry.Harness("claude"), 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), tt.filename)
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c := Catalog{Sources: []Source{{Harness: tt.harness, Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			for _, tools := range []bool{false, true} {
+				q := Query{Text: "needle", IncludeTools: tools}
+				got, err := c.searchDirect(t.Context(), q)
+				wantParts := 1
+				if tools {
+					wantParts = tt.tools
+				}
+				if !errors.Is(err, ErrIncomplete) || len(got.Issues) != 1 || len(got.Matches) != 1 || got.Matches[0].MatchingParts != wantParts || got.Matches[0].Conversation.UpdatedAt.Format(time.RFC3339) != tt.updated {
+					t.Fatalf("tools=%t: matches=%#v issues=%#v err=%v", tools, got.Matches, got.Issues, err)
+				}
+				compareIndexedSearch(t, c, q)
+			}
+		})
+	}
+}
 
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
@@ -243,13 +320,7 @@ func indexTranscriptFile(t *testing.T, ctx context.Context, index *historyIndex,
 		t.Fatal(err)
 	}
 	defer func() { _ = opened.Close() }()
-	s := &search{
-		index:       index,
-		query:       Query{Text: needle, Limit: 100},
-		needle:      needle,
-		needleASCII: true,
-		needleBytes: []byte(needle),
-	}
+	s := &search{index: index, query: Query{Text: needle, Limit: 100}, needle: needle}
 	if err := index.transcript(ctx, s, source, path, opened); err != nil {
 		t.Fatal(err)
 	}

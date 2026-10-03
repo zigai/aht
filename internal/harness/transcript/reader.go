@@ -34,6 +34,7 @@ type Decoder struct {
 	Emit         func(context.Context, string, string, string, int, time.Time)
 	Issue        func(string, error)
 	Metadata     map[string]string
+	IncludeTools bool
 }
 type Row struct {
 	SessionID, Title, CWD, Created, Updated, MessageID, Role string
@@ -50,6 +51,7 @@ type (
 		Initialize     func(*Decoder)
 		Extra          func(string, map[string]string, func(string) string) string
 		Record         func(context.Context, *Decoder, Record, int)
+		FastRecord     func(context.Context, *Decoder, []byte, int) bool
 		Document       func(context.Context, *Decoder, []byte) error
 		Query          func(context.Context, *sql.DB) (string, RowReader, error)
 	}

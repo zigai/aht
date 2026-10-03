@@ -7,7 +7,7 @@ import (
 )
 
 func (grokHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"grok.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, Document: nil, Query: transcriptQuery}
+	return transcript.Reader{Patterns: []string{"grok.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery}
 }
 
 func transcriptSources(home string) []string {

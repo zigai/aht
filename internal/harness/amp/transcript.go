@@ -89,7 +89,7 @@ func ampMessageID(msg transcript.Record) string {
 }
 
 func (ampHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"T-*.json", "*.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, Document: readTranscriptDocument, Query: nil}
+	return transcript.Reader{Patterns: []string{"T-*.json", "*.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil}
 }
 
 func transcriptSources(home string) []string {

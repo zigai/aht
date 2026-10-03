@@ -30,7 +30,7 @@ func readTranscriptRecord(ctx context.Context, t *transcript.Decoder, r transcri
 }
 
 func (copilotHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"events.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: []string{"events.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil}
 }
 
 func transcriptSources(home string) []string {

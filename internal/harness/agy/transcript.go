@@ -7,7 +7,7 @@ import (
 )
 
 func (agyHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: nil, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: nil, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: nil}
 }
 
 func transcriptSources(home string) []string {
