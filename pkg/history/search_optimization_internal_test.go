@@ -1,7 +1,9 @@
 package history
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -51,6 +53,43 @@ func TestIndexScopesFileMetadataAndCandidates(t *testing.T) {
 			compareIndexedSearch(t, selected, test.query)
 		})
 	}
+}
+
+func TestLargeSingleConversationUsesTrigramCandidates(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	body := `{"type":"session","id":"large","cwd":"/work"}` + "\n" +
+		strings.Repeat(`{"type":"message","message":{"role":"user","content":"ordinary text"}}`+"\n", 40) +
+		`{"type":"message","message":{"role":"user","content":"rare target phrase"}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	query := Query{Text: "rare target phrase", Limit: 1}
+	if result, err := c.Search(t.Context(), query); err != nil || len(result.Matches) != 1 {
+		t.Fatalf("index setup: %d matches, %v", len(result.Matches), err)
+	}
+	var s search
+	sources, err := c.begin(t.Context(), query, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := openHistoryIndex(t.Context(), c.IndexPath, s.indexSources(sources))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = index.close() }()
+	for _, fileID := range []int64{0, index.files[string(sources[0].Harness)+"\x00"+path].id} {
+		statement, _, err := index.partQuery(t.Context(), &s, fileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(statement, "parts_fts MATCH") {
+			t.Fatalf("file %d: query scans every part instead of the trigram index: %s", fileID, statement)
+		}
+	}
+	compareIndexedSearch(t, c, query)
 }
 
 func BenchmarkHistorySourceSearch(b *testing.B) {

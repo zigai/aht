@@ -102,26 +102,28 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	filter, args := directorySQL(s.query.Dir)
 	filter += " AND " + index.sourceFilter
 	args = append(args, index.sourceArgs...)
-	// For a small selected project or source, reading its few parts is cheaper than
-	// enumerating a common trigram across the entire index. CROSS JOIN keeps
-	// SQLite's metadata selection ahead of reading message bodies in this path.
-	var small bool
-	if fileID == 0 {
-		var err error
-		small, err = index.smallSelection(ctx, filter, args)
-		if err != nil {
-			return "", nil, err
-		}
-	}
 	// Tool parts are stored for opt-in searches only, so a default query must
 	// exclude them from candidate plans in both the trigram and instr branches.
 	predicate, args := rolePredicate(filter, s.query.Role, s.query.IncludeTools, args)
+	// For a selection with few searchable parts, a literal scan is cheaper than
+	// enumerating a common trigram across the entire index. CROSS JOIN keeps
+	// SQLite's metadata selection ahead of reading message bodies in this path.
+	selection, selectionArgs := predicate, args
+	if fileID != 0 {
+		selection += " AND c.file_id=?"
+		selectionArgs = append(append([]any{}, args...), fileID)
+	}
+	small, err := index.smallSelection(ctx, selection, selectionArgs)
+	if err != nil {
+		return "", nil, err
+	}
 	query := "SELECT c.file_id,c.id,p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + predicate
 	trigrams := false
 	if fileID != 0 {
 		query += " AND c.file_id=?"
 		args = append(args, fileID)
-	} else if !small && utf8.RuneCountInString(folded) >= 3 && !strings.ContainsRune(folded, 0) && utf8.ValidString(folded) {
+	}
+	if !small && utf8.RuneCountInString(folded) >= 3 && !strings.ContainsRune(folded, 0) && utf8.ValidString(folded) {
 		trigrams = true
 		query = strings.Replace(query, "CROSS JOIN parts", "JOIN parts", 1)
 		query += " AND p.id IN (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ?)"
@@ -141,10 +143,10 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 
 func (index *historyIndex) smallSelection(ctx context.Context, filter string, args []any) (bool, error) {
 	var count int
-	query := "SELECT count(*) FROM (SELECT c.id FROM conversations c JOIN files f ON f.id=c.file_id WHERE " + filter + " LIMIT ?)"
+	query := "SELECT count(*) FROM (SELECT p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + filter + " LIMIT ?)"
 	values := append(append([]any{}, args...), directoryScanThreshold+1)
 	if err := index.conn.QueryRowContext(ctx, query, values...).Scan(&count); err != nil {
-		return false, index.contention(fmt.Errorf("select indexed conversations: %w", err))
+		return false, index.contention(fmt.Errorf("select indexed parts: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
 }
