@@ -60,6 +60,24 @@ func TestReporterIdentityHasNoAttributeKeys(t *testing.T) {
 	})
 }
 
+func TestRenamesLeaveNoDeprecatedAliases(t *testing.T) {
+	t.Parallel()
+	visitProductionGo(t, func(path string, data []byte) {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, data, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, group := range f.Comments {
+			for line := range strings.Lines(group.Text()) {
+				if strings.HasPrefix(line, "Deprecated:") {
+					t.Errorf("%s declares a deprecated identifier; rename callers instead of keeping the old name", fset.Position(group.Pos()))
+				}
+			}
+		}
+	})
+}
+
 func TestSnapshotPersistenceCannotObserve(t *testing.T) {
 	t.Parallel()
 	for _, method := range []string{"Observe", "ObserveBatch"} {
