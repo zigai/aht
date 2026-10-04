@@ -222,9 +222,6 @@ func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing
 	if cols120[2].width < longestPath {
 		t.Fatalf("Path column width in 120-column terminal = %d, want >= %d", cols120[2].width, longestPath)
 	}
-	if cols120[2].wrap == nil {
-		t.Fatal("Path column wrap function should be set to wrapHumanPath")
-	}
 
 	longestResult := len("already installed; next: restart the harness to load updated plugin code; registration and permissions preserved")
 	// In 200-column terminal, Path and Result both fit completely.

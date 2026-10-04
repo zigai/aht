@@ -373,7 +373,7 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	t.Setenv("CODEX_HOME", dir)
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "hooks.json")
-	oldConfig := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"plannotator","timeout":345600}]},{"hooks":[{"type":"command","command":"aht report codex --activity idle --event Stop --attribute aht_integration_version=4 --attribute aht_integration=codex-hook --queue --raw-stdin --quiet"}]}]}}`
+	oldConfig := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-stop-hook","timeout":600}]},{"hooks":[{"type":"command","command":"aht report codex --activity idle --event Stop --attribute aht_integration_version=4 --attribute aht_integration=codex-hook --queue --raw-stdin --quiet"}]}]}}`
 	if err := os.WriteFile(targetPath, []byte(oldConfig), 0o600); err != nil {
 		t.Fatalf("writing target hooks: %v", err)
 	}
@@ -408,8 +408,8 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatalf("reading target file: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "plannotator") {
-		t.Fatalf("expected user plannotator hook to be preserved: %s", content)
+	if !strings.Contains(content, "user-stop-hook") {
+		t.Fatalf("expected user stop hook to be preserved: %s", content)
 	}
 	if strings.Contains(content, "aht_integration_version=4") {
 		t.Fatalf("expected stale aht hook to be removed: %s", content)
@@ -842,5 +842,33 @@ func assertLargeNumbersPreserved(t *testing.T, data []byte, phase string) {
 	text := string(data)
 	if !strings.Contains(text, "9007199254740993") || !strings.Contains(text, "9007199254740995") {
 		t.Fatalf("large integers were corrupted %s: %s", phase, data)
+	}
+}
+
+func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	result, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: defaultBinary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(result.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("missing hooks object")
+	}
+	command := requireTestHookCommand(t, hooks, "Interrupt")
+	if !strings.Contains(command, "--activity interrupted --event Interrupt") || !strings.Contains(command, "--quiet") {
+		t.Fatalf("Interrupt command = %q", command)
+	}
+	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, "Interrupt"); timeoutSeconds != 3 {
+		t.Fatalf("Interrupt timeout = %v, want 3", timeoutSeconds)
 	}
 }

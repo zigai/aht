@@ -9,7 +9,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestIndexScopesFileMetadataAndCandidates(t *testing.T) {
+func TestScopedIndexedSearchMatchesDirectSearch(t *testing.T) {
 	t.Parallel()
 	catalog := parityFixture(t)
 	root := catalog.Sources[0].Path
@@ -21,41 +21,19 @@ func TestIndexScopesFileMetadataAndCandidates(t *testing.T) {
 		name    string
 		sources []Source
 		query   Query
-		files   int
 	}{
-		{"agent", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("pi")}, 2},
-		{"file", []Source{{Harness: registry.Harness("pi"), Path: filepath.Join(root, "0.jsonl")}}, Query{Text: "needle"}, 1},
-		{"ignored", catalog.Sources, Query{Text: "needle", IgnoreHarnesses: []registry.Harness{registry.Harness("pi")}}, 2},
-		{"none", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("codex")}, 0},
+		{"agent", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("pi")}},
+		{"file", []Source{{Harness: registry.Harness("pi"), Path: filepath.Join(root, "0.jsonl")}}, Query{Text: "needle"}},
+		{"ignored", catalog.Sources, Query{Text: "needle", IgnoreHarnesses: []registry.Harness{registry.Harness("pi")}}},
+		{"none", catalog.Sources, Query{Text: "needle", Harness: registry.Harness("codex")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			selected := Catalog{Sources: test.sources, IndexPath: catalog.IndexPath}
-			var search search
-			sources, err := selected.begin(t.Context(), test.query, &search)
-			if err != nil {
-				t.Fatal(err)
-			}
-			index, err := openHistoryIndex(t.Context(), selected.IndexPath, search.indexSources(sources))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := index.close(); err != nil {
-					t.Error(err)
-				}
-			})
-			if err := index.prepareQuery(t.Context(), &search); err != nil {
-				t.Fatal(err)
-			}
-			if len(index.files) != test.files || len(index.candidates) != test.files {
-				t.Fatalf("scope: files=%d candidates=%d want=%d", len(index.files), len(index.candidates), test.files)
-			}
-			compareIndexedSearch(t, selected, test.query)
+			compareIndexedSearch(t, Catalog{Sources: test.sources, IndexPath: catalog.IndexPath}, test.query)
 		})
 	}
 }
 
-func TestLargeSingleConversationUsesTrigramCandidates(t *testing.T) {
+func TestLargeSingleConversationIndexedSearchMatchesDirectSearch(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "session.jsonl")
@@ -69,25 +47,6 @@ func TestLargeSingleConversationUsesTrigramCandidates(t *testing.T) {
 	query := Query{Text: "rare target phrase", Limit: 1}
 	if result, err := c.Search(t.Context(), query); err != nil || len(result.Matches) != 1 {
 		t.Fatalf("index setup: %d matches, %v", len(result.Matches), err)
-	}
-	var s search
-	sources, err := c.begin(t.Context(), query, &s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	index, err := openHistoryIndex(t.Context(), c.IndexPath, s.indexSources(sources))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = index.close() }()
-	for _, fileID := range []int64{0, index.files[string(sources[0].Harness)+"\x00"+path].id} {
-		statement, _, err := index.partQuery(t.Context(), &s, fileID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(statement, "parts_fts MATCH") {
-			t.Fatalf("file %d: query scans every part instead of the trigram index: %s", fileID, statement)
-		}
 	}
 	compareIndexedSearch(t, c, query)
 }

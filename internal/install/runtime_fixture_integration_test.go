@@ -78,7 +78,7 @@ func requireRuntimeTool(t *testing.T, name string) string {
 	t.Helper()
 	path, err := exec.LookPath(name)
 	if err != nil {
-		t.Fatalf("Phase 3 generated-artifact validation requires %s: %v", name, err)
+		t.Fatalf("generated-artifact validation requires %s: %v", name, err)
 	}
 	return path
 }

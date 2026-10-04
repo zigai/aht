@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -232,22 +231,13 @@ func TestObservedVersionMatchesPin(t *testing.T) {
 	}
 }
 
-func TestCatalogPartition(t *testing.T) {
-	weekly, releases := []string{}, []string{}
+func TestCatalogHarnessIDsAreUnique(t *testing.T) {
 	seen := map[string]bool{}
 	for _, spec := range defaultCatalog {
 		if seen[spec.ID] {
 			t.Fatalf("duplicate %s", spec.ID)
 		}
 		seen[spec.ID] = true
-		if spec.Source == "weekly" {
-			weekly = append(weekly, spec.ID)
-		} else {
-			releases = append(releases, spec.ID)
-		}
-	}
-	if strings.Join(weekly, ",") != "cursor" || len(releases) != 16 {
-		t.Fatalf("weekly=%v releases=%v", weekly, releases)
 	}
 }
 

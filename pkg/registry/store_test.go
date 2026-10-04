@@ -111,7 +111,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 	}
 }
 
-func TestStorePersistsSchemaV3Envelope(t *testing.T) {
+func TestStorePersistsSchemaEnvelope(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store := NewJournal(path, fixtureRules{})
@@ -130,7 +130,7 @@ func TestStorePersistsSchemaV3Envelope(t *testing.T) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Version != 3 || len(envelope.Sessions) != 1 {
+	if envelope.Version != StoreSchemaVersion || len(envelope.Sessions) != 1 {
 		t.Fatalf("unexpected schema envelope: %#v", envelope)
 	}
 }

@@ -118,8 +118,8 @@ func TestAbbreviatedRegistryIDsExpandCollidingPrefixes(t *testing.T) {
 func TestListTableColumnsExpandsSessionAndCWDWhenWidthAllows(t *testing.T) {
 	t.Parallel()
 	rows := [][]string{
-		{"omp-5afa9c61", "omp", "Format watch command column alignment", "live", "running", "tmux:0:2:zsh:%1", "~/Projects/sample-project", "1s ago"},
-		{"pi-ea2cacd9", "pi", "2026-08-27T20-22-44-492Z_01a044e3-a40c-77dc-8593-f0f6a3a7c42f", "live", "idle", "tmux:0:3:zsh:%2", "~/Projects/config", "1s ago"},
+		{"omp-5afa9c61", "omp", "Refactor parser error handling module", "live", "running", "tmux:0:2:zsh:%1", "~/Projects/sample-project", "1s ago"},
+		{"pi-ea2cacd9", "pi", "2026-08-27T20-22-44-492Z_01a044e3-a40c-77dc-8593-f0f6a3a7c42f", "live", "idle", "tmux:0:3:zsh:%2", "~/src/app-config", "1s ago"},
 	}
 
 	// In a wide terminal (e.g. 200 columns), SESSION and CWD should not be truncated.
@@ -150,7 +150,7 @@ func TestListFullFlagRendersCompleteValues(t *testing.T) {
 	now := time.Now().UTC()
 	live := registry.PresenceLive
 	longSession := "Deploy new analytics dashboard to production cluster for quarterly report"
-	longPath := "/home/zigai/Projects/very/deeply/nested/repository/path/with/lots/of/subdirectories"
+	longPath := "/home/user/src/very/deeply/nested/repository/path/with/lots/of/subdirectories"
 	session, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("codex"), At: now, Subject: registry.ObservationIdentity{SessionID: longSession}, Evidence: &registry.Report{Event: "start", Claim: &live, Listing: &registry.Listing{CWD: longPath}}})
 	if err != nil {
 		t.Fatal(err)
@@ -179,8 +179,8 @@ func TestListFullLayoutUsesTableOnlyWhenUsefulColumnsFit(t *testing.T) {
 		"2026-08-29T07-13-53-424Z_01a04c5e-2510-7000-86b9-e9be6ca73e54.jsonl",
 		"live",
 		"idle",
-		"tmux:sesh:5:zsh:%21",
-		"~/Projects/omp-extensions",
+		"tmux:main:5:zsh:%21",
+		"~/work/example-extensions",
 		"4h ago",
 	}}
 	columns, fits := listFullTableColumns(rows, 120)
@@ -228,7 +228,7 @@ func TestSessionDisplayLabel(t *testing.T) {
 		},
 		{
 			name:    "omp timestamped jsonl path extracts uuid",
-			session: registry.Session{ID: "omp-12345678", SessionPath: "/home/zigai/.omp/agent/sessions/-Projects-aht/2026-08-29T10-11-12-300Z_01a04d00-7b2c-7000-8cff-61086b324bf2.jsonl"},
+			session: registry.Session{ID: "omp-12345678", SessionPath: "/home/user/.omp/agent/sessions/-src-app/2026-08-29T10-11-12-300Z_01a04d00-7b2c-7000-8cff-61086b324bf2.jsonl"},
 			want:    "01a04d00-7b2c-7000-8cff-61086b324bf2",
 		},
 		{

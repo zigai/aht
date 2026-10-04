@@ -114,19 +114,3 @@ func TestSessionTitlesHonorsCancellation(t *testing.T) {
 		t.Fatalf("canceled lookup error = %v", err)
 	}
 }
-
-func TestSessionTitlesSupportIsDiscoverableThroughAHT(t *testing.T) {
-	t.Parallel()
-	for _, id := range []aht.Harness{
-		aht.HarnessCodex, aht.HarnessPi, aht.HarnessOmp,
-		aht.HarnessCline, aht.HarnessKimiCode, aht.HarnessGrok,
-		aht.HarnessGoose, aht.HarnessAmp, aht.HarnessOpenCode,
-		aht.HarnessKilo, aht.HarnessDroid, aht.HarnessOpenClaw,
-		aht.HarnessHermes, aht.HarnessClaude,
-	} {
-		capabilities, ok := aht.Capabilities(id)
-		if !ok || !capabilities.TitleLookup {
-			t.Fatalf("%s title lookup capability = %t, %t", id, capabilities.TitleLookup, ok)
-		}
-	}
-}

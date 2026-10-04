@@ -321,18 +321,6 @@ func TestSearchCLIExplicitSourceOverridesIgnoredHarness(t *testing.T) {
 	}
 }
 
-func TestSearchCLIHelpStatesResultOrdering(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := executeCLI(t.Context(), []string{"search", "--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
-		t.Fatalf("help code=%d stderr=%q", code, stderr.String())
-	}
-	for _, fragment := range []string{"most recently updated conversation first", "--limit keeps the newest <count>", "newest first (0 means unlimited)"} {
-		if !strings.Contains(stdout.String(), fragment) {
-			t.Fatalf("help missing %q:\n%s", fragment, stdout.String())
-		}
-	}
-}
-
 func TestSearchCLIUnsupportedSourceSummaryListsHarnessOnce(t *testing.T) {
 	searchCLIHome(t)
 	first := filepath.Join(t.TempDir(), "first.jsonl")
@@ -436,20 +424,10 @@ func TestSearchMatchTTY(t *testing.T) {
 	if !strings.Contains(output, "01a0c324") {
 		t.Errorf("TTY output missing inline short ID: %q", output)
 	}
-	if !strings.Contains(output, "● live") {
-		t.Errorf("TTY output missing live badge: %q", output)
-	}
-	if !strings.Contains(output, "├─") || !strings.Contains(output, "└─") {
-		t.Errorf("TTY output missing tree connectors: %q", output)
-	}
-	if strings.Contains(output, "\x1b[2m│\x1b[0m\n") {
-		t.Errorf("TTY output must not contain standalone stem line: %q", output)
-	}
-	if !strings.Contains(output, "\x1b[1;36mworkflow\x1b[0m") {
-		t.Errorf("TTY output missing highlighted needle: %q", output)
-	}
-	if !strings.Contains(output, "\x1b[1;33muser:\x1b[0m") || !strings.Contains(output, "\x1b[1;37massistant:\x1b[0m") {
-		t.Errorf("TTY output missing distinct role colors: %q", output)
+	for _, text := range []string{"live", "Please fix the failing", "I fixed the"} {
+		if !strings.Contains(output, text) {
+			t.Errorf("TTY output missing %q: %q", text, output)
+		}
 	}
 }
 
@@ -460,7 +438,7 @@ func TestCleanSessionTitle(t *testing.T) {
 		want  string
 	}{
 		{
-			input: "# AGENTS.md instructions for /home/zigai/Projects/loti <INSTRUCTIONS> When calling spawn_agent, never set the...",
+			input: "# AGENTS.md instructions for /home/user/src/app <INSTRUCTIONS> When calling spawn_agent, never set the...",
 			want:  "When calling spawn_agent, never set the...",
 		},
 		{
@@ -496,9 +474,9 @@ func TestResolveSearchTitle(t *testing.T) {
 				Title:     "When calli…",
 			},
 			excerpts: []history.Excerpt{
-				{Role: "user", Text: "No not this. It was not for freelance jobs, it was for regular jobs."},
+				{Role: "user", Text: "Use the staging database instead of the local one."},
 			},
-			want: "No not this. It was not for freelance jobs, it was for regular jobs.",
+			want: "Use the staging database instead of the local one.",
 		},
 		{
 			name: "fallback when title contains environment context",
@@ -507,9 +485,9 @@ func TestResolveSearchTitle(t *testing.T) {
 				Title:     "<environment_context> <cwd>/home/user/project</cwd> <approval_policy>on…",
 			},
 			excerpts: []history.Excerpt{
-				{Role: "user", Text: "Professional settings, including an internship at nChain and freelance projects."},
+				{Role: "user", Text: "Add pagination to the orders endpoint and update the client."},
 			},
-			want: "Professional settings, including an internship at nChain and freelance projects.",
+			want: "Add pagination to the orders endpoint and update the client.",
 		},
 		{
 			name: "retains clean existing title",

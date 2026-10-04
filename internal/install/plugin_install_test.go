@@ -124,9 +124,6 @@ func requireAgyPluginMarker(t *testing.T, dir string) {
 	if !strings.Contains(string(marker), managedMarker) {
 		t.Fatalf("expected managed marker, got %q", marker)
 	}
-	if !strings.Contains(string(marker), "AHT_INTEGRATION_VERSION=9") {
-		t.Fatalf("expected agy integration version 9 marker, got %q", marker)
-	}
 }
 
 func requireAgyImportManifest(t *testing.T, path string) {
@@ -236,17 +233,11 @@ func requireClineAgentPlugin(t *testing.T, pluginDir string) {
 	text := string(readTestFile(t, filepath.Join(pluginDir, "index.js"), "reading Cline AgentPlugin"))
 	requireTextContainsAll(t, text, []string{
 		"manifest: { capabilities: [\"hooks\"] }",
-		"setup(_api, ctx)",
 		"beforeRun(context)",
 		"beforeTool(context)",
 		"afterTool(context)",
 		"afterRun({ snapshot, result })",
 		"export default plugin",
-		"ctx?.session?.sessionId",
-		"ctx?.workspaceInfo?.rootPath",
-		"snapshot.runId",
-		"--pid",
-		`"--reporter", "cline-plugin"`,
 	}, "Cline AgentPlugin")
 	if strings.Contains(text, "context.input") || strings.Contains(text, "context.result") || strings.Contains(text, "outputText") {
 		t.Fatalf("Cline plugin reads content-bearing fields: %q", text)

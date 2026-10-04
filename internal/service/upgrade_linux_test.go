@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func verifyTrackerUpgrade(t *testing.T, stopped, stale, dryRun bool) {
 	}
 	previous := want
 	if stale {
-		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: 8", "version: 7"), "/tmp/new aht", "/tmp/old aht")
+		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: "+strconv.Itoa(ManagedVersion), "version: "+strconv.Itoa(ManagedVersion-1)), "/tmp/new aht", "/tmp/old aht")
 	}
 	path := filepath.Join(dir, "systemd", "user", linuxUnitName)
 	if err := writeAtomic(path, []byte(previous)); err != nil {

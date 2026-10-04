@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:cyclop // one sequential scenario proves both safety and explicit cleanup modes
 func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store := registry.NewJournal(path, catalog.Rules{})
@@ -30,9 +30,6 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("unsafe clean changed registry: %v, %#v", err, sessions)
-	}
-	if err := runTestCLI(context.Background(), []string{"--store", path, "gc"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
-		t.Fatal("legacy gc without an explicit policy unexpectedly succeeded")
 	}
 
 	var machine bytes.Buffer
@@ -81,7 +78,7 @@ func TestStatePathAndResetCommands(t *testing.T) {
 	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "reset", "--force"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "Cleared:    1") {
+	if !regexp.MustCompile(`Cleared:\s+1\b`).MatchString(stdout.String()) {
 		t.Fatalf("state reset output = %q", stdout.String())
 	}
 }
@@ -96,7 +93,7 @@ func TestStateResetCommandRecoversMalformedState(t *testing.T) {
 	if err := runTestCLI(context.Background(), []string{"--store", path, "manage", "state", "reset", "--force"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "Cleared:    0") {
+	if !regexp.MustCompile(`Cleared:\s+0\b`).MatchString(stdout.String()) {
 		t.Fatalf("state reset output = %q", stdout.String())
 	}
 	if _, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{}); err != nil {

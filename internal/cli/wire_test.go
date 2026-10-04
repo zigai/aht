@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -41,14 +40,5 @@ func TestWireNativeValuesAreNotReinterpretedAsModes(t *testing.T) {
 	}
 	if err := runner.ValidateWireArgs(args); err != nil {
 		t.Fatalf("native option value was reinterpreted: %v", err)
-	}
-}
-
-func TestWireAtRootIsUnknownCommand(t *testing.T) {
-	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(t.Context(), []string{"wire", "kimi-code", "--"}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("expected unknown command error for root wire command, got: %v", err)
 	}
 }

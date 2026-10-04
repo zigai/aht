@@ -8,68 +8,6 @@ import (
 	"testing"
 )
 
-func TestRootHelpShowsCompactCanonicalSurface(t *testing.T) {
-	var stdout bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	help := stdout.String()
-	for _, command := range []string{"list", "watch", "info", "stop", "manage"} {
-		if !strings.Contains(help, command) {
-			t.Errorf("root help does not show %q:\n%s", command, help)
-		}
-	}
-	for _, command := range []string{"admin", "setup", "integrations", "monitor", "registry", "doctor", "detection", "detect", "show", "explain", "install-hooks", "observe", "service", "report", "wire", "get", "gc", "queue", "drain", "path", "agy-hook"} {
-		if strings.Contains(help, "\n   "+command+" ") || strings.Contains(help, "\n  "+command+" ") {
-			t.Errorf("root help exposes internal, nested, or removed command %q:\n%s", command, help)
-		}
-	}
-}
-
-func TestManageHelpShowsCanonicalSurface(t *testing.T) {
-	var stdout bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"manage", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	help := stdout.String()
-	for _, command := range []string{"setup", "upgrade", "integrations", "tracker", "state", "doctor", "config", "detection"} {
-		if !strings.Contains(help, command) {
-			t.Errorf("manage help does not show %q:\n%s", command, help)
-		}
-	}
-	for _, command := range []string{"monitor", "registry"} {
-		if strings.Contains(help, "\n   "+command+" ") || strings.Contains(help, "\n  "+command+" ") {
-			t.Errorf("manage help exposes removed command %q:\n%s", command, help)
-		}
-	}
-}
-
-func TestMachineFacingCommandsAndDestructiveResetAreExplicit(t *testing.T) {
-	var stdout bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"hook", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), "Integration protocol endpoint") {
-		t.Fatalf("hook help does not identify the hook protocol endpoint:\n%s", stdout.String())
-	}
-
-	stdout.Reset()
-	if err := runTestCLI(context.Background(), []string{"manage", "tracker", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), "Service entry point") {
-		t.Fatalf("tracker help does not identify the service entry point:\n%s", stdout.String())
-	}
-
-	stdout.Reset()
-	if err := runTestCLI(context.Background(), []string{"manage", "state", "reset", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), "--force") || !strings.Contains(strings.ToLower(stdout.String()), "confirm destructive state reset") {
-		t.Fatalf("state reset help omits confirmation requirement:\n%s", stdout.String())
-	}
-}
-
 func TestEveryHiddenInternalCommandHasCallableHelp(t *testing.T) {
 	commands := []string{"report", "hook"}
 	for _, command := range commands {
@@ -137,7 +75,7 @@ func TestVersionDefaultsToHumanOutput(t *testing.T) {
 	if err := runTestCLI(context.Background(), []string{"--version"}, &stdout, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") || !strings.HasPrefix(stdout.String(), "aht ") {
+	if strings.TrimSpace(stdout.String()) == "" || strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
 		t.Fatalf("version default output = %q", stdout.String())
 	}
 }

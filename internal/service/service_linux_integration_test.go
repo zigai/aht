@@ -14,7 +14,7 @@ import (
 func TestSystemdAnalyzeAcceptsManagedUnit(t *testing.T) {
 	validator, err := exec.LookPath("systemd-analyze")
 	if err != nil {
-		t.Fatalf("Phase 3 service validation requires systemd-analyze: %v", err)
+		t.Fatalf("service validation requires systemd-analyze: %v", err)
 	}
 	unit, err := RenderSystemdUnit(Options{
 		Binary:      "/bin/true",

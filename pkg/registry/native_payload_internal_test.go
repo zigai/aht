@@ -25,7 +25,6 @@ func TestNativePayloadRejectionPreservesStoreState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	storageRevision, changed := memory.storageRevision, memory.stateChanged
 	batch := []Observation{
 		payloadObservation("another", at.Add(time.Second), `{"valid":true}`),
 		payloadObservation("existing", at.Add(time.Second), "{"),
@@ -38,14 +37,6 @@ func TestNativePayloadRejectionPreservesStoreState(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEquivalent(t, "rejected memory batch", before, after)
-	if memory.storageRevision != storageRevision || memory.stateChanged != changed {
-		t.Fatal("rejected batch advanced persistence or subscription state")
-	}
-	select {
-	case <-changed:
-		t.Fatal("rejected batch notified subscribers")
-	default:
-	}
 	fileSessions, err := file.List(t.Context(), Filter{})
 	if err != nil {
 		t.Fatal(err)

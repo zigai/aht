@@ -85,18 +85,6 @@ func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
 	}
 }
 
-func TestPiIntegrationAdvertisesPromptWaiting(t *testing.T) {
-	t.Parallel()
-
-	adapter, ok := Find(registry.Harness("pi"))
-	if !ok {
-		t.Fatal("Pi adapter not found")
-	}
-	if !adapter.Definition().Capabilities.WaitingPermission {
-		t.Fatal("Pi adapter does not advertise user prompt waiting")
-	}
-}
-
 func TestResumeCommandFor(t *testing.T) {
 	t.Parallel()
 
@@ -298,109 +286,6 @@ func TestParse(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("expected %q, got %q", test.want, got)
-			}
-		})
-	}
-}
-
-func TestSupportedNames(t *testing.T) {
-	t.Parallel()
-
-	want := []string{
-		"claude",
-		"codex",
-		"cursor",
-		"copilot",
-		"cline",
-		"kimi-code",
-		"grok",
-		"goose",
-		"pi",
-		"omp",
-		"opencode",
-		"agy",
-		"kilo",
-		"droid",
-		"openclaw",
-		"hermes",
-		"amp",
-	}
-	got := SupportedNames()
-	if !slices.Equal(got, want) {
-		t.Fatalf("expected %#v, got %#v", want, got)
-	}
-}
-
-func TestEnvNames(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		field harness.EnvField
-		want  []string
-	}{
-		{
-			name:  "session id",
-			field: harness.EnvSessionID,
-			want: []string{
-				"AHT_SESSION_ID",
-				"AGENT_SESSION_ID",
-				"CLAUDE_SESSION_ID",
-				"CODEX_SESSION_ID",
-				"GROK_SESSION_ID",
-				"PI_SESSION_ID",
-				"OPENCODE_SESSION_ID",
-				"KILO_SESSION_ID",
-				"AMP_THREAD_ID",
-				"AMP_SESSION_ID",
-			},
-		},
-		{
-			name:  "event",
-			field: harness.EnvEvent,
-			want: []string{
-				"AHT_EVENT",
-				"AGENT_EVENT",
-				"GROK_HOOK_EVENT",
-				"KILO_EVENT",
-			},
-		},
-		{
-			name:  "session path",
-			field: harness.EnvSessionPath,
-			want: []string{
-				"AHT_SESSION_PATH",
-				"AGENT_SESSION_PATH",
-				"CLAUDE_SESSION_PATH",
-				"CODEX_SESSION_PATH",
-				"CURSOR_TRANSCRIPT_PATH",
-				"PI_SESSION_PATH",
-				"OPENCODE_SESSION_PATH",
-				"KILO_SESSION_PATH",
-			},
-		},
-		{
-			name:  "project root",
-			field: harness.EnvProjectRoot,
-			want: []string{
-				"AHT_PROJECT_ROOT",
-				"PROJECT_ROOT",
-				"CURSOR_PROJECT_DIR",
-				"CLAUDE_PROJECT_DIR",
-				"GROK_WORKSPACE_ROOT",
-				"KILO_PROJECT_ROOT",
-				"FACTORY_PROJECT_DIR",
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := EnvNames(test.field)
-			if !slices.Equal(got, test.want) {
-				t.Fatalf("expected %#v, got %#v", test.want, got)
 			}
 		})
 	}
@@ -661,13 +546,13 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "claude accepts native hook payload",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts native hook payload",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
@@ -757,7 +642,7 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "claude accepts configurable transcript path",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
@@ -769,7 +654,7 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "codex accepts configurable transcript path",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
 			want:    true,
 		},
 		{

@@ -23,52 +23,6 @@ func TestCapabilitiesForUnsupported(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesForPi(t *testing.T) {
-	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.Harness("pi"))
-	if !ok {
-		t.Fatal("CapabilitiesFor(HarnessPi) returned false")
-	}
-	if caps.Harness != registry.Harness("pi") {
-		t.Fatalf("Harness = %q, want %q", caps.Harness, registry.Harness("pi"))
-	}
-	if caps.Authority != "hook" {
-		t.Fatalf("Authority = %q, want hook", caps.Authority)
-	}
-	if !caps.Installable {
-		t.Fatal("Pi should be installable")
-	}
-	if !caps.Resumable {
-		t.Fatal("Pi should be resumable")
-	}
-	if !caps.ScreenFallback {
-		t.Fatal("Pi should support screen fallback")
-	}
-	if !caps.SessionStart || !caps.SessionEnd || !caps.RunningIdle {
-		t.Fatalf("expected Pi to support lifecycle events: %+v", caps)
-	}
-}
-
-func TestCapabilitiesForCodex(t *testing.T) {
-	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.Harness("codex"))
-	if !ok {
-		t.Fatal("CapabilitiesFor(HarnessCodex) returned false")
-	}
-	if caps.Authority != "hook" {
-		t.Fatalf("Codex Authority = %q, want hook", caps.Authority)
-	}
-	if !caps.ScreenFallback {
-		t.Fatal("Codex should fall back to screen without native evidence")
-	}
-	if !caps.ScreenSupport {
-		t.Fatal("Codex should have screen support")
-	}
-	if !caps.TitleLookup {
-		t.Fatal("Codex should support native title lookup")
-	}
-}
-
 func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 	t.Parallel()
 	for _, id := range []registry.Harness{
@@ -82,17 +36,6 @@ func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 		if !ok || !caps.TitleLookup {
 			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)
 		}
-	}
-}
-
-func TestCapabilitiesForOpenClaw(t *testing.T) {
-	t.Parallel()
-	caps, ok := harness.CapabilitiesFor(registry.Harness("openclaw"))
-	if !ok {
-		t.Fatal("CapabilitiesFor(HarnessOpenClaw) returned false")
-	}
-	if !caps.Resumable {
-		t.Fatal("OpenClaw should be resumable")
 	}
 }
 

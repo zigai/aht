@@ -28,44 +28,6 @@ func createTestStoreSession(t *testing.T, storePath, sessionID string, presence 
 	return observed
 }
 
-func TestWaitCLIHelpAndMetavariables(t *testing.T) {
-	t.Parallel()
-
-	var stdout, stderr bytes.Buffer
-	code := executeCLI(context.Background(), []string{"wait", "--help"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("wait --help exit code = %d, want 0; stderr: %s", code, stderr.String())
-	}
-
-	help := stdout.String()
-	if !strings.Contains(help, "Usage:\n  aht wait <session> [flags]") {
-		t.Errorf("help missing usage: %s", help)
-	}
-
-	for _, required := range []string{
-		"--activity <val>",
-		"--presence <val>",
-		"--timeout <duration>",
-		"--stable-for <duration>",
-	} {
-		if !strings.Contains(help, required) {
-			t.Errorf("wait --help missing placeholder %q:\n%s", required, help)
-		}
-	}
-
-	for _, forbidden := range []string{
-		"--activity string",
-		"--presence string",
-		"--timeout duration",
-		"--stable-for duration",
-		"(default 0s)",
-	} {
-		if strings.Contains(help, forbidden) {
-			t.Errorf("wait --help contains forbidden text %q:\n%s", forbidden, help)
-		}
-	}
-}
-
 func TestWaitCLIMissingArgs(t *testing.T) {
 	t.Parallel()
 

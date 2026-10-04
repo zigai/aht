@@ -92,7 +92,7 @@ func TestObserverUsesBundledOmpFallbackWhenNativeIntegrationIsMissing(t *testing
 	process, pane := detectionProcessPane(198, "omp")
 	options := detectionObserverOptions(store, process, pane, t.TempDir())
 	options.ScreenCapture = func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
-		text := "╰────────╯\n ~/Projects/config · Codex · GPT-5.6-Sol · medium 22.7%/1M" +
+		text := "╰────────╯\n ~/src/app · Codex · Model-A · medium 22.7%/1M" +
 			strings.Repeat("\n ", 20)
 		return mux.ScreenSnapshot{Text: text}, nil
 	}
@@ -135,7 +135,7 @@ func TestObserverTracksOmpScreenStateTransitions(t *testing.T) {
 	}{
 		{screen: " ⠋ Working... (40s)", want: registry.ActivityRunning, rule: "custom_working"},
 		{screen: "Permission required: allow / deny", want: registry.ActivityWaiting, rule: "permission_prompt"},
-		{screen: " ~/Projects/config · Codex · GPT-5.6-Sol · medium 22.7%/1M" + strings.Repeat("\n ", 20), want: registry.ActivityIdle, rule: "custom_input_prompt"},
+		{screen: " ~/src/app · Codex · Model-A · medium 22.7%/1M" + strings.Repeat("\n ", 20), want: registry.ActivityIdle, rule: "custom_input_prompt"},
 	}
 	for _, transition := range transitions {
 		screen = transition.screen

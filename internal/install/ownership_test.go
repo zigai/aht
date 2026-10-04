@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
@@ -32,11 +34,12 @@ func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 
 func TestClassifyArtifactContentUsesHarnessGeneration(t *testing.T) {
 	t.Parallel()
-	current := "aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=9"
+	version := catalog.IntegrationVersionFor(registry.Harness("agy"))
+	current := fmt.Sprintf("aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d", version)
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current agy status = %q", status)
 	}
-	stale := "aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=7"
+	stale := fmt.Sprintf("aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d", version-1)
 	if status := classifyArtifactContent(stale); status != ArtifactStale {
 		t.Fatalf("stale agy status = %q", status)
 	}

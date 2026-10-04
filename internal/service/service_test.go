@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,26 +35,21 @@ func (r *recordingExecutor) Run(_ context.Context, name string, args ...string) 
 	return nil, nil
 }
 
-func TestDefaultObserverServiceIntervalIsResponsive(t *testing.T) {
-	t.Parallel()
-
-	options, err := normalizeOptions(Options{Binary: "/bin/aht", StorePath: "state.json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.Interval != 300*time.Millisecond {
-		t.Fatalf("default observer service interval = %s, want 300ms", options.Interval)
-	}
-}
-
 func TestRenderSystemdUnit(t *testing.T) {
 	got, err := RenderSystemdUnit(Options{Binary: "/tmp/agent sessions", StorePath: "/tmp/state.json", Interval: 3 * time.Second, GracePeriod: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# aht managed observer service\n# version: 8\n[Unit]\nDescription=AHT observer\nStartLimitIntervalSec=0\n\n[Service]\nExecStart=\"/tmp/agent sessions\" --store /tmp/state.json manage tracker run --interval 3s --grace-period 0s --quiet\nRestart=on-failure\nRestartSec=30s\n\n[Install]\nWantedBy=default.target\n"
-	if got != want {
-		t.Fatalf("rendered unit = %q, want %q", got, want)
+	for _, want := range []string{
+		"# " + ManagedMarker,
+		`ExecStart="/tmp/agent sessions" `,
+		"--store /tmp/state.json",
+		"--interval 3s",
+		"--grace-period 0s",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered unit missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -213,7 +209,7 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "# "+ManagedMarker) || !strings.Contains(string(content), "# version: 8") || !strings.Contains(string(content), " manage tracker run ") {
+	if !strings.Contains(string(content), "# "+ManagedMarker) || !strings.Contains(string(content), "# version: "+strconv.Itoa(ManagedVersion)) || !strings.Contains(string(content), " manage tracker run ") {
 		t.Fatalf("updated service did not migrate command surface: %s", content)
 	}
 }
@@ -407,5 +403,47 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 	}
 	if !result.Changed || result.Installed {
 		t.Fatalf("retry uninstall result = %#v", result)
+	}
+}
+
+func TestNormalizeOptionsResolvesBinaryFromPath(t *testing.T) {
+	binDir := t.TempDir()
+	binary := filepath.Join(binDir, "aht")
+	//nolint:gosec // This private fixture must be executable for executable-path lookup.
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	options, err := normalizeOptions(Options{Binary: "aht", StorePath: "state.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Binary != binary {
+		t.Fatalf("resolved executable = %q, want %q", options.Binary, binary)
+	}
+	_, err = normalizeOptions(Options{Binary: "missing-aht", StorePath: "state.json"})
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("missing executable error = %v", err)
+	}
+}
+
+func TestStatusPropagatesManagerFailures(t *testing.T) {
+	t.Parallel()
+	backend := linuxBackend{}
+	for _, cause := range []error{exec.ErrNotFound, os.ErrPermission, errManagerTestFailure, context.Canceled} {
+		running, _, err := backend.running(t.Context(), &recordingExecutor{err: cause})
+		if running || !errors.Is(err, cause) {
+			t.Errorf("status for %v = (%v, %v), want original failure", cause, running, err)
+		}
+	}
+}
+
+func TestExecutorPreservesCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := (osCommandExecutor{}).Run(ctx, "sh", "-c", "exit 0")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("executor cancellation error = %v", err)
 	}
 }

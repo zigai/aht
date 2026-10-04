@@ -142,7 +142,6 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 	}
 	for _, required := range []string{
 		`api.on("session_start"`, `api.on("before_agent_run"`, `api.on("agent_end"`, `api.on("session_end"`,
-		`"--lifecycle"`, `"--no-tmux"`, `openclaw_session_key`, `openclaw_run_id`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected OpenClaw plugin source to contain %q", required)

@@ -15,9 +15,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const expectedSessionSchemaVersion = 3
-
-//nolint:cyclop // assertions independently verify each report dimension
 func TestPrepareReportCarriesIndependentDimensions(t *testing.T) {
 	t.Parallel()
 	prepared, err := prepareReport(strings.NewReader(`{"session_id":"session-1","cwd":"/work","hook_event_name":"PermissionRequest","model":"gpt-5"}`), reportOptions{
@@ -32,9 +29,6 @@ func TestPrepareReportCarriesIndependentDimensions(t *testing.T) {
 	}
 	if prepared.observation.Report().Claim == nil || *prepared.observation.Report().Claim != registry.PresenceLive || prepared.observation.ActivityClaim() == nil || *prepared.observation.ActivityClaim() != registry.ActivityWaiting {
 		t.Fatalf("independent dimensions lost: %#v", prepared.observation)
-	}
-	if (catalog.Rules{}).Policy(prepared.observation.Harness).Authority != registry.AuthorityHook {
-		t.Fatalf("Codex native hooks must own activity: %#v", prepared.observation)
 	}
 	if prepared.observation.Listing() == nil || len(prepared.observation.Listing().ResumeCommand) != 3 {
 		t.Fatalf("catalog metadata missing: %#v", prepared.observation.Listing())

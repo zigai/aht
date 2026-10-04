@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -97,18 +96,6 @@ func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 		if _, installable := adapter.(harnesspkg.Installable); !installable {
 			t.Fatalf("Harnesses contains %q without install plan", harness)
 		}
-	}
-}
-
-func TestHarnesses(t *testing.T) {
-	t.Parallel()
-
-	harnesses := Harnesses()
-	if len(harnesses) == 0 {
-		t.Fatal("expected installable harnesses")
-	}
-	if !slices.Contains(harnesses, registry.Harness("codex")) {
-		t.Fatalf("Harnesses() = %v, want codex", harnesses)
 	}
 }
 

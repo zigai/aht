@@ -26,11 +26,11 @@
   {"agent":"pi","name":"prompt-submission","screen":"Prompt submitted · esc to interrupt","want":"running"},
   {"agent":"pi","name":"completion","screen":"Completed\nType a message · Enter to send","want":"idle"},
   {"agent":"pi","name":"interrupted","screen":"Interrupted\nType a message · Enter to send","want":"idle"},
-  {"agent":"pi","name":"custom-idle","screen":"\n────────────────────────────────────────\n\n────────────────────────────────────────\n ~/Projects · Codex · GPT-5.6 Sol · max                        18.3%/272k","want":"idle"},
-  {"agent":"pi","name":"custom-working","screen":"Historical API Error\n\n ⠋ Working... (40s)\n\n ~/Projects · Codex · GPT-5.6 Sol · max                        18.3%/272k","want":"running"},
-  {"agent":"pi","name":"custom-idle-branch-no-usage","screen":"Done\n ~/Projects/sesh ·  master · Codex · GPT-5.6-Sol · medium","want":"idle"},
-  {"agent":"pi","name":"custom-working-long-duration","screen":"Waiting for your approval\nWaiting for input\nInterrupted by user\n ⠋ Working... (2m 4s)\n ~/Projects · Codex · GPT-5.6 Sol · max 18.3%/272k","want":"running"},
-  {"agent":"pi","name":"custom-literal-working-history","screen":"Working...\n ~/Projects · Codex · GPT-5.6 Sol · max 18.3%/272k","want":"idle"},
-  {"agent":"pi","name":"custom-error-after-literal-working","screen":"Working...\nAPI Error: current request failed\n ~/Projects · Codex · GPT-5.6 Sol · max 18.3%/272k","want":"failed"},
+  {"agent":"pi","name":"custom-idle","screen":"\n────────────────────────────────────────\n\n────────────────────────────────────────\n ~/src · Codex · Model-A · max                        18.3%/272k","want":"idle"},
+  {"agent":"pi","name":"custom-working","screen":"Historical API Error\n\n ⠋ Working... (40s)\n\n ~/src · Codex · Model-A · max                        18.3%/272k","want":"running"},
+  {"agent":"pi","name":"custom-idle-branch-no-usage","screen":"Done\n ~/src/app ·  master · Codex · Model-A · medium","want":"idle"},
+  {"agent":"pi","name":"custom-working-long-duration","screen":"Waiting for your approval\nWaiting for input\nInterrupted by user\n ⠋ Working... (2m 4s)\n ~/src · Codex · Model-A · max 18.3%/272k","want":"running"},
+  {"agent":"pi","name":"custom-literal-working-history","screen":"Working...\n ~/src · Codex · Model-A · max 18.3%/272k","want":"idle"},
+  {"agent":"pi","name":"custom-error-after-literal-working","screen":"Working...\nAPI Error: current request failed\n ~/src · Codex · Model-A · max 18.3%/272k","want":"failed"},
   {"agent":"pi","name":"uncertain","screen":"ordinary shell output","want":"unknown"}
 ]

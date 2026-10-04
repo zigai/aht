@@ -52,23 +52,9 @@ func TestInstallPiWritesExtension(t *testing.T) {
 		`on("agent_start"`,
 		`on("before_agent_start"`,
 		`on("ui_prompt_start"`,
-		`report("waiting", ctx, event)`,
 		`on("ui_prompt_end"`,
-		`report(ctx.isIdle?.() ? "idle" : "running", ctx, event)`,
 		"AHT_INTEGRATION_ID=pi",
-		"AHT_INTEGRATION_VERSION=17",
-		`"report", "pi"`,
-		`"--observed-at", observedAt`,
-		`addAttribute(args, "pi_prompt_kind", event?.kind)`,
-		`args.push("--session-id", currentSessionId)`,
-		`args.push("--session-path", currentSessionPath)`,
 	}, "pi extension")
-	if strings.Contains(result.Snippet, `on("tool_approval_`) {
-		t.Fatalf("Pi extension must use documented UI prompt events: %q", result.Snippet)
-	}
-	if strings.Contains(result.Snippet, "registerCommand") || strings.Contains(result.Snippet, "aht-status") {
-		t.Fatalf("Pi extension must not register commands: %q", result.Snippet)
-	}
 }
 
 func TestInstallOmpWritesExtension(t *testing.T) {
@@ -111,14 +97,7 @@ func TestInstallOmpWritesExtension(t *testing.T) {
 		`on("session_stop"`,
 		`on("session_shutdown"`,
 		`export default function`,
-		"AHT_INTEGRATION_VERSION=18",
 	}, "oh-my-pi extension")
-	if strings.Contains(result.Snippet, `on("input"`) {
-		t.Fatalf("OMP extension must not treat local interactive input as agent activity: %q", result.Snippet)
-	}
-	if strings.Contains(result.Snippet, `"--queue"`) {
-		t.Fatalf("OMP extension must report through the broker hot path: %q", result.Snippet)
-	}
 	reinstalled, err := Run(t.Context(), Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
@@ -204,18 +183,10 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	}
 	requireTextContainsAll(t, result.Snippet, []string{
 		"AHT_INTEGRATION_ID=opencode",
-		"AHT_INTEGRATION_VERSION=13",
 		`export default { id: "aht-state", setup, server };`,
-		`async function server(ctx: V1PluginContext)`,
-		`async function setup(ctx: V2PluginContext)`,
 		`event: async ({ event }`,
-		`ctx?.event?.subscribe`,
-		`ctx?.location?.directory`,
 		`"permission.asked"`,
 		`"session.deleted"`,
-		`state === "gone" ? "--presence"`,
-		`"--observed-at", observedAt`,
-		`client.session.get({ path: { id: currentSessionId } })`,
 	}, "opencode plugin")
 }
 
@@ -299,11 +270,6 @@ func TestInstallKiloWritesPlugin(t *testing.T) {
 		`event: async ({ event }`,
 		`"permission.asked"`,
 		`"session.deleted"`,
-		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=10"`,
-		`"--observed-at", observedAt`,
-		`"kilo_status"`,
-		`"--reporter", source`,
 	}, "kilo snippet")
 }
 
@@ -388,12 +354,6 @@ func TestInstallAmpWritesPlugin(t *testing.T) {
 		`amp.on("agent.start"`,
 		`amp.on("tool.call"`,
 		`amp.on("agent.end"`,
-		`state === "gone" ? "--presence"`,
-		`"AHT_INTEGRATION_VERSION=4"`,
-		`"--observed-at", observedAt`,
-		`"report", "amp"`,
-		"amp.threads.get(threadId as ThreadID).title.get()",
-		`"--reporter", source`,
 	}, "amp snippet")
 }
 

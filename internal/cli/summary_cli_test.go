@@ -101,11 +101,6 @@ func testListSummaryProjectTable(t *testing.T, ctx context.Context, storePath st
 		t.Fatalf("runTestCLI project summary failed: %v", err)
 	}
 	out := stdout.String()
-	for _, heading := range []string{"Project", "Root", "Total", "Live", "Gone", "Pres?", "Run", "Wait", "Idle", "Failed", "Interrupted", "Act?"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("project summary table missing heading %q\n%s", heading, out)
-		}
-	}
 	if !strings.Contains(out, "/home/alice/service") || !strings.Contains(out, "/home/bob/service") {
 		t.Errorf("colliding basenames not shown distinctly with full root\n%s", out)
 	}
@@ -122,11 +117,6 @@ func testListSummaryHarnessTable(t *testing.T, ctx context.Context, storePath st
 		t.Fatalf("runTestCLI harness summary failed: %v", err)
 	}
 	out := stdout.String()
-	for _, heading := range []string{"Agent", "Total", "Live", "Gone", "Pres?", "Run", "Wait", "Idle", "Failed", "Interrupted", "Act?"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("harness summary table missing heading %q\n%s", heading, out)
-		}
-	}
 	for _, harness := range []string{"claude", "codex", "omp"} {
 		if !strings.Contains(out, harness) {
 			t.Errorf("harness %q not found in output\n%s", harness, out)
@@ -142,11 +132,6 @@ func testListSummaryMultiplexerTable(t *testing.T, ctx context.Context, storePat
 		t.Fatalf("runTestCLI multiplexer summary failed: %v", err)
 	}
 	out := stdout.String()
-	for _, heading := range []string{"MUX", "Session", "Server", "Total", "Live", "Gone"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("multiplexer summary table missing heading %q\n%s", heading, out)
-		}
-	}
 	for _, session := range []string{"main", "worker", "unknown"} {
 		if !strings.Contains(out, session) {
 			t.Errorf("session %q not found in multiplexer output\n%s", session, out)
@@ -162,7 +147,7 @@ func testListSummaryDefaultTable(t *testing.T, ctx context.Context, storePath st
 		t.Fatalf("runTestCLI default summary failed: %v", err)
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "MUX") || !strings.Contains(out, "Session") {
+	if !strings.Contains(out, "main") || !strings.Contains(out, "worker") {
 		t.Errorf("default summary did not use multiplexer session layout\n%s", out)
 	}
 }

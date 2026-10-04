@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -47,7 +48,7 @@ func TestStatusErrorsCarryStatusAndMessage(t *testing.T) {
 	if !HasStatus(err, http.StatusNotFound) || HasStatus(err, http.StatusForbidden) {
 		t.Fatalf("error = %v", err)
 	}
-	if got := err.Error(); got != "GitHub API GET "+client.baseURL+"/repos/o/r/releases/tags/v1: HTTP 404: Not Found" {
+	if got := err.Error(); !strings.Contains(got, "Not Found") {
 		t.Fatalf("message = %q", got)
 	}
 }

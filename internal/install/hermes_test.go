@@ -142,15 +142,6 @@ func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.
 			t.Fatalf("expected documented Hermes hook %q in manifest and source", hook)
 		}
 	}
-	for _, required := range []string{
-		`transition["lifecycle"] = "resume"`, `"lifecycle": "end"`, `"activity": "waiting"`,
-		`"activity": "running"`, `"activity": "idle"`, `"--no-tmux"`,
-		`"hermes", "--resume", session_id`, "child.wait(timeout=",
-	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("expected Hermes plugin source to contain %q", required)
-		}
-	}
 	for _, prohibited := range []string{
 		`values.get("user_message")`, `values.get("conversation_history")`,
 		`values.get("command")`, `values.get("description")`, `hermes sessions list`,

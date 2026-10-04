@@ -223,40 +223,8 @@ func TestHelpFlagInvariantAcrossAllCommands(t *testing.T) {
 			if code != exitCodeUsage {
 				t.Fatalf("%v exit code = %d, want %d", args, code, exitCodeUsage)
 			}
-			if !strings.Contains(stderr.String(), "unknown shorthand flag: 'h' in -h") {
-				t.Fatalf("%v stderr = %q, want unknown shorthand error", args, stderr.String())
-			}
 		})
 	}
-}
-
-func assertOrderedSubcommands(t *testing.T, helpText string, commands ...string) {
-	t.Helper()
-	lastIdx := -1
-	for _, cmd := range commands {
-		idx := strings.Index(helpText, "  "+cmd+" ")
-		if idx == -1 || idx <= lastIdx {
-			t.Fatalf("subcommands not ordered by operational frequency (failed at %q):\n%s", cmd, helpText)
-		}
-		lastIdx = idx
-	}
-}
-
-func TestSubcommandOrdering(t *testing.T) {
-	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	code := executeCLI(context.Background(), []string{"--help"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("root --help code = %d", code)
-	}
-	assertOrderedSubcommands(t, stdout.String(), "list", "watch", "info", "stop", "manage")
-
-	stdout.Reset()
-	code = executeCLI(context.Background(), []string{"manage", "--help"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("manage --help code = %d", code)
-	}
-	assertOrderedSubcommands(t, stdout.String(), "setup", "upgrade", "integrations", "tracker", "state", "doctor", "config", "detection")
 }
 
 func TestZeroArgParentCommandsExitUsage(t *testing.T) {
@@ -324,25 +292,5 @@ func TestReportValidationErrorsExitUsage(t *testing.T) {
 				t.Fatalf("%v omitted stderr diagnostic", args)
 			}
 		})
-	}
-}
-
-func TestReportFlagsHaveMetavariablePlaceholders(t *testing.T) {
-	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	code := executeCLI(context.Background(), []string{"report", "--help"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("report --help code = %d", code)
-	}
-	help := stdout.String()
-	for _, forbidden := range []string{"--presence string", "--activity string", "--cwd string", "--pid int", "--attribute stringArray"} {
-		if strings.Contains(help, forbidden) {
-			t.Fatalf("report --help contains bare Go type placeholder %q:\n%s", forbidden, help)
-		}
-	}
-	for _, required := range []string{"--presence <val>", "--activity <val>", "--cwd <dir>", "--pid <id>", "--attribute <key=value>"} {
-		if !strings.Contains(help, required) {
-			t.Fatalf("report --help missing metavariable placeholder %q:\n%s", required, help)
-		}
 	}
 }

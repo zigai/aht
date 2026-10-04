@@ -13,7 +13,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const generatedRuntimeSensitiveSentinel = "AHT_PHASE3_SENSITIVE_SENTINEL"
+const generatedRuntimeSensitiveSentinel = "AHT_SENSITIVE_SENTINEL"
 
 func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)

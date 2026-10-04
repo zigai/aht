@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -397,7 +396,7 @@ func TestVisibleChangeSurvivesOwnerCrashThroughJournal(t *testing.T) {
 	}
 }
 
-func TestSnapshotIsCompactJSONAndLegacyIndentedSnapshotsLoad(t *testing.T) {
+func TestLegacyIndentedSnapshotsLoad(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	now := time.Now().UTC()
@@ -414,9 +413,6 @@ func TestSnapshotIsCompactJSONAndLegacyIndentedSnapshotsLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Count(data, []byte{'\n'}) != 1 || bytes.Contains(data, []byte("  ")) {
-		t.Fatalf("snapshot is not compact JSON: %q", data)
-	}
 	var header struct {
 		SchemaVersion int `json:"schema_version"`
 	}
@@ -425,7 +421,7 @@ func TestSnapshotIsCompactJSONAndLegacyIndentedSnapshotsLoad(t *testing.T) {
 	}
 	loaded, err := NewJournal(path, fixtureRules{}).Get(t.Context(), "legacy")
 	if err != nil || loaded.SessionID != "native-legacy" {
-		t.Fatalf("compact snapshot reload = %#v, %v", loaded, err)
+		t.Fatalf("legacy snapshot reload = %#v, %v", loaded, err)
 	}
 }
 
@@ -508,20 +504,21 @@ func TestEndedProcessesExpireWithTombstoneTTL(t *testing.T) {
 	base := time.Now().UTC()
 	clock := base
 	store.setNowForTest(func() time.Time { return clock })
-	endedProcessOnlySession(t, store, retentionProcess(7100), base)
+	process := retentionProcess(7100)
+	endedProcessOnlySession(t, store, process, base)
 	if err := store.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(path); err != nil || !bytes.Contains(data, []byte(`"ended_processes"`)) {
-		t.Fatalf("snapshot before TTL = %q, %v; want ended process recorded", data, err)
+	if _, err := store.Observe(t.Context(), lateReport(process, "native-late", base.Add(3*time.Second))); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report before TTL = %v, want ErrProcessEnded", err)
 	}
 
 	clock = base.Add(2 * time.Minute)
 	if err := store.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(path); err != nil || bytes.Contains(data, []byte(`"ended_processes"`)) {
-		t.Fatalf("snapshot after TTL = %q, %v; want ended process forgotten", data, err)
+	if _, err := store.Observe(t.Context(), lateReport(process, "native-late", clock)); err != nil {
+		t.Fatalf("late report after TTL = %v, want accepted", err)
 	}
 }
 

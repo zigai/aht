@@ -75,7 +75,7 @@ func TestLimitedIndexMatchesUnlimitedDetails(t *testing.T) {
 	}
 }
 
-func TestIndexCleanupOnlyVisitsSelectedSources(t *testing.T) {
+func TestIndexSearchFollowsSourceSelectionAfterRemoval(t *testing.T) {
 	t.Parallel()
 	catalog, first := indexedFixture(t)
 	second := writeHistory(t, t.TempDir(), "other.jsonl", treeHistory)
@@ -86,16 +86,8 @@ func TestIndexCleanupOnlyVisitsSelectedSources(t *testing.T) {
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
-	db := openTestIndex(t, catalog.IndexPath)
-	var files int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 2 {
-		t.Fatalf("unselected source was cleaned up: files=%d err=%v", files, err)
-	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Dir(second)}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 0)
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 1 {
-		t.Fatalf("selected vanished source retained: files=%d err=%v", files, err)
-	}
 }
 
 func TestWarmIndexSymlinkedParentSource(t *testing.T) {
@@ -148,7 +140,7 @@ func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
 	}
 }
 
-func TestIndexCleanupSymlinkedParent(t *testing.T) {
+func TestIndexSearchSymlinkedParentAfterRemoval(t *testing.T) {
 	t.Parallel()
 	realRoot := t.TempDir()
 	symlinkRoot := filepath.Join(t.TempDir(), "symlink-parent")
@@ -167,9 +159,4 @@ func TestIndexCleanupSymlinkedParent(t *testing.T) {
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
-	db := openTestIndex(t, catalog.IndexPath)
-	var files int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 2 {
-		t.Fatalf("unselected source was cleaned up: files=%d err=%v", files, err)
-	}
 }

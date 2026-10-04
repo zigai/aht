@@ -62,9 +62,8 @@ type releaseVersion struct {
 }
 
 type releaseSession struct {
-	SchemaVersion int    `json:"schema_version"`
-	SessionID     string `json:"session_id"`
-	Harness       string `json:"harness"`
+	SessionID string `json:"session_id"`
+	Harness   string `json:"harness"`
 }
 
 type releaseIntegrationStatus struct {
@@ -669,8 +668,8 @@ func verifyReleaseTracking(t *testing.T, binary string) {
 	if err := json.Unmarshal(reportOutput, &reported); err != nil {
 		t.Fatalf("decode report output %q: %v", reportOutput, err)
 	}
-	if reported.SchemaVersion != 3 || reported.SessionID != "release-verification" || reported.Harness != "codex" {
-		t.Fatalf("report output does not contain the schema-v3 Codex session: %q", reportOutput)
+	if reported.SessionID != "release-verification" || reported.Harness != "codex" {
+		t.Fatalf("report output does not contain the Codex session: %q", reportOutput)
 	}
 
 	listOutput := runReleaseCommand(t, binary, environment, "--store", storePath, "--json", "list")

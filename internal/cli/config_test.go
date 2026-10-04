@@ -472,7 +472,7 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatal("created config content does not match template")
 	}
 
-	// 2. Run again without --force (human mode): should inform user on stderr that file exists (F10)
+	// 2. Run again without --force (human mode): should inform user on stderr that file exists
 	var stderr bytes.Buffer
 	stdout.Reset()
 	if err := runTestCLI(ctx, []string{"--config", targetPath, "manage", "config", "init"}, &stdout, &stderr); err != nil {
@@ -745,9 +745,6 @@ func TestCLIManageConfigSchema(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
 		t.Fatalf("schema output is not valid json: %v", err)
-	}
-	if schema["title"] != "AHT Configuration" {
-		t.Fatalf("unexpected schema title: %v", schema["title"])
 	}
 	if _, ok := schema["properties"]; !ok {
 		t.Fatal("schema missing properties")

@@ -299,7 +299,7 @@ func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
 }
 
 //nolint:cyclop // generation test covers terminal, ignored, resume, and process transitions
-func TestV2NativeTerminalAndResumeReduction(t *testing.T) {
+func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	base := time.Now().UTC().Add(-time.Minute)

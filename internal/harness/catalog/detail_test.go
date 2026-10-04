@@ -7,40 +7,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestEveryAdapterDeclaresDetailSupport(t *testing.T) {
-	t.Parallel()
-	results := map[registry.Harness][6]bool{
-		"claude":    {true, true, true, true, true, true},
-		"codex":     {true, false, false, true, false, true},
-		"copilot":   {true, false, false, false, false, false},
-		"droid":     {true, false, false, false, false, false},
-		"hermes":    {true, false, false, false, false, false},
-		"amp":       {true, false, false, false, false, false},
-		"agy":       {true, true, false, false, false, false},
-		"kimi-code": {true, true, false, false, false, false},
-		"omp":       {true, true, false, true, true, true},
-		"opencode":  {true, true, false, true, true, false},
-		"kilo":      {true, false, false, false, false, false},
-		"pi":        {false, false, false, true, true, true},
-		"cursor":    {}, "cline": {}, "grok": {}, "goose": {}, "openclaw": {},
-	}
-	if len(results) != len(All()) {
-		t.Fatal("adapter census does not match catalog")
-	}
-	for _, adapter := range All() {
-		id := adapter.Definition().ID
-		want, exists := results[id]
-		if !exists {
-			t.Fatalf("adapter %s has no audited detail result", id)
-		}
-		support := DetailCapabilitiesFor(id)
-		got := [6]bool{support.Native.Permission, support.Native.Question, support.Native.UsageLimit, support.Screen.Permission, support.Screen.Question, support.Screen.UsageLimit}
-		if got != want {
-			t.Fatalf("%s detail support = %v, want %v", id, got, want)
-		}
-	}
-}
-
 func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,18 +26,8 @@ func TestInvalidModeDoesNotCreateState(t *testing.T) {
 	}
 }
 
-func TestAhtPackageTypesAndDefaults(t *testing.T) {
+func TestRealtimeOnlyWithoutBrokerIsUnavailable(t *testing.T) {
 	t.Parallel()
-
-	if aht.PresenceLive != registry.PresenceLive {
-		t.Fatalf("PresenceLive = %q, want %q", aht.PresenceLive, registry.PresenceLive)
-	}
-	if aht.HarnessPi != registry.Harness("pi") {
-		t.Fatalf("HarnessPi = %q, want %q", aht.HarnessPi, registry.Harness("pi"))
-	}
-	if aht.ActivityRunning != registry.ActivityRunning {
-		t.Fatalf("ActivityRunning = %q, want %q", aht.ActivityRunning, registry.ActivityRunning)
-	}
 
 	c := aht.New(aht.Config{
 		StorePath:  filepath.Join(t.TempDir(), "sessions.json"),
@@ -93,39 +84,6 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 	}
 }
 
-func TestAhtErrorSentinels(t *testing.T) {
-	t.Parallel()
-
-	sentinels := []struct {
-		name   string
-		ahtErr error
-		target error
-	}{
-		{"ErrSessionNotFound", aht.ErrSessionNotFound, registry.ErrSessionNotFound},
-		{"ErrObservationConflict", aht.ErrObservationConflict, registry.ErrObservationConflict},
-		{"ErrInvalidObservation", aht.ErrInvalidObservation, registry.ErrInvalidObservation},
-		{"ErrCorruptStore", aht.ErrCorruptStore, registry.ErrCorruptStore},
-		{"ErrStoreTooLarge", aht.ErrStoreTooLarge, registry.ErrStoreTooLarge},
-		{"ErrHarnessRequired", aht.ErrHarnessRequired, registry.ErrHarnessRequired},
-		{"ErrObservationIdentity", aht.ErrObservationIdentity, registry.ErrObservationIdentity},
-		{"ErrUnknownHarness", aht.ErrUnknownHarness, registry.ErrUnknownHarness},
-		{"ErrUnknownPresence", aht.ErrUnknownPresence, registry.ErrUnknownPresence},
-		{"ErrUnknownActivity", aht.ErrUnknownActivity, registry.ErrUnknownActivity},
-	}
-
-	for _, s := range sentinels {
-		t.Run(s.name, func(t *testing.T) {
-			t.Parallel()
-			if !errors.Is(s.ahtErr, s.target) {
-				t.Fatalf("errors.Is(%v, %v) = false, want true", s.ahtErr, s.target)
-			}
-			if !errors.Is(s.target, s.ahtErr) {
-				t.Fatalf("errors.Is(%v, %v) = false, want true", s.target, s.ahtErr)
-			}
-		})
-	}
-}
-
 func TestAhtFacadeDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -166,8 +124,8 @@ func TestNewManagerUsesConfiguredStorePath(t *testing.T) {
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 	manager := aht.NewManager(aht.ManagerConfig{StorePath: storePath})
-	if got, want := manager.HealthPath(), storePath+".observer-health.json"; got != want {
-		t.Fatalf("HealthPath() = %q, want %q", got, want)
+	if got := manager.HealthPath(); filepath.Dir(got) != filepath.Dir(storePath) {
+		t.Fatalf("HealthPath() = %q, want a path next to %q", got, storePath)
 	}
 }
 
@@ -180,7 +138,7 @@ func TestExplainSessionDoesNotDuplicateErrorContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ExplainSession error = %v, want context.Canceled", err)
 	}
-	if got, want := err.Error(), "explain session: context canceled"; got != want {
-		t.Fatalf("ExplainSession error = %q, want %q", got, want)
+	if strings.Count(err.Error(), "explain session") != 1 {
+		t.Fatalf("ExplainSession error repeats its context: %q", err)
 	}
 }

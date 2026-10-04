@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/zigai/strata"
 )
 
@@ -355,23 +358,15 @@ func TestMaxFileSizeLimit(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = Load(largeConfig)
-	if err == nil {
-		t.Fatal("Load large file expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "exceeds 1 MiB limit") {
-		t.Fatalf("expected 1 MiB limit error, got: %v", err)
+	if _, _, err = Load(largeConfig); !errors.Is(err, ErrConfigFileTooLarge) {
+		t.Fatalf("Load large file error = %v, want ErrConfigFileTooLarge", err)
 	}
 }
 
-//nolint:cyclop // test verifies all fields of default configuration template
-func TestDefaultConfigTemplateValid(t *testing.T) {
+func TestDefaultConfigTemplateMatchesDefaults(t *testing.T) {
 	isolateConfigEnv(t)
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "default_template.toml")
-
-	tmpl := DefaultConfigTemplate()
-	if err := os.WriteFile(configPath, []byte(tmpl), 0o600); err != nil {
+	configPath := filepath.Join(t.TempDir(), "default_template.toml")
+	if err := os.WriteFile(configPath, []byte(DefaultConfigTemplate()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -382,45 +377,8 @@ func TestDefaultConfigTemplateValid(t *testing.T) {
 	if resolved != configPath {
 		t.Fatalf("expected resolved path %q, got %q", configPath, resolved)
 	}
-
-	if cfg.UI.DefaultPresence != "all" {
-		t.Errorf("expected UI.DefaultPresence='all', got %q", cfg.UI.DefaultPresence)
-	}
-	if cfg.UI.Sort != "updated" {
-		t.Errorf("expected UI.Sort='updated', got %q", cfg.UI.Sort)
-	}
-	if cfg.UI.SortDesc == nil || *cfg.UI.SortDesc {
-		t.Errorf("expected UI.SortDesc=false, got %v", cfg.UI.SortDesc)
-	}
-	if cfg.UI.AbsoluteTime == nil || *cfg.UI.AbsoluteTime {
-		t.Errorf("expected UI.AbsoluteTime=false, got %v", cfg.UI.AbsoluteTime)
-	}
-	if cfg.UI.TimeFormat != "relative" {
-		t.Errorf("expected UI.TimeFormat='relative', got %q", cfg.UI.TimeFormat)
-	}
-	if cfg.Retention.TombstoneTTL != "10m" {
-		t.Errorf("expected Retention.TombstoneTTL='10m', got %q", cfg.Retention.TombstoneTTL)
-	}
-	if len(cfg.Filter.IgnoreHarnesses) != 0 {
-		t.Errorf("expected empty IgnoreHarnesses, got %v", cfg.Filter.IgnoreHarnesses)
-	}
-	if len(cfg.Filter.IgnorePaths) != 0 {
-		t.Errorf("expected empty IgnorePaths, got %v", cfg.Filter.IgnorePaths)
-	}
-	if cfg.Tracker.Interval != "300ms" {
-		t.Errorf("expected Tracker.Interval='300ms', got %q", cfg.Tracker.Interval)
-	}
-	if cfg.Tracker.GracePeriod != "0s" {
-		t.Errorf("expected Tracker.GracePeriod='0s', got %q", cfg.Tracker.GracePeriod)
-	}
-	if cfg.Tracker.Quiet == nil || *cfg.Tracker.Quiet {
-		t.Errorf("expected Tracker.Quiet=false, got %v", cfg.Tracker.Quiet)
-	}
-	if cfg.Detection.ManifestsDir != "" {
-		t.Errorf("expected empty Detection.ManifestsDir, got %q", cfg.Detection.ManifestsDir)
-	}
-	if cfg.Detection.ScreenInspection == nil || !*cfg.Detection.ScreenInspection {
-		t.Errorf("expected Detection.ScreenInspection=true, got %v", cfg.Detection.ScreenInspection)
+	if diff := cmp.Diff(Defaults(), cfg); diff != "" {
+		t.Fatalf("default template differs from Defaults() (-defaults +template):\n%s", diff)
 	}
 }
 
@@ -520,22 +478,10 @@ sort = "created"
 		t.Fatalf("Load sparse config failed: %v", err)
 	}
 
-	// Specified field updated
-	if cfg.UI.Sort != "created" {
-		t.Errorf("expected UI.Sort='created', got %q", cfg.UI.Sort)
-	}
-	// Untouched fields must preserve true defaults
-	if cfg.UI.DefaultPresence != "all" {
-		t.Errorf("expected UI.DefaultPresence='all', got %q", cfg.UI.DefaultPresence)
-	}
-	if cfg.Retention.TombstoneTTL != "10m" {
-		t.Errorf("expected Retention.TombstoneTTL='10m', got %q", cfg.Retention.TombstoneTTL)
-	}
-	if cfg.Tracker.Interval != "300ms" {
-		t.Errorf("expected Tracker.Interval='300ms', got %q", cfg.Tracker.Interval)
-	}
-	if cfg.Detection.ScreenInspection == nil || !*cfg.Detection.ScreenInspection {
-		t.Errorf("expected Detection.ScreenInspection=true, got %v", cfg.Detection.ScreenInspection)
+	want := Defaults()
+	want.UI.Sort = "created"
+	if diff := cmp.Diff(want, cfg); diff != "" {
+		t.Fatalf("sparse config (-want +got):\n%s", diff)
 	}
 }
 
@@ -764,15 +710,125 @@ func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsRemovedRetentionKeys(t *testing.T) {
-	isolateConfigEnv(t)
-	for _, key := range []string{`auto_clean = false`, `max_gone_age = "7d"`} {
-		configPath := filepath.Join(t.TempDir(), "config.toml")
-		if err := os.WriteFile(configPath, []byte("[retention]\n"+key+"\n"), 0o600); err != nil {
+func TestParseDurationDayBounds(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"106752d", "-106752d", "213504d", "9223372036854775807d", "-9223372036854775808d"} {
+		if _, err := ParseDuration(input); !errors.Is(err, ErrInvalidDuration) {
+			t.Errorf("ParseDuration(%q) error = %v, want ErrInvalidDuration", input, err)
+		}
+	}
+	const largestWholeDays = 106751 * 24 * time.Hour
+	for _, tc := range []struct {
+		input string
+		want  time.Duration
+	}{
+		{input: "106751d", want: largestWholeDays},
+		{input: "-106751d", want: -largestWholeDays},
+	} {
+		got, err := ParseDuration(tc.input)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Load(configPath); err == nil {
-			t.Fatalf("Load accepted removed retention key %q", key)
+		if got != tc.want {
+			t.Errorf("ParseDuration(%q) = %s, want %s", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestLoadNormalizesUIValues(t *testing.T) {
+	isolateConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[ui]\nsort = ' Time '\ndefault_presence = ' ALL '\ntime_format = ' ISO8601 '\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Sort != "updated" || cfg.UI.DefaultPresence != "all" || cfg.UI.TimeFormat != "iso8601" {
+		t.Fatalf("noncanonical UI configuration: %+v", cfg.UI)
+	}
+	if err := os.WriteFile(path, []byte("[ui]\nsort = ' Agent '\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = Load(path)
+	if err != nil || cfg.UI.Sort != "harness" {
+		t.Fatalf("file alias: sort = %q, error = %v", cfg.UI.Sort, err)
+	}
+}
+
+func TestLoadPreservesFilesystemError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(path, "config.toml")
+	_, statErr := os.Stat(invalid)
+	if statErr == nil {
+		t.Fatal("expected a non-directory path component error")
+	}
+	_, _, err := Load(invalid)
+	if !errors.Is(err, ErrAccessConfig) || errors.Is(err, ErrConfigNotFound) {
+		t.Fatalf("Load error = %v, want access error, not missing", err)
+	}
+	pathErr, ok := errors.AsType[*os.PathError](statErr)
+	if !ok || !errors.Is(err, pathErr.Err) {
+		t.Fatalf("Load error does not retain OS error: %v", err)
+	}
+}
+
+func TestConcurrentEnsurePublishesOneCompleteConfig(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	var createdCount atomic.Int32
+	var group sync.WaitGroup
+	const contenders = 16
+	for range contenders {
+		group.Go(func() {
+			created, err := EnsureConfigFile(path)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if created {
+				createdCount.Add(1)
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil || string(contents) != DefaultConfigTemplate() {
+				t.Errorf("partially published config: %q, error: %v", contents, err)
+			}
+		})
+	}
+	group.Wait()
+	if got := createdCount.Load(); got != 1 {
+		t.Errorf("successful creators = %d, want 1", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("config permissions = %o", info.Mode().Perm())
+	}
+}
+
+func TestWriteConfigReplacesWithoutMutatingExistingInode(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("old config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = old.Close() }()
+	if err := WriteConfigFile(path); err != nil {
+		t.Fatal(err)
+	}
+	contents := make([]byte, len("old config"))
+	if _, err := old.Read(contents); err != nil || string(contents) != "old config" {
+		t.Fatalf("existing inode was overwritten: %q, %v", contents, err)
 	}
 }

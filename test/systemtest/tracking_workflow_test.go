@@ -62,10 +62,10 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 		t.Fatalf("initial watch event = %#v, want empty snapshot", initial)
 	}
 
-	const sensitiveSentinel = "AHT_PHASE_ONE_PRIVATE_PROMPT"
-	maliciousSessionID := "phase-one-session\x1b]0;owned\x07\u202ereordered"
+	const sensitiveSentinel = "AHT_PRIVATE_PROMPT_SENTINEL"
+	maliciousSessionID := "tracked-session\x1b]0;owned\x07\u202ereordered"
 	maliciousCWD := workingDir + "/\x1b[31mcolored\x1b[0m"
-	reportInput := strings.NewReader(`{"session_id":"phase-one-session","cwd":"` + workingDir + `","hook_event_name":"UserPromptSubmit","model":"gpt-5","prompt":"` + sensitiveSentinel + `","tool_input":{"command":"private"}}`)
+	reportInput := strings.NewReader(`{"session_id":"tracked-session","cwd":"` + workingDir + `","hook_event_name":"UserPromptSubmit","model":"gpt-5","prompt":"` + sensitiveSentinel + `","tool_input":{"command":"private"}}`)
 	reportOutput := runSystemTestCommand(
 		t,
 		binary,
@@ -87,7 +87,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	if err := json.Unmarshal(reportOutput, &reported); err != nil {
 		t.Fatalf("decode report output %q: %v", reportOutput, err)
 	}
-	assertPhaseOneSession(t, reported, maliciousSessionID, maliciousCWD)
+	assertTrackedSession(t, reported, maliciousSessionID, maliciousCWD)
 
 	observed := receiveSessionWatchEvent(t, watchCommand, watchEvents, reported.SessionID)
 	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityRunning {
@@ -104,8 +104,8 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	if err := json.Unmarshal(infoOutput, &info); err != nil {
 		t.Fatalf("decode info output %q: %v", infoOutput, err)
 	}
-	assertSamePhaseOneSession(t, reported, listed)
-	assertSamePhaseOneSession(t, reported, info)
+	assertSameTrackedSession(t, reported, listed)
+	assertSameTrackedSession(t, reported, info)
 
 	assertHumanCommandSafe(t, &transcript, binary, workingDir, environment, []string{"--store", storePath, "list", "--full"})
 	assertHumanCommandSafe(t, &transcript, binary, workingDir, environment, []string{"--store", storePath, "info", reported.SessionID})
@@ -121,7 +121,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	restartedListOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", storePath, "--json", "list")
 	transcript.Write(restartedListOutput)
 	restarted := decodeSessionByID(t, "restarted list", restartedListOutput, reported.SessionID)
-	assertSamePhaseOneSession(t, reported, restarted)
+	assertSameTrackedSession(t, reported, restarted)
 	if restarted.UpdatedAt.Before(reported.UpdatedAt) {
 		t.Fatalf("restarted session updated_at = %s, before reported %s", restarted.UpdatedAt, reported.UpdatedAt)
 	}
@@ -377,10 +377,10 @@ func decodeSessionByID(t *testing.T, source string, data []byte, sessionID strin
 	return registry.Session{}
 }
 
-func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
+func assertTrackedSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
 	t.Helper()
-	if session.SchemaVersion != 3 || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
-		t.Fatalf("session identity = %#v, want schema-v3 phase-one Codex session", session)
+	if session.SchemaVersion != registry.StoreSchemaVersion || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
+		t.Fatalf("session identity = %#v, want reported Codex session", session)
 	}
 	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityRunning {
 		t.Fatalf("effective session state = presence %q activity %v, want live/running from native report", session.Presence(), session.Activity())
@@ -393,9 +393,9 @@ func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID str
 	}
 }
 
-func assertSamePhaseOneSession(t *testing.T, want registry.Session, got registry.Session) {
+func assertSameTrackedSession(t *testing.T, want registry.Session, got registry.Session) {
 	t.Helper()
-	assertPhaseOneSession(t, got, want.SessionID, want.CWD)
+	assertTrackedSession(t, got, want.SessionID, want.CWD)
 	if got.ID != want.ID || !got.CreatedAt.Equal(want.CreatedAt) || got.UpdatedAt.Before(want.UpdatedAt) {
 		t.Fatalf("session changed across surfaces: want=%#v got=%#v", want, got)
 	}

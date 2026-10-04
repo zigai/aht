@@ -56,7 +56,7 @@ func TestReportCommandEmitsJSONOnlyWhenRequested(t *testing.T) {
 		t.Fatal(err)
 	}
 	var session registry.Session
-	if err := json.Unmarshal(stdout.Bytes(), &session); err != nil || session.SchemaVersion != expectedSessionSchemaVersion {
+	if err := json.Unmarshal(stdout.Bytes(), &session); err != nil || session.SchemaVersion != registry.StoreSchemaVersion {
 		t.Fatalf("report JSON = %q, %v", stdout.String(), err)
 	}
 }

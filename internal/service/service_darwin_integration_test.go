@@ -14,7 +14,7 @@ import (
 func TestPlutilAcceptsManagedLaunchAgent(t *testing.T) {
 	validator, err := exec.LookPath("plutil")
 	if err != nil {
-		t.Fatalf("Phase 3 service validation requires plutil: %v", err)
+		t.Fatalf("service validation requires plutil: %v", err)
 	}
 	plist, err := RenderLaunchAgent(Options{
 		Binary:      "/usr/bin/true",

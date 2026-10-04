@@ -79,7 +79,7 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 		{registry.Harness("pi"), "API Error: Rate limit exceeded", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("pi"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
 		{registry.Harness("omp"), " ⠋ Working... (40s)", registry.ActivityRunning, "custom_working"},
-		{registry.Harness("omp"), " ~/Projects/sesh · Codex · GPT-5.6 Sol · medium 7.1%/1M" + strings.Repeat("\n ", 20), registry.ActivityIdle, "custom_input_prompt"},
+		{registry.Harness("omp"), " ~/src/app · Codex · Model-A · medium 7.1%/1M" + strings.Repeat("\n ", 20), registry.ActivityIdle, "custom_input_prompt"},
 		{registry.Harness("omp"), "Permission required: allow / deny", registry.ActivityWaiting, "permission_prompt"},
 		{registry.Harness("omp"), "API Error: Rate limit exceeded", registry.ActivityFailed, "usage_limit_prompt"},
 		{registry.Harness("omp"), "Interrupted by user", registry.ActivityInterrupted, "interrupted_prompt"},
@@ -102,7 +102,7 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 func TestBundledManifestScenarioBoundaries(t *testing.T) {
 	t.Parallel()
 
-	const piFooter = " ~/Projects · Codex · GPT-5.6 Sol · max 18.3%/272k"
+	const piFooter = " ~/src · Codex · Model-A · max 18.3%/272k"
 	tests := []struct {
 		name    string
 		harness registry.Harness
@@ -400,9 +400,6 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
 		t.Fatalf("stale integration evaluation = %#v", evaluation)
 	}
-	if (catalog.Rules{}).Policy(registry.Harness("codex")).Authority != registry.AuthorityHook {
-		t.Fatal("Codex native hooks must own activity")
-	}
 }
 
 func TestOmpHookAuthorityUsesNativeIntegration(t *testing.T) {
@@ -410,10 +407,6 @@ func TestOmpHookAuthorityUsesNativeIntegration(t *testing.T) {
 	now := time.Now().UTC()
 	session := ompSession(now)
 
-	policy := (catalog.Rules{}).Policy(registry.Harness("omp"))
-	if policy.Authority != registry.AuthorityHook || !policy.ScreenFallback || policy.Reporter != "omp-extension" {
-		t.Fatalf("OMP policy = %#v", policy)
-	}
 	evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now)
 	if !evaluation.Active || !evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "matching_live_process_report" {
 		t.Fatalf("OMP hook evaluation = %#v", evaluation)

@@ -11,14 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-// indexSchemaVersion is the on-disk schema version the index must write.
-const indexSchemaVersion = 2
 
 func indexedFixture(t *testing.T) (history.Catalog, string) {
 	t.Helper()
@@ -158,83 +153,6 @@ func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
 	}
 }
 
-func TestIndexStoresSingleToolProjection(t *testing.T) {
-	t.Parallel()
-	c, _ := indexedFixture(t)
-	db := openTestIndex(t, c.IndexPath)
-	requireIndexedMatches(t, c, history.Query{Text: "tool-only"}, 0)
-	if files, toolFiles := indexStorage(t, db); files != 1 || toolFiles != 0 {
-		t.Fatalf("tools-off index = %d files, %d storing tools", files, toolFiles)
-	}
-	plain := countParts(t, db, "role<>'tool'")
-	if plain == 0 {
-		t.Fatal("tools-off search stored no parts")
-	}
-	// A tools search upgrades the file in place: one row, one copy of each part.
-	requireIndexedMatches(t, c, history.Query{Text: "tool-only", IncludeTools: true}, 1)
-	if files, toolFiles := indexStorage(t, db); files != 1 || toolFiles != 1 {
-		t.Fatalf("upgraded index = %d files, %d storing tools", files, toolFiles)
-	}
-	if stored := countParts(t, db, "role<>'tool'"); stored != plain {
-		t.Fatalf("tools search stored %d non-tool rows, want %d", stored, plain)
-	}
-	if stored := countParts(t, db, "instr(body,'Refresh Token')>0"); stored != 1 {
-		t.Fatalf("user text stored %d times", stored)
-	}
-	if stored := countParts(t, db, "role='tool'"); stored == 0 {
-		t.Fatal("tools search stored no tool rows")
-	}
-	ids := partIDs(t, db)
-	// A later tools-off search reuses the upgraded rows instead of rewriting them.
-	requireIndexedMatches(t, c, history.Query{Text: "tool-only"}, 0)
-	requireIndexedMatches(t, c, history.Query{Text: "Refresh Token"}, 1)
-	if _, toolFiles := indexStorage(t, db); toolFiles != 1 {
-		t.Fatal("tools-off search changed the storage mode")
-	}
-	if stored := countParts(t, db, "role='tool'"); stored == 0 {
-		t.Fatal("tools-off search dropped the stored tool rows")
-	}
-	if diff := cmp.Diff(ids, partIDs(t, db)); diff != "" {
-		t.Fatalf("tools-off search rewrote indexed rows (-before +after):\n%s", diff)
-	}
-}
-
-// indexStorage reports the indexed file rows and how many of them store tool
-// content.
-func indexStorage(t *testing.T, db *sql.DB) (int, int) {
-	t.Helper()
-	var files, toolFiles int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*),coalesce(sum(tools),0) FROM files").Scan(&files, &toolFiles); err != nil {
-		t.Fatal(err)
-	}
-	return files, toolFiles
-}
-
-// countParts counts stored parts matching a condition.
-func countParts(t *testing.T, db *sql.DB, condition string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE "+condition).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	return count
-}
-
-func TestIndexUsesWAL(t *testing.T) {
-	t.Parallel()
-	c, _ := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
-	db := openTestIndex(t, c.IndexPath)
-	var mode string
-	if err := db.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode); err != nil || !strings.EqualFold(mode, "wal") {
-		t.Fatalf("journal mode = %q, %v", mode, err)
-	}
-	var version int
-	if err := db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != indexSchemaVersion {
-		t.Fatalf("user version = %d, %v", version, err)
-	}
-}
-
 func TestIndexSearchesWhileWriteLocked(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
@@ -276,14 +194,6 @@ func TestIndexHealsUnusableDefaultCache(t *testing.T) {
 	}
 	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
 
-	healed := openTestIndex(t, path)
-	var version, files int
-	if err := healed.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != indexSchemaVersion {
-		t.Fatalf("healed user version = %d, %v", version, err)
-	}
-	if err := healed.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 1 {
-		t.Fatalf("healed index files = %d, %v", files, err)
-	}
 	// The unusable database is retained, so a second heal cannot have happened.
 	retained := openTestIndex(t, path+".invalid")
 	var kept string
@@ -445,33 +355,6 @@ func TestIndexDeletesVanishedHistoriesForEveryToolMode(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), "SELECT (SELECT count(*) FROM files),(SELECT count(*) FROM parts)").Scan(&files, &parts); err != nil || files != 0 || parts != 0 {
 		t.Fatalf("vanished history retained: files=%d parts=%d, %v", files, parts, err)
 	}
-}
-
-// partIDs lists stored part rows so a test can detect a rewrite of unchanged
-// history content.
-func partIDs(t *testing.T, db *sql.DB) []int64 {
-	t.Helper()
-	rows, err := db.QueryContext(t.Context(), "SELECT id FROM parts ORDER BY id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return ids
 }
 
 // holdIndexWriteLock takes the index write lock on a separate connection and

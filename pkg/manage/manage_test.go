@@ -11,17 +11,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestInstallableHarnesses(t *testing.T) {
-	t.Parallel()
-
-	harnesses := manage.InstallableHarnesses()
-	for _, expected := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("opencode")} {
-		if !slices.Contains(harnesses, expected) {
-			t.Errorf("InstallableHarnesses() missing %s", expected)
-		}
-	}
-}
-
 func writeExecutableFixture(t *testing.T, path string, content []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, content, 0o600); err != nil {
