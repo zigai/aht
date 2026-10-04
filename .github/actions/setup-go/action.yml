@@ -24,14 +24,21 @@ runs:
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         mkdir -p "$(go env GOCACHE)" "$(go env GOMODCACHE)"
-    # PR writes remain scoped to their merge ref by the Actions cache service.
-    # A new source revision can save useful work even if dependencies did not change.
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: github.event_name != 'push' || github.ref != 'refs/heads/master'
       with:
         path: |
           ${{ steps.paths.outputs.build }}
           ${{ steps.paths.outputs.modules }}
-        key: aht-go-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-${{ hashFiles('go.sum', 'Justfile', '.github/actions/setup-go/action.yml') }}-${{ github.sha }}
+        key: aht-go-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-${{ hashFiles('go.sum', 'Justfile', '.github/actions/setup-go/action.yml') }}
         restore-keys: |
-          aht-go-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-${{ hashFiles('go.sum', 'Justfile', '.github/actions/setup-go/action.yml') }}-
-          aht-go-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-
+          aht-go-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      with:
+        path: |
+          ${{ steps.paths.outputs.build }}
+          ${{ steps.paths.outputs.modules }}
+        key: aht-go-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-${{ hashFiles('go.sum', 'Justfile', '.github/actions/setup-go/action.yml') }}
+        restore-keys: |
+          aht-go-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.profile }}-
