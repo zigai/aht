@@ -30,6 +30,37 @@ func TestAffectedHosts(t *testing.T) {
 	}{
 		{name: "empty", paths: nil, want: []string{}},
 		{name: "unrelated documentation", paths: []string{"README.md", "docs/library.md"}, want: []string{}},
+		{name: "unrelated only", paths: []string{
+			"internal/architecture/conventions_test.go",
+			"internal/tools/compatibility/catalog.go",
+			"internal/tools/compatibility/changes_test.go",
+			"internal/tools/release/release.go",
+			"internal/tools/githubapi/client.go",
+			"test/systemtest/tracking_workflow_test.go",
+			"test/systemtest/stop_workflow_test.go",
+			"test/systemtest/install_recipe_test.go",
+			"test/systemtest/release_artifact_test.go",
+			"test/README.md",
+		}, want: []string{}},
+		{name: "unrelated and adapter family", paths: []string{
+			"internal/tools/compatibility/catalog.go",
+			"test/systemtest/tracking_workflow_test.go",
+			"internal/harness/pi/adapter.go",
+			"internal/architecture/conventions_test.go",
+		}, want: []string{"pi", "omp"}},
+		{name: "unrelated and shared source", paths: []string{
+			"internal/tools/release/release_test.go",
+			"pkg/registry/registry.go",
+		}, want: all},
+		{name: "unrelated and unknown path", paths: []string{
+			"test/systemtest/release_artifact_test.go",
+			"internal/tools/newgenerator/main.go",
+		}, want: all},
+		{name: "adapter and real host lifecycle", paths: []string{
+			"internal/harness/codex/adapter.go",
+			"test/hostcompat/lifecycle_command_test.go",
+		}, want: all},
+		{name: "adapter unit test retains family", paths: []string{"internal/harness/omp/adapter_test.go"}, want: []string{"pi", "omp"}},
 		{name: "adapter", paths: []string{"internal/harness/codex/assets/hook.sh"}, want: []string{"codex"}},
 		{name: "kimi directory differs from ID", paths: []string{"internal/harness/kimi/adapter.go"}, want: []string{"kimi-code"}},
 		{name: "pi family", paths: []string{"internal/harness/pi/assets/aht-state.ts.tmpl"}, want: []string{"pi", "omp"}},
@@ -41,7 +72,37 @@ func TestAffectedHosts(t *testing.T) {
 		{name: "shared template", paths: []string{"internal/harness/assets/typescript_queue.ts.tmpl"}, want: all},
 		{name: "unknown adapter", paths: []string{"internal/harness/newhost/adapter.go"}, want: all},
 	}
-	for _, path := range []string{"internal/install/harness_plan.go", "pkg/registry/registry.go", "internal/brokerserver/server.go", "internal/observer/observer.go", "internal/cli/hook.go", "pkg/client/client.go", "go.mod", "go.sum", "Justfile", ".github/workflows/ci.yml", ".github/workflows/compatibility-host.yml", "internal/tools/compatibility/catalog.go", "test/hostcompat/current_host_test.go"} {
+	for _, path := range []string{
+		"internal/install/harness_plan.go",
+		"internal/install/generated_runtime_integration_test.go",
+		"internal/install/runtime_fixture_integration_test.go",
+		"internal/install/testdata/node/omp-approval.mjs",
+		"internal/install/testdata/python/hermes-session-end.py",
+		"internal/harness/lifecycle_test.go",
+		"pkg/registry/registry.go",
+		"internal/brokerserver/server.go",
+		"internal/observer/observer.go",
+		"internal/cli/hook.go",
+		"internal/config/config.go",
+		"pkg/client/client.go",
+		"go.mod",
+		"go.sum",
+		"Justfile",
+		".goreleaser.yaml",
+		".github/workflows/ci.yml",
+		".github/workflows/compatibility-host.yml",
+		"test/hostcompat/current_host_test.go",
+		"test/hostcompat/lifecycle_observation_test.go",
+		"test/hostcompat/model_fixture_test.go",
+		"test/hostcompat/testdata/lifecycle.json",
+		"internal/architecture/new_test.go",
+		"internal/tools/newgenerator/main.go",
+		"internal/tools/compatibility_extra/main.go",
+		"test/systemtest/native_host_lifecycle_test.go",
+		"test/systemtest/testdata/native-host.sh",
+		"test/new_suite_test.go",
+		"unknown.go",
+	} {
 		t.Run(path, func(t *testing.T) {
 			if got := affectedHosts([]string{path}); !slices.Equal(got, all) {
 				t.Fatalf("affected hosts = %v, want %v", got, all)

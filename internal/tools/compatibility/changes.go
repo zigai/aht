@@ -8,13 +8,13 @@ import (
 	"strings"
 )
 
-// affectedHosts is conservative for unclassified source paths: new shared code
-// must not silently escape compatibility coverage. Adapter families also cover
+// affectedHosts ignores only known non-harness tooling, tests, and documentation.
+// Unclassified paths retain compatibility coverage. Adapter families also cover
 // their downstream native API consumers even when templates are separate files.
 func affectedHosts(paths []string) []string {
 	selected := make(map[string]bool)
 	for _, path := range paths {
-		if unrelatedDocumentation(path) {
+		if unrelatedCompatibilityPath(path) {
 			continue
 		}
 		id := adapterForPath(path)
@@ -36,8 +36,20 @@ func affectedHosts(paths []string) []string {
 	return ids
 }
 
-func unrelatedDocumentation(path string) bool {
-	return strings.HasPrefix(path, "docs/") || path == "README.md" || path == "LICENSE" || path == "CHANGELOG.md"
+func unrelatedCompatibilityPath(path string) bool {
+	switch path {
+	case "README.md", "LICENSE", "CHANGELOG.md", "test/README.md",
+		"internal/architecture/conventions_test.go",
+		"test/systemtest/tracking_workflow_test.go",
+		"test/systemtest/stop_workflow_test.go",
+		"test/systemtest/install_recipe_test.go",
+		"test/systemtest/release_artifact_test.go":
+		return true
+	}
+	return strings.HasPrefix(path, "docs/") ||
+		strings.HasPrefix(path, "internal/tools/compatibility/") ||
+		strings.HasPrefix(path, "internal/tools/release/") ||
+		strings.HasPrefix(path, "internal/tools/githubapi/")
 }
 
 func adapterForPath(path string) string {
