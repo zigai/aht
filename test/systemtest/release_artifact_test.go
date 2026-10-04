@@ -25,6 +25,7 @@ import (
 const (
 	artifactDirEnv          = "AHT_ARTIFACT_DIR"
 	publishedArtifactDirEnv = "AHT_PUBLISHED_ARTIFACT_DIR"
+	previousBinaryEnv       = "AHT_PREVIOUS_BINARY"
 	maxNativeBinaryBytes    = 256 << 20
 )
 
@@ -64,6 +65,24 @@ type releaseSession struct {
 	SchemaVersion int    `json:"schema_version"`
 	SessionID     string `json:"session_id"`
 	Harness       string `json:"harness"`
+}
+
+type releaseIntegrationStatus struct {
+	Harness string   `json:"harness"`
+	Status  string   `json:"status"`
+	Paths   []string `json:"paths"`
+}
+
+type releaseIntegrationCapability struct {
+	Harness            string `json:"harness"`
+	Installable        bool   `json:"installable"`
+	IntegrationVersion int    `json:"integration_version"`
+}
+
+type releaseIntegrationResult struct {
+	Harness string `json:"harness"`
+	Changed bool   `json:"changed"`
+	Error   string `json:"error"`
 }
 
 type releaseInventory struct {
@@ -360,6 +379,11 @@ func validateNativeArchive(t *testing.T, manifest releaseManifest, goos string, 
 	extractNativeArchive(t, artifactDiskPath(t, manifest, artifact), binaryPath)
 	verifyReleaseVersion(t, binaryPath, manifest.Metadata)
 	verifyReleaseTracking(t, binaryPath)
+	if previous, set := os.LookupEnv(previousBinaryEnv); set {
+		t.Run("integration_upgrade", func(t *testing.T) {
+			verifyReleaseIntegrationUpgrade(t, previous, binaryPath)
+		})
+	}
 }
 
 func extractNativeArchive(t *testing.T, archivePath string, binaryPath string) {
@@ -451,6 +475,171 @@ func isolatedReleaseEnvironment(t *testing.T) []string {
 		}
 	}
 	return systemTestEnvironment(home, configHome, stateDir)
+}
+
+func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary string) {
+	t.Helper()
+	if !filepath.IsAbs(previous) {
+		t.Fatalf("%s must identify an absolute executable path, got %q", previousBinaryEnv, previous)
+	}
+	info, err := os.Stat(previous)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("%s must identify a regular executable: path=%q stat=%v", previousBinaryEnv, previous, err)
+	}
+	environment := isolatedReleaseEnvironment(t)
+	oldCatalog := releaseInstallableCatalog(t, previous, environment)
+	newCatalog := releaseInstallableCatalog(t, binary, environment)
+	for id := range oldCatalog {
+		if _, supported := newCatalog[id]; !supported {
+			t.Fatalf("previously installable integration %q is absent from the new binary catalog", id)
+		}
+	}
+
+	oldInstall := releaseIntegrationResults(t, previous, environment, "install", "all", "--binary", binary)
+	requireReleaseIntegrationResults(t, oldInstall, oldCatalog, false)
+	oldStatuses := releaseIntegrationStatuses(t, previous, environment, binary, oldCatalog)
+	requireReleaseIntegrationsCurrent(t, oldStatuses)
+
+	requireReleaseIntegrationsBeforeUpgrade(t, binary, environment, oldCatalog, newCatalog)
+
+	upgraded := releaseIntegrationResults(t, binary, environment, "upgrade", "--binary", binary)
+	requireReleaseIntegrationResults(t, upgraded, oldCatalog, false)
+	for id := range newCatalog {
+		if _, installed := oldCatalog[id]; !installed {
+			added := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary)
+			requireReleaseIntegrationResults(t, added, map[string]int{id: newCatalog[id]}, false)
+		}
+	}
+	after := releaseIntegrationStatuses(t, binary, environment, binary, newCatalog)
+	requireReleaseIntegrationsCurrent(t, after)
+	preview := releaseIntegrationResults(t, binary, environment, "install", "all", "--binary", binary, "--dry-run")
+	requireReleaseIntegrationResults(t, preview, newCatalog, true)
+}
+
+func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, environment []string, oldCatalog map[string]int, newCatalog map[string]int) {
+	t.Helper()
+	before := releaseIntegrationStatuses(t, binary, environment, binary, newCatalog)
+	for id, status := range before {
+		old, installed := oldCatalog[id]
+		if !installed {
+			if status.Status != "missing" {
+				t.Fatalf("new integration %s before install = %s, want missing", id, status.Status)
+			}
+			continue
+		}
+		preview := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary, "--dry-run")
+		requireReleaseIntegrationResults(t, preview, map[string]int{id: newCatalog[id]}, false)
+		want := "current"
+		if preview[id].Changed || old != newCatalog[id] {
+			want = "stale"
+		}
+		if status.Status != want {
+			t.Fatalf("installed integration %s before upgrade = %s, want %s (versions %d -> %d, artifact changes=%t)",
+				id, status.Status, want, old, newCatalog[id], preview[id].Changed)
+		}
+	}
+}
+
+func releaseInstallableCatalog(t *testing.T, binary string, environment []string) map[string]int {
+	t.Helper()
+	output := runReleaseCommand(t, binary, environment, "--json", "manage", "capabilities")
+	var capabilities []releaseIntegrationCapability
+	if err := json.Unmarshal(output, &capabilities); err != nil {
+		t.Fatalf("decode %q capabilities %q: %v", binary, output, err)
+	}
+	catalog := make(map[string]int)
+	for _, capability := range capabilities {
+		if !capability.Installable {
+			continue
+		}
+		if capability.Harness == "" || capability.IntegrationVersion <= 0 {
+			t.Fatalf("invalid installable capability from %q: %+v", binary, capability)
+		}
+		if _, duplicate := catalog[capability.Harness]; duplicate {
+			t.Fatalf("duplicate installable integration %q from %q", capability.Harness, binary)
+		}
+		catalog[capability.Harness] = capability.IntegrationVersion
+	}
+	if len(catalog) == 0 {
+		t.Fatalf("%q exposes no installable integrations", binary)
+	}
+	return catalog
+}
+
+func releaseIntegrationStatuses(t *testing.T, executable string, environment []string, binary string, catalog map[string]int) map[string]releaseIntegrationStatus {
+	t.Helper()
+	output := runReleaseCommand(t, executable, environment, "--json", "manage", "integrations", "status", "--binary", binary)
+	var statuses []releaseIntegrationStatus
+	if err := json.Unmarshal(output, &statuses); err != nil {
+		t.Fatalf("decode %q integration status %q: %v", executable, output, err)
+	}
+	result := make(map[string]releaseIntegrationStatus, len(statuses))
+	actual := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		if _, duplicate := actual[status.Harness]; duplicate {
+			t.Fatalf("duplicate integration status for %q from %q", status.Harness, executable)
+		}
+		if len(status.Paths) == 0 {
+			t.Fatalf("integration %q from %q has no managed artifact paths", status.Harness, executable)
+		}
+		actual[status.Harness] = struct{}{}
+		result[status.Harness] = status
+	}
+	expected := make(map[string]struct{}, len(catalog))
+	for id := range catalog {
+		expected[id] = struct{}{}
+	}
+	requireExactSet(t, "integration status harnesses", actual, expected)
+	return result
+}
+
+func requireReleaseIntegrationsCurrent(t *testing.T, statuses map[string]releaseIntegrationStatus) {
+	t.Helper()
+	for id, status := range statuses {
+		if status.Status != "current" {
+			t.Errorf("integration %s = %s, want current; paths=%q", id, status.Status, status.Paths)
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+}
+
+func releaseIntegrationResults(t *testing.T, binary string, environment []string, args ...string) map[string]releaseIntegrationResult {
+	t.Helper()
+	command := append([]string{"--json", "manage", "integrations"}, args...)
+	output := runReleaseCommand(t, binary, environment, command...)
+	var results []releaseIntegrationResult
+	if err := json.Unmarshal(output, &results); err != nil {
+		t.Fatalf("decode %q integration results %q: %v", binary, output, err)
+	}
+	indexed := make(map[string]releaseIntegrationResult, len(results))
+	for _, result := range results {
+		if _, duplicate := indexed[result.Harness]; duplicate {
+			t.Fatalf("duplicate integration result for %q from %q", result.Harness, binary)
+		}
+		if result.Error != "" {
+			t.Fatalf("integration %q from %q failed: %s", result.Harness, binary, result.Error)
+		}
+		indexed[result.Harness] = result
+	}
+	return indexed
+}
+
+func requireReleaseIntegrationResults(t *testing.T, results map[string]releaseIntegrationResult, catalog map[string]int, unchanged bool) {
+	t.Helper()
+	actual := make(map[string]struct{}, len(results))
+	for id, result := range results {
+		actual[id] = struct{}{}
+		if unchanged && result.Changed {
+			t.Errorf("integration %s still differs from a clean install after upgrade", id)
+		}
+	}
+	expected := make(map[string]struct{}, len(catalog))
+	for id := range catalog {
+		expected[id] = struct{}{}
+	}
+	requireExactSet(t, "integration result harnesses", actual, expected)
 }
 
 func verifyReleaseVersion(t *testing.T, binary string, metadata releaseMetadata) {

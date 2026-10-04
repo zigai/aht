@@ -135,10 +135,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes dpkg rpm
 
       - name: Validate native artifact
-        shell: bash
-        run: |
-          set -o pipefail
-          just artifacts dist 2>&1 | tee artifact-validation.log
+        uses: ./.github/actions/validate-artifact
+        with:
+          target: ${{ matrix.target }}
 
       - name: Upload failed validation evidence
         if: failure()

@@ -1,0 +1,45 @@
+name: Validate native release artifact
+description: Exercise native archives, published integration upgrades, and installed Linux packages.
+inputs:
+  target:
+    description: Native operating system and architecture
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      with:
+        node-version: 24
+    - name: Set up uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        enable-cache: false
+    - name: Install native plugin managers
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        for harness in hermes openclaw; do
+          plan=$(AHT_COMPAT_SELECTION="$harness" go run ./internal/tools/compatibility probe)
+          version=$(jq -er --arg harness "$harness" '.observations[] | select(.harness == $harness and (.error // "") == "") | .version' <<< "$plan")
+          AHT_COMPAT_HARNESS="$harness" AHT_COMPAT_VERSION="$version" go run ./internal/tools/compatibility install
+        done
+    - name: Download previous published binary
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TARGET: ${{ inputs.target }}
+      run: bash .github/scripts/download-previous.sh
+    - name: Validate native artifact and integration upgrades
+      shell: bash
+      run: |
+        set -euo pipefail
+        just artifacts dist 2>&1 | tee artifact-validation.log
+    - name: Install and execute Linux packages
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: bash .github/scripts/validate-packages.sh
