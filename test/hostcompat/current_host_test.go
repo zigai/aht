@@ -82,7 +82,7 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 	t.Run("recorded_resume", func(t *testing.T) { host.runResume(t, command) })
 }
 
-func (host isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
+func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 	switch host.contract.ID {
 	case registry.Harness("droid"):
@@ -104,7 +104,42 @@ func (host isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	}
 }
 
-func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
+func (host *isolatedHost) driveHostCheckpoints(t *testing.T, command *exec.Cmd, wait <-chan error, logPath string) error {
+	t.Helper()
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case runErr := <-wait:
+			return runErr
+		case step := <-host.provider.checkpoints:
+			if step == 0 {
+				host.waitForActiveSession(t)
+			}
+			host.continueOrInterrupt(t, command)
+		case <-deadline.C:
+			output, _ := os.ReadFile(logPath)
+			t.Fatalf("%s lifecycle timed out after 30s\nprovider requests: %s\n%s", host.contract.ID, providerRequestSummary(host.provider), output)
+		}
+	}
+}
+
+func (host *isolatedHost) continueOrInterrupt(t *testing.T, command *exec.Cmd) {
+	t.Helper()
+	if !host.interrupt {
+		host.provider.release <- struct{}{}
+		return
+	}
+	if host.contract.ID == registry.Harness("openclaw") {
+		host.interruptOpenClaw(t)
+		return
+	}
+	if err := syscall.Kill(-command.Process.Pid, syscall.SIGINT); err != nil {
+		t.Fatalf("interrupting active host: %v", err)
+	}
+}
+
+func (host *isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 	t.Helper()
 	defer func() {
 		if t.Failed() {
@@ -114,7 +149,7 @@ func (host isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 	host.waitForObservation(t, "matching native session evidence after completed provider lifecycle", host.validateSession)
 }
 
-func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
+func (host *isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
 	t.Helper()
 	if host.contract.ID == registry.Harness("droid") {
 		return host.runDroidRPC(t, command.Env, nil, false)
@@ -156,31 +191,8 @@ func (host isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte 
 			t.Logf("isolated host output:\n%s\nprovider:\n%s", output, providerRequestSummary(host.provider))
 		}
 	}()
-	var runErr error
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	for !finished {
-		select {
-		case runErr = <-wait:
-			finished = true
-		case step := <-host.provider.checkpoints:
-			if step == 0 {
-				host.waitForActiveSession(t)
-			}
-			if host.interrupt {
-				if host.contract.ID == registry.Harness("openclaw") {
-					host.interruptOpenClaw(t)
-				} else if err := syscall.Kill(-command.Process.Pid, syscall.SIGINT); err != nil {
-					t.Fatalf("interrupting active host: %v", err)
-				}
-			} else {
-				host.provider.release <- struct{}{}
-			}
-		case <-deadline.C:
-			output, _ := os.ReadFile(logPath)
-			t.Fatalf("%s lifecycle timed out after 30s\nprovider requests: %s\n%s", host.contract.ID, providerRequestSummary(host.provider), output)
-		}
-	}
+	runErr := host.driveHostCheckpoints(t, command, wait, logPath)
+	finished = true
 	if err := logFile.Close(); err != nil {
 		t.Fatal(err)
 	}

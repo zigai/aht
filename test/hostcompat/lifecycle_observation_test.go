@@ -14,7 +14,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func (host isolatedHost) sessions(ctx context.Context) ([]registry.Session, error) {
+func (host *isolatedHost) sessions(ctx context.Context) ([]registry.Session, error) {
 	output, err := host.runAHT(ctx, "--json", "list", "--agent", string(host.contract.ID))
 	if err != nil {
 		return nil, err
@@ -36,17 +36,17 @@ func (host isolatedHost) sessions(ctx context.Context) ([]registry.Session, erro
 	return matching, nil
 }
 
-func (host isolatedHost) waitForActiveSession(t *testing.T) {
+func (host *isolatedHost) waitForActiveSession(t *testing.T) {
 	t.Helper()
 	host.waitForObservation(t, "live native session at held provider request", func(session registry.Session) bool {
 		native := session.Observations.Native
-		return native != nil && native.SessionID != "" && nativeActivityMatches(session, registry.ActivityRunning) &&
+		return native != nil && native.SessionID != "" && nativeActivityRunning(session) &&
 			session.Presence() == registry.PresenceLive && filepath.Clean(session.CWD) == filepath.Clean(host.work) &&
 			effectiveActivityMatches(session, registry.ActivityRunning)
 	})
 }
 
-func (host isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
+func (host *isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -79,7 +79,7 @@ func (host isolatedHost) waitForObservation(t *testing.T, description string, ma
 	}
 }
 
-func (host isolatedHost) assertInterrupted(t *testing.T) {
+func (host *isolatedHost) assertInterrupted(t *testing.T) {
 	t.Helper()
 	if len(host.provider.Requests()) != 1 {
 		t.Fatalf("interruption must precede the tool call, got %d provider requests", len(host.provider.Requests()))
@@ -97,7 +97,7 @@ func (host isolatedHost) assertInterrupted(t *testing.T) {
 		if host.contract.ID == registry.Harness("copilot") && session.Presence() == registry.PresenceGone {
 			return true
 		}
-		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone {
+		if native.Event == terminalEvent(host.contract.ID) && nativeGone(native, session) {
 			return true
 		}
 		// Grok's TUI quit must publish SessionEnd after Esc canceled the turn.

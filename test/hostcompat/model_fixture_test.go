@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func (host isolatedHost) configureKimiModel(t *testing.T, baseURL string) {
+func (host *isolatedHost) configureKimiModel(t *testing.T, baseURL string) {
 	t.Helper()
 
 	path := filepath.Join(host.root, "kimi", "config.toml")
@@ -23,7 +23,7 @@ func (host isolatedHost) configureKimiModel(t *testing.T, baseURL string) {
 	host.writeFile(t, path, config)
 }
 
-func (host isolatedHost) configureDroidModel(t *testing.T, baseURL string) {
+func (host *isolatedHost) configureDroidModel(t *testing.T, baseURL string) {
 	t.Helper()
 
 	path := filepath.Join(host.home, ".factory", "settings.json")
@@ -52,17 +52,27 @@ func (host isolatedHost) configureDroidModel(t *testing.T, baseURL string) {
 	host.writeFile(t, path, string(updated))
 }
 
-func (host isolatedHost) configureOpenClawModel(t *testing.T, baseURL string) int {
+func freeLocalPort(t *testing.T) int {
 	t.Helper()
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	var config net.ListenConfig
+	listener, err := config.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want TCP", listener.Addr())
+	}
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
+	return address.Port
+}
+
+func (host *isolatedHost) configureOpenClawModel(t *testing.T, baseURL string) int {
+	t.Helper()
+
+	port := freeLocalPort(t)
 	path := filepath.Join(host.home, ".openclaw", "openclaw.json")
 	settings := make(map[string]any)
 	data, err := os.ReadFile(path)

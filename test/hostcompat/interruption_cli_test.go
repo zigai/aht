@@ -16,9 +16,9 @@ import (
 // Cline --acp implements ACP's active-turn cancellation:
 // https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation
 // Cline: apps/cli/src/acp/acpAgent.ts, cancel() -> ClineCore.abort().
-// Closing stdin happens only after the pending prompt reports "cancelled";
+// Closing stdin happens only after the pending prompt reports its cancellation stop reason;
 // process exit alone is not evidence that a native turn was interrupted.
-func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
+func runCLIInterruption(t *testing.T, host *isolatedHost, env []string) {
 	t.Helper()
 	var command *exec.Cmd
 	switch host.contract.ID {
@@ -26,7 +26,7 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 		// ACP branches before the CLI's ordinary provider/sandbox argument
 		// handling. Its documented environment supplies provider selection;
 		// force the native local backend to avoid a detached hub daemon.
-		command = clineACPCommand(host, env)
+		command = clineACPCommand(t, host, env)
 	default:
 		t.Fatalf("no native CLI interruption driver for %s", host.contract.ID)
 	}
@@ -61,8 +61,8 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 	host.waitForActiveSession(t)
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": sessionID}})
 	result := cliInterruptionResponse(t, wire, "prompt")
-	if reason := cliString(t, cliField(t, result, "stopReason")); reason != "cancelled" {
-		t.Fatalf("native CLI interruption stop reason = %q, want cancelled", reason)
+	if reason := cliString(t, cliField(t, result, "stopReason")); reason != acpCancelledStopReason {
+		t.Fatalf("native CLI interruption stop reason = %q, want %q", reason, acpCancelledStopReason)
 	}
 	if count := len(host.provider.Requests()); count != 1 {
 		t.Fatalf("interrupted native CLI sent %d model requests, want one held request", count)
@@ -106,19 +106,20 @@ func cliInterruptionResponse(t *testing.T, wire *cliPermissionWire, id string) j
 	}
 }
 
-func clineACPCommand(host isolatedHost, env []string) *exec.Cmd {
+func clineACPCommand(t *testing.T, host *isolatedHost, env []string) *exec.Cmd {
+	t.Helper()
 	env = append(env, "CLINE_PROVIDER=openai-compatible", "CLINE_API_KEY=compat", "CLINE_MODEL=compat", "CLINE_SESSION_BACKEND_MODE=local")
-	return host.command(env, "--config", filepath.Join(host.root, "cline"), "--acp", "--auto-approve", "true")
+	return host.command(t, env, "--config", filepath.Join(host.root, "cline"), "--acp", "--auto-approve", "true")
 }
 
 // ACP loads the persisted core session under its original session ID. No
 // exported transcript or test-side history conversion is involved.
-func (host isolatedHost) runClineResume(t *testing.T, env []string, previous registry.Session) {
+func (host *isolatedHost) runClineResume(t *testing.T, env []string, previous registry.Session) {
 	t.Helper()
 	if previous.SessionID == "" {
 		t.Fatal("Cline resume requires the recorded native session ID")
 	}
-	wire, process := startCLIPermissionWire(t, host, clineACPCommand(host, env), false)
+	wire, process := startCLIPermissionWire(t, host, clineACPCommand(t, host, env), false)
 	cliInterruptionCall(t, wire, "initialize", "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]string{"name": "aht-compat", "version": "1"},

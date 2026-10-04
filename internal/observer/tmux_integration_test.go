@@ -23,93 +23,130 @@ import (
 	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
-//nolint:cyclop,gocognit // end-to-end setup and assertions intentionally cover all four agents in one server
+type screenFixture struct {
+	harness registry.Harness
+	screen  string
+	want    registry.Activity
+}
+
 func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux integration test")
 	}
-	var server *testtmux.Server
 	ctx := context.Background()
-
-	tests := []struct {
-		harness registry.Harness
-		screen  string
-		want    registry.Activity
-	}{
+	tests := []screenFixture{
 		{registry.Harness("codex"), "Would you like to run the following command?", registry.ActivityWaiting},
 		{registry.Harness("claude"), "Thinking… esc to interrupt", registry.ActivityRunning},
 		{registry.Harness("opencode"), "Ask anything", registry.ActivityIdle},
 		{registry.Harness("pi"), "Type a message · Enter to send", registry.ActivityIdle},
 	}
-	processes := make([]processinfo.Process, 0, len(tests))
-	panes := make([]tmux.Pane, 0, len(tests))
-	for index, test := range tests {
-		sessionName := string(test.harness)
-		script := filepath.Join(t.TempDir(), sessionName+".sh")
-		contents := "#!/bin/sh\nprintf '\\033[999;1H%s' " + harnesspkg.ShellQuote(test.screen) + "\nexec sleep 60\n"
-		if err := os.WriteFile(script, []byte(contents), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(script, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if server == nil {
-			server = testtmux.New(t, gotmux.NewSessionOptions{Name: sessionName, Program: gotmux.Exec(script)})
-		} else {
-			_, err := server.Tmux.NewSession(ctx, gotmux.NewSessionOptions{ //nolint:exhaustruct_v5 // remaining options default
-				Name:    sessionName,
-				Program: gotmux.Shell(script),
-			})
-			if err != nil {
-				t.Fatalf("create test session %s: %v", sessionName, err)
-			}
-		}
-		sess, err := server.Tmux.FindSession(ctx, sessionName)
-		if err != nil {
-			t.Fatalf("find session %s: %v", sessionName, err)
-		}
-		links, err := sess.Windows(ctx)
-		if err != nil || len(links) == 0 {
-			t.Fatalf("windows for %s: %v", sessionName, err)
-		}
-		activePane, err := links[0].Window().ActivePane(ctx)
-		if err != nil {
-			t.Fatalf("active pane for %s: %v", sessionName, err)
-		}
-		info, err := activePane.Info(ctx)
-		if err != nil {
-			t.Fatalf("pane info for %s: %v", sessionName, err)
-		}
-		paneID := string(info.ID)
-		paneTTY := info.TTY
-		panePID := info.PID
-		processPID := 5000 + index
-		processes = append(processes, processinfo.Process{PID: processPID, PPID: panePID, ProcessGroupID: processPID, Foreground: true, StartIdentity: "test:" + sessionName, Executable: "/usr/bin/" + sessionName, CWD: "/tmp", TTY: paneTTY, Args: []string{sessionName}})
-		tmuxLocation := registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionID: string(sess.ID()), SessionName: sessionName, WindowID: string(info.WindowID), WindowIndex: "0", WindowName: sessionName, PaneID: paneID, PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: panePID, PaneTTY: paneTTY}
-		pane := tmux.Pane{Location: tmuxLocation, PanePID: panePID, PaneTTY: paneTTY}
-		panes = append(panes, pane)
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			snapshot, captureErr := tmux.CapturePane(ctx, pane)
-			if captureErr == nil && strings.Contains(snapshot.Text, test.screen) {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("tmux pane %s did not render fixture %q: snapshot=%#v error=%v", paneID, test.screen, snapshot, captureErr)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	processes, panes := startScreenFixtures(t, tests)
 
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
-	observer := New(Options{Store: store, ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil }, PaneList: func(context.Context) ([]mux.Pane, error) { return multiplexerPanesFromTmux(panes), nil }, CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil }, DetectionConfigDir: t.TempDir(), Now: func() time.Time { return time.Now().UTC() }})
-	result, err := observer.RunOnce(ctx)
+	result, err := New(screenFixtureOptions(t, store, processes, panes)).RunOnce(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Degraded {
 		t.Fatalf("real tmux observer degraded: %#v", result)
 	}
+	assertScreenActivities(t, ctx, store, tests)
+
+	raceOptions := screenFixtureOptions(t, store, processes, panes)
+	raceOptions.ScreenCapture = integrationRaceCapture(store, processes)
+	if raceResult, err := New(raceOptions).RunOnce(ctx); err != nil || raceResult.Degraded {
+		t.Fatalf("real tmux race reconciliation = %#v, %v", raceResult, err)
+	}
+	assertIntegrationsWonRace(t, ctx, store)
+}
+
+func startScreenFixtures(t *testing.T, tests []screenFixture) ([]processinfo.Process, []tmux.Pane) {
+	t.Helper()
+	ctx := t.Context()
+	var server *testtmux.Server
+	processes := make([]processinfo.Process, 0, len(tests))
+	panes := make([]tmux.Pane, 0, len(tests))
+	for index, test := range tests {
+		sessionName := string(test.harness)
+		script := writeScreenScript(t, sessionName, test.screen)
+		if server == nil {
+			server = testtmux.New(t, gotmux.NewSessionOptions{Name: sessionName, Program: gotmux.Exec(script)})
+		} else if _, err := server.Tmux.NewSession(ctx, gotmux.NewSessionOptions{Name: sessionName, Program: gotmux.Shell(script)}); err != nil {
+			t.Fatalf("create test session %s: %v", sessionName, err)
+		}
+		process, pane := screenFixturePane(t, ctx, server, sessionName, 5000+index)
+		waitForScreenText(t, ctx, pane, test.screen)
+		processes = append(processes, process)
+		panes = append(panes, pane)
+	}
+	return processes, panes
+}
+
+func writeScreenScript(t *testing.T, name string, screen string) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), name+".sh")
+	contents := "#!/bin/sh\nprintf '\\033[999;1H%s' " + harnesspkg.ShellQuote(screen) + "\nexec sleep 60\n"
+	if err := os.WriteFile(script, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func screenFixturePane(t *testing.T, ctx context.Context, server *testtmux.Server, sessionName string, processPID int) (processinfo.Process, tmux.Pane) {
+	t.Helper()
+	sess, err := server.Tmux.FindSession(ctx, sessionName)
+	if err != nil {
+		t.Fatalf("find session %s: %v", sessionName, err)
+	}
+	links, err := sess.Windows(ctx)
+	if err != nil || len(links) == 0 {
+		t.Fatalf("windows for %s: %v", sessionName, err)
+	}
+	activePane, err := links[0].Window().ActivePane(ctx)
+	if err != nil {
+		t.Fatalf("active pane for %s: %v", sessionName, err)
+	}
+	info, err := activePane.Info(ctx)
+	if err != nil {
+		t.Fatalf("pane info for %s: %v", sessionName, err)
+	}
+	process := processinfo.Process{PID: processPID, PPID: info.PID, ProcessGroupID: processPID, Foreground: true, StartIdentity: "test:" + sessionName, Executable: "/usr/bin/" + sessionName, CWD: "/tmp", TTY: info.TTY, Args: []string{sessionName}}
+	tmuxLocation := registry.Location{Kind: registry.MultiplexerTmux, ServerID: server.Socket, SessionID: string(sess.ID()), SessionName: sessionName, WindowID: string(info.WindowID), WindowIndex: "0", WindowName: sessionName, PaneID: string(info.ID), PaneIndex: "0", PaneCurrentPath: "/tmp", PanePID: info.PID, PaneTTY: info.TTY}
+	return process, tmux.Pane{Location: tmuxLocation, PanePID: info.PID, PaneTTY: info.TTY}
+}
+
+func waitForScreenText(t *testing.T, ctx context.Context, pane tmux.Pane, text string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snapshot, captureErr := tmux.CapturePane(ctx, pane)
+		if captureErr == nil && strings.Contains(snapshot.Text, text) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tmux pane %s did not render fixture %q: snapshot=%#v error=%v", pane.Location.PaneID, text, snapshot, captureErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func screenFixtureOptions(t *testing.T, store *registry.Journal, processes []processinfo.Process, panes []tmux.Pane) Options {
+	t.Helper()
+	return Options{
+		Store:              store,
+		ProcessList:        func(context.Context) ([]processinfo.Process, error) { return processes, nil },
+		PaneList:           func(context.Context) ([]mux.Pane, error) { return multiplexerPanesFromTmux(panes), nil },
+		CatalogList:        func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		DetectionConfigDir: t.TempDir(),
+		Now:                func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func assertScreenActivities(t *testing.T, ctx context.Context, store *registry.Journal, tests []screenFixture) {
+	t.Helper()
 	sessions, err := store.List(ctx, registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -127,9 +164,10 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 			t.Errorf("session %s activity=%s screen=%#v, want %s screen activity", session.Harness, activityValue(session.Activity()), *session.Observations.Screen, want)
 		}
 	}
+}
 
-	raceOptions := Options{Store: store, ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil }, PaneList: func(context.Context) ([]mux.Pane, error) { return multiplexerPanesFromTmux(panes), nil }, CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil }, DetectionConfigDir: t.TempDir(), Now: func() time.Time { return time.Now().UTC() }}
-	raceOptions.ScreenCapture = func(captureCtx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
+func integrationRaceCapture(store *registry.Journal, processes []processinfo.Process) func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+	return func(captureCtx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
 		snapshot, captureErr := captureMultiplexerPane(captureCtx, pane)
 		if captureErr != nil {
 			return mux.ScreenSnapshot{}, fmt.Errorf("capture race fixture: %w", captureErr)
@@ -155,10 +193,11 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 		}
 		return snapshot, nil
 	}
-	if raceResult, err := New(raceOptions).RunOnce(ctx); err != nil || raceResult.Degraded {
-		t.Fatalf("real tmux race reconciliation = %#v, %v", raceResult, err)
-	}
-	sessions, err = store.List(ctx, registry.Filter{})
+}
+
+func assertIntegrationsWonRace(t *testing.T, ctx context.Context, store *registry.Journal) {
+	t.Helper()
+	sessions, err := store.List(ctx, registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}

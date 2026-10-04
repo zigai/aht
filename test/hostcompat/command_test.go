@@ -23,7 +23,7 @@ func buildCompatibilityOracle(t *testing.T) string {
 	oracle := filepath.Join(t.TempDir(), "aht-compat-oracle")
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	command := exec.Command("go", "build", "-ldflags", "-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle", "-o", oracle, ".")
+	command := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle", "-o", oracle, ".")
 	command.Dir = filepath.Clean(filepath.Join(sourceDirectory(), "..", ".."))
 	if output, err := compatibilityOutput(ctx, command); err != nil {
 		t.Fatalf("building compatibility oracle: %v\n%s", err, output)
@@ -31,9 +31,9 @@ func buildCompatibilityOracle(t *testing.T) string {
 	return oracle
 }
 
-func stageCompatibilityOracle(t *testing.T, oracle, target string) {
+func copyExecutable(t *testing.T, sourcePath, target string) {
 	t.Helper()
-	source, err := os.Open(oracle)
+	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +88,11 @@ func runCompatibilityCommand(ctx context.Context, command *exec.Cmd) error {
 	}
 	// A successful leader may still leave children holding its output pipes.
 	return errors.Join(waitErr, killCompatibilityGroup(command))
+}
+
+func cancelWithCompatibilityGroup(command *exec.Cmd) {
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error { return killCompatibilityGroup(command) }
 }
 
 func killCompatibilityGroup(command *exec.Cmd) error {

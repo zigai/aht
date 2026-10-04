@@ -4,7 +4,6 @@ package hostcompat
 
 import (
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +20,7 @@ import (
 // path does: docs/user-guide/03-keyboard-shortcuts.md documents Esc cancellation
 // and double Ctrl+Q quit; 10-hooks.md documents SessionEnd and shutdown Stop.
 // Keep the first main provider response held through cancellation and quitting.
-func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
+func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil && os.Getenv("AHT_TEST_TMUX_EXECUTABLE") == "" {
 		t.Fatal("Grok native interruption requires tmux")
@@ -32,33 +31,10 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer source.Close()
 	nativePath := filepath.Join(host.root, "grok-native")
-	destination, err := os.OpenFile(nativePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, copyErr := io.Copy(destination, source)
-	closeErr := destination.Close()
-	if copyErr != nil {
-		t.Fatal(copyErr)
-	}
-	if closeErr != nil {
-		t.Fatal(closeErr)
-	}
+	copyExecutable(t, sourcePath, nativePath)
 
 	pane := host.startGrokPane(t, command, nativePath)
-	capture := func() string {
-		out, err := pane.Capture(t.Context(), gotmux.CaptureOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(out)
-	}
 	t.Cleanup(func() {
 		if t.Failed() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -79,16 +55,36 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		t.Fatal("native Grok did not reach its first active provider request")
 	}
 	host.waitForActiveSession(t)
+	cancelAndQuitGrok(t, pane)
+	waitForGrokExit(t, pane)
+	if count := len(host.provider.Requests()); count != 1 {
+		t.Fatalf("interrupted native Grok sent %d model requests, want one held request", count)
+	}
+	// Process exit is only cleanup evidence; the shared caller still requires
+	// SessionEnd from the installed native hook integration.
+}
+
+func captureGrokPane(t *testing.T, pane gotmux.Pane) string {
+	t.Helper()
+	out, err := pane.Capture(t.Context(), gotmux.CaptureOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func cancelAndQuitGrok(t *testing.T, pane gotmux.Pane) {
+	t.Helper()
 	if err := pane.SendKeys(t.Context(), gotmux.KeyEscape); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	beforeQuit := capture()
+	beforeQuit := captureGrokPane(t, pane)
 	if err := pane.SendKeys(t.Context(), gotmux.Key("C-q")); err != nil {
 		t.Fatal(err)
 	}
 	confirmationDeadline := time.Now().Add(800 * time.Millisecond)
-	for capture() == beforeQuit {
+	for captureGrokPane(t, pane) == beforeQuit {
 		if time.Now().After(confirmationDeadline) {
 			t.Fatal("native Grok did not present quit confirmation")
 		}
@@ -97,6 +93,10 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	if err := pane.SendKeys(t.Context(), gotmux.Key("C-q")); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func waitForGrokExit(t *testing.T, pane gotmux.Pane) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		state, err := pane.Info(t.Context())
@@ -114,21 +114,16 @@ func (host isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 			if !known {
 				t.Log("native Grok pane has no reported exit status; checking SessionEnd")
 			}
-			break
+			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("native Grok did not quit within 15s: dead=%t status=%v", state.Dead, state.DeadStatus)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	if count := len(host.provider.Requests()); count != 1 {
-		t.Fatalf("interrupted native Grok sent %d model requests, want one held request", count)
-	}
-	// Process exit is only cleanup evidence; the shared caller still requires
-	// SessionEnd from the installed native hook integration.
 }
 
-func (host isolatedHost) startGrokPane(t *testing.T, command *exec.Cmd, nativePath string) gotmux.Pane {
+func (host *isolatedHost) startGrokPane(t *testing.T, command *exec.Cmd, nativePath string) gotmux.Pane {
 	t.Helper()
 	server := testtmux.New(t, gotmux.NewSessionOptions{
 		Name: "grok", Size: gotmux.Size{Width: 160, Height: 45}, Program: gotmux.Exec("/bin/sh"),

@@ -43,16 +43,8 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 			// are unavailable or the caller is outside tmux.
 			ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
 		})
-		if err == nil {
-			for _, pane := range panes {
-				if pane.Location.SessionName != "discovery" || filepath.Base(pane.Location.ServerID) != name {
-					continue
-				}
-				if pane.Location.ServerID == "-L:"+name || !filepath.IsAbs(pane.Location.ServerID) {
-					t.Fatalf("named server identity was not canonical: %#v", pane)
-				}
-				return
-			}
+		if err == nil && namedDiscoveryPaneFound(t, panes, name) {
+			return
 		}
 		select {
 		case <-ctx.Done():
@@ -60,6 +52,20 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func namedDiscoveryPaneFound(t *testing.T, panes []Pane, name string) bool {
+	t.Helper()
+	for _, pane := range panes {
+		if pane.Location.SessionName != "discovery" || filepath.Base(pane.Location.ServerID) != name {
+			continue
+		}
+		if pane.Location.ServerID == "-L:"+name || !filepath.IsAbs(pane.Location.ServerID) {
+			t.Fatalf("named server identity was not canonical: %#v", pane)
+		}
+		return true
+	}
+	return false
 }
 
 func TestListPanesDiscoversCustomSocketFallback(t *testing.T) {

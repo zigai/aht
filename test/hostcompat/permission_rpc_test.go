@@ -54,7 +54,7 @@ const piPermissionGate = `export default function (pi) {
 }
 `
 
-func runPiPermission(t *testing.T, host isolatedHost, allow bool) {
+func runPiPermission(t *testing.T, host *isolatedHost, allow bool) {
 	t.Helper()
 	configured, setup := host.lifecycleCommand(t)
 	if len(setup) != 0 {
@@ -62,23 +62,13 @@ func runPiPermission(t *testing.T, host isolatedHost, allow bool) {
 	}
 	gate := filepath.Join(host.root, "permission-gate.ts")
 	host.writeFile(t, gate, piPermissionGate)
-	cmd := host.command(configured.Env, "--mode", "rpc", "--provider", "aht-compat", "--model", "compat", "--extension", gate)
+	cmd := host.command(t, configured.Env, "--mode", "rpc", "--provider", "aht-compat", "--model", "compat", "--extension", gate)
 	input, next := permissionJSONPipes(t, cmd)
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "permission-prompt", "type": "prompt", "message": compatibilityPrompt})
-	var request map[string]any
-	for {
-		frame := next()
-		if frame["type"] == "agent_end" {
-			t.Fatal("Pi completed without requesting permission")
-		}
-		if frame["type"] == "extension_ui_request" && frame["method"] == "confirm" {
-			if frame["title"] != "AHT compatibility permission" {
-				t.Fatalf("unexpected Pi confirmation: %v", frame)
-			}
-			request = frame
-			break
-		}
+	request := awaitRPCApprovalRequest(t, next, "Pi", "confirm")
+	if request["title"] != "AHT compatibility permission" {
+		t.Fatalf("unexpected Pi confirmation: %v", request)
 	}
 	id, ok := request["id"].(string)
 	if !ok || id == "" {
@@ -86,15 +76,7 @@ func runPiPermission(t *testing.T, host isolatedHost, allow bool) {
 	}
 	waiting := assertPermissionWaiting(t, host)
 	sendPermissionJSON(t, input, map[string]any{"type": "extension_ui_response", "id": id, "confirmed": allow})
-	for {
-		frame := next()
-		if frame["type"] == "extension_ui_request" && frame["method"] == "confirm" {
-			t.Fatal("Pi requested a second permission for a single tool call")
-		}
-		if frame["type"] == "agent_end" && frame["willRetry"] != true {
-			break
-		}
-	}
+	awaitRPCRunEnd(t, next, "Pi", "confirm", func(frame map[string]any) bool { return frame["willRetry"] != true })
 	assertPermissionOutcome(t, host, waiting, allow)
 	sendPermissionJSON(t, input, map[string]any{"id": "permission-exit", "type": "prompt", "message": "/aht-permission-exit"})
 	process.wait(t)
@@ -125,70 +107,64 @@ func permissionJSONPipes(t *testing.T, cmd *exec.Cmd) (*os.File, func() map[stri
 	}
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
-	remaining := 16 << 20
-	deadline := time.Now().Add(45 * time.Second)
-	return input, func() map[string]any {
-		t.Helper()
-		if err := output.SetReadDeadline(deadline); err != nil {
-			t.Fatal(err)
-		}
-		if !scanner.Scan() {
-			err := scanner.Err()
-			if err == nil {
-				err = io.EOF
-			}
-			t.Fatalf("reading native permission JSONL: %v", err)
-		}
-		remaining -= len(scanner.Bytes())
-		if remaining < 0 {
-			t.Fatal("native permission stream exceeded 16 MiB")
-		}
-		var frame map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil {
-			t.Fatalf("invalid native permission JSONL: %v", err)
-		}
-		if frame["type"] == "extension_error" || (frame["type"] == "response" && frame["success"] == false) || frame["error"] != nil {
-			t.Fatalf("native permission protocol failed: %v", frame)
-		}
-		return frame
+	frames := &jsonlFrames{output: output, scanner: scanner, remaining: 16 << 20, deadline: time.Now().Add(45 * time.Second)}
+	return input, func() map[string]any { return frames.next(t) }
+}
+
+type jsonlFrames struct {
+	output    *os.File
+	scanner   *bufio.Scanner
+	remaining int
+	deadline  time.Time
+}
+
+func (frames *jsonlFrames) next(t *testing.T) map[string]any {
+	t.Helper()
+	if err := frames.output.SetReadDeadline(frames.deadline); err != nil {
+		t.Fatal(err)
 	}
+	if !frames.scanner.Scan() {
+		err := frames.scanner.Err()
+		if err == nil {
+			err = io.EOF
+		}
+		t.Fatalf("reading native permission JSONL: %v", err)
+	}
+	frames.remaining -= len(frames.scanner.Bytes())
+	if frames.remaining < 0 {
+		t.Fatal("native permission stream exceeded 16 MiB")
+	}
+	var frame map[string]any
+	if err := json.Unmarshal(frames.scanner.Bytes(), &frame); err != nil {
+		t.Fatalf("invalid native permission JSONL: %v", err)
+	}
+	if frame["type"] == "extension_error" || (frame["type"] == "response" && frame["success"] == false) || frame["error"] != nil {
+		t.Fatalf("native permission protocol failed: %v", frame)
+	}
+	return frame
 }
 
 // OMP's native approval wrapper calls the RPC-backed select UI and emits
 // tool_approval_requested/resolved around the decision. No policy extension is
 // needed: always-ask gates the built-in shell tool itself.
-func runOmpPermission(t *testing.T, host isolatedHost, allow bool) {
+func runOmpPermission(t *testing.T, host *isolatedHost, allow bool) {
 	t.Helper()
 	configured, setup := host.lifecycleCommand(t)
 	if len(setup) != 0 {
 		t.Fatal("OMP permission driver does not expect setup processes")
 	}
-	args := []string{"--mode", "rpc", "--model", "aht-compat/compat", "--approval-mode", "always-ask"}
 	// Keep the existing fixture's explicit loading of the managed extension;
 	// do not copy its print-mode or auto-approval flags.
-	for index := 1; index+1 < len(configured.Args); index++ {
-		if configured.Args[index] == "--hook" {
-			args = append(args, "--hook", configured.Args[index+1])
-		}
-	}
-	if len(args) == 6 {
+	hooks := hookArguments(configured.Args)
+	if len(hooks) == 0 {
 		t.Fatal("OMP lifecycle command did not specify its managed hook")
 	}
-	cmd := host.command(configured.Env, args...)
+	args := append([]string{"--mode", "rpc", "--model", "aht-compat/compat", "--approval-mode", "always-ask"}, hooks...)
+	cmd := host.command(t, configured.Env, args...)
 	input, next := permissionJSONPipes(t, cmd)
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "permission-prompt", "type": "prompt", "message": compatibilityPrompt})
-	var request map[string]any
-	for {
-		frame := next()
-		if frame["type"] == "agent_end" {
-			t.Fatal("OMP completed without requesting permission")
-		}
-		if frame["type"] == "extension_ui_request" && frame["method"] == "select" {
-			request = frame
-			break
-		}
-	}
+	request := awaitRPCApprovalRequest(t, next, "OMP", "select")
 	title, _ := request["title"].(string)
 	options, _ := request["options"].([]any)
 	id, _ := request["id"].(string)
@@ -201,21 +177,49 @@ func runOmpPermission(t *testing.T, host isolatedHost, allow bool) {
 		choice = "Approve"
 	}
 	sendPermissionJSON(t, input, map[string]any{"type": "extension_ui_response", "id": id, "value": choice})
-	for {
-		frame := next()
-		if frame["type"] == "extension_ui_request" && frame["method"] == "select" {
-			t.Fatal("OMP requested a second permission for a single tool call")
-		}
-		if frame["type"] == "agent_end" && frame["isTerminal"] != false {
-			break
-		}
-	}
+	awaitRPCRunEnd(t, next, "OMP", "select", func(frame map[string]any) bool { return frame["isTerminal"] != false })
 	assertPermissionOutcome(t, host, waiting, allow)
 	// OMP documents stdin EOF as a graceful session-disposal boundary.
 	if err := input.Close(); err != nil {
 		t.Fatal(err)
 	}
 	process.wait(t)
+}
+
+func hookArguments(args []string) []string {
+	var hooks []string
+	for index := 1; index+1 < len(args); index++ {
+		if args[index] == "--hook" {
+			hooks = append(hooks, "--hook", args[index+1])
+		}
+	}
+	return hooks
+}
+
+func awaitRPCApprovalRequest(t *testing.T, next func() map[string]any, host string, method string) map[string]any {
+	t.Helper()
+	for {
+		frame := next()
+		if frame["type"] == "agent_end" {
+			t.Fatalf("%s completed without requesting permission", host)
+		}
+		if frame["type"] == "extension_ui_request" && frame["method"] == method {
+			return frame
+		}
+	}
+}
+
+func awaitRPCRunEnd(t *testing.T, next func() map[string]any, host string, method string, final func(map[string]any) bool) {
+	t.Helper()
+	for {
+		frame := next()
+		if frame["type"] == "extension_ui_request" && frame["method"] == method {
+			t.Fatalf("%s requested a second permission for a single tool call", host)
+		}
+		if frame["type"] == "agent_end" && final(frame) {
+			return
+		}
+	}
 }
 
 func sendPermissionJSON(t *testing.T, input *os.File, frame any) {

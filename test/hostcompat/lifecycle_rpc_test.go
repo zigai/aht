@@ -11,7 +11,7 @@ import (
 // Pi's RPC agent_settled event is the no-continuation boundary. Closing stdin
 // after that event disposes the native session and awaits session_shutdown;
 // process-observer retirement is not accepted as a substitute.
-func (host isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
+func (host *isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 	input, next := permissionJSONPipes(t, command)
 	process := startPermissionProcess(t, host, command)

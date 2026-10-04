@@ -2,6 +2,9 @@ version: "2"
 
 run:
   timeout: 3m
+  build-tags:
+    - integration
+    - compatibility
 
 formatters:
   enable:

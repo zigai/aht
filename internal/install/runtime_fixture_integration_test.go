@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func runNodeRuntime(t *testing.T, moduleName string, module string, driver strin
 	if strings.HasSuffix(moduleName, ".ts") {
 		args = []string{"--experimental-strip-types", driverPath}
 	}
-	runGeneratedCommand(t, exec.Command("node", args...), "")
+	runGeneratedCommand(t, "", "node", args...)
 }
 
 func writeRuntimeArtifact(t *testing.T, name string, content string) string {
@@ -59,11 +60,11 @@ func writeTestFile(t *testing.T, path string, content string, mode os.FileMode) 
 	}
 }
 
-func runGeneratedCommand(t *testing.T, command *exec.Cmd, stdin string) {
+func runGeneratedCommand(t *testing.T, stdin string, name string, args ...string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	command = exec.CommandContext(ctx, command.Path, command.Args[1:]...)
+	command := exec.CommandContext(ctx, name, args...)
 	command.Env = os.Environ()
 	command.Dir = filepath.Dir(command.Path)
 	command.Stdin = strings.NewReader(stdin)
@@ -133,13 +134,13 @@ func captureBinaryCommand(t *testing.T) string {
 
 func parseCapturedInvocations(content string) [][]string {
 	var invocations [][]string
-	for _, chunk := range strings.Split(content, "---") {
+	for chunk := range strings.SplitSeq(content, "---") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
 		}
 		var args []string
-		for _, line := range strings.Split(chunk, "\n") {
+		for line := range strings.SplitSeq(chunk, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" {
 				args = append(args, line)
@@ -169,31 +170,22 @@ func matchInvocation(args []string, expected []string) bool {
 	for i := idx; i < len(expected); i += 2 {
 		flag := expected[i]
 		if i+1 >= len(expected) {
-			found := false
-			for _, a := range args {
-				if a == flag {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
-			break
+			return slices.Contains(args, flag)
 		}
-		val := expected[i+1]
-		found := false
-		for j := 0; j+1 < len(args); j++ {
-			if args[j] == flag && args[j+1] == val {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !hasFlagValue(args, flag, expected[i+1]) {
 			return false
 		}
 	}
 	return true
+}
+
+func hasFlagValue(args []string, flag string, value string) bool {
+	for j := 0; j+1 < len(args); j++ {
+		if args[j] == flag && args[j+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func requireCapturedArguments(t *testing.T, path string, expected ...string) {

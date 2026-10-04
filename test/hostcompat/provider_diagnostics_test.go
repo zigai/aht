@@ -16,43 +16,53 @@ func providerRequestSummary(provider *scriptedProvider) string {
 	requests := provider.Requests()
 	summary := make([]string, 0, len(requests))
 	for _, request := range requests {
-		body := request.Body
-		var payload map[string]any
-		if json.Unmarshal([]byte(body), &payload) == nil {
-			if tools, exists := payload["tools"].([]any); exists {
-				names := make([]string, 0, len(tools))
-				keys := make([]string, 0, len(payload))
-				for key := range payload {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-				for _, rawTool := range tools {
-					tool, ok := rawTool.(map[string]any)
-					if !ok {
-						continue
-					}
-					if name, ok := tool["name"].(string); ok {
-						names = append(names, name)
-					}
-					if function, ok := tool["function"].(map[string]any); ok {
-						if name, ok := function["name"].(string); ok {
-							names = append(names, name)
-						}
-					}
-				}
-				input := payload["input"]
-				if input == nil {
-					input = payload["messages"]
-				}
-				body = "input_tail=" + summarizeProviderInput(input) + " keys=" + strings.Join(keys, ",") + " tools=" + strings.Join(names, ",")
-			}
-		}
+		body := summarizeProviderBody(request.Body)
 		if len(body) > 2048 {
 			body = body[:2048] + "..."
 		}
 		summary = append(summary, fmt.Sprintf("%s %s %s", request.Method, request.Path, body))
 	}
 	return strings.Join(summary, "\n")
+}
+
+func summarizeProviderBody(body string) string {
+	var payload map[string]any
+	if json.Unmarshal([]byte(body), &payload) != nil {
+		return body
+	}
+	tools, exists := payload["tools"].([]any)
+	if !exists {
+		return body
+	}
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	input := payload["input"]
+	if input == nil {
+		input = payload["messages"]
+	}
+	return "input_tail=" + summarizeProviderInput(input) + " keys=" + strings.Join(keys, ",") + " tools=" + strings.Join(providerToolNames(tools), ",")
+}
+
+func providerToolNames(tools []any) []string {
+	names := make([]string, 0, len(tools))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := tool["name"].(string); ok {
+			names = append(names, name)
+		}
+		if function, ok := tool["function"].(map[string]any); ok {
+			if name, ok := function["name"].(string); ok {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 func summarizeProviderInput(value any) string {

@@ -23,125 +23,139 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 			name = "allow"
 		}
 		t.Run(name, func(t *testing.T) {
-			host := newPermissionHost(t, contract, oracle, allow)
-			configured, setup := host.lifecycleCommand(t)
-			if len(setup) != 0 {
-				t.Fatal("unexpected Python host setup commands")
-			}
-			var command *exec.Cmd
-			switch contract.ID {
-			case registry.Harness("kimi-code"):
-				command = host.kimiWireCommand(t, configured.Env, []string{"--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2"})
-			case registry.Harness("hermes"):
-				command = host.command(configured.Env, "acp", "--accept-hooks")
-			default:
-				t.Fatalf("unsupported Python permission host %s", contract.ID)
-			}
-			wire := newPythonPermissionWire(t, command)
-			process := startPermissionProcess(t, host, command)
-			promptMethod := "prompt"
-			promptParams := map[string]any{"user_input": compatibilityPrompt}
-			sessionID := ""
-			if contract.ID == registry.Harness("kimi-code") {
-				// Kimi's root approval hub suppresses requests until initialize.
-				// No external tools or hook subscriptions are needed.
-				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocol_version": "1.10", "client": map[string]any{"name": "aht-compat", "version": "1"}}})
-				wire.response(t, "initialize")
-			}
-			if contract.ID == registry.Harness("hermes") {
-				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
-				wire.response(t, "initialize")
-				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.work, "mcpServers": []any{}}})
-				created := wire.response(t, "new")
-				var session struct {
-					SessionID string `json:"sessionId"`
-				}
-				if err := json.Unmarshal(created.Result, &session); err != nil || session.SessionID == "" {
-					t.Fatalf("Hermes ACP returned invalid session: %s (%v)", created.Result, err)
-				}
-				sessionID = session.SessionID
-				promptMethod = "session/prompt"
-				promptParams = map[string]any{"sessionId": sessionID, "prompt": []any{map[string]any{"type": "text", "text": compatibilityPrompt}}}
-			}
-			wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": promptMethod, "params": promptParams})
-			for {
-				message := wire.read(t)
-				if message.Method == "event" || message.Method == "session/update" {
-					continue
-				}
-				if len(message.Error) != 0 {
-					t.Fatalf("native permission RPC error: %s", message.Error)
-				}
-				var result any
-				if contract.ID == registry.Harness("kimi-code") {
-					var request struct {
-						Type    string `json:"type"`
-						Payload struct {
-							ID         string `json:"id"`
-							Sender     string `json:"sender"`
-							ToolCallID string `json:"tool_call_id"`
-						} `json:"payload"`
-					}
-					if err := json.Unmarshal(message.Params, &request); err != nil || message.Method != "request" || request.Type != "ApprovalRequest" || request.Payload.ID == "" || request.Payload.Sender != "Shell" || request.Payload.ToolCallID == "" {
-						t.Fatalf("expected native Kimi Shell approval, got %+v (%v)", message, err)
-					}
-					choice := "reject"
-					if allow {
-						choice = "approve"
-					}
-					result = map[string]any{"request_id": request.Payload.ID, "response": choice}
-				} else {
-					var request struct {
-						SessionID string `json:"sessionId"`
-						Options   []struct {
-							OptionID string `json:"optionId"`
-							Kind     string `json:"kind"`
-						} `json:"options"`
-					}
-					if err := json.Unmarshal(message.Params, &request); err != nil || message.Method != "session/request_permission" || request.SessionID != sessionID {
-						t.Fatalf("expected native Hermes session permission, got %+v (%v)", message, err)
-					}
-					kind := "reject_once"
-					if allow {
-						kind = "allow_once"
-					}
-					optionID := ""
-					for _, option := range request.Options {
-						if option.Kind == kind {
-							optionID = option.OptionID
-							break
-						}
-					}
-					if optionID == "" {
-						t.Fatalf("Hermes did not offer %s", kind)
-					}
-					result = map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}}
-				}
-				if len(message.ID) == 0 || string(message.ID) == "null" {
-					t.Fatal("approval request has no response ID")
-				}
-				waiting := assertPermissionWaiting(t, host)
-				wire.send(t, map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result})
-				completed := wire.response(t, "prompt")
-				var finish struct {
-					Status     string `json:"status"`
-					StopReason string `json:"stopReason"`
-				}
-				if err := json.Unmarshal(completed.Result, &finish); err != nil {
-					t.Fatal(err)
-				}
-				if contract.ID == registry.Harness("kimi-code") && finish.Status != "finished" || contract.ID == registry.Harness("hermes") && finish.StopReason != "end_turn" {
-					t.Fatalf("native permission turn did not finish: %s", completed.Result)
-				}
-				assertPermissionOutcome(t, host, waiting, allow)
-				if err := wire.input.Close(); err != nil {
-					t.Fatal(err)
-				}
-				process.wait(t)
-				break
-			}
+			runPythonPermission(t, contract, oracle, allow)
 		})
 	}
+}
+
+func runPythonPermission(t *testing.T, contract hostContract, oracle string, allow bool) {
+	t.Helper()
+	host := newPermissionHost(t, contract, oracle, allow)
+	configured, setup := host.lifecycleCommand(t)
+	if len(setup) != 0 {
+		t.Fatal("unexpected Python host setup commands")
+	}
+	command := pythonPermissionCommand(t, host, configured.Env)
+	wire := newPythonPermissionWire(t, command)
+	process := startPermissionProcess(t, host, command)
+	sessionID, promptMethod, promptParams := openPythonPermissionSession(t, host, wire)
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": promptMethod, "params": promptParams})
+	message := wire.request(t)
+	var result any
+	if contract.ID == registry.Harness("kimi-code") {
+		result = kimiApprovalResult(t, message, allow)
+	} else {
+		result = hermesApprovalResult(t, message, sessionID, allow)
+	}
+	if len(message.ID) == 0 || string(message.ID) == "null" {
+		t.Fatal("approval request has no response ID")
+	}
+	waiting := assertPermissionWaiting(t, host)
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result})
+	requirePythonTurnFinished(t, contract.ID, wire.response(t, "prompt"))
+	assertPermissionOutcome(t, host, waiting, allow)
+	if err := wire.input.Close(); err != nil {
+		t.Fatal(err)
+	}
+	process.wait(t)
+}
+
+func pythonPermissionCommand(t *testing.T, host *isolatedHost, env []string) *exec.Cmd {
+	t.Helper()
+	switch host.contract.ID {
+	case registry.Harness("kimi-code"):
+		return host.kimiWireCommand(t, env, []string{"--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2"})
+	case registry.Harness("hermes"):
+		return host.command(t, env, "acp", "--accept-hooks")
+	default:
+		t.Fatalf("unsupported Python permission host %s", host.contract.ID)
+		return nil
+	}
+}
+
+func requirePythonTurnFinished(t *testing.T, id registry.Harness, completed pythonPermissionMessage) {
+	t.Helper()
+	var finish struct {
+		Status     string `json:"status"`
+		StopReason string `json:"stopReason"` //nolint:tagliatelle // ACP wire field.
+	}
+	if err := json.Unmarshal(completed.Result, &finish); err != nil {
+		t.Fatal(err)
+	}
+	if id == registry.Harness("kimi-code") && finish.Status != "finished" || id == registry.Harness("hermes") && finish.StopReason != "end_turn" {
+		t.Fatalf("native permission turn did not finish: %s", completed.Result)
+	}
+}
+
+func openPythonPermissionSession(t *testing.T, host *isolatedHost, wire *pythonPermissionWire) (string, string, map[string]any) {
+	t.Helper()
+	if host.contract.ID == registry.Harness("kimi-code") {
+		// Kimi's root approval hub suppresses requests until initialize.
+		// No external tools or hook subscriptions are needed.
+		wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocol_version": "1.10", "client": map[string]any{"name": "aht-compat", "version": "1"}}})
+		wire.response(t, "initialize")
+		return "", "prompt", map[string]any{"user_input": compatibilityPrompt}
+	}
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
+	wire.response(t, "initialize")
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.work, "mcpServers": []any{}}})
+	created := wire.response(t, "new")
+	var session struct {
+		SessionID string `json:"sessionId"` //nolint:tagliatelle // ACP wire field.
+	}
+	if err := json.Unmarshal(created.Result, &session); err != nil || session.SessionID == "" {
+		t.Fatalf("Hermes ACP returned invalid session: %s (%v)", created.Result, err)
+	}
+	return session.SessionID, "session/prompt", map[string]any{"sessionId": session.SessionID, "prompt": []any{map[string]any{"type": "text", "text": compatibilityPrompt}}}
+}
+
+func kimiApprovalResult(t *testing.T, message pythonPermissionMessage, allow bool) map[string]any {
+	t.Helper()
+	var request struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ID         string `json:"id"`
+			Sender     string `json:"sender"`
+			ToolCallID string `json:"tool_call_id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(message.Params, &request); err != nil || message.Method != "request" || request.Type != "ApprovalRequest" || request.Payload.ID == "" || request.Payload.Sender != "Shell" || request.Payload.ToolCallID == "" {
+		t.Fatalf("expected native Kimi Shell approval, got %+v (%v)", message, err)
+	}
+	choice := "reject"
+	if allow {
+		choice = "approve"
+	}
+	return map[string]any{"request_id": request.Payload.ID, "response": choice}
+}
+
+func hermesApprovalResult(t *testing.T, message pythonPermissionMessage, sessionID string, allow bool) map[string]any {
+	t.Helper()
+	var request struct {
+		SessionID string `json:"sessionId"` //nolint:tagliatelle // ACP wire field.
+		Options   []struct {
+			OptionID string `json:"optionId"` //nolint:tagliatelle // ACP wire field.
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(message.Params, &request); err != nil || message.Method != "session/request_permission" || request.SessionID != sessionID {
+		t.Fatalf("expected native Hermes session permission, got %+v (%v)", message, err)
+	}
+	kind := "reject_once"
+	if allow {
+		kind = "allow_once"
+	}
+	for _, option := range request.Options {
+		if option.Kind != kind {
+			continue
+		}
+		if option.OptionID == "" {
+			break
+		}
+		return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}
+	}
+	t.Fatalf("Hermes did not offer %s", kind)
+	return nil
 }
 
 type pythonPermissionMessage struct {
@@ -208,7 +222,7 @@ func (wire *pythonPermissionWire) read(t *testing.T) pythonPermissionMessage {
 	return message
 }
 
-func (wire *pythonPermissionWire) response(t *testing.T, id string) pythonPermissionMessage {
+func (wire *pythonPermissionWire) request(t *testing.T) pythonPermissionMessage {
 	t.Helper()
 	for {
 		message := wire.read(t)
@@ -218,10 +232,16 @@ func (wire *pythonPermissionWire) response(t *testing.T, id string) pythonPermis
 		if len(message.Error) != 0 {
 			t.Fatalf("native permission RPC error: %s", message.Error)
 		}
-		var responseID string
-		if err := json.Unmarshal(message.ID, &responseID); err != nil || responseID != id || message.Method != "" {
-			t.Fatalf("expected native RPC response %q, got %+v", id, message)
-		}
 		return message
 	}
+}
+
+func (wire *pythonPermissionWire) response(t *testing.T, id string) pythonPermissionMessage {
+	t.Helper()
+	message := wire.request(t)
+	var responseID string
+	if err := json.Unmarshal(message.ID, &responseID); err != nil || responseID != id || message.Method != "" {
+		t.Fatalf("expected native RPC response %q, got %+v", id, message)
+	}
+	return message
 }

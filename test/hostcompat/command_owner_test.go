@@ -126,7 +126,7 @@ func compatibilityFixtureCommand(t *testing.T, mode, work string) *exec.Cmd {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-test.run=^TestCompatibilityCommandFixture$")
+	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestCompatibilityCommandFixture$")
 	command.Env = append(isolatedEnvironment(), "AHT_COMPAT_COMMAND_FIXTURE="+mode)
 	command.Dir = work
 	return command

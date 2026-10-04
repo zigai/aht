@@ -4,7 +4,6 @@ package install
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
 		command := generatedCommandHook(t, registry.Harness("claude"))
-		runGeneratedCommand(t, exec.Command("sh", "-c", command), `{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
+		runGeneratedCommand(t, `{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`, "sh", "-c", command)
 		requireCapturedArguments(t, capture.path, "report", "claude", "--activity", "idle")
 	})
 
@@ -33,7 +32,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
 		script := writeRuntimeArtifact(t, "report.sh", generatedArtifactContent(t, registry.Harness("goose"), "scripts/report.sh"))
-		runGeneratedCommand(t, exec.Command("sh", script, "running", "UserPromptSubmit"), `{"session_id":"goose-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
+		runGeneratedCommand(t, `{"session_id":"goose-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`, "sh", script, "running", "UserPromptSubmit")
 		requireCapturedArguments(t, capture.path, "report", "goose", "--activity", "running")
 	})
 
@@ -72,7 +71,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		driver := runtimeScript(t, "python/hermes-session-end.py")
 		driverPath := filepath.Join(dir, "driver.py")
 		writeTestFile(t, driverPath, driver, 0o600)
-		runGeneratedCommand(t, exec.Command("python3", driverPath, modulePath), "")
+		runGeneratedCommand(t, "", "python3", driverPath, modulePath)
 		requireCapturedArguments(t, capture.path, "report", "hermes", "--activity", "failed")
 	})
 
@@ -188,26 +187,31 @@ func TestGeneratedWaitingDetailsAndCorrelatedResolution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var states []string
-			for _, invocation := range parseCapturedInvocations(string(data)) {
-				activity, detail := "", ""
-				for i := 0; i+1 < len(invocation); i++ {
-					switch invocation[i] {
-					case "--activity":
-						activity = invocation[i+1]
-					case "--detail":
-						detail = invocation[i+1]
-					}
-				}
-				if activity != "" {
-					states = append(states, activity+":"+detail)
-				}
-			}
+			states := capturedActivityStates(parseCapturedInvocations(string(data)))
 			if strings.Join(states, ",") != strings.Join(expected, ",") {
 				t.Fatalf("generated states = %v, want %v", states, expected)
 			}
 		})
 	}
+}
+
+func capturedActivityStates(invocations [][]string) []string {
+	var states []string
+	for _, invocation := range invocations {
+		activity, detail := "", ""
+		for i := 0; i+1 < len(invocation); i++ {
+			switch invocation[i] {
+			case "--activity":
+				activity = invocation[i+1]
+			case "--detail":
+				detail = invocation[i+1]
+			}
+		}
+		if activity != "" {
+			states = append(states, activity+":"+detail)
+		}
+	}
+	return states
 }
 
 func TestAmpTitleReportsMetadataWithoutReplacingWaitingEvidence(t *testing.T) {

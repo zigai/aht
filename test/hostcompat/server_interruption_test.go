@@ -12,7 +12,7 @@ import (
 // The native abort endpoint ends the active turn, not the durable session.
 // https://opencode.ai/docs/server/#sessions
 // https://github.com/Kilo-Org/kilocode/blob/main/packages/sdk/js/src/v2/gen/types.gen.ts
-func (host isolatedHost) runServerInterruption(t *testing.T, env []string) {
+func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	t.Helper()
 	baseURL, client, process := startNativeServer(t, host, env)
 	query := "?directory=" + url.QueryEscape(host.work)

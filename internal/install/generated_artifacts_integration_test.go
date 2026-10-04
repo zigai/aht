@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -29,7 +28,6 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 	artifacts := collectGeneratedArtifacts(t, captureBinary(t))
 	seenHarnesses := make(map[registry.Harness]bool)
 	for _, artifact := range artifacts {
-		artifact := artifact
 		t.Run(string(artifact.harness)+"/"+strings.ReplaceAll(artifact.path, "/", "_"), func(t *testing.T) {
 			validateGeneratedArtifact(t, artifact)
 		})
@@ -49,39 +47,44 @@ func validateGeneratedArtifact(t *testing.T, artifact generatedArtifact) {
 	if match := unresolvedPlaceholder.FindString(artifact.content); match != "" {
 		t.Fatalf("generated artifact contains unresolved placeholder %q:\n%s", match, artifact.content)
 	}
-	path := strings.ToLower(artifact.path)
-	switch {
-	case strings.HasSuffix(path, ".json"):
+	switch extension := strings.ToLower(filepath.Ext(artifact.path)); extension {
+	case ".json":
 		if !json.Valid([]byte(artifact.content)) {
 			t.Fatalf("invalid generated JSON:\n%s", artifact.content)
 		}
-	case strings.HasSuffix(path, ".toml"):
+	case ".toml":
 		var value map[string]any
 		if err := toml.Unmarshal([]byte(artifact.content), &value); err != nil {
 			t.Fatalf("invalid generated TOML: %v\n%s", err, artifact.content)
 		}
-	case strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml"):
+	case ".yaml", ".yml":
 		var value map[string]any
 		if err := yaml.Unmarshal([]byte(artifact.content), &value); err != nil {
 			t.Fatalf("invalid generated YAML: %v\n%s", err, artifact.content)
 		}
-	case strings.HasSuffix(path, ".ts"):
-		file := writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content)
-		moduleURL := (&url.URL{Scheme: "file", Path: file}).String()
-		runGeneratedCommand(t, exec.Command("node", "--experimental-strip-types", "--eval", "import("+strconv.Quote(moduleURL)+")"), "")
-	case strings.HasSuffix(path, ".js"):
-		file := writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content)
-		runGeneratedCommand(t, exec.Command("node", "--check", file), "")
-	case strings.HasSuffix(path, ".py"):
-		file := writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content)
-		runGeneratedCommand(t, exec.Command("python3", "-m", "py_compile", file), "")
-	case strings.HasSuffix(path, ".sh"):
-		file := writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content)
-		runGeneratedCommand(t, exec.Command("sh", "-n", file), "")
+	case ".ts", ".js", ".py", ".sh":
+		checkGeneratedScriptSyntax(t, extension, writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content))
 	default:
 		if !strings.Contains(artifact.content, harnesspkg.ManagedMarker) {
 			t.Fatalf("unrecognized generated artifact %q lacks managed marker", artifact.path)
 		}
+	}
+}
+
+func checkGeneratedScriptSyntax(t *testing.T, extension string, file string) {
+	t.Helper()
+	switch extension {
+	case ".ts":
+		moduleURL := (&url.URL{Scheme: "file", Path: file}).String()
+		runGeneratedCommand(t, "", "node", "--experimental-strip-types", "--eval", "import("+strconv.Quote(moduleURL)+")")
+	case ".js":
+		runGeneratedCommand(t, "", "node", "--check", file)
+	case ".py":
+		runGeneratedCommand(t, "", "python3", "-m", "py_compile", file)
+	case ".sh":
+		runGeneratedCommand(t, "", "sh", "-n", file)
+	default:
+		t.Fatalf("no syntax check for generated %s file", extension)
 	}
 }
 
@@ -101,39 +104,47 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 		}
 		harness := adapter.Definition().ID
 		for _, action := range installer.InstallPlan(binary.command).Actions {
-			switch plan := action.(type) {
-			case harnesspkg.JSONCommandHooksAction:
-				config := make(map[string]any)
-				applyJSONCommandHooks(harness, plan.Plan)(config)
-				artifacts = append(artifacts, generatedJSONArtifact(t, harness, plan.Plan.Path, config))
-			case harnesspkg.CursorJSONHooksAction:
-				config := make(map[string]any)
-				applyCursorJSONHooks(harness, plan.Plan)(config)
-				artifacts = append(artifacts, generatedJSONArtifact(t, harness, plan.Plan.Path, config))
-			case harnesspkg.ManagedTextBlockAction:
-				artifacts = append(artifacts, generatedArtifact{harness: harness, path: plan.Plan.Path, content: plan.Plan.Block})
-			case harnesspkg.RenderedFileAction:
-				content, err := renderInstallContent(plan.Plan.Content, plan.Plan.JSONContent)
-				if err != nil {
-					t.Fatalf("render %s artifact: %v", harness, err)
-				}
-				artifacts = append(artifacts, generatedArtifact{harness: harness, path: plan.Plan.Path, content: content})
-			case harnesspkg.PluginDirectoryAction:
-				for _, file := range plan.Plan.Files {
-					content, err := renderInstallContent(file.Content, file.JSONContent)
-					if err != nil {
-						t.Fatalf("render %s plugin artifact %s: %v", harness, file.Name, err)
-					}
-					artifacts = append(artifacts, generatedArtifact{harness: harness, path: file.Name, content: content})
-				}
-			case harnesspkg.ShimAction:
-				artifacts = append(artifacts, generatedArtifact{harness: harness, path: string(harness) + ".sh", content: shimScript(binary.command, string(harness), "/usr/bin/true", catalog.IntegrationVersionFor(harness))})
-			default:
-				t.Fatalf("unvalidated install action for %s: %T", harness, action)
-			}
+			artifacts = append(artifacts, generatedActionArtifacts(t, harness, binary, action)...)
 		}
 	}
 	return artifacts
+}
+
+func generatedActionArtifacts(t *testing.T, harness registry.Harness, binary captureExecutable, action harnesspkg.InstallAction) []generatedArtifact {
+	t.Helper()
+	switch plan := action.(type) {
+	case harnesspkg.JSONCommandHooksAction:
+		config := make(map[string]any)
+		applyJSONCommandHooks(harness, plan.Plan)(config)
+		return []generatedArtifact{generatedJSONArtifact(t, harness, plan.Plan.Path, config)}
+	case harnesspkg.CursorJSONHooksAction:
+		config := make(map[string]any)
+		applyCursorJSONHooks(harness, plan.Plan)(config)
+		return []generatedArtifact{generatedJSONArtifact(t, harness, plan.Plan.Path, config)}
+	case harnesspkg.ManagedTextBlockAction:
+		return []generatedArtifact{{harness: harness, path: plan.Plan.Path, content: plan.Plan.Block}}
+	case harnesspkg.RenderedFileAction:
+		content, err := renderInstallContent(plan.Plan.Content, plan.Plan.JSONContent)
+		if err != nil {
+			t.Fatalf("render %s artifact: %v", harness, err)
+		}
+		return []generatedArtifact{{harness: harness, path: plan.Plan.Path, content: content}}
+	case harnesspkg.PluginDirectoryAction:
+		artifacts := make([]generatedArtifact, 0, len(plan.Plan.Files))
+		for _, file := range plan.Plan.Files {
+			content, err := renderInstallContent(file.Content, file.JSONContent)
+			if err != nil {
+				t.Fatalf("render %s plugin artifact %s: %v", harness, file.Name, err)
+			}
+			artifacts = append(artifacts, generatedArtifact{harness: harness, path: file.Name, content: content})
+		}
+		return artifacts
+	case harnesspkg.ShimAction:
+		return []generatedArtifact{{harness: harness, path: string(harness) + ".sh", content: shimScript(binary.command, string(harness), "/usr/bin/true", catalog.IntegrationVersionFor(harness))}}
+	default:
+		t.Fatalf("unvalidated install action for %s: %T", harness, action)
+		return nil
+	}
 }
 
 func generatedJSONArtifact(t *testing.T, harness registry.Harness, path string, value any) generatedArtifact {

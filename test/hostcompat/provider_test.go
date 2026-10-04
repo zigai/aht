@@ -48,7 +48,7 @@ type scriptedProvider struct {
 	expectRejectedTool bool
 }
 
-func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName string, toolArgs map[string]any, marker string) *scriptedProvider { //nolint:unparam // marker varies across build-tag variants (e.g. compatibility tag in current_host_test.go)
+func newScriptedProvider(t *testing.T, protocol providerProtocol, toolName string, toolArgs map[string]any, marker string) *scriptedProvider {
 	t.Helper()
 	provider := &scriptedProvider{
 		protocol: protocol,
@@ -99,7 +99,7 @@ func (provider *scriptedProvider) waitForRelease(request *http.Request, step int
 	}
 }
 
-func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request *http.Request) { //nolint:cyclop,gocognit // The cohesive HTTP protocol state machine is clearer as one handler.
+func (provider *scriptedProvider) serveHTTP(writer http.ResponseWriter, request *http.Request) { //nolint:cyclop // The cohesive HTTP protocol state machine is clearer as one handler.
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 4<<20))
 	if err != nil {
 		http.Error(writer, "invalid request body", http.StatusBadRequest)

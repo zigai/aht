@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// The agent CLI is a Gateway client: signalling it does not cancel the run.
+// The agent CLI is a Gateway client: signaling it does not cancel the run.
 // Resolve the session we created, then abort that exact Gateway-owned session.
 // https://docs.openclaw.ai/gateway/protocol/rpc-session-control
-func (host isolatedHost) interruptOpenClaw(t *testing.T) {
+func (host *isolatedHost) interruptOpenClaw(t *testing.T) {
 	t.Helper()
 	output := host.openclawRPC(t, "sessions.resolve", map[string]any{"sessionId": "aht-compat"})
 	var session struct {
@@ -26,14 +26,14 @@ func (host isolatedHost) interruptOpenClaw(t *testing.T) {
 	var result struct {
 		OK           bool   `json:"ok"`
 		Status       string `json:"status"`
-		AbortedRunID string `json:"abortedRunId"`
+		AbortedRunID string `json:"abortedRunId"` //nolint:tagliatelle // OpenClaw Gateway RPC field.
 	}
 	if err := json.Unmarshal(abortOutput, &result); err != nil || !result.OK || result.Status != "aborted" {
 		t.Fatalf("aborting gateway session: %v; response: %s", err, abortOutput)
 	}
 }
 
-func (host isolatedHost) openclawRPC(t *testing.T, method string, params map[string]any) []byte {
+func (host *isolatedHost) openclawRPC(t *testing.T, method string, params map[string]any) []byte {
 	t.Helper()
 	data, err := json.Marshal(params)
 	if err != nil {
@@ -41,7 +41,7 @@ func (host isolatedHost) openclawRPC(t *testing.T, method string, params map[str
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	command := exec.Command(host.hostPath, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
+	command := exec.CommandContext(ctx, host.hostPath, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
 	command.Env = host.env
 	command.Dir = host.work
 	output, err := compatibilityOutput(ctx, command)

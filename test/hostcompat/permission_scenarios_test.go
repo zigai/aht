@@ -35,7 +35,7 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 	}
 }
 
-func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow bool) isolatedHost {
+func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow bool) *isolatedHost {
 	t.Helper()
 	host := newIsolatedHost(t, contract, oracle)
 	host.installIntegration(t)
@@ -57,7 +57,7 @@ func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow
 	return host
 }
 
-func assertPermissionWaiting(t *testing.T, host isolatedHost) registry.Session {
+func assertPermissionWaiting(t *testing.T, host *isolatedHost) registry.Session {
 	t.Helper()
 	waiting := host.waitForObservation(t, "live native permission wait before tool execution", func(session registry.Session) bool {
 		native := session.Observations.Native
@@ -75,7 +75,7 @@ func assertPermissionWaiting(t *testing.T, host isolatedHost) registry.Session {
 	return waiting
 }
 
-func assertPermissionOutcome(t *testing.T, host isolatedHost, waiting registry.Session, allow bool) {
+func assertPermissionOutcome(t *testing.T, host *isolatedHost, waiting registry.Session, allow bool) {
 	t.Helper()
 	host.waitForObservation(t, "same native session leaving permission wait", func(session registry.Session) bool {
 		native := session.Observations.Native
@@ -96,7 +96,7 @@ func assertPermissionOutcome(t *testing.T, host isolatedHost, waiting registry.S
 	}
 }
 
-func assertPermissionMarker(t *testing.T, host isolatedHost, exists bool) {
+func assertPermissionMarker(t *testing.T, host *isolatedHost, exists bool) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(host.work, permissionMarker))
 	if !exists {
@@ -116,7 +116,7 @@ type permissionProcess struct {
 	err     error
 }
 
-func startPermissionProcess(t *testing.T, host isolatedHost, command *exec.Cmd) *permissionProcess {
+func startPermissionProcess(t *testing.T, host *isolatedHost, command *exec.Cmd) *permissionProcess {
 	t.Helper()
 	logFile, err := os.CreateTemp(host.root, "permission-*.log")
 	if err != nil {
@@ -131,6 +131,7 @@ func startPermissionProcess(t *testing.T, host isolatedHost, command *exec.Cmd) 
 	if command.SysProcAttr == nil {
 		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
+	command.Cancel = func() error { return syscall.Kill(-command.Process.Pid, syscall.SIGTERM) }
 	command.WaitDelay = compatibilityWaitDelay
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
@@ -143,38 +144,49 @@ func startPermissionProcess(t *testing.T, host isolatedHost, command *exec.Cmd) 
 		close(done)
 	}()
 	t.Cleanup(func() {
-		select {
-		case <-done:
-		default:
-			// A production transport owns a separate native process group.
-			// Let its signal handler reap that group before forcing this one down.
-			_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
-			select {
-			case <-done:
-			case <-time.After(4 * time.Second):
-			}
-		}
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Error("permission host was not reaped after killing its owned process group")
-		}
+		process.stopOwnedGroup(t)
 		_ = logFile.Close()
 		if t.Failed() {
-			log, _ := os.ReadFile(logFile.Name())
-			events, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
-			t.Logf("isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s", log, events, providerRequestSummary(host.provider))
-			// Cleanup runs after t.Context is canceled. This diagnostic owns a
-			// fresh, short budget and must never replace the scenario failure.
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
-			observed, probeErr := host.sessions(ctx)
-			cancel()
-			sessions, _ := json.MarshalIndent(observed, "", "  ")
-			t.Logf("owned launcher PID=%d; isolated native session state (probe error: %v):\n%s", command.Process.Pid, probeErr, sessions)
+			logPermissionFailure(t, host, logFile.Name(), command.Process.Pid)
 		}
 	})
 	return process
+}
+
+func (process *permissionProcess) stopOwnedGroup(t *testing.T) {
+	t.Helper()
+	pid := process.command.Process.Pid
+	select {
+	case <-process.done:
+	default:
+		// A production transport owns a separate native process group.
+		// Let its signal handler reap that group before forcing this one down.
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		select {
+		case <-process.done:
+		case <-time.After(4 * time.Second):
+		}
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	select {
+	case <-process.done:
+	case <-time.After(5 * time.Second):
+		t.Error("permission host was not reaped after killing its owned process group")
+	}
+}
+
+func logPermissionFailure(t *testing.T, host *isolatedHost, logPath string, pid int) {
+	t.Helper()
+	log, _ := os.ReadFile(logPath)
+	events, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
+	t.Logf("isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s", log, events, providerRequestSummary(host.provider))
+	// Cleanup runs after t.Context is canceled. This diagnostic owns a
+	// fresh, short budget and must never replace the scenario failure.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
+	observed, probeErr := host.sessions(ctx)
+	cancel()
+	sessions, encodeErr := json.MarshalIndent(observed, "", "  ")
+	t.Logf("owned launcher PID=%d; isolated native session state (probe error: %v, encode error: %v):\n%s", pid, probeErr, encodeErr, sessions)
 }
 
 func (process *permissionProcess) waitErr() error {

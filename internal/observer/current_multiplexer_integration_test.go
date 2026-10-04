@@ -42,7 +42,7 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 		harness.ShellQuote(zellijBinary), "--config-dir", harness.ShellQuote(configDir),
 		"--session", harness.ShellQuote(session),
 	}, " ")
-	process := exec.Command(script, "-q", "-c", commandLine, logPath)
+	process := exec.CommandContext(t.Context(), script, "-q", "-c", commandLine, logPath)
 	process.Stdout = logFile
 	process.Stderr = logFile
 	stdin, err := process.StdinPipe()
@@ -72,7 +72,7 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 
 	waitForCommandSuccess(t, 15*time.Second, zellijBinary, "--config-dir", configDir, "--session", session, "action", "list-panes", "--all", "--json")
 	marker := "AHT_ZELLIJ_CURRENT_VERSION_CAPTURE"
-	run := exec.Command(zellijBinary, "--config-dir", configDir, "--session", session, "run", "--", "sh", "-c", "printf '%s\\n' "+harness.ShellQuote(marker)+"; sleep 30")
+	run := exec.CommandContext(t.Context(), zellijBinary, "--config-dir", configDir, "--session", session, "run", "--", "sh", "-c", "printf '%s\\n' "+harness.ShellQuote(marker)+"; sleep 30")
 	output, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("create Zellij test pane: %v\n%s\n%s", err, output, readProbeLog(logPath))
@@ -80,9 +80,7 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerZellij, session, strings.TrimSpace(string(output)), func(ctx context.Context) ([]mux.Pane, error) {
-		return zellij.ListPanes(ctx)
-	})
+	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerZellij, session, strings.TrimSpace(string(output)), zellij.ListPanes)
 	waitForPaneCapture(t, ctx, pane, marker, zellij.CapturePane)
 }
 
@@ -90,7 +88,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	herdrBinary := requireDeclaredMultiplexer(t, "herdr")
 
 	session := fmt.Sprintf("aht-herdr-%d", time.Now().UnixNano())
-	home, err := os.MkdirTemp("/tmp", "aht-herdr-home-")
+	home, err := os.MkdirTemp("/tmp", "aht-herdr-home-") //nolint:usetesting // reason: Herdr socket paths under t.TempDir exceed the Unix socket path limit; cleanup is registered below.
 	if err != nil {
 		t.Fatalf("create short Herdr home: %v", err)
 	}
@@ -102,7 +100,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Herdr log: %v", err)
 	}
-	process := exec.Command(herdrBinary, "server")
+	process := exec.CommandContext(t.Context(), herdrBinary, "server")
 	process.Stdout = logFile
 	process.Stderr = logFile
 	if err := process.Start(); err != nil {
@@ -123,7 +121,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	})
 
 	waitForCommandSuccess(t, 10*time.Second, herdrBinary, "api", "snapshot")
-	workspace := exec.Command(herdrBinary, "workspace", "create", "--cwd", t.TempDir(), "--label", "aht-test", "--no-focus")
+	workspace := exec.CommandContext(t.Context(), herdrBinary, "workspace", "create", "--cwd", t.TempDir(), "--label", "aht-test", "--no-focus")
 	workspace.Env = os.Environ()
 	output, err := workspace.CombinedOutput()
 	if err != nil {
@@ -132,11 +130,9 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerHerdr, session, "", func(ctx context.Context) ([]mux.Pane, error) {
-		return herdr.ListPanes(ctx)
-	})
+	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerHerdr, session, "", herdr.ListPanes)
 	marker := "AHT_HERDR_CURRENT_VERSION_CAPTURE"
-	run := exec.Command(herdrBinary, "pane", "run", pane.Location.PaneID, "printf '%s\\n' "+harness.ShellQuote(marker))
+	run := exec.CommandContext(t.Context(), herdrBinary, "pane", "run", pane.Location.PaneID, "printf '%s\\n' "+harness.ShellQuote(marker))
 	run.Env = os.Environ()
 	output, err = run.CombinedOutput()
 	if err != nil {

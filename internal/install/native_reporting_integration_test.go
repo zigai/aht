@@ -118,7 +118,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 			writeTestFile(t, filepath.Join(dir, "extension.ts"), artifact.content, 0o600)
 		}
 	}
-	runReportingDriver(t, "node", dir, runtimeScript(t, "node/omp-queued-reports.mjs"), capture, "session_shutdown")
+	runReportingDriver(t, reportingFixture{tool: "node", terminal: "session_shutdown", driver: runtimeScript(t, "node/omp-queued-reports.mjs")}, dir, capture)
 	records := readReportingRecords(t, capture)
 	want := [][]string{
 		{"--lifecycle", "start", "--session-id", "original"},

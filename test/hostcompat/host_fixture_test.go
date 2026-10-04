@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +34,7 @@ type isolatedHost struct {
 	interrupt bool
 }
 
-func newIsolatedHost(t *testing.T, contract hostContract, oracle string) isolatedHost {
+func newIsolatedHost(t *testing.T, contract hostContract, oracle string) *isolatedHost {
 	t.Helper()
 
 	hostPath, err := exec.LookPath(contract.Executable)
@@ -51,7 +53,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string) isolate
 	if err := os.MkdirAll(filepath.Dir(aht), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stageCompatibilityOracle(t, oracle, aht+".real")
+	copyExecutable(t, oracle, aht+".real")
 
 	writeObservationLauncher(t, aht, filepath.Join(root, "native-events"))
 	env := isolatedEnvironment()
@@ -80,7 +82,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string) isolate
 		"HERMES_HOME="+filepath.Join(root, "hermes"),
 	)
 
-	return isolatedHost{
+	return &isolatedHost{
 		root: root, home: home, work: work, store: filepath.Join(root, "sessions.json"),
 		aht: aht, hostPath: hostPath, env: env, contract: contract, provider: nil,
 	}
@@ -94,12 +96,12 @@ func sourceDirectory() string {
 	return filepath.Dir(file)
 }
 
-func (host isolatedHost) installIntegration(t *testing.T) {
+func (host *isolatedHost) installIntegration(t *testing.T) {
 	t.Helper()
 	host.mustRunAHT(t, "manage", "integrations", "install", string(host.contract.ID), "--binary", host.aht)
 }
 
-func (host isolatedHost) assertIntegrationCurrent(t *testing.T) {
+func (host *isolatedHost) assertIntegrationCurrent(t *testing.T) {
 	t.Helper()
 	output := host.mustRunAHT(t, "--json", "manage", "integrations", "status", string(host.contract.ID), "--binary", host.aht)
 	var statuses []struct {
@@ -113,31 +115,69 @@ func (host isolatedHost) assertIntegrationCurrent(t *testing.T) {
 		t.Fatalf("installed integration is not current:\n%s", output)
 	}
 	for _, path := range statuses[0].Paths {
-		found := false
-		_ = filepath.Walk(path, func(candidate string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil || info.IsDir() {
-				return nil
-			}
-			content, readErr := os.ReadFile(candidate)
-			if readErr == nil && bytes.Contains(content, []byte(host.aht)) {
-				found = true
-			}
-			return nil
-		})
-		if found {
+		if pathReferences(t, path, []byte(host.aht)) {
 			return
 		}
 	}
 	t.Fatalf("current integration does not reference compatibility oracle %s:\n%s", host.aht, output)
 }
 
-func (host isolatedHost) assertVersion(t *testing.T) {
+func pathReferences(t *testing.T, path string, needle []byte) bool {
 	t.Helper()
-	command := exec.Command(host.hostPath, host.contract.VersionArgs...)
-	command.Env = host.env
-	command.Dir = host.work
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("inspect integration path %s: %v", path, err)
+	}
+	if !info.IsDir() {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read integration file %s: %v", path, err)
+		}
+		return bytes.Contains(content, needle)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		t.Fatalf("open integration directory %s: %v", path, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	found := false
+	err = fs.WalkDir(root.FS(), ".", func(candidate string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		content, err := root.ReadFile(candidate)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", candidate, err)
+		}
+		if bytes.Contains(content, needle) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("search integration directory %s: %v", path, err)
+	}
+	return found
+}
+
+func (host *isolatedHost) assertVersion(t *testing.T) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
+	command := exec.CommandContext(ctx, host.hostPath, host.contract.VersionArgs...)
+	command.Env = host.env
+	command.Dir = host.work
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -152,19 +192,19 @@ func (host isolatedHost) assertVersion(t *testing.T) {
 	t.Logf("current %s: %s", host.contract.ID, bytes.TrimSpace(output))
 }
 
-func (host isolatedHost) startTracker(t *testing.T) {
+func (host *isolatedHost) startTracker(t *testing.T) {
 	t.Helper()
 
 	logFile, err := os.Create(filepath.Join(host.root, "tracker.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(host.aht, "--store", host.store, "manage", "tracker", "run", "--quiet")
+	command := exec.CommandContext(t.Context(), host.aht, "--store", host.store, "manage", "tracker", "run", "--quiet")
 	command.Env = host.env
 	command.Dir = host.work
 	command.Stdout = logFile
 	command.Stderr = logFile
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cancelWithCompatibilityGroup(command)
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
 		t.Fatal(err)
@@ -193,17 +233,30 @@ func (host isolatedHost) startTracker(t *testing.T) {
 	}
 }
 
-func (host isolatedHost) writeFile(t *testing.T, path string, content string) {
+func (host *isolatedHost) writeFile(t *testing.T, path string, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	name, err := filepath.Rel(host.root, path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	root, err := os.OpenRoot(host.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := root.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.WriteFile(name, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (host isolatedHost) mustRunAHT(t *testing.T, args ...string) []byte {
+func (host *isolatedHost) mustRunAHT(t *testing.T, args ...string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -214,8 +267,8 @@ func (host isolatedHost) mustRunAHT(t *testing.T, args ...string) []byte {
 	return output
 }
 
-func (host isolatedHost) runAHT(ctx context.Context, args ...string) ([]byte, error) {
-	command := exec.Command(host.aht, append([]string{"--store", host.store}, args...)...)
+func (host *isolatedHost) runAHT(ctx context.Context, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, host.aht, append([]string{"--store", host.store}, args...)...)
 	command.Env = host.env
 	command.Dir = host.work
 	output, err := compatibilityOutput(ctx, command)

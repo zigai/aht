@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,21 +43,12 @@ type systemWatchEvent struct {
 }
 
 func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
-	root, err := shortSystemTestRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := shortSystemTestRoot(t, "home", "config", "state", "work")
 	binary := buildSystemTestBinary(t, root)
 	home := filepath.Join(root, "home")
 	configHome := filepath.Join(root, "config")
 	stateDir := filepath.Join(root, "state")
 	workingDir := filepath.Join(root, "work")
-	for _, directory := range []string{home, configHome, stateDir, workingDir} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatalf("create isolated directory %q: %v", directory, err)
-		}
-	}
 
 	environment := systemTestEnvironment(home, configHome, stateDir)
 	storePath := filepath.Join(stateDir, "sessions.json")
@@ -138,8 +130,23 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	assertSensitiveSentinelAbsent(t, root, sensitiveSentinel, transcript.Bytes())
 }
 
-func shortSystemTestRoot() (string, error) {
-	return os.MkdirTemp("/tmp", "aht-systest-")
+func shortSystemTestRoot(t *testing.T, directories ...string) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/tmp", "aht-systest-") //nolint:usetesting // reason: broker socket paths under t.TempDir and macOS TMPDIR exceed the Unix socket path limit; cleanup is registered below.
+	if err != nil {
+		t.Fatalf("create system test root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Errorf("remove system test root: %v", err)
+		}
+	})
+	for _, directory := range directories {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
+			t.Fatalf("create isolated directory %q: %v", directory, err)
+		}
+	}
+	return root
 }
 
 func buildSystemTestBinary(t *testing.T, root string) string {
@@ -149,7 +156,7 @@ func buildSystemTestBinary(t *testing.T, root string) string {
 		t.Fatalf("resolve repository root: %v", err)
 	}
 	binary := filepath.Join(root, "aht")
-	command := exec.Command("go", "build", "-o", binary, ".")
+	command := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
 	command.Dir = repositoryRoot
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -179,10 +186,7 @@ func systemTestEnvironment(home string, configHome string, stateDir string) []st
 
 func startSystemTestCommand(t *testing.T, binary string, directory string, environment []string, args ...string) *runningTestCommand {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, args...), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
-	process.command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	process := newRunningTestCommand(t, binary, directory, environment, args...)
 	process.command.Stdout = &process.stdout
 	process.command.Stderr = &process.stderr
 	if err := process.command.Start(); err != nil {
@@ -198,6 +202,18 @@ func startSystemTestCommand(t *testing.T, binary string, directory string, envir
 		}
 	})
 	return process
+}
+
+func newRunningTestCommand(t *testing.T, binary string, directory string, environment []string, args ...string) *runningTestCommand {
+	t.Helper()
+	command := exec.CommandContext(t.Context(), binary, args...)
+	command.Dir = directory
+	command.Env = environment
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	}
+	return &runningTestCommand{command: command, done: make(chan error, 1)}
 }
 
 func stopSystemTestCommand(t *testing.T, process *runningTestCommand) {
@@ -251,9 +267,7 @@ type watchResult struct {
 
 func startJSONWatch(t *testing.T, binary string, directory string, environment []string, storePath string) (*runningTestCommand, <-chan watchResult) {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, "--store", storePath, "--json", "watch"), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
+	process := newRunningTestCommand(t, binary, directory, environment, "--store", storePath, "--json", "watch")
 	stdout, err := process.command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("create watch stdout pipe: %v", err)
@@ -402,10 +416,31 @@ func assertHumanCommandSafe(t *testing.T, transcript *bytes.Buffer, binary strin
 
 func assertHumanWatchSafe(t *testing.T, transcript *bytes.Buffer, binary string, directory string, environment []string, storePath string) {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, "--store", storePath, "watch", "--format", "plain"), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
-	process.command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	process, line, scannerDone := startPlainWatch(t, binary, directory, environment, storePath)
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case output, ok := <-line:
+		if !ok {
+			t.Fatalf("human watch closed without output; stderr=%q", process.stderr.String())
+		}
+		transcript.Write(output)
+		assertTerminalSafe(t, output)
+		if !bytes.Contains(output, []byte("owned")) || !bytes.Contains(output, []byte("reordered")) {
+			t.Fatalf("human watch lost recognizable safe text: %q", output)
+		}
+	case err := <-process.done:
+		t.Fatalf("human watch exited before snapshot: %v; stderr=%q", err, process.stderr.String())
+	case <-timer.C:
+		t.Fatalf("timed out waiting for human watch snapshot; stderr=%q", process.stderr.String())
+	}
+	stopSystemTestCommand(t, process)
+	<-scannerDone
+}
+
+func startPlainWatch(t *testing.T, binary string, directory string, environment []string, storePath string) (*runningTestCommand, <-chan []byte, <-chan struct{}) {
+	t.Helper()
+	process := newRunningTestCommand(t, binary, directory, environment, "--store", storePath, "watch", "--format", "plain")
 	stdout, err := process.command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("create human watch stdout pipe: %v", err)
@@ -444,25 +479,7 @@ func assertHumanWatchSafe(t *testing.T, transcript *bytes.Buffer, binary string,
 		}
 		<-scannerDone
 	})
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case output, ok := <-line:
-		if !ok {
-			t.Fatalf("human watch closed without output; stderr=%q", process.stderr.String())
-		}
-		transcript.Write(output)
-		assertTerminalSafe(t, output)
-		if !bytes.Contains(output, []byte("owned")) || !bytes.Contains(output, []byte("reordered")) {
-			t.Fatalf("human watch lost recognizable safe text: %q", output)
-		}
-	case err := <-process.done:
-		t.Fatalf("human watch exited before snapshot: %v; stderr=%q", err, process.stderr.String())
-	case <-timer.C:
-		t.Fatalf("timed out waiting for human watch snapshot; stderr=%q", process.stderr.String())
-	}
-	stopSystemTestCommand(t, process)
-	<-scannerDone
+	return process, line, scannerDone
 }
 
 func assertTerminalSafe(t *testing.T, output []byte) {
@@ -492,23 +509,32 @@ func assertSensitiveSentinelAbsent(t *testing.T, root string, sentinel string, t
 	if bytes.Contains(transcript, []byte(sentinel)) {
 		t.Fatalf("sensitive sentinel appears in command output")
 	}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := rootFS.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	err = fs.WalkDir(rootFS.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := rootFS.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 		if bytes.Contains(data, []byte(sentinel)) {
-			return fmt.Errorf("sensitive sentinel appears in %s", path)
+			t.Errorf("sensitive sentinel appears in %s", path)
 		}
 		return nil
 	})
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 }

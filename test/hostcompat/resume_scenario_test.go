@@ -26,16 +26,32 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	}
 	host.provider.mu.Unlock()
 	var output []byte
-	if host.contract.ID == registry.Harness("cline") {
+	switch host.contract.ID {
+	case registry.Harness("cline"):
 		host.runClineResume(t, original.Env, previous)
-	} else if host.contract.ID == registry.Harness("droid") {
+	case registry.Harness("droid"):
 		output = host.runDroidRPC(t, original.Env, &previous, false)
-	} else {
-		command := exec.Command(original.Path, resumeArguments(host.contract.ID, original.Args[1:], previous)...)
+	default:
+		command := exec.CommandContext(t.Context(), original.Path, resumeArguments(host.contract.ID, original.Args[1:], previous)...)
 		command.Env = original.Env
 		command.Dir = host.work
 		output = host.runHostCommand(t, command)
 	}
+	host.assertResumeRestoredHistory(t, oldCallID, oldMarker)
+	host.waitForSession(t, output)
+	resumed := host.waitForObservation(t, "terminal resumed native identity", func(session registry.Session) bool {
+		return session.SessionID == previous.SessionID && host.validateSession(session)
+	})
+	if resumed.ID != previous.ID || resumed.Observations.Native.SessionID != previous.Observations.Native.SessionID {
+		t.Fatal("resume changed the AHT or native session identity")
+	}
+	if resumed.Observations.Native.ObservedAt.Before(previous.Observations.Native.ObservedAt) || resumed.Observations.Native.ObservedAt.Equal(previous.Observations.Native.ObservedAt) {
+		t.Fatal("resume oracle accepted stale terminal evidence from the original process")
+	}
+}
+
+func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID string, oldMarker string) {
+	t.Helper()
 	if err := host.provider.Error(); err != nil {
 		t.Fatalf("resumed provider exchange failed: %v\n%s", err, providerRequestSummary(host.provider))
 	}
@@ -49,16 +65,6 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 		}
 	} else if !requestContainsToolResult(host.contract.Protocol, []byte(requests[0].Body), oldCallID, oldMarker) {
 		t.Fatal("resumed model request did not restore the prior native tool result")
-	}
-	host.waitForSession(t, output)
-	resumed := host.waitForObservation(t, "terminal resumed native identity", func(session registry.Session) bool {
-		return session.SessionID == previous.SessionID && host.validateSession(session)
-	})
-	if resumed.ID != previous.ID || resumed.Observations.Native.SessionID != previous.Observations.Native.SessionID {
-		t.Fatal("resume changed the AHT or native session identity")
-	}
-	if resumed.Observations.Native.ObservedAt.Before(previous.Observations.Native.ObservedAt) || resumed.Observations.Native.ObservedAt.Equal(previous.Observations.Native.ObservedAt) {
-		t.Fatal("resume oracle accepted stale terminal evidence from the original process")
 	}
 }
 
