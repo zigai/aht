@@ -1,4 +1,4 @@
-// Command release gates a version tag on CI and manages its GitHub release.
+// Command release gates a version tag on CI and tracked regressions and manages its GitHub release.
 //
 // Each subcommand is safe to rerun: a draft is owned by the workflow run that
 // created it through a marker in its body, so retries reuse it and cleanup never

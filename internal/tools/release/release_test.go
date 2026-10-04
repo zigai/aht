@@ -2,7 +2,9 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/tools/githubapi"
 )
@@ -41,13 +44,15 @@ func successfulJobs() []workflowJob {
 	return jobs
 }
 
-// fakeGitHub serves the release and workflow endpoints for fixture/aht.
+// fakeGitHub serves the release, workflow, and issue endpoints for fixture/aht.
 type fakeGitHub struct {
-	mu      sync.Mutex
-	release *release
-	deleted []int64
-	runs    []workflowRun
-	jobs    []workflowJob
+	mu           sync.Mutex
+	release      *release
+	deleted      []int64
+	runs         []workflowRun
+	jobs         []workflowJob
+	issues       []regressionIssue
+	runSnapshots [][]workflowRun
 	// fail, keyed by "METHOD /path", returns a status after optionally applying
 	// the request, simulating a rejected call or a lost response.
 	fail map[string]failure
@@ -61,18 +66,7 @@ type failure struct {
 func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /repos/fixture/aht/actions/workflows/ci.yml/runs", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("head_sha") != fixtureSHA {
-			t.Errorf("runs query = %s", r.URL.RawQuery)
-		}
-		writeJSON(w, map[string]any{"workflow_runs": f.runs})
-	})
-	mux.HandleFunc("GET /repos/fixture/aht/actions/runs/10/jobs", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("filter") != "latest" {
-			t.Errorf("jobs query = %s", r.URL.RawQuery)
-		}
-		writeJSON(w, map[string]any{"jobs": f.jobs})
-	})
+	f.registerGateHandlers(t, mux)
 	mux.HandleFunc("GET /repos/fixture/aht/releases/tags/v1.2.3", func(w http.ResponseWriter, _ *http.Request) {
 		if f.release == nil {
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
@@ -115,6 +109,34 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 			return
 		}
 		mux.ServeHTTP(w, r)
+	})
+}
+
+func (f *fakeGitHub) registerGateHandlers(t *testing.T, mux *http.ServeMux) {
+	t.Helper()
+	mux.HandleFunc("GET /repos/fixture/aht/actions/workflows/ci.yml/runs", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("head_sha") != fixtureSHA || query.Get("event") != "push" || query.Get("branch") != releaseBranch {
+			t.Errorf("runs query = %s", r.URL.RawQuery)
+		}
+		if len(f.runSnapshots) != 0 {
+			f.runs = f.runSnapshots[0]
+			f.runSnapshots = f.runSnapshots[1:]
+		}
+		writeJSON(w, map[string]any{"workflow_runs": f.runs})
+	})
+	mux.HandleFunc("GET /repos/fixture/aht/actions/runs/{run}/jobs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("filter") != "latest" {
+			t.Errorf("jobs query = %s", r.URL.RawQuery)
+		}
+		writeJSON(w, map[string]any{"jobs": f.jobs})
+	})
+	mux.HandleFunc("GET /repos/fixture/aht/issues", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("state") != "open" || query.Get("creator") != issueCreator || query.Get("per_page") != "100" {
+			t.Errorf("issues query = %s", r.URL.RawQuery)
+		}
+		writeJSON(w, f.issues)
 	})
 }
 
@@ -207,7 +229,6 @@ func TestReleaseRequiresNewestExactCommitCIAndEveryGate(t *testing.T) {
 		{"other workflow", []workflowRun{with(func(r *workflowRun) { r.Path = ".github/workflows/other.yml" })}, successfulJobs(), false},
 		{"other branch", []workflowRun{with(func(r *workflowRun) { r.HeadBranch = "feature" })}, successfulJobs(), false},
 		{"PR result", []workflowRun{with(func(r *workflowRun) { r.Event = "pull_request" })}, successfulJobs(), false},
-		{"running", []workflowRun{with(func(r *workflowRun) { r.Status, r.Conclusion = "in_progress", "" })}, successfulJobs(), false},
 		{"failed newer run", []workflowRun{successfulRun, with(func(r *workflowRun) { r.ID, r.Conclusion = 11, "failure" })}, successfulJobs(), false},
 		{"missing compatibility gate", []workflowRun{successfulRun}, withoutGate, false},
 		{"skipped compatibility gate", []workflowRun{successfulRun}, skippedGate, false},
@@ -219,6 +240,251 @@ func TestReleaseRequiresNewestExactCommitCIAndEveryGate(t *testing.T) {
 			f.github.runs, f.github.jobs = tt.runs, tt.jobs
 			if err := f.run(t, "require-ci"); (err == nil) != tt.pass {
 				t.Fatalf("require-ci = %v, want pass %v", err, tt.pass)
+			}
+		})
+	}
+}
+
+func TestReleaseWaitsForNewestCIToComplete(t *testing.T) {
+	for _, conclusion := range []string{"success", "failure", "cancelled"} { //nolint:misspell // reason: GitHub Actions uses the external conclusion "cancelled".
+		t.Run(conclusion, func(t *testing.T) {
+			f := newFixture(t)
+			queued := successfulRun
+			queued.ID, queued.Status, queued.Conclusion = 11, "queued", ""
+			running := queued
+			running.Status = "in_progress"
+			completed := queued
+			completed.Status, completed.Conclusion = "completed", conclusion
+			f.github.runSnapshots = [][]workflowRun{
+				{successfulRun, queued},
+				{successfulRun, running},
+				{successfulRun, completed},
+			}
+			ticks := make(chan time.Time, 2)
+			ticks <- time.Time{}
+			ticks <- time.Time{}
+			target, err := f.app.target()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			run, err := f.app.waitForCI(ctx, target, ticks)
+			if conclusion == "success" {
+				if err != nil || run.ID != 11 || run.Status != "completed" {
+					t.Fatalf("waitForCI = %+v, %v; want completed run 11", run, err)
+				}
+				if err := f.run(t, "require-ci"); err != nil {
+					t.Fatalf("completed CI did not pass release gate: %v", err)
+				}
+			} else if !errors.Is(err, errRelease) || !strings.Contains(err.Error(), "completed/"+conclusion) {
+				t.Fatalf("waitForCI = %v, want completed/%s failure", err, conclusion)
+			}
+		})
+	}
+}
+
+type cancelOnWrite struct {
+	cancel context.CancelFunc
+}
+
+func (w cancelOnWrite) Write(data []byte) (int, error) {
+	w.cancel()
+	return len(data), nil
+}
+
+func TestReleaseCancelsWhileWaitingForCI(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			f := newFixture(t)
+			f.github.runs[0].Status, f.github.runs[0].Conclusion = status, ""
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.app.stdout = cancelOnWrite{cancel: cancel}
+			if err := f.app.run(ctx, []string{"require-ci"}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("require-ci = %v, want cancellation", err)
+			}
+		})
+	}
+}
+
+func trackedIssue(url string) regressionIssue {
+	issue := regressionIssue{
+		Body:  "Compatibility regression\n\n<!-- aht-compatibility:grok -->\n",
+		State: "open", HTMLURL: url,
+	}
+	issue.User.Login = issueCreator
+	return issue
+}
+
+func TestReleaseRejectsOnlyOpenTrackedBotRegressionIssues(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*regressionIssue)
+		block  bool
+	}{
+		{"tracked bot issue", func(*regressionIssue) {}, true},
+		{"closed issue", func(i *regressionIssue) { i.State = "closed" }, false},
+		{"human issue", func(i *regressionIssue) { i.User.Login = "contributor" }, false},
+		{"different bot", func(i *regressionIssue) { i.User.Login = "other[bot]" }, false},
+		{"pull request", func(i *regressionIssue) { i.PullRequest = &struct{}{} }, false},
+		{"untracked issue", func(i *regressionIssue) { i.Body = "A different problem" }, false},
+		{"inline marker", func(i *regressionIssue) { i.Body = "Quoted <!-- aht-compatibility:grok -->" }, false},
+		{"marker suffix", func(i *regressionIssue) { i.Body = "<!-- aht-compatibility:grok --> extra" }, false},
+		{"invalid marker", func(i *regressionIssue) { i.Body = "<!-- aht-compatibility: -->" }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			issue := trackedIssue("https://example.invalid/issues/1")
+			tt.change(&issue)
+			f.github.issues = []regressionIssue{issue}
+			err := f.run(t, "require-ci")
+			if tt.block {
+				if !errors.Is(err, errRelease) || !strings.Contains(err.Error(), issue.HTMLURL) {
+					t.Fatalf("require-ci = %v, want tracked regression URL", err)
+				}
+			} else if err != nil {
+				t.Fatalf("untracked issue prevented release: %v", err)
+			}
+		})
+	}
+}
+
+func TestReleaseListsEveryTrackedRegressionURL(t *testing.T) {
+	f := newFixture(t)
+	f.github.issues = []regressionIssue{
+		trackedIssue("https://example.invalid/issues/1"),
+		trackedIssue("https://example.invalid/issues/2"),
+	}
+	err := f.run(t, "require-ci")
+	if !errors.Is(err, errRelease) {
+		t.Fatalf("require-ci = %v, want tracked regression failure", err)
+	}
+	for _, url := range []string{"https://example.invalid/issues/1", "https://example.invalid/issues/2"} {
+		if !strings.Contains(err.Error(), url) {
+			t.Errorf("regression failure %q lacks %s", err, url)
+		}
+	}
+}
+
+func TestReleasePropagatesGateAPIErrors(t *testing.T) {
+	for _, path := range []string{
+		"/repos/fixture/aht/actions/workflows/ci.yml/runs",
+		"/repos/fixture/aht/actions/runs/10/jobs",
+		"/repos/fixture/aht/issues",
+	} {
+		t.Run(path, func(t *testing.T) {
+			f := newFixture(t)
+			f.github.fail["GET "+path] = failure{status: http.StatusForbidden}
+			if err := f.run(t, "require-ci"); !githubapi.HasStatus(err, http.StatusForbidden) {
+				t.Fatalf("require-ci = %v, want forbidden API failure", err)
+			}
+		})
+	}
+}
+
+type paginationCase struct {
+	name     string
+	path     string
+	pages    [2]any
+	wantText string
+}
+
+func paginationCases() []paginationCase {
+	newerFailure := successfulRun
+	newerFailure.ID, newerFailure.Conclusion = 11, "failure"
+	return []paginationCase{
+		{
+			name: "newest run is on second page",
+			path: "/repos/fixture/aht/actions/workflows/ci.yml/runs",
+			pages: [2]any{
+				map[string]any{"workflow_runs": []workflowRun{successfulRun}},
+				map[string]any{"workflow_runs": []workflowRun{newerFailure}},
+			},
+			wantText: "completed/failure",
+		},
+		{
+			name: "required jobs span pages",
+			path: "/repos/fixture/aht/actions/runs/10/jobs",
+			pages: [2]any{
+				map[string]any{"jobs": successfulJobs()[:2]},
+				map[string]any{"jobs": successfulJobs()[2:]},
+			},
+		},
+		{
+			name: "regression is on second page",
+			path: "/repos/fixture/aht/issues",
+			pages: [2]any{
+				[]regressionIssue{},
+				[]regressionIssue{trackedIssue("https://example.invalid/issues/2")},
+			},
+			wantText: "https://example.invalid/issues/2",
+		},
+	}
+}
+
+func (tc paginationCase) handler(t *testing.T, failSecond bool) http.Handler {
+	t.Helper()
+	github := &fakeGitHub{runs: []workflowRun{successfulRun}, jobs: successfulJobs()}
+	fallback := github.handler(t)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("release gate attempted a GitHub write: %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != tc.path {
+			fallback.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			if failSecond {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			writeJSON(w, tc.pages[1])
+			return
+		}
+		next := *r.URL
+		query := next.Query()
+		query.Set("page", "2")
+		next.RawQuery = query.Encode()
+		w.Header().Set("Link", fmt.Sprintf("<http://%s%s>; rel=\"next\"", r.Host, next.String()))
+		writeJSON(w, tc.pages[0])
+	})
+}
+
+func runPaginatedGate(t *testing.T, tc paginationCase, failSecond bool) error {
+	t.Helper()
+	server := httptest.NewServer(tc.handler(t, failSecond))
+	t.Cleanup(server.Close)
+	app := application{api: githubapi.New(server.URL, ""), stdout: io.Discard, getenv: func(key string) string { return fixtureEnv[key] }}
+	return app.run(t.Context(), []string{"require-ci"})
+}
+
+func TestReleaseGateFollowsPagination(t *testing.T) {
+	for _, tc := range paginationCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runPaginatedGate(t, tc, false)
+			if tc.wantText == "" {
+				if err != nil {
+					t.Fatalf("jobs split over two pages prevented release: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errRelease) || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("require-ci = %v, want release failure containing %q", err, tc.wantText)
+			}
+		})
+	}
+}
+
+func TestReleaseGateFailsOnLaterPageErrors(t *testing.T) {
+	for _, tc := range paginationCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := runPaginatedGate(t, tc, true); !githubapi.HasStatus(err, http.StatusForbidden) {
+				t.Fatalf("require-ci = %v, want later-page API failure", err)
 			}
 		})
 	}

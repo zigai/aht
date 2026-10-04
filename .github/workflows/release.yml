@@ -17,10 +17,11 @@ concurrency:
 jobs:
   verify-tag:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
+      issues: read
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
     steps:

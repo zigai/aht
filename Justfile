@@ -166,7 +166,7 @@ release-patch: _release-check _goreleaser-version-check
     new="v${major}.${minor}.$((patch + 1))"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    # The tagged commit already passed the pre-push check and CI on master.
+    # Release verification waits for this commit's CI before publishing.
     git push --no-verify origin "$new"
 
 # Release a new minor version
@@ -179,7 +179,7 @@ release-minor: _release-check _goreleaser-version-check
     new="v${major}.$((minor + 1)).0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    # The tagged commit already passed the pre-push check and CI on master.
+    # Release verification waits for this commit's CI before publishing.
     git push --no-verify origin "$new"
 
 # Release a new major version
@@ -191,7 +191,7 @@ release-major: _release-check _goreleaser-version-check
     new="v$((major + 1)).0.0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    # The tagged commit already passed the pre-push check and CI on master.
+    # Release verification waits for this commit's CI before publishing.
     git push --no-verify origin "$new"
 
 alias release := release-patch
