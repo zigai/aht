@@ -46,7 +46,7 @@ jobs:
         run: go run ./internal/tools/compatibility changes
 
   changed-hosts:
-    needs: affected-hosts
+    needs: [affected-hosts, build-snapshot]
     if: needs.affected-hosts.outputs.selected == 'true'
     strategy:
       fail-fast: false
@@ -56,6 +56,8 @@ jobs:
     with:
       harness: ${{ matrix.harness }}
       version: ${{ matrix.version }}
+      artifact: snapshot-${{ github.sha }}
+      attempts: ${{ github.event_name == 'push' && 2 || 1 }}
 
   change-compatibility:
     name: change-compatibility

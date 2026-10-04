@@ -13,6 +13,14 @@ on:
         description: Lifecycle test attempts; a pass on any attempt counts as success
         default: 1
         type: number
+      artifact:
+        description: Snapshot artifact containing the Linux-amd64 release build
+        default: ''
+        type: string
+      release-tag:
+        description: Published release binary and test source to exercise
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -31,6 +39,65 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout published compatibility tests
+        if: inputs.release-tag != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release-tag }}
+          path: host-source
+          persist-credentials: false
+
+      - name: Require published prebuilt test support
+        if: inputs.release-tag != ''
+        shell: bash
+        run: |
+          if ! grep -Fq 'AHT_COMPAT_BINARY' host-source/test/hostcompat/command_test.go; then
+            echo "The published release's compatibility tests do not accept a prebuilt binary; publish a release containing that support before scheduling release checks." >&2
+            exit 1
+          fi
+
+      - name: Resolve tested revision
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "commit=$(git -C host-source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download snapshot binary
+        if: inputs.artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/aht-snapshot
+
+      - name: Extract snapshot binary
+        if: inputs.artifact != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE=$(jq -er '.[] | select(.type == "Archive" and .goos == "linux" and .goarch == "amd64") | .name' "$RUNNER_TEMP/aht-snapshot/artifacts.json")
+          mkdir -p "$RUNNER_TEMP/aht-compat-binary"
+          tar -xzf "$RUNNER_TEMP/aht-snapshot/$ARCHIVE" -C "$RUNNER_TEMP/aht-compat-binary" aht
+          chmod 0755 "$RUNNER_TEMP/aht-compat-binary/aht"
+          echo "AHT_COMPAT_BINARY=$RUNNER_TEMP/aht-compat-binary/aht" >> "$GITHUB_ENV"
+
+      - name: Download published binary
+        if: inputs.release-tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/aht-compat-binary"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'aht_*_linux_amd64.tar.gz' --output "$RUNNER_TEMP/aht-compat-binary/release.tar.gz"
+          tar -xzf "$RUNNER_TEMP/aht-compat-binary/release.tar.gz" -C "$RUNNER_TEMP/aht-compat-binary" aht
+          chmod 0755 "$RUNNER_TEMP/aht-compat-binary/aht"
+          echo "AHT_COMPAT_BINARY=$RUNNER_TEMP/aht-compat-binary/aht" >> "$GITHUB_ENV"
       - name: Set diagnostics directory
         run: echo "AHT_COMPAT_WORK=$RUNNER_TEMP/aht-compat-diagnostics" >> "$GITHUB_ENV"
 
@@ -68,6 +135,7 @@ jobs:
       - name: Exercise installed integration and host
         id: lifecycle
         shell: bash
+        working-directory: ${{ inputs.release-tag != '' && 'host-source' || '.' }}
         env:
           ATTEMPTS: ${{ inputs.attempts }}
         run: |
@@ -91,6 +159,7 @@ jobs:
         env:
           AHT_INSTALL_OUTCOME: ${{ steps.install.outcome }}
           AHT_TEST_OUTCOME: ${{ steps.lifecycle.outcome }}
+          GITHUB_SHA: ${{ steps.source.outputs.commit }}
         run: go run ./internal/tools/compatibility result
 
       - name: Upload sanitized diagnostics and result

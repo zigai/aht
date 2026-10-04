@@ -104,6 +104,7 @@ func (a application) detectReleases(ctx context.Context, persist bool) error {
 		if err != nil {
 			return err
 		}
+		state.invalidateOtherRevisions(a.getenv("AHT_COMPAT_REVISION"))
 	}
 	selection := a.getenv("AHT_COMPAT_SELECTION")
 	if selection == "" {

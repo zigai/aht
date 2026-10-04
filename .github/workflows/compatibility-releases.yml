@@ -31,11 +31,23 @@ jobs:
     outputs:
       matrix: ${{ steps.detect.outputs.matrix }}
       changed: ${{ steps.detect.outputs.changed }}
+      release-tag: ${{ steps.release.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Resolve latest published release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse "$TAG^{commit}")" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -50,6 +62,7 @@ jobs:
           AHT_COMPAT_WORK: ${{ runner.temp }}/release-plan
           AHT_COMPAT_SELECTION: ${{ inputs.harness || 'all' }}
           AHT_COMPAT_FORCE: ${{ inputs.force || false }}
+          AHT_COMPAT_REVISION: ${{ steps.release.outputs.commit }}
         run: go run ./internal/tools/compatibility detect
 
       - name: Save release plan
@@ -74,6 +87,7 @@ jobs:
       version: ${{ matrix.version }}
       # A single flaky failure must not be recorded as a release regression.
       attempts: 2
+      release-tag: ${{ needs.detect.outputs.release-tag }}
 
   record:
     if: always() && needs.detect.result == 'success'

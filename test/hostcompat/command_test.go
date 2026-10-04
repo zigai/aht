@@ -20,6 +20,13 @@ const compatibilityWaitDelay = time.Second
 
 func buildCompatibilityOracle(t *testing.T) string {
 	t.Helper()
+	if binary := os.Getenv("AHT_COMPAT_BINARY"); binary != "" {
+		oracle, err := filepath.Abs(binary)
+		if err != nil {
+			t.Fatalf("resolve prebuilt compatibility binary: %v", err)
+		}
+		return oracle
+	}
 	oracle := filepath.Join(t.TempDir(), "aht-compat-oracle")
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()

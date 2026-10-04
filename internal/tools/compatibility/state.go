@@ -14,6 +14,18 @@ func emptyState() releaseState {
 	return releaseState{Schema: stateSchema, Harnesses: map[string]checkedRelease{}, Successful: map[string]checkedRelease{}}
 }
 
+func (state releaseState) invalidateOtherRevisions(revision string) {
+	if revision == "" {
+		return
+	}
+	for id, record := range state.Harnesses {
+		if record.Revision != revision {
+			record.Outcome = "incomplete"
+			state.Harnesses[id] = record
+		}
+	}
+}
+
 func validateState(state releaseState) error {
 	if state.Schema != stateSchema || state.Harnesses == nil || state.Successful == nil {
 		return fmt.Errorf("%w: invalid state; refusing to reset release history", errCompatibility)
