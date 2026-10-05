@@ -1,9 +1,11 @@
 package install
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -119,6 +121,65 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(data), userCommand) || strings.Contains(string(data), "--reporter claude-hook") {
 		t.Fatalf("user hook was not preserved cleanly: %s", data)
+	}
+}
+
+func TestRemoveDeletesNativeWatchersWithoutReportingHooks(t *testing.T) {
+	for _, test := range []struct {
+		name, event, binary string
+	}{
+		{"session-start", "SessionStart", "aht"},
+		{"file-changed", "FileChanged", "aht"},
+		{"custom-binary", "FileChanged", "'/opt/tools/renamed tracker'"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assertNativeWatcherRemoval(t, test.event, test.binary)
+		})
+	}
+}
+
+func assertNativeWatcherRemoval(t *testing.T, event, binary string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv(registry.StateDirEnv, t.TempDir())
+	path := filepath.Join(dir, "settings.json")
+	command := binary + " --json hook claude --event " + event
+	userHook := map[string]any{"type": "command", "command": "echo \"" + command + "\"", "statusMessage": "aht managed integration"}
+	group := map[string]any{"hooks": []any{
+		map[string]any{"type": "command", "command": command, "statusMessage": "aht managed integration"},
+		userHook,
+	}}
+	config := map[string]any{"theme": "dark", "hooks": map[string]any{
+		event: []any{group},
+	}}
+	body, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := Options{Harness: registry.Harness("claude"), DryRun: true}
+	if result, err := Remove(t.Context(), options); err != nil || !result.Changed {
+		t.Fatalf("dry-run removal = %+v, %v", result, err)
+	}
+	if data := readTestFile(t, path, "reading dry-run config"); string(data) != string(body) {
+		t.Fatalf("dry-run changed config: %s", data)
+	}
+	options.DryRun = false
+	if result, err := Remove(t.Context(), options); err != nil || !result.Changed {
+		t.Fatalf("watcher removal = %+v, %v", result, err)
+	}
+	want := map[string]any{"theme": "dark", "hooks": map[string]any{
+		event: []any{map[string]any{"hooks": []any{userHook}}},
+	}}
+	data := readTestFile(t, path, "reading removed watcher")
+	if got := decodeTestJSONObject(t, data, "removed watcher"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("remaining config = %#v, want %#v", got, want)
+	}
+	if result, err := Remove(t.Context(), options); err != nil || result.Changed {
+		t.Fatalf("second removal = %+v, %v", result, err)
 	}
 }
 

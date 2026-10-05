@@ -1,6 +1,7 @@
 package agy
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"os"
@@ -119,10 +120,10 @@ func (agyHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaul
 	return agyPayloadDefaults(payload), nil
 }
 
-func (agyHarness) HandleHook(invocation harness.HookInvocation) harness.HookResult {
+func (agyHarness) HandleHook(_ context.Context, invocation harness.HookInvocation) (harness.HookResult, error) {
 	invocation.Event = agyHookEvent(invocation.Payload, invocation.Event)
 
-	return agyHandleHook(invocation)
+	return agyHandleHook(invocation), nil
 }
 
 func agyHookConfig(binary string) map[string]any {

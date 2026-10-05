@@ -12,8 +12,8 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// Remove deletes only artifacts owned by aht for one harness while honoring
-// caller cancellation.
+// Remove deletes aht-owned artifacts, including standalone native hooks, while
+// honoring caller cancellation.
 func Remove(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("remove integration context: %w", err)
@@ -102,7 +102,7 @@ func removePlanAction(ctx context.Context, opts Options, harnessID registry.Harn
 
 func removeJSONCommandHooks(opts Options, harnessID registry.Harness, plan harnesspkg.JSONCommandHookInstallPlan) (Result, error) {
 	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
-		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID))
+		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID), []map[string]any{harnessConfig})
 		changed := removeWrappedCommandHooks(harnessConfig, isManaged)
 		if plan.HooksAtRoot {
 			changed = removeManagedCommandHookEvents(harnessConfig, isManaged) || changed
@@ -139,7 +139,7 @@ func removeCursorJSONHooks(opts Options, harnessID registry.Harness, plan harnes
 		if !ok {
 			return false
 		}
-		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID))
+		isManaged := isManagedSourceHookCommand(managedSource(plan.Source, harnessID), []map[string]any{harnessConfig})
 		changed := false
 		for _, spec := range plan.Hooks {
 			changed = removeManagedJSONHookEvent(hooks, spec.Event, isManaged, removeManagedCursorHooks) || changed

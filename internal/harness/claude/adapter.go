@@ -78,6 +78,16 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceLive, harness.HookEventSessionStart, claudeIntegrationSource),
 			},
 			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "",
+				Command: harness.ShellQuote(binary) + " --json hook claude --event SessionStart",
+			},
+			{
+				Event:   "FileChanged",
+				Matcher: "",
+				Command: harness.ShellQuote(binary) + " --json hook claude --event FileChanged",
+			},
+			{
 				Event:   harness.HookEventUserPromptSubmit,
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, harness.HookEventUserPromptSubmit, claudeIntegrationSource),

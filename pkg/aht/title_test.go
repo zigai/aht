@@ -27,7 +27,8 @@ func writeTitleFixture(t *testing.T, root, name, body string) string {
 }
 
 func TestSessionTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
-	t.Parallel()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	generated := writeTitleFixture(t, root, "generated.jsonl", `{"type":"ai-title","sessionId":"generated","aiTitle":"Generated title"}
 `)

@@ -128,39 +128,82 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	})
 
 	t.Run("missing-binary-nonfatal", func(t *testing.T) {
-		const absentBinary = "/nonexistent/binary/absent-aht"
-		renderAbsentModule := func(h registry.Harness) string {
-			t.Helper()
-			adapter, ok := catalog.Find(h)
-			if !ok {
-				t.Fatalf("find harness %s", h)
-			}
-			installer, ok := adapter.(harnesspkg.Installable)
-			if !ok {
-				t.Fatalf("harness %s is not installable", h)
-			}
-			for _, action := range installer.InstallPlan(absentBinary).Actions {
-				if rf, ok := action.(harnesspkg.RenderedFileAction); ok {
-					if !strings.Contains(rf.Plan.Content, absentBinary) {
-						t.Fatalf("rendered %s template did not select absent binary %q", h, absentBinary)
-					}
-					return rf.Plan.Content
-				}
-			}
-			t.Fatalf("no rendered action found for %s", h)
-			return ""
-		}
+		runNodeRuntime(t, "opencode_absent.ts", renderedRuntimeModule(t, registry.Harness("opencode")), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "opencode_v2_absent.ts", renderedRuntimeModule(t, registry.Harness("opencode")), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "opencode_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "opencode_v2_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "kilo_absent.ts", renderedRuntimeModule(t, registry.Harness("kilo")), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "kilo_absent.ts", renderAbsentModule(registry.Harness("kilo")), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "pi_absent.ts", renderedRuntimeModule(t, registry.Harness("pi")), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "pi_absent.ts", renderAbsentModule(registry.Harness("pi")), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
-
-		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "omp_absent.ts", renderedRuntimeModule(t, registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "plugin.ts", renderedRuntimeModule(t, registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
 	})
+}
+
+func TestGeneratedNativeTitleWatcherCommands(t *testing.T) {
+	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
+	requireRuntimeTool(t, "sh")
+	for _, event := range []string{"SessionStart", "FileChanged"} {
+		t.Run(event, func(t *testing.T) {
+			capture := captureBinary(t)
+			t.Setenv("AHT_CAPTURE", capture.path)
+			runGeneratedNativeTitleWatchers(t, capture.command, capture.path, event)
+		})
+	}
+}
+
+func runGeneratedNativeTitleWatchers(t *testing.T, binary, capturePath, event string) {
+	t.Helper()
+	adapter, ok := catalog.Find(registry.Harness("claude"))
+	if !ok {
+		t.Fatal("missing Claude adapter")
+	}
+	installer, ok := adapter.(harnesspkg.Installable)
+	if !ok {
+		t.Fatal("expected installable native watcher adapter")
+	}
+	found := false
+	for _, action := range installer.InstallPlan(binary).Actions {
+		hooks, ok := action.(harnesspkg.JSONCommandHooksAction)
+		if !ok {
+			continue
+		}
+		for _, hook := range hooks.Plan.Hooks {
+			if hook.Event == event && strings.Contains(hook.Command, " --json hook ") {
+				found = true
+				runGeneratedCommand(t, `{"session_id":"native","transcript_path":"/tmp/native.jsonl","cwd":"/tmp","hook_event_name":"`+event+`","file_path":"/tmp/native.jsonl","event":"change"}`, "sh", "-c", hook.Command)
+				requireCapturedArguments(t, capturePath, "--json", "hook", "claude", "--event", event)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no generated %s watcher", event)
+	}
+}
+
+func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
+	t.Helper()
+	const binary = "/nonexistent/binary/absent-aht"
+	adapter, ok := catalog.Find(h)
+	if !ok {
+		t.Fatalf("find harness %s", h)
+	}
+	installer, ok := adapter.(harnesspkg.Installable)
+	if !ok {
+		t.Fatalf("harness %s is not installable", h)
+	}
+	for _, action := range installer.InstallPlan(binary).Actions {
+		rf, ok := action.(harnesspkg.RenderedFileAction)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(rf.Plan.Content, binary) {
+			t.Fatalf("rendered %s template did not select absent binary %q", h, binary)
+		}
+		return rf.Plan.Content
+	}
+	t.Fatalf("no rendered action found for %s", h)
+	return ""
 }
 
 func TestGeneratedWaitingDetailsAndCorrelatedResolution(t *testing.T) {

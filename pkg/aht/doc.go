@@ -49,10 +49,10 @@
 //
 // # Titles and history
 //
-// [SessionTitles] reads display names from harness files on demand; cache the
-// results when refreshing often. [SearchHistory] searches past conversations on
-// disk, including ones AHT never tracked, and does not need the tracker. It
-// returns partial results with [ErrHistoryIncomplete] when some sources cannot
+// [SessionTitles] reads native display names; Claude uses a persistent OS cache,
+// while Pi scans transcripts. [SearchHistory] searches past conversations on disk,
+// including ones AHT never tracked, and does not need the tracker. It returns
+// partial results with [ErrHistoryIncomplete] when some sources cannot
 // be read. Use [HistoryCatalog] to search specific directories.
 //
 // # Integrations and the tracker

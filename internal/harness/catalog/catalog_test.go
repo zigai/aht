@@ -827,7 +827,8 @@ func TestHandleHookAgy(t *testing.T) {
 func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	t.Helper()
 
-	result, ok := HandleHook(
+	result, ok, err := HandleHook(
+		t.Context(),
 		registry.Harness("agy"),
 		test.event,
 		json.RawMessage(`{"test":true}`),
@@ -836,6 +837,9 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	)
 	if !ok {
 		t.Fatal("expected agy hook adapter")
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(result.Response, test.wantResponse) {
 		t.Fatalf("expected response %#v, got %#v", test.wantResponse, result.Response)
@@ -858,7 +862,7 @@ func TestHandleHookUnsupportedHarness(t *testing.T) {
 
 	var rawPayload json.RawMessage
 	var payload map[string]any
-	if _, ok := HandleHook(registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok {
-		t.Fatal("expected codex to have no managed hook adapter")
+	if _, ok, err := HandleHook(t.Context(), registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok || err != nil {
+		t.Fatalf("expected codex to have no managed hook adapter: supported=%v err=%v", ok, err)
 	}
 }

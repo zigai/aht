@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/shlex"
+
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
@@ -125,26 +127,10 @@ func applyJSONCommandHooks(
 	plan harnesspkg.JSONCommandHookInstallPlan,
 ) func(map[string]any) bool {
 	source := managedSource(plan.Source, harness)
-	statusMessage := strings.TrimSpace(plan.StatusMessage)
-	if !plan.OmitStatusMessage && statusMessage == "" {
-		statusMessage = managedMarker
-	}
-	isManaged := isManagedSourceHookCommand(source)
-	desiredByEvent := make(map[string][]any)
-	events := make([]string, 0, len(plan.Hooks))
-	for _, hook := range plan.Hooks {
-		if _, exists := desiredByEvent[hook.Event]; !exists {
-			events = append(events, hook.Event)
-		}
-		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], commandHookGroup(
-			hook.Command,
-			hook.Matcher,
-			statusMessage,
-			catalog.HookTimeoutSecondsFor(harness, hook.Event),
-		))
-	}
+	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(harness, plan)
 
 	return func(harnessConfig map[string]any) bool {
+		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig, desiredConfig})
 		changed := false
 		hooks := harnessConfig
 		if plan.HooksAtRoot {
@@ -178,6 +164,36 @@ func applyJSONCommandHooks(
 	}
 }
 
+func buildJSONCommandHooks(
+	harness registry.Harness,
+	plan harnesspkg.JSONCommandHookInstallPlan,
+) (map[string][]any, []string, map[string]any) {
+	statusMessage := strings.TrimSpace(plan.StatusMessage)
+	if !plan.OmitStatusMessage && statusMessage == "" {
+		statusMessage = managedMarker
+	}
+	desiredByEvent := make(map[string][]any)
+	events := make([]string, 0, len(plan.Hooks))
+	for _, hook := range plan.Hooks {
+		if _, exists := desiredByEvent[hook.Event]; !exists {
+			events = append(events, hook.Event)
+		}
+		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], commandHookGroup(
+			hook.Command,
+			hook.Matcher,
+			statusMessage,
+			catalog.HookTimeoutSecondsFor(harness, hook.Event),
+		))
+	}
+
+	ownedCommands := make([]any, 0, len(plan.Hooks))
+	for _, hook := range plan.Hooks {
+		ownedCommands = append(ownedCommands, map[string]any{"command": hook.Command})
+	}
+	desiredConfig := map[string]any{"hooks": ownedCommands}
+	return desiredByEvent, events, desiredConfig
+}
+
 func installCursorJSONHooks(
 	opts Options,
 	harness registry.Harness,
@@ -204,9 +220,9 @@ func applyCursorJSONHooks(
 	plan harnesspkg.CursorJSONHookInstallPlan,
 ) func(map[string]any) bool {
 	source := managedSource(plan.Source, harness)
-	isManaged := isManagedSourceHookCommand(source)
 
 	return func(harnessConfig map[string]any) bool {
+		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig})
 		changed := ensureCursorVersion(harnessConfig)
 		for _, hook := range plan.Hooks {
 			updated := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
@@ -738,9 +754,92 @@ func managedSource(source string, harness registry.Harness) string {
 	return source
 }
 
-func isManagedSourceHookCommand(source string) func(string) bool {
+func isManagedSourceHookCommand(source string, configs []map[string]any) func(string) bool {
 	pattern := regexp.MustCompile(`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` + regexp.QuoteMeta(source) + `(?:['"\s]|$)`)
-	return pattern.MatchString
+	nativeID := nativeHookIDForSource(source)
+	binaries := make(map[string]bool)
+	for _, config := range configs {
+		collectOwnedHookBinaries(config, pattern, nativeID, binaries)
+	}
+	return func(command string) bool {
+		if pattern.MatchString(command) {
+			return true
+		}
+		if nativeID == "" {
+			return false
+		}
+		return canonicalNativeHookCommand(command, nativeID, binaries)
+	}
+}
+
+func nativeHookIDForSource(source string) string {
+	for _, adapter := range catalog.All() {
+		if adapter.Definition().IntegrationSource != source {
+			continue
+		}
+		if _, ok := adapter.(harnesspkg.HookAdapter); ok {
+			return string(adapter.Definition().ID)
+		}
+		break
+	}
+	return ""
+}
+
+func canonicalNativeHookCommand(command, nativeID string, binaries map[string]bool) bool {
+	words, err := shlex.Split(command)
+	return err == nil && len(words) > 0 && binaries[words[0]] && canonicalNativeHookWords(command, nativeID, words)
+}
+
+func canonicalNativeHookWords(command, nativeID string, words []string) bool {
+	if nativeID == "" || len(words) != 6 ||
+		words[1] != "--json" || words[2] != "hook" || words[3] != nativeID ||
+		words[4] != "--event" || words[5] == "" {
+		return false
+	}
+	for i, word := range words {
+		words[i] = harnesspkg.ShellQuote(word)
+	}
+	return command == strings.Join(words, " ")
+}
+
+func collectOwnedHookBinaries(value any, sourcePattern *regexp.Regexp, nativeID string, binaries map[string]bool) {
+	switch value := value.(type) {
+	case map[string]any:
+		if binary := ownedHookBinary(value, sourcePattern, nativeID); binary != "" {
+			binaries[binary] = true
+		}
+		for _, child := range value {
+			collectOwnedHookBinaries(child, sourcePattern, nativeID, binaries)
+		}
+	case []any:
+		for _, child := range value {
+			collectOwnedHookBinaries(child, sourcePattern, nativeID, binaries)
+		}
+	}
+}
+
+func ownedHookBinary(hook map[string]any, sourcePattern *regexp.Regexp, nativeID string) string {
+	command, ok := hook["command"].(string)
+	if !ok {
+		return ""
+	}
+	tagged := sourcePattern.MatchString(command)
+	marked := hook["statusMessage"] == managedMarker
+	if !tagged && !marked {
+		return ""
+	}
+	words, err := shlex.Split(command)
+	if err != nil || len(words) < 3 {
+		return ""
+	}
+	binary := words[0]
+	if tagged && words[1] == "report" {
+		return binary
+	}
+	if marked && canonicalNativeHookWords(command, nativeID, words) {
+		return binary
+	}
+	return ""
 }
 
 func installLabel(value string, harness registry.Harness, suffix string) string {

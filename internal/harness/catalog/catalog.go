@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -64,17 +65,24 @@ var adapters = []harness.Adapter{
 	amp.New(),
 }
 
+var adaptersByID = func() map[registry.Harness]harness.Adapter {
+	byID := make(map[registry.Harness]harness.Adapter, len(adapters))
+	for _, adapter := range adapters {
+		id := adapter.Definition().ID
+		if _, exists := byID[id]; !exists {
+			byID[id] = adapter
+		}
+	}
+	return byID
+}()
+
 func All() []harness.Adapter {
 	return append([]harness.Adapter(nil), adapters...)
 }
 
 func Find(harnessID registry.Harness) (harness.Adapter, bool) {
-	for _, adapter := range adapters {
-		if adapter.Definition().ID == harnessID {
-			return adapter, true
-		}
-	}
-	return nil, false
+	adapter, ok := adaptersByID[harnessID]
+	return adapter, ok
 }
 
 func SupportsScreen(harnessID registry.Harness) bool {
@@ -265,21 +273,22 @@ func WithResumeCommand(observation registry.Observation) registry.Observation {
 }
 
 func HandleHook(
+	ctx context.Context,
 	harnessID registry.Harness,
 	explicitEvent string,
 	rawPayload json.RawMessage,
 	payload map[string]any,
 	parentArgs []string,
-) (harness.HookResult, bool) {
+) (harness.HookResult, bool, error) {
 	adapter, ok := Find(harnessID)
 	if !ok {
-		return emptyHookResult, false
+		return emptyHookResult, false, nil
 	}
 	hookAdapter, ok := adapter.(harness.HookAdapter)
 	if !ok {
-		return emptyHookResult, false
+		return emptyHookResult, false, nil
 	}
-	result := hookAdapter.HandleHook(harness.HookInvocation{
+	result, err := hookAdapter.HandleHook(ctx, harness.HookInvocation{
 		Event:      explicitEvent,
 		RawPayload: rawPayload,
 		Payload:    payload,
@@ -288,7 +297,10 @@ func HandleHook(
 	if result.Response == nil {
 		result.Response = map[string]any{}
 	}
-	return result, true
+	if err != nil {
+		return result, true, fmt.Errorf("handle %s hook: %w", harnessID, err)
+	}
+	return result, true, nil
 }
 
 func LifecycleFor(id registry.Harness, event string, attributes map[string]string) harness.LifecycleDefaults {

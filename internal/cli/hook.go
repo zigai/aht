@@ -85,9 +85,12 @@ func (app *application) runManagedHook(
 	rawPayload := rawPayloadFromHookBytes(data)
 	payload := hookPayloadObject(rawPayload)
 	parentArgs := parentProcessArgs(ctx)
-	result, ok := catalog.HandleHook(harnessID, opts.event, rawPayload, payload, parentArgs)
+	result, ok, err := catalog.HandleHook(ctx, harnessID, opts.event, rawPayload, payload, parentArgs)
 	if !ok {
 		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harnessID)
+	}
+	if err != nil {
+		return fmt.Errorf("handling managed hook: %w", err)
 	}
 	if result.ReportOK {
 		result.Report.SetProcess(reportProcessIdentity(harnessID, reportProcessAncestors(ctx, 0)))
