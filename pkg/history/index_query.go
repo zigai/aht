@@ -105,29 +105,33 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	// Tool parts are stored for opt-in searches only, so a default query must
 	// exclude them from candidate plans in both the trigram and instr branches.
 	predicate, args := rolePredicate(filter, s.query.Role, s.query.IncludeTools, args)
-	// For a selection with few searchable parts, a literal scan is cheaper than
-	// enumerating a common trigram across the entire index. CROSS JOIN keeps
-	// SQLite's metadata selection ahead of reading message bodies in this path.
-	selection, selectionArgs := predicate, args
+	// A selected literal scan avoids enumerating common trigrams across the
+	// whole index. Indexed text lengths account for oversized message bodies;
+	// CROSS JOIN keeps metadata selection ahead of reading those bodies.
 	if fileID != 0 {
-		selection += " AND c.file_id=?"
-		selectionArgs = append(append([]any{}, args...), fileID)
-	}
-	small, err := index.smallSelection(ctx, selection, selectionArgs)
-	if err != nil {
-		return "", nil, err
-	}
-	query := "SELECT c.file_id,c.id,p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + predicate
-	trigrams := false
-	if fileID != 0 {
-		query += " AND c.file_id=?"
+		predicate += " AND c.file_id=?"
 		args = append(args, fileID)
 	}
-	if !small && utf8.RuneCountInString(folded) >= 3 && !strings.ContainsRune(folded, 0) && utf8.ValidString(folded) {
-		trigrams = true
-		query = strings.Replace(query, "CROSS JOIN parts", "JOIN parts", 1)
+	phrase := trigramPhrase(folded)
+	trigrams := phrase != ""
+	if trigrams {
+		literal, err := index.preferLiteral(ctx, predicate, args, phrase, s.query.Dir != "" || fileID != 0)
+		if err != nil {
+			return "", nil, err
+		}
+		trigrams = !literal
+	}
+	partJoin := "CROSS JOIN parts p"
+	if trigrams {
+		partJoin = "JOIN parts p"
+		if !s.query.CaseSensitive {
+			partJoin += " INDEXED BY parts_search"
+		}
+	}
+	query := "SELECT c.file_id,c.id,p.id FROM conversations c JOIN files f ON f.id=c.file_id " + partJoin + " ON p.conversation_id=c.id WHERE " + predicate
+	if trigrams {
 		query += " AND p.id IN (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ?)"
-		args = append(args, `"`+strings.ReplaceAll(folded, `"`, `""`)+`"`)
+		args = append(args, phrase)
 	}
 	column, literal := "p.folded", folded
 	if s.query.CaseSensitive {
@@ -141,6 +145,13 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, fileID int6
 	return query, args, nil
 }
 
+func trigramPhrase(text string) string {
+	if utf8.RuneCountInString(text) < 3 || strings.ContainsRune(text, 0) || !utf8.ValidString(text) {
+		return ""
+	}
+	return `"` + strings.ReplaceAll(text, `"`, `""`) + `"`
+}
+
 func (index *historyIndex) smallSelection(ctx context.Context, filter string, args []any) (bool, error) {
 	var count int
 	query := "SELECT count(*) FROM (SELECT p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + filter + " LIMIT ?)"
@@ -149,6 +160,25 @@ func (index *historyIndex) smallSelection(ctx context.Context, filter string, ar
 		return false, index.contention(fmt.Errorf("select indexed parts: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
+}
+
+func (index *historyIndex) preferLiteral(ctx context.Context, filter string, args []any, phrase string, scoped bool) (bool, error) {
+	if !scoped {
+		return index.smallSelection(ctx, filter, args)
+	}
+	var pages int64
+	query := "SELECT coalesce(sum(1+length(CAST(p.folded AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
+	if err := index.conn.QueryRowContext(ctx, query, args...).Scan(&pages); err != nil {
+		return false, index.contention(fmt.Errorf("measure selected parts: %w", err))
+	}
+	if pages <= directoryScanThreshold {
+		return true, nil
+	}
+	var candidates int64
+	if err := index.conn.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ? LIMIT ?)", phrase, pages+1).Scan(&candidates); err != nil {
+		return false, index.contention(fmt.Errorf("measure trigram candidates: %w", err))
+	}
+	return candidates > pages, nil
 }
 
 func rolePredicate(filter, role string, includeTools bool, args []any) (string, []any) {

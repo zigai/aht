@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -77,6 +79,50 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireIndexedMatches(t, c, history.Query{Text: "Removed"}, 1)
+}
+
+func TestIndexRejectsMiddlePrefixRewriteBeforeAppend(t *testing.T) {
+	t.Parallel()
+	padding := `{"type":"message","message":{"role":"toolResult","content":"` + strings.Repeat("x", 128<<10) + `"}}` + "\n"
+	body := `{"type":"session","id":"session","cwd":"/work"}` + "\n" +
+		padding + `{"type":"message","message":{"role":"user","content":"middle-token"}}` + "\n" + padding
+	path := writeHistory(t, t.TempDir(), "session.jsonl", body)
+	catalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	requireIndexedMatches(t, catalog, history.Query{Text: "middle-token"}, 1)
+
+	rewritten := strings.Replace(body, "middle-token", "edited-token", 1) +
+		`{"type":"message","message":{"role":"user","content":"appended-token"}}` + "\n"
+	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Text: "middle-token"}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Text: "edited-token"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Text: "appended-token"}, 1)
+}
+
+func TestIndexUpgradesWithoutReindexing(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	appendHistory(t, path, strings.Repeat(`{"type":"message","message":{"role":"user","content":"refresh token"}}`+"\n", 100))
+	before := requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	db := openTestIndex(t, catalog.IndexPath)
+	_, err := db.ExecContext(t.Context(), `
+DROP INDEX IF EXISTS parts_search;
+DROP INDEX parts_conversation;
+CREATE INDEX parts_conversation ON parts(conversation_id);
+CREATE TRIGGER reject_reindex BEFORE UPDATE ON conversations BEGIN
+ SELECT RAISE(FAIL,'transcripts must not be reindexed'); END;
+PRAGMA user_version=2;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		after := requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+		if diff := cmp.Diff(before, after); diff != "" {
+			t.Fatalf("cache upgrade changed results (-before +after):\n%s", diff)
+		}
+	}
 }
 
 func TestIndexRefreshesReplacementTruncationAndDeletion(t *testing.T) {

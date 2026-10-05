@@ -21,7 +21,7 @@ import (
 
 const (
 	// indexVersion is the schema version written by indexSchema.
-	indexVersion            = 2
+	indexVersion            = 3
 	indexApplicationID      = 0x41485431 // ASCII "AHT1".
 	requiredIndexTableCount = 4
 	// indexInvalidSuffix names the retained copy of an unusable default cache.
@@ -29,6 +29,11 @@ const (
 	// sqlitePrimaryCodeMask isolates a primary SQLite result code from extended codes.
 	sqlitePrimaryCodeMask = 0xff
 )
+
+const partIndexes = `
+CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(folded AS BLOB)));
+CREATE INDEX parts_search ON parts(id,conversation_id,role);
+`
 
 // The tools column records whether the file stores tool parts, not its identity:
 // every history has exactly one row and one copy of each part.
@@ -47,14 +52,14 @@ CREATE TABLE parts (
  id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
  role TEXT NOT NULL, body TEXT NOT NULL, folded TEXT NOT NULL,
  message_id TEXT NOT NULL, line INTEGER NOT NULL, timestamp TEXT NOT NULL);
-CREATE INDEX parts_conversation ON parts(conversation_id);
+` + partIndexes + `
 CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='parts', content_rowid='id', tokenize='trigram case_sensitive 1');
 CREATE TRIGGER parts_insert AFTER INSERT ON parts BEGIN
  INSERT INTO parts_fts(rowid,folded) VALUES(new.id,new.folded); END;
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  INSERT INTO parts_fts(parts_fts,rowid,folded) VALUES('delete',old.id,old.folded); END;
 PRAGMA application_id=0x41485431;
-PRAGMA user_version=2;
+PRAGMA user_version=3;
 `
 
 var (
@@ -199,26 +204,20 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 }
 
 // ensureSchema validates the on-disk schema, creating it when the file holds no
-// tables at all.
+// tables and upgrading the existing index without reparsing native histories.
 func (index *historyIndex) ensureSchema(ctx context.Context) error {
-	var appID int
-	if err := index.conn.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
-		if isIndexContentFailure(err) {
-			return schemaFailure(err)
+	appID, version, err := readIndexSchema(ctx, index.conn.QueryRowContext)
+	if err != nil {
+		return err
+	}
+	if appID == indexApplicationID && (version == indexVersion || version == 2) {
+		if err := index.validateSchemaTables(ctx); err != nil {
+			return err
 		}
-		return fmt.Errorf("read history index application id: %w", err)
-	}
-	var version int
-	if err := index.conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		if isIndexContentFailure(err) {
-			return schemaFailure(err)
+		if version == indexVersion {
+			return nil
 		}
-		return fmt.Errorf("read history index version: %w", err)
-	}
-	if version == indexVersion && appID == indexApplicationID {
-		return index.validateSchemaTables(ctx)
-	}
-	if version != 0 || appID != 0 {
+	} else if version != 0 || appID != 0 {
 		return errIndexSchema
 	}
 	tx, err := index.conn.BeginTx(ctx, nil)
@@ -262,22 +261,17 @@ func (index *historyIndex) validateSchemaTables(ctx context.Context) error {
 // the emptiness and version checks happen under the write lock, so concurrent
 // searches observe one creator instead of racing to create the same tables.
 func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
-	var appID int
-	if err := tx.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
-		if isIndexContentFailure(err) {
-			return schemaFailure(err)
-		}
-		return fmt.Errorf("read history index application id: %w", err)
-	}
-	var version int
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		if isIndexContentFailure(err) {
-			return schemaFailure(err)
-		}
-		return fmt.Errorf("read history index version: %w", err)
+	appID, version, err := readIndexSchema(ctx, tx.QueryRowContext)
+	if err != nil {
+		return err
 	}
 	switch {
 	case version == indexVersion && appID == indexApplicationID:
+		return nil
+	case version == 2 && appID == indexApplicationID:
+		if _, err := tx.ExecContext(ctx, "DROP INDEX parts_conversation;"+partIndexes+"PRAGMA user_version=3;"); err != nil {
+			return fmt.Errorf("upgrade history index: %w", err)
+		}
 		return nil
 	case version != 0 || appID != 0:
 		return errIndexSchema
@@ -289,6 +283,23 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("create history index: %w", err)
 	}
 	return nil
+}
+
+func readIndexSchema(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row) (int, int, error) {
+	var appID, version int
+	if err := queryRow(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+		if isIndexContentFailure(err) {
+			return 0, 0, schemaFailure(err)
+		}
+		return 0, 0, fmt.Errorf("read history index application id: %w", err)
+	}
+	if err := queryRow(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		if isIndexContentFailure(err) {
+			return 0, 0, schemaFailure(err)
+		}
+		return 0, 0, fmt.Errorf("read history index version: %w", err)
+	}
+	return appID, version, nil
 }
 
 func (index *historyIndex) inspectSchemaEmptiness(ctx context.Context, tx *sql.Tx) error {

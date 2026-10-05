@@ -392,11 +392,18 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 
 // hashPrefix bounds cancellation latency while verifying retained JSONL bytes.
 func hashPrefix(ctx context.Context, digest hash.Hash, file *os.File, size int64) error {
+	buffer := make([]byte, min(max(size, 0), hashChunkBytes))
+	reader := io.LimitedReader{R: file, N: size}
 	for remaining := size; remaining > 0; {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("hash history: %w", err)
 		}
-		n, err := io.CopyN(digest, file, min(remaining, hashChunkBytes))
+		reader.N = min(remaining, hashChunkBytes)
+		expected := reader.N
+		n, err := io.CopyBuffer(digest, &reader, buffer)
+		if err == nil && n < expected {
+			err = io.EOF
+		}
 		if err != nil {
 			return fmt.Errorf("read history prefix: %w", err)
 		}
