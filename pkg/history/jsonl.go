@@ -200,21 +200,43 @@ func (s *search) matchText(t *transcript, role, body, id string, line int, times
 	// (ß folds to ss), so the window anchor is the unfolded rune index whose
 	// folded prefix covers that offset; case-sensitive matching never folds.
 	anchor := utf8.RuneCountInString(value[:offset])
-	runes := []rune(body)
 	if !s.query.CaseSensitive {
 		anchor = foldRuneIndex(body, anchor)
 	}
-	anchor = min(max(anchor, 0), len(runes))
-	start := max(0, anchor-excerptRunes/4)
-	end := min(len(runes), start+max(excerptRunes, utf8.RuneCountInString(s.needle)))
-	excerpt := string(runes[start:end])
-	if start > 0 {
-		excerpt = "…" + excerpt
-	}
-	if end < len(runes) {
-		excerpt += "…"
-	}
+	excerpt := excerptWindow(body, anchor, utf8.RuneCountInString(s.needle))
 	t.match.Excerpts = append(t.match.Excerpts, Excerpt{Role: role, Text: excerpt, MessageID: id, Line: line, Timestamp: timestamp})
+}
+
+func excerptWindow(body string, anchor, needleRunes int) string {
+	start := max(0, anchor-excerptRunes/4)
+	end := start + max(excerptRunes, needleRunes)
+	startByte, endByte := len(body), len(body)
+	runeIndex := 0
+	for byteOffset := range body {
+		if runeIndex == start {
+			startByte = byteOffset
+		}
+		if runeIndex == end {
+			endByte = byteOffset
+			break
+		}
+		runeIndex++
+	}
+	if anchor > runeIndex {
+		return excerptWindow(body, runeIndex, needleRunes)
+	}
+	excerpt := body[startByte:endByte]
+	if !utf8.ValidString(excerpt) {
+		excerpt = string([]rune(excerpt))
+	}
+	prefix, suffix := "", ""
+	if startByte > 0 {
+		prefix = "…"
+	}
+	if endByte < len(body) {
+		suffix = "…"
+	}
+	return prefix + excerpt + suffix
 }
 
 func clip(value string, limit int) string {

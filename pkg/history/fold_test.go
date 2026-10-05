@@ -18,14 +18,14 @@ const foldFixtureBody = `{"type":"session","id":"fold-session","cwd":"/work/fold
 `
 
 // foldSearch runs the production direct scan over one Pi-format transcript.
-func foldSearch(t *testing.T, body, query string) (Result, error) {
+func foldSearch(t *testing.T, body string, query Query) (Result, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}}
-	return catalog.searchDirect(t.Context(), Query{Text: query})
+	return catalog.searchDirect(t.Context(), query)
 }
 
 // TestFoldNormalizerContract holds every expectation that depends on the folding
@@ -84,7 +84,7 @@ func TestFoldNormalizerContract(t *testing.T) {
 	} {
 		t.Run("search "+tt.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := foldSearch(t, foldFixtureBody, tt.query)
+			result, err := foldSearch(t, foldFixtureBody, Query{Text: tt.query})
 			if err != nil || len(result.Matches) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}
@@ -125,19 +125,51 @@ func TestFoldRuneIndexProperties(t *testing.T) {
 func TestFoldExcerptWindows(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		name, body, query, token string
+		name, body, query, token, want string
+		caseSensitive                  bool
 	}{
 		{
 			name:  "sharp s run before the match",
 			body:  strings.Repeat("ß", 300) + " refresh token " + strings.Repeat("ß", 300),
 			query: "refresh token",
 			token: "refresh token",
+			want:  "…" + strings.Repeat("ß", 59) + " refresh token " + strings.Repeat("ß", 166) + "…",
 		},
 		{
 			name:  "ligature matched inside its own expansion",
 			body:  strings.Repeat("ß", 300) + "ﬃ" + strings.Repeat("ß", 300),
 			query: "ffi",
 			token: "ﬃ",
+			want:  "…" + strings.Repeat("ß", 60) + "ﬃ" + strings.Repeat("ß", 179) + "…",
+		},
+		{
+			name:  "window ending at the body boundary",
+			body:  strings.Repeat("€", 60) + "needle" + strings.Repeat("€", 174),
+			query: "needle",
+			token: "needle",
+			want:  strings.Repeat("€", 60) + "needle" + strings.Repeat("€", 174),
+		},
+		{
+			name:  "window truncating a multibyte suffix",
+			body:  strings.Repeat("€", 60) + "needle" + strings.Repeat("€", 175),
+			query: "needle",
+			token: "needle",
+			want:  strings.Repeat("€", 60) + "needle" + strings.Repeat("€", 174) + "…",
+		},
+		{
+			name:  "invalid bytes in the selected window",
+			body:  "\xff\xfe needle",
+			query: "needle",
+			token: "needle",
+			want:  "\ufffd\ufffd needle",
+		},
+		{
+			name:          "case sensitive continuation byte beyond rune count",
+			body:          strings.Repeat("a", 100) + "\U0001f600",
+			query:         "\x80",
+			token:         "\U0001f600",
+			want:          "…" + strings.Repeat("a", 59) + "\U0001f600",
+			caseSensitive: true,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,13 +179,16 @@ func TestFoldExcerptWindows(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixture := `{"type":"session","id":"fold-session","cwd":"/work/fold"}` + "\n" + string(message) + "\n"
-			result, err := foldSearch(t, fixture, tt.query)
+			result, err := foldSearch(t, fixture, Query{Text: tt.query, CaseSensitive: tt.caseSensitive})
 			if err != nil || len(result.Matches) != 1 || len(result.Matches[0].Excerpts) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}
 			excerpt := result.Matches[0].Excerpts[0].Text
 			if !strings.Contains(excerpt, tt.token) {
 				t.Fatalf("excerpt for %q does not contain %q: %q", tt.query, tt.token, excerpt)
+			}
+			if excerpt != tt.want {
+				t.Fatalf("excerpt = %q, want %q", excerpt, tt.want)
 			}
 			if runes := utf8.RuneCountInString(excerpt); runes > excerptRunes+2 {
 				t.Fatalf("excerpt of %d runes exceeds the %d-rune window: %q", runes, excerptRunes, excerpt)
