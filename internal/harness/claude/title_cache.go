@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	titleCacheVersion      = 1
+	titleCacheVersion      = 2
 	titleCacheStringFields = 3
 	titleJSONEscapeBytes   = 6
 )
 
 type titleSourceStamp struct {
-	Device uint64 `json:"device"`
+	Device string `json:"device"`
 	Inode  uint64 `json:"inode"`
 	Size   int64  `json:"size"`
 	Mtime  int64  `json:"mtime"`

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -311,7 +312,7 @@ func TestTitleCacheRejectsCorruptOrForeignSnapshots(t *testing.T) {
 		name   string
 		mutate func(*testing.T, map[string]any)
 	}{
-		{"version", func(_ *testing.T, record map[string]any) { record["version"] = -1 }},
+		{"previous version", func(_ *testing.T, record map[string]any) { record["version"] = 1 }},
 		{"negative offset", func(t *testing.T, record map[string]any) {
 			t.Helper()
 			titleCacheObject(t, record, "state")["offset"] = -1
@@ -352,7 +353,9 @@ func TestTitleCacheRejectsCorruptOrForeignSnapshots(t *testing.T) {
 				t.Fatal(err)
 			}
 			var record map[string]any
-			if err := json.Unmarshal(body, &record); err != nil {
+			decoder := json.NewDecoder(bytes.NewReader(body))
+			decoder.UseNumber()
+			if err := decoder.Decode(&record); err != nil {
 				t.Fatal(err)
 			}
 			record["title"] = "Stale"
