@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
@@ -29,14 +30,9 @@ func (app *application) newLocationsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			harnesses, err := selectedLocationHarnesses(args)
+			locations, err := selectedLocations(args, projectDir)
 			if err != nil {
 				return err
-			}
-			locations := make([]harness.Location, 0, len(harnesses))
-			for _, harnessID := range harnesses {
-				found, _ := harness.LocationsFor(harnessID, projectDir)
-				locations = append(locations, found...)
 			}
 			if app.outputJSON {
 				return app.writeJSON(locations)
@@ -63,24 +59,26 @@ func resolveProjectDir(dir string) (string, error) {
 	return absolute, nil
 }
 
-func selectedLocationHarnesses(args []string) ([]registry.Harness, error) {
+func selectedLocations(args []string, projectDir string) ([]harness.Location, error) {
 	if len(args) == 0 {
-		return harness.Supported(), nil
+		return harness.AllLocations(projectDir), nil
 	}
-	seen := make(map[registry.Harness]bool, len(args))
 	selected := make([]registry.Harness, 0, len(args))
 	for _, arg := range args {
 		harnessID, err := harness.Parse(arg)
 		if err != nil {
 			return nil, exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, arg), exitCodeUsage)
 		}
-		if seen[harnessID] {
-			continue
+		if !slices.Contains(selected, harnessID) {
+			selected = append(selected, harnessID)
 		}
-		seen[harnessID] = true
-		selected = append(selected, harnessID)
 	}
-	return selected, nil
+	var locations []harness.Location
+	for _, harnessID := range selected {
+		found, _ := harness.LocationsFor(harnessID, projectDir)
+		locations = append(locations, found...)
+	}
+	return locations, nil
 }
 
 func (app *application) writeLocationsTable(locations []harness.Location) error {
