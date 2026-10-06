@@ -19,7 +19,7 @@ import (
 
 const (
 	observeDefaultInterval = 300 * time.Millisecond
-	realtimeComponentCount = 3
+	realtimeComponentCount = 4
 )
 
 var (
@@ -180,10 +180,11 @@ func (app *application) runRealtimeObserver(
 		return store.RunPersistence(runCtx, 0, 0)
 	})
 	run("observer", func() error { return app.runObserver(runCtx, opts, watcher) })
+	run("history", func() error { return app.runHistoryIndexer(runCtx, store, opts.quiet) })
 
 	first := <-results
 	cancel()
-	all := []trackerComponentResult{first, <-results, <-results}
+	all := []trackerComponentResult{first, <-results, <-results, <-results}
 	var joined error
 	for _, result := range all {
 		if result.err == nil {

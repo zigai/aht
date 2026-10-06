@@ -17,3 +17,14 @@ func (t *Decoder) Message(ctx context.Context, r Record, id string, line int, ti
 		t.Capture(ctx, "tool", string(r["tool_calls"]), id, line, timestamp)
 	}
 }
+
+// CaptureModel records the model of an assistant message. Placeholder
+// models that native tools write for locally generated replies are ignored.
+func (t *Decoder) CaptureModel(message Record) {
+	if Str(message, "role") != "assistant" {
+		return
+	}
+	if model := Str(message, "model"); model != "" && model != "<synthetic>" {
+		t.Conversation.Model = model
+	}
+}

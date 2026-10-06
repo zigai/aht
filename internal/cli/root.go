@@ -270,6 +270,7 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newCapabilitiesCommand(),
 		app.newManageConfigCommand(),
 		app.newDetectionCommand(),
+		app.newHistoryCommand(),
 	)
 	return command
 }

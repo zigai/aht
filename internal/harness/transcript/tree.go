@@ -32,7 +32,9 @@ func TreeRecord(ctx context.Context, t *Decoder, r Record, line int) {
 			t.Conversation.Title = title
 		}
 	case "message":
-		t.Message(ctx, Obj(r, "message"), entry.ID, line, entry.Timestamp)
+		message := Obj(r, "message")
+		t.CaptureModel(message)
+		t.Message(ctx, message, entry.ID, line, entry.Timestamp)
 	}
 }
 

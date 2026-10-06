@@ -34,6 +34,8 @@ func readDatabaseRow(ctx context.Context, t *transcript.Decoder, row transcript.
 	if id == "" {
 		id = row.MessageID
 	}
-	t.Message(ctx, transcript.Obj(r, "message"), id, 0, timestamp)
+	message := transcript.Obj(r, "message")
+	t.CaptureModel(message)
+	t.Message(ctx, message, id, 0, timestamp)
 	return nil
 }

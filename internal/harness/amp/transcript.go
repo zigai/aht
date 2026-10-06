@@ -28,6 +28,7 @@ func readTranscriptDocument(ctx context.Context, t *transcript.Decoder, data []b
 	t.Conversation.SessionID = sessionID
 	t.Conversation.CreatedAt = transcript.ParseTime(r["created"])
 	t.Conversation.Title = transcript.Str(r, "title")
+	t.Conversation.GitBranch = ampBranch(transcript.Obj(r, "env"))
 	if dir := ampDirectory(transcript.Obj(r, "env")); dir != "" {
 		t.Conversation.CWD = dir
 		t.Conversation.ProjectRoot = dir
@@ -52,19 +53,24 @@ func parseAmpMessages(raw json.RawMessage) ([]transcript.Record, error) {
 	return messages, nil
 }
 
-func ampDirectory(env transcript.Record) string {
-	if len(env) == 0 {
-		return ""
-	}
-	initialObj := transcript.Obj(env, "initial")
-	if len(initialObj) == 0 {
-		return ""
-	}
+func ampTree(env transcript.Record) transcript.Record {
 	var trees []transcript.Record
-	if json.Unmarshal(initialObj["trees"], &trees) != nil || len(trees) == 0 {
-		return ""
+	if json.Unmarshal(transcript.Obj(env, "initial")["trees"], &trees) != nil || len(trees) == 0 {
+		return nil
 	}
-	uri := transcript.Str(trees[0], "uri")
+	return trees[0]
+}
+
+func ampBranch(env transcript.Record) string {
+	ref := transcript.Str(transcript.Obj(ampTree(env), "repository"), "ref")
+	if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		return branch
+	}
+	return ""
+}
+
+func ampDirectory(env transcript.Record) string {
+	uri := transcript.Str(ampTree(env), "uri")
 	if dir, ok := strings.CutPrefix(uri, "file://"); ok {
 		return dir
 	}
@@ -89,7 +95,7 @@ func ampMessageID(msg transcript.Record) string {
 }
 
 func (ampHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"T-*.json", "*.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil}
+	return transcript.Reader{Patterns: []string{"T-*.json", "*.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil, LocalTitles: false, Parent: nil}
 }
 
 func transcriptSources(home string) []string {
