@@ -713,3 +713,34 @@ func TestResultsCarryNativeTitlesFromTitleFiles(t *testing.T) {
 	})
 	requireTitle("stream", streamed, err)
 }
+
+func TestDefaultSourcesRequireHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		t.Skipf("platform reports home directory %q without HOME", home)
+	}
+	t.Chdir(t.TempDir())
+
+	sources, err := history.DefaultSources()
+	if err == nil {
+		t.Fatalf("DefaultSources without a home directory = %v, want an error", sources)
+	}
+}
+
+func TestDefaultSourcesAreAbsoluteWithPaddedHome(t *testing.T) {
+	t.Setenv("HOME", "  "+t.TempDir()+"\n")
+
+	sources, err := history.DefaultSources()
+	if err != nil {
+		t.Fatalf("DefaultSources: %v", err)
+	}
+	if len(sources) == 0 {
+		t.Fatal("DefaultSources returned no sources")
+	}
+	for _, source := range sources {
+		if !filepath.IsAbs(source.Path) {
+			t.Errorf("%s source path %q is not absolute", source.Harness, source.Path)
+		}
+	}
+}

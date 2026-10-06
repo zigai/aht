@@ -42,6 +42,9 @@ func openclawStateDir() string {
 	if home == "" {
 		home = harness.HomeDir()
 	}
+	if home == "" {
+		return ""
+	}
 
 	profile := strings.TrimSpace(os.Getenv("OPENCLAW_PROFILE"))
 	if profile != "" && profile != "default" {

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -874,7 +875,8 @@ func isolateLocationEnvironment(t *testing.T) string {
 		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
 		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
 		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
-		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME",
+		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME", "XDG_DATA_HOME", "APPDATA", "DROID_SESSIONS_DIR", "KILO_DB",
+		"CODEX_SQLITE_HOME", "CLINE_SESSION_DATA_DIR",
 	} {
 		t.Setenv(name, "")
 	}
@@ -947,10 +949,33 @@ func TestLocationsStayWithinTheirScope(t *testing.T) {
 	}
 }
 
-func TestLocationsAreAbsoluteWithoutHome(t *testing.T) {
+// withoutHome leaves no home directory known and moves the working directory
+// into an empty directory, so any path built from a missing home resolves there.
+func withoutHome(t *testing.T) string {
+	t.Helper()
 	isolateLocationEnvironment(t)
 	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if home := harness.HomeDir(); home != "" {
+		t.Skipf("platform reports home directory %q without HOME", home)
+	}
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	return workDir
+}
+
+func TestLocationsOmitGlobalPathsWithoutHome(t *testing.T) {
 	projectDir := t.TempDir()
+	isolateLocationEnvironment(t)
+	withHome := map[string]bool{}
+	for _, adapter := range All() {
+		locations, _ := LocationsFor(adapter.Definition().ID, projectDir)
+		for _, location := range locations {
+			withHome[location.Path] = true
+		}
+	}
+	withoutHome(t)
 
 	for _, adapter := range All() {
 		id := adapter.Definition().ID
@@ -958,6 +983,9 @@ func TestLocationsAreAbsoluteWithoutHome(t *testing.T) {
 		for _, location := range locations {
 			if !filepath.IsAbs(location.Path) {
 				t.Errorf("%s: %+v is not absolute without a home directory", id, location)
+			}
+			if location.Scope == harness.LocationScopeGlobal && !withHome[location.Path] {
+				t.Errorf("%s: %+v resolved without a home directory or override", id, location)
 			}
 		}
 	}
@@ -984,22 +1012,32 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_STATE_DIR"},
 		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_CONFIG_PATH", value: func(dir string) string { return filepath.Join(dir, "custom.json") }},
 	} {
-		t.Run(string(test.harness)+"/"+test.variable, func(t *testing.T) {
-			isolateLocationEnvironment(t)
-			override := t.TempDir()
-			value := override
-			if test.value != nil {
-				value = test.value(override)
+		for _, knownHome := range []bool{true, false} {
+			name := string(test.harness) + "/" + test.variable
+			if !knownHome {
+				name += "/without home"
 			}
-			t.Setenv(test.variable, value)
-			locations, _ := LocationsFor(test.harness, "")
-			config := globalLocationPaths(locations, harness.LocationKindConfig)
-			if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
-				return !strings.HasPrefix(path, override+string(filepath.Separator)) && !strings.HasPrefix(path, "/etc/")
-			}) {
-				t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				isolateLocationEnvironment(t)
+				if !knownHome {
+					t.Setenv("HOME", "")
+					t.Setenv("USERPROFILE", "")
+				}
+				override := t.TempDir()
+				value := override
+				if test.value != nil {
+					value = test.value(override)
+				}
+				t.Setenv(test.variable, value)
+				locations, _ := LocationsFor(test.harness, "")
+				config := globalLocationPaths(locations, harness.LocationKindConfig)
+				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
+					return !strings.HasPrefix(path, override+string(filepath.Separator)) && !strings.HasPrefix(path, "/etc/")
+				}) {
+					t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
+				}
+			})
+		}
 	}
 }
 
@@ -1013,5 +1051,121 @@ func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
 		if !slices.ContainsFunc(got, func(path string) bool { return filepath.Dir(path) == override }) || slices.ContainsFunc(got, func(path string) bool { return strings.Contains(path, ".cline") }) {
 			t.Errorf("cline %s with CLINE_DIR = %v", kind, got)
 		}
+	}
+}
+
+func writeDecoyFile(t *testing.T, workDir string, content string, elements ...string) {
+	t.Helper()
+	path := filepath.Join(append([]string{workDir}, elements...)...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeDecoyDatabase(t *testing.T, workDir string, schema string, row string, elements ...string) {
+	t.Helper()
+	path := filepath.Join(append([]string{workDir}, elements...)...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, statement := range []string{schema, row} {
+		if _, err := db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness registry.Harness
+		plant   func(t *testing.T, workDir string)
+	}{
+		{registry.Harness("droid"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"type":"session_start","id":"abc","title":"Decoy"}`+"\n", ".factory", "sessions", "abc.jsonl")
+		}},
+		{registry.Harness("grok"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"info":{"session_id":"abc"},"generated_title":"Decoy"}`, ".grok", "sessions", "group", "abc", "summary.json")
+		}},
+		{registry.Harness("codex"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"id":"abc","thread_name":"Decoy"}`+"\n", ".codex", "session_index.jsonl")
+		}},
+		{registry.Harness("hermes"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, title TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".hermes", "state.db")
+		}},
+		{registry.Harness("goose"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, description TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".local", "share", "goose", "sessions", "sessions.db")
+		}},
+		{registry.Harness("kilo"), func(t *testing.T, workDir string) {
+			t.Helper()
+			t.Setenv("PATH", "")
+			writeDecoyDatabase(t, workDir, "CREATE TABLE session (id TEXT, title TEXT)", "INSERT INTO session VALUES ('abc', 'Decoy')", ".local", "share", "kilo", "kilo.db")
+		}},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			workDir := withoutHome(t)
+			test.plant(t, workDir)
+			adapter, ok := Find(test.harness)
+			if !ok {
+				t.Fatalf("adapter %s not found", test.harness)
+			}
+			reader, ok := adapter.(harness.TitleReader)
+			if !ok {
+				t.Fatalf("adapter %s has no title reader", test.harness)
+			}
+
+			titles, err := reader.SessionTitles(t.Context(), []registry.ObservationIdentity{{SessionID: testSessionID}})
+			if err != nil || len(titles) != 1 || titles[0] != "" {
+				t.Fatalf("SessionTitles without a home = %q, %v, want one empty title", titles, err)
+			}
+		})
+	}
+}
+
+func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness registry.Harness
+		payload string
+		plant   func(t *testing.T, workDir string)
+	}{
+		{
+			harness: registry.Harness("cline"),
+			payload: `{"sessionContext":{"rootSessionId":"abc"},"hookName":"TaskStart"}`,
+			plant:   func(*testing.T, string) {},
+		},
+		{
+			harness: registry.Harness("kimi-code"),
+			payload: `{"session_id":"abc","cwd":"/repo","hook_event_name":"SessionStart"}`,
+			plant: func(t *testing.T, workDir string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Join(workDir, ".kimi", "sessions", "wd", "abc"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			test.plant(t, withoutHome(t))
+
+			got, err := PayloadDefaults(test.harness, json.RawMessage(test.payload))
+			if err != nil {
+				t.Fatalf("PayloadDefaults: %v", err)
+			}
+			if got.SessionID != testSessionID || got.SessionPath != "" {
+				t.Fatalf("PayloadDefaults without a home = %+v, want session %q and no path", got, testSessionID)
+			}
+		})
 	}
 }

@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -26,7 +26,11 @@ func (gooseHarness) SessionTitles(ctx context.Context, identities []registry.Obs
 	if len(identities) == 0 {
 		return titles, nil
 	}
-	db, err := openGooseSessionDatabase()
+	path := gooseSessionDatabasePath()
+	if path == "" {
+		return titles, nil
+	}
+	db, err := openGooseSessionDatabase(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return titles, nil
 	}
@@ -38,8 +42,7 @@ func (gooseHarness) SessionTitles(ctx context.Context, identities []registry.Obs
 	return readGooseSessionTitles(ctx, db, identities, titles)
 }
 
-func openGooseSessionDatabase() (*sql.DB, error) {
-	path := gooseSessionDatabasePath()
+func openGooseSessionDatabase(path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect Goose session database: %w", err)
 	} else if err != nil {
@@ -129,24 +132,29 @@ func gooseSessionColumns(ctx context.Context, db *sql.DB) (map[string]bool, erro
 }
 
 func gooseSessionDatabasePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		home = "."
+	if root := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(root) {
+		return filepath.Join(root, "data", "sessions", "sessions.db")
 	}
-	data := os.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		data = filepath.Join(home, ".local", "share")
-	}
-	gooseDir := filepath.Join(data, "goose")
 	if runtime.GOOS == "windows" {
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
+			home := harness.HomeDir()
+			if home == "" {
+				return ""
+			}
 			appData = filepath.Join(home, "AppData", "Roaming")
 		}
-		gooseDir = filepath.Join(appData, "Block", "goose")
+
+		return filepath.Join(appData, "Block", "goose", "sessions", "sessions.db")
 	}
-	if root := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(root) {
-		gooseDir = filepath.Join(root, "data")
+	data := os.Getenv("XDG_DATA_HOME")
+	if data == "" {
+		home := harness.HomeDir()
+		if home == "" {
+			return ""
+		}
+		data = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(gooseDir, "sessions", "sessions.db")
+
+	return filepath.Join(data, "goose", "sessions", "sessions.db")
 }

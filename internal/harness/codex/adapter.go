@@ -57,9 +57,14 @@ func New() codexHarness {
 
 func (codexHarness) RetainNativeActivity() bool { return true }
 
-func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
+func (codexHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := codexHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(codexHome(), "hooks.json"),
+		Path:              filepath.Join(base, "hooks.json"),
 		Source:            codexIntegrationSource,
 		Label:             "codex hooks",
 		ConfigLabel:       "codex config",
@@ -124,7 +129,7 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
 			},
 		},
-	}}, harness.ShimAction{}}}
+	}}, harness.ShimAction{}}}, nil
 }
 
 func (codexHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -162,11 +167,12 @@ func codexHome() string {
 	if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".codex")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".codex"
+	return filepath.Join(home, ".codex")
 }
 
 func (codexHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

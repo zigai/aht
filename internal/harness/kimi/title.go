@@ -81,7 +81,11 @@ func loadKimiFallbackGroups(ctx context.Context, groups map[string]*kimiTitleGro
 	if len(fallback.indicesByID) == 0 {
 		return nil
 	}
-	metadata, err := readKimiMetadata(ctx)
+	home := kimiCodeHome()
+	if home == "" {
+		return nil
+	}
+	metadata, err := readKimiMetadata(ctx, home)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -172,7 +176,11 @@ func kimiSessionPathMayUseWorkspaceLookup(sessionPath, sessionID string) bool {
 	if sessionPath == "" || filepath.Base(sessionPath) != sessionID {
 		return false
 	}
-	root, err := filepath.Abs(filepath.Join(kimiCodeHome(), "sessions"))
+	home := kimiCodeHome()
+	if home == "" {
+		return false
+	}
+	root, err := filepath.Abs(filepath.Join(home, "sessions"))
 	if err != nil {
 		return false
 	}
@@ -236,12 +244,12 @@ func resolveKimiFallbackTitles(fallbackTitles map[int][]string, titles []string)
 	return errors.Join(failures...)
 }
 
-func readKimiMetadata(ctx context.Context) (kimiMetadata, error) {
+func readKimiMetadata(ctx context.Context, home string) (kimiMetadata, error) {
 	var metadata kimiMetadata
 	if err := ctx.Err(); err != nil {
 		return metadata, fmt.Errorf("read Kimi Code workspace metadata: %w", err)
 	}
-	path := filepath.Join(kimiCodeHome(), "kimi.json")
+	path := filepath.Join(home, "kimi.json")
 	file, err := titlefile.Open(path)
 	if err != nil {
 		return metadata, fmt.Errorf("open Kimi Code workspace metadata: %w", err)

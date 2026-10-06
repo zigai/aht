@@ -53,9 +53,14 @@ func New() ompHarness {
 	})}
 }
 
-func (ompHarness) InstallPlan(binary string) harness.InstallPlan {
+func (ompHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := ompAgentDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(ompAgentDir(), "extensions", ompExtensionName),
+		Path:        filepath.Join(base, "extensions", ompExtensionName),
 		Label:       "oh-my-pi extension",
 		ConfigLabel: "oh-my-pi extension",
 		Content: harness.RenderScriptTemplate(
@@ -66,7 +71,7 @@ func (ompHarness) InstallPlan(binary string) harness.InstallPlan {
 			integrationVersion,
 		),
 		JSONContent: nil,
-	}}}}
+	}}}}, nil
 }
 
 func (ompHarness) ResumeCommand(sessionID string, sessionPath string) []string {

@@ -55,9 +55,14 @@ func New() hermesHarness {
 	})}
 }
 
-func (hermesHarness) InstallPlan(binary string) harness.InstallPlan {
+func (hermesHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := hermesHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(hermesHome(), "plugins", hermesPluginName)
+	dir := filepath.Join(base, "plugins", hermesPluginName)
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   dir,
@@ -71,7 +76,7 @@ func (hermesHarness) InstallPlan(binary string) harness.InstallPlan {
 		MarkerFile:     hermesMarkerFileName,
 		ImportManifest: nil,
 		Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
-	}}}}
+	}}}}, nil
 }
 
 func (hermesHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -86,11 +91,12 @@ func hermesHome() string {
 	if configured := strings.TrimSpace(os.Getenv("HERMES_HOME")); configured != "" {
 		return configured
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".hermes")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".hermes"
+	return filepath.Join(home, ".hermes")
 }
 
 func hermesPluginManifest(version string) string {

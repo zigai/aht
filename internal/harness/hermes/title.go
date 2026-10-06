@@ -24,7 +24,11 @@ func (hermesHarness) SessionTitles(ctx context.Context, identities []registry.Ob
 	if len(identities) == 0 {
 		return titles, nil
 	}
-	db, err := openHermesSessionDatabase()
+	home := hermesHome()
+	if home == "" {
+		return titles, nil
+	}
+	db, err := openHermesSessionDatabase(home)
 	if errors.Is(err, os.ErrNotExist) {
 		return titles, nil
 	}
@@ -52,8 +56,8 @@ func (hermesHarness) SessionTitles(ctx context.Context, identities []registry.Ob
 	return titles, errors.Join(failures...)
 }
 
-func openHermesSessionDatabase() (*sql.DB, error) {
-	databasePath := filepath.Join(hermesHome(), "state.db")
+func openHermesSessionDatabase(home string) (*sql.DB, error) {
+	databasePath := filepath.Join(home, "state.db")
 	info, err := os.Stat(databasePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect hermes session database: %w", err)

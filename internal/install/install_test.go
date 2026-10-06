@@ -99,6 +99,107 @@ func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 	}
 }
 
+// withoutHome clears the whole environment, so no home directory and no
+// adapter override is known, and moves the working directory into an empty
+// directory where any path built from a missing home would land.
+func withoutHome(t *testing.T) string {
+	t.Helper()
+	for _, entry := range os.Environ() {
+		if name, _, _ := strings.Cut(entry, "="); name != "" {
+			t.Setenv(name, "")
+		}
+	}
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	return workDir
+}
+
+func TestInstallPlansWithoutHomeFailOrStayAbsolute(t *testing.T) {
+	withoutHome(t)
+
+	for _, harness := range Harnesses() {
+		t.Run(string(harness), func(t *testing.T) {
+			plan, _, err := installPlanForHarness(harness, testInstallBinary)
+			if err != nil {
+				if !errors.Is(err, harnesspkg.ErrHomeUnknown) {
+					t.Fatalf("plan error = %v, want %v", err, harnesspkg.ErrHomeUnknown)
+				}
+				return
+			}
+			for _, path := range planPaths(plan) {
+				if !filepath.IsAbs(path) {
+					t.Errorf("plan path %q is relative without a home directory", path)
+				}
+			}
+		})
+	}
+}
+
+func TestIntegrationEntryPointsWithoutHomeFailWithoutTouchingWorkingDirectory(t *testing.T) {
+	workDir := withoutHome(t)
+	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
+
+	for _, test := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "install", run: func() error { _, err := Run(t.Context(), options); return err }},
+		{name: "remove", run: func() error { _, err := Remove(t.Context(), options); return err }},
+		{name: "inspect", run: func() error { _, err := Inspect(t.Context(), options.Harness, options.Binary); return err }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); !errors.Is(err, harnesspkg.ErrHomeUnknown) {
+				t.Fatalf("%s error = %v, want %v", test.name, err, harnesspkg.ErrHomeUnknown)
+			}
+		})
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("working directory entries = %v, %v, want none", entries, err)
+	}
+}
+
+func TestInstallPlanFollowsEnvironmentOverrideWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+	}{
+		{registry.Harness("claude"), "CLAUDE_CONFIG_DIR"},
+		{registry.Harness("codex"), "CODEX_HOME"},
+		{registry.Harness("copilot"), "COPILOT_HOME"},
+		{registry.Harness("cline"), "CLINE_DIR"},
+		{registry.Harness("grok"), "GROK_HOME"},
+		{registry.Harness("hermes"), "HERMES_HOME"},
+		{registry.Harness("kimi-code"), "KIMI_SHARE_DIR"},
+		{registry.Harness("pi"), "PI_CODING_AGENT_DIR"},
+		{registry.Harness("omp"), "PI_CODING_AGENT_DIR"},
+		{registry.Harness("kilo"), "KILO_CONFIG_DIR"},
+		{registry.Harness("opencode"), "OPENCODE_CONFIG_DIR"},
+		{registry.Harness("amp"), "XDG_CONFIG_HOME"},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			withoutHome(t)
+			override := t.TempDir()
+			t.Setenv(test.variable, override)
+
+			plan, _, err := installPlanForHarness(test.harness, testInstallBinary)
+			if err != nil {
+				t.Fatalf("plan with %s set and no home: %v", test.variable, err)
+			}
+			paths := planPaths(plan)
+			if len(paths) == 0 {
+				t.Fatal("plan has no paths")
+			}
+			for _, path := range paths {
+				if !strings.HasPrefix(path, override+string(filepath.Separator)) {
+					t.Errorf("plan path %q is outside %s=%q", path, test.variable, override)
+				}
+			}
+		})
+	}
+}
+
 const (
 	testInstallBinary     = "/usr/local/bin/aht"
 	piExtensionName       = "aht-state.ts"

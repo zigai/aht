@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -40,9 +41,9 @@ type historyFile struct {
 // locations. Missing directories are normal and do not make search incomplete.
 // Unsupported readers remain visible in Result.Sources instead of appearing empty.
 func DefaultSources() ([]Source, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("locate history home: %w", err)
+	home := harness.HomeDir()
+	if home == "" {
+		return nil, fmt.Errorf("locate history home: %w", harness.ErrHomeUnknown)
 	}
 	var sources []Source
 	for _, adapter := range catalog.All() {

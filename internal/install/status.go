@@ -75,7 +75,12 @@ func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspk
 	}
 
 	advisor, _ := adapter.(harnesspkg.InstallAdvisor)
-	return installer.InstallPlan(binary), advisor, nil
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("plan %s integration: %w", harnessID, err)
+	}
+
+	return plan, advisor, nil
 }
 
 func inspectIntegrationPlan(ctx context.Context, plan harnesspkg.InstallPlan, result *IntegrationStatus) error {

@@ -53,14 +53,19 @@ func New() grokHarness {
 	})}
 }
 
-func (grokHarness) InstallPlan(binary string) harness.InstallPlan {
+func (grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := grokHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(grokHome(), "hooks", grokHookFileName),
+		Path:        filepath.Join(base, "hooks", grokHookFileName),
 		Label:       "grok hooks",
 		ConfigLabel: "grok hooks",
 		Content:     "",
 		JSONContent: grokHookConfig(binary),
-	}}}}
+	}}}}, nil
 }
 
 func (grokHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -209,11 +214,12 @@ func grokHome() string {
 	if value := strings.TrimSpace(os.Getenv("GROK_HOME")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".grok")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".grok"
+	return filepath.Join(home, ".grok")
 }
 
 func (grokHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

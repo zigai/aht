@@ -84,7 +84,11 @@ func grokSummaryPaths(identity registry.ObservationIdentity) ([]string, error) {
 		return nil, nil
 	}
 
-	root := filepath.Join(grokHome(), "sessions")
+	home := grokHome()
+	if home == "" {
+		return nil, nil
+	}
+	root := filepath.Join(home, "sessions")
 	groups, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

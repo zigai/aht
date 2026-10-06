@@ -103,7 +103,11 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 			continue
 		}
 		harness := adapter.Definition().ID
-		for _, action := range installer.InstallPlan(binary.command).Actions {
+		plan, err := installer.InstallPlan(binary.command)
+		if err != nil {
+			t.Fatalf("plan %s integration: %v", harness, err)
+		}
+		for _, action := range plan.Actions {
 			artifacts = append(artifacts, generatedActionArtifacts(t, harness, binary, action)...)
 		}
 	}
@@ -166,7 +170,11 @@ func generatedCommandHook(t *testing.T, harness registry.Harness) string {
 	if !ok {
 		t.Fatalf("harness %s is not installable", harness)
 	}
-	for _, action := range installer.InstallPlan(captureBinaryCommand(t)).Actions {
+	plan, err := installer.InstallPlan(captureBinaryCommand(t))
+	if err != nil {
+		t.Fatalf("plan %s integration: %v", harness, err)
+	}
+	for _, action := range plan.Actions {
 		if plan, ok := action.(harnesspkg.JSONCommandHooksAction); ok && len(plan.Plan.Hooks) > 0 {
 			return plan.Plan.Hooks[0].Command
 		}

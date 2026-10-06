@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -64,8 +63,11 @@ func New() agyHarness {
 	})}
 }
 
-func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
+func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	configDir := agyConfigDir()
+	if configDir == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   filepath.Join(configDir, "plugins", agyPluginName),
@@ -96,7 +98,7 @@ func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
 			Components: []string{agyImportComponent},
 		},
 		Registration: nil,
-	}}, harness.ShimAction{}}}
+	}}, harness.ShimAction{}}}, nil
 }
 
 func (agyHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -175,11 +177,12 @@ func agyMarkerContent() string {
 }
 
 func agyConfigDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".gemini", "antigravity-cli")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".gemini", "antigravity-cli")
+	return filepath.Join(home, ".gemini", "antigravity-cli")
 }
 
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {

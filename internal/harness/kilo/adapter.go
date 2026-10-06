@@ -57,9 +57,14 @@ func New() kiloHarness {
 	})}
 }
 
-func (kiloHarness) InstallPlan(binary string) harness.InstallPlan {
+func (kiloHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := kiloConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(kiloConfigDir(), "plugin", kiloPluginName),
+		Path:        filepath.Join(base, "plugin", kiloPluginName),
 		Label:       "kilo plugin",
 		ConfigLabel: "kilo plugin",
 		Content: harness.RenderScriptTemplate(
@@ -70,7 +75,7 @@ func (kiloHarness) InstallPlan(binary string) harness.InstallPlan {
 			integrationVersion,
 		),
 		JSONContent: nil,
-	}}}}
+	}}}}, nil
 }
 
 func (kiloHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -90,9 +95,10 @@ func kiloConfigDir() string {
 		return filepath.Join(value, "kilo")
 	}
 
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".config", "kilo")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".config", "kilo")
+	return filepath.Join(home, ".config", "kilo")
 }

@@ -52,9 +52,14 @@ func New() ampHarness {
 	})}
 }
 
-func (ampHarness) InstallPlan(binary string) harness.InstallPlan {
+func (ampHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := ampConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(ampConfigDir(), "plugins", ampPluginName),
+		Path:        filepath.Join(base, "plugins", ampPluginName),
 		Label:       "amp plugin",
 		ConfigLabel: "amp plugin",
 		Content: harness.RenderScriptTemplate(
@@ -65,7 +70,7 @@ func (ampHarness) InstallPlan(binary string) harness.InstallPlan {
 			integrationVersion,
 		),
 		JSONContent: nil,
-	}}}}
+	}}}}, nil
 }
 
 func (ampHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -81,9 +86,10 @@ func ampConfigDir() string {
 		return filepath.Join(value, "amp")
 	}
 
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".config", "amp")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".config", "amp")
+	return filepath.Join(home, ".config", "amp")
 }
