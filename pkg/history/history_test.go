@@ -591,8 +591,8 @@ func TestExcerptSpansMarkFoldedMatchesInOriginalText(t *testing.T) {
 		result := searchQuery(t, body, tt.query)
 		requireMatches(t, result, nil, 1)
 		excerpt := result.Matches[0].Excerpts[0]
-		got := make([]string, 0, len(excerpt.Matches))
-		for _, span := range excerpt.Matches {
+		got := make([]string, 0, len(excerpt.Spans))
+		for _, span := range excerpt.Spans {
 			got = append(got, excerpt.Text[span.Start:span.End])
 		}
 		if diff := cmp.Diff(tt.want, got); diff != "" {

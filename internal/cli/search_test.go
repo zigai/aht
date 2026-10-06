@@ -381,7 +381,7 @@ func TestSearchMatchTTY(t *testing.T) {
 		},
 	}
 	match.ResumeCommand = []string{"pi", "--session", "/work/my project/session.jsonl"}
-	match.Excerpts[0].Matches = []history.Span{{Start: 23, End: 31}}
+	match.Excerpts[0].Spans = []history.Span{{Start: 23, End: 31}}
 	if err := app.writeSearchMatchTTY(match, false); err != nil {
 		t.Fatal(err)
 	}

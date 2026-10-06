@@ -201,7 +201,7 @@ func (s *search) capture(t *transcript, role, body, id string, line int, timesta
 		c.Prompt = clip(cleanPrompt(body), promptRunes)
 	}
 	if s.writer != nil {
-		s.writer.append(Excerpt{Role: role, Text: body, Matches: nil, MessageID: id, Line: line, Timestamp: timestamp})
+		s.writer.append(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
 		return
 	}
 	s.matchText(t, role, body, id, line, timestamp)
@@ -259,7 +259,7 @@ func (s *search) matchText(t *transcript, role, body, id string, line int, times
 		return
 	}
 	text := excerptWindow(body, anchor, length)
-	t.match.Excerpts = append(t.match.Excerpts, Excerpt{Role: role, Text: text, Matches: spans(text, s.terms), MessageID: id, Line: line, Timestamp: timestamp})
+	t.match.Excerpts = append(t.match.Excerpts, Excerpt{Role: role, Text: text, Spans: spans(text, s.terms), MessageID: id, Line: line, Timestamp: timestamp})
 }
 
 func (s *search) skipsPart(t *transcript, role string) bool {

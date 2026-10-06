@@ -692,7 +692,7 @@ func (app *application) writeSearchExcerptsTTY(excerpts []history.Excerpt, width
 			styled = "\x1b[2m" + role + styleReset
 		}
 		first := branch + styled + strings.Repeat(" ", max(1, maxRoleLabelWidth-len(role)+1))
-		for index, line := range highlightedLines(excerpt.Text, excerpt.Matches, textWidth) {
+		for index, line := range highlightedLines(excerpt.Text, excerpt.Spans, textWidth) {
 			lead := continuation
 			if index == 0 {
 				lead = first

@@ -172,7 +172,7 @@ type Span struct {
 type Excerpt struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
-	Matches   []Span    `json:"matches,omitempty"`
+	Spans     []Span    `json:"spans,omitempty"`
 	MessageID string    `json:"message_id,omitempty"`
 	Line      int       `json:"line,omitempty"`
 	Timestamp time.Time `json:"timestamp,omitzero"`
