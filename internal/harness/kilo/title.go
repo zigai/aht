@@ -98,7 +98,7 @@ func openKiloSessionDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("inspect Kilo database: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("kilo database %q: %w", path, errKiloDatabaseNotRegular)
+		return nil, fmt.Errorf("%w: %q", errKiloDatabaseNotRegular, path)
 	}
 	var databaseURL url.URL
 	databaseURL.Scheme = "file"

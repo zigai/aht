@@ -76,7 +76,6 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string) *isolat
 		"PI_CODING_AGENT_DIR="+filepath.Join(root, "pi-agent"),
 		"OPENCODE_CONFIG_DIR="+filepath.Join(root, "opencode"),
 		"KILO_CONFIG_DIR="+filepath.Join(root, "kilo"),
-		"AGY_CONFIG_HOME="+filepath.Join(root, "agy"),
 		"FACTORY_CONFIG_DIR="+filepath.Join(home, ".factory"),
 		"FACTORY_DROID_AUTO_UPDATE_ENABLED=false",
 		"HERMES_HOME="+filepath.Join(root, "hermes"),

@@ -175,9 +175,6 @@ func agyMarkerContent() string {
 }
 
 func agyConfigDir() string {
-	if value := strings.TrimSpace(os.Getenv("AGY_CONFIG_HOME")); value != "" {
-		return value
-	}
 	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
 		return filepath.Join(home, ".gemini", "antigravity-cli")
 	}

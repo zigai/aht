@@ -239,7 +239,7 @@ func parseSessions(output string) ([]string, error) {
 	if sessions, ok := parseListSessions(output); ok {
 		return sessions, nil
 	}
-	return nil, fmt.Errorf("parse herdr sessions: %w", errInvalidSessionsOutput)
+	return nil, errInvalidSessionsOutput
 }
 
 func parseContainerSessions(output string) ([]string, bool) {

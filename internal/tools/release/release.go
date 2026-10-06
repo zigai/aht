@@ -172,7 +172,7 @@ func (a application) prepareDraft(ctx context.Context, t target, notes string) e
 		existing = &created
 	}
 	if !t.owns(*existing) {
-		return fmt.Errorf("%w: release %s belongs to another run; refusing to replace it", errRelease, t.tag)
+		return fmt.Errorf("%w: tag %s belongs to another run; refusing to replace it", errRelease, t.tag)
 	}
 	if err := a.output("release-id", strconv.FormatInt(existing.ID, 10)); err != nil {
 		return err

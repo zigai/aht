@@ -89,6 +89,10 @@ func opencodeConfigDir() string {
 		return filepath.Dir(value)
 	}
 
+	return opencodeUserConfigDir()
+}
+
+func opencodeUserConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
 		return filepath.Join(value, "opencode")
 	}

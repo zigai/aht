@@ -29,7 +29,6 @@ func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 	t.Setenv("KIMI_SHARE_DIR", filepath.Join(home, ".kimi"))
 	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
-	t.Setenv("AGY_CONFIG_HOME", filepath.Join(home, ".gemini", "antigravity-cli"))
 
 	for _, harnessID := range Harnesses() {
 		result, err := Run(t.Context(), Options{Harness: harnessID, Binary: testInstallBinary})
@@ -436,8 +435,9 @@ func TestRemoveAlsoRemovesManagedShimFallback(t *testing.T) {
 }
 
 func TestInspectDetectsAndInstallRepairsMissingPluginImport(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("AGY_CONFIG_HOME", dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
 	if _, err := Run(t.Context(), Options{Harness: registry.Harness("agy"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}

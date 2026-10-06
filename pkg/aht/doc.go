@@ -61,6 +61,8 @@
 // [NewManager] returns a [Manager] that checks, installs, and removes harness
 // integrations and controls the background tracker service. [Capabilities]
 // reports what each harness supports.
+// [HarnessLocations] lists where each harness reads its settings, instructions,
+// skills, commands, and MCP definitions.
 //
 // # Reporting state
 //

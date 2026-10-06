@@ -45,7 +45,7 @@ func DefaultCatalogList(ctx context.Context) ([]CatalogEntry, error) {
 	}
 	for index := range entries {
 		if entries[index].Harness == "" {
-			return nil, fmt.Errorf("catalog entry %d: %w", index, errCatalogEntryHarness)
+			return nil, fmt.Errorf("%w at index %d", errCatalogEntryHarness, index)
 		}
 		normalized, err := catalog.Parse(string(entries[index].Harness))
 		if err != nil {

@@ -866,3 +866,150 @@ func TestHandleHookUnsupportedHarness(t *testing.T) {
 		t.Fatalf("expected codex to have no managed hook adapter: supported=%v err=%v", ok, err)
 	}
 }
+
+func isolateLocationEnvironment(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{
+		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "COPILOT_HOME",
+		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
+		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
+		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
+		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME",
+	} {
+		t.Setenv(name, "")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+func globalLocationPaths(locations []harness.Location, kind harness.LocationKind) []string {
+	var paths []string
+	for _, location := range locations {
+		if location.Kind == kind && location.Scope == harness.LocationScopeGlobal {
+			paths = append(paths, location.Path)
+		}
+	}
+	return paths
+}
+
+func TestLocationsForUnknownHarness(t *testing.T) {
+	t.Parallel()
+	locations, ok := LocationsFor(registry.Harness("no-such-harness"), t.TempDir())
+	if ok || locations != nil {
+		t.Fatalf("LocationsFor(unknown) = %v, %t, want nil, false", locations, ok)
+	}
+}
+
+func checkLocationScope(t *testing.T, id registry.Harness, location harness.Location, projectDir string) {
+	t.Helper()
+	if !filepath.IsAbs(location.Path) {
+		t.Errorf("%s: relative path %q", id, location.Path)
+	}
+	inProject := strings.HasPrefix(location.Path, projectDir+string(filepath.Separator))
+	switch location.Scope {
+	case harness.LocationScopeProject:
+		if !inProject {
+			t.Errorf("%s: project path %q is outside %q", id, location.Path, projectDir)
+		}
+	case harness.LocationScopeGlobal:
+		if inProject {
+			t.Errorf("%s: global path %q is inside the project", id, location.Path)
+		}
+	}
+}
+
+func TestLocationsStayWithinTheirScope(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	projectDir := t.TempDir()
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, ok := LocationsFor(id, projectDir)
+		if !ok || len(locations) == 0 {
+			t.Errorf("%s: LocationsFor = %d locations, %t", id, len(locations), ok)
+			continue
+		}
+		seen := make(map[harness.Location]bool, len(locations))
+		for _, location := range locations {
+			if seen[location] {
+				t.Errorf("%s: duplicate location %+v", id, location)
+			}
+			seen[location] = true
+			checkLocationScope(t, id, location, projectDir)
+		}
+
+		withoutProject, _ := LocationsFor(id, "")
+		for _, location := range withoutProject {
+			if location.Scope != harness.LocationScopeGlobal || !strings.HasPrefix(location.Path, home) {
+				t.Errorf("%s: %+v returned without a project directory or outside the isolated home %q", id, location, home)
+			}
+		}
+	}
+}
+
+func TestLocationsAreAbsoluteWithoutHome(t *testing.T) {
+	isolateLocationEnvironment(t)
+	t.Setenv("HOME", "")
+	projectDir := t.TempDir()
+
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, _ := LocationsFor(id, projectDir)
+		for _, location := range locations {
+			if !filepath.IsAbs(location.Path) {
+				t.Errorf("%s: %+v is not absolute without a home directory", id, location)
+			}
+		}
+	}
+}
+
+func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+		value    func(dir string) string
+	}{
+		{harness: registry.Harness("claude"), variable: "CLAUDE_CONFIG_DIR"},
+		{harness: registry.Harness("codex"), variable: "CODEX_HOME"},
+		{harness: registry.Harness("copilot"), variable: "COPILOT_HOME"},
+		{harness: registry.Harness("cursor"), variable: "CURSOR_CONFIG_DIR"},
+		{harness: registry.Harness("cline"), variable: "CLINE_DIR"},
+		{harness: registry.Harness("cline"), variable: "CLINE_DATA_DIR"},
+		{harness: registry.Harness("kimi-code"), variable: "KIMI_SHARE_DIR"},
+		{harness: registry.Harness("grok"), variable: "GROK_HOME"},
+		{harness: registry.Harness("goose"), variable: "GOOSE_PATH_ROOT"},
+		{harness: registry.Harness("hermes"), variable: "HERMES_HOME"},
+		{harness: registry.Harness("pi"), variable: "PI_CODING_AGENT_DIR"},
+		{harness: registry.Harness("kilo"), variable: "KILO_CONFIG_DIR"},
+		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_STATE_DIR"},
+		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_CONFIG_PATH", value: func(dir string) string { return filepath.Join(dir, "custom.json") }},
+	} {
+		t.Run(string(test.harness)+"/"+test.variable, func(t *testing.T) {
+			isolateLocationEnvironment(t)
+			override := t.TempDir()
+			value := override
+			if test.value != nil {
+				value = test.value(override)
+			}
+			t.Setenv(test.variable, value)
+			locations, _ := LocationsFor(test.harness, "")
+			config := globalLocationPaths(locations, harness.LocationKindConfig)
+			if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool { return !strings.HasPrefix(path, override+string(filepath.Separator)) }) {
+				t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
+			}
+		})
+	}
+}
+
+func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
+	isolateLocationEnvironment(t)
+	override := t.TempDir()
+	t.Setenv("CLINE_DIR", override)
+	locations, _ := LocationsFor(registry.Harness("cline"), "")
+	for _, kind := range []harness.LocationKind{harness.LocationKindSkills, harness.LocationKindCommands, harness.LocationKindInstructions} {
+		got := globalLocationPaths(locations, kind)
+		if !slices.ContainsFunc(got, func(path string) bool { return filepath.Dir(path) == override }) || slices.ContainsFunc(got, func(path string) bool { return strings.Contains(path, ".cline") }) {
+			t.Errorf("cline %s with CLINE_DIR = %v", kind, got)
+		}
+	}
+}

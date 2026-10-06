@@ -18,16 +18,7 @@ func TestResumeCommand(t *testing.T) {
 	}
 }
 
-func TestConfigDirOverride(t *testing.T) {
-	t.Setenv("AMP_CONFIG_DIR", "/tmp/amp-config")
-	t.Setenv("XDG_CONFIG_HOME", "/tmp/ignored-xdg")
-	if got := ampConfigDir(); got != "/tmp/amp-config" {
-		t.Fatalf("expected AMP_CONFIG_DIR to win, got %q", got)
-	}
-}
-
 func TestConfigDirXDG(t *testing.T) {
-	t.Setenv("AMP_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/custom-xdg")
 	if got := ampConfigDir(); got != "/tmp/custom-xdg/amp" {
 		t.Fatalf("expected XDG_CONFIG_HOME/amp, got %q", got)

@@ -62,7 +62,7 @@ func openHermesSessionDatabase() (*sql.DB, error) {
 		return nil, fmt.Errorf("inspect Hermes session database: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("hermes session database %q: %w", databasePath, errHermesDatabaseNotRegular)
+		return nil, fmt.Errorf("%w: %q", errHermesDatabaseNotRegular, databasePath)
 	}
 	var databaseURL url.URL
 	databaseURL.Scheme = "file"

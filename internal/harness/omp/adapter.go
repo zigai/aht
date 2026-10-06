@@ -2,7 +2,6 @@ package omp
 
 import (
 	_ "embed"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -88,31 +87,6 @@ func (ompHarness) ObservableProcess(process processinfo.Process) bool {
 		}
 	}
 	return true
-}
-
-func ompAgentDir() string {
-	if value := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); value != "" {
-		return value
-	}
-	configRoot := strings.TrimSpace(os.Getenv("OMP_CONFIG_DIR"))
-	if configRoot == "" {
-		configRoot = ".omp"
-	}
-	if !filepath.IsAbs(configRoot) {
-		if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-			configRoot = filepath.Join(home, configRoot)
-		}
-	}
-
-	var profile string
-	if value, ok := os.LookupEnv("OMP_PROFILE"); ok {
-		profile = strings.TrimSpace(value)
-	}
-	if profile != "" && profile != "default" {
-		configRoot = filepath.Join(configRoot, "profiles", profile)
-	}
-
-	return filepath.Join(configRoot, "agent")
 }
 
 func (ompHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

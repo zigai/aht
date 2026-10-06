@@ -131,7 +131,7 @@ func Parse(value string) (registry.Harness, error) {
 			return definition.ID, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %q", registry.ErrUnknownHarness, value)
+	return "", fmt.Errorf("%w %q", registry.ErrUnknownHarness, value)
 }
 
 func SupportedNames() []string {
@@ -244,6 +244,20 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 		return nil
 	}
 	return resumable.ResumeCommand(sessionID, sessionPath)
+}
+
+// LocationsFor lists the documented configuration locations of a harness. It
+// reports false when the harness is unknown or does not expose locations.
+func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Location, bool) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return nil, false
+	}
+	provider, ok := adapter.(harness.LocationProvider)
+	if !ok {
+		return nil, false
+	}
+	return provider.Locations(projectDir), true
 }
 
 func WithResumeCommand(observation registry.Observation) registry.Observation {
