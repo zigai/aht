@@ -6,9 +6,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -93,6 +98,27 @@ func TestSearchCLIRendersSafeTextAndPartialJSON(t *testing.T) {
 	if strings.ContainsAny(stdout.String(), "\x1b\u202e") || !strings.Contains(stdout.String(), "native-id") {
 		t.Fatalf("unsafe output %q", stdout.String())
 	}
+	appendMalformedRecord(t, path)
+	stdout.Reset()
+	stderr.Reset()
+	args[len(args)-1] = "--json"
+	if code := executeCLI(t.Context(), args, strings.NewReader(""), &stdout, &stderr); code != 0 || strings.Contains(stderr.String(), "private-data") {
+		t.Fatalf("malformed record code=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	partialArgs := slices.Concat(args, []string{"--source", "pi=" + filepath.Join(t.TempDir(), "missing")})
+	code := executeCLI(t.Context(), partialArgs, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 || !json.Valid(stdout.Bytes()) || strings.Contains(stderr.String(), "private-data") {
+		t.Fatalf("partial output code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "search incomplete; some histories could not be searched") || strings.Contains(stderr.String(), "history search incomplete") {
+		t.Fatalf("partial diagnostic = %q", stderr.String())
+	}
+}
+
+func appendMalformedRecord(t *testing.T, path string) {
+	t.Helper()
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -103,28 +129,25 @@ func TestSearchCLIRendersSafeTextAndPartialJSON(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	stdout.Reset()
-	stderr.Reset()
-	args[len(args)-1] = "--json"
-	code := executeCLI(t.Context(), args, strings.NewReader(""), &stdout, &stderr)
-	if code != 1 || !json.Valid(stdout.Bytes()) || strings.Contains(stderr.String(), "private-data") {
-		t.Fatalf("partial output code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "search incomplete; some histories could not be searched") || strings.Contains(stderr.String(), "history search incomplete") {
-		t.Fatalf("partial diagnostic = %q", stderr.String())
-	}
 }
 
 func TestSearchCLIRejectsInvalidOptionsBeforeConfig(t *testing.T) {
 	for _, args := range [][]string{
-		{"search"},
 		{"search", ""},
 		{"search", "x", "--limit", "-1"},
 		{"search", "x", "--agent", "bad"},
 		{"search", "x", "--source", "pi"},
 		{"search", "x", "--source", "pi="},
-		{"search", "x", "extra"},
 		{"search", "x", "--agent", "codex", "--source", "pi=/tmp/history.jsonl"},
+		{"search", "(", "--regex"},
+		{"search", "--since", "yesterday"},
+		{"search", "--since", "1d", "--until", "2d"},
+		{"search", "x", "--stream", "--limit", "1"},
+		{"search", "--format", "title"},
+		{"search", "--group-by", "week"},
+		{"search", "--presence", "unknown"},
+		{"search", "--sort", "matches"},
+		{"search", "x", "--not", " "},
 	} {
 		configPath := filepath.Join(t.TempDir(), "missing-config.toml")
 		args = append([]string{"--config", configPath}, args...)
@@ -224,16 +247,6 @@ func TestSearchCLIUsageErrorsShowCorrectedUsage(t *testing.T) {
 		expected []string
 	}{
 		{
-			name:     "missing argument",
-			args:     []string{"search"},
-			expected: []string{"expected exactly one text argument", "aht search --help"},
-		},
-		{
-			name:     "extra argument",
-			args:     []string{"search", "refresh", "token"},
-			expected: []string{"expected exactly one text argument, received 2", `aht search "refresh token"`},
-		},
-		{
 			name:     "source without path",
 			args:     []string{"search", "refresh", "--source", "pi"},
 			expected: []string{`invalid --source "pi": expected agent=path`, "for example --source codex=/path/to/sessions"},
@@ -246,7 +259,7 @@ func TestSearchCLIUsageErrorsShowCorrectedUsage(t *testing.T) {
 		{
 			name:     "conflicting harness selection",
 			args:     []string{"search", "refresh", "--agent", "codex", "--source", "pi=" + path},
-			expected: []string{"conflicting --agent and --source harnesses", `--agent "codex"`, `--source "pi=`, "aht search --help"},
+			expected: []string{"conflicting --harness and --source harnesses", `--source "pi=`, "aht search --help"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -345,53 +358,6 @@ func TestSearchCLIUnsupportedSourceSummaryListsHarnessOnce(t *testing.T) {
 	}
 }
 
-func TestHighlightNeedle(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name          string
-		text          string
-		needle        string
-		caseSensitive bool
-		want          string
-	}{
-		{
-			name:          "case-insensitive simple",
-			text:          "Hello World",
-			needle:        "world",
-			caseSensitive: false,
-			want:          "Hello \x1b[1;36mWorld\x1b[0m",
-		},
-		{
-			name:          "case-insensitive multiple",
-			text:          "test one, TEST two, Test three",
-			needle:        "test",
-			caseSensitive: false,
-			want:          "\x1b[1;36mtest\x1b[0m one, \x1b[1;36mTEST\x1b[0m two, \x1b[1;36mTest\x1b[0m three",
-		},
-		{
-			name:          "case-sensitive match",
-			text:          "Exact Match and exact mismatch",
-			needle:        "Exact",
-			caseSensitive: true,
-			want:          "\x1b[1;36mExact\x1b[0m Match and exact mismatch",
-		},
-		{
-			name:          "no match",
-			text:          "completely unrelated content",
-			needle:        "absent",
-			caseSensitive: false,
-			want:          "completely unrelated content",
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := highlightNeedle(tt.text, tt.needle, tt.caseSensitive)
-			if got != tt.want {
-				t.Errorf("highlightNeedle() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSearchMatchTTY(t *testing.T) {
 	t.Parallel()
 	var stdout bytes.Buffer
@@ -414,99 +380,28 @@ func TestSearchMatchTTY(t *testing.T) {
 			{Role: "assistant", Text: "I fixed the workflow test"},
 		},
 	}
-	if err := app.writeSearchMatchTTY(match, history.Query{Text: "workflow"}, false); err != nil {
+	match.ResumeCommand = []string{"pi", "--session", "/work/my project/session.jsonl"}
+	match.Excerpts[0].Matches = []history.Span{{Start: 23, End: 31}}
+	if err := app.writeSearchMatchTTY(match, false); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()
 	if !strings.Contains(output, "Fix failing workflow") {
 		t.Errorf("TTY output missing title: %q", output)
 	}
-	if !strings.Contains(output, "01a0c324") {
-		t.Errorf("TTY output missing inline short ID: %q", output)
+	if !strings.Contains(output, "01a0c324-11ca-7000-894a-0e31b911d7ae") {
+		t.Errorf("TTY output missing the full session ID: %q", output)
+	}
+	if !strings.Contains(output, "cd /work/project && pi --session '/work/my project/session.jsonl'") {
+		t.Errorf("TTY output missing a pasteable resume command: %q", output)
+	}
+	if !strings.Contains(output, highlightStart+"workflow"+styleReset) {
+		t.Errorf("TTY output did not highlight the match span: %q", output)
 	}
 	for _, text := range []string{"live", "Please fix the failing", "I fixed the"} {
 		if !strings.Contains(output, text) {
 			t.Errorf("TTY output missing %q: %q", text, output)
 		}
-	}
-}
-
-func TestCleanSessionTitle(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		input string
-		want  string
-	}{
-		{
-			input: "# AGENTS.md instructions for /home/user/src/app <INSTRUCTIONS> When calling spawn_agent, never set the...",
-			want:  "When calling spawn_agent, never set the...",
-		},
-		{
-			input: "<environment_context> <cwd>/home/user/app</cwd> </environment_context> Real task description",
-			want:  "Real task description",
-		},
-		{
-			input: "Normal session title",
-			want:  "Normal session title",
-		},
-	} {
-		t.Run(tt.input, func(t *testing.T) {
-			got := cleanSessionTitle(tt.input)
-			if got != tt.want {
-				t.Errorf("cleanSessionTitle(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveSearchTitle(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name     string
-		conv     history.Conversation
-		excerpts []history.Excerpt
-		want     string
-	}{
-		{
-			name: "fallback when title is a truncated fragment",
-			conv: history.Conversation{
-				SessionID: "sess1",
-				Title:     "When calli…",
-			},
-			excerpts: []history.Excerpt{
-				{Role: "user", Text: "Use the staging database instead of the local one."},
-			},
-			want: "Use the staging database instead of the local one.",
-		},
-		{
-			name: "fallback when title contains environment context",
-			conv: history.Conversation{
-				SessionID: "sess2",
-				Title:     "<environment_context> <cwd>/home/user/project</cwd> <approval_policy>on…",
-			},
-			excerpts: []history.Excerpt{
-				{Role: "user", Text: "Add pagination to the orders endpoint and update the client."},
-			},
-			want: "Add pagination to the orders endpoint and update the client.",
-		},
-		{
-			name: "retains clean existing title",
-			conv: history.Conversation{
-				SessionID: "sess3",
-				Title:     "Fix failing GitHub Actions workflow",
-			},
-			excerpts: []history.Excerpt{
-				{Role: "user", Text: "Please fix GHA"},
-			},
-			want: "Fix failing GitHub Actions workflow",
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := resolveSearchTitle(tt.conv, tt.excerpts)
-			if got != tt.want {
-				t.Errorf("resolveSearchTitle() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -522,6 +417,7 @@ func TestSearchCLIRoleFilter(t *testing.T) {
 		{"agent", 0, true},
 		{"assistant", 0, true},
 		{"all", 1, true},
+		{"tool", 0, true},
 		{"invalid", 0, false},
 	} {
 		t.Run("role="+test.role, func(t *testing.T) {
@@ -545,5 +441,246 @@ func TestSearchCLIRoleFilter(t *testing.T) {
 				t.Fatalf("role %q: got %d matches, want %d", test.role, len(result.Matches), test.matches)
 			}
 		})
+	}
+}
+
+// conversationFixture writes pi histories for the sessions, each with one user
+// message mentioning its topic.
+func conversationFixture(t *testing.T, sessions map[string]string) string {
+	t.Helper()
+	searchCLIHome(t)
+	root := t.TempDir()
+	for id, cwd := range sessions {
+		body := `{"type":"session","id":"` + id + `","cwd":"` + cwd + `","timestamp":"2026-09-01T10:00:00Z"}
+{"type":"message","id":"u1","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"topic ` + id + ` refresh"}}
+`
+		writeSearchFixtureBody(t, filepath.Join(root, id+".jsonl"), body)
+	}
+	return root
+}
+
+func writeSearchFixtureBody(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runSearchOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	args = append([]string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json")}, args...)
+	var stdout, stderr bytes.Buffer
+	if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
+		t.Fatalf("%v: %v stderr=%q", args, err, stderr.String())
+	}
+	return stdout.String()
+}
+
+func TestSearchCLIListsWithoutText(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": "/work/a", "beta": "/work/b"})
+	output := runSearchOutput(t, "search", "--source", "pi="+root, "--dir", "/work/a")
+	if !strings.Contains(output, "alpha") || strings.Contains(output, "beta") || !strings.Contains(output, "topic alpha refresh") {
+		t.Fatalf("listing = %q", output)
+	}
+	var result history.Result
+	if err := json.Unmarshal([]byte(runSearchOutput(t, "--json", "search", "--source", "pi="+root)), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 2 || len(result.Matches[0].Excerpts) != 0 {
+		t.Fatalf("JSON listing = %#v", result.Matches)
+	}
+}
+
+func TestSearchCLIFormatsAndGroups(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": "/work/a", "beta": "/work/a", "gamma": "/work/c"})
+	ids := strings.Fields(runSearchOutput(t, "search", "refresh", "--source", "pi="+root, "--format", "id"))
+	if strings.Join(ids, ",") != "alpha,beta,gamma" {
+		t.Fatalf("ids = %q", ids)
+	}
+	resume := runSearchOutput(t, "search", "gamma", "--source", "pi="+root, "--format", "resume")
+	if want := "cd /work/c && pi --session " + filepath.Join(root, "gamma.jsonl") + "\n"; resume != want {
+		t.Fatalf("resume = %q, want %q", resume, want)
+	}
+	var groups []searchGroup
+	if err := json.Unmarshal([]byte(runSearchOutput(t, "--json", "search", "--source", "pi="+root, "--group-by", "project")), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 || groups[0].Group != "/work/a" || groups[0].Conversations != 2 || groups[1].Conversations != 1 {
+		t.Fatalf("groups = %#v", groups)
+	}
+}
+
+func TestSearchCLIStreamsJSONLines(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": "/work/a", "beta": "/work/b"})
+	output := runSearchOutput(t, "--json", "search", "refresh", "--source", "pi="+root, "--stream")
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stream lines = %q", output)
+	}
+	for _, line := range lines {
+		var match history.Match
+		if err := json.Unmarshal([]byte(line), &match); err != nil || match.Conversation.SessionID == "" {
+			t.Fatalf("stream line %q: %v", line, err)
+		}
+	}
+}
+
+func TestHighlightedLinesWrapAndMarkSpans(t *testing.T) {
+	t.Parallel()
+	//nolint:gosmopolitan // Wide and multi-byte runes exercise display-width wrapping.
+	value := "İİ alpha\x1b  beta 你好 gamma"
+	start := strings.Index(value, "beta")
+	lines := highlightedLines(value, []history.Span{{Start: start, End: start + len("beta")}}, 10)
+	joined := strings.Join(lines, "|")
+	//nolint:gosmopolitan // Wide runes exercise display-width wrapping.
+	want := "İİ alpha|" + highlightStart + "beta" + styleReset + " 你好|gamma"
+	if joined != want {
+		t.Fatalf("lines = %q, want %q", joined, want)
+	}
+	for _, line := range lines {
+		if !utf8.ValidString(line) {
+			t.Fatalf("invalid UTF-8 line %q", line)
+		}
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	t.Parallel()
+	for value, want := range map[string]string{
+		"/work/app":       "/work/app",
+		"--resume":        "--resume",
+		"my project":      "'my project'",
+		"it's":            `'it'\''s'`,
+		"":                "''",
+		"$(touch x)":      "'$(touch x)'",
+		"/work/ünïcode-1": "/work/ünïcode-1",
+	} {
+		if got := shellQuote(value); got != want {
+			t.Errorf("shellQuote(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+func TestParseSearchTime(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	for value, want := range map[string]time.Time{
+		"":                     {},
+		"7d":                   now.Add(-7 * 24 * time.Hour),
+		"90m":                  now.Add(-90 * time.Minute),
+		"2026-09-01T08:00:00Z": time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC),
+		"2026-09-01":           time.Date(2026, 9, 1, 0, 0, 0, 0, time.Local), //nolint:gosmopolitan // Bare dates are parsed in the user's local zone.
+	} {
+		got, err := parseSearchTime(value, now)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("parseSearchTime(%q) = %v, %v; want %v", value, got, err, want)
+		}
+	}
+	for _, value := range []string{"yesterday", "-1d", "0d", "7"} {
+		if _, err := parseSearchTime(value, now); err == nil {
+			t.Errorf("parseSearchTime(%q) accepted", value)
+		}
+	}
+}
+
+func piSession(id, cwd, at string) string {
+	return `{"type":"session","id":"` + id + `","cwd":"` + cwd + `","timestamp":"` + at + `"}
+{"type":"message","id":"u1","timestamp":"` + at + `","message":{"role":"user","content":"topic ` + id + ` refresh"}}
+`
+}
+
+func TestSearchCLIGroupsByDayNewestFirst(t *testing.T) {
+	searchCLIHome(t)
+	root := t.TempDir()
+	writeSearchFixtureBody(t, filepath.Join(root, "early.jsonl"), piSession("early", "/work/a", "2026-08-01T12:00:00Z"))
+	writeSearchFixtureBody(t, filepath.Join(root, "late-1.jsonl"), piSession("late-1", "/work/a", "2026-09-01T12:00:00Z"))
+	writeSearchFixtureBody(t, filepath.Join(root, "late-2.jsonl"), piSession("late-2", "/work/b", "2026-09-01T12:30:00Z"))
+	writeSearchFixtureBody(t, filepath.Join(root, "undated.jsonl"), `{"type":"session","id":"undated","cwd":"/work/c"}
+{"type":"message","id":"u1","message":{"role":"user","content":"topic undated refresh"}}
+`)
+	var groups []searchGroup
+	if err := json.Unmarshal([]byte(runSearchOutput(t, "--json", "search", "refresh", "--source", "pi="+root, "--group-by", "day")), &groups); err != nil {
+		t.Fatal(err)
+	}
+	day := func(at time.Time) string { return at.In(time.Local).Format(time.DateOnly) } //nolint:gosmopolitan // matches --group-by day local buckets
+	want := []searchGroup{
+		{Group: day(time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)), Conversations: 2, Messages: 2},
+		{Group: day(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)), Conversations: 1, Messages: 1},
+		{Group: "-", Conversations: 1, Messages: 1},
+	}
+	if diff := cmp.Diff(want, groups); diff != "" {
+		t.Fatalf("day groups (-want +got):\n%s", diff)
+	}
+	table := runSearchOutput(t, "search", "--source", "pi="+root, "--group-by", "harness")
+	if !strings.Contains(table, "Harness") || !regexp.MustCompile(`(?m)^pi\s+4\s+4\s*$`).MatchString(table) {
+		t.Fatalf("harness table = %q", table)
+	}
+}
+
+func TestSearchCLIStreamsTextMatches(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": "/work/a", "beta": "/work/b"})
+	output := runSearchOutput(t, "search", "refresh", "--source", "pi="+root, "--stream")
+	for _, id := range []string{"alpha", "beta"} {
+		if !strings.Contains(output, "pi "+id) || !strings.Contains(output, "topic "+id+" refresh") || !strings.Contains(output, "pi --session "+filepath.Join(root, id+".jsonl")) {
+			t.Fatalf("stream output = %q, missing %s", output, id)
+		}
+	}
+}
+
+func TestSearchCLIMalformedRecordsWarnWithoutFailing(t *testing.T) {
+	searchCLIHome(t)
+	root := t.TempDir()
+	body := piSession("damaged", "/work/a", "2026-09-01T12:00:00Z") + "{broken\n{broken\n{broken\n{broken\n"
+	writeSearchFixtureBody(t, filepath.Join(root, "damaged.jsonl"), body)
+	var stdout, stderr bytes.Buffer
+	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh", "--source", "pi=" + root}
+	if code := executeCLI(t.Context(), args, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "damaged") || !strings.Contains(stderr.String(), "skipped 4 malformed history records") || strings.Contains(stderr.String(), "could not be read") {
+		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestSearchProgressStaysOffNonTerminalStderr(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": "/work/a"})
+	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stderr.Close() }()
+	var stdout bytes.Buffer
+	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh", "--source", "pi=" + root}
+	if err := runTestCLI(t.Context(), args, &stdout, stderr); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.ContainsAny(written, "\r\x1b") {
+		t.Fatalf("stderr = %q", written)
+	}
+}
+
+func TestSearchProgressClearsItsLine(t *testing.T) {
+	var stderr bytes.Buffer
+	progress := &searchProgress{app: &application{stderr: &stderr}, enabled: true}
+	progress.clear()
+	if stderr.Len() != 0 {
+		t.Fatalf("clear without a shown line wrote %q", stderr.String())
+	}
+	progress.update(history.Progress{Source: history.Source{Harness: registry.Harness("pi")}, Done: 1, Total: 2, Refreshed: 1})
+	if !strings.Contains(stderr.String(), "Scanning pi history 1/2, indexed 1 changed") {
+		t.Fatalf("progress = %q", stderr.String())
+	}
+	progress.clear()
+	if !strings.HasSuffix(stderr.String(), "\r\x1b[2K") {
+		t.Fatalf("progress line was not erased: %q", stderr.String())
+	}
+	shown := stderr.Len()
+	progress.clear()
+	if stderr.Len() != shown {
+		t.Fatalf("second clear wrote %q", stderr.String()[shown:])
 	}
 }

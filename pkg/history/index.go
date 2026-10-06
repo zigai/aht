@@ -21,11 +21,12 @@ import (
 
 const (
 	// indexVersion is the schema version written by indexSchema.
-	indexVersion            = 3
+	indexVersion = 5
+	// oldestIndexVersion is the oldest schema this build recognizes as its own;
+	// older own versions are rebuilt from native history.
+	oldestIndexVersion      = 2
 	indexApplicationID      = 0x41485431 // ASCII "AHT1".
 	requiredIndexTableCount = 4
-	// indexInvalidSuffix names the retained copy of an unusable default cache.
-	indexInvalidSuffix = ".invalid"
 	// sqlitePrimaryCodeMask isolates a primary SQLite result code from extended codes.
 	sqlitePrimaryCodeMask = 0xff
 )
@@ -36,15 +37,17 @@ CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
 // The tools column records whether the file stores tool parts, not its identity:
-// every history has exactly one row and one copy of each part.
+// every history has exactly one row and one copy of each part. child marks a
+// history the reader may fold into a parent history's conversation.
 const indexSchema = `
 CREATE TABLE files (
- id INTEGER PRIMARY KEY, harness TEXT NOT NULL, path TEXT NOT NULL, tools INTEGER NOT NULL,
+ id INTEGER PRIMARY KEY, harness TEXT NOT NULL, path TEXT NOT NULL, tools INTEGER NOT NULL, child INTEGER NOT NULL,
  stamp TEXT NOT NULL, checkpoint TEXT NOT NULL, issues TEXT NOT NULL, omitted INTEGER NOT NULL,
  UNIQUE(harness,path));
 CREATE TABLE conversations (
  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
- metadata TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL);
+ metadata TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL,
+ started INTEGER NOT NULL, active INTEGER NOT NULL, messages INTEGER NOT NULL, branch TEXT NOT NULL);
 CREATE INDEX conversations_file ON conversations(file_id);
 CREATE INDEX conversations_cwd ON conversations(cwd);
 CREATE INDEX conversations_root ON conversations(root);
@@ -59,19 +62,31 @@ CREATE TRIGGER parts_insert AFTER INSERT ON parts BEGIN
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  INSERT INTO parts_fts(parts_fts,rowid,folded) VALUES('delete',old.id,old.folded); END;
 PRAGMA application_id=0x41485431;
-PRAGMA user_version=3;
+PRAGMA user_version=5;
+`
+
+// firstConversationSQL selects the first conversation row of the history f.
+const firstConversationSQL = "coalesce((SELECT min(c.id) FROM conversations c WHERE c.file_id=f.id),0)"
+
+// dropIndexSchema removes every object of an older own schema version.
+const dropIndexSchema = `
+DROP TRIGGER IF EXISTS parts_insert;
+DROP TRIGGER IF EXISTS parts_delete;
+DROP TABLE IF EXISTS parts_fts;
+DROP TABLE IF EXISTS parts;
+DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS files;
 `
 
 var (
-	// errIndexUnavailable reports that the disposable history index cannot be
-	// used. Callers must fall back to direct scanning instead of failing.
-	errIndexUnavailable = errors.New("history index unavailable")
-	errIndexSchema      = errors.New("unrecognized history index; choose a new IndexPath or remove the disposable AHT index")
-	errIndexWAL         = errors.New("history index cannot use write-ahead logging")
+	errIndexSchema = errors.New("unrecognized history index; choose a new IndexPath or remove the disposable AHT index")
+	errIndexWAL    = errors.New("history index cannot use write-ahead logging")
 )
 
+// indexedFile is one history's committed index entry. resumeID is its first
+// conversation row, which an append resume extends; zero means none.
 type indexedFile struct {
-	id                                       int64
+	id, resumeID                             int64
 	harness, path, stamp, checkpoint, issues string
 	omitted                                  int
 	tools                                    bool
@@ -84,7 +99,8 @@ type historyIndex struct {
 	files        map[string]indexedFile
 	paths        map[string]Source
 	candidates   map[int64]bool
-	plans        map[int64]indexedMatches
+	plans        map[int64]*indexedMatches
+	excluded     map[int64]bool
 	queries      *indexQueries
 	seen         map[string]bool
 	sourceFilter string
@@ -95,7 +111,7 @@ type historyIndex struct {
 // default cache under [os.UserCacheDir], whose unusable database is retained as
 // history-v1.sqlite.invalid and rebuilt once. An explicit path is never moved
 // aside and reports a database it does not recognize as a hard error. Any other
-// setup failure, and lock contention on any path, returns errIndexUnavailable.
+// setup failure, and lock contention on any path, returns ErrIndexUnavailable.
 func openHistoryIndex(ctx context.Context, path string, sources []Source) (*historyIndex, error) {
 	cached := path == ""
 	if cached {
@@ -124,11 +140,10 @@ func openHistoryIndex(ctx context.Context, path string, sources []Source) (*hist
 	if isIndexBusy(err) {
 		return nil, indexUnavailable(err)
 	}
-	// The default cache is disposable: move the unusable database aside and
+	// The default cache is disposable: delete the unusable database and
 	// rebuild it once.
-	invalid := path + indexInvalidSuffix
-	if healErr := replaceInvalidIndex(path, invalid); healErr != nil {
-		return nil, errors.Join(indexUnavailable(err), fmt.Errorf("replace invalid history index: %w", healErr))
+	if healErr := removeIndex(path); healErr != nil {
+		return nil, errors.Join(indexUnavailable(err), fmt.Errorf("remove invalid history index: %w", healErr))
 	}
 	if index, err = openIndexDatabase(ctx, path, sources); err != nil {
 		return nil, indexUnavailable(fmt.Errorf("rebuild history index: %w", err))
@@ -166,7 +181,7 @@ func openIndexDatabase(ctx context.Context, path string, sources []Source) (*his
 	index.db = db
 	index.sourceFilter, index.sourceArgs = sourceSQL(sources)
 	index.files, index.paths, index.seen = map[string]indexedFile{}, map[string]Source{}, map[string]bool{}
-	index.candidates, index.plans = map[int64]bool{}, map[int64]indexedMatches{}
+	index.candidates, index.plans, index.excluded = map[int64]bool{}, map[int64]*indexedMatches{}, map[int64]bool{}
 	if err = index.connect(ctx); err != nil {
 		return nil, errors.Join(err, index.close())
 	}
@@ -204,13 +219,13 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 }
 
 // ensureSchema validates the on-disk schema, creating it when the file holds no
-// tables and upgrading the existing index without reparsing native histories.
+// tables and replacing an older own version, which is rebuilt from native history.
 func (index *historyIndex) ensureSchema(ctx context.Context) error {
 	appID, version, err := readIndexSchema(ctx, index.conn.QueryRowContext)
 	if err != nil {
 		return err
 	}
-	if appID == indexApplicationID && (version == indexVersion || version == 2) {
+	if appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion {
 		if err := index.validateSchemaTables(ctx); err != nil {
 			return err
 		}
@@ -268,9 +283,9 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 	switch {
 	case version == indexVersion && appID == indexApplicationID:
 		return nil
-	case version == 2 && appID == indexApplicationID:
-		if _, err := tx.ExecContext(ctx, "DROP INDEX parts_conversation;"+partIndexes+"PRAGMA user_version=3;"); err != nil {
-			return fmt.Errorf("upgrade history index: %w", err)
+	case appID == indexApplicationID && version >= oldestIndexVersion && version < indexVersion:
+		if _, err := tx.ExecContext(ctx, dropIndexSchema+indexSchema); err != nil {
+			return fmt.Errorf("rebuild history index: %w", err)
 		}
 		return nil
 	case version != 0 || appID != 0:
@@ -285,19 +300,16 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+// readIndexSchema reads the application ID and schema version in one statement,
+// so a concurrent creator's commit cannot pair one value with the other's
+// previous state.
 func readIndexSchema(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row) (int, int, error) {
 	var appID, version int
-	if err := queryRow(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+	if err := queryRow(ctx, "SELECT a.application_id, v.user_version FROM pragma_application_id a, pragma_user_version v").Scan(&appID, &version); err != nil {
 		if isIndexContentFailure(err) {
 			return 0, 0, schemaFailure(err)
 		}
-		return 0, 0, fmt.Errorf("read history index application id: %w", err)
-	}
-	if err := queryRow(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		if isIndexContentFailure(err) {
-			return 0, 0, schemaFailure(err)
-		}
-		return 0, 0, fmt.Errorf("read history index version: %w", err)
+		return 0, 0, fmt.Errorf("read history index schema version: %w", err)
 	}
 	return appID, version, nil
 }
@@ -334,7 +346,7 @@ func (index *historyIndex) enableWAL(ctx context.Context) error {
 
 func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	//nolint:gosec // G202: sourceSQL emits only fixed predicates, binds every source value, and uses 0 for empty selections; TestIndexScopesFileMetadataAndCandidates exercises the SQLite queries.
-	rows, err := index.conn.QueryContext(ctx, "SELECT id,harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
+	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
 	if err != nil {
 		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
 			return schemaFailure(err)
@@ -344,7 +356,7 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var file indexedFile
-		if err = rows.Scan(&file.id, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools); err != nil {
+		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools); err != nil {
 			return fmt.Errorf("read indexed file: %w", err)
 		}
 		key := file.harness + "\x00" + file.path
@@ -399,7 +411,7 @@ func (index *historyIndex) contention(err error) error {
 	if !isIndexBusy(err) {
 		return err
 	}
-	index.unavailable = errors.Join(index.unavailable, errIndexUnavailable, err)
+	index.unavailable = errors.Join(index.unavailable, ErrIndexUnavailable, err)
 	return index.unavailable
 }
 
@@ -469,10 +481,10 @@ func (index *historyIndex) reportIssues(s *search, source Source, file indexedFi
 	s.result.OmittedIssues += file.omitted
 }
 
-// indexUnavailable reports a disabled optimization, keeping the underlying
-// cause inspectable through [errors.Is].
+// indexUnavailable reports an unusable index, keeping the underlying cause
+// inspectable through [errors.Is].
 func indexUnavailable(err error) error {
-	return errors.Join(errIndexUnavailable, err)
+	return errors.Join(ErrIndexUnavailable, err)
 }
 
 // isIndexBusy reports lock contention, including extended busy codes.
@@ -527,15 +539,11 @@ func closeConn(conn *sql.Conn) error {
 	return nil
 }
 
-// replaceInvalidIndex retains an unusable cache database under a fixed name and
-// discards its journals, which belong to the moved database.
-func replaceInvalidIndex(path, invalid string) error {
-	if err := os.Rename(path, invalid); err != nil {
-		return fmt.Errorf("rename unusable history index: %w", err)
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
+// removeIndex deletes an unusable cache database with its journals.
+func removeIndex(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove unusable history index journal: %w", err)
+			return fmt.Errorf("remove unusable history index: %w", err)
 		}
 	}
 	return nil

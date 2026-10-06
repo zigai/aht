@@ -11,7 +11,9 @@ import (
 	"hash"
 	"io"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -20,6 +22,10 @@ import (
 )
 
 const hashChunkBytes = 64 << 10
+
+// errStaleResume reports that another process rewrote a history's index entry
+// after this search parsed an append against the older checkpoint.
+var errStaleResume = errors.New("history index changed while refreshing")
 
 type indexCheckpoint struct {
 	Conversation Conversation `json:"conversation"`
@@ -33,15 +39,69 @@ type indexCheckpoint struct {
 	Tools        bool         `json:"tools"`
 }
 
+// bufferedConversation is one parsed conversation waiting to be written.
+// resumed marks the conversation continued from an append checkpoint; dropped
+// marks one that turned out to lack a native session identity.
+type bufferedConversation struct {
+	conversation Conversation
+	parts        []Excerpt
+	resumed      bool
+	dropped      bool
+}
+
+// indexWriter collects one history's parsed content off the database
+// connection, so parse workers run in parallel and the single writer only
+// inserts finished files.
 type indexWriter struct {
-	tx                     *sql.Tx
-	fileID, conversationID int64
-	insert                 *sql.Stmt
-	err                    error
-	checkpoint             indexCheckpoint
-	resume                 *indexCheckpoint
-	hash                   hash.Hash
-	includeTools           bool
+	conversations []bufferedConversation
+	open          bool
+	checkpoint    indexCheckpoint
+	resume        *indexCheckpoint
+	hash          hash.Hash
+	includeTools  bool
+}
+
+// refreshJob parses one changed history. previous is the file's indexed state
+// when the job was created, and resumeID its first conversation row, which an
+// append resume extends.
+type refreshJob struct {
+	source       Source
+	file         historyFile
+	previous     indexedFile
+	exists       bool
+	resumeID     int64
+	includeTools bool
+	metadata     map[string]string
+	done         chan refreshResult
+}
+
+// refreshResult is a parsed history. openErr means the file could not be opened
+// and was not inspected; failure means it was inspected but not parsed.
+type refreshResult struct {
+	stamp     string
+	unchanged bool
+	writer    *indexWriter
+	issues    []Issue
+	omitted   int
+	openErr   error
+	failure   error
+	err       error
+}
+
+// pendingFile keeps walk order: matches and diagnostics are reported in the
+// order files were discovered, whichever worker parsed them. children are the
+// file's child histories, refreshed separately and matched with it.
+type pendingFile struct {
+	file     historyFile
+	job      *refreshJob
+	children []pendingFile
+}
+
+// settledFile is a history whose index entry is ready to read; changed means
+// this search stored it.
+type settledFile struct {
+	path    string
+	changed bool
 }
 
 func stampFile(info os.FileInfo) string {
@@ -57,291 +117,556 @@ func stampPath(path string) string {
 	return stampFile(info)
 }
 
-func transcriptExtra(s *search, source Source, path string) string {
+// databaseStamp includes both journal forms: WAL writes need not change the
+// main database, so any of them changing refreshes the database's projection.
+func databaseStamp(path string) string {
+	return stampPath(path) + "|" + stampPath(path+"-wal") + "|" + stampPath(path+"-journal")
+}
+
+func transcriptExtra(metadata map[string]string, source Source, path string) string {
 	if extra := catalog.TranscriptFor(source.Harness).Extra; extra != nil {
-		return extra(path, s.sourceMetadata, stampPath)
+		return extra(path, metadata, stampPath)
 	}
 	return ""
+}
+
+func fileKey(source Source, path string) string { return string(source.Harness) + "\x00" + path }
+
+// scanFiles refreshes and searches one source's histories. Unchanged files are
+// answered from the index; changed files are parsed by workers and written by
+// this goroutine in discovery order, each in its own short transaction.
+func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Source, files []historyFile, status *SourceStatus) {
+	if index.unavailable != nil {
+		s.indexErr = index.unavailable
+		return
+	}
+	if s.mode != modeRefresh {
+		if err := index.prepareQuery(ctx, s); err != nil {
+			index.report(s, source, source.Path, err)
+			return
+		}
+	}
+	workers := min(maxScanWorkers, max(minScanWorkers, runtime.GOMAXPROCS(0)))
+	jobs, wg := startRefreshWorkers(ctx, workers)
+	progress := Progress{Source: source, Done: 0, Total: len(files), Refreshed: 0}
+	var queue []pendingFile
+	for _, file := range files {
+		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
+			break
+		}
+		pending := index.pend(s, source, file, jobs)
+		for _, child := range file.children {
+			pending.children = append(pending.children, index.pend(s, source, child, jobs))
+		}
+		queue = append(queue, pending)
+		if len(queue) > 2*workers {
+			index.finish(ctx, s, source, queue[0], status, &progress)
+			queue = queue[1:]
+		}
+	}
+	close(jobs)
+	for _, pending := range queue {
+		index.finish(ctx, s, source, pending, status, &progress)
+	}
+	wg.Wait()
+}
+
+func startRefreshWorkers(ctx context.Context, workers int) (chan *refreshJob, *sync.WaitGroup) {
+	jobs := make(chan *refreshJob)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				job.done <- parseRefresh(ctx, job)
+			}
+		}()
+	}
+	return jobs, &wg
 }
 
 // unchanged uses the same identity, ctime, size, mtime, mode and sidecar stamp as
 // an opened transcript. Check effective read access as well: cached content must
 // not hide permission failures, including ACLs or changed process credentials.
-// A miss follows the normal open path, which rechecks the opened file's identity.
-func (index *historyIndex) unchanged(ctx context.Context, s *search, source Source, path string, info os.FileInfo) bool {
-	file, exists := index.files[string(source.Harness)+"\x00"+path]
-	if !exists || !info.Mode().IsRegular() || (s.query.IncludeTools && !file.tools) {
+// A miss is parsed, which rechecks the opened file's identity.
+func (index *historyIndex) unchanged(s *search, source Source, file historyFile) bool {
+	stored, exists := index.files[fileKey(source, file.path)]
+	if !exists || (s.query.IncludeTools && !stored.tools) {
 		return false
 	}
-	stamp := stampFile(info) + "|" + transcriptExtra(s, source, path)
-	if stamp != file.stamp || unix.Faccessat(unix.AT_FDCWD, path, unix.R_OK, unix.AT_EACCESS) != nil {
+	if file.database {
+		return databaseStamp(file.path) == stored.stamp
+	}
+	info, err := file.stat()
+	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	// The matching stamp guarantees visit will not invoke a refresh callback.
-	if err := index.visit(ctx, s, source, path, stamp, nil); errors.Is(err, errIndexUnavailable) {
-		s.indexErr = err
+	stamp := stampFile(info) + "|" + transcriptExtra(s.sourceMetadata, source, file.path)
+	return stamp == stored.stamp && unix.Faccessat(unix.AT_FDCWD, file.path, unix.R_OK, unix.AT_EACCESS) == nil
+}
+
+func (index *historyIndex) newJob(s *search, source Source, file historyFile) *refreshJob {
+	previous, exists := index.files[fileKey(source, file.path)]
+	resumeID := previous.resumeID
+	if file.database {
+		resumeID = 0
 	}
-	return true
+	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, metadata: s.sourceMetadata, done: make(chan refreshResult, 1)}
 }
 
-func (index *historyIndex) transcript(ctx context.Context, s *search, source Source, path string, file *os.File) error {
-	info, err := file.Stat()
-	if err != nil {
-		s.issue(source, path, err)
-		return nil
+func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
+	pending := pendingFile{file: file, job: nil, children: nil}
+	if !index.unchanged(s, source, file) {
+		pending.job = index.newJob(s, source, file)
+		jobs <- pending.job
 	}
-	extra := transcriptExtra(s, source, path)
-
-	stamp := stampFile(info) + "|" + extra
-	return index.visit(ctx, s, source, path, stamp, func(writer *indexWriter, reader *search, previous indexedFile) error {
-		writer.checkpoint.Identity, _ = fileIdentity(info)
-		writer.checkpoint.Extra = extra
-		writer.checkpoint.Size = info.Size()
-		if catalog.TranscriptFor(source.Harness).Document == nil && !strings.HasSuffix(path, ".zst") {
-			if err := writer.prepareAppendResume(ctx, file, previous, info); err != nil {
-				return err
-			}
-		}
-		if writer.resume == nil {
-			if _, err := writer.tx.ExecContext(ctx, "DELETE FROM conversations WHERE file_id=?", writer.fileID); err != nil {
-				return fmt.Errorf("replace indexed conversation: %w", err)
-			}
-		}
-		reader.scanTranscript(ctx, source, path, file)
-		after, err := file.Stat()
-		if err != nil {
-			return fmt.Errorf("check indexed transcript: %w", err)
-		}
-		if stampFile(after) != stampFile(info) {
-			writer.checkpoint.Complete = false
-		}
-		return nil
-	})
+	return pending
 }
 
-func (index *historyIndex) database(ctx context.Context, s *search, source Source, path string) error {
-	// WAL writes need not change the main database. Include both journal forms
-	// and refresh the database's projection when any of them changes.
-	stamp := stampPath(path) + "|" + stampPath(path+"-wal") + "|" + stampPath(path+"-journal")
-	return index.visit(ctx, s, source, path, stamp, func(writer *indexWriter, reader *search, _ indexedFile) error {
-		if _, err := writer.tx.ExecContext(ctx, "DELETE FROM conversations WHERE file_id=?", writer.fileID); err != nil {
-			return fmt.Errorf("replace indexed database: %w", err)
+// finish handles one history and its children in discovery order, storing
+// each changed file before reading matches.
+func (index *historyIndex) finish(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress) {
+	defer func() {
+		progress.Done++
+		s.report(*progress)
+	}()
+	parent, ok := index.settle(ctx, s, source, pending, status, progress)
+	var children []settledFile
+	for _, child := range pending.children {
+		if settled, ok := index.settle(ctx, s, source, child, status, progress); ok {
+			children = append(children, settled)
 		}
-		reader.scanDatabase(ctx, source, path)
-		return nil
-	})
+	}
+	if !ok {
+		for _, child := range children {
+			index.visit(ctx, s, source, child, nil)
+		}
+		return
+	}
+	index.visit(ctx, s, source, parent, children)
 }
 
-// visit refreshes a changed history in its own write transaction and then
-// reports its matches from the committed index. Lock contention returns
-// errIndexUnavailable so the caller can scan native history directly.
-func (index *historyIndex) visit(ctx context.Context, s *search, source Source, path, stamp string, refresh func(*indexWriter, *search, indexedFile) error) error {
+// settle stores one changed history and reports whether its index entry can be
+// read.
+func (index *historyIndex) settle(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress) (settledFile, bool) {
+	path := pending.file.path
+	settled := settledFile{path: path, changed: false}
+	if pending.job == nil {
+		status.Files++
+		return settled, true
+	}
+	result := <-pending.job.done
+	if result.openErr != nil {
+		s.issue(source, path, result.openErr)
+		return settled, false
+	}
+	status.Files++
+	if result.failure != nil {
+		s.issue(source, path, result.failure)
+		return settled, false
+	}
+	if result.unchanged {
+		return settled, true
+	}
+	if result.err != nil {
+		index.report(s, source, path, result.err)
+		return settled, false
+	}
 	if index.unavailable != nil {
-		return index.unavailable
+		s.indexErr = index.unavailable
+		return settled, false
 	}
-	if err := index.prepareQuery(ctx, s); err != nil {
-		return index.report(s, source, path, err)
-	}
-	key := string(source.Harness) + "\x00" + path
-	index.seen[key] = true
-	file, exists := index.files[key]
-	// A tools query upgrades a file that did not store tool content.
-	changed := !exists || file.stamp != stamp || (s.query.IncludeTools && !file.tools)
-	if changed {
-		if err := index.refresh(ctx, s, source, path, stamp, &file, refresh); err != nil {
-			return index.report(s, source, path, err)
+	file, err := index.store(ctx, pending.job, result)
+	if errors.Is(err, errStaleResume) {
+		retry := *pending.job
+		retry.previous, retry.resumeID = file, 0
+		result = parseRefresh(ctx, &retry)
+		if err = errors.Join(result.err, result.failure, result.openErr); err == nil && !result.unchanged {
+			file, err = index.store(ctx, &retry, result)
 		}
-		index.files[key] = file
 	}
-	index.reportIssues(s, source, file)
-	if err := index.matches(ctx, s, file, changed); err != nil {
-		return index.report(s, source, path, err)
+	if err != nil {
+		index.report(s, source, path, err)
+		return settled, false
 	}
-	return nil
+	index.files[fileKey(source, path)] = file
+	progress.Refreshed++
+	settled.changed = true
+	return settled, true
 }
 
-// report returns failures that disable the index, so the search can restart
+// visit reports the diagnostics of a stored history and its children, then
+// reads their matches from the committed index.
+func (index *historyIndex) visit(ctx context.Context, s *search, source Source, parent settledFile, children []settledFile) {
+	var group []groupFile
+	for _, settled := range append([]settledFile{parent}, children...) {
+		key := fileKey(source, settled.path)
+		index.seen[key] = true
+		file, ok := index.files[key]
+		if !ok {
+			continue
+		}
+		index.reportIssues(s, source, file)
+		group = append(group, groupFile{file: file, changed: settled.changed})
+	}
+	if len(group) == 0 || group[0].file.path != parent.path {
+		for _, member := range group {
+			index.visitGroup(ctx, s, source, []groupFile{member})
+		}
+		return
+	}
+	index.visitGroup(ctx, s, source, group)
+}
+
+func (index *historyIndex) visitGroup(ctx context.Context, s *search, source Source, group []groupFile) {
+	if err := index.matches(ctx, s, group); err != nil {
+		index.report(s, source, group[0].file.path, err)
+	}
+}
+
+// report keeps failures that disable the index, so the search can restart
 // against native history, and records every other failure as a diagnostic.
-func (index *historyIndex) report(s *search, source Source, path string, err error) error {
-	if errors.Is(err, errIndexUnavailable) {
-		return err
+func (index *historyIndex) report(s *search, source Source, path string, err error) {
+	if errors.Is(err, ErrIndexUnavailable) {
+		s.indexErr = errors.Join(s.indexErr, err)
+		return
 	}
 	s.issue(source, path, err)
-	return nil
 }
 
-// refresh replaces one changed history inside its own transaction, so concurrent
-// readers keep the last committed snapshot instead of waiting for a whole search.
-func (index *historyIndex) refresh(ctx context.Context, s *search, source Source, path, stamp string, file *indexedFile, read func(*indexWriter, *search, indexedFile) error) error {
-	previous := *file
-	if err := index.beginWrite(ctx); err != nil {
-		return err
-	}
-	updated, err := index.writeRefresh(ctx, s, source, path, stamp, previous, read)
-	if err != nil {
-		return errors.Join(err, index.rollbackWrite())
-	}
-	if err := index.endWrite(); err != nil {
-		return err
-	}
-	*file = updated
-	return nil
-}
-
-func (index *historyIndex) writeRefresh(ctx context.Context, s *search, source Source, path, stamp string, previous indexedFile, read func(*indexWriter, *search, indexedFile) error) (indexedFile, error) {
-	file, skip, err := index.prepareIndexedFile(ctx, s, source, path, stamp, previous)
-	if err != nil || skip {
-		return file, err
-	}
-
-	writer := new(indexWriter)
-	writer.tx, writer.fileID = index.tx, file.id
-	writer.includeTools = file.tools
-	writer.checkpoint.Tools = file.tools
-	insert, err := index.tx.PrepareContext(ctx, "INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp) VALUES(?,?,?,?,?,?,?)")
-	if err != nil {
-		return indexedFile{}, fmt.Errorf("prepare history indexing: %w", err)
-	}
-	writer.insert = insert
-	defer func() { _ = writer.insert.Close() }()
+// parseRefresh reads one history into an indexWriter without touching the
+// database, so it can run on any worker.
+func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
+	includeTools := job.includeTools || (job.exists && job.previous.tools)
+	writer := newIndexWriter(includeTools)
 	reader := new(search)
-	reader.query.IncludeTools = file.tools
-	reader.sourceMetadata, reader.writer = s.sourceMetadata, writer
-	if err = read(writer, reader, file); err != nil {
+	reader.mode = modeRefresh
+	reader.query.IncludeTools = includeTools
+	reader.sourceMetadata = job.metadata
+	reader.writer = writer
+	reader.reset()
+	var result refreshResult
+	var parsed bool
+	if job.file.database {
+		result, parsed = parseDatabaseRefresh(ctx, job, reader)
+	} else {
+		result, parsed = parseTranscriptRefresh(ctx, job, reader, writer)
+	}
+	if !parsed {
+		return result
+	}
+	if err := ctx.Err(); err != nil {
+		result.err = fmt.Errorf("refresh history: %w", err)
+		return result
+	}
+	result.writer = writer
+	result.issues = append(reader.result.Issues, result.issues...)
+	result.omitted = reader.result.OmittedIssues
+	return result
+}
+
+func (job *refreshJob) isCurrent(stamp string) bool {
+	return job.exists && stamp == job.previous.stamp && (!job.includeTools || job.previous.tools)
+}
+
+func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search) (refreshResult, bool) {
+	var result refreshResult
+	result.stamp = databaseStamp(job.file.path)
+	if job.isCurrent(result.stamp) {
+		result.unchanged = true
+		return result, false
+	}
+	reader.scanDatabase(ctx, job.source, job.file.path)
+	return result, true
+}
+
+func parseTranscriptRefresh(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter) (refreshResult, bool) {
+	var result refreshResult
+	source, path := job.source, job.file.path
+	file, err := job.file.open()
+	if err != nil {
+		result.openErr = err
+		return result, false
+	}
+	result, ok := parseOpenTranscript(ctx, job, reader, writer, file)
+	if err := file.Close(); err != nil {
+		result.issues = append(result.issues, Issue{Source: source, Path: path, Message: err.Error(), Record: false})
+	}
+	return result, ok
+}
+
+func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter, file *os.File) (refreshResult, bool) {
+	var result refreshResult
+	source, path := job.source, job.file.path
+	info, err := file.Stat()
+	if err != nil {
+		result.failure = err
+		return result, false
+	}
+	extra := transcriptExtra(job.metadata, source, path)
+	result.stamp = stampFile(info) + "|" + extra
+	if job.isCurrent(result.stamp) {
+		result.unchanged = true
+		return result, false
+	}
+	writer.checkpoint.Identity, _ = fileIdentity(info)
+	writer.checkpoint.Extra = extra
+	writer.checkpoint.Size = info.Size()
+	if catalog.TranscriptFor(source.Harness).Document == nil && !strings.HasSuffix(path, ".zst") {
+		if err := writer.prepareAppendResume(ctx, file, job, info); err != nil {
+			result.err = err
+			return result, false
+		}
+	}
+	if t := reader.scanTranscript(ctx, source, path, file); t != nil {
+		reader.add(ctx, t)
+	}
+	after, err := file.Stat()
+	if err != nil {
+		result.err = fmt.Errorf("check indexed transcript: %w", err)
+		return result, false
+	}
+	if stampFile(after) != stampFile(info) {
+		writer.checkpoint.Complete = false
+	}
+	return result, true
+}
+
+// store replaces one changed history inside its own transaction, so concurrent
+// readers keep the last committed snapshot instead of waiting for a whole search.
+// When another process stored the same stamp first, its entry is reused.
+func (index *historyIndex) store(ctx context.Context, job *refreshJob, result refreshResult) (indexedFile, error) {
+	if err := index.beginWrite(ctx); err != nil {
 		return indexedFile{}, err
 	}
-	if err = errors.Join(writer.err, ctx.Err()); err != nil {
-		return indexedFile{}, fmt.Errorf("refresh history: %w", err)
+	file, err := index.writeRefresh(ctx, job, result)
+	if err != nil {
+		return file, errors.Join(err, index.rollbackWrite())
 	}
-	return index.saveRefresh(ctx, source, path, stamp, file, reader)
+	if err := index.endWrite(); err != nil {
+		return indexedFile{}, err
+	}
+	return file, nil
 }
 
-func (index *historyIndex) prepareIndexedFile(ctx context.Context, s *search, source Source, path, stamp string, previous indexedFile) (indexedFile, bool, error) {
-	var current indexedFile
-	err := index.tx.QueryRowContext(ctx, "SELECT id,stamp,checkpoint,issues,omitted,tools FROM files WHERE harness=? AND path=?", source.Harness, path).Scan(
-		&current.id, &current.stamp, &current.checkpoint, &current.issues, &current.omitted, &current.tools,
+func (index *historyIndex) writeRefresh(ctx context.Context, job *refreshJob, result refreshResult) (indexedFile, error) {
+	source, path, writer := job.source, job.file.path, result.writer
+	current, exists, err := index.storedFile(ctx, source, path)
+	if err != nil {
+		return indexedFile{}, err
+	}
+	if exists && writer.accepts(current, result.stamp) {
+		return current, nil
+	}
+	if writer.staleResume(job, current, exists) {
+		return current, errStaleResume
+	}
+	if !exists {
+		if current, err = index.addFile(ctx, source, path, writer.includeTools); err != nil {
+			return indexedFile{}, err
+		}
+	}
+	if writer.resume == nil {
+		if _, err := index.tx.ExecContext(ctx, "DELETE FROM conversations WHERE file_id=?", current.id); err != nil {
+			return indexedFile{}, fmt.Errorf("replace indexed conversation: %w", err)
+		}
+	}
+	first, err := index.writeConversations(ctx, current.id, job.resumeID, writer)
+	if err != nil {
+		return indexedFile{}, err
+	}
+	current.resumeID = first
+	return index.saveRefresh(ctx, source, path, result, current)
+}
+
+func (writer *indexWriter) accepts(current indexedFile, stamp string) bool {
+	return current.stamp == stamp && (!writer.includeTools || current.tools)
+}
+
+func (writer *indexWriter) staleResume(job *refreshJob, current indexedFile, exists bool) bool {
+	return writer.resume != nil && (!exists || current.checkpoint != job.previous.checkpoint || current.resumeID != job.resumeID)
+}
+
+func (index *historyIndex) addFile(ctx context.Context, source Source, path string, includeTools bool) (indexedFile, error) {
+	parent := catalog.TranscriptFor(source.Harness).Parent
+	child := parent != nil && parent(path) != ""
+	if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,child,stamp,checkpoint,issues,omitted) VALUES(?,?,?,?,'','','[]',0)", source.Harness, path, includeTools, child); err != nil {
+		return indexedFile{}, index.contention(fmt.Errorf("add indexed history: %w", err))
+	}
+	current, _, err := index.storedFile(ctx, source, path)
+	if err != nil {
+		return indexedFile{}, err
+	}
+	return current, nil
+}
+
+// storedFile reads a history's committed entry inside the open transaction.
+func (index *historyIndex) storedFile(ctx context.Context, source Source, path string) (indexedFile, bool, error) {
+	var file indexedFile
+	err := index.tx.QueryRowContext(ctx, "SELECT id,"+firstConversationSQL+",stamp,checkpoint,issues,omitted,tools FROM files f WHERE harness=? AND path=?", source.Harness, path).Scan(
+		&file.id, &file.resumeID, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools,
 	)
-	includeTools := previous.tools || s.query.IncludeTools
+	file.harness, file.path = string(source.Harness), path
 	switch {
 	case err == nil:
-		includeTools = current.tools || s.query.IncludeTools
-		if current.stamp == stamp && (!s.query.IncludeTools || current.tools) {
-			current.harness = string(source.Harness)
-			current.path = path
-			return current, true, nil
-		}
-		current.harness = string(source.Harness)
-		current.path = path
-		current.tools = includeTools
-		return current, false, nil
+		return file, true, nil
 	case errors.Is(err, sql.ErrNoRows):
-		if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,stamp,checkpoint,issues,omitted) VALUES(?,?,?,'','','[]',0) ON CONFLICT(harness,path) DO UPDATE SET tools=excluded.tools", source.Harness, path, includeTools); err != nil {
-			return indexedFile{}, false, index.contention(fmt.Errorf("add indexed history: %w", err))
-		}
-		id, err := index.indexedRow(ctx, source, path)
-		if err != nil {
-			return indexedFile{}, false, err
-		}
-		previous.id = id
-		previous.tools = includeTools
-		return previous, false, nil
+		return file, false, nil
 	default:
-		return indexedFile{}, false, fmt.Errorf("identify indexed history: %w", err)
+		return file, false, index.contention(fmt.Errorf("identify indexed history: %w", err))
 	}
 }
 
-// indexedRow returns the row of one indexed history, visible to the open
-// refresh transaction after its upsert.
-func (index *historyIndex) indexedRow(ctx context.Context, source Source, path string) (int64, error) {
-	var id int64
-	if err := index.tx.QueryRowContext(ctx, "SELECT id FROM files WHERE harness=? AND path=?", source.Harness, path).Scan(&id); err != nil {
-		return 0, fmt.Errorf("identify indexed history: %w", err)
+// writeConversations stores the buffered conversations and returns the first
+// conversation row of the history afterwards, or zero.
+func (index *historyIndex) writeConversations(ctx context.Context, fileID, resumeID int64, writer *indexWriter) (int64, error) {
+	insert, err := index.tx.PrepareContext(ctx, "INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp) VALUES(?,?,?,?,?,?,?)")
+	if err != nil {
+		return 0, fmt.Errorf("prepare history indexing: %w", err)
+	}
+	defer func() { _ = insert.Close() }()
+	var first int64
+	if writer.resume != nil {
+		first = resumeID
+	}
+	for _, buffered := range writer.conversations {
+		if buffered.dropped {
+			if buffered.resumed {
+				if _, err := index.tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", resumeID); err != nil {
+					return 0, fmt.Errorf("remove indexed conversation: %w", err)
+				}
+				first = 0
+			}
+			continue
+		}
+		id, err := index.upsertConversation(ctx, fileID, resumeID, buffered)
+		if err != nil {
+			return 0, err
+		}
+		if first == 0 {
+			first = id
+		}
+		if err := index.insertParts(ctx, insert, id, buffered.parts); err != nil {
+			return 0, err
+		}
+	}
+	return first, nil
+}
+
+func (index *historyIndex) upsertConversation(ctx context.Context, fileID, resumeID int64, buffered bufferedConversation) (int64, error) {
+	c := buffered.conversation
+	metadata, err := json.Marshal(c)
+	if err != nil {
+		return 0, fmt.Errorf("encode indexed conversation: %w", err)
+	}
+	columns := []any{string(metadata), cleanIndexDir(c.CWD), cleanIndexDir(c.ProjectRoot), startedColumn(c), activeColumn(c), c.Messages, c.GitBranch}
+	id := resumeID
+	if buffered.resumed {
+		_, err = index.tx.ExecContext(ctx, "UPDATE conversations SET metadata=?,cwd=?,root=?,started=?,active=?,messages=?,branch=? WHERE id=?", append(columns, id)...)
+	} else {
+		var inserted sql.Result
+		inserted, err = index.tx.ExecContext(ctx, "INSERT INTO conversations(file_id,metadata,cwd,root,started,active,messages,branch) VALUES(?,?,?,?,?,?,?,?)", append([]any{fileID}, columns...)...)
+		if err == nil {
+			id, err = inserted.LastInsertId()
+		}
+	}
+	if err != nil {
+		return 0, index.contention(fmt.Errorf("index conversation: %w", err))
 	}
 	return id, nil
 }
 
-func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path, stamp string, previous indexedFile, reader *search) (indexedFile, error) {
-	var file indexedFile
-	writer := reader.writer
+func (index *historyIndex) insertParts(ctx context.Context, insert *sql.Stmt, conversationID int64, parts []Excerpt) error {
+	for _, part := range parts {
+		if _, err := insert.ExecContext(ctx, conversationID, part.Role, part.Text, fold(part.Text), part.MessageID, part.Line, part.Timestamp.Format(time.RFC3339Nano)); err != nil {
+			return index.contention(fmt.Errorf("index message text: %w", err))
+		}
+	}
+	return nil
+}
+
+func startedColumn(c Conversation) int64 {
+	if started := activeSince(c); !started.IsZero() {
+		return started.Unix()
+	}
+	return unknownStarted
+}
+
+func activeColumn(c Conversation) int64 {
+	if active := activeUntil(c); !active.IsZero() {
+		return active.Unix()
+	}
+	return unknownActive
+}
+
+func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path string, result refreshResult, previous indexedFile) (indexedFile, error) {
+	writer := result.writer
+	issues, omitted := result.issues, result.omitted
 	if writer.resume != nil {
 		var oldIssues []Issue
 		if err := json.Unmarshal([]byte(previous.issues), &oldIssues); err != nil {
-			return file, fmt.Errorf("decode previous index issues: %w", err)
+			return indexedFile{}, fmt.Errorf("decode previous index issues: %w", err)
 		}
 		// Existing diagnostics precede newly appended lines, preserving the cap.
-		newIssues, newOmitted := reader.result.Issues, reader.result.OmittedIssues
-		reader.result.Issues = oldIssues
-		reader.result.OmittedIssues = previous.omitted
-		for _, issue := range newIssues {
-			reader.recordIssue(issue)
+		merged := new(search)
+		merged.reset()
+		merged.result.Issues = oldIssues
+		merged.result.OmittedIssues = previous.omitted
+		for _, issue := range issues {
+			merged.recordIssue(issue)
 		}
-		reader.result.OmittedIssues += newOmitted
+		issues, omitted = merged.result.Issues, merged.result.OmittedIssues+omitted
 	}
 	checkpoint, err := json.Marshal(writer.checkpoint)
 	if err != nil {
-		return file, fmt.Errorf("encode index checkpoint: %w", err)
+		return indexedFile{}, fmt.Errorf("encode index checkpoint: %w", err)
 	}
-	issues, err := json.Marshal(reader.result.Issues)
+	encoded, err := json.Marshal(issues)
 	if err != nil {
-		return file, fmt.Errorf("encode index issues: %w", err)
+		return indexedFile{}, fmt.Errorf("encode index issues: %w", err)
 	}
-	file = indexedFile{id: previous.id, harness: string(source.Harness), path: path, stamp: stamp, checkpoint: string(checkpoint), issues: string(issues), omitted: reader.result.OmittedIssues, tools: writer.includeTools}
+	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted, tools: writer.includeTools}
 	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=?,tools=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.tools, file.id); err != nil {
 		return file, index.contention(fmt.Errorf("save history checkpoint: %w", err))
 	}
 	return file, nil
 }
 
-func (writer *indexWriter) conversation(ctx context.Context) {
-	if writer.err != nil || writer.conversationID != 0 {
-		return
-	}
-	result, err := writer.tx.ExecContext(ctx, "INSERT INTO conversations(file_id,metadata,cwd,root) VALUES(?,'{}','','')", writer.fileID)
-	if err == nil {
-		writer.conversationID, err = result.LastInsertId()
-	}
-	if err != nil {
-		writer.err = fmt.Errorf("index conversation: %w", err)
-	}
+func newIndexWriter(includeTools bool) *indexWriter {
+	var conversation Conversation
+	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false, Tools: includeTools}
+	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, includeTools: includeTools}
 }
 
-func (writer *indexWriter) append(ctx context.Context, part Excerpt) {
+func (writer *indexWriter) current() *bufferedConversation {
+	if !writer.open {
+		resumed := writer.resume != nil && len(writer.conversations) == 0
+		var conversation Conversation
+		writer.conversations = append(writer.conversations, bufferedConversation{conversation: conversation, parts: nil, resumed: resumed, dropped: false})
+		writer.open = true
+	}
+	return &writer.conversations[len(writer.conversations)-1]
+}
+
+func (writer *indexWriter) append(part Excerpt) {
 	// Conversation metadata is captured for every recognized message; only tool
 	// content storage is opt-in.
 	if part.Role == "tool" && !writer.includeTools {
 		return
 	}
-	writer.conversation(ctx)
-	if writer.err != nil {
-		return
-	}
-	_, err := writer.insert.ExecContext(ctx, writer.conversationID, part.Role, part.Text, fold(part.Text), part.MessageID, part.Line, part.Timestamp.Format(time.RFC3339Nano))
-	if err != nil {
-		writer.err = fmt.Errorf("index message text: %w", err)
-	}
+	buffered := writer.current()
+	buffered.parts = append(buffered.parts, part)
 }
 
-func (writer *indexWriter) finish(ctx context.Context, c Conversation) {
-	if writer.err != nil {
+func (writer *indexWriter) finish(c Conversation) {
+	if c.SessionID == "" && !writer.open && (writer.resume == nil || len(writer.conversations) > 0) {
 		return
 	}
-	if c.SessionID == "" {
-		if writer.conversationID != 0 {
-			_, writer.err = writer.tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", writer.conversationID)
-		}
-	} else {
-		writer.conversation(ctx)
-		if writer.err != nil {
-			return
-		}
-		metadata, err := json.Marshal(c)
-		if err != nil {
-			writer.err = fmt.Errorf("encode indexed conversation: %w", err)
-			return
-		}
-		_, writer.err = writer.tx.ExecContext(ctx, "UPDATE conversations SET metadata=?,cwd=?,root=? WHERE id=?", string(metadata), cleanIndexDir(c.CWD), cleanIndexDir(c.ProjectRoot), writer.conversationID)
-	}
-	writer.conversationID = 0
+	buffered := writer.current()
+	buffered.conversation = c
+	buffered.dropped = c.SessionID == ""
+	writer.open = false
 }
 
 // resumable reports whether this checkpoint can be extended in place: the
@@ -352,13 +677,13 @@ func (checkpoint indexCheckpoint) resumable(writer *indexWriter, info os.FileInf
 		checkpoint.Tools == writer.includeTools
 }
 
-func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.File, previous indexedFile, info os.FileInfo) error {
+func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.File, job *refreshJob, info os.FileInfo) error {
 	writer.hash = sha256.New()
 	var checkpoint indexCheckpoint
-	if previous.checkpoint == "" {
+	if job.previous.checkpoint == "" || job.resumeID == 0 {
 		return nil
 	}
-	if err := json.Unmarshal([]byte(previous.checkpoint), &checkpoint); err != nil {
+	if err := json.Unmarshal([]byte(job.previous.checkpoint), &checkpoint); err != nil {
 		return fmt.Errorf("decode history checkpoint: %w", err)
 	}
 	// Resuming keeps the stored rows, so it is only valid for an identical tool
@@ -372,16 +697,8 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 		return fmt.Errorf("verify history prefix: %w", err)
 	}
 	if hex.EncodeToString(writer.hash.Sum(nil)) == checkpoint.Digest {
-		var id int64
-		err := writer.tx.QueryRowContext(ctx, "SELECT id FROM conversations WHERE file_id=? ORDER BY id LIMIT 1", writer.fileID).Scan(&id)
-		if err == nil {
-			writer.conversationID = id
-			writer.resume = &checkpoint
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("resume indexed conversation: %w", err)
-		}
+		writer.resume = &checkpoint
+		return nil
 	}
 	writer.hash.Reset()
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

@@ -53,3 +53,29 @@ func foldRuneIndex(text string, foldedOffset int) int {
 	}
 	return index
 }
+
+// foldWithOffsets folds text rune by rune and maps each byte of the folded
+// result to the byte offset in text of the rune that produced it, plus a final
+// entry for the end of text. Matches found in folded text map back through it.
+func foldWithOffsets(text string) (string, []int) {
+	var folded strings.Builder
+	folded.Grow(len(text))
+	starts := make([]int, 0, len(text)+1)
+	for offset, character := range text {
+		mapped := fold(string(character))
+		folded.WriteString(mapped)
+		for range len(mapped) {
+			starts = append(starts, offset)
+		}
+	}
+	starts = append(starts, len(text))
+	return folded.String(), starts
+}
+
+// originalEnd maps the exclusive end of a nonempty folded match to the end of
+// the original rune that produced its last byte.
+func originalEnd(text string, starts []int, end int) int {
+	start := starts[end-1]
+	_, size := utf8.DecodeRuneInString(text[start:])
+	return start + size
+}

@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -158,5 +160,54 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 		if !strings.Contains(stdout.String(), "degraded=true") || !strings.Contains(stdout.String(), errTestPaneList.Error()) {
 			t.Fatalf("human degraded result = %q", stdout.String())
 		}
+	}
+}
+
+func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
+	searchCLIHome(t)
+	cache := os.Getenv("XDG_CACHE_HOME")
+	settled := filepath.Join(t.TempDir(), "settled.jsonl")
+	running := filepath.Join(t.TempDir(), "running.jsonl")
+	writeSearchFixture(t, settled)
+	writeSearchFixture(t, running)
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	now := time.Now().UTC()
+	for _, session := range []struct {
+		id, path string
+		activity registry.Activity
+	}{{"settled", settled, registry.ActivityIdle}, {"running", running, registry.ActivityRunning}} {
+		observation := registry.Observation{Harness: registry.Harness("pi"), At: now, Subject: registry.ObservationIdentity{SessionID: session.id, SessionPath: session.path}, Evidence: &registry.Report{Event: "agent_end", Claim: new(registry.PresenceLive), Activity: new(session.activity)}}
+		if _, err := store.Observe(t.Context(), observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var stderr bytes.Buffer
+	app := &application{stderr: &stderr}
+	done := make(chan error, 1)
+	go func() { done <- app.runHistoryIndexer(ctx, store, false) }()
+	indexed := func(path string) bool {
+		db, err := sql.Open("sqlite", filepath.Join(cache, "aht", "history-v1.sqlite"))
+		if err != nil {
+			return false
+		}
+		defer func() { _ = db.Close() }()
+		var count int
+		return db.QueryRowContext(t.Context(), "SELECT count(*) FROM files WHERE path=?", path).Scan(&count) == nil && count == 1
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !indexed(settled) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("indexer: %v", err)
+	}
+	if !indexed(settled) || indexed(running) || stderr.Len() != 0 {
+		t.Fatalf("settled indexed=%t running indexed=%t stderr=%q", indexed(settled), indexed(running), stderr.String())
 	}
 }

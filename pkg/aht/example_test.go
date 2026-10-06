@@ -53,7 +53,7 @@ func ExampleClient_Wait() {
 //nolint:testableexamples // local history is machine-specific, so this example is compiled but not run.
 func ExampleSearchHistory() {
 	result, err := aht.SearchHistory(context.Background(), aht.HistoryQuery{
-		Text:         "refresh token",
+		Terms:        []string{"refresh token"},
 		IncludeTools: true,
 		Limit:        20,
 	})
@@ -130,7 +130,7 @@ func ExampleHistoryCatalog_Search() {
 		},
 		IndexPath: "/archive/aht-history.sqlite",
 	}
-	result, err := catalog.Search(context.Background(), aht.HistoryQuery{Text: "migration", Dir: "/work/app"})
+	result, err := catalog.Search(context.Background(), aht.HistoryQuery{Terms: []string{"migration"}, Dir: "/work/app"})
 	if err != nil && !errors.Is(err, aht.ErrHistoryIncomplete) {
 		log.Fatal(err)
 	}

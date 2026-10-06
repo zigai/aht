@@ -28,7 +28,7 @@ func requireIndexedMatches(t *testing.T, c history.Catalog, q history.Query, cou
 	t.Helper()
 	result, err := c.Search(t.Context(), q)
 	if err != nil || len(result.Matches) != count {
-		t.Fatalf("search %q: matches=%d want=%d issues=%#v error=%v", q.Text, len(result.Matches), count, result.Issues, err)
+		t.Fatalf("search %q: matches=%d want=%d issues=%#v error=%v", q.Terms, len(result.Matches), count, result.Issues, err)
 	}
 	return result
 }
@@ -48,13 +48,13 @@ func appendHistory(t *testing.T, path, body string) {
 func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	appendHistory(t, path, `{"type":"message","id":"new","message":{"role":"user","content":"appended token"}}`+"\n")
-	result := requireIndexedMatches(t, c, history.Query{Text: "appended token"}, 1)
+	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"appended token"}}, 1)
 	if result.Matches[0].Excerpts[0].Line != 7 {
 		t.Fatalf("appended line = %d", result.Matches[0].Excerpts[0].Line)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -71,14 +71,14 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 	if err = os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "changed"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"changed"}}, 1)
 	// A prefix rewrite followed by growth must not qualify as an append.
 	rewritten := strings.ReplaceAll(string(data), "Refresh", "Removed") + `{"type":"session_info","name":"rewritten"}` + "\n"
 	//nolint:gosec // G703: path belongs to the isolated t.TempDir fixture, not transcript input.
 	if err = os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "Removed"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"Removed"}}, 1)
 }
 
 func TestIndexRejectsMiddlePrefixRewriteBeforeAppend(t *testing.T) {
@@ -88,23 +88,23 @@ func TestIndexRejectsMiddlePrefixRewriteBeforeAppend(t *testing.T) {
 		padding + `{"type":"message","message":{"role":"user","content":"middle-token"}}` + "\n" + padding
 	path := writeHistory(t, t.TempDir(), "session.jsonl", body)
 	catalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, catalog, history.Query{Text: "middle-token"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"middle-token"}}, 1)
 
 	rewritten := strings.Replace(body, "middle-token", "edited-token", 1) +
 		`{"type":"message","message":{"role":"user","content":"appended-token"}}` + "\n"
 	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Text: "middle-token"}, 0)
-	requireIndexedMatches(t, catalog, history.Query{Text: "edited-token"}, 1)
-	requireIndexedMatches(t, catalog, history.Query{Text: "appended-token"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"middle-token"}}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"edited-token"}}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"appended-token"}}, 1)
 }
 
 func TestIndexUpgradesWithoutReindexing(t *testing.T) {
 	t.Parallel()
 	catalog, path := indexedFixture(t)
 	appendHistory(t, path, strings.Repeat(`{"type":"message","message":{"role":"user","content":"refresh token"}}`+"\n", 100))
-	before := requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	before := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	db := openTestIndex(t, catalog.IndexPath)
 	_, err := db.ExecContext(t.Context(), `
 DROP INDEX IF EXISTS parts_search;
@@ -118,7 +118,7 @@ PRAGMA user_version=2;`)
 	}
 
 	for range 2 {
-		after := requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+		after := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 		if diff := cmp.Diff(before, after); diff != "" {
 			t.Fatalf("cache upgrade changed results (-before +after):\n%s", diff)
 		}
@@ -128,23 +128,23 @@ PRAGMA user_version=2;`)
 func TestIndexRefreshesReplacementTruncationAndDeletion(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	replacement := writeHistory(t, t.TempDir(), "replacement", strings.ReplaceAll(treeHistory, "native-session", "replacement"))
 	if err := os.Rename(replacement, path); err != nil {
 		t.Fatal(err)
 	}
-	result := requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	if result.Matches[0].Conversation.SessionID != "replacement" {
 		t.Fatal("atomic replacement retained old identity")
 	}
 	if err := os.WriteFile(path, []byte(`{"type":"session","id":"empty"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 0)
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 0)
 	db := openTestIndex(t, c.IndexPath)
 	var files int
 	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil || files != 0 {
@@ -157,26 +157,29 @@ func TestIndexRechecksIncompleteLastLineAndRetainsDiagnostics(t *testing.T) {
 	c, path := indexedFixture(t)
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"unfinished`)
 	for range 2 {
-		result, err := c.Search(t.Context(), history.Query{Text: "refresh"})
-		if !errors.Is(err, history.ErrIncomplete) || len(result.Issues) != 1 || len(result.Matches) != 1 {
-			t.Fatalf("cached partial result = %#v, %v", result, err)
-		}
+		searchWithRecordIssue(t, c, "refresh")
 	}
 	appendHistory(t, path, ` token"}}`+"\n")
-	requireIndexedMatches(t, c, history.Query{Text: "unfinished token"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"unfinished token"}}, 1)
 	appendHistory(t, path, "invalid secret-sentinel\n")
-	_, err := c.Search(t.Context(), history.Query{Text: "refresh"})
-	if !errors.Is(err, history.ErrIncomplete) {
-		t.Fatal(err)
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}})
+	if err != nil || len(result.Issues) != 1 {
+		t.Fatalf("invalid record = %#v %v", result.Issues, err)
 	}
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"after error"}}`+"\n")
-	result, err := c.Search(t.Context(), history.Query{Text: "after error"})
-	if !errors.Is(err, history.ErrIncomplete) || len(result.Issues) != 1 || len(result.Matches) != 1 {
-		t.Fatalf("append diagnostics = %#v %v", result, err)
-	}
+	result = searchWithRecordIssue(t, c, "after error")
 	if strings.Contains(result.Issues[0].Message, "secret-sentinel") {
 		t.Fatal("cached diagnostic exposed content")
 	}
+}
+
+func searchWithRecordIssue(t *testing.T, c history.Catalog, term string) history.Result {
+	t.Helper()
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{term}})
+	if err != nil || len(result.Issues) != 1 || !result.Issues[0].Record || len(result.Matches) != 1 {
+		t.Fatalf("partial result = %#v, %v", result, err)
+	}
+	return result
 }
 
 func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
@@ -187,9 +190,9 @@ func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
 		if tools {
 			want = 1
 		}
-		requireIndexedMatches(t, c, history.Query{Text: "tool-only", IncludeTools: tools}, want)
+		requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: tools}, want)
 		for _, text := range []string{"reasoning-only", "system-only"} {
-			requireIndexedMatches(t, c, history.Query{Text: text, IncludeTools: tools}, 0)
+			requireIndexedMatches(t, c, history.Query{Terms: []string{text}, IncludeTools: tools}, 0)
 		}
 	}
 	db := openTestIndex(t, c.IndexPath)
@@ -202,18 +205,18 @@ func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
 func TestIndexSearchesWhileWriteLocked(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	release := holdIndexWriteLock(t, c.IndexPath)
 	defer release()
 	// A warm search reads the last committed snapshot without a write lock: it
 	// must not wait for the five-second busy timeout the lock imposes on writers.
 	start := time.Now()
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	if waited := time.Since(start); waited > 2*time.Second {
 		t.Fatalf("warm search waited %s on the index write lock", waited)
 	}
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"locked append"}}`+"\n")
-	result, err := c.Search(t.Context(), history.Query{Text: "locked append"})
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"locked append"}})
 	if err != nil || len(result.Matches) != 1 {
 		t.Fatalf("locked refresh = %#v, %v", result, err)
 	}
@@ -238,13 +241,15 @@ func TestIndexHealsUnusableDefaultCache(t *testing.T) {
 	if _, err := foreign.ExecContext(t.Context(), "CREATE TABLE unrelated(value); INSERT INTO unrelated VALUES('keep')"); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 
-	// The unusable database is retained, so a second heal cannot have happened.
-	retained := openTestIndex(t, path+".invalid")
-	var kept string
-	if err := retained.QueryRowContext(t.Context(), "SELECT value FROM unrelated").Scan(&kept); err != nil || kept != "keep" {
-		t.Fatalf("retained cache = %q, %v", kept, err)
+	// The unusable cache is deleted rather than kept beside the rebuilt index.
+	if _, err := os.Stat(path + ".invalid"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unusable cache copy = %v", err)
+	}
+	var unrelated int
+	if err := openTestIndex(t, path).QueryRowContext(t.Context(), "SELECT count(*) FROM sqlite_schema WHERE name='unrelated'").Scan(&unrelated); err != nil || unrelated != 0 {
+		t.Fatalf("rebuilt cache kept foreign tables: %d, %v", unrelated, err)
 	}
 }
 
@@ -254,12 +259,12 @@ func TestIndexRefreshesSidecarMetadata(t *testing.T) {
 	writeHistory(t, root, "session.messages.json", `{"sessionId":"s","messages":[{"role":"user","content":"needle"}]}`)
 	manifest := writeHistory(t, root, "session.json", `{"session_id":"s","cwd":"/old","metadata":{"title":"old"}}`)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Text: "needle", Dir: "/old"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 1)
 	if err := os.WriteFile(manifest, []byte(`{"session_id":"s","cwd":"/new","metadata":{"title":"new"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "needle", Dir: "/old"}, 0)
-	result := requireIndexedMatches(t, c, history.Query{Text: "needle", Dir: "/new"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 0)
+	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/new"}, 1)
 	if result.Matches[0].Conversation.Title != "new" {
 		t.Fatal("stale title")
 	}
@@ -270,16 +275,16 @@ func TestIndexRefreshesSQLiteWALUpdatesAndDeletes(t *testing.T) {
 	db := databaseFixture(t, "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
 INSERT INTO sessions VALUES('s','title',1,2); INSERT INTO messages VALUES(1,'s','user','before',1);`)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("hermes"), Path: databasePath(t, db)}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Text: "before"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"before"}}, 1)
 	if _, err := db.ExecContext(t.Context(), "UPDATE messages SET content='after'"); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "before"}, 0)
-	requireIndexedMatches(t, c, history.Query{Text: "after"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"before"}}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"after"}}, 1)
 	if _, err := db.ExecContext(t.Context(), "DELETE FROM messages"); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "after"}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"after"}}, 0)
 }
 
 func TestIndexConcurrentSearchAndCancellation(t *testing.T) {
@@ -288,7 +293,7 @@ func TestIndexConcurrentSearchAndCancellation(t *testing.T) {
 	var group sync.WaitGroup
 	for range 4 {
 		group.Go(func() {
-			result, err := c.Search(t.Context(), history.Query{Text: "refresh"})
+			result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}})
 			if err != nil || len(result.Matches) != 1 {
 				t.Errorf("concurrent search: %#v %v", result, err)
 			}
@@ -297,10 +302,10 @@ func TestIndexConcurrentSearchAndCancellation(t *testing.T) {
 	group.Wait()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := c.Search(ctx, history.Query{Text: "refresh"}); !errors.Is(err, context.Canceled) {
+	if _, err := c.Search(ctx, history.Query{Terms: []string{"refresh"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled search: %v", err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 }
 
 func openTestIndex(t *testing.T, path string) *sql.DB {
@@ -320,13 +325,13 @@ func openTestIndex(t *testing.T, path string) *sql.DB {
 func TestIndexRefreshFailureDoesNotReturnStaleMatches(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	db := openTestIndex(t, c.IndexPath)
 	if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER reject_refresh BEFORE INSERT ON parts BEGIN SELECT RAISE(ABORT,'test refresh failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"appended token"}}`+"\n")
-	result, err := c.Search(t.Context(), history.Query{Text: "refresh"})
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}})
 	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 0 || len(result.Issues) != 1 {
 		t.Fatalf("failed refresh returned stale content: %#v, %v", result, err)
 	}
@@ -337,7 +342,7 @@ func TestIndexRefreshFailureDoesNotReturnStaleMatches(t *testing.T) {
 	if _, err := db.ExecContext(t.Context(), "DROP TRIGGER reject_refresh"); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "appended token"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"appended token"}}, 1)
 }
 
 func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
@@ -347,7 +352,7 @@ func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 	if _, err := db.ExecContext(t.Context(), "CREATE TABLE retained(value); INSERT INTO retained VALUES('keep')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Search(t.Context(), history.Query{Text: "refresh"}); err == nil {
+	if _, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}}); err == nil {
 		t.Fatal("accepted foreign index")
 	}
 	var value string
@@ -356,7 +361,7 @@ func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 	}
 	// Use a fresh path, then exercise rebuilding the disposable cache.
 	c.IndexPath = filepath.Join(t.TempDir(), "index.sqlite")
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	info, err := os.Stat(c.IndexPath)
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +372,7 @@ func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 	if err := os.Remove(c.IndexPath); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 }
 
 func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
@@ -376,26 +381,26 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	manifest := writeHistory(t, root, "kimi.json", `{"work_dirs":[{"path":"/work/kimi-project","kaos":"local"}]}`)
 	path := writeHistory(t, root, "sessions/aaec326b87de6c65cbc919cff0fa048e/native/context.jsonl", `{"role":"user","content":"refresh token"}`)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh", Dir: "/work/kimi-project"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}, Dir: "/work/kimi-project"}, 1)
 	if err := os.Remove(manifest); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh", Dir: "/work/kimi-project"}, 0)
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}, Dir: "/work/kimi-project"}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	c.Sources = []history.Source{}
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 0)
 }
 
 func TestIndexDeletesVanishedHistoriesForEveryToolMode(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
-	requireIndexedMatches(t, c, history.Query{Text: "tool-only", IncludeTools: true}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, 1)
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	// One vanished history leaves no rows behind for either search mode.
-	requireIndexedMatches(t, c, history.Query{Text: "refresh"}, 0)
-	requireIndexedMatches(t, c, history.Query{Text: "tool-only", IncludeTools: true}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 0)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, 0)
 	db := openTestIndex(t, c.IndexPath)
 	var files, parts int
 	if err := db.QueryRowContext(t.Context(), "SELECT (SELECT count(*) FROM files),(SELECT count(*) FROM parts)").Scan(&files, &parts); err != nil || files != 0 || parts != 0 {
@@ -421,5 +426,24 @@ func holdIndexWriteLock(t *testing.T, path string) func() {
 		if err := conn.Close(); err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+func TestIndexRebuildsOlderOwnSchema(t *testing.T) {
+	t.Parallel()
+	c, _ := indexedFixture(t)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
+	old := openTestIndex(t, c.IndexPath)
+	var current int
+	if err := old.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.ExecContext(t.Context(), "PRAGMA user_version=3"); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
+	var version int
+	if err := openTestIndex(t, c.IndexPath).QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != current {
+		t.Fatalf("schema version = %d, %v; want %d", version, err, current)
 	}
 }
