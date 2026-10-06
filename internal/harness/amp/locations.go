@@ -14,9 +14,9 @@ func (ampHarness) Locations(projectDir string) []harness.Location {
 		Global(harness.LocationKindInstructions, filepath.Join(dir, "AGENTS.md")).
 		Home(harness.LocationKindInstructions, filepath.Join(".config", "AGENTS.md")).
 		Global(harness.LocationKindSkills, filepath.Join(dir, "skills")).
-		Home(harness.LocationKindSkills, filepath.Join(".config", "agents", "skills"), filepath.Join(".agents", "skills")).
+		Home(harness.LocationKindSkills, filepath.Join(".config", "agents", "skills"), filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".claude", "plugins", "cache")).
 		Project(harness.LocationKindConfig, filepath.Join(".amp", "settings.json"), filepath.Join(".amp", "settings.jsonc")).
 		Project(harness.LocationKindInstructions, "AGENTS.md", "AGENT.md", "CLAUDE.md").
-		Project(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindSkills, filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills")).
 		Locations()
 }

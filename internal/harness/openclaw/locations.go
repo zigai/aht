@@ -8,7 +8,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (openclawHarness) Locations(projectDir string) []harness.Location {
+func (openclawHarness) Locations(_ string) []harness.Location {
 	state := openclawStateDir()
 	config := filepath.Join(state, "openclaw.json")
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); value != "" {
@@ -19,13 +19,18 @@ func (openclawHarness) Locations(projectDir string) []harness.Location {
 		workspace = value
 	}
 
-	return harness.NewLocationBuilder(projectDir).
+	return harness.NewLocationBuilder("").
 		Global(harness.LocationKindConfig, config).
-		Global(harness.LocationKindInstructions, filepath.Join(workspace, "AGENTS.md")).
-		Global(harness.LocationKindSkills, filepath.Join(state, "skills")).
+		Global(harness.LocationKindInstructions,
+			filepath.Join(workspace, "AGENTS.md"),
+			filepath.Join(workspace, "SOUL.md"),
+			filepath.Join(workspace, "USER.md"),
+			filepath.Join(workspace, "IDENTITY.md"),
+			filepath.Join(workspace, "BOOT.md"),
+			filepath.Join(workspace, "BOOTSTRAP.md"),
+		).
+		Global(harness.LocationKindSkills, filepath.Join(state, "skills"), filepath.Join(workspace, "skills"), filepath.Join(workspace, ".agents", "skills")).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
-		Project(harness.LocationKindInstructions, "AGENTS.md").
-		Project(harness.LocationKindSkills, "skills", filepath.Join(".agents", "skills")).
 		Locations()
 }
 
@@ -38,5 +43,9 @@ func openclawStateDir() string {
 		home = harness.HomeDir()
 	}
 
+	profile := strings.TrimSpace(os.Getenv("OPENCLAW_PROFILE"))
+	if profile != "" && profile != "default" {
+		return filepath.Join(home, ".openclaw-"+profile)
+	}
 	return filepath.Join(home, ".openclaw")
 }

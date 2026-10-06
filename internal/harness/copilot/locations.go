@@ -15,7 +15,7 @@ func (copilotHarness) Locations(projectDir string) []harness.Location {
 		Global(harness.LocationKindMCP, filepath.Join(home, "mcp-config.json")).
 		Global(harness.LocationKindSkills, filepath.Join(home, "skills")).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
-		Project(harness.LocationKindInstructions, filepath.Join(".github", "copilot-instructions.md"), filepath.Join(".github", "instructions"), "AGENTS.md", "CLAUDE.md", "GEMINI.md").
+		Project(harness.LocationKindInstructions, filepath.Join(".github", "copilot-instructions.md"), filepath.Join(".github", "instructions"), "AGENTS.md", "CLAUDE.md", filepath.Join(".claude", "CLAUDE.md"), "GEMINI.md").
 		Project(harness.LocationKindSkills, filepath.Join(".github", "skills"), filepath.Join(".agents", "skills")).
 		Locations()
 }

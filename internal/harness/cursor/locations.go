@@ -15,11 +15,11 @@ func (cursorHarness) Locations(projectDir string) []harness.Location {
 		Global(harness.LocationKindConfig, cursorCLIConfigPaths()...).
 		Global(harness.LocationKindMCP, filepath.Join(cursorHome(), "mcp.json")).
 		Global(harness.LocationKindSkills, filepath.Join(cursorHome(), "skills")).
-		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
+		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills")).
 		Project(harness.LocationKindConfig, filepath.Join(".cursor", "cli.json")).
 		Project(harness.LocationKindInstructions, "AGENTS.md", "CLAUDE.md", filepath.Join(".cursor", "rules")).
 		Project(harness.LocationKindMCP, filepath.Join(".cursor", "mcp.json")).
-		Project(harness.LocationKindSkills, filepath.Join(".cursor", "skills"), filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindSkills, filepath.Join(".cursor", "skills"), filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills")).
 		Locations()
 }
 

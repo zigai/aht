@@ -940,7 +940,7 @@ func TestLocationsStayWithinTheirScope(t *testing.T) {
 
 		withoutProject, _ := LocationsFor(id, "")
 		for _, location := range withoutProject {
-			if location.Scope != harness.LocationScopeGlobal || !strings.HasPrefix(location.Path, home) {
+			if location.Scope != harness.LocationScopeGlobal || (!strings.HasPrefix(location.Path, home) && !strings.HasPrefix(location.Path, "/etc/")) {
 				t.Errorf("%s: %+v returned without a project directory or outside the isolated home %q", id, location, home)
 			}
 		}
@@ -994,7 +994,9 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 			t.Setenv(test.variable, value)
 			locations, _ := LocationsFor(test.harness, "")
 			config := globalLocationPaths(locations, harness.LocationKindConfig)
-			if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool { return !strings.HasPrefix(path, override+string(filepath.Separator)) }) {
+			if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
+				return !strings.HasPrefix(path, override+string(filepath.Separator)) && !strings.HasPrefix(path, "/etc/")
+			}) {
 				t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
 			}
 		})

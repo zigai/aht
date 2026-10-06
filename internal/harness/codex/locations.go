@@ -2,6 +2,7 @@ package codex
 
 import (
 	"path/filepath"
+	"runtime"
 
 	"github.com/zigai/aht/v2/internal/harness"
 )
@@ -9,7 +10,13 @@ import (
 func (codexHarness) Locations(projectDir string) []harness.Location {
 	home := codexHome()
 
-	return harness.NewLocationBuilder(projectDir).
+	builder := harness.NewLocationBuilder(projectDir)
+	if runtime.GOOS != "windows" {
+		builder.Global(harness.LocationKindConfig, "/etc/codex/config.toml")
+		builder.Global(harness.LocationKindSkills, "/etc/codex/skills")
+	}
+
+	return builder.
 		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml")).
 		Global(harness.LocationKindInstructions, filepath.Join(home, "AGENTS.override.md"), filepath.Join(home, "AGENTS.md")).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).

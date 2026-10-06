@@ -12,8 +12,8 @@ func (kimiCodeHarness) Locations(projectDir string) []harness.Location {
 	return harness.NewLocationBuilder(projectDir).
 		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml")).
 		Global(harness.LocationKindMCP, filepath.Join(home, "mcp.json")).
-		Home(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".config", "agents", "skills"), filepath.Join(".agents", "skills")).
+		Home(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills"), filepath.Join(".config", "agents", "skills"), filepath.Join(".agents", "skills")).
 		Project(harness.LocationKindInstructions, "AGENTS.md", filepath.Join(".kimi", "AGENTS.md")).
-		Project(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills"), filepath.Join(".agents", "skills")).
 		Locations()
 }

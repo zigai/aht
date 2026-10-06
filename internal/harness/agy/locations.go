@@ -20,6 +20,7 @@ func (agyHarness) Locations(projectDir string) []harness.Location {
 			filepath.Join(".gemini", "config", "rules"),
 		).
 		Project(harness.LocationKindMCP, filepath.Join(".agents", "mcp_config.json")).
+		Project(harness.LocationKindConfig, filepath.Join(".agents", "rules.json")).
 		Project(
 			harness.LocationKindInstructions,
 			"AGENTS.md",
@@ -27,6 +28,7 @@ func (agyHarness) Locations(projectDir string) []harness.Location {
 			filepath.Join(".agents", "AGENTS.md"),
 			filepath.Join(".agents", "GEMINI.md"),
 			filepath.Join(".agents", "rules"),
+			filepath.Join(".agent", "rules"),
 		).
 		Project(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
 		Locations()

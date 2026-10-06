@@ -13,8 +13,8 @@ func (clineHarness) Locations(projectDir string) []harness.Location {
 	settings := filepath.Join(clineDataDir(), "settings")
 
 	return harness.NewLocationBuilder(projectDir).
-		Global(harness.LocationKindConfig, filepath.Join(settings, "global-settings.json")).
-		Global(harness.LocationKindMCP, filepath.Join(settings, "cline_mcp_settings.json")).
+		Global(harness.LocationKindConfig, clineSettingsPath(settings, "CLINE_GLOBAL_SETTINGS_PATH", "global-settings.json")).
+		Global(harness.LocationKindMCP, clineSettingsPath(settings, "CLINE_MCP_SETTINGS_PATH", "cline_mcp_settings.json")).
 		Global(harness.LocationKindInstructions, filepath.Join(config, "rules")).
 		Home(harness.LocationKindInstructions, filepath.Join(".agents", "AGENTS.md"), filepath.Join("Cline", "Rules"), filepath.Join("Documents", "Cline", "Rules")).
 		Global(harness.LocationKindSkills, filepath.Join(config, "skills")).
@@ -25,6 +25,13 @@ func (clineHarness) Locations(projectDir string) []harness.Location {
 		Project(harness.LocationKindSkills, filepath.Join(".clinerules", "skills"), filepath.Join(".cline", "skills"), filepath.Join(".agents", "skills")).
 		Project(harness.LocationKindCommands, filepath.Join(".clinerules", "workflows"), filepath.Join(".cline", "workflows")).
 		Locations()
+}
+
+func clineSettingsPath(dir, variable, name string) string {
+	if value := strings.TrimSpace(os.Getenv(variable)); value != "" {
+		return value
+	}
+	return filepath.Join(dir, name)
 }
 
 func clineDataDir() string {

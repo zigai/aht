@@ -14,9 +14,10 @@ func (gooseHarness) Locations(projectDir string) []harness.Location {
 	return harness.NewLocationBuilder(projectDir).
 		Global(harness.LocationKindConfig, filepath.Join(dir, "config.yaml")).
 		Global(harness.LocationKindInstructions, filepath.Join(dir, "AGENTS.md"), filepath.Join(dir, ".goosehints")).
-		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
+		Global(harness.LocationKindSkills, filepath.Join(dir, "skills")).
+		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills")).
 		Project(harness.LocationKindInstructions, "AGENTS.md", ".goosehints").
-		Project(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindSkills, filepath.Join(".agents", "skills"), filepath.Join(".goose", "skills"), filepath.Join(".claude", "skills")).
 		Locations()
 }
 

@@ -42,6 +42,36 @@ func TestManageLocationsJSONReportsExistenceUnderTemporaryHome(t *testing.T) {
 	assertLocation(t, locations, harness.LocationKindConfig, harness.LocationScopeProject, filepath.Join(projectDir, ".codex", "config.toml"), false)
 }
 
+func TestManageLocationsJSONReportsNativeOverrides(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(home, "custom-open"))
+	for _, path := range []string{filepath.Join(home, "custom-open", "commands"), filepath.Join(project, "opencode.jsonc")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasSuffix(path, "commands") {
+			if err := os.Mkdir(path, 0o750); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := runTestCLI(context.Background(), []string{"--json", "manage", "locations", "opencode", "--project", project}, &stdout, &stderr); err != nil {
+		t.Fatalf("locations failed: %v; stderr=%s", err, stderr.String())
+	}
+	var locations []harness.Location
+	if err := json.Unmarshal(stdout.Bytes(), &locations); err != nil {
+		t.Fatalf("decode %q: %v", stdout.String(), err)
+	}
+	assertLocation(t, locations, harness.LocationKindCommands, harness.LocationScopeGlobal, filepath.Join(home, "custom-open", "commands"), true)
+	assertLocation(t, locations, harness.LocationKindConfig, harness.LocationScopeProject, filepath.Join(project, "opencode.jsonc"), true)
+}
+
 func assertLocation(t *testing.T, locations []harness.Location, kind harness.LocationKind, scope harness.LocationScope, path string, exists bool) {
 	t.Helper()
 	for _, location := range locations {
