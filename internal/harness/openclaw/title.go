@@ -168,14 +168,14 @@ func callOpenClawGateway(ctx context.Context, binary, method string, params any,
 			return fmt.Errorf("call OpenClaw Gateway %s: %w", method, ctx.Err())
 		}
 		if stdout.exceeded || stderr.exceeded {
-			return fmt.Errorf("OpenClaw Gateway %s: %w", method, errOpenClawTitleOutputTooLarge)
+			return fmt.Errorf("%w: %s", errOpenClawTitleOutputTooLarge, method)
 		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
 		}
 		if message != "" {
-			return fmt.Errorf("OpenClaw Gateway %s failed: %s: %w", method, message, errOpenClawGatewayCallFailed)
+			return fmt.Errorf("%w: %s: %s", errOpenClawGatewayCallFailed, method, message)
 		}
 		return fmt.Errorf("call OpenClaw Gateway %s: %w", method, err)
 	}

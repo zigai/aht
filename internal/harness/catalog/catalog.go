@@ -131,7 +131,7 @@ func Parse(value string) (registry.Harness, error) {
 			return definition.ID, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %q", registry.ErrUnknownHarness, value)
+	return "", fmt.Errorf("%w %q", registry.ErrUnknownHarness, value)
 }
 
 func SupportedNames() []string {
