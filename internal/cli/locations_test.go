@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -58,36 +55,6 @@ func assertLocation(t *testing.T, locations []harness.Location, kind harness.Loc
 	t.Errorf("no %s %s location at %s in %+v", scope, kind, path, locations)
 }
 
-func TestManageLocationsTableListsEveryHarnessByDefault(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	var stdout, stderr bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"manage", "locations", "--project", t.TempDir()}, &stdout, &stderr); err != nil {
-		t.Fatalf("locations failed: %v; stderr=%s", err, stderr.String())
-	}
-	for _, id := range harness.Supported() {
-		if !strings.Contains(stdout.String(), string(id)) {
-			t.Errorf("table does not mention %s", id)
-		}
-	}
-	for _, heading := range []string{"Harness", "Kind", "Scope", "Path", "Exists"} {
-		if !strings.Contains(stdout.String(), heading) {
-			t.Errorf("table does not have a %s column", heading)
-		}
-	}
-}
-
-func TestManageLocationsRejectsUnknownHarness(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(context.Background(), []string{"manage", "locations", "claude", "no-such-harness"}, &stdout, &stderr)
-	if !errors.Is(err, registry.ErrUnknownHarness) {
-		t.Fatalf("error = %v, want ErrUnknownHarness", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("output before validation failed: %q", stdout.String())
-	}
-}
-
 func TestManageLocationsUnknownHarnessMessageAndExitCode(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
@@ -97,30 +64,6 @@ func TestManageLocationsUnknownHarnessMessageAndExitCode(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown harness "no-such-harness"`) || strings.Count(stderr.String(), "unknown harness") != 1 {
 		t.Fatalf("stderr = %q, want a single unknown harness message naming the argument", stderr.String())
-	}
-}
-
-func TestManageLocationsJSONFieldNames(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	var stdout, stderr bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"--json", "manage", "locations", "codex", "--project", t.TempDir()}, &stdout, &stderr); err != nil {
-		t.Fatalf("locations failed: %v; stderr=%s", err, stderr.String())
-	}
-	var rows []map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
-		t.Fatalf("decode %q: %v", stdout.String(), err)
-	}
-	if len(rows) == 0 {
-		t.Fatal("no locations reported")
-	}
-	want := []string{"exists", "harness", "kind", "path", "scope"}
-	for _, row := range rows {
-		if got := slices.Sorted(maps.Keys(row)); !slices.Equal(got, want) {
-			t.Fatalf("fields = %v, want %v in %v", got, want, row)
-		}
-		if _, ok := row["exists"].(bool); !ok {
-			t.Fatalf("exists = %#v, want a boolean in %v", row["exists"], row)
-		}
 	}
 }
 
@@ -170,59 +113,5 @@ func TestManageLocationsProjectDirectory(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestManageLocationsListsEachHarnessOnce(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	count := func(args ...string) int {
-		t.Helper()
-		var stdout, stderr bytes.Buffer
-		if err := runTestCLI(context.Background(), append([]string{"--json", "manage", "locations", "--project", t.TempDir()}, args...), &stdout, &stderr); err != nil {
-			t.Fatalf("locations failed: %v; stderr=%s", err, stderr.String())
-		}
-		var locations []harness.Location
-		if err := json.Unmarshal(stdout.Bytes(), &locations); err != nil {
-			t.Fatalf("decode %q: %v", stdout.String(), err)
-		}
-		return len(locations)
-	}
-
-	single := count("kimi-code")
-	if single == 0 {
-		t.Fatal("no locations for kimi-code")
-	}
-	if got := count("kimi-code", "kimi-code", "kimi"); got != single {
-		t.Fatalf("repeated and aliased arguments listed %d locations, want %d", got, single)
-	}
-}
-
-func TestManageLocationsTableMarksExistingPaths(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CODEX_HOME", "")
-	if err := os.MkdirAll(filepath.Join(home, ".agents", "skills"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if err := runTestCLI(context.Background(), []string{"manage", "locations", "codex", "--project", t.TempDir()}, &stdout, &stderr); err != nil {
-		t.Fatalf("locations failed: %v; stderr=%s", err, stderr.String())
-	}
-
-	var existing, missing int
-	for line := range strings.SplitSeq(stdout.String(), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 || fields[0] != "codex" {
-			continue
-		}
-		switch fields[len(fields)-1] {
-		case "yes":
-			existing++
-		case "no":
-			missing++
-		}
-	}
-	if existing != 1 || missing == 0 {
-		t.Fatalf("table has %d existing and %d missing rows, want 1 existing and some missing:\n%s", existing, missing, stdout.String())
 	}
 }

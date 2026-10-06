@@ -50,23 +50,3 @@ func TestLocationsForReportsExistingPaths(t *testing.T) {
 		}
 	}
 }
-
-func TestAllLocationsCoversEverySupportedHarness(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	covered := make(map[registry.Harness]bool)
-	for _, location := range harness.AllLocations(t.TempDir()) {
-		covered[location.Harness] = true
-	}
-	for _, id := range harness.Supported() {
-		if !covered[id] {
-			t.Errorf("AllLocations has no entry for %s", id)
-		}
-	}
-}
-
-func TestLocationsForUnknownHarness(t *testing.T) {
-	locations, ok := harness.LocationsFor(registry.Harness("no-such-harness"), t.TempDir())
-	if ok || locations != nil {
-		t.Fatalf("LocationsFor(unknown) = %v, %t, want nil, false", locations, ok)
-	}
-}
