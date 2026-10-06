@@ -17,6 +17,18 @@ import (
 	"testing"
 )
 
+// Git hooks export GIT_DIR, GIT_INDEX_FILE and similar variables. Git
+// commands run in fixture repositories would otherwise act on the repository
+// running the hook.
+func TestMain(m *testing.M) {
+	for _, entry := range os.Environ() {
+		if name, _, _ := strings.Cut(entry, "="); strings.HasPrefix(name, "GIT_") {
+			_ = os.Unsetenv(name)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 func TestResultRejectsVersionDrift(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "codex.log"), []byte("current codex: codex-cli 0.154.0\n"), 0o600); err != nil {
