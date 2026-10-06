@@ -108,7 +108,7 @@ func installedNative(id registry.Harness, binary string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	paths := planPaths(plan)
+	paths := append(planPaths(plan), retiredPluginPaths(plan)...)
 	for _, path := range paths {
 		status, err := classifyArtifactForHarness(path, id)
 		if err != nil {
@@ -119,6 +119,19 @@ func installedNative(id registry.Harness, binary string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func retiredPluginPaths(plan harnesspkg.InstallPlan) []string {
+	var paths []string
+	for _, action := range plan.Actions {
+		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
+			for _, retired := range plugin.Plan.Retired {
+				paths = append(paths, retired.Dir)
+			}
+		}
+	}
+
+	return paths
 }
 
 func installedShim(id registry.Harness) (string, bool, error) {

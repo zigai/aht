@@ -79,6 +79,7 @@ func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
 		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openclawMarkerFileName},
 		MarkerFile:     openclawMarkerFileName,
 		ImportManifest: nil,
+		Retired:        nil,
 		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
 	}}}}
 }

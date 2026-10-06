@@ -102,7 +102,7 @@ func discoveryScope(id registry.Harness) string {
 	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
-	return "agy --help documents hosted model selection but no local-provider endpoint; https://docs.agy.ai/plugins was unreachable during contract review, so native lifecycle support is not asserted"
+	return "agy --help documents hosted model selection but no local-provider endpoint; only plugin loading is asserted, through `agy plugin list` and `agy -p /hooks`, so native lifecycle support is not asserted"
 }
 
 // Record only flags describing native observations, never stdin, tool inputs,

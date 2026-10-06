@@ -21,17 +21,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-type importManifest struct {
-	Imports []importEntry `json:"imports"`
-}
-
-type importEntry struct {
-	Name       string   `json:"name"`
-	Source     string   `json:"source"`
-	ImportedAt string   `json:"imported_at"`
-	Components []string `json:"components"`
-}
-
 func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	plan, advisor, err := installPlanForHarness(opts.Harness, opts.Binary)
 	if err != nil {
@@ -486,6 +475,12 @@ func installPluginDirectory(
 		}
 	}
 
+	retiredChanged, err := removeRetiredPlugins(ctx, opts, harness, plan)
+	if err != nil {
+		return Result{}, err
+	}
+	changed = changed || retiredChanged
+
 	label := installLabel(plan.Label, harness, "plugin")
 
 	return Result{
@@ -610,6 +605,7 @@ func readImportManifest(path string) (importManifest, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return importManifest{
 				Imports: nil,
+				extra:   nil,
 			}, nil
 		}
 
@@ -630,45 +626,23 @@ func upsertImport(
 	now time.Time,
 ) (importManifest, bool) {
 	for index, item := range manifest.Imports {
-		if item.Name != plan.Name {
+		if item.name() != plan.Name {
 			continue
 		}
 
-		next := item
-		if next.Source != plan.Source {
-			next.Source = plan.Source
-		}
-		if next.ImportedAt == "" {
-			next.ImportedAt = now.Format(time.RFC3339)
-		}
-		for _, component := range plan.Components {
-			if !slices.Contains(next.Components, component) {
-				next.Components = append(next.Components, component)
-			}
-		}
-		if importsEqual(item, next) {
+		next, changed := item.withPlan(plan, now)
+		if !changed {
 			return manifest, false
 		}
-
+		manifest.Imports = slices.Clone(manifest.Imports)
 		manifest.Imports[index] = next
+
 		return manifest, true
 	}
 
-	manifest.Imports = append(manifest.Imports, importEntry{
-		Name:       plan.Name,
-		Source:     plan.Source,
-		ImportedAt: now.Format(time.RFC3339),
-		Components: append([]string(nil), plan.Components...),
-	})
+	manifest.Imports = append(slices.Clone(manifest.Imports), newImportEntry(plan, now))
 
 	return manifest, true
-}
-
-func importsEqual(left importEntry, right importEntry) bool {
-	if left.Name != right.Name || left.Source != right.Source || left.ImportedAt != right.ImportedAt {
-		return false
-	}
-	return slices.Equal(left.Components, right.Components)
 }
 
 func writeImportManifest(path string, manifest importManifest) error {

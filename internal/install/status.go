@@ -177,6 +177,11 @@ func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryIns
 		}
 		return append(result, registration), nil
 	}
+	retired, err := inspectRetiredPlugins(plan)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, retired...)
 	if plan.ImportManifest == nil {
 		return result, nil
 	}
@@ -186,21 +191,38 @@ func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryIns
 	}
 	status := ArtifactMissing
 	for _, entry := range manifest.Imports {
-		if entry.Name != plan.ImportManifest.Name {
+		if entry.name() != plan.ImportManifest.Name {
 			continue
 		}
 		status = ArtifactCurrent
-		if entry.Source != plan.ImportManifest.Source {
+		if entry.source() != plan.ImportManifest.Source {
 			status = ArtifactStale
 		}
 		for _, component := range plan.ImportManifest.Components {
-			if !slices.Contains(entry.Components, component) {
+			if !slices.Contains(entry.components(), component) {
 				status = ArtifactStale
 			}
 		}
 		break
 	}
 	return append(result, inspectedArtifact{path: plan.ImportManifest.Path, status: status}), nil
+}
+
+// inspectRetiredPlugins reports managed plugins at former locations as stale
+// so that an upgrade moves them.
+func inspectRetiredPlugins(plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
+	var stale []inspectedArtifact
+	for _, retired := range plan.Retired {
+		status, err := ClassifyArtifact(retired.Dir)
+		if err != nil {
+			return nil, err
+		}
+		if status == ArtifactCurrent || status == ArtifactStale {
+			stale = append(stale, inspectedArtifact{path: retired.Dir, status: ArtifactStale})
+		}
+	}
+
+	return stale, nil
 }
 
 func inspectSharedFile(path string) ([]inspectedArtifact, error) {
