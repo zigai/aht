@@ -19,7 +19,10 @@ type PluginContext = {
   readonly worktree?: string | undefined;
   readonly project?: { readonly path?: string | undefined; readonly root?: string };
 };
-type PluginHooks = { event(input: { readonly event: unknown }): Promise<void> };
+type PluginHooks = {
+  event(input: { readonly event: unknown }): Promise<void>;
+  dispose(): Promise<void>;
+};
 async function AHTPlugin(ctx: PluginContext): Promise<PluginHooks> {
   const pendingState = createPendingState(false);
   let currentSessionId: string | undefined;
@@ -119,6 +122,11 @@ function addEvent(args: string[], value: unknown): void {
   }
 
   return {
+    // Kilo exits right after disposing plugins; waiting here keeps queued
+    // reports, including the final idle notifications, from being abandoned.
+    dispose: async () => {
+      await commandDrain;
+    },
     event: async ({ event }) => {
       const state = pendingState(event);
       if (state === undefined) {
