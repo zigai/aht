@@ -25,7 +25,7 @@ func transcriptExtra(path string, metadata map[string]string, _ func(string) str
 }
 
 func (kimiCodeHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"context.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: transcriptSourceMetadata, Initialize: initializeTranscript, Extra: transcriptExtra, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: []string{"context.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: transcriptSourceMetadata, Initialize: initializeTranscript, Extra: transcriptExtra, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil, LocalTitles: false, Parent: nil}
 }
 
 func transcriptSources(home string) []string {

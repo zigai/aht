@@ -16,6 +16,9 @@ func readTranscriptRecord(ctx context.Context, t *transcript.Decoder, r transcri
 		t.Conversation.SessionID = transcript.Str(payload, "id")
 		t.Conversation.CWD = transcript.Str(payload, "cwd")
 		t.Conversation.CreatedAt = transcript.ParseTime(payload["timestamp"])
+		if branch := transcript.Str(transcript.Obj(payload, "git"), "branch"); branch != "" {
+			t.Conversation.GitBranch = branch
+		}
 	case "response_item":
 		timestamp := transcript.ParseTime(r["timestamp"])
 		switch transcript.Str(payload, "type") {
@@ -32,8 +35,9 @@ func readTranscriptRecord(ctx context.Context, t *transcript.Decoder, r transcri
 }
 
 // readFastRecord decodes only the envelope of records the search reader ignores
-// or, for excluded tool calls, the metadata that Capture would update. Hints
-// only select candidates; each handled record is validated as complete JSON.
+// (and the model of turn contexts) or, for excluded tool calls, the metadata
+// that Capture would update. Hints only select candidates; each handled record
+// is validated as complete JSON.
 func readFastRecord(ctx context.Context, t *transcript.Decoder, data []byte, line int) bool {
 	if !fastCandidate(data, t.IncludeTools) {
 		return false
@@ -47,7 +51,15 @@ func readFastRecord(ctx context.Context, t *transcript.Decoder, data []byte, lin
 		return false
 	}
 	switch entry.Type {
-	case "event_msg", "turn_context", "compacted":
+	case "event_msg", "compacted":
+		return true
+	case "turn_context":
+		var turn struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(entry.Payload, &turn) == nil && turn.Model != "" {
+			t.Conversation.Model = turn.Model
+		}
 		return true
 	case "response_item":
 		return !t.IncludeTools && fastResponseItem(ctx, t, entry.Payload, entry.Timestamp, line)
@@ -89,7 +101,7 @@ func fastResponseItem(ctx context.Context, t *transcript.Decoder, raw, timestamp
 }
 
 func (codexHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
 }
 
 func transcriptSources(home string) []string {

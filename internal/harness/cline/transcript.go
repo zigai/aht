@@ -84,6 +84,8 @@ func clineMetadata(t *transcript.Decoder) {
 	t.Conversation.CWD = transcript.Str(r, "cwd")
 	t.Conversation.ProjectRoot = transcript.Str(r, "workspace_root")
 	t.Conversation.CreatedAt = transcript.ParseTime(r["started_at"])
+	t.Conversation.Model = transcript.Str(r, "model")
+	t.Conversation.GitBranch = transcript.Str(transcript.Obj(transcript.Obj(r, "metadata"), "git"), "branch")
 	t.Conversation.Title = transcript.Str(transcript.Obj(r, "metadata"), "title")
 }
 
@@ -92,7 +94,7 @@ func transcriptExtra(path string, _ map[string]string, stamp func(string) string
 }
 
 func (clineHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"*.messages.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: transcriptExtra, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil}
+	return transcript.Reader{Patterns: []string{"*.messages.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: transcriptExtra, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil, LocalTitles: false, Parent: nil}
 }
 
 func transcriptSources(home string) []string {
