@@ -9,7 +9,7 @@ import (
 )
 
 func (gooseHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"sessions.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery}
+	return transcript.Reader{Patterns: []string{"sessions.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
 }
 func transcriptSources(home string) []string { return []string{transcriptGoosePath(home)} }
 func transcriptGoosePath(home string) string {

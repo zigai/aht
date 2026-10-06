@@ -22,8 +22,14 @@ type Conversation struct {
 	SessionID   string           `json:"session_id"`
 	Path        string           `json:"path"`
 	Title       string           `json:"title,omitempty"`
+	CustomTitle string           `json:"custom_title,omitempty"`
+	AITitle     string           `json:"ai_title,omitempty"`
+	Prompt      string           `json:"prompt,omitempty"`
 	CWD         string           `json:"cwd,omitempty"`
 	ProjectRoot string           `json:"project_root,omitempty"`
+	GitBranch   string           `json:"git_branch,omitempty"`
+	Model       string           `json:"model,omitempty"`
+	Messages    int              `json:"messages"`
 	CreatedAt   time.Time        `json:"created_at,omitzero"`
 	UpdatedAt   time.Time        `json:"updated_at,omitzero"`
 }
@@ -54,6 +60,10 @@ type (
 		FastRecord     func(context.Context, *Decoder, []byte, int) bool
 		Document       func(context.Context, *Decoder, []byte) error
 		Query          func(context.Context, *sql.DB) (string, RowReader, error)
+		LocalTitles    bool
+		// Parent maps a history file that belongs to another file's
+		// conversation, such as a subagent transcript, to that file's path.
+		Parent func(string) string
 	}
 )
 

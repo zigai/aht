@@ -18,12 +18,12 @@ func TestWarmIndexReportsUnreadableTranscript(t *testing.T) {
 		t.Skip("root can read files regardless of their permission bits")
 	}
 	catalog, path := indexedFixture(t)
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	if err := os.Chmod(path, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, limit := range []int{0, 1} {
-		result, err := catalog.Search(t.Context(), history.Query{Text: "refresh", Limit: limit})
+		result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Limit: limit})
 		if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 0 || len(result.Issues) != 1 || result.Sources[0].Status != "failed" {
 			t.Fatalf("unreadable history: result=%#v err=%v", result, err)
 		}
@@ -31,7 +31,7 @@ func TestWarmIndexReportsUnreadableTranscript(t *testing.T) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 }
 
 func TestWarmIndexExplicitSymlinkSource(t *testing.T) {
@@ -43,7 +43,7 @@ func TestWarmIndexExplicitSymlinkSource(t *testing.T) {
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: link}}
 	for range 2 {
-		result := requireIndexedMatches(t, catalog, history.Query{Text: "refresh", Limit: 1}, 1)
+		result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Limit: 1}, 1)
 		if result.Matches[0].Conversation.Path != path || len(result.Matches[0].Excerpts) == 0 {
 			t.Fatalf("symlink result = %#v", result)
 		}
@@ -54,7 +54,7 @@ func TestLimitedIndexMatchesUnlimitedDetails(t *testing.T) {
 	t.Parallel()
 	sources := orderingSources(t)
 	catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
-	query := history.Query{Text: "refresh token", Registry: []registry.Session{
+	query := history.Query{Terms: []string{"refresh token"}, Registry: []registry.Session{
 		{ID: "live", Harness: registry.Harness("pi"), SessionID: "recently-updated", SessionPath: sources[1].Path},
 	}}
 	for range 2 {
@@ -80,14 +80,14 @@ func TestIndexSearchFollowsSourceSelectionAfterRemoval(t *testing.T) {
 	catalog, first := indexedFixture(t)
 	second := writeHistory(t, t.TempDir(), "other.jsonl", treeHistory)
 	catalog.Sources = append(catalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: second})
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 2)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 2)
 	if err := os.Remove(second); err != nil {
 		t.Fatal(err)
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Dir(second)}}
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 0)
 }
 
 func TestWarmIndexSymlinkedParentSource(t *testing.T) {
@@ -107,7 +107,7 @@ func TestWarmIndexSymlinkedParentSource(t *testing.T) {
 		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
 	}
 	for range 2 {
-		result := requireIndexedMatches(t, catalog, history.Query{Text: "refresh", Limit: 1}, 1)
+		result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Limit: 1}, 1)
 		if result.Matches[0].Conversation.Path != path || len(result.Matches[0].Excerpts) == 0 {
 			t.Fatalf("symlink result = %#v", result)
 		}
@@ -131,7 +131,7 @@ func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
 `)
 	sources := []history.Source{{Harness: registry.Harness("pi"), Path: created}, {Harness: registry.Harness("pi"), Path: updated}}
 	catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
-	query := history.Query{Text: "refresh token", Limit: 1, Registry: []registry.Session{
+	query := history.Query{Terms: []string{"refresh token"}, Limit: 1, Registry: []registry.Session{
 		{ID: "live", Harness: registry.Harness("pi"), SessionID: "recently-updated", SessionPath: sources[1].Path},
 	}}
 	limited := requireIndexedMatches(t, catalog, query, 1)
@@ -153,10 +153,10 @@ func TestIndexSearchSymlinkedParentAfterRemoval(t *testing.T) {
 		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: symlinkRoot}, {Harness: registry.Harness("pi"), Path: second}},
 		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
 	}
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 2)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 2)
 	if err := os.Remove(second); err != nil {
 		t.Fatal(err)
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
-	requireIndexedMatches(t, catalog, history.Query{Text: "refresh"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 }

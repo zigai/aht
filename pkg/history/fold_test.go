@@ -84,7 +84,7 @@ func TestFoldNormalizerContract(t *testing.T) {
 	} {
 		t.Run("search "+tt.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := foldSearch(t, foldFixtureBody, Query{Text: tt.query})
+			result, err := foldSearch(t, foldFixtureBody, Query{Terms: []string{tt.query}})
 			if err != nil || len(result.Matches) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}
@@ -179,7 +179,7 @@ func TestFoldExcerptWindows(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixture := `{"type":"session","id":"fold-session","cwd":"/work/fold"}` + "\n" + string(message) + "\n"
-			result, err := foldSearch(t, fixture, Query{Text: tt.query, CaseSensitive: tt.caseSensitive})
+			result, err := foldSearch(t, fixture, Query{Terms: []string{tt.query}, CaseSensitive: tt.caseSensitive})
 			if err != nil || len(result.Matches) != 1 || len(result.Matches[0].Excerpts) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}

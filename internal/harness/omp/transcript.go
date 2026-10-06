@@ -3,7 +3,7 @@ package omp
 import "github.com/zigai/aht/v2/internal/harness/transcript"
 
 func (ompHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord, FastRecord: transcript.FastTreeRecord, Document: nil, Query: nil}
+	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord, FastRecord: transcript.FastTreeRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
 }
 
 func transcriptSources(home string) []string {

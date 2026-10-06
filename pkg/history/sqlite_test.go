@@ -102,15 +102,15 @@ func assertDatabaseSearch(t *testing.T, h registry.Harness, path string) {
 		t.Fatal(err)
 	}
 	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: h, Path: filepath.Dir(path)}}}
-	result, err := c.Search(t.Context(), history.Query{Text: "refresh token"})
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh token"}})
 	if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "native" {
 		t.Fatalf("search = %#v, %v", result, err)
 	}
-	result, err = c.Search(t.Context(), history.Query{Text: "tool-only"})
+	result, err = c.Search(t.Context(), history.Query{Terms: []string{"tool-only"}})
 	if err != nil || len(result.Matches) != 0 {
 		t.Fatalf("default tool exclusion = %#v, %v", result, err)
 	}
-	result, err = c.Search(t.Context(), history.Query{Text: "tool-only", IncludeTools: true})
+	result, err = c.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, IncludeTools: true})
 	if err != nil || len(result.Matches) != 1 || result.Matches[0].Excerpts[0].Role != "tool" {
 		t.Fatalf("tool search = %#v, %v", result, err)
 	}
@@ -132,7 +132,7 @@ func TestHermesNullableAndOversizedMessageBodies(t *testing.T) {
 	}{
 		{name: "nullable", status: "searched", matchingParts: 1},
 		{
-			name: "oversized", status: "failed", matchingParts: 2, issues: 1, err: history.ErrIncomplete,
+			name: "oversized", status: "searched", matchingParts: 2, issues: 1, err: nil,
 			extraRows: `INSERT INTO messages VALUES(3,'native','assistant',zeroblob(16*1024*1024+1),3);
 INSERT INTO messages VALUES(4,'native','assistant','another refresh token',4);`,
 		},
@@ -147,8 +147,8 @@ INSERT INTO messages VALUES(1,'native','assistant',NULL,1);
 
 INSERT INTO messages VALUES(2,'native','user','refresh token',2);`+tt.extraRows)
 			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("hermes"), Path: databasePath(t, db)}}}
-			result, err := catalog.Search(t.Context(), history.Query{Text: "refresh token"})
-			if !errors.Is(err, tt.err) || len(result.Issues) != tt.issues || len(result.Matches) != 1 || result.Matches[0].MatchingParts != tt.matchingParts || result.Sources[0].Status != tt.status {
+			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh token"}})
+			if !errors.Is(err, tt.err) || (tt.issues > 0 && !result.Issues[0].Record) || len(result.Issues) != tt.issues || len(result.Matches) != 1 || result.Matches[0].MatchingParts != tt.matchingParts || result.Sources[0].Status != tt.status {
 				t.Fatalf("content search = %#v, %v", result, err)
 			}
 			if tt.issues > 0 && !strings.Contains(result.Issues[0].Message, "exceeds 16 MiB") {
@@ -176,7 +176,7 @@ INSERT INTO messages VALUES(3,'native','assistant','[{"type":"text","text":"anot
 				t.Fatal(err)
 			}
 			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("goose"), Path: databasePath(t, db)}}}
-			result, err := catalog.Search(t.Context(), history.Query{Text: "refresh token"})
+			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh token"}})
 			if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 1 || result.Matches[0].MatchingParts != 2 || len(result.Issues) != 1 || result.Sources[0].Status != "failed" {
 				t.Fatalf("malformed content search = %#v, %v", result, err)
 			}
@@ -204,9 +204,9 @@ func TestSQLiteToolRowsFeedMetadataWithoutToolSearch(t *testing.T) {
 	for _, mode := range searchModes(t, toolDatabase(t)) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
-			plain, err := mode.catalog.Search(t.Context(), history.Query{Text: "refresh token"})
+			plain, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"refresh token"}})
 			requireMatches(t, plain, err, 1)
-			tools, err := mode.catalog.Search(t.Context(), history.Query{Text: "refresh token", IncludeTools: true})
+			tools, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"refresh token"}, IncludeTools: true})
 			requireMatches(t, tools, err, 1)
 			if diff := cmp.Diff(plain.Matches[0].Conversation, tools.Matches[0].Conversation); diff != "" {
 				t.Fatalf("conversation metadata depends on IncludeTools (-plain +tools):\n%s", diff)
@@ -223,9 +223,9 @@ func TestSQLiteToolRowsAreSearchableOnlyWithTools(t *testing.T) {
 	for _, mode := range searchModes(t, toolDatabase(t)) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
-			plain, err := mode.catalog.Search(t.Context(), history.Query{Text: "tool-only"})
+			plain, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}})
 			requireMatches(t, plain, err, 0)
-			tools, err := mode.catalog.Search(t.Context(), history.Query{Text: "tool-only", IncludeTools: true})
+			tools, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, IncludeTools: true})
 			requireMatches(t, tools, err, 1)
 			if tools.Matches[0].Excerpts[0].Role != "tool" {
 				t.Fatalf("tool row excerpt role = %q", tools.Matches[0].Excerpts[0].Role)

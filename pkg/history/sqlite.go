@@ -3,7 +3,6 @@ package history
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/url"
 
@@ -25,15 +24,6 @@ const (
 type databaseRow = native.Row
 
 func (s *search) scanDatabase(ctx context.Context, source Source, path string) {
-	if s.index != nil {
-		// Refresh failures reach the caller as source issues and as the sticky
-		// error index.commit reports; only an unusable index must be retained
-		// here so the search can fall back to a direct scan.
-		if err := s.index.database(ctx, s, source, path); errors.Is(err, errIndexUnavailable) {
-			s.indexErr = err
-		}
-		return
-	}
 	// mode=ro prevents creation, migration and writes. Do not use immutable=1:
 	// an actively running harness may have committed history in its WAL.
 	var uri url.URL
@@ -83,7 +73,7 @@ func historySQL(ctx context.Context, db *sql.DB, h registry.Harness) (string, na
 
 func (s *search) databaseRows(ctx context.Context, source Source, path string, parse native.RowReader, rows *sql.Rows) {
 	var t transcript
-	defer func() { s.add(ctx, t.match) }()
+	defer func() { s.add(ctx, &t) }()
 	for rows.Next() {
 		if ctx.Err() != nil {
 			return
@@ -94,15 +84,11 @@ func (s *search) databaseRows(ctx context.Context, source Source, path string, p
 			return
 		}
 		if row.SessionID != t.match.Conversation.SessionID {
-			s.add(ctx, t.match)
-			t.match.Excerpts = nil
-			t.match.MatchingParts = 0
-			t.match.RegistryStates = nil
-			t.recognized = true
-			t.match.Conversation = Conversation{Harness: source.Harness, SessionID: row.SessionID, Path: path, Title: row.Title, CWD: row.CWD, ProjectRoot: "", CreatedAt: native.StoredTime(row.Created), UpdatedAt: native.StoredTime(row.Updated)}
+			s.add(ctx, &t)
+			t = newDatabaseTranscript(Conversation{Harness: source.Harness, SessionID: row.SessionID, Path: path, Title: row.Title, CustomTitle: "", AITitle: "", Prompt: "", CWD: row.CWD, ProjectRoot: "", GitBranch: "", Model: "", Messages: 0, CreatedAt: native.StoredTime(row.Created), UpdatedAt: native.StoredTime(row.Updated)})
 		}
 		if !row.Body.Valid {
-			s.issue(source, path, errRecordSize)
+			s.recordProblem(source, path, errRecordSize)
 			continue
 		}
 		if err := parse(ctx, s.decoder(source, &t), row); err != nil {

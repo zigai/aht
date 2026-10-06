@@ -271,6 +271,7 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newLocationsCommand(),
 		app.newManageConfigCommand(),
 		app.newDetectionCommand(),
+		app.newHistoryCommand(),
 	)
 	return command
 }

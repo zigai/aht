@@ -51,9 +51,10 @@
 //
 // [SessionTitles] reads native display names; Claude uses a persistent OS cache,
 // while Pi scans transcripts. [SearchHistory] searches past conversations on disk,
-// including ones AHT never tracked, and does not need the tracker. It returns
-// partial results with [ErrHistoryIncomplete] when some sources cannot
-// be read. Use [HistoryCatalog] to search specific directories.
+// including ones AHT never tracked, and does not need the tracker; [ListHistory]
+// lists them by metadata. Both return partial results with [ErrHistoryIncomplete]
+// when some sources cannot be read. Use [HistoryCatalog] to search specific
+// directories or stream matches. [ResumeCommand] builds a native resume command.
 //
 // # Integrations and the tracker
 //

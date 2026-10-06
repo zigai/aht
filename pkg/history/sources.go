@@ -25,6 +25,17 @@ const (
 
 var errSymlinkCycle = errors.New("too many levels of symbolic links")
 
+// historyFile is one native history inside a source. Directory walks open and
+// stat through their root to keep its containment guarantees. children are
+// histories that belong to this file's conversation, in walk order.
+type historyFile struct {
+	path     string
+	database bool
+	open     func() (*os.File, error)
+	stat     func() (os.FileInfo, error)
+	children []historyFile
+}
+
 // DefaultSources resolves native environment overrides and standard history
 // locations. Missing directories are normal and do not make search incomplete.
 // Unsupported readers remain visible in Result.Sources instead of appearing empty.
@@ -56,32 +67,41 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 	}
 	source = resolved
 	path := source.Path
-	before := len(s.result.Issues) + s.result.OmittedIssues
+	before := s.failureCount()
+	var files []historyFile
 	if info.IsDir() {
-		s.loadSourceMetadata(source, path, true)
-		s.scanDirectory(ctx, source, &status)
-	} else {
-		resolved, resolveErr := resolveSymlinkFile(path)
-		if resolveErr != nil {
-			s.issue(source, path, resolveErr)
-		} else {
-			s.scanFile(ctx, source, resolved, &status)
+		root, err := os.OpenRoot(path)
+		if err != nil {
+			s.issue(source, path, err)
+			status.Status = "failed"
+			return
 		}
+		defer s.closeReader(source, path, root)
+		s.loadSourceMetadata(source, path, true)
+		files = groupChildren(source.Harness, s.walkDirectory(ctx, source, root))
+	} else if file, ok := s.singleFile(source, path); ok {
+		s.loadSourceMetadata(source, file.path, false)
+		files = []historyFile{file}
 	}
-	if len(s.result.Issues)+s.result.OmittedIssues > before {
+	if s.index != nil {
+		s.index.scanFiles(ctx, s, source, files, &status)
+	} else {
+		s.scanFilesParallel(ctx, source, files, &status)
+	}
+	if s.failureCount() > before {
 		status.Status = "failed"
 	}
 }
 
-func (s *search) scanDirectory(ctx context.Context, source Source, status *SourceStatus) {
-	root, err := os.OpenRoot(source.Path)
-	if err != nil {
-		s.issue(source, source.Path, err)
-		return
-	}
-	defer s.closeReader(source, source.Path, root)
-	var filesToScan []string
-	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
+func (s *search) failureCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failures
+}
+
+func (s *search) walkDirectory(ctx context.Context, source Source, root *os.Root) []historyFile {
+	var files []historyFile
+	err := fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := s.checkScan(ctx); err != nil {
 			return err
 		}
@@ -93,111 +113,184 @@ func (s *search) scanDirectory(ctx context.Context, source Source, status *Sourc
 		if skip {
 			return fs.SkipDir
 		}
-		if !process {
-			return nil
-		}
-
-		if s.index != nil {
-			s.scanEntry(ctx, source, path, root, status)
-		} else {
-			filesToScan = append(filesToScan, path)
+		if process {
+			files = append(files, rootFile(root, source.Path, path))
 		}
 		return nil
 	})
 	if err != nil && ctx.Err() == nil {
 		s.issue(source, source.Path, err)
 	}
-	if s.index == nil && len(filesToScan) > 0 {
-		s.scanFilesParallel(ctx, source, filesToScan, root, status)
+	return files
+}
+
+// groupChildren attaches each history whose native parent was also found to
+// that parent. A child whose parent is missing stays a history of its own.
+func groupChildren(h registry.Harness, files []historyFile) []historyFile {
+	parent := catalog.TranscriptFor(h).Parent
+	if parent == nil {
+		return files
+	}
+	positions := make(map[string]int, len(files))
+	for i, file := range files {
+		positions[file.path] = i
+	}
+	owners := make([]int, len(files))
+	for i, file := range files {
+		owners[i] = -1
+		if owner, ok := positions[parent(file.path)]; ok && owner != i && !file.database {
+			owners[i] = owner
+		}
+	}
+	for i, owner := range owners {
+		if owner >= 0 {
+			files[owner].children = append(files[owner].children, files[i])
+		}
+	}
+	grouped := files[:0]
+	for i, file := range files {
+		if owners[i] < 0 {
+			grouped = append(grouped, file)
+		}
+	}
+	return grouped
+}
+
+func rootFile(root *os.Root, base, relative string) historyFile {
+	absolute := filepath.Join(base, relative)
+	if isDatabase(relative) {
+		return historyFile{path: absolute, database: true, open: nil, stat: func() (os.FileInfo, error) { return os.Stat(absolute) }, children: nil}
+	}
+	return historyFile{
+		path:     absolute,
+		database: false,
+		open:     func() (*os.File, error) { return root.Open(relative) },
+		stat:     func() (os.FileInfo, error) { return root.Stat(relative) },
+		children: nil,
 	}
 }
 
-func (s *search) scanFilesParallel(ctx context.Context, source Source, files []string, root *os.Root, status *SourceStatus) {
-	if len(files) == 1 {
-		s.scanEntry(ctx, source, files[0], root, status)
+// singleFile resolves an explicit file source. Non-regular files are skipped.
+func (s *search) singleFile(source Source, path string) (historyFile, bool) {
+	resolved, err := resolveSymlinkFile(path)
+	if err != nil {
+		s.issue(source, path, err)
+		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		s.issue(source, resolved, err)
+		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+	}
+	if !info.Mode().IsRegular() {
+		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+	}
+	file := historyFile{
+		path:     resolved,
+		database: isDatabase(resolved),
+		open:     func() (*os.File, error) { return os.Open(resolved) },
+		stat:     func() (os.FileInfo, error) { return os.Stat(resolved) },
+		children: nil,
+	}
+	if file.database {
+		file.open = nil
+	}
+	return file, true
+}
+
+// scanFilesParallel scans without the index. Matches are ranked afterwards, so
+// workers may finish files in any order.
+func (s *search) scanFilesParallel(ctx context.Context, source Source, files []historyFile, status *SourceStatus) {
+	if len(files) == 0 {
 		return
 	}
 	workers := min(maxScanWorkers, len(files), max(minScanWorkers, runtime.GOMAXPROCS(0)))
-	var totalFiles atomic.Int64
+	var next, done, inspected atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for w := range workers {
-		go func(workerID int) {
+	for range workers {
+		go func() {
 			defer wg.Done()
-			for i := workerID; i < len(files); i += workers {
-				if ctx.Err() != nil {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(files) || ctx.Err() != nil || s.halted() {
 					return
 				}
-				s.scanEntryDirect(ctx, source, files[i], root, &totalFiles)
+				inspected.Add(int64(s.scanFileDirect(ctx, source, files[i])))
+				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0})
 			}
-		}(w)
+		}()
 	}
 	wg.Wait()
-	status.Files += int(totalFiles.Load())
+	status.Files += int(inspected.Load())
 }
 
-func (s *search) scanEntryDirect(ctx context.Context, source Source, path string, root *os.Root, totalFiles *atomic.Int64) {
-	absolute := filepath.Join(source.Path, path)
-	if isDatabase(path) {
-		s.scanFile(ctx, source, absolute, nil)
-		totalFiles.Add(1)
+// scanFileDirect parses one history with its children and returns how many
+// files it inspected.
+func (s *search) scanFileDirect(ctx context.Context, source Source, file historyFile) int {
+	if file.database {
+		s.scanDatabase(ctx, source, file.path)
+		return 1
+	}
+	inspected := 0
+	t, ok := s.readTranscriptFile(ctx, source, file)
+	if ok {
+		inspected++
+	}
+	for _, child := range file.children {
+		c, ok := s.readTranscriptFile(ctx, source, child)
+		if !ok {
+			continue
+		}
+		inspected++
+		switch {
+		case c == nil:
+		case t != nil && c.match.Conversation.SessionID == t.match.Conversation.SessionID:
+			t.absorb(c, s.query.Excerpts)
+		default:
+			s.add(ctx, c)
+		}
+	}
+	if t != nil {
+		s.add(ctx, t)
+	}
+	return inspected
+}
+
+func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile) (*transcript, bool) {
+	opened, err := file.open()
+	if err != nil {
+		s.issue(source, file.path, err)
+		return nil, false
+	}
+	t := s.scanTranscript(ctx, source, file.path, opened)
+	if err := opened.Close(); err != nil {
+		s.issue(source, file.path, err)
+	}
+	return t, true
+}
+
+func (s *search) report(progress Progress) {
+	if s.progress == nil {
 		return
 	}
-	file, openErr := root.Open(path)
-	if openErr != nil {
-		s.issue(source, absolute, openErr)
-		return
-	}
-	totalFiles.Add(1)
-	s.scanTranscript(ctx, source, absolute, file)
-	if err := file.Close(); err != nil {
-		s.issue(source, absolute, err)
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.progress(progress)
 }
 
 func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry) (bool, bool) {
 	if entry.IsDir() {
 		return skipHistoryDirectory(source.Harness, path), false
 	}
-	return false, entry.Type().IsRegular() && historyFile(source.Harness, entry.Name())
-}
-
-func (s *search) scanFile(ctx context.Context, source Source, path string, status *SourceStatus) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		s.issue(source, path, err)
-		return
-	}
-	if !info.Mode().IsRegular() {
-		return
-	}
-	s.loadSourceMetadata(source, path, false)
-	if status != nil {
-		status.Files++
-	}
-	if isDatabase(path) {
-		s.scanDatabase(ctx, source, path)
-		return
-	}
-	if s.index != nil && s.index.unchanged(ctx, s, source, path, info) {
-		return
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		s.issue(source, path, err)
-		return
-	}
-	s.scanTranscript(ctx, source, path, file)
-	if err := file.Close(); err != nil {
-		s.issue(source, path, err)
-	}
+	return false, entry.Type().IsRegular() && historyName(source.Harness, entry.Name())
 }
 
 func isDatabase(path string) bool {
 	return strings.HasSuffix(path, ".db") || strings.HasSuffix(path, ".sqlite")
 }
 
-func historyFile(h registry.Harness, name string) bool {
+func historyName(h registry.Harness, name string) bool {
 	for _, pattern := range catalog.TranscriptFor(h).Patterns {
 		matched, err := filepath.Match(pattern, name)
 		if err == nil && matched {
@@ -205,31 +298,6 @@ func historyFile(h registry.Harness, name string) bool {
 		}
 	}
 	return false
-}
-
-func (s *search) scanEntry(ctx context.Context, source Source, path string, root *os.Root, status *SourceStatus) {
-	absolute := filepath.Join(source.Path, path)
-	if isDatabase(path) {
-		s.scanFile(ctx, source, absolute, status)
-		return
-	}
-	if s.index != nil {
-		// Stat through the walk's root to retain its containment guarantees.
-		if info, err := root.Stat(path); err == nil && s.index.unchanged(ctx, s, source, absolute, info) {
-			status.Files++
-			return
-		}
-	}
-	file, openErr := root.Open(path)
-	if openErr != nil {
-		s.issue(source, absolute, openErr)
-		return
-	}
-	status.Files++
-	s.scanTranscript(ctx, source, absolute, file)
-	if closeErr := file.Close(); closeErr != nil {
-		s.issue(source, absolute, closeErr)
-	}
 }
 
 func isIgnoredDirName(name string) bool {
@@ -286,7 +354,7 @@ func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.
 	}
 	if !supported(source.Harness) {
 		status.Status = "unsupported"
-		if s.query.Harness != "" || s.explicitSources {
+		if len(s.query.Harnesses) > 0 || s.explicitSources {
 			s.issue(source, path, ErrUnsupportedHarness)
 		}
 		return source, nil, false
