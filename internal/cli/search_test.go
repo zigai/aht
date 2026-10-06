@@ -618,10 +618,11 @@ func TestSearchCLIGroupsByDayNewestFirst(t *testing.T) {
 }
 
 func TestSearchCLIStreamsTextMatches(t *testing.T) {
-	root := conversationFixture(t, map[string]string{"alpha": "/work/a", "beta": "/work/b"})
+	sessions := map[string]string{"alpha": "/work/a", "beta": "/work/b"}
+	root := conversationFixture(t, sessions)
 	output := runSearchOutput(t, "search", "refresh", "--source", "pi="+root, "--stream")
-	for _, id := range []string{"alpha", "beta"} {
-		if !strings.Contains(output, "pi "+id) || !strings.Contains(output, "topic "+id+" refresh") || !strings.Contains(output, "pi --session "+filepath.Join(root, id+".jsonl")) {
+	for id, cwd := range sessions {
+		if !strings.Contains(output, "pi "+id) || !strings.Contains(output, "topic "+id+" refresh") || !strings.Contains(output, "cd "+cwd+" && pi --session") {
 			t.Fatalf("stream output = %q, missing %s", output, id)
 		}
 	}

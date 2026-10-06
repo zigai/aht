@@ -165,7 +165,6 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 
 func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
 	searchCLIHome(t)
-	cache := os.Getenv("XDG_CACHE_HOME")
 	settled := filepath.Join(t.TempDir(), "settled.jsonl")
 	running := filepath.Join(t.TempDir(), "running.jsonl")
 	writeSearchFixture(t, settled)
@@ -190,15 +189,7 @@ func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
 	app := &application{stderr: &stderr}
 	done := make(chan error, 1)
 	go func() { done <- app.runHistoryIndexer(ctx, store, false) }()
-	indexed := func(path string) bool {
-		db, err := sql.Open("sqlite", filepath.Join(cache, "aht", "history-v1.sqlite"))
-		if err != nil {
-			return false
-		}
-		defer func() { _ = db.Close() }()
-		var count int
-		return db.QueryRowContext(t.Context(), "SELECT count(*) FROM files WHERE path=?", path).Scan(&count) == nil && count == 1
-	}
+	indexed := func(path string) bool { return historyIndexed(t, path) }
 	deadline := time.Now().Add(10 * time.Second)
 	for !indexed(settled) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
@@ -210,4 +201,22 @@ func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
 	if !indexed(settled) || indexed(running) || stderr.Len() != 0 {
 		t.Fatalf("settled indexed=%t running indexed=%t stderr=%q", indexed(settled), indexed(running), stderr.String())
 	}
+}
+
+// historyIndexed reports whether the default history index holds path. The
+// default index lives under [os.UserCacheDir], which is not XDG_CACHE_HOME on
+// every platform.
+func historyIndexed(t *testing.T, path string) bool {
+	t.Helper()
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(cache, "aht", "history-v1.sqlite"))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = db.Close() }()
+	var count int
+	return db.QueryRowContext(t.Context(), "SELECT count(*) FROM files WHERE path=?", path).Scan(&count) == nil && count == 1
 }
