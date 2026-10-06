@@ -163,9 +163,6 @@ func clineSessionDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_SESSION_DATA_DIR")); value != "" {
 		return value
 	}
-	if value := strings.TrimSpace(os.Getenv("CLINE_DATA_DIR")); value != "" {
-		return filepath.Join(value, "sessions")
-	}
 
-	return filepath.Join(clineConfigDir(), "data", "sessions")
+	return filepath.Join(clineDataDir(), "sessions")
 }

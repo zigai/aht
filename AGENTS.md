@@ -57,6 +57,8 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
      or screen fallback.
    - `distribution.go`: `Distribution()` with `Directory` equal to the adapter
      folder name. The architecture test derives name ownership from it.
+   - `locations.go`: `Locations(projectDir)` with the config, instruction,
+     skill, command, and MCP paths the native docs name. Every adapter needs it.
 3. Generated integrations report with
    `aht report <name> --reporter <IntegrationSource> --reporter-version <version>`,
    plus `--sequence` for ordered reporters and `--multi-session` when one process

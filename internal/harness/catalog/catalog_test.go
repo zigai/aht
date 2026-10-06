@@ -866,3 +866,198 @@ func TestHandleHookUnsupportedHarness(t *testing.T) {
 		t.Fatalf("expected codex to have no managed hook adapter: supported=%v err=%v", ok, err)
 	}
 }
+
+func isolateLocationEnvironment(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{
+		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "COPILOT_HOME",
+		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
+		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
+		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
+		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME",
+	} {
+		t.Setenv(name, "")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+func globalLocationPaths(locations []harness.Location, kind harness.LocationKind) []string {
+	var paths []string
+	for _, location := range locations {
+		if location.Kind == kind && location.Scope == harness.LocationScopeGlobal {
+			paths = append(paths, location.Path)
+		}
+	}
+	return paths
+}
+
+func TestLocationsForUnknownHarness(t *testing.T) {
+	t.Parallel()
+	locations, ok := LocationsFor(registry.Harness("no-such-harness"), t.TempDir())
+	if ok || locations != nil {
+		t.Fatalf("LocationsFor(unknown) = %v, %t, want nil, false", locations, ok)
+	}
+}
+
+func checkLocationScope(t *testing.T, id registry.Harness, location harness.Location, projectDir string) {
+	t.Helper()
+	if !filepath.IsAbs(location.Path) {
+		t.Errorf("%s: relative path %q", id, location.Path)
+	}
+	inProject := strings.HasPrefix(location.Path, projectDir+string(filepath.Separator))
+	switch location.Scope {
+	case harness.LocationScopeProject:
+		if !inProject {
+			t.Errorf("%s: project path %q is outside %q", id, location.Path, projectDir)
+		}
+	case harness.LocationScopeGlobal:
+		if inProject {
+			t.Errorf("%s: global path %q is inside the project", id, location.Path)
+		}
+	}
+}
+
+func TestLocationsStayWithinTheirScope(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	projectDir := t.TempDir()
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, ok := LocationsFor(id, projectDir)
+		if !ok || len(locations) == 0 {
+			t.Errorf("%s: LocationsFor = %d locations, %t", id, len(locations), ok)
+			continue
+		}
+		seen := make(map[harness.Location]bool, len(locations))
+		for _, location := range locations {
+			if seen[location] {
+				t.Errorf("%s: duplicate location %+v", id, location)
+			}
+			seen[location] = true
+			checkLocationScope(t, id, location, projectDir)
+		}
+
+		withoutProject, _ := LocationsFor(id, "")
+		for _, location := range withoutProject {
+			if location.Scope != harness.LocationScopeGlobal || !strings.HasPrefix(location.Path, home) {
+				t.Errorf("%s: %+v returned without a project directory or outside the isolated home %q", id, location, home)
+			}
+		}
+	}
+}
+
+func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	override := t.TempDir()
+
+	t.Setenv("CODEX_HOME", override)
+	codex, _ := LocationsFor(registry.Harness("codex"), "")
+	if got := globalLocationPaths(codex, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "config.toml")}) {
+		t.Errorf("codex config with CODEX_HOME = %v", got)
+	}
+	for _, location := range codex {
+		if strings.HasPrefix(location.Path, filepath.Join(home, ".codex")) {
+			t.Errorf("codex location %q ignores CODEX_HOME", location.Path)
+		}
+	}
+
+	t.Setenv("CURSOR_CONFIG_DIR", override)
+	cursor, _ := LocationsFor(registry.Harness("cursor"), "")
+	if got := globalLocationPaths(cursor, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "cli-config.json")}) {
+		t.Errorf("cursor config with CURSOR_CONFIG_DIR = %v", got)
+	}
+
+	t.Setenv("GOOSE_PATH_ROOT", override)
+	goose, _ := LocationsFor(registry.Harness("goose"), "")
+	if got := globalLocationPaths(goose, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "config", "config.yaml")}) {
+		t.Errorf("goose config with GOOSE_PATH_ROOT = %v", got)
+	}
+
+	t.Setenv("OPENCLAW_STATE_DIR", override)
+	t.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(override, "custom.json"))
+	openclaw, _ := LocationsFor(registry.Harness("openclaw"), "")
+	if got := globalLocationPaths(openclaw, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "custom.json")}) {
+		t.Errorf("openclaw config with OPENCLAW_CONFIG_PATH = %v", got)
+	}
+	if got := globalLocationPaths(openclaw, harness.LocationKindInstructions); !slices.Equal(got, []string{filepath.Join(override, "workspace", "AGENTS.md")}) {
+		t.Errorf("openclaw instructions with OPENCLAW_STATE_DIR = %v", got)
+	}
+
+	t.Setenv("KILO_CONFIG_DIR", override)
+	kilo, _ := LocationsFor(registry.Harness("kilo"), "")
+	if got := globalLocationPaths(kilo, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "kilo.json"), filepath.Join(override, "kilo.jsonc")}) {
+		t.Errorf("kilo config with KILO_CONFIG_DIR = %v", got)
+	}
+
+	t.Setenv("CLINE_DIR", override)
+	cline, _ := LocationsFor(registry.Harness("cline"), "")
+	if got := globalLocationPaths(cline, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(override, "data", "settings", "global-settings.json")}) {
+		t.Errorf("cline settings with CLINE_DIR = %v", got)
+	}
+	requireClineDirectory(t, cline, override)
+	dataDir := t.TempDir()
+	t.Setenv("CLINE_DATA_DIR", dataDir)
+	cline, _ = LocationsFor(registry.Harness("cline"), "")
+	if got := globalLocationPaths(cline, harness.LocationKindConfig); !slices.Equal(got, []string{filepath.Join(dataDir, "settings", "global-settings.json")}) {
+		t.Errorf("cline settings with CLINE_DATA_DIR = %v", got)
+	}
+}
+
+func TestLocationsFollowHomeDirectoryVariables(t *testing.T) {
+	isolateLocationEnvironment(t)
+
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+	}{
+		{harness: registry.Harness("claude"), variable: "CLAUDE_CONFIG_DIR"},
+		{harness: registry.Harness("copilot"), variable: "COPILOT_HOME"},
+		{harness: registry.Harness("kimi-code"), variable: "KIMI_SHARE_DIR"},
+		{harness: registry.Harness("grok"), variable: "GROK_HOME"},
+		{harness: registry.Harness("hermes"), variable: "HERMES_HOME"},
+		{harness: registry.Harness("pi"), variable: "PI_CODING_AGENT_DIR"},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			override := t.TempDir()
+			t.Setenv(test.variable, override)
+			locations, _ := LocationsFor(test.harness, "")
+			if got := globalLocationPaths(locations, harness.LocationKindConfig); len(got) == 0 || !strings.HasPrefix(got[0], override+string(filepath.Separator)) {
+				t.Errorf("config locations with %s=%s = %v", test.variable, override, got)
+			}
+		})
+	}
+}
+
+func TestLocationsAreAbsoluteWithoutHome(t *testing.T) {
+	isolateLocationEnvironment(t)
+	t.Setenv("HOME", "")
+	projectDir := t.TempDir()
+
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, _ := LocationsFor(id, projectDir)
+		for _, location := range locations {
+			if !filepath.IsAbs(location.Path) {
+				t.Errorf("%s: %+v is not absolute without a home directory", id, location)
+			}
+		}
+	}
+}
+
+func requireClineDirectory(t *testing.T, locations []harness.Location, dir string) {
+	t.Helper()
+	for _, expected := range []struct {
+		kind harness.LocationKind
+		name string
+	}{
+		{harness.LocationKindSkills, "skills"},
+		{harness.LocationKindCommands, "workflows"},
+		{harness.LocationKindInstructions, "rules"},
+	} {
+		got := globalLocationPaths(locations, expected.kind)
+		if !slices.Contains(got, filepath.Join(dir, expected.name)) || slices.ContainsFunc(got, func(path string) bool { return strings.Contains(path, ".cline") }) {
+			t.Errorf("cline %s with CLINE_DIR = %v", expected.kind, got)
+		}
+	}
+}

@@ -246,6 +246,20 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 	return resumable.ResumeCommand(sessionID, sessionPath)
 }
 
+// LocationsFor lists the documented configuration locations of a harness. It
+// reports false when the harness is unknown or does not expose locations.
+func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Location, bool) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return nil, false
+	}
+	provider, ok := adapter.(harness.LocationProvider)
+	if !ok {
+		return nil, false
+	}
+	return provider.Locations(projectDir), true
+}
+
 func WithResumeCommand(observation registry.Observation) registry.Observation {
 	switch observation.Evidence.(type) {
 	case *registry.Report, *registry.Listing:

@@ -55,6 +55,14 @@ const (
 	SummaryGroupByProject            SummaryGroupBy  = registry.SummaryGroupByProject
 	SummaryGroupByHarness            SummaryGroupBy  = registry.SummaryGroupByHarness
 
+	HarnessLocationKindConfig       HarnessLocationKind  = harness.LocationKindConfig
+	HarnessLocationKindInstructions HarnessLocationKind  = harness.LocationKindInstructions
+	HarnessLocationKindSkills       HarnessLocationKind  = harness.LocationKindSkills
+	HarnessLocationKindCommands     HarnessLocationKind  = harness.LocationKindCommands
+	HarnessLocationKindMCP          HarnessLocationKind  = harness.LocationKindMCP
+	HarnessLocationScopeGlobal      HarnessLocationScope = harness.LocationScopeGlobal
+	HarnessLocationScopeProject     HarnessLocationScope = harness.LocationScopeProject
+
 	ArtifactMissing ArtifactStatus = manage.ArtifactMissing
 	ArtifactCurrent ArtifactStatus = manage.ArtifactCurrent
 	ArtifactStale   ArtifactStatus = manage.ArtifactStale
@@ -286,6 +294,15 @@ type (
 	// HarnessCapabilities describes the static capabilities and supported features of an agent harness.
 	HarnessCapabilities = harness.Capabilities
 
+	// HarnessLocation is a path where a harness documents reading user-facing configuration.
+	HarnessLocation = harness.Location
+
+	// HarnessLocationKind says what a [HarnessLocation] holds.
+	HarnessLocationKind = harness.LocationKind
+
+	// HarnessLocationScope says whom a [HarnessLocation] applies to.
+	HarnessLocationScope = harness.LocationScope
+
 	// HarnessRuntimeStatus describes the installed/runtime state of a harness integration.
 	HarnessRuntimeStatus = harness.RuntimeStatus
 
@@ -391,4 +408,17 @@ func Capabilities(harnessID Harness) (HarnessCapabilities, bool) {
 // AllCapabilities returns the static capabilities of all supported harnesses.
 func AllCapabilities() []HarnessCapabilities {
 	return harness.AllCapabilities()
+}
+
+// HarnessLocations returns the documented configuration locations of harnessID:
+// settings, instructions, skills, commands, and MCP files, for the current user
+// and for projectDir. Project locations are omitted when projectDir is empty.
+// It returns false for an unknown harness.
+func HarnessLocations(harnessID Harness, projectDir string) ([]HarnessLocation, bool) {
+	return harness.LocationsFor(harnessID, projectDir)
+}
+
+// AllHarnessLocations returns the locations of all supported harnesses.
+func AllHarnessLocations(projectDir string) []HarnessLocation {
+	return harness.AllLocations(projectDir)
 }

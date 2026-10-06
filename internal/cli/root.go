@@ -268,6 +268,7 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newStateCommand(),
 		app.newDoctorCommand(),
 		app.newCapabilitiesCommand(),
+		app.newLocationsCommand(),
 		app.newManageConfigCommand(),
 		app.newDetectionCommand(),
 	)
