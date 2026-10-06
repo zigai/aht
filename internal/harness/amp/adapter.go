@@ -77,10 +77,6 @@ func (ampHarness) ResumeCommand(sessionID string, _ string) []string {
 }
 
 func ampConfigDir() string {
-	if value := strings.TrimSpace(os.Getenv("AMP_CONFIG_DIR")); value != "" {
-		return value
-	}
-
 	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
 		return filepath.Join(value, "amp")
 	}

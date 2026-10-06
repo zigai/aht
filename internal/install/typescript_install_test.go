@@ -160,6 +160,24 @@ func TestInstallOmpUsesProfileAgentDir(t *testing.T) {
 	}
 }
 
+func TestInstallOmpUsesConfigDirName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	t.Setenv("PI_CONFIG_DIR", ".custom-omp")
+	t.Setenv("OMP_PROFILE", "")
+
+	result, err := Run(t.Context(), Options{Harness: registry.Harness("omp"), Binary: testInstallBinary})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	wantPath := filepath.Join(home, ".custom-omp", "agent", "extensions", ompExtensionName)
+	if result.Path != wantPath {
+		t.Fatalf("unexpected path %q, want %q", result.Path, wantPath)
+	}
+}
+
 func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

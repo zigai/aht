@@ -1045,6 +1045,29 @@ func TestLocationsAreAbsoluteWithoutHome(t *testing.T) {
 	}
 }
 
+func TestLocationsIgnoreVariablesTheHarnessDoesNotRead(t *testing.T) {
+	isolateLocationEnvironment(t)
+	override := t.TempDir()
+
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+	}{
+		{harness: registry.Harness("agy"), variable: "AGY_CONFIG_HOME"},
+		{harness: registry.Harness("amp"), variable: "AMP_CONFIG_DIR"},
+		{harness: registry.Harness("omp"), variable: "OMP_CONFIG_DIR"},
+	} {
+		t.Run(string(test.harness)+"/"+test.variable, func(t *testing.T) {
+			before, _ := LocationsFor(test.harness, "")
+			t.Setenv(test.variable, override)
+			after, _ := LocationsFor(test.harness, "")
+			if !slices.Equal(before, after) {
+				t.Errorf("%s changed locations:\nbefore %v\nafter  %v", test.variable, before, after)
+			}
+		})
+	}
+}
+
 func requireClineDirectory(t *testing.T, locations []harness.Location, dir string) {
 	t.Helper()
 	for _, expected := range []struct {
