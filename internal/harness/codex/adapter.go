@@ -58,7 +58,7 @@ func New() codexHarness {
 func (codexHarness) RetainNativeActivity() bool { return true }
 
 func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
+	plan := harness.JSONCommandHookInstallPlan{
 		Path:              filepath.Join(codexHome(), "hooks.json"),
 		Source:            codexIntegrationSource,
 		Label:             "codex hooks",
@@ -124,7 +124,10 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
 			},
 		},
-	}}, harness.ShimAction{}}}
+		Trust: nil,
+	}
+	plan.Trust = hookTrust{path: plan.Path, hooks: plan.Hooks}
+	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: plan}, harness.ShimAction{}}}
 }
 
 func (codexHarness) ResumeCommand(sessionID string, _ string) []string {

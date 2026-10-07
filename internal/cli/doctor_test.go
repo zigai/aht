@@ -73,17 +73,17 @@ func assertDoctorSurface(t *testing.T) {
 	t.Helper()
 	path := prepareDoctorEnvironment(t)
 	concise := executeDoctorSurface(t, "--store", path, "manage", "doctor")
-	if strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+	if strings.Contains(concise, "integration.claude") || strings.Contains(concise, "integration.pi") {
 		t.Fatalf("concise doctor includes uninstalled integrations:\n%s", concise)
 	}
-	executeDoctorSurface(t, "manage", "integrations", "install", "codex", "--binary", defaultInstallBinary())
+	executeDoctorSurface(t, "manage", "integrations", "install", "claude", "--binary", defaultInstallBinary())
 	concise = executeDoctorSurface(t, "--store", path, "manage", "doctor")
-	if !strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+	if !strings.Contains(concise, "integration.claude") || strings.Contains(concise, "integration.pi") {
 		t.Fatalf("concise doctor omitted installed integration or included uninstalled integrations:\n%s", concise)
 	}
 
 	verbose := executeDoctorSurface(t, "--store", path, "manage", "doctor", "--verbose")
-	if !strings.Contains(verbose, "integration.pi") || !strings.Contains(verbose, "integration.codex") {
+	if !strings.Contains(verbose, "integration.pi") || !strings.Contains(verbose, "integration.claude") {
 		t.Fatalf("verbose doctor omitted integration details:\n%s", verbose)
 	}
 	for _, mode := range []struct {
