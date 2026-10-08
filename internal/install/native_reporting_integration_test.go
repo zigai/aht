@@ -21,6 +21,27 @@ func TestPiReportingAllowsSlowSuccessfulWrite(t *testing.T) {
 	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, binary), runtimeScript(t, "node/pi-slow-report.mjs"), nil)
 }
 
+func TestPluginDisposeWaitsForQueuedReports(t *testing.T) {
+	for _, id := range []registry.Harness{registry.Harness("opencode"), registry.Harness("kilo")} {
+		t.Run(string(id), func(t *testing.T) {
+			dir := t.TempDir()
+			binary := filepath.Join(dir, "reporter")
+			t.Setenv("AHT_REPORT_LOG", filepath.Join(dir, "reports"))
+			writeTestFile(t, binary, "#!"+requireRuntimeTool(t, "node")+"\n"+runtimeScript(t, "node/delayed-reporter.cjs"), 0o700)
+			var module string
+			for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: binary}) {
+				if artifact.harness == id && strings.HasSuffix(artifact.path, "aht-state.ts") {
+					module = artifact.content
+				}
+			}
+			if module == "" {
+				t.Fatalf("missing generated %s plugin", id)
+			}
+			runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/plugin-dispose-drain.mjs"), nil)
+		})
+	}
+}
+
 func TestPiReportingRetainsSafeNativeDiagnosticsAndRecovers(t *testing.T) {
 	for _, hasUI := range []string{"true", "false"} {
 		t.Run("hasUI="+hasUI, func(t *testing.T) {
