@@ -1008,6 +1008,7 @@ func assertLargeNumbersPreserved(t *testing.T, data []byte, phase string) {
 }
 
 func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
+	installFakeCodexCLI(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
 
 	result, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: defaultBinary})
