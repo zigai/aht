@@ -42,6 +42,22 @@ type sessionServer struct {
 	sentinel chan struct{}
 }
 
+// shortSocketDir keeps socket paths below Darwin's Unix socket path limit,
+// regardless of TMPDIR or the test name. Metadata still uses t.TempDir.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "aht-zellij-") //nolint:usetesting // reason: t.TempDir paths can exceed the Unix socket path limit; cleanup is registered below.
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove test socket directory: %v", err)
+		}
+	})
+	return dir
+}
+
 // startSessionServer binds a session socket whose modification time is created.
 func startSessionServer(t *testing.T, socketDir string, name string, created time.Time) *sessionServer {
 	t.Helper()
@@ -182,7 +198,7 @@ func TestCurrentWithEnvNormalizesTerminalPaneID(t *testing.T) {
 
 func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	t.Parallel()
-	socketDir := t.TempDir()
+	socketDir := shortSocketDir(t)
 	startSessionServer(t, socketDir, "work", testNow.Add(-time.Hour))
 	startSessionServer(t, socketDir, "boot", testNow)
 	var got []string
@@ -220,7 +236,7 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 
 func TestListPanesUsesNativeJSONInventory(t *testing.T) {
 	t.Parallel()
-	socketDir, infoDir := t.TempDir(), t.TempDir()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
 	startSessionServer(t, socketDir, "work", testNow.Add(-time.Hour))
 	var calls []scopedCall
 	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{
@@ -245,7 +261,7 @@ func TestListPanesUsesNativeJSONInventory(t *testing.T) {
 
 func TestListPanesNeverConnectsToStartingSession(t *testing.T) {
 	t.Parallel()
-	socketDir, infoDir := t.TempDir(), t.TempDir()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
 	startSessionServer(t, socketDir, "work", testNow.Add(-time.Hour))
 	starting := startSessionServer(t, socketDir, "boot", testNow.Add(-time.Second))
 	var calls []scopedCall
@@ -286,7 +302,7 @@ func TestListPanesDecidesSessionReadiness(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			socketDir, infoDir := t.TempDir(), t.TempDir()
+			socketDir, infoDir := shortSocketDir(t), t.TempDir()
 			startSessionServer(t, socketDir, "s", testNow.Add(-test.age))
 			if test.metadata != nil {
 				writeMetadata(t, infoDir, "s", testNow.Add(*test.metadata))
@@ -308,7 +324,7 @@ func TestListPanesDecidesSessionReadiness(t *testing.T) {
 
 func TestListPanesIgnoresSocketsThatAreNotLiveSessions(t *testing.T) {
 	t.Parallel()
-	socketDir, infoDir := t.TempDir(), t.TempDir()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
 	old := testNow.Add(-time.Hour)
 	startSessionServer(t, socketDir, "web_server_bus", old)
 	stale := startSessionServer(t, socketDir, "crashed", old)
@@ -341,7 +357,7 @@ func TestListPanesIgnoresSocketsThatAreNotLiveSessions(t *testing.T) {
 
 func TestListPanesReportsBrokenSessionsAndKeepsOthers(t *testing.T) {
 	t.Parallel()
-	socketDir, infoDir := t.TempDir(), t.TempDir()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
 	for _, name := range []string{"failing", "garbled", "good"} {
 		startSessionServer(t, socketDir, name, testNow.Add(-time.Hour))
 	}
@@ -380,7 +396,7 @@ func TestListPanesFindsNothingWithoutSocketDir(t *testing.T) {
 }
 
 func TestListPanesReadsSocketDirFromEnvironment(t *testing.T) {
-	socketDir := t.TempDir()
+	socketDir := shortSocketDir(t)
 	t.Setenv("ZELLIJ_SOCKET_DIR", socketDir)
 	startSessionServer(t, socketDir, "work", time.Now().Add(-time.Hour))
 	var calls []scopedCall
