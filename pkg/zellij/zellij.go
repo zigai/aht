@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/command"
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -24,15 +25,26 @@ type Env struct {
 	PaneID      string
 }
 
-type CommandRunner func(context.Context, ...string) (string, error)
+// CommandRunner runs zellij with args. A runner should pass [SocketDir] of ctx
+// as ZELLIJ_SOCKET_DIR so the command reaches only the targeted session.
+type CommandRunner func(ctx context.Context, args ...string) (string, error)
 
+type socketDirKey struct{}
+
+// ListOptions configures [ListPanesWithOptions]. Empty directories and a nil
+// Now resolve like Zellij does: from the environment and the system clock.
 type ListOptions struct {
-	Run      CommandRunner
-	LookPath func(string) (string, error)
+	Run            CommandRunner
+	LookPath       func(string) (string, error)
+	SocketDir      string
+	SessionInfoDir string
+	Now            func() time.Time
 }
 
+// CaptureOptions configures [CapturePaneWithOptions].
 type CaptureOptions struct {
-	Run CommandRunner
+	Run       CommandRunner
+	SocketDir string
 }
 
 type paneRecord struct {
@@ -45,6 +57,13 @@ type paneRecord struct {
 	TabName     string `json:"tab_name"`
 	PaneCommand string `json:"pane_command"`
 	PaneCWD     string `json:"pane_cwd"`
+}
+
+// SocketDir returns the Zellij socket directory a [CommandRunner] call is
+// scoped to, or "" when the call is not scoped.
+func SocketDir(ctx context.Context) string {
+	dir, _ := ctx.Value(socketDirKey{}).(string)
+	return dir
 }
 
 func Current() registry.Location {
@@ -62,47 +81,90 @@ func CurrentWithEnv(env Env) registry.Location {
 	}
 }
 
+// withRunner fills in the zellij runner. It reports false when zellij is not
+// installed, which an optional multiplexer treats as having no panes.
+func (opts ListOptions) withRunner() (ListOptions, bool) {
+	if opts.Run != nil {
+		return opts, true
+	}
+	lookPath := opts.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if _, err := lookPath("zellij"); err != nil {
+		return opts, false
+	}
+	opts.Run = runZellij
+	return opts, true
+}
+
+func (opts ListOptions) withDefaults() (ListOptions, error) {
+	if opts.SocketDir == "" {
+		opts.SocketDir = defaultSocketDir()
+	}
+	if opts.SessionInfoDir == "" {
+		dir, err := defaultSessionInfoDir()
+		if err != nil {
+			return opts, err
+		}
+		opts.SessionInfoDir = dir
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	return opts, nil
+}
+
+func (opts ListOptions) usable(ctx context.Context, socket sessionSocket) (bool, error) {
+	if !socket.ready(opts.SessionInfoDir, opts.Now()) {
+		return false, nil
+	}
+	return socket.alive(ctx)
+}
+
 func ListPanes(ctx context.Context) ([]mux.Pane, error) {
-	return ListPanesWithOptions(ctx, ListOptions{Run: nil, LookPath: nil})
+	return ListPanesWithOptions(ctx, ListOptions{Run: nil, LookPath: nil, SocketDir: "", SessionInfoDir: "", Now: nil})
 }
 
 func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list zellij panes: %w", err)
 	}
-	lookPath := opts.LookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-	if opts.Run == nil {
-		if _, err := lookPath("zellij"); err != nil {
-			//nolint:nilerr // an optional unavailable multiplexer contributes no panes
-			return nil, nil
-		}
-		opts.Run = runZellij
-	}
-	sessionOutput, err := opts.Run(ctx, "list-sessions", "--no-formatting")
-	if err != nil {
-		if strings.Contains(strings.ToLower(sessionOutput), "no active zellij sessions") {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list zellij sessions: %w", err)
-	}
-	if strings.Contains(strings.ToLower(sessionOutput), "no active zellij sessions") {
+	opts, available := opts.withRunner()
+	if !available {
 		return nil, nil
 	}
-	sessions := parseSessions(sessionOutput)
+	opts, err := opts.withDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("list zellij sessions: %w", err)
+	}
+	sockets, err := listSessionSockets(opts.SocketDir)
+	if err != nil {
+		return nil, fmt.Errorf("list zellij sessions: %w", err)
+	}
 	panes := make([]mux.Pane, 0)
 	var listErrors []error
-	for _, session := range sessions {
-		output, listErr := opts.Run(ctx, "--session", session, "action", "list-panes", "--all", "--json")
-		if listErr != nil {
-			listErrors = append(listErrors, fmt.Errorf("list zellij session %q panes: %w", session, listErr))
+	for _, socket := range sockets {
+		usable, usableErr := opts.usable(ctx, socket)
+		if usableErr != nil {
+			listErrors = append(listErrors, usableErr)
 			continue
 		}
-		parsed, parseErr := parsePanes(session, output)
+		if !usable {
+			continue
+		}
+		output, listErr := runInSession(ctx, opts.Run, opts.SocketDir, socket.name, "--session", socket.name, "action", "list-panes", "--all", "--json")
+		if errors.Is(listErr, errSessionGone) {
+			continue
+		}
+		if listErr != nil {
+			listErrors = append(listErrors, fmt.Errorf("list zellij session %q panes: %w", socket.name, listErr))
+			continue
+		}
+		parsed, parseErr := parsePanes(socket.name, output)
 		if parseErr != nil {
-			return nil, parseErr
+			listErrors = append(listErrors, fmt.Errorf("list zellij session %q panes: %w", socket.name, parseErr))
+			continue
 		}
 		panes = append(panes, parsed...)
 	}
@@ -110,7 +172,7 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 }
 
 func CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Run: nil})
+	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Run: nil, SocketDir: ""})
 }
 
 func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, opts CaptureOptions) (mux.ScreenSnapshot, error) {
@@ -121,28 +183,15 @@ func CapturePaneWithOptions(ctx context.Context, pane mux.Pane, opts CaptureOpti
 	if run == nil {
 		run = runZellij
 	}
-	text, err := run(ctx, "--session", pane.Location.SessionName, "action", "dump-screen", "--pane-id", pane.Location.PaneID)
+	socketDir := opts.SocketDir
+	if socketDir == "" {
+		socketDir = defaultSocketDir()
+	}
+	text, err := runInSession(ctx, run, socketDir, pane.Location.SessionName, "--session", pane.Location.SessionName, "action", "dump-screen", "--pane-id", pane.Location.PaneID)
 	if err != nil {
 		return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
 	}
 	return mux.ScreenSnapshot{Text: strings.Join(mux.BoundBottomLines(text, defaultCaptureLines), "\n"), Title: pane.Title}, nil
-}
-
-func parseSessions(output string) []string {
-	var sessions []string
-	for line := range strings.Lines(output) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "(EXITED") {
-			continue
-		}
-		if name, _, ok := strings.Cut(line, " [Created "); ok {
-			line = strings.TrimSpace(name)
-		}
-		if line != "" {
-			sessions = append(sessions, line)
-		}
-	}
-	return sessions
 }
 
 func parsePanes(session string, output string) ([]mux.Pane, error) {
@@ -170,7 +219,11 @@ func parsePanes(session string, output string) ([]mux.Pane, error) {
 }
 
 func runZellij(ctx context.Context, args ...string) (string, error) {
-	output, err := command.Run(ctx, "zellij", nil, args...)
+	env := os.Environ()
+	if dir := SocketDir(ctx); dir != "" {
+		env = append(env, "ZELLIJ_SOCKET_DIR="+dir)
+	}
+	output, err := command.Run(ctx, "zellij", env, args...)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return string(output), fmt.Errorf("run zellij command: %w", ctxErr)
