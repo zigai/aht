@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	codexpkg "github.com/zigai/aht/v2/internal/harness/codex"
 )
 
 func TestInstallClaudeWritesHooks(t *testing.T) {
@@ -297,6 +297,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 //nolint:cyclop // one install assertion verifies every required Codex hook shape
 func TestInstallCodexMergesHooks(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
+	installFakeCodexCLI(t)
 
 	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("codex"),
@@ -311,9 +312,6 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	}
 	if !result.Changed {
 		t.Fatal("expected codex install to report changed")
-	}
-	if result.NextStep != codexpkg.HookTrustNextStep {
-		t.Fatalf("Codex install next step = %q", result.NextStep)
 	}
 
 	data, err := os.ReadFile(result.Path)
@@ -361,6 +359,7 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 func TestInstallCodexReplacesManagedHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
+	installFakeCodexCLI(t)
 	path := filepath.Join(dir, "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("creating codex dir: %v", err)
@@ -377,13 +376,13 @@ func TestInstallCodexReplacesManagedHooks(t *testing.T) {
 		RequiredText:         []string{"--raw-stdin", "--quiet"},
 		FirstChangeMessage:   "expected codex install to replace old managed hook",
 		SecondChangedMessage: "expected second codex install to be idempotent",
-		ExpectedNextStep:     codexpkg.HookTrustNextStep,
 	})
 }
 
 func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
+	installFakeCodexCLI(t)
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "hooks.json")
 	oldConfig := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-stop-hook","timeout":600}]},{"hooks":[{"type":"command","command":"aht report codex --activity idle --event Stop --attribute aht_integration_version=4 --attribute aht_integration=codex-hook --queue --raw-stdin --quiet"}]}]}}`
@@ -429,6 +428,156 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	}
 	if !strings.Contains(content, "/bin/aht-test report codex") || !strings.Contains(content, "--reporter codex-hook") {
 		t.Fatalf("expected new aht hook in target: %s", content)
+	}
+}
+
+func requireCodexFixtureObject(t *testing.T, value any) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("fixture config value has type %T, want object", value)
+	}
+	return object
+}
+
+func TestCodexInstallTrustsOwnHooksAndRepairsUnchangedReinstall(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	statePath := installFakeCodexCLI(t)
+	userHooks := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"user-start-command"}]}]}}`
+	if err := writeCodexFixtureFile(filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json"), []byte(userHooks)); err != nil {
+		t.Fatal(err)
+	}
+	before := readCodexFixtureConfig(t, statePath)
+	beforeState := requireCodexFixtureObject(t, requireTestHooks(t, before)["state"])
+	disabledKey := filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json") + ":session_start:1:0"
+	beforeState[disabledKey] = map[string]any{"enabled": false, "trusted_hash": "sha256:previous"}
+	writeCodexFixtureConfig(t, statePath, before)
+	options := Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht"}
+	installed, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+	hookBytes := readTestFile(t, installed.Path, "reading installed hooks")
+	config := readCodexFixtureConfig(t, statePath)
+	state := requireCodexFixtureObject(t, requireTestHooks(t, config)["state"])
+	delete(requireCodexFixtureObject(t, state[disabledKey]), "trusted_hash")
+	writeCodexFixtureConfig(t, statePath, config)
+	unapproved := readTestFile(t, statePath, "reading unapproved config")
+	status, err := Inspect(t.Context(), options.Harness, options.Binary)
+	if err != nil || status.Status != ArtifactStale {
+		t.Fatalf("missing approval status = %+v, %v", status, err)
+	}
+	if string(readTestFile(t, statePath, "reading config after inspection")) != string(unapproved) {
+		t.Fatal("status inspection mutated native approval config")
+	}
+	reinstalled, err := Run(t.Context(), options)
+	if err != nil || reinstalled.Changed {
+		t.Fatalf("unchanged reinstall = %+v, %v", reinstalled, err)
+	}
+	if string(readTestFile(t, installed.Path, "reading unchanged hooks")) != string(hookBytes) {
+		t.Fatal("approval repair changed hook definitions")
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+	status, err = Inspect(t.Context(), options.Harness, options.Binary)
+	if err != nil || status.Status != ArtifactCurrent {
+		t.Fatalf("repaired approval status = %+v, %v", status, err)
+	}
+	options.Binary = "/bin/updated-fixture-aht"
+	if _, err := Run(t.Context(), options); err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+}
+
+func assertCodexFixtureTrust(t *testing.T, path string, before map[string]any) {
+	t.Helper()
+	config, state, err := loadCodexFixtureConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixturePreservedSettings(t, config, state, before)
+	metadata, err := codexFixtureHooks(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := 0
+	for _, hook := range metadata {
+		if hook["command"] == "user-start-command" {
+			key, ok := hook["key"].(string)
+			if !ok {
+				t.Fatalf("fixture hook key has type %T, want string", hook["key"])
+			}
+			if _, exists := state[key]; exists {
+				t.Fatal("installer approved an unrelated user command")
+			}
+			continue
+		}
+		owned++
+		if hook["trustStatus"] != "trusted" {
+			t.Fatalf("installed command has no current native approval: %#v", hook)
+		}
+	}
+	if owned == 0 || len(state) != owned+1 {
+		t.Fatalf("approved hooks = %d, config state = %#v", owned, state)
+	}
+}
+
+func assertCodexFixturePreservedSettings(t *testing.T, config, state, before map[string]any) {
+	t.Helper()
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("fixture hooks config is not an object")
+	}
+	beforeHooks, ok := before["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("initial fixture hooks config is not an object")
+	}
+	beforeState, ok := beforeHooks["state"].(map[string]any)
+	if !ok {
+		t.Fatal("initial fixture approval state is not an object")
+	}
+	if config["model"] != before["model"] || hooks["enabled"] != false || !reflect.DeepEqual(state["unrelated-native-key"], beforeState["unrelated-native-key"]) {
+		t.Fatalf("approval altered unrelated settings: %#v", config)
+	}
+	disabledKey := filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json") + ":session_start:1:0"
+	if approval, ok := state[disabledKey].(map[string]any); !ok || approval["enabled"] != false {
+		t.Fatalf("approval changed the existing disabled flag: %#v", state[disabledKey])
+	}
+}
+
+func TestCodexInstallPropagatesNativeTrustFailures(t *testing.T) {
+	for _, failure := range []string{"rpc", "discovery", "hash", "missing command", "write", "verification"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Setenv("CODEX_HOME", t.TempDir())
+			installFakeCodexCLI(t)
+			t.Setenv("AHT_TEST_CODEX_FAILURE", failure)
+			if _, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht"}); err == nil {
+				t.Fatalf("installation succeeded despite native %s failure", failure)
+			}
+		})
+	}
+}
+
+func TestCodexDryRunDoesNotRequireCLIOrMutateFiles(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	statePath := installFakeCodexCLI(t)
+	before := readTestFile(t, statePath, "reading fixture config")
+	t.Setenv("PATH", t.TempDir())
+	options := Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht", DryRun: true}
+	result, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(result.Path); !os.IsNotExist(err) {
+		t.Fatalf("dry run created hook definitions: %v", err)
+	}
+	if string(readTestFile(t, statePath, "reading fixture config after preview")) != string(before) {
+		t.Fatal("dry run changed native approval config")
+	}
+	options.DryRun = false
+	if _, err := Run(t.Context(), options); err == nil {
+		t.Fatal("native install succeeded without Codex")
 	}
 }
 

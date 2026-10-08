@@ -71,6 +71,7 @@ func (droidHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		StatusMessage:     "",
 		OmitStatusMessage: true,
 		HooksAtRoot:       true,
+		Trust:             nil,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,

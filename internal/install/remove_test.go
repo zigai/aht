@@ -19,6 +19,7 @@ var errTestManifestWrite = errors.New("manifest write failed")
 func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
+	installFakeCodexCLI(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))

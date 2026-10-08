@@ -156,7 +156,7 @@ func mergeInspectedArtifact(result *IntegrationStatus, item inspectedArtifact) {
 func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]inspectedArtifact, error) {
 	switch value := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		return inspectSharedFile(value.Plan.Path)
+		return inspectCommandHooks(ctx, value.Plan)
 	case harnesspkg.CursorJSONHooksAction:
 		return inspectSharedFile(value.Plan.Path)
 	case harnesspkg.ManagedTextBlockAction:
@@ -168,6 +168,21 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 	default:
 		return nil, nil
 	}
+}
+
+func inspectCommandHooks(ctx context.Context, plan harnesspkg.JSONCommandHookInstallPlan) ([]inspectedArtifact, error) {
+	statuses, err := inspectSharedFile(plan.Path)
+	if err != nil || plan.Trust == nil || statuses[0].status == ArtifactMissing {
+		return statuses, err
+	}
+	trusted, err := plan.Trust.Inspect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting %s hook trust: %w", plan.Label, err)
+	}
+	if !trusted {
+		statuses = append(statuses, inspectedArtifact{path: plan.Label + " trust", status: ArtifactStale})
+	}
+	return statuses, nil
 }
 
 func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {

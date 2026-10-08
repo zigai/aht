@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,21 +77,19 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCodexInstallAndStatusSurfaceHookTrustStep(t *testing.T) {
+func TestCodexInstallFailsWhenNativeCLIIsMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+	t.Setenv("PATH", t.TempDir())
 
 	var stdout bytes.Buffer
-	executeSurfaceCommand(t, &stdout, "manage", "integrations", "install", "codex", "--binary", "/bin/aht-v1")
-	requireSurfaceOutput(t, stdout.String(), "Codex install omitted trust activation", "next:", "/hooks")
-
-	executeSurfaceCommand(t, &stdout, "manage", "integrations", "status", "codex", "--binary", "/bin/aht-v1")
-	requireSurfaceOutput(t, stdout.String(), "Codex status omitted trust verification", "current", "/hooks", "trust status")
-
-	executeSurfaceCommand(t, &stdout, "--json", "manage", "integrations", "install", "codex", "--binary", "/bin/aht-v2")
-	requireCodexUpdateTrustJSON(t, stdout.Bytes())
+	err := runTestCLI(t.Context(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{})
+	var missingCLI *exec.Error
+	if !errors.As(err, &missingCLI) || missingCLI.Name != "codex" {
+		t.Fatalf("install error = %v, want missing Codex executable", err)
+	}
 }
 
 func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T) {
@@ -98,6 +97,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+	t.Setenv("PATH", t.TempDir())
 
 	var concise bytes.Buffer
 	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run"}, &concise, &bytes.Buffer{}); err != nil {
@@ -122,21 +122,6 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	var results []map[string]any
 	if err := json.Unmarshal(machine.Bytes(), &results); err != nil || len(results) != 1 {
 		t.Fatalf("install JSON is not an array: %q, %v", machine.String(), err)
-	}
-}
-
-func requireCodexUpdateTrustJSON(t *testing.T, data []byte) {
-	t.Helper()
-	var results []map[string]any
-	if err := json.Unmarshal(data, &results); err != nil {
-		t.Fatalf("Codex update JSON = %q, %v", data, err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("Codex update JSON = %q, want one result", data)
-	}
-	nextStep, ok := results[0]["next_step"].(string)
-	if !ok || results[0]["changed"] != true || !strings.Contains(nextStep, "/hooks") {
-		t.Fatalf("Codex update omitted trust activation: %#v", results[0])
 	}
 }
 

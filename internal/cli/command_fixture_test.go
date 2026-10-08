@@ -1,34 +1,14 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-func executeSurfaceCommand(t *testing.T, stdout *bytes.Buffer, args ...string) {
-	t.Helper()
-	stdout.Reset()
-	if err := runTestCLI(context.Background(), args, stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func requireSurfaceOutput(t *testing.T, output string, message string, fragments ...string) {
-	t.Helper()
-	output = strings.Join(strings.Fields(output), " ")
-	for _, fragment := range fragments {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("%s: %q", message, output)
-		}
-	}
-}
 
 func observeTestSession(t *testing.T, store registry.Store, sessionID string, at time.Time) registry.Session {
 	t.Helper()
