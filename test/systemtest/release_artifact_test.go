@@ -485,7 +485,7 @@ func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary strin
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("%s must identify a regular executable: path=%q stat=%v", previousBinaryEnv, previous, err)
 	}
-	environment := isolatedReleaseEnvironment(t)
+	environment, codex := installReleaseCodexCLI(t, isolatedReleaseEnvironment(t))
 	oldCatalog := releaseInstallableCatalog(t, previous, environment)
 	newCatalog := releaseInstallableCatalog(t, binary, environment)
 	for id := range oldCatalog {
@@ -496,10 +496,16 @@ func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary strin
 
 	oldInstall := releaseIntegrationResults(t, previous, environment, "install", "all", "--binary", binary)
 	requireReleaseIntegrationResults(t, oldInstall, oldCatalog, false)
+	if _, installed := oldCatalog["codex"]; installed {
+		codex.setManagedTrust(t, true)
+	}
 	oldStatuses := releaseIntegrationStatuses(t, previous, environment, binary, oldCatalog)
 	requireReleaseIntegrationsCurrent(t, oldStatuses)
 
 	requireReleaseIntegrationsBeforeUpgrade(t, binary, environment, oldCatalog, newCatalog)
+	if _, installed := oldCatalog["codex"]; installed {
+		codex.setManagedTrust(t, false)
+	}
 
 	upgraded := releaseIntegrationResults(t, binary, environment, "upgrade", "--binary", binary)
 	requireReleaseIntegrationResults(t, upgraded, oldCatalog, false)
@@ -513,6 +519,9 @@ func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary strin
 	requireReleaseIntegrationsCurrent(t, after)
 	preview := releaseIntegrationResults(t, binary, environment, "install", "all", "--binary", binary, "--dry-run")
 	requireReleaseIntegrationResults(t, preview, newCatalog, true)
+	if _, installed := newCatalog["codex"]; installed {
+		codex.assertTrusted(t)
+	}
 }
 
 func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, environment []string, oldCatalog map[string]int, newCatalog map[string]int) {
