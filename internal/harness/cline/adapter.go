@@ -56,9 +56,14 @@ func New() clineHarness {
 	})}
 }
 
-func (clineHarness) InstallPlan(binary string) harness.InstallPlan {
+func (clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := clineConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(clineConfigDir(), "plugins", clinePluginName)
+	dir := filepath.Join(base, "plugins", clinePluginName)
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   dir,
@@ -78,7 +83,7 @@ func (clineHarness) InstallPlan(binary string) harness.InstallPlan {
 		ImportManifest: nil,
 		Retired:        nil,
 		Registration:   nil,
-	}}}}
+	}}}}, nil
 }
 
 func (clineHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -146,18 +151,24 @@ func clineSessionPath(sessionID string) string {
 		return ""
 	}
 
-	return filepath.Join(clineSessionDir(), sessionID, sessionID+".messages.json")
+	dir := clineSessionDir()
+	if dir == "" {
+		return ""
+	}
+
+	return filepath.Join(dir, sessionID, sessionID+".messages.json")
 }
 
 func clineConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_DIR")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".cline")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".cline"
+	return filepath.Join(home, ".cline")
 }
 
 func clineSessionDir() string {
@@ -165,5 +176,10 @@ func clineSessionDir() string {
 		return value
 	}
 
-	return filepath.Join(clineDataDir(), "sessions")
+	data := clineDataDir()
+	if data == "" {
+		return ""
+	}
+
+	return filepath.Join(data, "sessions")
 }

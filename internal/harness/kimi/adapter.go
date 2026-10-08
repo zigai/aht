@@ -70,15 +70,20 @@ func New() kimiCodeHarness {
 	})}
 }
 
-func (kimiCodeHarness) InstallPlan(binary string) harness.InstallPlan {
+func (kimiCodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := kimiCodeHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.ManagedTextBlockAction{Plan: harness.ManagedTextBlockInstallPlan{
-		Path:        filepath.Join(kimiCodeHome(), "config.toml"),
+		Path:        filepath.Join(base, "config.toml"),
 		Label:       "kimi-code hooks",
 		ConfigLabel: "kimi-code config",
 		StartMarker: kimiCodeManagedIntegrationStart,
 		EndMarker:   kimiCodeManagedIntegrationEnd,
 		Block:       kimiCodeHookBlock(binary),
-	}}}}
+	}}}}, nil
 }
 
 func (kimiCodeHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -268,7 +273,11 @@ func kimiCodeSessionPath(sessionID string) (string, error) {
 		return "", nil
 	}
 
-	sessionsRoot := filepath.Join(kimiCodeHome(), "sessions")
+	home := kimiCodeHome()
+	if home == "" {
+		return "", nil
+	}
+	sessionsRoot := filepath.Join(home, "sessions")
 	workDirs, err := os.ReadDir(sessionsRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -296,11 +305,12 @@ func kimiCodeHome() string {
 	if value := strings.TrimSpace(os.Getenv("KIMI_SHARE_DIR")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".kimi")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".kimi"
+	return filepath.Join(home, ".kimi")
 }
 
 func (kimiCodeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

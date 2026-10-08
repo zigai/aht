@@ -162,8 +162,12 @@ func runGeneratedNativeTitleWatchers(t *testing.T, binary, capturePath, event st
 	if !ok {
 		t.Fatal("expected installable native watcher adapter")
 	}
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		t.Fatalf("plan Claude integration: %v", err)
+	}
 	found := false
-	for _, action := range installer.InstallPlan(binary).Actions {
+	for _, action := range plan.Actions {
 		hooks, ok := action.(harnesspkg.JSONCommandHooksAction)
 		if !ok {
 			continue
@@ -192,7 +196,11 @@ func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
 	if !ok {
 		t.Fatalf("harness %s is not installable", h)
 	}
-	for _, action := range installer.InstallPlan(binary).Actions {
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		t.Fatalf("plan %s integration: %v", h, err)
+	}
+	for _, action := range plan.Actions {
 		rf, ok := action.(harnesspkg.RenderedFileAction)
 		if !ok {
 			continue

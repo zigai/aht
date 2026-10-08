@@ -55,9 +55,14 @@ func New() claudeHarness {
 
 func (claudeHarness) RetainNativeActivity() bool { return true }
 
-func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
+func (claudeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := claudeConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(claudeConfigDir(), "settings.json"),
+		Path:              filepath.Join(base, "settings.json"),
 		Source:            claudeIntegrationSource,
 		Label:             "claude hooks",
 		ConfigLabel:       "claude config",
@@ -162,7 +167,7 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceGone, "SessionEnd", claudeIntegrationSource),
 			},
 		},
-	}}}}
+	}}}}, nil
 }
 
 func (claudeHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -204,11 +209,12 @@ func claudeConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".claude")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".claude"
+	return filepath.Join(home, ".claude")
 }
 
 func (claudeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

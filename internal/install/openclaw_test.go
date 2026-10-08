@@ -117,7 +117,10 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 	if !ok {
 		t.Fatal("OpenClaw adapter is not installable")
 	}
-	plan := installer.InstallPlan(testInstallBinary)
+	plan, err := installer.InstallPlan(testInstallBinary)
+	if err != nil {
+		t.Fatalf("plan OpenClaw integration: %v", err)
+	}
 	pluginAction, ok := plan.Actions[0].(harnesspkg.PluginDirectoryAction)
 	if !ok {
 		t.Fatalf("unexpected OpenClaw install action: %T", plan.Actions[0])

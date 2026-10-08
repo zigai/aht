@@ -24,6 +24,9 @@ func (codexHarness) SessionTitles(ctx context.Context, identities []registry.Obs
 			continue
 		}
 		home := titleHome(identity.SessionPath)
+		if home == "" {
+			continue
+		}
 		if byHome[home] == nil {
 			byHome[home] = make(map[string][]int)
 		}

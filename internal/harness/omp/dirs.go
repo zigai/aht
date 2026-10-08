@@ -23,12 +23,19 @@ func agentDirUnder(home string) string {
 		}
 	}
 
+	if home == "" {
+		return ""
+	}
+
 	return filepath.Join(profileRoot(home, profile), "agent")
 }
 
 func sessionsDirUnder(home string) string {
 	profile := activeProfile()
 	agentDir := agentDirUnder(home)
+	if agentDir == "" {
+		return ""
+	}
 	if agentDir == filepath.Join(profileRoot(home, profile), "agent") {
 		if root := xdgDataRoot(profile); root != "" {
 			return filepath.Join(root, "sessions")

@@ -241,7 +241,11 @@ func newNativeTrustFixture(t *testing.T) *nativeTrustFixture {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	action, ok := codex.New().InstallPlan("/opt/example agent/bin/aht").Actions[0].(harness.JSONCommandHooksAction)
+	installPlan, err := codex.New().InstallPlan("/opt/example agent/bin/aht")
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, ok := installPlan.Actions[0].(harness.JSONCommandHooksAction)
 	if !ok {
 		t.Fatal("Codex install plan does not contain a command hook action")
 	}

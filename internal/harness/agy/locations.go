@@ -8,7 +8,7 @@ import (
 
 func (agyHarness) Locations(projectDir string) []harness.Location {
 	return harness.NewLocationBuilder(projectDir).
-		Global(harness.LocationKindConfig, filepath.Join(agyConfigDir(), "settings.json")).
+		Global(harness.LocationKindConfig, filepath.Join(agyApplicationDir(), "settings.json")).
 		Global(harness.LocationKindSkills, filepath.Join(agyConfigDir(), "skills")).
 		Home(harness.LocationKindMCP, filepath.Join(".gemini", "config", "mcp_config.json")).
 		Home(

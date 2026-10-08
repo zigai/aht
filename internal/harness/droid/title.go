@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/titlefile"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -50,6 +51,9 @@ func droidSessionPaths(identity registry.ObservationIdentity) ([]string, error) 
 		return []string{identity.SessionPath}, nil
 	}
 	root := droidSessionsDir()
+	if root == "" {
+		return nil, nil
+	}
 	paths := []string{filepath.Join(root, identity.SessionID+".jsonl")}
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
@@ -103,9 +107,10 @@ func droidSessionsDir() string {
 	if value := strings.TrimSpace(os.Getenv("DROID_SESSIONS_DIR")); value != "" {
 		return value
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		home = "."
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
+
 	return filepath.Join(home, ".factory", "sessions")
 }

@@ -74,8 +74,11 @@ type ScreenManifestProvider interface {
 	ScreenManifest() string
 }
 
+// Installable adapters describe the files an integration manages. InstallPlan
+// returns [ErrHomeUnknown] when the target lies under a home directory that is
+// not known.
 type Installable interface {
-	InstallPlan(binary string) InstallPlan
+	InstallPlan(binary string) (InstallPlan, error)
 }
 type InstallAdvisor interface {
 	InstallNextStep(changed bool, dryRun bool) string

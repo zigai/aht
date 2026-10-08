@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -64,9 +63,14 @@ func New() agyHarness {
 	})}
 }
 
-func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
+func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	configDir := agyConfigDir()
+	if configDir == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-		Dir:   filepath.Join(agyConfigDir(), "plugins", agyPluginName),
+		Dir:   filepath.Join(configDir, "plugins", agyPluginName),
 		Label: "agy plugin",
 		Files: []harness.RenderedFileInstallSpec{
 			{
@@ -87,10 +91,10 @@ func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
 		},
 		SnippetOrder:   []string{"plugin.json", "hooks.json", agyMarkerFileName},
 		MarkerFile:     agyMarkerFileName,
-		ImportManifest: agyImportManifest(agyConfigDir()),
+		ImportManifest: agyImportManifest(configDir),
 		Registration:   nil,
 		Retired:        []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
-	}}, harness.ShimAction{}}}
+	}}, harness.ShimAction{}}}, nil
 }
 
 func agyImportManifest(dir string) *harness.ImportManifestInstallPlan {
@@ -195,19 +199,27 @@ func agyMarkerContent() string {
 }
 
 func agyConfigDir() string {
-	return filepath.Join(agyGeminiDir(), "config")
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "config")
 }
 
 func agyApplicationDir() string {
-	return filepath.Join(agyGeminiDir(), "antigravity-cli")
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "antigravity-cli")
 }
 
 func agyGeminiDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".gemini")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
-
-	return ".gemini"
+	return filepath.Join(home, ".gemini")
 }
 
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {

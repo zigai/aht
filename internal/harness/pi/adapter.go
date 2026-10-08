@@ -53,9 +53,14 @@ func New() piHarness {
 	})}
 }
 
-func (piHarness) InstallPlan(binary string) harness.InstallPlan {
+func (piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := piAgentDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(piAgentDir(), "extensions", piExtensionName),
+		Path:        filepath.Join(base, "extensions", piExtensionName),
 		Label:       "pi extension",
 		ConfigLabel: "pi extension",
 		Content: harness.RenderScriptTemplate(
@@ -66,7 +71,7 @@ func (piHarness) InstallPlan(binary string) harness.InstallPlan {
 			integrationVersion,
 		),
 		JSONContent: nil,
-	}}}}
+	}}}}, nil
 }
 
 func (piHarness) ResumeCommand(sessionID string, sessionPath string) []string {
@@ -85,11 +90,12 @@ func piAgentDir() string {
 		return value
 	}
 
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".pi", "agent")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".pi", "agent")
+	return filepath.Join(home, ".pi", "agent")
 }
 
 func (piHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

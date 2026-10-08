@@ -87,6 +87,54 @@ func TestSnapshotPersistenceCannotObserve(t *testing.T) {
 	}
 }
 
+func TestHarnessPathsResolveHomeThroughOneHelper(t *testing.T) {
+	t.Parallel()
+	visitProductionGo(t, func(path string, data []byte) {
+		if !strings.HasPrefix(path, "internal/harness/") && !strings.HasPrefix(path, "pkg/history/") {
+			return
+		}
+		if path == "internal/harness/location.go" {
+			return
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok && looksUpHomeDirectory(call) {
+				t.Errorf("%s resolves the home directory itself; use harness.HomeDir", path)
+			}
+			return true
+		})
+	})
+}
+
+func looksUpHomeDirectory(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := selector.X.(*ast.Ident)
+	if !ok || pkg.Name != "os" {
+		return false
+	}
+	if selector.Sel.Name == "UserHomeDir" {
+		return true
+	}
+
+	return selector.Sel.Name == "Getenv" && len(call.Args) == 1 && isStringLiteral(call.Args[0], "HOME")
+}
+
+func isStringLiteral(expr ast.Expr, want string) bool {
+	literal, ok := expr.(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return false
+	}
+	value, err := strconv.Unquote(literal.Value)
+
+	return err == nil && value == want
+}
+
 func visitProductionGo(t *testing.T, visit func(string, []byte)) {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

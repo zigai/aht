@@ -2,7 +2,6 @@ package goose
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,9 +59,14 @@ func New() gooseHarness {
 	})}
 }
 
-func (gooseHarness) InstallPlan(binary string) harness.InstallPlan {
+func (gooseHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := goosePluginsDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-		Dir:   filepath.Join(goosePluginsDir(), goosePluginName),
+		Dir:   filepath.Join(base, goosePluginName),
 		Label: "goose plugin",
 		Files: []harness.RenderedFileInstallSpec{
 			{
@@ -95,7 +99,7 @@ func (gooseHarness) InstallPlan(binary string) harness.InstallPlan {
 		ImportManifest: nil,
 		Retired:        nil,
 		Registration:   nil,
-	}}}}
+	}}}}, nil
 }
 
 func (gooseHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -211,11 +215,12 @@ func gooseMarkerContent() string {
 }
 
 func goosePluginsDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".agents", "plugins")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".agents", "plugins")
+	return filepath.Join(home, ".agents", "plugins")
 }
 
 func (gooseHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

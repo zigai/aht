@@ -39,5 +39,10 @@ func clineDataDir() string {
 		return value
 	}
 
-	return filepath.Join(clineConfigDir(), "data")
+	config := clineConfigDir()
+	if config == "" {
+		return ""
+	}
+
+	return filepath.Join(config, "data")
 }

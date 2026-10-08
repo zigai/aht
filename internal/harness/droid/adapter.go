@@ -2,9 +2,7 @@ package droid
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -59,9 +57,14 @@ func New() droidHarness {
 	})}
 }
 
-func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
+func (droidHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := droidConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(droidConfigDir(), "hooks.json"),
+		Path:              filepath.Join(base, "hooks.json"),
 		Source:            droidIntegrationSource,
 		Label:             "droid hooks",
 		ConfigLabel:       "factory config",
@@ -118,7 +121,7 @@ func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: droidHookCommand(binary, registry.PresenceGone, "SessionEnd"),
 			},
 		},
-	}}}}
+	}}}}, nil
 }
 
 func (droidHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -158,11 +161,12 @@ func droidHookCommand[T harness.Transition](binary string, transition T, event s
 }
 
 func droidConfigDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".factory")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".factory"
+	return filepath.Join(home, ".factory")
 }
 
 func (droidHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

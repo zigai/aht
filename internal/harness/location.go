@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,10 @@ const (
 	LocationScopeGlobal  LocationScope = "global"
 	LocationScopeProject LocationScope = "project"
 )
+
+// ErrHomeUnknown reports that a path under the user's home directory cannot be
+// resolved because no home directory is known.
+var ErrHomeUnknown = errors.New("home directory is unknown; set HOME")
 
 type (
 	LocationKind  string
@@ -47,7 +52,12 @@ func NewLocationBuilder(projectDir string) *LocationBuilder {
 	return &LocationBuilder{projectDir: projectDir, locations: nil}
 }
 
-// HomeDir returns the user's home directory, or an empty string when none is known.
+// HomeDir returns the user's home directory: $HOME with surrounding whitespace
+// trimmed when it is non-empty, otherwise [os.UserHomeDir]. It returns an empty
+// string when neither yields a directory. Callers must treat an empty result as
+// "unknown" and must not join paths onto it: the result would be relative and
+// resolve against the working directory. Environment overrides that name a
+// directory outright do not need the home directory and take precedence over it.
 func HomeDir() string {
 	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
 		return home
