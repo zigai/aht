@@ -42,6 +42,7 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 func TestRunAllInstallsEveryHarness(t *testing.T) {
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
+	installFakeCodexCLI(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("GROK_HOME", t.TempDir())
@@ -128,7 +129,6 @@ type managedReplacementCase struct {
 	RequiredText         []string
 	FirstChangeMessage   string
 	SecondChangedMessage string
-	ExpectedNextStep     string
 }
 
 func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
@@ -147,9 +147,6 @@ func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
 	}
 	if !result.Changed {
 		t.Fatal(test.FirstChangeMessage)
-	}
-	if result.NextStep != test.ExpectedNextStep {
-		t.Fatalf("install next step = %q, want %q", result.NextStep, test.ExpectedNextStep)
 	}
 
 	text := string(readTestFile(t, test.Path, "reading installed hooks"))

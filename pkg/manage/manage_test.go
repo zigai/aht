@@ -23,12 +23,12 @@ func writeExecutableFixture(t *testing.T, path string, content []byte) {
 
 func assertMissingStatus(t *testing.T, mgr *manage.Manager, hookPath, shimPath string) {
 	t.Helper()
-	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("claude"))
 	if err != nil {
-		t.Fatalf("IntegrationStatus(Codex) missing error = %v", err)
+		t.Fatalf("IntegrationStatus(Claude) missing error = %v", err)
 	}
-	if status.Harness != registry.Harness("codex") {
-		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.Harness("codex"))
+	if status.Harness != registry.Harness("claude") {
+		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.Harness("claude"))
 	}
 	if status.Status != manage.ArtifactMissing {
 		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactMissing)
@@ -47,9 +47,9 @@ func assertForeignStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatal(err)
 	}
 	writeExecutableFixture(t, shimPath, []byte("#!/bin/sh\n# custom user shim\nexit 0\n"))
-	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("claude"))
 	if err != nil {
-		t.Fatalf("IntegrationStatus(Codex) foreign error = %v", err)
+		t.Fatalf("IntegrationStatus(Claude) foreign error = %v", err)
 	}
 	if status.Status != manage.ArtifactForeign {
 		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactForeign)
@@ -61,17 +61,17 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 	if err := os.Remove(shimPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.InstallIntegration(context.Background(), registry.Harness("codex"), manage.IntegrationOptions{
+	if _, err := mgr.InstallIntegration(context.Background(), registry.Harness("claude"), manage.IntegrationOptions{
 		TargetBinary: "",
 		DryRun:       false,
 		Force:        true,
 		UseShim:      false,
 	}); err != nil {
-		t.Fatalf("InstallIntegration(Codex) error = %v", err)
+		t.Fatalf("InstallIntegration(Claude) error = %v", err)
 	}
-	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("codex"))
+	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("claude"))
 	if err != nil {
-		t.Fatalf("IntegrationStatus(Codex) current error = %v", err)
+		t.Fatalf("IntegrationStatus(Claude) current error = %v", err)
 	}
 	if status.Status != manage.ArtifactCurrent {
 		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactCurrent)
@@ -80,7 +80,7 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 
 func TestManagerIntegrationStatus(t *testing.T) {
 	homeDir := t.TempDir()
-	codexDir := t.TempDir()
+	integrationDir := t.TempDir()
 	stateDir := t.TempDir()
 	binDir := t.TempDir()
 	binary := filepath.Join(binDir, "aht")
@@ -88,7 +88,7 @@ func TestManagerIntegrationStatus(t *testing.T) {
 
 	t.Setenv("HOME", homeDir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(homeDir, ".config"))
-	t.Setenv("CODEX_HOME", codexDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", integrationDir)
 	t.Setenv(registry.StateDirEnv, stateDir)
 
 	mgr := manage.New(manage.Config{
@@ -96,8 +96,8 @@ func TestManagerIntegrationStatus(t *testing.T) {
 		StorePath: filepath.Join(t.TempDir(), "sessions.json"),
 	})
 
-	hookPath := filepath.Join(codexDir, "hooks.json")
-	shimPath := filepath.Join(stateDir, "shims", "codex")
+	hookPath := filepath.Join(integrationDir, "settings.json")
+	shimPath := filepath.Join(stateDir, "shims", "claude")
 
 	assertMissingStatus(t, mgr, hookPath, shimPath)
 	assertForeignStatus(t, mgr, shimPath)
