@@ -9,12 +9,6 @@ import (
 	"testing"
 )
 
-// Print mode authenticates even for the native /hooks command. Use agy's
-// documented Gemini API-key provider and custom endpoint instead of a Google
-// account or the developer's OS keyring:
-// https://antigravity.google/docs/cli/install#using-a-gemini-api-key
-// /hooks must only inspect local hooks, not make any model requests. The key is
-// a fixture for this local endpoint, never a credential for Google's service.
 func prepareAgyHookInspection(t *testing.T, host *isolatedHost) {
 	t.Helper()
 	provider := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
