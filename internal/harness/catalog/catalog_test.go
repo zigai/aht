@@ -1041,6 +1041,18 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestAgySettingsUseApplicationDirectory(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	locations, ok := LocationsFor(registry.Harness("agy"), "")
+	if !ok {
+		t.Fatal("missing locations")
+	}
+	want := []string{filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")}
+	if got := globalLocationPaths(locations, harness.LocationKindConfig); !slices.Equal(got, want) {
+		t.Fatalf("settings locations = %v, want %v", got, want)
+	}
+}
+
 func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
 	isolateLocationEnvironment(t)
 	override := t.TempDir()

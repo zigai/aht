@@ -75,6 +75,7 @@ func (hermesHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		SnippetOrder:   []string{"plugin.yaml", "__init__.py", hermesMarkerFileName},
 		MarkerFile:     hermesMarkerFileName,
 		ImportManifest: nil,
+		Retired:        nil,
 		Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
 	}}}}, nil
 }

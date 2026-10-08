@@ -89,7 +89,7 @@ func removePlanAction(ctx context.Context, opts Options, harnessID registry.Harn
 		result, err := removeOwnedFiles(opts, harnessID, []string{typed.Plan.Path}, typed.Plan.Path)
 		return result, true, err
 	case harnesspkg.PluginDirectoryAction:
-		result, err := removePluginDirectory(ctx, opts, harnessID, typed.Plan)
+		result, err := removePluginDirectoryWithRetired(ctx, opts, harnessID, typed.Plan)
 		return result, true, err
 	case harnesspkg.ShimAction:
 		var result Result
@@ -229,6 +229,54 @@ func removeOwnedFiles(opts Options, harnessID registry.Harness, paths []string, 
 	return removeResult(harnessID, resultPath, len(managed) > 0, opts.DryRun), nil
 }
 
+func removePluginDirectoryWithRetired(
+	ctx context.Context,
+	opts Options,
+	harnessID registry.Harness,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (Result, error) {
+	result, err := removePluginDirectory(ctx, opts, harnessID, plan)
+	if err != nil {
+		return Result{}, err
+	}
+	retiredChanged, err := removeRetiredPlugins(ctx, opts, harnessID, plan)
+	if err != nil {
+		return Result{}, err
+	}
+	if retiredChanged && !result.Changed {
+		return removeResult(harnessID, plan.Dir, true, opts.DryRun), nil
+	}
+
+	return result, nil
+}
+
+// removeRetiredPlugins removes aht-managed plugins at former locations of the
+// plugin. A directory at such a location that aht does not own is left alone.
+func removeRetiredPlugins(
+	ctx context.Context,
+	opts Options,
+	harnessID registry.Harness,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (bool, error) {
+	changed := false
+	for _, retired := range plan.Retired {
+		managed, err := newPluginDirectoryInstall(retired, nil).managed()
+		if err != nil {
+			return false, err
+		}
+		if !managed {
+			continue
+		}
+		result, err := removePluginDirectory(ctx, opts, harnessID, retired)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || result.Changed
+	}
+
+	return changed, nil
+}
+
 //nolint:cyclop // removal handles both native registrations and import manifests
 func removePluginDirectory(ctx context.Context, opts Options, harnessID registry.Harness, plan harnesspkg.PluginDirectoryInstallPlan) (Result, error) {
 	plugin := newPluginDirectoryInstall(plan, nil)
@@ -356,7 +404,7 @@ func removeImport(manifest importManifest, name string) (importManifest, bool) {
 	next := make([]importEntry, 0, len(manifest.Imports))
 	removed := false
 	for _, item := range manifest.Imports {
-		if item.Name == name {
+		if item.name() == name {
 			removed = true
 			continue
 		}

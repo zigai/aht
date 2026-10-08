@@ -142,6 +142,9 @@ type PluginDirectoryInstallPlan struct {
 	MarkerFile     string
 	ImportManifest *ImportManifestInstallPlan
 	Registration   PluginRegistration
+	// Retired lists former locations of this plugin. Installing or removing
+	// the plugin also removes aht-managed artifacts found there.
+	Retired []PluginDirectoryInstallPlan
 }
 type PluginRegistrationState uint8
 

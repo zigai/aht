@@ -23,7 +23,7 @@ const (
 	agyIntegrationID               = "agy"
 	agyHookSource                  = "agy-hook"
 	agyHookAdditionalAttributeKeys = 3
-	integrationVersion             = 9
+	integrationVersion             = 10
 )
 
 type agyHarness struct{ harness.BaseAdapter }
@@ -89,16 +89,38 @@ func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				JSONContent: nil,
 			},
 		},
-		SnippetOrder: []string{"plugin.json", "hooks.json", agyMarkerFileName},
-		MarkerFile:   agyMarkerFileName,
-		ImportManifest: &harness.ImportManifestInstallPlan{
-			Path:       filepath.Join(configDir, agyImportManifestName),
-			Name:       agyPluginName,
-			Source:     agyImportSource,
-			Components: []string{agyImportComponent},
-		},
-		Registration: nil,
+		SnippetOrder:   []string{"plugin.json", "hooks.json", agyMarkerFileName},
+		MarkerFile:     agyMarkerFileName,
+		ImportManifest: agyImportManifest(configDir),
+		Registration:   nil,
+		Retired:        []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
 	}}, harness.ShimAction{}}}, nil
+}
+
+func agyImportManifest(dir string) *harness.ImportManifestInstallPlan {
+	return &harness.ImportManifestInstallPlan{
+		Path:       filepath.Join(dir, agyImportManifestName),
+		Name:       agyPluginName,
+		Source:     agyImportSource,
+		Components: []string{agyImportComponent},
+	}
+}
+
+// agyRetiredPlugin describes where earlier integration versions installed the
+// plugin, before agy moved plugin discovery to the shared config directory.
+func agyRetiredPlugin() harness.PluginDirectoryInstallPlan {
+	dir := agyApplicationDir()
+
+	return harness.PluginDirectoryInstallPlan{
+		Dir:            filepath.Join(dir, "plugins", agyPluginName),
+		Label:          "agy plugin",
+		Files:          nil,
+		SnippetOrder:   nil,
+		MarkerFile:     agyMarkerFileName,
+		ImportManifest: agyImportManifest(dir),
+		Registration:   nil,
+		Retired:        nil,
+	}
 }
 
 func (agyHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -177,12 +199,27 @@ func agyMarkerContent() string {
 }
 
 func agyConfigDir() string {
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "config")
+}
+
+func agyApplicationDir() string {
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "antigravity-cli")
+}
+
+func agyGeminiDir() string {
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
-
-	return filepath.Join(home, ".gemini", "antigravity-cli")
+	return filepath.Join(home, ".gemini")
 }
 
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {

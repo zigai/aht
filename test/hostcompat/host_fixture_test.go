@@ -191,6 +191,32 @@ func (host *isolatedHost) assertVersion(t *testing.T) {
 	t.Logf("current %s: %s", host.contract.ID, bytes.TrimSpace(output))
 }
 
+// assertHostLoadsIntegration asks the host itself which integration it loaded,
+// so an installed artifact at a location the host does not read fails here.
+func (host *isolatedHost) assertHostLoadsIntegration(t *testing.T) {
+	t.Helper()
+	for _, check := range host.contract.LoadChecks {
+		if check.Prepare != nil {
+			check.Prepare(t, host)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		command := exec.CommandContext(ctx, host.hostPath, check.Args...)
+		command.Env = host.env
+		command.Dir = host.work
+		var stdout, stderr bytes.Buffer
+		command.Stdout = &stdout
+		command.Stderr = &stderr
+		err := runCompatibilityCommand(ctx, command)
+		cancel()
+		if err != nil {
+			t.Fatalf("%s %v failed: %v\n%s\n%s", host.contract.ID, check.Args, err, stdout.Bytes(), stderr.Bytes())
+		}
+		if needle := check.Needle(host); !bytes.Contains(stdout.Bytes(), []byte(needle)) {
+			t.Fatalf("%s %v does not show the installed integration (no %q):\n%s", host.contract.ID, check.Args, needle, stdout.Bytes())
+		}
+	}
+}
+
 func (host *isolatedHost) startTracker(t *testing.T) {
 	t.Helper()
 

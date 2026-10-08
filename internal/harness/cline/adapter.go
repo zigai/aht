@@ -81,6 +81,7 @@ func (clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		SnippetOrder:   []string{"package.json", "index.js", clineMarkerFileName},
 		MarkerFile:     clineMarkerFileName,
 		ImportManifest: nil,
+		Retired:        nil,
 		Registration:   nil,
 	}}}}, nil
 }
