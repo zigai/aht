@@ -438,7 +438,7 @@ func TestRemoveAlsoRemovesManagedShimFallback(t *testing.T) {
 func TestInspectDetectsAndInstallRepairsMissingPluginImport(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	dir := filepath.Join(home, ".gemini", "config")
 	if _, err := Run(t.Context(), Options{Harness: registry.Harness("agy"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}

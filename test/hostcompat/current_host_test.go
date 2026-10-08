@@ -30,6 +30,7 @@ func TestCurrentHarnessLifecycle(t *testing.T) {
 	host.installIntegration(t)
 	host.assertIntegrationCurrent(t)
 	host.assertVersion(t)
+	host.assertHostLoadsIntegration(t)
 	if contract.Level == compatibilityLevelDiscovery {
 		t.Logf("%s discovery-only: installation, current integration, and installed version checked; no lifecycle, interruption, permission, or resume claim. Scope: %s", contract.ID, discoveryScope(contract.ID))
 		return
