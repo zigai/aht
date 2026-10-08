@@ -86,7 +86,9 @@ aht manage integrations install all
 aht manage integrations install codex --dry-run --show-content
 ```
 
-`<harness>` is a supported harness name from the list above.
+`<harness>` is a supported harness name from the list above. Codex installs and
+updates automatically trust only AHT hooks through the installed Codex CLI;
+missing Codex or failed trust updates fail the installation.
 
 ## License
 
