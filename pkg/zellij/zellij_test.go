@@ -42,8 +42,6 @@ type sessionServer struct {
 	sentinel chan struct{}
 }
 
-// shortSocketDir keeps socket paths below Darwin's Unix socket path limit,
-// regardless of TMPDIR or the test name. Metadata still uses t.TempDir.
 func shortSocketDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "aht-zellij-") //nolint:usetesting // reason: t.TempDir paths can exceed the Unix socket path limit; cleanup is registered below.
