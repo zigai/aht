@@ -61,6 +61,12 @@ func installPlanAction(ctx context.Context, opts Options, harness registry.Harne
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
 		result, err := installJSONCommandHooks(opts, harness, typed.Plan)
+		if err == nil && !opts.DryRun && typed.Plan.Trust != nil {
+			err = typed.Plan.Trust.Install(ctx)
+			if err != nil {
+				err = fmt.Errorf("trusting installed %s hooks: %w; fix the harness CLI and rerun aht manage integrations install %s", harness, err, harness)
+			}
+		}
 
 		return result, true, err
 	case harnesspkg.CursorJSONHooksAction:

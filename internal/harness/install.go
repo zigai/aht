@@ -84,6 +84,12 @@ type JSONCommandHookInstallPlan struct {
 	OmitStatusMessage bool
 	HooksAtRoot       bool
 	Hooks             []CommandHookInstallSpec
+	Trust             JSONCommandHookTrust
+}
+
+type JSONCommandHookTrust interface {
+	Install(ctx context.Context) error
+	Inspect(ctx context.Context) (bool, error)
 }
 
 type CommandHookInstallSpec struct {

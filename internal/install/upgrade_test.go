@@ -105,6 +105,7 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 
 func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	isolateUpgradeHome(t)
+	installFakeCodexCLI(t)
 	claude, err := Run(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +136,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	isolateUpgradeHome(t)
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
+	installFakeCodexCLI(t)
 	for _, id := range Harnesses() {
 		// pi and omp intentionally share the explicit PI_CODING_AGENT_DIR; exercise
 		// one at a time to verify that ownership does not select the other adapter.
@@ -278,6 +280,7 @@ func assertUpgradeArtifactsUntouched(t *testing.T, snapshots map[string]artifact
 
 func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	isolateUpgradeHome(t)
+	installFakeCodexCLI(t)
 	binary := filepath.Join(t.TempDir(), "aht")
 	if err := os.WriteFile(binary, []byte("old binary"), 0o600); err != nil {
 		t.Fatal(err)
@@ -286,8 +289,7 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A reviewed file need not use the installer's JSON indentation. Reformatting
-	// identical hook definitions must not create a new file for Codex to review.
+	// Equivalent formatting must not rewrite the installed hook definitions.
 	data, err := os.ReadFile(installed.Path)
 	if err != nil {
 		t.Fatal(err)
@@ -307,8 +309,8 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	if err != nil || len(results) != 1 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	if results[0].Changed || results[0].NextStep != "" {
-		t.Fatalf("unchanged hooks requested review: %+v", results[0])
+	if results[0].Changed {
+		t.Fatalf("unchanged hooks were rewritten: %+v", results[0])
 	}
 	assertUpgradeArtifactsUntouched(t, before)
 }
