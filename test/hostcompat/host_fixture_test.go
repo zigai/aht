@@ -196,6 +196,9 @@ func (host *isolatedHost) assertVersion(t *testing.T) {
 func (host *isolatedHost) assertHostLoadsIntegration(t *testing.T) {
 	t.Helper()
 	for _, check := range host.contract.LoadChecks {
+		if check.Prepare != nil {
+			check.Prepare(t, host)
+		}
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		command := exec.CommandContext(ctx, host.hostPath, check.Args...)
 		command.Env = host.env

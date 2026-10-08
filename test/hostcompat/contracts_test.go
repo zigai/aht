@@ -24,8 +24,9 @@ var errHostContractMissing = errors.New("current-host contract is missing")
 // loadCheck runs a host command that reports which integrations the host
 // loaded and requires its output to contain the needle.
 type loadCheck struct {
-	Args   []string
-	Needle func(host *isolatedHost) string
+	Args    []string
+	Needle  func(host *isolatedHost) string
+	Prepare func(t *testing.T, host *isolatedHost)
 }
 
 type hostContract struct {
@@ -50,7 +51,7 @@ var hostContracts = []hostContract{
 	{ID: registry.Harness("pi"), Executable: "pi", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md", "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md", "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md", "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md"}},
 	{ID: registry.Harness("omp"), Executable: "omp", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/extension-loading.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/config-usage.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/context-files.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/skills.md", "https://github.com/can1357/oh-my-pi/blob/main/docs/environment-variables.md", "https://github.com/can1357/oh-my-pi/blob/main/packages/utils/src/dirs.ts"}},
 	{ID: registry.Harness("opencode"), Executable: "opencode", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://opencode.ai/v2/docs/build/plugins", "https://opencode.ai/docs/plugins/", "https://opencode.ai/docs/providers/#custom-provider", "https://opencode.ai/docs/config/", "https://opencode.ai/docs/rules/", "https://opencode.ai/docs/skills/"}},
-	{ID: registry.Harness("agy"), Executable: "agy", VersionArgs: []string{"--version"}, LoadChecks: agyLoadChecks, Level: compatibilityLevelDiscovery, Docs: []string{"https://antigravity.google/docs/plugins?tab=cli", "https://antigravity.google/docs/hooks?tab=cli", "https://antigravity.google/docs/settings?tab=cli", "https://antigravity.google/docs/rules", "https://antigravity.google/docs/mcp"}},
+	{ID: registry.Harness("agy"), Executable: "agy", VersionArgs: []string{"--version"}, LoadChecks: agyLoadChecks, Level: compatibilityLevelDiscovery, Docs: []string{"https://antigravity.google/docs/plugins?tab=cli", "https://antigravity.google/docs/hooks?tab=cli", "https://antigravity.google/docs/cli/install", "https://antigravity.google/docs/cli/headless", "https://antigravity.google/docs/settings?tab=cli", "https://antigravity.google/docs/rules", "https://antigravity.google/docs/mcp"}},
 	{ID: registry.Harness("kilo"), Executable: "kilo", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://kilo.ai/docs/code-with-ai/platforms/cli-reference", "https://kilo.ai/docs/automate/extending/plugins", "https://kilo.ai/docs/customize/skills", "https://kilo.ai/docs/customize/custom-instructions", "https://kilo.ai/docs/code-with-ai/platforms/cli", "https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/global.ts"}},
 	{ID: registry.Harness("droid"), Executable: "droid", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://docs.factory.ai/harness/hooks", "https://docs.factory.ai/droid-exec/overview", "https://docs.factory.ai/model-independence/byok", "https://docs.factory.com/droid-cli/settings", "https://docs.factory.com/harness/agents-md", "https://docs.factory.com/harness/skills"}},
 	{ID: registry.Harness("openclaw"), Executable: "openclaw", VersionArgs: []string{"--version"}, Level: compatibilityLevelLifecycle, Protocol: providerProtocolOpenAIChat, Docs: []string{"https://docs.openclaw.ai/plugins/hooks", "https://docs.openclaw.ai/gateway/protocol/rpc-session-control", "https://docs.openclaw.ai/cli/agent", "https://docs.openclaw.ai/help/environment", "https://docs.openclaw.ai/tools/skills", "https://docs.openclaw.ai/concepts/agent-workspace"}},
@@ -98,6 +99,6 @@ func contractFor(id registry.Harness) (hostContract, error) {
 }
 
 var agyLoadChecks = []loadCheck{
-	{Args: []string{"plugin", "list"}, Needle: func(*isolatedHost) string { return "aht-state" }},
-	{Args: []string{"-p", "/hooks"}, Needle: func(host *isolatedHost) string { return host.aht }},
+	{Args: []string{"plugin", "list"}, Needle: func(*isolatedHost) string { return "aht-state" }, Prepare: nil},
+	{Args: []string{"-p", "/hooks"}, Needle: func(host *isolatedHost) string { return host.aht }, Prepare: prepareAgyHookInspection},
 }
