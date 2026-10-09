@@ -309,7 +309,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "agent", want: "", wantOK: false},
 		{command: "claude", want: registry.Harness("claude"), wantOK: true},
 		{command: "kimi", want: registry.Harness("kimi-code"), wantOK: true},
-		{command: "Kimi Code", want: registry.Harness("kimi-code"), wantOK: true},
+		{command: "kimi-code", want: registry.Harness("kimi-code"), wantOK: true},
 		{command: "grok", want: registry.Harness("grok"), wantOK: true},
 		{command: "grok-build", want: registry.Harness("grok"), wantOK: true},
 		{command: "goose", want: registry.Harness("goose"), wantOK: true},
@@ -442,8 +442,8 @@ func TestPayloadDefaults(t *testing.T) {
 		{
 			name:       "kimi",
 			harness:    registry.Harness("kimi-code"),
-			payload:    `{"session_id":"kimi-payload-session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","tool_name":"Bash","turn_id":7}`,
-			wantID:     "kimi-payload-session-no-index",
+			payload:    `{"session_id":"session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli","tool_name":"Bash","turn_id":7}`,
+			wantID:     "session-no-index",
 			wantPath:   "",
 			wantCWD:    "/tmp",
 			wantRoot:   "",
@@ -509,7 +509,7 @@ func TestPayloadDefaultsRejectsMalformedPayload(t *testing.T) {
 
 func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("KIMI_SHARE_DIR", home)
+	t.Setenv("KIMI_CODE_HOME", home)
 
 	sessionDir := filepath.Join(home, "sessions", "wd_repo_abc", "kimi-index-session")
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
@@ -518,7 +518,7 @@ func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 
 	got, err := PayloadDefaults(
 		registry.Harness("kimi-code"),
-		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","source":"startup"}`),
+		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","client_type":"kimi_code_cli","source":"startup"}`),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error from PayloadDefaults: %v", err)
@@ -530,8 +530,8 @@ func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 		got.Event != "SessionStart" {
 		t.Fatalf("unexpected defaults: %#v", got)
 	}
-	if got.Attributes["kimi_code_start_source"] != "startup" {
-		t.Fatalf("expected kimi_code_start_source=startup, got %#v", got.Attributes)
+	if got.Attributes["kimi_code_source"] != "startup" {
+		t.Fatalf("expected kimi_code_source=startup, got %#v", got.Attributes)
 	}
 }
 
@@ -607,7 +607,7 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "kimi-code accepts native hook payload",
 			harness: registry.Harness("kimi-code"),
-			payload: `{"session_id":"kimi-session","cwd":"/repo","hook_event_name":"PermissionRequest"}`,
+			payload: `{"session_id":"session-example","cwd":"/repo","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli"}`,
 			want:    true,
 		},
 		{
@@ -872,7 +872,7 @@ func isolateLocationEnvironment(t *testing.T) string {
 	t.Helper()
 	for _, name := range []string{
 		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "COPILOT_HOME",
-		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
+		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
 		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
 		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
 		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME", "XDG_DATA_HOME", "APPDATA", "DROID_SESSIONS_DIR", "KILO_DB",
@@ -1003,7 +1003,7 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 		{harness: registry.Harness("cursor"), variable: "CURSOR_CONFIG_DIR"},
 		{harness: registry.Harness("cline"), variable: "CLINE_DIR"},
 		{harness: registry.Harness("cline"), variable: "CLINE_DATA_DIR"},
-		{harness: registry.Harness("kimi-code"), variable: "KIMI_SHARE_DIR"},
+		{harness: registry.Harness("kimi-code"), variable: "KIMI_CODE_HOME"},
 		{harness: registry.Harness("grok"), variable: "GROK_HOME"},
 		{harness: registry.Harness("goose"), variable: "GOOSE_PATH_ROOT"},
 		{harness: registry.Harness("hermes"), variable: "HERMES_HOME"},
@@ -1162,7 +1162,7 @@ func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
 			payload: `{"session_id":"abc","cwd":"/repo","hook_event_name":"SessionStart"}`,
 			plant: func(t *testing.T, workDir string) {
 				t.Helper()
-				if err := os.MkdirAll(filepath.Join(workDir, ".kimi", "sessions", "wd", "abc"), 0o700); err != nil {
+				if err := os.MkdirAll(filepath.Join(workDir, ".kimi-code", "sessions", "wd", "abc"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			},

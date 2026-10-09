@@ -27,6 +27,8 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	host.provider.mu.Unlock()
 	var output []byte
 	switch host.contract.ID {
+	case registry.Harness("kimi-code"):
+		host.runKimiACP(t, host.command(t, original.Env, "acp"), &previous, false)
 	case registry.Harness("cline"):
 		host.runClineResume(t, original.Env, previous)
 	case registry.Harness("droid"):
@@ -79,8 +81,6 @@ func resumeArguments(id registry.Harness, original []string, session registry.Se
 		return append(args, "--session", resumeReference(session))
 	case registry.Harness("omp"):
 		return append(args, "--resume", resumeReference(session))
-	case registry.Harness("kimi-code"):
-		return append(args, "--session", session.SessionID)
 	case registry.Harness("goose"):
 		return append(args, "--resume", "--session-id", session.SessionID)
 	case registry.Harness("hermes"):

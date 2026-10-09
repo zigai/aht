@@ -9,7 +9,6 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/jedib0t/go-pretty/v6 v6.8.3
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/sethvargo/go-retry v0.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
 	github.com/zigai/gotmux v0.7.0
@@ -19,7 +18,6 @@ require (
 	golang.org/x/term v0.46.0
 	golang.org/x/text v0.37.0
 	modernc.org/sqlite v1.59.0
-	pgregory.net/rapid v1.3.0
 )
 
 require (
@@ -49,4 +47,5 @@ require (
 	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+	pgregory.net/rapid v1.3.0 // indirect
 )

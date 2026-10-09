@@ -156,9 +156,10 @@ func assertAttempt(t *testing.T, spec harnessSpec, result hostResult, attempt ch
 }
 
 func TestSupportedOlderSuccessPreservesFailureAboveMaximum(t *testing.T) {
-	spec := testHarness(t, "kimi-code")
+	spec := testHarness(t, "codex")
+	spec.MaxVersion = "1.2.0"
 	state := emptyState()
-	latest := checkedRelease{Source: spec.sourceKey(), Version: "1.52.0", Outcome: "failure", RunURL: "upstream-run"}
+	latest := checkedRelease{Source: spec.sourceKey(), Version: "1.3.0", Outcome: "failure", RunURL: "upstream-run"}
 	state.Harnesses[spec.ID] = latest
 	selected := []candidate{{Harness: spec.ID, Version: spec.MaxVersion}}
 	result := hostResult{Harness: spec.ID, Version: spec.MaxVersion, Outcome: "success", Revision: "supported-sha"}

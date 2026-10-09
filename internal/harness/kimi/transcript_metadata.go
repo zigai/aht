@@ -1,96 +1,92 @@
 package kimi
 
 import (
-	"crypto/md5" //nolint:gosec // G501: Kimi's native directory mapping mandates MD5; it is metadata lookup, not authentication. TestKimiNativeDirectoryMetadata covers compatibility; Kimi owns the format.
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
+	"github.com/zigai/aht/v2/internal/harness/titlefile"
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
-type kimiWorkDir struct {
-	Path string `json:"path"`
-	Kaos string `json:"kaos"`
+//nolint:tagliatelle // Native Kimi session state uses camelCase field names.
+type kimiSessionState struct {
+	ID         string          `json:"id"`
+	Title      string          `json:"title"`
+	TitleKind  string          `json:"titleKind"`
+	LastPrompt string          `json:"lastPrompt"`
+	CWD        string          `json:"cwd"`
+	CreatedAt  json.RawMessage `json:"createdAt"`
+	UpdatedAt  json.RawMessage `json:"updatedAt"`
 }
 
-type kimiMetadata struct {
-	WorkDirs []kimiWorkDir `json:"work_dirs"`
+func kimiTranscriptSessionDir(path string) string {
+	if filepath.Base(path) != "wire.jsonl" || filepath.Base(filepath.Dir(path)) != "main" {
+		return ""
+	}
+	agents := filepath.Dir(filepath.Dir(path))
+	if filepath.Base(agents) != "agents" {
+		return ""
+	}
+	return filepath.Dir(agents)
 }
 
-func transcriptMetadata(sessionsDir string, issue func(string, error)) map[string]string {
-	// Native Kimi metadata maps paths to MD5 directory names. Never try to
-	// reverse directory encodings or infer cwd from a session filename.
-	rootPath := filepath.Dir(sessionsDir)
-	root, err := os.OpenRoot(rootPath)
+func readKimiSessionState(sessionDir, sessionID string) (kimiSessionState, error) {
+	var state kimiSessionState
+	path := filepath.Join(sessionDir, "state.json")
+	file, err := titlefile.Open(path)
 	if err != nil {
-		issue(rootPath, err)
-		return nil
+		return state, fmt.Errorf("open Kimi Code session state: %w", err)
 	}
-	defer func() {
-		if err := root.Close(); err != nil {
-			issue(rootPath, err)
-		}
-	}()
-	file, err := root.Open("kimi.json")
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		issue(rootPath, err)
-		return nil
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			issue(rootPath, err)
-		}
-	}()
-	data, err := io.ReadAll(io.LimitReader(file, transcript.MaxRecordBytes+1))
-	if err != nil {
-		issue(rootPath, err)
-		return nil
+	data, readErr := io.ReadAll(io.LimitReader(file, transcript.MaxRecordBytes+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return state, fmt.Errorf("read Kimi Code session state: %w", err)
 	}
 	if len(data) > transcript.MaxRecordBytes {
-		issue(rootPath, transcript.ErrRecordSize)
-		return nil
+		return state, transcript.ErrRecordSize
 	}
-	metadata, err := decodeWorkspaceMetadata(data)
+	if json.Unmarshal(data, &state) != nil {
+		return state, transcript.ErrInvalidRecord
+	}
+	if state.ID == "" || state.ID != sessionID {
+		return kimiSessionState{}, transcript.ErrUnknownFormat
+	}
+	return state, nil
+}
+
+func initializeTranscript(decoder *transcript.Decoder) {
+	sessionDir := kimiTranscriptSessionDir(decoder.Conversation.Path)
+	if sessionDir == "" {
+		return
+	}
+	decoder.Conversation.SessionID = filepath.Base(sessionDir)
+	state, err := readKimiSessionState(sessionDir, decoder.Conversation.SessionID)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
 	if err != nil {
-		issue(rootPath, transcript.ErrInvalidRecord)
-		return nil
+		decoder.Issue(filepath.Join(sessionDir, "state.json"), err)
+		return
 	}
-	dirs := make(map[string]string, len(metadata.WorkDirs))
-	for _, entry := range metadata.WorkDirs {
-		digest := md5.Sum([]byte(entry.Path)) //nolint:gosec // G401: Kimi owns this non-security MD5 path encoding; TestKimiNativeDirectoryMetadata covers compatibility. No identity or authorization depends on this digest.
-		name := hex.EncodeToString(digest[:])
-		if entry.Kaos != "" && entry.Kaos != "local" {
-			name = entry.Kaos + "_" + name
-		}
-		dirs[name] = entry.Path
+	decoder.Conversation.Title = state.Title
+	switch state.TitleKind {
+	case "custom":
+		decoder.Conversation.CustomTitle = state.Title
+	case "generated":
+		decoder.Conversation.AITitle = state.Title
 	}
-	return dirs
+	decoder.Conversation.CWD = state.CWD
+	decoder.Conversation.CreatedAt = transcript.ParseTime(state.CreatedAt)
+	decoder.Conversation.UpdatedAt = transcript.ParseTime(state.UpdatedAt)
 }
 
-func transcriptSourceMetadata(path string, isDir bool, issue func(string, error)) map[string]string {
-	if isDir {
-		return transcriptMetadata(path, issue)
+func transcriptExtra(path string, _ map[string]string, stamp func(string) string) string {
+	sessionDir := kimiTranscriptSessionDir(path)
+	if sessionDir == "" {
+		return ""
 	}
-	sessionsDir := filepath.Dir(filepath.Dir(filepath.Dir(path)))
-	if filepath.Base(sessionsDir) == "sessions" {
-		return transcriptMetadata(sessionsDir, issue)
-	}
-	return nil
-}
-
-func decodeWorkspaceMetadata(data []byte) (kimiMetadata, error) {
-	var metadata kimiMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return metadata, fmt.Errorf("decode workspace metadata: %w", err)
-	}
-	return metadata, nil
+	return stamp(filepath.Join(sessionDir, "state.json"))
 }

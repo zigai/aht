@@ -20,7 +20,7 @@ func isolateUpgradeHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "KILO_CONFIG_DIR", registry.StateDirEnv} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_CODE_HOME", "GROK_HOME", "PI_CODING_AGENT_DIR", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "KILO_CONFIG_DIR", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
 

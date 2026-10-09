@@ -71,7 +71,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string) *isolat
 		"AHT_STORE="+filepath.Join(root, "sessions.json"),
 		"CLINE_DIR="+filepath.Join(root, "cline"),
 		"CLINE_DATA_DIR="+filepath.Join(root, "cline-data"),
-		"KIMI_SHARE_DIR="+filepath.Join(root, "kimi"),
+		"KIMI_CODE_HOME="+filepath.Join(root, "kimi"),
 		"GROK_HOME="+filepath.Join(root, "grok"),
 		"PI_CODING_AGENT_DIR="+filepath.Join(root, "pi-agent"),
 		"OPENCODE_CONFIG_DIR="+filepath.Join(root, "opencode"),

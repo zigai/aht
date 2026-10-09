@@ -2,7 +2,6 @@ package kimi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ const (
 	kimiCommand                     = "kimi"
 	kimiSessionFlag                 = "--session"
 	kimiCodeIntegrationSource       = "kimi-code-hook"
+	kimiCodeIntegrationVersion      = 15
 	kimiCodeManagedIntegrationStart = "# BEGIN aht managed integration: kimi-code"
 	kimiCodeManagedIntegrationEnd   = "# END aht managed integration: kimi-code"
 )
@@ -29,23 +29,22 @@ type hookPayload struct {
 	SessionID     string `json:"session_id"      validate:"required,notblank"`
 	CWD           string `json:"cwd"             validate:"required,notblank"`
 	HookEventName string `json:"hook_event_name" validate:"required,notblank"`
+	ClientType    string `json:"client_type"     validate:"required,eq=kimi_code_cli"`
 }
 
 type kimiCodeHookSpec struct {
-	event          string
-	matcher        string
-	command        string
-	timeoutSeconds int
+	event      string
+	matcher    string
+	transition harness.HookTransition
 }
 
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true,
+		ExclusiveProcess: false,
 		CatalogCreates:   false,
 		ID:               registry.Harness("kimi-code"),
 		Aliases:          []string{"kimi", "kimi_code", "kimicode"},
-		// Native startup replaces argv with this title through setproctitle.
-		ProcessNames: []string{"kimi", "kimi-code", "kimi_code", "kimicode", "kimi code"},
+		ProcessNames:     []string{"kimi", "kimi-code"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
@@ -54,16 +53,15 @@ func New() kimiCodeHarness {
 			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart: true,
-			SessionEnd:   true,
-			RunningIdle:  true,
-			// Approval waiting is observed through aht hook wire kimi-code.
+			SessionStart:      true,
+			SessionEnd:        true,
+			RunningIdle:       true,
 			WaitingPermission: true,
 			NativeCatalog:     true,
 			ProcessIdentity:   false,
 			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationVersion: kimiCodeIntegrationVersion,
 		IntegrationSource:  kimiCodeIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
 		ScreenFallback:     false,
@@ -90,7 +88,6 @@ func (kimiCodeHarness) ResumeCommand(sessionID string, _ string) []string {
 	if sessionID == "" {
 		return nil
 	}
-
 	return []string{kimiCommand, kimiSessionFlag, sessionID}
 }
 
@@ -105,13 +102,10 @@ func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadD
 		return harness.PayloadDefaults{}, err
 	}
 	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "kimi_code_hook_event", harness.PayloadString(payload, "hook_event_name"))
-	harness.AddAttributeString(attributes, "kimi_code_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "kimi_code_tool_name", harness.PayloadString(payload, "tool_name"))
+	for _, field := range []string{"hook_event_name", "source", "client_type", "session_title", "tool_name", "tool_call_id", "agent_id", "decision", "reason", "error_type"} {
+		harness.AddAttributeString(attributes, "kimi_code_"+field, harness.PayloadString(payload, field))
+	}
 	harness.AddAttributeString(attributes, "kimi_code_turn_id", payloadScalarString(payload, "turn_id"))
-	harness.AddAttributeString(attributes, "kimi_code_decision", harness.PayloadString(payload, "decision"))
-	harness.AddAttributeString(attributes, "kimi_code_reason", harness.PayloadString(payload, "reason"))
-	harness.AddAttributeString(attributes, "kimi_code_notification_type", harness.PayloadStringAny(payload, "notification_type", "type"))
 
 	return harness.PayloadDefaults{
 		SessionID:   sessionID,
@@ -123,146 +117,66 @@ func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadD
 	}, nil
 }
 
-func (kimiCodeHarness) ValidateWireArgs(args []string) error {
-	return ValidateArgs(args)
-}
-
-func (kimiCodeHarness) RunWire(ctx context.Context, opts harness.WireOptions) error {
-	return Run(ctx, Options{
-		Sink:      opts.Sink,
-		Args:      opts.Args,
-		StorePath: opts.StorePath,
-		Stdin:     opts.Stdin,
-		Stdout:    opts.Stdout,
-		Stderr:    opts.Stderr,
-	})
-}
-
 func kimiCodeHookBlock(binary string) string {
 	specs := []kimiCodeHookSpec{
-		{
-			event:          harness.HookEventSessionStart,
-			matcher:        "startup|resume",
-			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          harness.HookEventUserPromptSubmit,
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          harness.HookEventPreToolUse,
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          harness.HookEventPostToolUse,
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          harness.HookEventPostToolUseFailure,
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          harness.HookEventStop,
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          "StopFailure",
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityFailed, "StopFailure"),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		// SubagentStart and SubagentStop fire for child agents while the
-		// parent turn keeps running until Stop.
-		{
-			event:          "PreCompact",
-			matcher:        "",
-			command:        kimiCodeHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		// Automatic compaction continues the running turn; only manual
-		// compaction, including manual-with-prompt, returns the session to idle.
-		{
-			event:          "PostCompact",
-			matcher:        "^manual",
-			command:        kimiCodeHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
-		{
-			event:          "SessionEnd",
-			matcher:        "exit",
-			command:        kimiCodeHookCommand(binary, registry.PresenceGone, "SessionEnd"),
-			timeoutSeconds: harness.HookTimeoutSeconds,
-		},
+		{event: "SessionStart", matcher: "startup|resume", transition: harness.HookActivityIdle},
+		{event: "SessionHeartbeat", matcher: "", transition: harness.HookPresenceLive},
+		{event: "UserPromptSubmit", matcher: "", transition: harness.HookActivityRunning},
+		{event: "TurnStarted", matcher: "", transition: harness.HookActivityRunning},
+		{event: "PreToolUse", matcher: "", transition: harness.HookActivityRunning},
+		{event: "PostToolUse", matcher: "", transition: harness.HookActivityRunning},
+		{event: "PostToolUseFailure", matcher: "", transition: harness.HookActivityRunning},
+		{event: "PermissionRequest", matcher: "", transition: harness.HookActivityWaiting},
+		{event: "PermissionResult", matcher: "", transition: harness.HookActivityRunning},
+		{event: "Stop", matcher: "", transition: harness.HookActivityIdle},
+		{event: "Interrupt", matcher: "", transition: harness.HookActivityInterrupted},
+		{event: "StopFailure", matcher: "", transition: harness.HookActivityFailed},
+		{event: "PreCompact", matcher: "", transition: harness.HookActivityRunning},
+		{event: "PostCompact", matcher: "^manual", transition: harness.HookActivityIdle},
+		{event: "SessionEnd", matcher: "exit|archive", transition: harness.HookPresenceGone},
 	}
 
 	var builder strings.Builder
-	builder.WriteString(kimiCodeManagedIntegrationStart)
-	builder.WriteByte('\n')
-	builder.WriteString("# ")
-	builder.WriteString(harness.ManagedMarker)
-	builder.WriteByte('\n')
+	builder.WriteString(kimiCodeManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=kimi-code\n")
 	for _, spec := range specs {
-		builder.WriteByte('\n')
-		builder.WriteString("[[hooks]]\n")
-		builder.WriteString("event = ")
-		builder.WriteString(tomlQuoteString(spec.event))
-		builder.WriteByte('\n')
+		builder.WriteString("\n[[hooks]]\nevent = " + tomlQuoteString(spec.event) + "\n")
 		if spec.matcher != "" {
-			builder.WriteString("matcher = ")
-			builder.WriteString(tomlQuoteString(spec.matcher))
-			builder.WriteByte('\n')
+			builder.WriteString("matcher = " + tomlQuoteString(spec.matcher) + "\n")
 		}
-		builder.WriteString("command = ")
-		builder.WriteString(tomlQuoteString(spec.command))
-		builder.WriteByte('\n')
-		builder.WriteString("timeout = ")
-		builder.WriteString(strconv.Itoa(spec.timeoutSeconds))
-		builder.WriteByte('\n')
+		builder.WriteString("command = " + tomlQuoteString(kimiCodeHookCommand(binary, spec)) + "\n")
+		builder.WriteString("timeout = " + strconv.Itoa(harness.HookTimeoutSeconds) + "\n")
 	}
-	builder.WriteByte('\n')
-	builder.WriteString(kimiCodeManagedIntegrationEnd)
-	builder.WriteByte('\n')
-
+	builder.WriteString("\n" + kimiCodeManagedIntegrationEnd + "\n")
 	return builder.String()
 }
 
-func tomlQuoteString(s string) string {
-	encoded, err := json.Marshal(s)
+func tomlQuoteString(value string) string {
+	encoded, err := json.Marshal(value)
 	if err != nil {
-		return strconv.Quote(s)
+		panic(fmt.Errorf("encode TOML string: %w", err))
 	}
 	encoded = bytes.ReplaceAll(encoded, []byte{0x7f}, []byte(`\u007f`))
 	return string(encoded)
 }
 
-func kimiCodeHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.Harness("kimi-code"), transition, event, kimiCodeIntegrationSource)
+func kimiCodeHookCommand(binary string, spec kimiCodeHookSpec) string {
+	dimension, _, _ := strings.Cut(string(spec.transition), ":")
+	return strings.Join([]string{
+		harness.ShellQuote(binary), "report", "kimi-code",
+		"--" + dimension, spec.transition.State(), "--event", spec.event,
+		"--reporter-version", strconv.Itoa(kimiCodeIntegrationVersion),
+		"--reporter", kimiCodeIntegrationSource, "--multi-session", "--raw-stdin", "--quiet",
+	}, " ")
 }
 
 func payloadScalarString(payload map[string]any, key string) string {
-	value, ok := payload[key]
-	if !ok {
-		return ""
-	}
-
-	switch typed := value.(type) {
+	switch value := payload[key].(type) {
 	case string:
-		return strings.TrimSpace(typed)
+		return strings.TrimSpace(value)
 	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
+		return strconv.FormatFloat(value, 'f', -1, 64)
 	case bool:
-		return strconv.FormatBool(typed)
+		return strconv.FormatBool(value)
 	default:
 		return ""
 	}
@@ -272,11 +186,11 @@ func kimiCodeSessionPath(sessionID string) (string, error) {
 	if sessionID == "" || filepath.Base(sessionID) != sessionID {
 		return "", nil
 	}
-
 	home := kimiCodeHome()
 	if home == "" {
 		return "", nil
 	}
+
 	sessionsRoot := filepath.Join(home, "sessions")
 	workDirs, err := os.ReadDir(sessionsRoot)
 	if err != nil {
@@ -302,20 +216,19 @@ func kimiCodeSessionPath(sessionID string) (string, error) {
 }
 
 func kimiCodeHome() string {
-	if value := strings.TrimSpace(os.Getenv("KIMI_SHARE_DIR")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME")); value != "" {
 		return value
 	}
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
-
-	return filepath.Join(home, ".kimi")
+	return filepath.Join(home, ".kimi-code")
 }
 
 func (kimiCodeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
 	if event == "" {
-		event = attributes["kimi_code_hook_event"]
+		event = attributes["kimi_code_hook_event_name"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "kimi_code_start_source", "source", "reason"))
+	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "kimi_code_source", "source", "reason"))
 }

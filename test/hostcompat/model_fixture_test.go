@@ -19,7 +19,7 @@ func (host *isolatedHost) configureKimiModel(t *testing.T, baseURL string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := fmt.Sprintf("default_model = \"aht-compat\"\ntelemetry = false\n\n[providers.aht-compat]\ntype = \"openai_responses\"\nbase_url = %q\napi_key = \"compat\"\n\n[models.aht-compat]\nprovider = \"aht-compat\"\nmodel = \"compat\"\nmax_context_size = 128000\n\n%s", baseURL, string(data))
+	config := fmt.Sprintf("default_model = \"aht-compat\"\ntelemetry = false\nauto_session_title = false\n\n[providers.aht-compat]\ntype = \"openai_responses\"\nbase_url = %q\napi_key = \"compat\"\n\n[models.aht-compat]\nprovider = \"aht-compat\"\nmodel = \"compat\"\nmax_context_size = 128000\ncapabilities = [\"tool_use\"]\n\n%s", baseURL, string(data))
 	host.writeFile(t, path, config)
 }
 

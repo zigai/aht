@@ -83,10 +83,7 @@ func TestNativeJSONLReaders(t *testing.T) {
 {"type":"tool.execution_complete","data":{"result":{"content":"tool-only"}}}
 {"type":"assistant.reasoning","data":{"content":"reasoning-only"}}
 `},
-		{"kimi", registry.Harness("kimi-code"), "native-session/context.jsonl", `{"role":"user","content":[{"type":"text","text":"Refresh Token"}]}
-{"role":"tool","content":"tool-only"}
-{"role":"assistant","content":[{"type":"think","think":"reasoning-only"}]}
-`},
+		{"kimi", registry.Harness("kimi-code"), "native-session/agents/main/wire.jsonl", kimiWireHistory},
 		{"cline", registry.Harness("cline"), "native-session.messages.json", `{"version":1,"sessionId":"native-session","system_prompt":"system-only","messages":[{"id":"u1","role":"user","content":"Refresh Token"},{"role":"tool","content":[{"type":"tool-result","output":{"value":"tool-only"}}]},{"role":"assistant","content":[{"type":"reasoning","text":"reasoning-only"}]}]}`},
 		{"amp", registry.Harness("amp"), "T-native-session.json", `{"v":1,"id":"native-session","title":"Authentication work","env":{"initial":{"trees":[{"uri":"file:///work/project"}]}},"messages":[{"messageId":0,"role":"user","content":[{"type":"text","text":"Refresh Token"}]},{"messageId":1,"role":"tool","content":[{"type":"tool-result","output":"tool-only"}]},{"messageId":2,"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]},{"messageId":3,"role":"system","content":"system-only"}]}`},
 	}
@@ -226,33 +223,77 @@ func TestUnicodeExcerptAndJSON(t *testing.T) {
 	}
 }
 
+const kimiWireHistory = `{"type":"metadata","protocol_version":"1.5","created_at":1788220800000}
+{"type":"context.append_message","agentId":"main","time":1788220801000,"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}],"toolCalls":[]}}
+{"type":"context.append_loop_event","agentId":"main","time":1788220802000,"event":{"type":"content.part","stepUuid":"step-one","part":{"type":"text","text":"The refresh token handler is ready"}}}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"content.part","part":{"type":"think","think":"reasoning-only"}}}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","toolCallId":"call-one","result":{"output":"tool-only"}}}
+{"type":"context.append_message","agentId":"main","message":{"role":"system","content":[{"type":"text","text":"system-only"}]}}
+`
+
 func TestKimiNativeDirectoryMetadata(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeHistory(t, root, "kimi.json", `{"work_dirs":[{"path":"/work/kimi-project","kaos":"local"}]}`)
-	// MD5('/work/kimi-project') is the directory key in Kimi's native metadata format.
-	path := writeHistory(t, root, "sessions/aaec326b87de6c65cbc919cff0fa048e/native/context.jsonl", `{"role":"user","content":"refresh token"}`)
-	link := filepath.Join(t.TempDir(), "context.jsonl")
+	session := "sessions/wd_project_0123456789ab/native-session/"
+	writeHistory(t, root, session+"state.json", `{"id":"native-session","version":2,"title":"Authentication work","titleKind":"custom","lastPrompt":"Saved prompt","cwd":"/work/example-project","createdAt":1788220800000,"updatedAt":1788220803000}`)
+	path := writeHistory(t, root, session+"agents/main/wire.jsonl", kimiWireHistory)
+	writeHistory(t, root, session+"agents/agent-0/wire.jsonl", strings.ReplaceAll(kimiWireHistory, "Refresh Token", "child-only"))
+	writeHistory(t, root, "sessions/legacy/context.jsonl", `{"role":"user","content":"refresh token"}`)
+	link := filepath.Join(t.TempDir(), "wire.jsonl")
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	for _, tt := range []struct{ name, path string }{
-		{"directory", filepath.Join(root, "sessions")},
-		{"file", path},
-		{"symlink", link},
+	for _, test := range []struct{ name, path string }{
+		{"directory", filepath.Join(root, "sessions")}, {"file", path}, {"symlink", link},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: tt.path}}}
-			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dir: "/work/kimi-project"})
-			if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.CWD != "/work/kimi-project" {
-				t.Fatalf("Kimi cwd = %#v, %v", result, err)
+			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: test.path}}}
+			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"})
+			if err != nil || len(result.Matches) != 1 {
+				t.Fatalf("native history = %#v, %v", result, err)
 			}
-			result, err = catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, IgnorePaths: []string{"/work/kimi-project"}})
+			assertKimiNativeMetadata(t, result.Matches[0].Conversation)
+			result, err = catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, IgnorePaths: []string{"/work/example-project"}})
 			if err != nil || len(result.Matches) != 0 {
-				t.Fatalf("ignored Kimi cwd = %#v, %v", result, err)
+				t.Fatalf("ignored cwd = %#v, %v", result, err)
+			}
+			result, err = catalog.Search(t.Context(), history.Query{Terms: []string{"child-only"}})
+			if err != nil || len(result.Matches) != 0 {
+				t.Fatalf("subagent collected independently = %#v, %v", result, err)
 			}
 		})
+	}
+}
+
+func assertKimiNativeMetadata(t *testing.T, conversation history.Conversation) {
+	t.Helper()
+	if conversation.SessionID != "native-session" || conversation.CWD != "/work/example-project" || conversation.Title != "Authentication work" || conversation.CustomTitle != "Authentication work" || conversation.Messages != 2 || !conversation.CreatedAt.Equal(time.UnixMilli(1788220800000)) || !conversation.UpdatedAt.Equal(time.UnixMilli(1788220803000)) {
+		t.Fatalf("native metadata = %#v", conversation)
+	}
+}
+
+const kimiMirroredWireHistory = kimiWireHistory + `{"type":"llm.request","agentId":"main","provider":"example","model":"example-model"}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}]},"meta":{"userMessageId":"prompt-one"}}}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]},"meta":{"model":{"provider":"agent-loop","model":"agent-loop"}}}}
+{"type":"human.agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]}}}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"tool","content":[{"type":"text","text":"tool-only"}],"toolCallId":"call-one"}}}
+{"type":"context.append_message","agentId":"main","message":{"role":"user","content":[{"type":"text","text":"injected-only"}],"origin":{"kind":"injection","variant":"date_change"}}}
+`
+
+func TestKimiWireMirrorsDoNotDuplicateMessages(t *testing.T) {
+	t.Parallel()
+	result := searchFile(t, registry.Harness("kimi-code"), "native-session/agents/main/wire.jsonl", kimiMirroredWireHistory, "refresh token", false)
+	if len(result.Matches) != 1 || result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 || result.Matches[0].Conversation.Model != "example-model" {
+		t.Fatalf("mirrored messages = %#v", result)
+	}
+	tools := searchFile(t, registry.Harness("kimi-code"), "native-session/agents/main/wire.jsonl", kimiMirroredWireHistory, "tool-only", true)
+	if len(tools.Matches) != 1 || tools.Matches[0].MatchingParts != 1 {
+		t.Fatalf("mirrored tool results = %#v", tools)
+	}
+	injected := searchFile(t, registry.Harness("kimi-code"), "native-session/agents/main/wire.jsonl", kimiMirroredWireHistory, "injected-only", false)
+	if len(injected.Matches) != 0 {
+		t.Fatalf("injected context was searched = %#v", injected)
 	}
 }
 

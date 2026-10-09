@@ -46,7 +46,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("GROK_HOME", t.TempDir())
-	t.Setenv("KIMI_SHARE_DIR", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -172,7 +172,7 @@ func TestInstallPlanFollowsEnvironmentOverrideWithoutHome(t *testing.T) {
 		{registry.Harness("cline"), "CLINE_DIR"},
 		{registry.Harness("grok"), "GROK_HOME"},
 		{registry.Harness("hermes"), "HERMES_HOME"},
-		{registry.Harness("kimi-code"), "KIMI_SHARE_DIR"},
+		{registry.Harness("kimi-code"), "KIMI_CODE_HOME"},
 		{registry.Harness("pi"), "PI_CODING_AGENT_DIR"},
 		{registry.Harness("omp"), "PI_CODING_AGENT_DIR"},
 		{registry.Harness("kilo"), "KILO_CONFIG_DIR"},

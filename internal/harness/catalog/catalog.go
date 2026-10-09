@@ -103,15 +103,6 @@ func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) 
 	return filter, ok
 }
 
-func WireRunnerFor(harnessID registry.Harness) (harness.WireRunner, bool) {
-	adapter, ok := Find(harnessID)
-	if !ok {
-		return nil, false
-	}
-	runner, ok := adapter.(harness.WireRunner)
-	return runner, ok
-}
-
 func IntegrationVersionFor(harnessID registry.Harness) int {
 	adapter, ok := Find(harnessID)
 	if !ok {

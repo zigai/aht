@@ -378,17 +378,36 @@ func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	manifest := writeHistory(t, root, "kimi.json", `{"work_dirs":[{"path":"/work/kimi-project","kaos":"local"}]}`)
-	path := writeHistory(t, root, "sessions/aaec326b87de6c65cbc919cff0fa048e/native/context.jsonl", `{"role":"user","content":"refresh token"}`)
-	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}, Dir: "/work/kimi-project"}, 1)
+	session := "sessions/wd_project_0123456789ab/native-session/"
+	manifest := writeHistory(t, root, session+"state.json", `{"id":"native-session","title":"First title","cwd":"/work/example-project"}`)
+	path := writeHistory(t, root, session+"agents/main/wire.jsonl", kimiMirroredWireHistory)
+	catalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
+		t.Fatalf("indexed mirrored history = %#v", result)
+	}
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
+		t.Fatalf("cached mirrored history = %#v", result)
+	}
+	if result.Matches[0].Conversation.Title != "First title" {
+		t.Fatalf("initial title = %q", result.Matches[0].Conversation.Title)
+	}
+	if err := os.WriteFile(manifest, []byte(`{"id":"native-session","title":"Updated title","cwd":"/work/other-project"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 0)
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 1)
+	if result.Matches[0].Conversation.Title != "Updated title" {
+		t.Fatalf("updated title = %q", result.Matches[0].Conversation.Title)
+	}
 	if err := os.Remove(manifest); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}, Dir: "/work/kimi-project"}, 0)
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
-	c.Sources = []history.Source{}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	catalog.Sources = []history.Source{}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 0)
 }
 
 func TestIndexDeletesVanishedHistoriesForEveryToolMode(t *testing.T) {

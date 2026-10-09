@@ -183,15 +183,17 @@ func TestTrackedIssues(t *testing.T) {
 	state := emptyState()
 	state.Harnesses["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.41", Outcome: "failure", RunURL: "grok-run"}
 	state.Successful["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.39", Outcome: "success"}
-	state.Harnesses["kimi-code"] = checkedRelease{Source: kimi.sourceKey(), Version: "1.52.0", Outcome: "failure", RunURL: "kimi-run"}
+	state.Harnesses["kimi-code"] = checkedRelease{Source: kimi.sourceKey(), Version: "2.1.1", Outcome: "failure", RunURL: "kimi-run"}
 	state.Harnesses["codex"] = checkedRelease{Source: codex.sourceKey(), Version: "0.157.0", Outcome: "success", RunURL: "codex-run"}
 	state.Harnesses["claude"] = checkedRelease{Source: testHarness(t, "claude").sourceKey(), Version: "2.1.0", Outcome: "infrastructure"}
 	state.Harnesses["droid"] = checkedRelease{Source: "npm:old-package", Version: "1.0.0", Outcome: "failure"}
 	want := issueReport{
-		Open: []issueStatus{{Harness: "grok", Version: "1.0.41", Successful: "1.0.39", RunURL: "grok-run"}},
+		Open: []issueStatus{
+			{Harness: "kimi-code", Version: "2.1.1", RunURL: "kimi-run"},
+			{Harness: "grok", Version: "1.0.41", Successful: "1.0.39", RunURL: "grok-run"},
+		},
 		Resolved: []issueStatus{
 			{Harness: "codex", Version: "0.157.0", RunURL: "codex-run", Reason: "passed"},
-			{Harness: "kimi-code", Version: "1.52.0", MaxVersion: kimi.MaxVersion, RunURL: "kimi-run", Reason: "above supported maximum"},
 		},
 	}
 	got := trackedIssues(state)

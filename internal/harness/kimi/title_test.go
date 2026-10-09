@@ -1,64 +1,83 @@
 package kimi
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+
+	"github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestKimiACPTitleResponsesDecodeNativeFieldNames(t *testing.T) {
-	supported, err := kimiACPHasSessionList(json.RawMessage(`{"agentCapabilities":{"sessionCapabilities":{"list":{}}}}`))
+func writeKimiState(t *testing.T, root, name, body string) string {
+	t.Helper()
+	path := filepath.Join(root, name, "state.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Dir(path)
+}
+
+func TestKimiSessionTitlesReadLocalState(t *testing.T) {
+	t.Parallel()
+	sessionDir := writeKimiState(t, t.TempDir(), "session-example", `{"id":"session-example","title":"  Example title  ","cwd":"/work/example"}`)
+	identities := []registry.ObservationIdentity{
+		{SessionID: "session-example", SessionPath: sessionDir},
+		{SessionID: "session-example", SessionPath: filepath.Join(sessionDir, "agents", "main", "wire.jsonl")},
+		{SessionID: "session-example", SessionPath: filepath.Join(sessionDir, "state.json")},
+		{SessionID: "session-example", SessionPath: filepath.Join(sessionDir, "agents", "agent-0", "wire.jsonl")},
+		{SessionID: "other", SessionPath: sessionDir},
+	}
+	titles, err := (kimiCodeHarness{}).SessionTitles(t.Context(), identities)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !supported {
-		t.Fatal("session/list capability was not detected")
-	}
-
-	sessions, err := decodeKimiACPSessions(json.RawMessage(`{"sessions":[{"sessionId":"session-1","title":"Kimi title"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 1 || sessions[0].SessionID != "session-1" || sessions[0].Title != "Kimi title" {
-		t.Fatalf("decoded sessions = %#v", sessions)
+	if diff := cmp.Diff([]string{"Example title", "Example title", "Example title", "", ""}, titles); diff != "" {
+		t.Fatalf("titles (-want +got):\n%s", diff)
 	}
 }
 
-func TestKimiFallbackTitlesRequireOneWorkspaceMatch(t *testing.T) {
-	titles := []string{""}
-	fallback := kimiSessionTitleFallback{indices: map[int]bool{0: true}}
-	fallbackTitles := make(map[int][]string)
-	group := &kimiTitleGroup{indicesByID: map[string][]int{"session-1": {0}}}
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "Workspace title"}}, titles, fallbackTitles)
-	if err := resolveKimiFallbackTitles(fallbackTitles, titles); err != nil {
-		t.Fatal(err)
-	}
-	if titles[0] != "Workspace title" {
-		t.Fatalf("title = %q, want %q", titles[0], "Workspace title")
-	}
-
-	titles[0] = ""
-	fallbackTitles = make(map[int][]string)
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "First title"}}, titles, fallbackTitles)
-	applyKimiSessionTitles(group, fallback, []kimiACPSessionTitle{{SessionID: "session-1", Title: "Second title"}}, titles, fallbackTitles)
-	if err := resolveKimiFallbackTitles(fallbackTitles, titles); !errors.Is(err, errKimiSessionMatchesMultipleWorkspaces) {
-		t.Fatalf("ambiguous fallback error = %v, want multiple-workspaces sentinel", err)
-	}
-	if titles[0] != "" {
-		t.Fatalf("ambiguous title = %q, want empty", titles[0])
+func TestKimiSessionTitleFailures(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, body string
+		want       error
+	}{
+		{"invalid", `{"id":`, transcript.ErrInvalidRecord},
+		{"wrong identity", `{"id":"another","title":"Wrong title"}`, transcript.ErrUnknownFormat},
+		{"too large", strings.Repeat("x", transcript.MaxRecordBytes+1), transcript.ErrRecordSize},
+		{"no title", `{"id":"session-example","lastPrompt":"Not a title"}`, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			sessionDir := writeKimiState(t, t.TempDir(), "session-example", test.body)
+			titles, err := (kimiCodeHarness{}).SessionTitles(t.Context(), []registry.ObservationIdentity{{SessionID: "session-example", SessionPath: sessionDir}})
+			if !errors.Is(err, test.want) || len(titles) != 1 || titles[0] != "" {
+				t.Fatalf("titles=%#v error=%v want=%v", titles, err, test.want)
+			}
+		})
 	}
 }
 
-func TestKimiSessionPathMustBeInSessionStore(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KIMI_SHARE_DIR", home)
-
-	storedPath := filepath.Join(home, "sessions", "workspace-hash", "session-1")
-	if !kimiSessionPathMayUseWorkspaceLookup(storedPath, "session-1") {
-		t.Fatalf("session path %q was rejected", storedPath)
+func TestKimiSessionTitlesMissingAndCancelled(t *testing.T) {
+	t.Parallel()
+	identity := registry.ObservationIdentity{SessionID: "session-example", SessionPath: filepath.Join(t.TempDir(), "session-example")}
+	titles, err := (kimiCodeHarness{}).SessionTitles(t.Context(), []registry.ObservationIdentity{identity})
+	if err != nil || len(titles) != 1 || titles[0] != "" {
+		t.Fatalf("missing state=%#v, %v", titles, err)
 	}
-	if kimiSessionPathMayUseWorkspaceLookup(filepath.Join(home, "other", "session-1"), "session-1") {
-		t.Fatal("session path outside the Kimi store was accepted")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = (kimiCodeHarness{}).SessionTitles(ctx, []registry.ObservationIdentity{identity})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled lookup=%v", err)
 	}
 }

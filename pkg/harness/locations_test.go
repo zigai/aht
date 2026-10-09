@@ -86,8 +86,10 @@ func TestLocationsForDocumentedNativePaths(t *testing.T) {
 		{name: "grok claude rules", harness: "grok", path: ".claude/rules", kind: harness.LocationKindInstructions, isDir: true},
 		{name: "hermes override instructions", harness: "hermes", path: "AGENTS.override.md", kind: harness.LocationKindInstructions},
 		{name: "kilo project context", harness: "kilo", path: "CONTEXT.md", kind: harness.LocationKindInstructions},
-		{name: "kimi claude skills", harness: "kimi-code", path: ".claude/skills", global: true, kind: harness.LocationKindSkills, isDir: true},
-		{name: "kimi codex skills", harness: "kimi-code", path: ".codex/skills", kind: harness.LocationKindSkills, isDir: true},
+		{name: "kimi user skills", harness: "kimi-code", path: ".kimi-code/skills", global: true, kind: harness.LocationKindSkills, isDir: true},
+		{name: "kimi project skills", harness: "kimi-code", path: ".kimi-code/skills", kind: harness.LocationKindSkills, isDir: true},
+		{name: "kimi relocated instructions", harness: "kimi-code", path: "custom-agent/AGENTS.md", global: true, kind: harness.LocationKindInstructions, override: "KIMI_CODE_HOME", overrideAt: "custom-agent"},
+		{name: "kimi project mcp", harness: "kimi-code", path: ".kimi-code/mcp.json", kind: harness.LocationKindMCP},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,7 +123,7 @@ func createLocationFixture(t *testing.T, tt locationCase) (string, string) {
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	for _, key := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_WORKSPACE_DIR", "CLAUDE_CONFIG_DIR", "CLINE_DATA_DIR", "CLINE_GLOBAL_SETTINGS_PATH", "CLINE_MCP_SETTINGS_PATH"} {
+	for _, key := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_WORKSPACE_DIR", "CLAUDE_CONFIG_DIR", "CLINE_DATA_DIR", "CLINE_GLOBAL_SETTINGS_PATH", "CLINE_MCP_SETTINGS_PATH", "KIMI_CODE_HOME"} {
 		t.Setenv(key, "")
 	}
 	base := project

@@ -59,7 +59,6 @@ func (app *application) newHookCommand() *cobra.Command {
 			return app.runManagedHook(cmd.Context(), stdin, args[0], options)
 		},
 	}
-	cmd.AddCommand(app.newWireCommand())
 	cmd.Flags().StringVar(&options.event, "event", "", "native hook event `<name>`")
 	return cmd
 }

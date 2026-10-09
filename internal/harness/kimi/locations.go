@@ -10,10 +10,14 @@ func (kimiCodeHarness) Locations(projectDir string) []harness.Location {
 	home := kimiCodeHome()
 
 	return harness.NewLocationBuilder(projectDir).
-		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml")).
+		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml"), filepath.Join(home, "tui.toml")).
 		Global(harness.LocationKindMCP, filepath.Join(home, "mcp.json")).
-		Home(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills"), filepath.Join(".config", "agents", "skills"), filepath.Join(".agents", "skills")).
-		Project(harness.LocationKindInstructions, "AGENTS.md", filepath.Join(".kimi", "AGENTS.md")).
-		Project(harness.LocationKindSkills, filepath.Join(".kimi", "skills"), filepath.Join(".claude", "skills"), filepath.Join(".codex", "skills"), filepath.Join(".agents", "skills")).
+		Global(harness.LocationKindInstructions, filepath.Join(home, "AGENTS.md"), filepath.Join(home, "SYSTEM.md")).
+		Global(harness.LocationKindSkills, filepath.Join(home, "skills")).
+		Home(harness.LocationKindInstructions, filepath.Join(".agents", "AGENTS.md")).
+		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindInstructions, "AGENTS.md", filepath.Join(".kimi-code", "AGENTS.md")).
+		Project(harness.LocationKindSkills, filepath.Join(".kimi-code", "skills"), filepath.Join(".agents", "skills")).
+		Project(harness.LocationKindMCP, filepath.Join(".kimi-code", "mcp.json")).
 		Locations()
 }

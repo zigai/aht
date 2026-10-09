@@ -89,7 +89,7 @@ func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	case registry.Harness("droid"):
 		host.runDroidRPC(t, command.Env, nil, true)
 	case registry.Harness("kimi-code"):
-		host.runKimiWire(t, command, true)
+		host.runKimiACP(t, command, nil, true)
 	case registry.Harness("opencode"), registry.Harness("kilo"):
 		host.runServerInterruption(t, command.Env)
 	case registry.Harness("pi"), registry.Harness("omp"):
@@ -156,7 +156,7 @@ func (host *isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte
 		return host.runDroidRPC(t, command.Env, nil, false)
 	}
 	if host.contract.ID == registry.Harness("kimi-code") {
-		host.runKimiWire(t, command, false)
+		host.runKimiACP(t, command, nil, false)
 		return nil
 	}
 	if host.contract.ID == registry.Harness("pi") {

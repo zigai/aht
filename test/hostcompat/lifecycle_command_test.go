@@ -20,7 +20,7 @@ var lifecycleToolNames = map[registry.Harness]string{
 	registry.Harness("codex"):     "exec_command",
 	registry.Harness("copilot"):   "bash",
 	registry.Harness("cline"):     "run_commands",
-	registry.Harness("kimi-code"): "Shell",
+	registry.Harness("kimi-code"): "Bash",
 	registry.Harness("grok"):      "run_terminal_command",
 	registry.Harness("droid"):     "Execute",
 	registry.Harness("goose"):     "shell",
@@ -89,7 +89,7 @@ func (host *isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd
 	baseURL := host.provider.URL() + "/v1"
 	if host.contract.ID == registry.Harness("kimi-code") {
 		host.configureKimiModel(t, baseURL)
-		return host.kimiWireCommand(t, env, []string{"--yolo", "--no-thinking", "--model", "aht-compat", "--max-steps-per-turn", "2"}), nil
+		return host.command(t, env, "acp"), nil
 	}
 	launcher, ok := lifecycleLaunchers[host.contract.ID]
 	if !ok {

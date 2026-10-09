@@ -118,6 +118,31 @@ func TestAffectedHosts(t *testing.T) {
 	}
 }
 
+func TestKnownGoodHonorsSourceAndMaximum(t *testing.T) {
+	t.Parallel()
+	spec := testHarness(t, "codex")
+	spec.MaxVersion = "1.2.0"
+	for _, scenario := range []struct {
+		name      string
+		source    string
+		version   string
+		want      string
+		available bool
+	}{
+		{name: "caps proven release", source: spec.sourceKey(), version: "1.3.0", want: "1.2.0", available: true},
+		{name: "ignores replaced distribution", source: "npm:retired-agent", version: "1.3.0", available: false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			state := emptyState()
+			state.Successful[spec.ID] = checkedRelease{Source: scenario.source, Version: scenario.version, Outcome: "success"}
+			version, available, err := knownGood(spec, state)
+			if err != nil || version != scenario.want || available != scenario.available {
+				t.Fatalf("known good = %q, %t, %v", version, available, err)
+			}
+		})
+	}
+}
+
 func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 	codex, kimi := testHarness(t, "codex"), testHarness(t, "kimi-code")
 	successful := func(spec harnessSpec, version string) string {
@@ -131,7 +156,7 @@ func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 		warning                bool
 	}{
 		{name: "pins proven release", path: "internal/harness/codex/adapter.go", successful: successful(codex, "1.2.0"), repository: "owner/repo", want: candidate{Harness: "codex", Version: "1.2.0"}},
-		{name: "caps proven release at maximum", path: "internal/harness/kimi/adapter.go", successful: successful(kimi, "1.52.0"), repository: "owner/repo", want: candidate{Harness: "kimi-code", Version: kimi.MaxVersion}},
+		{name: "pins replacement release", path: "internal/harness/kimi/adapter.go", successful: successful(kimi, "2.1.1"), repository: "owner/repo", want: candidate{Harness: "kimi-code", Version: "2.1.1"}},
 		{name: "resolves without history", path: "internal/harness/codex/adapter.go", repository: "owner/repo", want: candidate{Harness: "codex", Version: "1.2.3"}, lookups: 1},
 		{name: "resolves when state is unavailable", path: "internal/harness/codex/adapter.go", want: candidate{Harness: "codex", Version: "1.2.3"}, lookups: 1, warning: true},
 	}

@@ -1,9 +1,7 @@
 package harness
 
 import (
-	"context"
 	"encoding/json"
-	"os"
 	"slices"
 	"time"
 
@@ -109,24 +107,6 @@ type ProcessFilter interface {
 	ObservableProcess(process processinfo.Process) bool
 }
 
-type WireRunner interface {
-	ValidateWireArgs(args []string) error
-	RunWire(ctx context.Context, opts WireOptions) error
-}
-
-type WireSink interface {
-	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
-	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
-}
-
-type WireOptions struct {
-	Sink      WireSink
-	Args      []string
-	StorePath string
-	Stdin     *os.File
-	Stdout    *os.File
-	Stderr    *os.File
-}
 type BaseAdapter struct {
 	definition Definition
 }
