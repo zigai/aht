@@ -80,6 +80,7 @@ type releaseIntegrationCapability struct {
 
 type releaseIntegrationResult struct {
 	Harness string `json:"harness"`
+	Path    string `json:"path"`
 	Changed bool   `json:"changed"`
 	Error   string `json:"error"`
 }
@@ -502,19 +503,20 @@ func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary strin
 	oldStatuses := releaseIntegrationStatuses(t, previous, environment, binary, oldCatalog)
 	requireReleaseIntegrationsCurrent(t, oldStatuses)
 
-	requireReleaseIntegrationsBeforeUpgrade(t, binary, environment, oldCatalog, newCatalog)
+	continuing := requireReleaseIntegrationsBeforeUpgrade(t, binary, environment, oldCatalog, newCatalog, oldInstall)
 	if _, installed := oldCatalog["codex"]; installed {
 		codex.setManagedTrust(t, false)
 	}
 
 	upgraded := releaseIntegrationResults(t, binary, environment, "upgrade", "--binary", binary)
-	requireReleaseIntegrationResults(t, upgraded, oldCatalog, false)
+	requireReleaseIntegrationResults(t, upgraded, continuing, false)
 	for id := range newCatalog {
-		if _, installed := oldCatalog[id]; !installed {
+		if _, installed := continuing[id]; !installed {
 			added := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary)
 			requireReleaseIntegrationResults(t, added, map[string]int{id: newCatalog[id]}, false)
 		}
 	}
+	requireRetiredReleaseIntegrationsCurrent(t, previous, binary, environment, oldCatalog, continuing)
 	after := releaseIntegrationStatuses(t, binary, environment, binary, newCatalog)
 	requireReleaseIntegrationsCurrent(t, after)
 	preview := releaseIntegrationResults(t, binary, environment, "install", "all", "--binary", binary, "--dry-run")
@@ -524,9 +526,10 @@ func verifyReleaseIntegrationUpgrade(t *testing.T, previous string, binary strin
 	}
 }
 
-func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, environment []string, oldCatalog map[string]int, newCatalog map[string]int) {
+func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, environment []string, oldCatalog map[string]int, newCatalog map[string]int, oldInstall map[string]releaseIntegrationResult) map[string]int {
 	t.Helper()
 	before := releaseIntegrationStatuses(t, binary, environment, binary, newCatalog)
+	continuing := make(map[string]int)
 	for id, status := range before {
 		old, installed := oldCatalog[id]
 		if !installed {
@@ -537,6 +540,14 @@ func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, enviro
 		}
 		preview := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary, "--dry-run")
 		requireReleaseIntegrationResults(t, preview, map[string]int{id: newCatalog[id]}, false)
+		if oldInstall[id].Path != preview[id].Path {
+			if status.Status != "missing" {
+				t.Fatalf("replacement integration %s at %q before install = %s, want missing; previous path=%q",
+					id, preview[id].Path, status.Status, oldInstall[id].Path)
+			}
+			continue
+		}
+		continuing[id] = newCatalog[id]
 		want := "current"
 		if preview[id].Changed || old != newCatalog[id] {
 			want = "stale"
@@ -546,6 +557,19 @@ func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, enviro
 				id, status.Status, want, old, newCatalog[id], preview[id].Changed)
 		}
 	}
+	return continuing
+}
+
+func requireRetiredReleaseIntegrationsCurrent(t *testing.T, previous string, binary string, environment []string, oldCatalog map[string]int, continuing map[string]int) {
+	t.Helper()
+	statuses := releaseIntegrationStatuses(t, previous, environment, binary, oldCatalog)
+	retired := make(map[string]releaseIntegrationStatus)
+	for id, status := range statuses {
+		if _, upgraded := continuing[id]; !upgraded {
+			retired[id] = status
+		}
+	}
+	requireReleaseIntegrationsCurrent(t, retired)
 }
 
 func releaseInstallableCatalog(t *testing.T, binary string, environment []string) map[string]int {
@@ -628,6 +652,9 @@ func releaseIntegrationResults(t *testing.T, binary string, environment []string
 		}
 		if result.Error != "" {
 			t.Fatalf("integration %q from %q failed: %s", result.Harness, binary, result.Error)
+		}
+		if result.Path == "" {
+			t.Fatalf("integration %q from %q has no managed artifact path", result.Harness, binary)
 		}
 		indexed[result.Harness] = result
 	}
