@@ -299,7 +299,7 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 	t.Parallel()
 	gone := registry.PresenceGone
 	idle := registry.ActivityIdle
-	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid")} {
+	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid"), registry.Harness("qwen")} {
 		t.Run(string(id), func(t *testing.T) {
 			session := registry.Session{Observations: registry.Observations{Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle}}, Liveness: registry.NewLiveness(gone, registry.ActivityValue(nil), nil)}
 			if terminalSession(id, session) {

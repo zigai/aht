@@ -812,6 +812,110 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	}
 }
 
+func TestInstallQwenWritesHooks(t *testing.T) {
+	qwenHome := t.TempDir()
+	t.Setenv("QWEN_HOME", qwenHome)
+	settingsPath := filepath.Join(qwenHome, "settings.json")
+	userCommand := "/opt/local/bin/user-qwen-hook"
+	initial := `{
+  "$version": 3,
+  "security": {"auth": {"selectedType": "openai"}},
+  "hooks": {
+    "PreToolUse": [{"matcher": "^run_shell_command$", "hooks": [{"type": "command", "command": "` + userCommand + `"}]}]
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := installQwen(t)
+	if !result.Changed || result.Path != settingsPath {
+		t.Fatalf("unexpected qwen install result: %#v", result)
+	}
+
+	data := readTestFile(t, settingsPath, "reading qwen settings")
+	config := decodeTestJSONObject(t, data, "qwen settings")
+	if config["$version"] == nil || config["security"] == nil || !strings.Contains(string(data), userCommand) {
+		t.Fatalf("Qwen install did not preserve foreign settings/hooks: %s", data)
+	}
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("Qwen hooks must live under the settings hooks key: %s", data)
+	}
+	requireTestHookEvents(t, hooks, []string{
+		hookEventSessionStart,
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PostToolUseFailure",
+		"Notification",
+		"PreCompact",
+		"PostCompact",
+		hookEventStop,
+		"StopFailure",
+		"SessionEnd",
+	})
+	requireNoSubagentHooks(t, hooks, "SubagentStop")
+	if _, ok := hooks["PermissionRequest"]; ok {
+		t.Fatalf("Qwen PermissionRequest also fires for auto-denied background agents: %s", data)
+	}
+	text := string(data)
+	requireTextContainsAll(t, text, []string{
+		"--raw-stdin-defaults-only",
+		"--reporter qwen-hook",
+		`"matcher": "permission_prompt"`,
+		`"matcher": "idle_prompt"`,
+	}, "qwen hooks")
+	if strings.Contains(text, "statusMessage") {
+		t.Fatalf("Qwen shows statusMessage while a hook runs; managed hooks must omit it: %s", text)
+	}
+
+	if installQwen(t).Changed {
+		t.Fatal("expected second qwen install to be idempotent")
+	}
+}
+
+func TestInstallQwenExpandsHome(t *testing.T) {
+	for _, override := range []string{"~", "~/config", `~\config`} {
+		t.Run(override, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("QWEN_HOME", override)
+			t.Chdir(t.TempDir())
+			settingsPath := filepath.Join(home, "settings.json")
+			if override != "~" {
+				settingsPath = filepath.Join(home, "config", "settings.json")
+			}
+
+			result := installQwen(t)
+			if result.Path != settingsPath {
+				t.Fatalf("installed path = %q, want %q", result.Path, settingsPath)
+			}
+			data := readTestFile(t, settingsPath, "reading expanded Qwen settings")
+			config := decodeTestJSONObject(t, data, "Qwen settings")
+			if _, ok := config["hooks"].(map[string]any); !ok {
+				t.Fatalf("expanded Qwen settings contain no hooks: %s", data)
+			}
+		})
+	}
+}
+
+func installQwen(t *testing.T) Result {
+	t.Helper()
+	result, err := Run(t.Context(), Options{
+		Harness:      registry.Harness("qwen"),
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	return result
+}
+
 func TestInstallGrokWritesHooks(t *testing.T) {
 	t.Setenv("GROK_HOME", t.TempDir())
 

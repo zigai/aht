@@ -215,6 +215,13 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionPath: "",
 			want:        []string{"amp", "threads", "continue", testSessionID},
 		},
+		{
+			name:        "qwen",
+			harness:     registry.Harness("qwen"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"qwen", "--resume", testSessionID},
+		},
 	}
 
 	for _, test := range tests {
@@ -273,6 +280,8 @@ func TestParse(t *testing.T) {
 		{name: "hermes agent alias", value: "hermes-agent", want: registry.Harness("hermes")},
 		{name: "amp", value: "amp", want: registry.Harness("amp")},
 		{name: "amp alias code", value: "ampcode", want: registry.Harness("amp")},
+		{name: "qwen", value: "qwen", want: registry.Harness("qwen")},
+		{name: "qwen code alias", value: "qwen-code", want: registry.Harness("qwen")},
 		{name: "amp alias hyphen", value: "amp-code", want: registry.Harness("amp")},
 		{name: "amp alias underscore", value: "amp_code", want: registry.Harness("amp")},
 	}
@@ -325,6 +334,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "hermes", want: registry.Harness("hermes"), wantOK: true},
 		{command: "hermes-agent", want: registry.Harness("hermes"), wantOK: true},
 		{command: "amp", want: registry.Harness("amp"), wantOK: true},
+		{command: "qwen", want: registry.Harness("qwen"), wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 
@@ -474,6 +484,18 @@ func TestPayloadDefaults(t *testing.T) {
 			wantEvent:  "PreToolUse",
 			wantAttr:   "droid_tool_name",
 			wantAttrKV: "Bash",
+		},
+		{
+			name:       "qwen",
+			harness:    registry.Harness("qwen"),
+			payload:    `{"session_id":"qwen-session","transcript_path":"/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl","cwd":"/repo","hook_event_name":"Notification","notification_type":"permission_prompt","permission_mode":"default"}`,
+			wantID:     "qwen-session",
+			wantPath:   "/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl",
+			wantCWD:    "/repo",
+			wantRoot:   "",
+			wantEvent:  "Notification",
+			wantAttr:   "qwen_notification_type",
+			wantAttrKV: "permission_prompt",
 		},
 	}
 

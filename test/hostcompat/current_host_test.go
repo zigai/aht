@@ -100,6 +100,8 @@ func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 		runCLIInterruption(t, host, command.Env)
 	case registry.Harness("grok"):
 		host.runGrokInterruption(t, command)
+	case registry.Harness("qwen"):
+		host.runQwenTUI(t, command, true)
 	default:
 		host.runHostCommand(t, command)
 	}
@@ -150,18 +152,30 @@ func (host *isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 	host.waitForObservation(t, "matching native session evidence after completed provider lifecycle", host.validateSession)
 }
 
+// runNativeDriver completes a turn through the hosts whose lifecycle needs
+// their own protocol or terminal driver instead of a plain process run.
+func (host *isolatedHost) runNativeDriver(t *testing.T, command *exec.Cmd) ([]byte, bool) {
+	t.Helper()
+	switch host.contract.ID {
+	case registry.Harness("droid"):
+		return host.runDroidRPC(t, command.Env, nil, false), true
+	case registry.Harness("kimi-code"):
+		host.runKimiACP(t, command, nil, false)
+		return nil, true
+	case registry.Harness("pi"):
+		host.runPiCompletion(t, command)
+		return nil, true
+	case registry.Harness("qwen"):
+		return host.runQwenTUI(t, command, false), true
+	default:
+		return nil, false
+	}
+}
+
 func (host *isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte {
 	t.Helper()
-	if host.contract.ID == registry.Harness("droid") {
-		return host.runDroidRPC(t, command.Env, nil, false)
-	}
-	if host.contract.ID == registry.Harness("kimi-code") {
-		host.runKimiACP(t, command, nil, false)
-		return nil
-	}
-	if host.contract.ID == registry.Harness("pi") {
-		host.runPiCompletion(t, command)
-		return nil
+	if output, handled := host.runNativeDriver(t, command); handled {
+		return output
 	}
 
 	logPath := filepath.Join(host.root, fmt.Sprintf("%s-host.log", host.contract.ID))
