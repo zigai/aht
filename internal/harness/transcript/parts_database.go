@@ -7,12 +7,12 @@ import (
 )
 
 const partV1Query = `SELECT s.id AS session_id, s.title AS title, s.directory AS cwd,
- s.time_created AS created, s.time_updated AS updated, p.id AS message_id,
+ s.time_created AS created, s.time_updated AS updated, p.id AS message_id, p.id AS message_order,
  json_extract(m.data,'$.role') AS role, p.data AS body, p.time_created AS timestamp
  FROM session s JOIN message m ON m.session_id=s.id JOIN part p ON p.message_id=m.id`
 
 const partV2Query = `SELECT s.id AS session_id, s.title AS title, s.directory AS cwd,
- s.time_created AS created, s.time_updated AS updated, m.id AS message_id,
+ s.time_created AS created, s.time_updated AS updated, m.id AS message_id, m.id AS message_order,
  m.type AS role, m.data AS body, m.time_created AS timestamp
  FROM session s JOIN session_message m ON m.session_id=s.id`
 
