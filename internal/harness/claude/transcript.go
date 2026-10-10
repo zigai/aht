@@ -88,8 +88,8 @@ func (claudeHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: false, Parent: subagentParent}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(transcript.EnvPath("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude")), "projects")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(transcript.EnvPath("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude")), "projects")}, nil
 }
 
 // subagentParent maps <session>/subagents/agent-<id>.jsonl, which Claude Code

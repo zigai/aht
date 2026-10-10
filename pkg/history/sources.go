@@ -49,7 +49,11 @@ func DefaultSources() ([]Source, error) {
 	for _, adapter := range catalog.All() {
 		reader := catalog.TranscriptFor(adapter.Definition().ID)
 		if reader.Sources != nil {
-			for _, path := range reader.Sources(home) {
+			paths, err := reader.Sources(home)
+			if err != nil {
+				return nil, fmt.Errorf("discover %s history sources: %w", adapter.Definition().ID, err)
+			}
+			for _, path := range paths {
 				sources = append(sources, Source{Harness: adapter.Definition().ID, Path: path})
 			}
 		}

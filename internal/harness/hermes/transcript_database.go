@@ -11,12 +11,12 @@ import (
 )
 
 const nativeQuery = `SELECT s.id AS session_id, s.title AS title, '' AS cwd,
- s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id,
+ s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
  m.role AS role, m.content AS body, m.timestamp AS timestamp
  FROM sessions s JOIN messages m ON m.session_id=s.id`
 
 const currentQueryFormat = `SELECT s.id AS session_id, s.title AS title, s.cwd AS cwd,
- s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id,
+ s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
  m.role AS role, json_object('content',m.content,'tool_calls',m.tool_calls,'codex_message_items',m.codex_message_items,'project_root',s.git_repo_root%s) AS body,
  m.timestamp AS timestamp FROM sessions s JOIN messages m ON m.session_id=s.id`
 

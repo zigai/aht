@@ -98,6 +98,6 @@ func (ampHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"T-*.json", "*.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(transcript.EnvPath("AMP_DATA_DIR", filepath.Join(transcript.DataHome(home), "amp")), "threads")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(transcript.EnvPath("AMP_DATA_DIR", filepath.Join(transcript.DataHome(home), "amp")), "threads")}, nil
 }

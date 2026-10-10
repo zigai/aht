@@ -97,6 +97,6 @@ func (clineHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"*.messages.json"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: transcriptExtra, Record: nil, FastRecord: nil, Document: readTranscriptDocument, Query: nil, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{transcript.EnvPath("CLINE_SESSION_DATA_DIR", filepath.Join(transcript.EnvPath("CLINE_DATA_DIR", filepath.Join(home, ".cline", "data")), "sessions"))}
+func transcriptSources(home string) ([]string, error) {
+	return []string{transcript.EnvPath("CLINE_SESSION_DATA_DIR", filepath.Join(transcript.EnvPath("CLINE_DATA_DIR", filepath.Join(home, ".cline", "data")), "sessions"))}, nil
 }

@@ -58,6 +58,49 @@ func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
 	}
 }
 
+func TestCrushScreenActivitySupersedesToolHookReport(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	process := registry.ProcessIdentity{PID: 321, StartIdentity: "boot:321", Executable: "crush"}
+	running := registry.ActivityRunning
+	idle := registry.ActivityIdle
+	observations := []registry.Observation{
+		{
+			Harness: registry.Harness("crush"), At: at,
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{Integration: "crush-hook"},
+				Event:    "PreToolUse", Activity: &running, Process: &process,
+			},
+		},
+		{
+			Harness: registry.Harness("crush"), At: at.Add(time.Minute),
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: (*registry.Reading)(&registry.ScreenObservation{
+				Activity: idle, Authority: registry.AuthorityScreen, Reason: "manifest_rule",
+				RuleID: "input_prompt", Process: process, ObservedAt: at.Add(time.Minute),
+			}),
+		},
+	}
+
+	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.SessionID != "native-session" {
+			t.Fatalf("session id = %q, want native identity from the hook", session.SessionID)
+		}
+		if session.Activity() == nil || *session.Activity() != idle || session.Decision() == nil || session.Decision().Authority != registry.AuthorityScreen {
+			t.Fatalf("activity = %v, decision = %v, want idle from the Crush screen", session.Activity(), session.Decision())
+		}
+	}
+}
+
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
 
@@ -214,6 +257,13 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"amp", "threads", "continue", testSessionID},
+		},
+		{
+			name:        "crush",
+			harness:     registry.Harness("crush"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"crush", "--session", testSessionID},
 		},
 	}
 

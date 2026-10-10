@@ -102,6 +102,9 @@ func discoveryScope(id registry.Harness) string {
 	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
+	if id == registry.Harness("crush") {
+		return "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md documents only PreToolUse, so the hook supplies native session identity while start, idle, permission, and end come from the screen manifest; native lifecycle support is not asserted"
+	}
 	return "only plugin loading is asserted, through `agy plugin list` and `agy -p /hooks` with the documented Gemini API-key provider pointed at a local endpoint; hook inspection must not make model requests, and native lifecycle support is not asserted"
 }
 
