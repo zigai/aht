@@ -30,7 +30,7 @@ func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 		registry.Harness("cline"), registry.Harness("kimi-code"), registry.Harness("grok"),
 		registry.Harness("goose"), registry.Harness("amp"), registry.Harness("opencode"),
 		registry.Harness("kilo"), registry.Harness("droid"), registry.Harness("openclaw"),
-		registry.Harness("hermes"), registry.Harness("claude"),
+		registry.Harness("hermes"), registry.Harness("claude"), registry.Harness("qwen"),
 	} {
 		caps, ok := harness.CapabilitiesFor(id)
 		if !ok || !caps.TitleLookup {

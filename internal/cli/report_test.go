@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -74,6 +76,19 @@ func TestReportJSONCoversIgnoredResult(t *testing.T) {
 	var result map[string]string
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result["status"] != "ignored" {
 		t.Fatalf("result = %q, decoded=%#v, err=%v", stdout.String(), result, err)
+	}
+}
+
+func TestReportQwenSubagentHooksPreserveForegroundState(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []string{"waiting", "idle"} {
+		for _, event := range []string{"PreToolUse", "PostToolUse", "PostToolUseFailure"} {
+			t.Run(state+"/"+event, func(t *testing.T) {
+				t.Parallel()
+				assertQwenSubagentReportPreservesSession(t, state, event)
+			})
+		}
 	}
 }
 
@@ -161,6 +176,44 @@ func TestHermesLifecycleReportsDriveDocumentedStateTransitions(t *testing.T) {
 		{name: "on_session_finalize", lifecycle: "end", presence: "gone", activity: "", wantPresence: registry.PresenceGone, wantActivity: nil},
 	}
 	testLifecycleReports(t, "hermes", time.Date(2026, 7, 18, 13, 0, 0, 0, time.UTC), tests)
+}
+
+func assertQwenSubagentReportPreservesSession(t *testing.T, state, event string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	args := []string{"--store", path, "--json", "report", "qwen", "--raw-stdin-defaults-only", "--no-tmux", "--session-id", "native-session", "--activity", state}
+	foreground := `{"session_id":"native-session","cwd":"/work","hook_event_name":"Notification","notification_type":"idle_prompt"}`
+	if state == "waiting" {
+		foreground = `{"session_id":"native-session","cwd":"/work","hook_event_name":"Notification","notification_type":"permission_prompt"}`
+	}
+	var output bytes.Buffer
+	if err := runTestCLIWithStdin(t.Context(), args, strings.NewReader(foreground), &output, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var before registry.Session
+	if err := json.Unmarshal(output.Bytes(), &before); err != nil {
+		t.Fatal(err)
+	}
+
+	args[len(args)-1] = "running"
+	payload := `{"session_id":"native-session","cwd":"/work","hook_event_name":"` + event + `","agent_id":"child-agent","tool_name":"read_file"}`
+	output.Reset()
+	if err := runTestCLIWithStdin(t.Context(), args, strings.NewReader(payload), &output, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil || result.Status != "ignored" {
+		t.Fatalf("subagent result = %s, error = %v", output.Bytes(), err)
+	}
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(t.Context(), registry.Filter{})
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, error = %v", sessions, err)
+	}
+	if diff := cmp.Diff(before, sessions[0], cmp.Comparer(func(before, after registry.ProcessIdentity) bool { return before == after })); diff != "" {
+		t.Fatalf("subagent changed foreground session (-before +after):\n%s", diff)
+	}
 }
 
 func testLifecycleReports(t *testing.T, harness string, base time.Time, tests []lifecycleReportCase) {

@@ -137,7 +137,7 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        - pattern: '(^|\.)Harness(Claude|Codex|Cursor|Copilot|Cline|KimiCode|Grok|Goose|Pi|Omp|OpenCode|Agy|Kilo|Droid|OpenClaw|Hermes|Amp)$'
+        - pattern: '(^|\.)Harness(Claude|Codex|Cursor|Copilot|Cline|KimiCode|Grok|Goose|Pi|Omp|OpenCode|Agy|Kilo|Droid|OpenClaw|Hermes|Amp|Qwen)$'
           msg: Harness names belong to adapters and the public constants file.
     errcheck:
       check-type-assertions: true

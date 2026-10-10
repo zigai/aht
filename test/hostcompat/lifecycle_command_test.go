@@ -30,6 +30,7 @@ var lifecycleToolNames = map[registry.Harness]string{
 	registry.Harness("pi"):        "bash",
 	registry.Harness("omp"):       "bash",
 	registry.Harness("hermes"):    "terminal",
+	registry.Harness("qwen"):      "run_shell_command",
 }
 
 func lifecycleToolName(id registry.Harness) string {
@@ -80,6 +81,7 @@ var lifecycleLaunchers = map[registry.Harness]lifecycleLauncher{
 	registry.Harness("hermes"):   (*isolatedHost).hermesLaunch,
 	registry.Harness("openclaw"): (*isolatedHost).openclawLaunch,
 	registry.Harness("droid"):    (*isolatedHost).droidLaunch,
+	registry.Harness("qwen"):     (*isolatedHost).qwenLaunch,
 }
 
 func (host *isolatedHost) lifecycleCommand(t *testing.T) (*exec.Cmd, []*exec.Cmd) {
@@ -201,6 +203,13 @@ func (host *isolatedHost) droidLaunch(t *testing.T, env []string, baseURL string
 	host.configureDroidModel(t, baseURL)
 	env = append(env, "FACTORY_API_KEY=compat")
 	return lifecycleLaunch{env: env, args: droidRPCArguments(host.work)}
+}
+
+func (host *isolatedHost) qwenLaunch(t *testing.T, env []string, baseURL string) lifecycleLaunch {
+	t.Helper()
+	host.configureQwenModel(t)
+	env = append(env, "OPENAI_API_KEY=compat", "OPENAI_BASE_URL="+baseURL, "OPENAI_MODEL=compat", "QWEN_DISABLE_AUTO_TITLE=1")
+	return lifecycleLaunch{env: env, args: []string{"-i", compatibilityPrompt, "--auth-type", "openai", "--model", "compat", "--yolo"}}
 }
 
 func (host *isolatedHost) command(t *testing.T, env []string, args ...string) *exec.Cmd {

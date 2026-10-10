@@ -26,6 +26,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/openclaw"
 	"github.com/zigai/aht/v2/internal/harness/opencode"
 	"github.com/zigai/aht/v2/internal/harness/pi"
+	"github.com/zigai/aht/v2/internal/harness/qwen"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -63,6 +64,7 @@ var adapters = []harness.Adapter{
 	openclaw.New(),
 	hermes.New(),
 	amp.New(),
+	qwen.New(),
 }
 
 var adaptersByID = func() map[registry.Harness]harness.Adapter {
