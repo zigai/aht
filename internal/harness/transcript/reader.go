@@ -51,7 +51,7 @@ type (
 	RowReader func(context.Context, *Decoder, Row) error
 	Reader    struct {
 		Patterns       []string
-		Sources        func(string) []string
+		Sources        func(string) ([]string, error)
 		SkipDirectory  func(string) bool
 		SourceMetadata func(string, bool, func(string, error)) map[string]string
 		Initialize     func(*Decoder)
