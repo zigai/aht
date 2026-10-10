@@ -170,6 +170,37 @@ func TestBundledManifestScenarioBoundaries(t *testing.T) {
 			screen: "  ⠋ Working... (40s) Running tests\n" + piFooter,
 			want:   registry.ActivityRunning, rule: "custom_working",
 		},
+		{
+			name: "crush help text in transcript while idle", harness: registry.Harness("crush"),
+			screen: " │ what does esc cancel do?\n\n   It stops the turn; press again to cancel.\n\n   > Ready!\n :::\n :::\n\n" +
+				" tab focus chat • shift+tab mode • / or ctrl+p commands …",
+			want: registry.ActivityIdle, rule: "input_prompt",
+		},
+		{
+			name: "crush permission text in transcript while running", harness: registry.Harness("crush"),
+			screen: "   The dialog says Permission Required and offers Allow for Session or enter confirm.\n\n   > Working...\n :::\n :::\n\n" +
+				" esc cancel • tab focus chat • shift+tab mode • / or ctrl+p commands …",
+			want: registry.ActivityRunning, rule: "working_interruptible",
+		},
+		{
+			name: "crush queued prompts while running", harness: registry.Harness("crush"),
+			screen: "   > Working...\n ::: queued prompt\n\n" +
+				" esc clear queue • tab focus chat • shift+tab mode • / or ctrl+p commands …",
+			want: registry.ActivityRunning, rule: "working_interruptible",
+		},
+		{
+			name: "crush permission labels in transcript while idle", harness: registry.Harness("crush"),
+			screen: "   Permission Required\n   Allow for Session\n   enter confirm\n\n   > Ready!\n :::\n\n" +
+				" tab focus chat • shift+tab mode • / or ctrl+p commands …",
+			want: registry.ActivityIdle, rule: "input_prompt",
+		},
+		{
+			name: "crush permission dialog over running help", harness: registry.Harness("crush"),
+			screen: "   │ Permission Required ╱╱╱╱╱╱╱╱╱╱╱ │\n   │ Tool bash                           │\n" +
+				"   │ Allow      Allow for Session      Deny │\n" + //nolint:dupword // reason: "Allow Allow" is the exact button row Crush renders in its permission dialog.
+				"   │ ←/→ choose • enter confirm • esc exit │\n esc cancel • tab focus chat • shift+tab mode …",
+			want: registry.ActivityWaiting, rule: "permission_prompt",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
