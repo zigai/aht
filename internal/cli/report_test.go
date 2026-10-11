@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -244,4 +246,87 @@ func equalActivity(left, right *registry.Activity) bool {
 	}
 
 	return *left == *right
+}
+
+func TestReportIgnoresAnotherHarnessEnvironment(t *testing.T) {
+	agent := startNamedProcess(t, "pi")
+	t.Setenv("CLAUDE_PID", strconv.Itoa(agent))
+
+	session := reportFromEnvironment(t, "pi", "--session-id", "inner-pi")
+	if session.Process != nil && session.Process.PID == agent {
+		t.Fatal("pi report took its process from an outer Claude session's PID")
+	}
+}
+
+func TestReportReadsTheReportingHarnessEnvironment(t *testing.T) {
+	agent := startNamedProcess(t, "pi")
+	t.Setenv("CLAUDE_SESSION_ID", "outer-claude")
+	t.Setenv("PI_SESSION_ID", "inner-pi")
+	t.Setenv("PI_PID", strconv.Itoa(agent))
+
+	session := reportFromEnvironment(t, "pi")
+	if session.SessionID != "inner-pi" {
+		t.Fatalf("session id = %q, want inner-pi", session.SessionID)
+	}
+	if session.Process == nil || session.Process.PID != agent {
+		t.Fatalf("process = %+v, want pid %d", session.Process, agent)
+	}
+}
+
+func TestReportPrefersGenericEnvironmentAndFlags(t *testing.T) {
+	t.Setenv("AHT_SESSION_ID", "generic")
+	t.Setenv("PI_SESSION_ID", "harness")
+
+	if session := reportFromEnvironment(t, "pi"); session.SessionID != "generic" {
+		t.Fatalf("session id = %q, want the generic variable", session.SessionID)
+	}
+	if session := reportFromEnvironment(t, "pi", "--session-id", "flag"); session.SessionID != "flag" {
+		t.Fatalf("session id = %q, want the flag", session.SessionID)
+	}
+}
+
+func TestReportScopesEnvironmentToTheHarnessNamedInTheEnvironment(t *testing.T) {
+	t.Setenv("AHT_HARNESS", "pi")
+	t.Setenv("CLAUDE_SESSION_ID", "outer-claude")
+	t.Setenv("PI_SESSION_ID", "inner-pi")
+
+	if session := reportFromEnvironment(t, ""); session.SessionID != "inner-pi" {
+		t.Fatalf("session id = %q, want inner-pi", session.SessionID)
+	}
+}
+
+func reportFromEnvironment(t *testing.T, harnessID string, extra ...string) registry.Session {
+	t.Helper()
+	args := []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "--json", "report"}
+	if harnessID != "" {
+		args = append(args, harnessID)
+	}
+	args = append(args, "--event", "session_start", "--no-tmux")
+	args = append(args, extra...)
+	var stdout bytes.Buffer
+	if err := runTestCLI(t.Context(), args, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var session registry.Session
+	if err := json.Unmarshal(stdout.Bytes(), &session); err != nil {
+		t.Fatalf("report output %q: %v", stdout.String(), err)
+	}
+	return session
+}
+
+func startNamedProcess(t *testing.T, name string) int {
+	t.Helper()
+	path, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := &exec.Cmd{Path: path, Args: []string{name, "60"}}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
 }
