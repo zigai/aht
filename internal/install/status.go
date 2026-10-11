@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"unicode/utf8"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -74,6 +75,9 @@ func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspk
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
 
+	if !utf8.ValidString(binary) {
+		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errBinaryEncoding, binary)
+	}
 	advisor, _ := adapter.(harnesspkg.InstallAdvisor)
 	plan, err := installer.InstallPlan(binary)
 	if err != nil {

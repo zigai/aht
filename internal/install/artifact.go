@@ -27,7 +27,7 @@ type renderedFileInstall struct {
 type jsonHookFileInstall struct {
 	Harness                 registry.Harness
 	Path                    string
-	Apply                   func(map[string]any) bool
+	Apply                   func(map[string]any) (bool, error)
 	EncodeError             string
 	CreateDirError          string
 	WriteError              string
@@ -73,7 +73,10 @@ func installJSONHookFile(opts Options, file jsonHookFileInstall) (Result, error)
 		return Result{}, err
 	}
 
-	changed := file.Apply(harnessConfig)
+	changed, err := file.Apply(harnessConfig)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s: %w", file.Path, err)
+	}
 	data, err := json.MarshalIndent(harnessConfig, "", "  ")
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", file.EncodeError, err)

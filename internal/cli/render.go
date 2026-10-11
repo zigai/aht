@@ -303,12 +303,16 @@ func (app *application) writeHumanDetails(details []humanDetail) error {
 
 func sanitizeHumanText(value string) string {
 	value = strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) || isBidiControl(character) {
+		if isTerminalControl(character) {
 			return ' '
 		}
 		return character
 	}, value)
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func isTerminalControl(character rune) bool {
+	return unicode.IsControl(character) || isBidiControl(character)
 }
 
 func isBidiControl(character rune) bool {
