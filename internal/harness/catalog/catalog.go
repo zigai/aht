@@ -137,9 +137,9 @@ func SupportedNames() []string {
 	return names
 }
 
-func EnvNames(field harness.EnvField) []string {
+func EnvNames(harnessID registry.Harness, field harness.EnvField) []string {
 	names := genericEnvNames(field)
-	for _, adapter := range adapters {
+	if adapter, ok := Find(harnessID); ok {
 		names = appendUnique(names, envNamesForField(adapter.Definition().Env, field)...)
 	}
 	return names
