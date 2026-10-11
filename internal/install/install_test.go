@@ -223,6 +223,21 @@ const (
 	hookEventStop         = harnesspkg.HookEventStop
 )
 
+func TestInstallRejectsBinaryPathThatIsNotUTF8(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("pi"), Binary: "/opt/caf\xe9/aht"})
+	if !errors.Is(err, errBinaryEncoding) {
+		t.Fatalf("install error = %v, want errBinaryEncoding", err)
+	}
+	entries, readErr := os.ReadDir(home)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("rejected install wrote %v (%v)", entries, readErr)
+	}
+}
+
 type managedReplacementCase struct {
 	Harness              registry.Harness
 	Path                 string

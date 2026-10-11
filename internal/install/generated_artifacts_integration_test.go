@@ -185,7 +185,12 @@ func generatedCommandHook(t *testing.T, harness registry.Harness) string {
 
 func generatedArtifactContent(t *testing.T, harness registry.Harness, suffix string) string {
 	t.Helper()
-	for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: captureBinaryCommand(t), path: os.Getenv("AHT_CAPTURE")}) {
+	return generatedArtifactContentFor(t, captureExecutable{command: captureBinaryCommand(t), path: os.Getenv("AHT_CAPTURE")}, harness, suffix)
+}
+
+func generatedArtifactContentFor(t *testing.T, binary captureExecutable, harness registry.Harness, suffix string) string {
+	t.Helper()
+	for _, artifact := range collectGeneratedArtifacts(t, binary) {
 		if artifact.harness == harness && strings.HasSuffix(filepath.ToSlash(artifact.path), suffix) {
 			return artifact.content
 		}
