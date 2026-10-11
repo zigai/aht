@@ -74,6 +74,9 @@ func TestMessagePartsQuotedString(t *testing.T) {
 			if got := MessageParts(tc.raw, "assistant", true); !slices.Equal(got, want) {
 				t.Fatalf("raw=%q: MessageParts = %#v, slow path = %#v (error: %v)", tc.raw, got, want, err)
 			}
+			if got := Str(Record{"value": tc.raw}, "value"); got != decoded {
+				t.Fatalf("raw=%q: Str = %q, slow path = %q (error: %v)", tc.raw, got, decoded, err)
+			}
 		})
 	}
 }

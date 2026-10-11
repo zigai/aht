@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -15,8 +14,8 @@ type (
 )
 
 func MessageParts(raw json.RawMessage, role string, tools bool) []TextPart {
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && plainJSONString(raw[1:len(raw)-1]) {
-		return []TextPart{{Role: role, Text: string(raw[1 : len(raw)-1])}}
+	if text, ok := plainQuotedString(raw); ok {
+		return []TextPart{{Role: role, Text: text}}
 	}
 	var body string
 	if json.Unmarshal(raw, &body) == nil {
@@ -67,8 +66,8 @@ func ContentText(raw json.RawMessage) string {
 
 func Str(r Record, key string) string {
 	raw := r[key]
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
-		return string(raw[1 : len(raw)-1])
+	if text, ok := plainQuotedString(raw); ok {
+		return text
 	}
 	var value string
 	_ = json.Unmarshal(raw, &value)
@@ -91,8 +90,8 @@ func FirstString(r Record, keys ...string) string {
 }
 
 func ParseTime(raw json.RawMessage) time.Time {
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' && bytes.IndexByte(raw, '\\') < 0 {
-		return NativeTime(string(raw[1 : len(raw)-1]))
+	if text, ok := plainQuotedString(raw); ok {
+		return NativeTime(text)
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
@@ -171,6 +170,13 @@ func StoredTime(value string) time.Time {
 func ToolBlockText(r Record) string {
 	state := Obj(r, "state")
 	return FirstString(r, "tool", "name") + " " + string(state["input"]) + " " + Str(state, "output") + " " + ContentText(state["content"]) + " " + Str(state, "error") + " " + Str(Obj(state, "error"), "message")
+}
+
+func plainQuotedString(raw []byte) (string, bool) {
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' || !plainJSONString(raw[1:len(raw)-1]) {
+		return "", false
+	}
+	return string(raw[1 : len(raw)-1]), true
 }
 
 func plainJSONString(body []byte) bool {
