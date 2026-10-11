@@ -351,7 +351,11 @@ func installManagedTextBlock(
 		return Result{}, err
 	}
 
-	next := upsertManagedTextBlock(current, plan.StartMarker, plan.EndMarker, plan.Block)
+	cleaned, err := removeManagedTextBlock(current, plan.StartMarker, plan.EndMarker)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s: %w", plan.Path, err)
+	}
+	next := appendManagedTextBlock(cleaned, plan.Block)
 	changed := current != next
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
@@ -391,22 +395,16 @@ func readTextFile(path string) (string, error) {
 	return string(data), nil
 }
 
-func upsertManagedTextBlock(current string, startMarker string, endMarker string, block string) string {
-	cleaned := removeManagedTextBlock(current, startMarker, endMarker)
-
-	return appendManagedTextBlock(cleaned, block)
-}
-
-func removeManagedTextBlock(current string, startMarker string, endMarker string) string {
+func removeManagedTextBlock(current string, startMarker string, endMarker string) (string, error) {
 	for {
 		start := strings.Index(current, startMarker)
 		if start < 0 {
-			return current
+			return current, nil
 		}
 
 		endOffset := strings.Index(current[start:], endMarker)
-		if endOffset < 0 {
-			return current
+		if endOffset < 0 || strings.Contains(current[start+len(startMarker):start+endOffset], startMarker) {
+			return "", errManagedBlockMarker
 		}
 
 		end := start + endOffset + len(endMarker)
