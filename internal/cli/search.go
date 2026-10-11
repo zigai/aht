@@ -574,6 +574,14 @@ func resumeLine(match history.Match) string {
 	return "cd " + shellQuote(match.Conversation.CWD) + " && " + command
 }
 
+func pasteableResumeLine(match history.Match) string {
+	resume := resumeLine(match)
+	if strings.ContainsFunc(resume, isTerminalControl) {
+		return ""
+	}
+	return resume
+}
+
 // shellQuote quotes one POSIX shell word, leaving plain words readable.
 func shellQuote(value string) string {
 	if value != "" && strings.IndexFunc(value, func(r rune) bool {
@@ -597,7 +605,11 @@ func (app *application) writeSearchField(match history.Match, field string) erro
 	if value == "" {
 		return nil
 	}
-	return app.writeln(sanitizeHumanText(value))
+	if strings.ContainsFunc(value, isTerminalControl) {
+		app.warnf("The %s of %s contains control characters; use --json to read it.\n", field, sanitizeHumanText(match.Conversation.SessionID))
+		return nil
+	}
+	return app.writeln(value)
 }
 
 func (app *application) writeSearchMatch(match history.Match) error {
@@ -615,8 +627,8 @@ func (app *application) writeSearchMatch(match history.Match) error {
 	if !c.UpdatedAt.IsZero() {
 		details = append(details, humanDetail{label: "Updated", value: c.UpdatedAt.UTC().Format(time.RFC3339)})
 	}
-	if resume := resumeLine(match); resume != "" {
-		details = append(details, humanDetail{label: "Resume", value: resume, wrap: wrapHumanIdentifier})
+	if resume := pasteableResumeLine(match); resume != "" {
+		details = append(details, humanDetail{label: "Resume", value: resume, wrap: func(value string, _ int) []string { return []string{value} }})
 	}
 	if err := app.writeHumanDetails(details); err != nil {
 		return err
@@ -662,8 +674,8 @@ func (app *application) writeSearchMatchTTY(match history.Match, verbose bool) e
 	if err := app.writeSearchExcerptsTTY(match.Excerpts, width); err != nil {
 		return err
 	}
-	if resume := resumeLine(match); resume != "" {
-		if err := app.writef("  \x1b[2mresume:%s %s\n", styleReset, sanitizeHumanText(resume)); err != nil {
+	if resume := pasteableResumeLine(match); resume != "" {
+		if err := app.writef("  \x1b[2mresume:%s %s\n", styleReset, resume); err != nil {
 			return err
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -380,7 +381,7 @@ func TestSearchMatchTTY(t *testing.T) {
 			{Role: "assistant", Text: "I fixed the workflow test"},
 		},
 	}
-	match.ResumeCommand = []string{"pi", "--session", "/work/my project/session.jsonl"}
+	match.ResumeCommand = []string{"pi", "--session", "/work/my  project/session.jsonl"}
 	match.Excerpts[0].Spans = []history.Span{{Start: 23, End: 31}}
 	if err := app.writeSearchMatchTTY(match, false); err != nil {
 		t.Fatal(err)
@@ -392,7 +393,7 @@ func TestSearchMatchTTY(t *testing.T) {
 	if !strings.Contains(output, "01a0c324-11ca-7000-894a-0e31b911d7ae") {
 		t.Errorf("TTY output missing the full session ID: %q", output)
 	}
-	if !strings.Contains(output, "cd /work/project && pi --session '/work/my project/session.jsonl'") {
+	if !strings.Contains(output, "cd /work/project && pi --session '/work/my  project/session.jsonl'") {
 		t.Errorf("TTY output missing a pasteable resume command: %q", output)
 	}
 	if !strings.Contains(output, highlightStart+"workflow"+styleReset) {
@@ -507,6 +508,46 @@ func TestSearchCLIFormatsAndGroups(t *testing.T) {
 	}
 	if len(groups) != 2 || groups[0].Group != "/work/a" || groups[0].Conversations != 2 || groups[1].Conversations != 1 {
 		t.Fatalf("groups = %#v", groups)
+	}
+}
+
+func TestSearchCLIOutputsKeepRepeatedSpaces(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"my  session": "/work/my  project"})
+	historyPath := filepath.Join(root, "my  session.jsonl")
+
+	if path := runSearchOutput(t, "search", "refresh", "--source", "pi="+root, "--format", "path"); path != historyPath+"\n" {
+		t.Fatalf("path = %q, want %q", path, historyPath+"\n")
+	}
+
+	line := strings.TrimSuffix(runSearchOutput(t, "search", "refresh", "--source", "pi="+root, "--format", "resume"), "\n")
+	script := `cd() { printf '%s\0' "$@"; }; pi() { printf '%s\0' "$@"; }; ` + line
+	output, err := exec.CommandContext(t.Context(), "sh", "-c", script).Output()
+	if err != nil {
+		t.Fatalf("sh rejected %q: %v", line, err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	if want := []string{"/work/my  project", "--session", historyPath}; !slices.Equal(got, want) {
+		t.Fatalf("sh read %q from %q, want %q", got, line, want)
+	}
+
+	text := runSearchOutput(t, "search", "refresh", "--source", "pi="+root)
+	if want := "cd '/work/my  project' && pi --session '" + historyPath + "'"; !strings.Contains(text, want) {
+		t.Fatalf("text output %q missing resume command %q", text, want)
+	}
+}
+
+func TestSearchCLIResumeLineSkipsControlCharacters(t *testing.T) {
+	root := conversationFixture(t, map[string]string{"alpha": `/work/a\tb`})
+	var stdout, stderr bytes.Buffer
+	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "alpha", "--source", "pi=" + root, "--format", "resume"}
+	if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
+		t.Fatalf("search failed: %v stderr=%q", err, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("printed resume line %q for a directory it cannot represent", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "alpha") {
+		t.Fatalf("stderr = %q, want a warning naming the conversation", stderr.String())
 	}
 }
 
