@@ -18,12 +18,12 @@ func (host *isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
 	sendPermissionJSON(t, input, map[string]any{"id": "compat-prompt", "type": "prompt", "message": compatibilityPrompt})
 	for expected := range 2 {
 		select {
-		case step := <-host.provider.checkpoints:
-			if step != expected {
-				t.Fatalf("Pi provider checkpoint = %d, want %d", step, expected)
+		case hold := <-host.provider.Holds():
+			if hold.Request.Index != expected {
+				t.Fatalf("Pi provider checkpoint = %d, want %d", hold.Request.Index, expected)
 			}
 			host.waitForActiveSession(t)
-			host.provider.release <- struct{}{}
+			hold.Release()
 		case <-process.done:
 			t.Fatalf("Pi exited before provider checkpoint %d: %v", expected, process.waitErr())
 		case <-time.After(30 * time.Second):

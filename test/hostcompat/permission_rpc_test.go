@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -56,13 +57,10 @@ const piPermissionGate = `export default function (pi) {
 
 func runPiPermission(t *testing.T, host *isolatedHost, allow bool) {
 	t.Helper()
-	configured, setup := host.lifecycleCommand(t)
-	if len(setup) != 0 {
-		t.Fatal("Pi permission driver does not expect setup processes")
-	}
-	gate := filepath.Join(host.root, "permission-gate.ts")
+	configured := host.lifecycleCommand(t)
+	gate := filepath.Join(host.launched.Root, "permission-gate.ts")
 	host.writeFile(t, gate, piPermissionGate)
-	cmd := host.command(t, configured.Env, "--mode", "rpc", "--provider", "aht-compat", "--model", "compat", "--extension", gate)
+	cmd := host.command(t, configured.Env, "--mode", "rpc", "--provider", harness.LaunchProviderName, "--model", fakeModel, "--extension", gate)
 	input, next := permissionJSONPipes(t, cmd)
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "permission-prompt", "type": "prompt", "message": compatibilityPrompt})
@@ -149,17 +147,14 @@ func (frames *jsonlFrames) next(t *testing.T) map[string]any {
 // needed: always-ask gates the built-in shell tool itself.
 func runOmpPermission(t *testing.T, host *isolatedHost, allow bool) {
 	t.Helper()
-	configured, setup := host.lifecycleCommand(t)
-	if len(setup) != 0 {
-		t.Fatal("OMP permission driver does not expect setup processes")
-	}
+	configured := host.lifecycleCommand(t)
 	// Keep the existing fixture's explicit loading of the managed extension;
 	// do not copy its print-mode or auto-approval flags.
 	hooks := hookArguments(configured.Args)
 	if len(hooks) == 0 {
 		t.Fatal("OMP lifecycle command did not specify its managed hook")
 	}
-	args := append([]string{"--mode", "rpc", "--model", "aht-compat/compat", "--approval-mode", "always-ask"}, hooks...)
+	args := append([]string{"--mode", "rpc", "--model", harness.LaunchProviderName + "/" + fakeModel, "--approval-mode", "always-ask"}, hooks...)
 	cmd := host.command(t, configured.Env, args...)
 	input, next := permissionJSONPipes(t, cmd)
 	process := startPermissionProcess(t, host, cmd)

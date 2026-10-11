@@ -12,6 +12,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/testtmux"
 )
 
@@ -27,11 +28,11 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	}
 	// The installed launcher can update itself. Run a disposable copy of its
 	// resolved executable, never modify the developer's native installation.
-	sourcePath, err := filepath.EvalSymlinks(host.hostPath)
+	sourcePath, err := filepath.EvalSymlinks(host.launched.Executable)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nativePath := filepath.Join(host.root, "grok-native")
+	nativePath := filepath.Join(host.launched.Root, "grok-native")
 	copyExecutable(t, sourcePath, nativePath)
 
 	pane := host.startGrokPane(t, command, nativePath)
@@ -47,9 +48,9 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		}
 	})
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first native Grok provider request step = %d, want 0", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first native Grok provider request step = %d, want 0", hold.Request.Index)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("native Grok did not reach its first active provider request")
@@ -137,9 +138,9 @@ func (host *isolatedHost) startGrokPane(t *testing.T, command *exec.Cmd, nativeP
 		t.Fatal(err)
 	}
 	args := append([]string{"-i"}, command.Env...)
-	args = append(args, nativePath, "--model", "aht-compat", "--always-approve", "--disable-web-search", "--no-memory", compatibilityPrompt)
+	args = append(args, nativePath, "--model", harness.LaunchProviderName, "--always-approve", "--disable-web-search", "--no-memory", compatibilityPrompt)
 	if err := pane.Respawn(t.Context(), gotmux.RespawnOptions{
-		Dir: host.work, Program: gotmux.Exec("env", args...), KillRunning: true,
+		Dir: host.launched.Work, Program: gotmux.Exec("env", args...), KillRunning: true,
 	}); err != nil {
 		t.Fatal(err)
 	}

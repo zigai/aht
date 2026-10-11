@@ -28,10 +28,7 @@ func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 		}
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
-			configured, setup := host.lifecycleCommand(t)
-			if len(setup) != 0 {
-				t.Fatal("unexpected CLI provider setup commands")
-			}
+			configured := host.lifecycleCommand(t)
 			switch contract.ID {
 			case registry.Harness("claude"):
 				runClaudePermission(t, host, configured.Env, allow)
@@ -219,7 +216,7 @@ func (wire *cliPermissionWire) call(t *testing.T, id int, method string, params 
 
 func runClaudePermission(t *testing.T, host *isolatedHost, env []string, allow bool) {
 	t.Helper()
-	command := host.command(t, env, "-p", "--model", "compat", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--permission-prompt-tool", "stdio", "--permission-mode", "default", "--settings", `{"permissions":{"ask":["Bash"]}}`)
+	command := host.command(t, env, "-p", "--model", fakeModel, "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--permission-prompt-tool", "stdio", "--permission-mode", "default", "--settings", `{"permissions":{"ask":["Bash"]}}`)
 	wire, process := startCLIPermissionWire(t, host, command, false)
 	wire.send(t, map[string]any{"type": "control_request", "request_id": "aht-init", "request": map[string]any{"subtype": "initialize"}})
 	awaitClaudeInitialized(t, wire)
@@ -287,7 +284,7 @@ func runCodexPermission(t *testing.T, host *isolatedHost, env []string, allow bo
 	wire.call(t, 1, "initialize", map[string]any{"clientInfo": map[string]any{"name": "aht_compat", "version": "1"}, "capabilities": map[string]any{"experimentalApi": true}})
 	wire.send(t, map[string]any{"method": "initialized", "params": map[string]any{}})
 	id := trustCodexHooks(t, host, wire, 3)
-	thread := wire.call(t, id, "thread/start", map[string]any{"model": "compat", "cwd": host.work, "approvalPolicy": "untrusted", "sandbox": "workspace-write"})
+	thread := wire.call(t, id, "thread/start", map[string]any{"model": fakeModel, "cwd": host.launched.Work, "approvalPolicy": "untrusted", "sandbox": "workspace-write"})
 	threadID := cliString(t, cliField(t, cliField(t, thread, "thread"), "id"))
 	wire.call(t, id+1, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": compatibilityPrompt}}})
 	var waiting registry.Session
@@ -322,7 +319,7 @@ func runCodexPermission(t *testing.T, host *isolatedHost, env []string, allow bo
 
 func trustCodexHooks(t *testing.T, host *isolatedHost, wire *cliPermissionWire, firstID int) int {
 	t.Helper()
-	inventory := wire.call(t, 2, "hooks/list", map[string]any{"cwds": []string{host.work}})
+	inventory := wire.call(t, 2, "hooks/list", map[string]any{"cwds": []string{host.launched.Work}})
 	var entries []struct {
 		Hooks []struct {
 			Key     string `json:"key"`
@@ -359,7 +356,7 @@ func codexDecision(allow bool) string {
 func runCopilotPermission(t *testing.T, host *isolatedHost, env []string, allow bool) {
 	t.Helper()
 	wire, process := startCLIPermissionWire(t, host, host.command(t, env, "--headless", "--stdio", "--no-auto-update", "--no-auto-login"), true)
-	created := wire.call(t, 2, "session.create", map[string]any{"model": "compat", "workingDirectory": host.work, "requestPermission": true, "provider": map[string]any{"type": "openai", "baseUrl": host.provider.URL() + "/v1", "apiKey": "compat"}})
+	created := wire.call(t, 2, "session.create", map[string]any{"model": fakeModel, "workingDirectory": host.launched.Work, "requestPermission": true, "provider": map[string]any{"type": "openai", "baseUrl": host.provider.URL() + "/v1", "apiKey": fakeAPIKey}})
 	sessionID := cliString(t, cliField(t, created, "sessionId"))
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": 3, "method": "session.send", "params": map[string]any{"sessionId": sessionID, "prompt": compatibilityPrompt}})
 	turn := &copilotPermissionTurn{host: host, wire: wire, sessionID: sessionID, allow: allow}
@@ -469,7 +466,7 @@ func (turn *copilotPermissionTurn) answerPermission(t *testing.T, data json.RawM
 func copilotDecisionKinds(t *testing.T, host *isolatedHost) (string, string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	out, versionErr := compatibilityOutput(ctx, host.command(t, host.env, "--version"))
+	out, versionErr := compatibilityOutput(ctx, host.command(t, host.launched.Env, "--version"))
 	cancel()
 	if versionErr != nil {
 		t.Fatalf("Copilot permission version probe: %v\n%s", versionErr, out)
@@ -482,7 +479,7 @@ func copilotDecisionKinds(t *testing.T, host *isolatedHost) (string, string) {
 
 func (turn *copilotPermissionTurn) observeToolCompletion(t *testing.T, data json.RawMessage) {
 	t.Helper()
-	if cliString(t, cliField(t, data, "toolCallId")) != turn.host.provider.callID {
+	if cliString(t, cliField(t, data, "toolCallId")) != turn.host.callID {
 		t.Fatalf("Copilot completed an unrelated tool: %s", data)
 	}
 	success := string(cliField(t, data, "success")) == "true"

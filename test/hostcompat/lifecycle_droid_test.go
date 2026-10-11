@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func droidRPCArguments(work string) []string {
-	return []string{"exec", "--input-format", "stream-jsonrpc", "--output-format", "stream-jsonrpc", "--auto", "high", "--cwd", work}
-}
+const droidLaunchModelID = "custom:" + harness.LaunchProviderName + "-0"
 
 // The public SDK's JsonRpcEnvelopeSchema requires type and factoryApiVersion;
 // factoryProtocolVersion is optional, not a client-selected compatibility pin.
@@ -25,11 +25,11 @@ func droidRPCArguments(work string) []string {
 // not set the initialized session's autonomy level on current Droid.
 func (host *isolatedHost) runDroidRPC(t *testing.T, env []string, previous *registry.Session, interrupt bool) []byte {
 	t.Helper()
-	command := host.command(t, env, droidRPCArguments(host.work)...)
+	command := host.headlessCommand(t, env)
 	input, next := permissionJSONPipes(t, command)
 	process := startPermissionProcess(t, host, command)
 	session := &droidRPCSession{input: input, next: next, pending: make(map[string]bool), interrupt: interrupt}
-	session.open(t, host.work, previous)
+	session.open(t, host.launched.Work, previous)
 	session.send(t, "compat-turn", "droid.add_user_message", map[string]any{"text": compatibilityPrompt})
 	host.driveDroidCheckpoints(t, process, session.sessionID, previous, interrupt)
 	if interrupt {
@@ -74,7 +74,7 @@ func (session *droidRPCSession) open(t *testing.T, work string, previous *regist
 	t.Helper()
 	if previous == nil {
 		session.send(t, "compat-session", "droid.initialize_session", map[string]any{
-			"machineId": "aht-compat", "cwd": work, "modelId": "custom:aht-compat-0",
+			"machineId": "aht-compat", "cwd": work, "modelId": droidLaunchModelID,
 			"interactionMode": "auto", "autonomyLevel": "high",
 		})
 	} else {
@@ -93,7 +93,7 @@ func (session *droidRPCSession) open(t *testing.T, work string, previous *regist
 			}
 		}
 		settings, _ := result["settings"].(map[string]any)
-		if settings["modelId"] != "custom:aht-compat-0" || settings["interactionMode"] != "auto" || settings["autonomyLevel"] != "high" {
+		if settings["modelId"] != droidLaunchModelID || settings["interactionMode"] != "auto" || settings["autonomyLevel"] != "high" {
 			t.Fatalf("Droid did not retain the isolated model and native auto-high policy: %v", settings)
 		}
 	}
@@ -190,10 +190,11 @@ func (host *isolatedHost) driveDroidCheckpoints(t *testing.T, process *permissio
 		gates = 1
 	}
 	for expected := range gates {
+		var hold *fakeprovider.Hold
 		select {
-		case step := <-host.provider.checkpoints:
-			if step != expected {
-				t.Fatalf("Droid provider checkpoint = %d, want %d", step, expected)
+		case hold = <-host.provider.Holds():
+			if hold.Request.Index != expected {
+				t.Fatalf("Droid provider checkpoint = %d, want %d", hold.Request.Index, expected)
 			}
 		case <-process.done:
 			t.Fatalf("Droid exited before provider checkpoint %d: %v", expected, process.waitErr())
@@ -204,7 +205,7 @@ func (host *isolatedHost) driveDroidCheckpoints(t *testing.T, process *permissio
 			return droidRunningAtHeldRequest(session, sessionID, previous)
 		})
 		if !interrupt {
-			host.provider.release <- struct{}{}
+			hold.Release()
 		}
 	}
 }

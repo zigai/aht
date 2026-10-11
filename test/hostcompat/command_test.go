@@ -97,11 +97,6 @@ func runCompatibilityCommand(ctx context.Context, command *exec.Cmd) error {
 	return errors.Join(waitErr, killCompatibilityGroup(command))
 }
 
-func cancelWithCompatibilityGroup(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error { return killCompatibilityGroup(command) }
-}
-
 func killCompatibilityGroup(command *exec.Cmd) error {
 	if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("kill compatibility process group: %w", err)

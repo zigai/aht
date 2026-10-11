@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -25,7 +26,7 @@ func (host *isolatedHost) validateSession(session registry.Session) bool {
 	if session.SessionID != "" && session.SessionID != session.Observations.Native.SessionID {
 		return false
 	}
-	if host.work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.work) {
+	if host.launched.Work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.launched.Work) {
 		return false
 	}
 	return terminalSession(host.contract.ID, session)
@@ -40,7 +41,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 			Present: true,
 		},
 	}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)}
-	host := &isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
+	host := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
 	if host.validateSession(processOnly) {
 		t.Fatal("oracle accepted process-only session for non-exempt harness")
 	}
@@ -79,7 +80,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		t.Fatal("oracle accepted session with mismatched native session ID")
 	}
 
-	cursorHost := &isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
+	cursorHost := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
 	if !cursorHost.validateSession(processOnly) {
 		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
 	}
@@ -278,7 +279,7 @@ func turnEndEvent(id registry.Harness) string {
 
 func (host *isolatedHost) assertNativeEvents(t *testing.T) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(host.root, "native-events"))
+	data, err := os.ReadFile(host.nativeEvents)
 	if err != nil {
 		t.Fatalf("reading native callback evidence: %v", err)
 	}

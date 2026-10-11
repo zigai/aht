@@ -32,7 +32,7 @@ compatibility-tests:
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
-    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m
+    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat ./test/interactive -run '^TestCurrentHarness(Lifecycle|Interactive)$' -timeout 15m
 
 # Validate built release artifacts and optional published copies
 artifacts artifact_dir="dist" published_dir="":
