@@ -63,6 +63,25 @@ func TestRenderSystemdUnitEscapesLiteralPercentSigns(t *testing.T) {
 	}
 }
 
+func TestRenderSystemdUnitEscapesQuotesAndDollarSigns(t *testing.T) {
+	for _, test := range []struct {
+		name, store, want string
+	}{
+		{name: "apostrophe", store: "/home/o'neil/state.json", want: `ExecStart=/bin/aht --store "/home/o'neil/state.json" `},
+		{name: "dollar", store: "/srv/a$b/${HOME}/state.json", want: "ExecStart=/bin/aht --store /srv/a$$b/$${HOME}/state.json "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := RenderSystemdUnit(Options{Binary: "/bin/aht", StorePath: test.store, Interval: 3 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("rendered unit missing %q:\n%s", test.want, got)
+			}
+		})
+	}
+}
+
 func TestInstallUsesAtomicContentAndManagerArgv(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)

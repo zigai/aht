@@ -1,6 +1,8 @@
 package install
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,5 +208,61 @@ func TestInstallKimiCodeDryRunDoesNotWrite(t *testing.T) {
 	}
 	if _, err := os.Stat(result.Path); err == nil {
 		t.Fatalf("expected dry-run not to write %s", result.Path)
+	}
+}
+
+func TestKimiCodeRefusesUnpairedManagedMarker(t *testing.T) {
+	managedBlock := kimiCodeManagedStart + "\n[[hooks]]\nevent = \"Stop\"\ncommand = \"aht report kimi-code\"\n" + kimiCodeManagedEnd + "\n"
+	for _, test := range []struct {
+		name   string
+		action func(context.Context, Options) (Result, error)
+		config string
+	}{
+		{name: "install with lone start", action: Run, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n"},
+		{name: "install with lone start before block", action: Run, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock},
+		{name: "remove with lone start before block", action: Remove, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("KIMI_CODE_HOME", dir)
+			path := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := test.action(t.Context(), Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary})
+
+			if !errors.Is(err, errManagedBlockMarker) {
+				t.Fatalf("error = %v, want %v", err, errManagedBlockMarker)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != test.config {
+				t.Fatalf("config = %q, %v; want unchanged %q", data, err, test.config)
+			}
+		})
+	}
+}
+
+func TestInstallKimiCodeRefusesHooksItCannotExtend(t *testing.T) {
+	for _, config := range []string{
+		"hooks = []\n",
+		"[hooks]\nenabled = false\n",
+	} {
+		t.Run(config, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("KIMI_CODE_HOME", dir)
+			path := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(t.Context(), Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary})
+
+			if !errors.Is(err, errHookConfigShape) {
+				t.Fatalf("error = %v, want %v", err, errHookConfigShape)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != config {
+				t.Fatalf("config = %q, %v; want unchanged %q", data, err, config)
+			}
+		})
 	}
 }

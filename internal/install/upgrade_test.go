@@ -83,23 +83,31 @@ func assertUpgradedHooks(t *testing.T, path string, before []byte, dry bool) {
 }
 
 func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
-	isolateUpgradeHome(t)
-	target := "/custom/harness with 'quotes'"
-	old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: target}, registry.Harness("codex"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
-	if err != nil || len(results) != 1 || results[0].Path != old.Path {
-		t.Fatalf("upgrade = %+v, %v", results, err)
-	}
-	got, exists, err := installedShim(registry.Harness("codex"))
-	if err != nil || !exists || got != target {
-		t.Fatalf("target = %q, %v, %v", got, exists, err)
-	}
-	native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
-	if err != nil || native {
-		t.Fatalf("shim migrated to native: %v, %v", native, err)
+	for _, test := range []struct {
+		name, target string
+	}{
+		{name: "quotes", target: "/custom/harness with 'quotes'"},
+		{name: "newline", target: "/custom/harness\nbin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUpgradeHome(t)
+			old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: test.target}, registry.Harness("codex"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+			if err != nil || len(results) != 1 || results[0].Path != old.Path {
+				t.Fatalf("upgrade = %+v, %v", results, err)
+			}
+			got, exists, err := installedShim(registry.Harness("codex"))
+			if err != nil || !exists || got != test.target {
+				t.Fatalf("target = %q, %v, %v", got, exists, err)
+			}
+			native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
+			if err != nil || native {
+				t.Fatalf("shim migrated to native: %v, %v", native, err)
+			}
+		})
 	}
 }
 

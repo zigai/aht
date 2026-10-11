@@ -119,7 +119,15 @@ type captureExecutable struct {
 
 func captureBinary(t *testing.T) captureExecutable {
 	t.Helper()
-	dir := t.TempDir()
+	return captureBinaryIn(t, "")
+}
+
+func captureBinaryIn(t *testing.T, directory string) captureExecutable {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), directory)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	capture := filepath.Join(dir, "arguments")
 	command := filepath.Join(dir, "aht-capture")
 	script := runtimeScript(t, "sh/capture-report.sh")

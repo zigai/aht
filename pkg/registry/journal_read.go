@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 )
@@ -111,7 +112,7 @@ func (s *MemoryStore) commandLocked(ctx context.Context, entry journalEntry) (jo
 	if err := ctx.Err(); err != nil {
 		return journalResult{}, fmt.Errorf("committing registry command: %w", err)
 	}
-	if journalWorthy(entry, result) {
+	if journalWorthy(entry, result) || !maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
 		if err := appendJournal(s.path, entry); err != nil {
 			return journalResult{}, err
 		}
@@ -130,7 +131,8 @@ func (s *MemoryStore) commandLocked(ctx context.Context, entry journalEntry) (jo
 
 // journalWorthy reports whether losing entry in an owner crash would matter:
 // consumer-visible changes, native reports, and administrative commands.
-// Heartbeat-only process, placement, listing, and screen refreshes are not.
+// Heartbeat-only process, placement, listing, and screen refreshes are not,
+// unless they record an ended process that later reports are checked against.
 func journalWorthy(entry journalEntry, result journalResult) bool {
 	if entry.Reset || entry.DeleteAfter != nil || len(result.changes) > 0 {
 		return true
