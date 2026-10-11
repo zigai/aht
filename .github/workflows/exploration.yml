@@ -33,6 +33,22 @@ jobs:
             target: FuzzParseCurrent
           - package: ./pkg/tmux
             target: FuzzParseListPanes
+          - package: ./pkg/registry
+            target: FuzzObservationCodec
+          - package: ./pkg/registry
+            target: FuzzSessionCodec
+          - package: ./pkg/registry
+            target: FuzzJournalEntryCodec
+          - package: ./pkg/registry
+            target: FuzzJournalRecovery
+          - package: ./internal/harness/transcript
+            target: FuzzMessageParts
+          - package: ./internal/harness/transcript
+            target: FuzzParseTree
+          - package: ./internal/config
+            target: FuzzDecodeTOMLLayers
+          - package: ./internal/cli
+            target: FuzzReportAttributes
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -73,6 +89,22 @@ jobs:
         with:
           path: ${{ steps.go.outputs.build-cache }}/fuzz
           key: aht-fuzz-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  extended-simulations:
+    name: Extended deterministic simulations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          profile: extended-simulations
+
+      - name: Run extended simulations
+        run: AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/catalog
 
   vulnerabilities:
     runs-on: ubuntu-24.04

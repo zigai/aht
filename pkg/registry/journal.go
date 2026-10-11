@@ -209,7 +209,7 @@ func appendJournal(path string, entry journalEntry) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	file, err := registryFSFor(path).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening journal: %w", err)
 	}
@@ -224,7 +224,7 @@ func appendJournal(path string, entry journalEntry) error {
 }
 
 func journalMissing(path string) (bool, error) {
-	_, err := os.Lstat(path + ".journal.jsonl")
+	_, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
@@ -234,7 +234,7 @@ func journalMissing(path string) (bool, error) {
 	return false, nil
 }
 
-func writeJournal(file *os.File, data []byte) error {
+func writeJournal(file registryFile, data []byte) error {
 	offset, err := journalAppendOffset(file)
 	if err != nil {
 		return err
@@ -255,7 +255,7 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 	if err := writeSnapshotAtomic(path, snap); err != nil {
 		return err
 	}
-	info, err := os.Lstat(path + ".journal.jsonl")
+	info, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
 	if err == nil && info.Size() == 0 {
 		return nil
 	}
@@ -263,7 +263,7 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 		return fmt.Errorf("stating journal: %w", err)
 	}
 	created := err != nil
-	file, err := os.OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, err := registryFSFor(path).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("truncating journal: %w", err)
 	}
@@ -273,7 +273,7 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 	return syncDir(filepath.Dir(path))
 }
 
-func journalAppendOffset(file *os.File) (int64, error) {
+func journalAppendOffset(file registryFile) (int64, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("stating journal: %w", err)
