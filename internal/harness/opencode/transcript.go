@@ -10,7 +10,7 @@ func (opencodeHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"opencode*.db"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{transcript.DatabaseLocation(filepath.Join(transcript.DataHome(home), "opencode"), "OPENCODE_DB")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{transcript.DatabaseLocation(filepath.Join(transcript.DataHome(home), "opencode"), "OPENCODE_DB")}, nil
 }
 func skipTranscriptDirectory(path string) bool { return path != "." }

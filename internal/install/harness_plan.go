@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/shlex"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 
@@ -120,31 +121,33 @@ func installJSONCommandHooks(
 func applyJSONCommandHooks(
 	harness registry.Harness,
 	plan harnesspkg.JSONCommandHookInstallPlan,
-) func(map[string]any) bool {
+) func(map[string]any) (bool, error) {
 	source := managedSource(plan.Source, harness)
 	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(harness, plan)
 
-	return func(harnessConfig map[string]any) bool {
+	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig, desiredConfig})
 		changed := false
 		hooks := harnessConfig
 		if plan.HooksAtRoot {
 			changed = removeWrappedCommandHooks(harnessConfig, isManaged)
 		} else {
-			var ok bool
-			hooks, ok = harnessConfig["hooks"].(map[string]any)
-			if !ok {
-				hooks = make(map[string]any)
-				harnessConfig["hooks"] = hooks
+			var err error
+			hooks, err = hooksObject(harnessConfig)
+			if err != nil {
+				return false, err
 			}
 		}
 		for _, event := range events {
-			updated := upsertManagedCommandHookGroups(
+			updated, err := upsertManagedCommandHookGroups(
 				hooks,
 				event,
 				desiredByEvent[event],
 				isManaged,
 			)
+			if err != nil {
+				return false, err
+			}
 			changed = changed || updated
 		}
 		for event := range hooks {
@@ -155,8 +158,34 @@ func applyJSONCommandHooks(
 			changed = changed || removed
 		}
 
-		return changed
+		return changed, nil
 	}
+}
+
+func hooksObject(harnessConfig map[string]any) (map[string]any, error) {
+	value, exists := harnessConfig["hooks"]
+	if !exists || value == nil {
+		hooks := make(map[string]any)
+		harnessConfig["hooks"] = hooks
+		return hooks, nil
+	}
+	hooks, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: hooks is not an object", errHookConfigShape)
+	}
+	return hooks, nil
+}
+
+func hookEventList(hooks map[string]any, event string) ([]any, error) {
+	value, exists := hooks[event]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	definitions, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: hooks.%s is not an array", errHookConfigShape, event)
+	}
+	return definitions, nil
 }
 
 func buildJSONCommandHooks(
@@ -213,18 +242,21 @@ func installCursorJSONHooks(
 func applyCursorJSONHooks(
 	harness registry.Harness,
 	plan harnesspkg.CursorJSONHookInstallPlan,
-) func(map[string]any) bool {
+) func(map[string]any) (bool, error) {
 	source := managedSource(plan.Source, harness)
 
-	return func(harnessConfig map[string]any) bool {
+	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig})
 		changed := ensureCursorVersion(harnessConfig)
 		for _, hook := range plan.Hooks {
-			updated := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
+			updated, err := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
+			if err != nil {
+				return false, err
+			}
 			changed = changed || updated
 		}
 
-		return changed
+		return changed, nil
 	}
 }
 
@@ -238,20 +270,19 @@ func ensureCursorVersion(harnessConfig map[string]any) bool {
 	return true
 }
 
-func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) bool {
-	hooks, ok := harnessConfig["hooks"].(map[string]any)
-	if !ok {
-		hooks = make(map[string]any)
-		harnessConfig["hooks"] = hooks
+func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) (bool, error) {
+	hooks, err := hooksObject(harnessConfig)
+	if err != nil {
+		return false, err
 	}
-	definitions, ok := hooks[event].([]any)
-	if !ok {
-		definitions = nil
+	definitions, err := hookEventList(hooks, event)
+	if err != nil {
+		return false, err
 	}
 
 	managedCount, exactCount := countManagedCursorHooks(definitions, command, isManaged)
 	if managedCount == 1 && exactCount == 1 {
-		return false
+		return false, nil
 	}
 
 	definitions, _ = removeManagedCursorHooks(definitions, isManaged)
@@ -260,7 +291,7 @@ func upsertCursorHook(harnessConfig map[string]any, event string, command string
 		"timeout": float64(harnesspkg.HookTimeoutSeconds),
 	})
 
-	return true
+	return true, nil
 }
 
 func countManagedCursorHooks(
@@ -321,7 +352,14 @@ func installManagedTextBlock(
 		return Result{}, err
 	}
 
-	next := upsertManagedTextBlock(current, plan.StartMarker, plan.EndMarker, plan.Block)
+	cleaned, err := removeManagedTextBlock(current, plan.StartMarker, plan.EndMarker)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s: %w", plan.Path, err)
+	}
+	next := appendManagedTextBlock(cleaned, plan.Block)
+	if filepath.Ext(plan.Path) == ".toml" && validTOML(cleaned) && !validTOML(next) {
+		return Result{}, fmt.Errorf("%w: %s cannot take the managed block", errHookConfigShape, plan.Path)
+	}
 	changed := current != next
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
@@ -361,22 +399,21 @@ func readTextFile(path string) (string, error) {
 	return string(data), nil
 }
 
-func upsertManagedTextBlock(current string, startMarker string, endMarker string, block string) string {
-	cleaned := removeManagedTextBlock(current, startMarker, endMarker)
-
-	return appendManagedTextBlock(cleaned, block)
+func validTOML(content string) bool {
+	var document map[string]any
+	return toml.Unmarshal([]byte(content), &document) == nil
 }
 
-func removeManagedTextBlock(current string, startMarker string, endMarker string) string {
+func removeManagedTextBlock(current string, startMarker string, endMarker string) (string, error) {
 	for {
 		start := strings.Index(current, startMarker)
 		if start < 0 {
-			return current
+			return current, nil
 		}
 
 		endOffset := strings.Index(current[start:], endMarker)
-		if endOffset < 0 {
-			return current
+		if endOffset < 0 || strings.Contains(current[start+len(startMarker):start+endOffset], startMarker) {
+			return "", errManagedBlockMarker
 		}
 
 		end := start + endOffset + len(endMarker)

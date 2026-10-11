@@ -15,6 +15,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/cline"
 	"github.com/zigai/aht/v2/internal/harness/codex"
 	"github.com/zigai/aht/v2/internal/harness/copilot"
+	"github.com/zigai/aht/v2/internal/harness/crush"
 	"github.com/zigai/aht/v2/internal/harness/cursor"
 	"github.com/zigai/aht/v2/internal/harness/droid"
 	"github.com/zigai/aht/v2/internal/harness/goose"
@@ -26,6 +27,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/openclaw"
 	"github.com/zigai/aht/v2/internal/harness/opencode"
 	"github.com/zigai/aht/v2/internal/harness/pi"
+	"github.com/zigai/aht/v2/internal/harness/qwen"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -63,6 +65,8 @@ var adapters = []harness.Adapter{
 	openclaw.New(),
 	hermes.New(),
 	amp.New(),
+	crush.New(),
+	qwen.New(),
 }
 
 var adaptersByID = func() map[registry.Harness]harness.Adapter {

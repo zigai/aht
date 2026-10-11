@@ -39,8 +39,8 @@ func readSessionRows(t *testing.T, sessionColumns, sessionValues string) transcr
 	decoder := &transcript.Decoder{Conversation: &conversation, Recognized: &recognized}
 	for rows.Next() {
 		var row transcript.Row
-		var created, updated sql.NullString
-		if err := rows.Scan(&row.SessionID, &row.Title, &row.CWD, &created, &updated, &row.MessageID, &row.Role, &row.Body, &row.Timestamp); err != nil {
+		var created, updated, messageOrder sql.NullString
+		if err := rows.Scan(&row.SessionID, &row.Title, &row.CWD, &created, &updated, &row.MessageID, &messageOrder, &row.Role, &row.Body, &row.Timestamp); err != nil {
 			t.Fatal(err)
 		}
 		if err := read(t.Context(), decoder, row); err != nil {

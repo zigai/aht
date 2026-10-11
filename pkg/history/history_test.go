@@ -85,6 +85,12 @@ func TestNativeJSONLReaders(t *testing.T) {
 `},
 		{"kimi", registry.Harness("kimi-code"), "native-session/agents/main/wire.jsonl", kimiWireHistory},
 		{"cline", registry.Harness("cline"), "native-session.messages.json", `{"version":1,"sessionId":"native-session","system_prompt":"system-only","messages":[{"id":"u1","role":"user","content":"Refresh Token"},{"role":"tool","content":[{"type":"tool-result","output":{"value":"tool-only"}}]},{"role":"assistant","content":[{"type":"reasoning","text":"reasoning-only"}]}]}`},
+		{"qwen", registry.Harness("qwen"), "native-session.jsonl", `{"uuid":"u1","parentUuid":null,"sessionId":"native-session","timestamp":"2026-09-01T00:00:01Z","type":"user","cwd":"/work/project","gitBranch":"main","message":{"role":"user","parts":[{"text":"Refresh Token"}]}}
+{"uuid":"s1","parentUuid":"u1","sessionId":"native-session","timestamp":"2026-09-01T00:00:02Z","type":"system","cwd":"/work/project","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"system-only"}}}
+{"uuid":"a1","parentUuid":"s1","sessionId":"native-session","timestamp":"2026-09-01T00:00:03Z","type":"assistant","cwd":"/work/project","model":"compat","message":{"role":"model","parts":[{"text":"reasoning-only","thought":true},{"functionCall":{"id":"c1","name":"run_shell_command","args":{"command":"tool-only"}}}]}}
+{"uuid":"t1","parentUuid":"a1","sessionId":"native-session","timestamp":"2026-09-01T00:00:04Z","type":"tool_result","cwd":"/work/project","message":{"role":"user","parts":[{"functionResponse":{"id":"c1","name":"run_shell_command","response":{"output":"tool-only"}}}]}}
+{"uuid":"n1","parentUuid":"t1","sessionId":"native-session","timestamp":"2026-09-01T00:00:05Z","type":"system","cwd":"/work/project","subtype":"custom_title","systemPayload":{"customTitle":"Authentication work","titleSource":"auto"}}
+`},
 		{"amp", registry.Harness("amp"), "T-native-session.json", `{"v":1,"id":"native-session","title":"Authentication work","env":{"initial":{"trees":[{"uri":"file:///work/project"}]}},"messages":[{"messageId":0,"role":"user","content":[{"type":"text","text":"Refresh Token"}]},{"messageId":1,"role":"tool","content":[{"type":"tool-result","output":"tool-only"}]},{"messageId":2,"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]},{"messageId":3,"role":"system","content":"system-only"}]}`},
 	}
 	for _, tt := range tests {
@@ -303,7 +309,7 @@ func assertNativeTextPolicy(t *testing.T, h registry.Harness, file, body string)
 	if len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "native-session" {
 		t.Fatalf("matches = %#v", result.Matches)
 	}
-	if (h == registry.Harness("omp") || h == registry.Harness("pi")) && result.Matches[0].Conversation.Title != "Authentication work" {
+	if (h == registry.Harness("omp") || h == registry.Harness("pi") || h == registry.Harness("qwen")) && result.Matches[0].Conversation.Title != "Authentication work" {
 		t.Fatalf("%s conversation title = %q, want %q", h, result.Matches[0].Conversation.Title, "Authentication work")
 	}
 	if result.Matches[0].RegistryStates == nil || len(result.Matches[0].RegistryStates) != 0 {
@@ -327,6 +333,54 @@ func assertRoleFilteringPolicy(t *testing.T, h registry.Harness, file, body stri
 	}
 	if got := searchFile(t, h, file, body, "reasoning-only", true); len(got.Matches) != 0 {
 		t.Fatal("tool opt-in exposed reasoning")
+	}
+}
+
+func TestQwenHistorySourcesAtDifferentDepths(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const parent = `{"uuid":"u1","sessionId":"main","type":"user","cwd":"/work/project","message":{"role":"user","parts":[{"text":"refresh parent"}]}}` + "\n"
+	const child = `{"uuid":"u2","sessionId":"main","type":"user","cwd":"/work/project","message":{"role":"user","parts":[{"text":"refresh child"}]}}` + "\n"
+	writeHistory(t, root, "projects/-work-project/chats/main.jsonl", parent)
+	writeHistory(t, root, "projects/-work-project/chats/archive/archived.jsonl", strings.ReplaceAll(parent, "main", "archived"))
+	writeHistory(t, root, "projects/-work-project/subagents/main/agent-a1.jsonl", child)
+	writeHistory(t, root, "projects/-work-project/memory/ignored.jsonl", strings.ReplaceAll(parent, "main", "memory"))
+	writeHistory(t, root, "projects/-work-project/workflows/run/journal.jsonl", strings.ReplaceAll(parent, "main", "workflow"))
+	for _, test := range []struct{ name, path string }{
+		{"runtime", root},
+		{"projects", filepath.Join(root, "projects")},
+		{"project", filepath.Join(root, "projects", "-work-project")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("qwen"), Path: test.path}}}
+			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}})
+			if err != nil || len(result.Issues) != 0 {
+				t.Fatalf("history = %#v, %v", result, err)
+			}
+			parts := make(map[string]int)
+			for _, match := range result.Matches {
+				parts[match.Conversation.SessionID] = match.MatchingParts
+			}
+			if diff := cmp.Diff(map[string]int{"main": 2, "archived": 1}, parts); diff != "" {
+				t.Fatalf("session matching parts (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestQwenSessionWithOnlySystemRecordsIsNotAnIssue(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeHistory(t, root, "-work-project/chats/native-session.jsonl", `{"uuid":"s1","parentUuid":null,"sessionId":"native-session","timestamp":"2026-09-01T00:00:00Z","type":"system","cwd":"/work/project","subtype":"slash_command","systemPayload":{"phase":"invocation","rawCommand":"/model"}}
+`)
+	writeHistory(t, root, "-work-project/chats/other-session.jsonl", `{"uuid":"u1","parentUuid":null,"sessionId":"other-session","timestamp":"2026-09-01T00:00:00Z","type":"user","cwd":"/work/project","message":{"role":"user","parts":[{"text":"refresh token"}]}}
+`)
+	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("qwen"), Path: root}}}
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}})
+	if err != nil || len(result.Issues) != 0 || len(result.Matches) != 1 {
+		t.Fatalf("search = %#v, %v", result, err)
 	}
 }
 

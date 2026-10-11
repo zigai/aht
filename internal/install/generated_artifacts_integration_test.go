@@ -114,17 +114,22 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 	return artifacts
 }
 
+func generatedHookArtifact(t *testing.T, harness registry.Harness, path string, apply func(map[string]any) (bool, error)) generatedArtifact {
+	t.Helper()
+	config := make(map[string]any)
+	if _, err := apply(config); err != nil {
+		t.Fatalf("apply %s hooks: %v", harness, err)
+	}
+	return generatedJSONArtifact(t, harness, path, config)
+}
+
 func generatedActionArtifacts(t *testing.T, harness registry.Harness, binary captureExecutable, action harnesspkg.InstallAction) []generatedArtifact {
 	t.Helper()
 	switch plan := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		config := make(map[string]any)
-		applyJSONCommandHooks(harness, plan.Plan)(config)
-		return []generatedArtifact{generatedJSONArtifact(t, harness, plan.Plan.Path, config)}
+		return []generatedArtifact{generatedHookArtifact(t, harness, plan.Plan.Path, applyJSONCommandHooks(harness, plan.Plan))}
 	case harnesspkg.CursorJSONHooksAction:
-		config := make(map[string]any)
-		applyCursorJSONHooks(harness, plan.Plan)(config)
-		return []generatedArtifact{generatedJSONArtifact(t, harness, plan.Plan.Path, config)}
+		return []generatedArtifact{generatedHookArtifact(t, harness, plan.Plan.Path, applyCursorJSONHooks(harness, plan.Plan))}
 	case harnesspkg.ManagedTextBlockAction:
 		return []generatedArtifact{{harness: harness, path: plan.Plan.Path, content: plan.Plan.Block}}
 	case harnesspkg.RenderedFileAction:
@@ -185,7 +190,12 @@ func generatedCommandHook(t *testing.T, harness registry.Harness) string {
 
 func generatedArtifactContent(t *testing.T, harness registry.Harness, suffix string) string {
 	t.Helper()
-	for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: captureBinaryCommand(t), path: os.Getenv("AHT_CAPTURE")}) {
+	return generatedArtifactContentFor(t, captureExecutable{command: captureBinaryCommand(t), path: os.Getenv("AHT_CAPTURE")}, harness, suffix)
+}
+
+func generatedArtifactContentFor(t *testing.T, binary captureExecutable, harness registry.Harness, suffix string) string {
+	t.Helper()
+	for _, artifact := range collectGeneratedArtifacts(t, binary) {
 		if artifact.harness == harness && strings.HasSuffix(filepath.ToSlash(artifact.path), suffix) {
 			return artifact.content
 		}

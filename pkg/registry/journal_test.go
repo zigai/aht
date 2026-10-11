@@ -260,3 +260,33 @@ func TestFallbackGCCannotBeResurrectedByMemoryFlush(t *testing.T) {
 		t.Fatalf("retained live session: %v", err)
 	}
 }
+
+func TestMemoryStoreJournalsEndedProcessBeforeLateReport(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	memory, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := memory.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	process := ProcessIdentity{PID: 100, PPID: 1, ProcessGroupID: 100, Foreground: true, StartIdentity: "boot:100", Executable: "/bin/agent"}
+	if _, err := memory.Observe(t.Context(), Observation{Harness: HarnessCodex, Evidence: &Sighting{Process: process, Present: false}}); err != nil {
+		t.Fatal(err)
+	}
+	late := Observation{Harness: HarnessCodex, Subject: ObservationIdentity{SessionID: "late"}, Evidence: &Report{Activity: new(ActivityIdle), Process: &process}}
+	if _, err := memory.Observe(t.Context(), late); !errors.Is(err, ErrProcessEnded) {
+		t.Fatalf("late report from ended process: %v, want ErrProcessEnded", err)
+	}
+
+	sessions, err := NewFileStore(path, fixtureRules{}).List(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("disk replay recreated sessions the tracker rejected: %+v", sessions)
+	}
+}

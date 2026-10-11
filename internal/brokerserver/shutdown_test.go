@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
 	"testing"
 	"time"
 
@@ -35,15 +34,8 @@ func (l *failingListener) Accept() (net.Conn, error) {
 }
 
 func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
-	path, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	path := shortStatePath(t)
 	socketPath := broker.SocketPath(path)
-	t.Cleanup(func() {
-		_ = os.Remove(path)
-		_ = os.Remove(socketPath)
-	})
 	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)

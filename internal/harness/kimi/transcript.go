@@ -77,6 +77,6 @@ func skipTranscriptDirectory(path string) bool {
 	return filepath.Base(filepath.Dir(path)) == "agents" && filepath.Base(path) != "main"
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(transcript.EnvPath("KIMI_CODE_HOME", filepath.Join(home, ".kimi-code")), "sessions")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(transcript.EnvPath("KIMI_CODE_HOME", filepath.Join(home, ".kimi-code")), "sessions")}, nil
 }

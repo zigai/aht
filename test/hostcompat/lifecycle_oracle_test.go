@@ -103,6 +103,9 @@ func discoveryScope(id registry.Harness) string {
 	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
+	if id == registry.Harness("crush") {
+		return "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md documents only PreToolUse, so the hook supplies native session identity while start, idle, permission, and end come from the screen manifest; native lifecycle support is not asserted"
+	}
 	return "only plugin loading is asserted, through `agy plugin list` and `agy -p /hooks` with the documented Gemini API-key provider pointed at a local endpoint; hook inspection must not make model requests, and native lifecycle support is not asserted"
 }
 
@@ -300,7 +303,7 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 	t.Parallel()
 	gone := registry.PresenceGone
 	idle := registry.ActivityIdle
-	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid")} {
+	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid"), registry.Harness("qwen")} {
 		t.Run(string(id), func(t *testing.T) {
 			session := registry.Session{Observations: registry.Observations{Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle}}, Liveness: registry.NewLiveness(gone, registry.ActivityValue(nil), nil)}
 			if terminalSession(id, session) {

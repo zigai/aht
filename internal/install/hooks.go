@@ -38,20 +38,20 @@ func upsertManagedCommandHookGroups(
 	event string,
 	desiredGroups []any,
 	isManaged func(string) bool,
-) bool {
-	groups, ok := hooks[event].([]any)
-	if !ok {
-		groups = nil
+) (bool, error) {
+	groups, err := hookEventList(hooks, event)
+	if err != nil {
+		return false, err
 	}
 
 	if managedCommandHookGroupsCurrent(groups, desiredGroups, isManaged) {
-		return false
+		return false, nil
 	}
 
 	groups, _ = removeManagedCommandHookGroups(groups, isManaged)
 	hooks[event] = append(groups, desiredGroups...)
 
-	return true
+	return true, nil
 }
 
 func managedCommandHookGroupsCurrent(groups []any, desiredGroups []any, isManaged func(string) bool) bool {

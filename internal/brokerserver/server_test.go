@@ -101,14 +101,7 @@ func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	path, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(path)
-		_ = os.Remove(broker.SocketPath(path))
-	})
+	path := shortStatePath(t)
 	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
@@ -193,19 +186,14 @@ func receiveSnapshot(
 }
 
 // shortStatePath keeps the derived socket below Darwin's Unix socket path limit.
-func shortStatePath() (string, error) {
-	stateFile, err := os.CreateTemp("", "aht-broker-state-")
+func shortStatePath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "aht-broker-") //nolint:usetesting // reason: t.TempDir paths are too long for a Unix socket on Darwin.
 	if err != nil {
-		return "", fmt.Errorf("creating temporary state path: %w", err)
+		t.Fatalf("creating temporary state directory: %v", err)
 	}
-	path := stateFile.Name()
-	if err := stateFile.Close(); err != nil {
-		return "", fmt.Errorf("closing temporary state file: %w", err)
-	}
-	if err := os.Remove(path); err != nil {
-		return "", fmt.Errorf("removing temporary state file: %w", err)
-	}
-	return path, nil
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "state")
 }
 
 type brokerAdversityFixture struct {
@@ -487,14 +475,7 @@ func TestServer_ShutsDownCleanly(t *testing.T) {
 
 func startBrokerAdversityFixture(t *testing.T) brokerAdversityFixture {
 	t.Helper()
-	path, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(path)
-		_ = os.Remove(broker.SocketPath(path))
-	})
+	path := shortStatePath(t)
 	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
@@ -610,11 +591,7 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	path, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(path) })
+	path := shortStatePath(t)
 
 	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {

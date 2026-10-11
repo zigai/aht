@@ -31,6 +31,8 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 		runPythonPermissionScenarios(t, contract, oracle)
 	case registry.Harness("opencode"), registry.Harness("kilo"):
 		runServerPermissionScenarios(t, contract, oracle)
+	case registry.Harness("qwen"):
+		runQwenPermissionScenarios(t, contract, oracle)
 	default:
 		// These lifecycle adapters do not advertise permission-wait coverage.
 		// Cursor and Antigravity are separately tested as discovery-only hosts.
