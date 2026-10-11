@@ -241,3 +241,28 @@ func TestKimiCodeRefusesUnpairedManagedMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallKimiCodeRefusesHooksItCannotExtend(t *testing.T) {
+	for _, config := range []string{
+		"hooks = []\n",
+		"[hooks]\nenabled = false\n",
+	} {
+		t.Run(config, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("KIMI_CODE_HOME", dir)
+			path := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(t.Context(), Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary})
+
+			if !errors.Is(err, errHookConfigShape) {
+				t.Fatalf("error = %v, want %v", err, errHookConfigShape)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != config {
+				t.Fatalf("config = %q, %v; want unchanged %q", data, err, config)
+			}
+		})
+	}
+}

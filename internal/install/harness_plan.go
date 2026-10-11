@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/shlex"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 
@@ -356,6 +357,9 @@ func installManagedTextBlock(
 		return Result{}, fmt.Errorf("%s: %w", plan.Path, err)
 	}
 	next := appendManagedTextBlock(cleaned, plan.Block)
+	if filepath.Ext(plan.Path) == ".toml" && validTOML(cleaned) && !validTOML(next) {
+		return Result{}, fmt.Errorf("%w: %s cannot take the managed block", errHookConfigShape, plan.Path)
+	}
 	changed := current != next
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
@@ -393,6 +397,11 @@ func readTextFile(path string) (string, error) {
 	}
 
 	return string(data), nil
+}
+
+func validTOML(content string) bool {
+	var document map[string]any
+	return toml.Unmarshal([]byte(content), &document) == nil
 }
 
 func removeManagedTextBlock(current string, startMarker string, endMarker string) (string, error) {
