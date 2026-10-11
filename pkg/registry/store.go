@@ -201,7 +201,7 @@ func (s *FileStore) loadSnapshot() (snapshot, error) {
 }
 
 func readSnapshotFile(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := registryFSFor(path).Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening store: %w", err)
 	}
@@ -238,10 +238,11 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 		return ErrStoreTooLarge
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	fs := registryFSFor(path)
+	if err := fs.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
 	}
-	temp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	temp, err := fs.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("creating temp store: %w", err)
 	}
@@ -252,7 +253,7 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 			return
 		}
 		_ = temp.Close()
-		_ = os.Remove(tempPath)
+		_ = fs.Remove(tempPath)
 	}()
 	if err := temp.Chmod(0o600); err != nil {
 		return fmt.Errorf("setting temp store permissions: %w", err)
@@ -266,7 +267,7 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("closing temp store: %w", err)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := fs.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("renaming temp store: %w", err)
 	}
 	keep = true
@@ -274,7 +275,7 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 }
 
 func syncDir(dir string) error {
-	handle, err := os.Open(dir)
+	handle, err := registryFSForDir(dir).Open(dir)
 	if err != nil {
 		return fmt.Errorf("opening state directory: %w", err)
 	}

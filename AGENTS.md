@@ -94,4 +94,24 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
    - Resume commands in `internal/harness/catalog/catalog_test.go`, history
      fixtures in `pkg/history/history_test.go`, and title capability in
      `pkg/harness/capabilities_test.go` when those capabilities exist.
+   - The adapter is picked up automatically by the generated lifecycle
+     properties in `internal/harness/catalog/lifecycle_property_test.go`. It
+     must pass them without per-harness exceptions.
 7. Verify with `just check`.
+
+## Invariants and Simulation
+
+Registry, journal, and observer behavior is checked by named invariants and
+seeded simulations:
+
+- Session invariants live in `internal/registrycheck` (`core` holds the rules
+  `pkg/registry` tests share); cross-step registry invariants live in
+  `pkg/registry/invariants_test.go`. When a change introduces a new rule about
+  session state, add it there and record the situation as a required
+  `registrycheck.Coverage` name so the property cannot pass vacuously.
+- Registry file I/O goes through `registryFSFor` (`pkg/registry/fs.go`), so the
+  journal crash tests see every write, sync, and rename.
+- A failing randomized test prints its seed. Reproduce from that seed, fix the
+  code, and keep the seed as a regression case.
+- Run `just explore` (extended seeds and bounded fuzzing) before merging
+  registry, journal, or observer changes.
