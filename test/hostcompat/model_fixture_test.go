@@ -52,6 +52,36 @@ func (host *isolatedHost) configureDroidModel(t *testing.T, baseURL string) {
 	host.writeFile(t, path, string(updated))
 }
 
+// Qwen Code spends extra model requests on background memory, skill review and
+// followup suggestions after a turn; the scripted provider answers exactly the
+// turn's requests.
+func (host *isolatedHost) configureQwenModel(t *testing.T) {
+	t.Helper()
+
+	path := filepath.Join(host.home, ".qwen", "settings.json")
+	settings := make(map[string]any)
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings["memory"] = map[string]any{
+		"enableManagedAutoMemory": false,
+		"enableManagedAutoDream":  false,
+		"enableAutoSkill":         false,
+	}
+	settings["ui"] = map[string]any{"enableFollowupSuggestions": false}
+	updated, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.writeFile(t, path, string(updated))
+}
+
 func freeLocalPort(t *testing.T) int {
 	t.Helper()
 	var config net.ListenConfig
