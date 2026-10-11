@@ -257,6 +257,8 @@ linters:
         - "github.com/urfave/cli\\..*"
         - "github.com/spf13/cobra\\..*"
         - "github.com/spf13/pflag\\..*"
+        - "github.com/anthropics/anthropic-sdk-go.*"
+        - "github.com/openai/openai-go/v3.*"
   exclusions:
     warn-unused: false
     presets: []
