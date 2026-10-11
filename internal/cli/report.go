@@ -18,6 +18,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/observer"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
 
@@ -469,22 +470,29 @@ func reportProcessAncestors(ctx context.Context, pid int) []processinfo.Process 
 }
 
 func reportProcessIdentity(harnessID registry.Harness, processes []processinfo.Process) *registry.ProcessIdentity {
-	for _, process := range processes {
-		if !reportProcessMatchesHarness(process, harnessID) {
-			continue
+	var selected *processinfo.Process
+	for index, process := range processes {
+		matches := reportProcessMatchesHarness(process, harnessID)
+		if selected != nil && !matches {
+			break
 		}
-		return &registry.ProcessIdentity{
-			PID:            process.PID,
-			PPID:           process.PPID,
-			ProcessGroupID: process.ProcessGroupID,
-			Foreground:     process.Foreground,
-			StartIdentity:  process.StartIdentity,
-			Executable:     process.Executable,
-			CWD:            process.CWD,
-			TTY:            process.TTY,
+		if matches && (selected == nil || !observer.IsAgentWrapper(process)) {
+			selected = &processes[index]
 		}
 	}
-	return nil
+	if selected == nil {
+		return nil
+	}
+	return &registry.ProcessIdentity{
+		PID:            selected.PID,
+		PPID:           selected.PPID,
+		ProcessGroupID: selected.ProcessGroupID,
+		Foreground:     selected.Foreground,
+		StartIdentity:  selected.StartIdentity,
+		Executable:     selected.Executable,
+		CWD:            selected.CWD,
+		TTY:            selected.TTY,
+	}
 }
 
 func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
