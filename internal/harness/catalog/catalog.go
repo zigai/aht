@@ -15,6 +15,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/cline"
 	"github.com/zigai/aht/v2/internal/harness/codex"
 	"github.com/zigai/aht/v2/internal/harness/copilot"
+	"github.com/zigai/aht/v2/internal/harness/crush"
 	"github.com/zigai/aht/v2/internal/harness/cursor"
 	"github.com/zigai/aht/v2/internal/harness/droid"
 	"github.com/zigai/aht/v2/internal/harness/goose"
@@ -64,6 +65,7 @@ var adapters = []harness.Adapter{
 	openclaw.New(),
 	hermes.New(),
 	amp.New(),
+	crush.New(),
 	qwen.New(),
 }
 

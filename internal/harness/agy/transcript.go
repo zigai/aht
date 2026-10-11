@@ -10,6 +10,6 @@ func (agyHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: nil, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: nil, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(home, ".gemini", "antigravity-cli")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(home, ".gemini", "antigravity-cli")}, nil
 }

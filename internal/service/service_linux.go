@@ -128,8 +128,8 @@ func systemdArg(value string) string {
 	if value == "" {
 		return "\"\""
 	}
-	value = strings.ReplaceAll(value, "%", "%%")
-	if strings.IndexFunc(value, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '"' || r == '\\' }) < 0 {
+	value = strings.ReplaceAll(strings.ReplaceAll(value, "%", "%%"), "$", "$$")
+	if strings.IndexFunc(value, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '"' || r == '\'' || r == '\\' }) < 0 {
 		return value
 	}
 	return strconv.Quote(value)

@@ -58,6 +58,49 @@ func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
 	}
 }
 
+func TestCrushScreenActivitySupersedesToolHookReport(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	process := registry.ProcessIdentity{PID: 321, StartIdentity: "boot:321", Executable: "crush"}
+	running := registry.ActivityRunning
+	idle := registry.ActivityIdle
+	observations := []registry.Observation{
+		{
+			Harness: registry.Harness("crush"), At: at,
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{Integration: "crush-hook"},
+				Event:    "PreToolUse", Activity: &running, Process: &process,
+			},
+		},
+		{
+			Harness: registry.Harness("crush"), At: at.Add(time.Minute),
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: (*registry.Reading)(&registry.ScreenObservation{
+				Activity: idle, Authority: registry.AuthorityScreen, Reason: "manifest_rule",
+				RuleID: "input_prompt", Process: process, ObservedAt: at.Add(time.Minute),
+			}),
+		},
+	}
+
+	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.SessionID != "native-session" {
+			t.Fatalf("session id = %q, want native identity from the hook", session.SessionID)
+		}
+		if session.Activity() == nil || *session.Activity() != idle || session.Decision() == nil || session.Decision().Authority != registry.AuthorityScreen {
+			t.Fatalf("activity = %v, decision = %v, want idle from the Crush screen", session.Activity(), session.Decision())
+		}
+	}
+}
+
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
 
@@ -214,6 +257,13 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionID:   testSessionID,
 			sessionPath: "",
 			want:        []string{"amp", "threads", "continue", testSessionID},
+		},
+		{
+			name:        "crush",
+			harness:     registry.Harness("crush"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"crush", "--session", testSessionID},
 		},
 		{
 			name:        "qwen",
@@ -1199,6 +1249,46 @@ func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
 			}
 			if got.SessionID != testSessionID || got.SessionPath != "" {
 				t.Fatalf("PayloadDefaults without a home = %+v, want session %q and no path", got, testSessionID)
+			}
+		})
+	}
+}
+
+func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		harness    registry.Harness
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{"claude", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"claude", "Elicitation", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "idle_prompt", "claude_permission_mode": "bypassPermissions"}, nil},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "agent_needs_input"}, nil},
+		{"claude", "state", registry.ActivityWaiting, map[string]string{"claude_permission_mode": "plan"}, nil},
+		{"claude", "PermissionRequest", registry.ActivityRunning, nil, nil},
+		{"claude", "StopFailure", registry.ActivityFailed, map[string]string{"claude_error_type": "rate_limit"}, new(registry.ActivityDetailUsageLimit)},
+		{"claude", "PostToolUseFailure", registry.ActivityRunning, map[string]string{"claude_error_type": "rate_limit"}, nil},
+		{"codex", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"copilot", "permissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"droid", "Notification", registry.ActivityWaiting, map[string]string{"droid_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
+		{"hermes", "pre_approval_request", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"amp", "thread.state", registry.ActivityWaiting, map[string]string{"amp_thread_state": "awaiting-approval"}, new(registry.ActivityDetailPermission)},
+		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_question"}, new(registry.ActivityDetailQuestion)},
+		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_permission"}, new(registry.ActivityDetailPermission)},
+		{"opencode", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"opencode", "question.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
+		{"kilo", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"pi", "ui_prompt_start", registry.ActivityWaiting, nil, nil},
+	} {
+		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
+			report := &registry.Report{Event: test.event, Activity: &test.activity, Attributes: test.attributes}
+			observation := PrepareObservation(registry.Observation{Harness: test.harness, Evidence: report})
+			if !reflect.DeepEqual(observation.Report().Detail, test.want) {
+				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
 			}
 		})
 	}

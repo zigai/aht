@@ -140,6 +140,21 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	})
 }
 
+func TestGeneratedRuntimesRunBinaryOutsideBasicMultilingualPlane(t *testing.T) {
+	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
+	requireRuntimeTool(t, "node")
+	capture := captureBinaryIn(t, "tools-\U000F0000")
+	t.Setenv("AHT_CAPTURE", capture.path)
+
+	cline := generatedArtifactContentFor(t, capture, registry.Harness("cline"), "index.js")
+	runNodeRuntime(t, "index.js", cline, runtimeScript(t, "node/cline-failed.mjs"), nil)
+	requireCapturedArguments(t, capture.path, "report", "cline", "--activity", "failed")
+
+	pi := generatedArtifactContentFor(t, capture, registry.Harness("pi"), "aht-state.ts")
+	runNodeRuntime(t, "extension.ts", pi, runtimeScript(t, "node/pi-failed.mjs"), nil)
+	requireCapturedArguments(t, capture.path, "report", "pi", "--activity", "failed")
+}
+
 func TestGeneratedNativeTitleWatcherCommands(t *testing.T) {
 	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
 	requireRuntimeTool(t, "sh")

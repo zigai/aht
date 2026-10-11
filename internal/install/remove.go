@@ -193,7 +193,10 @@ func removeTextBlock(opts Options, harnessID registry.Harness, plan harnesspkg.M
 	if err != nil {
 		return Result{}, err
 	}
-	next := removeManagedTextBlock(current, plan.StartMarker, plan.EndMarker)
+	next, err := removeManagedTextBlock(current, plan.StartMarker, plan.EndMarker)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s: %w", plan.Path, err)
+	}
 	changed := next != current
 	if changed && !opts.DryRun {
 		if err := writeFileAtomic(plan.Path, []byte(next), "creating config directory", "writing cleaned config"); err != nil {

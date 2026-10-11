@@ -45,7 +45,10 @@ func TestTranscriptSourcesExpandHomeOverrides(t *testing.T) {
 			t.Setenv("QWEN_RUNTIME_DIR", scenario.runtime)
 			want := filepath.Join(home, scenario.want, "projects")
 
-			sources := New().Transcript().Sources(home)
+			sources, err := New().Transcript().Sources(home)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(sources) != 1 || sources[0] != want {
 				t.Fatalf("sources = %q, want [%q]", sources, want)
 			}

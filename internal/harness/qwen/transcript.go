@@ -125,12 +125,12 @@ func (qwenHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: false, Parent: subagentParent}
 }
 
-func transcriptSources(home string) []string {
+func transcriptSources(home string) ([]string, error) {
 	base := runtimeDirectory(home)
 	if base == "" {
-		return nil
+		return nil, nil
 	}
-	return []string{filepath.Join(base, "projects")}
+	return []string{filepath.Join(base, "projects")}, nil
 }
 
 // Sessions live in <project>/chats and subagent transcripts in

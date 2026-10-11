@@ -26,6 +26,7 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 [`kilo`](https://github.com/kilo-org/kilocode),
 [`droid`](https://factory.ai),
 [`amp`](https://ampcode.com),
+[`crush`](https://github.com/charmbracelet/crush),
 [`qwen`](https://github.com/QwenLM/qwen-code).
 
 ## Installation

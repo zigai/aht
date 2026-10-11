@@ -94,7 +94,7 @@ func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {
 
 func renderOpenclawPlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", harness.ScriptString(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 

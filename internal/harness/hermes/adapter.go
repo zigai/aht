@@ -117,7 +117,7 @@ provides_hooks:
 
 func renderHermesPlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", harness.ScriptString(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 

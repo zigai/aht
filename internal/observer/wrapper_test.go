@@ -7,36 +7,100 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestResolveHarnessUsesScopedAgentHint(t *testing.T) {
+func TestResolveHarnessIdentifiesSessionProcesses(t *testing.T) {
 	t.Parallel()
-	process := processinfo.Process{Executable: "/usr/bin/fence", AgentHint: "claude", Args: []string{"fence", "--", "node"}}
-	harness, ok := resolveHarness(process)
-	if !ok || harness != registry.Harness("claude") {
-		t.Fatalf("resolveHarness = %q, %v; want Claude from hint", harness, ok)
+	for _, test := range []struct {
+		name    string
+		process processinfo.Process
+		want    registry.Harness
+	}{
+		{
+			name:    "scoped agent hint",
+			process: processinfo.Process{Executable: "/usr/bin/fence", AgentHint: "claude", Args: []string{"fence", "--", "node"}},
+			want:    "claude",
+		},
+		{
+			name: "omp headless session",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/omp",
+				Args:       []string{"/home/test/.local/bin/omp", "--print", "check this repository"},
+			},
+			want: "omp",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			harness, ok := resolveHarness(test.process)
+			if !ok || harness != test.want {
+				t.Fatalf("resolveHarness = %q, %v; want %q", harness, ok, test.want)
+			}
+		})
 	}
 }
 
-func TestResolveHarnessIgnoresOmpInternalWorkers(t *testing.T) {
+func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 	t.Parallel()
-	process := processinfo.Process{
-		Executable: "/home/test/.local/bin/omp",
-		Args:       []string{"/home/test/.local/bin/omp", "__omp_worker_js_eval_process"},
-	}
-	harness, ok := resolveHarness(process)
-	if ok || harness != "" {
-		t.Fatalf("resolveHarness = %q, %v; want internal OMP worker ignored", harness, ok)
-	}
-}
-
-func TestResolveHarnessKeepsOmpHeadlessSessions(t *testing.T) {
-	t.Parallel()
-	process := processinfo.Process{
-		Executable: "/home/test/.local/bin/omp",
-		Args:       []string{"/home/test/.local/bin/omp", "--print", "check this repository"},
-	}
-	harness, ok := resolveHarness(process)
-	if !ok || harness != registry.Harness("omp") {
-		t.Fatalf("resolveHarness = %q, %v; want headless OMP session", harness, ok)
+	for _, test := range []struct {
+		name    string
+		process processinfo.Process
+	}{
+		{
+			name: "omp internal worker",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/omp",
+				Args:       []string{"/home/test/.local/bin/omp", "__omp_worker_js_eval_process"},
+			},
+		},
+		{
+			name: "test fixture",
+			process: processinfo.Process{
+				Executable: "/tmp/aht-systest-12345/codex",
+				Args:       []string{"/tmp/aht-systest-12345/codex", "--store", "/tmp/aht-systest-12345/state.json"},
+			},
+		},
+		{
+			name: "aht tracker loop",
+			process: processinfo.Process{
+				Executable: "/home/test/bin/codex",
+				Args:       []string{"codex", "manage", "tracker", "run", "--quiet"},
+			},
+		},
+		{
+			name: "electron helper --type=zygote",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/agy",
+				Args:       []string{"/home/test/.local/bin/agy", "--type=zygote"},
+			},
+		},
+		{
+			name: "electron helper --type=utility",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/agy",
+				Args:       []string{"/home/test/.local/bin/agy", "--type=utility"},
+			},
+		},
+		{
+			name: "electron helper --type=gpu-process",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/agy",
+				Args:       []string{"/home/test/.local/bin/agy", "--type=gpu-process"},
+			},
+		},
+		{
+			name: "electron helper --type=renderer",
+			process: processinfo.Process{
+				Executable: "/home/test/.local/bin/agy",
+				Args:       []string{"/home/test/.local/bin/agy", "--type=renderer"},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			harness, ok := resolveHarness(test.process)
+			if ok || harness != "" {
+				t.Fatalf("resolveHarness = %q, %v; want ignored", harness, ok)
+			}
+		})
 	}
 }
 
@@ -51,44 +115,6 @@ func TestResolveHarnessScansKnownWrappers(t *testing.T) {
 				t.Fatalf("resolveHarness = %q, %v; want Codex behind %s", harness, ok, wrapper)
 			}
 		})
-	}
-}
-
-func TestResolveHarnessIgnoresElectronHelperSubprocesses(t *testing.T) {
-	t.Parallel()
-	for _, arg := range []string{"--type=zygote", "--type=utility", "--type=gpu-process", "--type=renderer"} {
-		process := processinfo.Process{
-			Executable: "/home/test/.local/bin/agy",
-			Args:       []string{"/home/test/.local/bin/agy", arg},
-		}
-		harness, ok := resolveHarness(process)
-		if ok || harness != "" {
-			t.Fatalf("resolveHarness with %s = %q, %v; want ignored helper", arg, harness, ok)
-		}
-	}
-}
-
-func TestResolveHarnessIgnoresTestFixtures(t *testing.T) {
-	t.Parallel()
-	process := processinfo.Process{
-		Executable: "/tmp/aht-systest-12345/codex",
-		Args:       []string{"/tmp/aht-systest-12345/codex", "--store", "/tmp/aht-systest-12345/state.json"},
-	}
-	harness, ok := resolveHarness(process)
-	if ok || harness != "" {
-		t.Fatalf("resolveHarness = %q, %v; want ignored test fixture", harness, ok)
-	}
-}
-
-func TestResolveHarnessIgnoresAhtTrackerLoop(t *testing.T) {
-	t.Parallel()
-	process := processinfo.Process{
-		Executable: "/home/test/bin/codex",
-		Args:       []string{"codex", "manage", "tracker", "run", "--quiet"},
-	}
-	harness, ok := resolveHarness(process)
-	if ok || harness != "" {
-		t.Fatalf("resolveHarness = %q, %v; want ignored tracker runner", harness, ok)
 	}
 }
 

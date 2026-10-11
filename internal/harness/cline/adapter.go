@@ -125,7 +125,7 @@ func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 
 func renderClinePlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", harness.ScriptString(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 

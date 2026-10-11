@@ -3,6 +3,7 @@ package install
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -578,6 +579,41 @@ func TestCodexDryRunDoesNotRequireCLIOrMutateFiles(t *testing.T) {
 	options.DryRun = false
 	if _, err := Run(t.Context(), options); err == nil {
 		t.Fatal("native install succeeded without Codex")
+	}
+}
+
+func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
+	for _, test := range []struct {
+		name, harness, config string
+	}{
+		{name: "claude event object", harness: "claude", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
+		{name: "claude hooks string", harness: "claude", config: `{"hooks": "my-notifier"}`},
+		{name: "cursor event object", harness: "cursor", config: `{"version": 1, "hooks": {"stop": {"command": "my-notifier"}}}`},
+		{name: "cursor hooks string", harness: "cursor", config: `{"version": 1, "hooks": "my-notifier"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+			path := filepath.Join(home, ".cursor", "hooks.json")
+			if test.harness == "claude" {
+				path = filepath.Join(home, ".claude", "settings.json")
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(t.Context(), Options{Harness: registry.Harness(test.harness), Binary: testInstallBinary})
+			if !errors.Is(err, errHookConfigShape) {
+				t.Fatalf("install error = %v, want errHookConfigShape", err)
+			}
+			if got := readTestFile(t, path, "reading hook config"); string(got) != test.config {
+				t.Fatalf("install changed the user's config to:\n%s", got)
+			}
+		})
 	}
 }
 
@@ -1272,4 +1308,98 @@ func countClaudeNativeWatcherHooks(t *testing.T, group map[string]any, event str
 		}
 	}
 	return watchers
+}
+
+type managedReplacementCase struct {
+	Harness              registry.Harness
+	Path                 string
+	RemovedText          string
+	RequiredText         []string
+	FirstChangeMessage   string
+	SecondChangedMessage string
+}
+
+func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
+	t.Helper()
+
+	result, err := Run(t.Context(), Options{
+		Harness:      test.Harness,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal(test.FirstChangeMessage)
+	}
+
+	text := string(readTestFile(t, test.Path, "reading installed hooks"))
+	if strings.Contains(text, test.RemovedText) {
+		t.Fatalf("expected old managed hook to be removed: %s", text)
+	}
+	requireTextContainsAll(t, text, test.RequiredText, "installed hooks")
+
+	second, err := Run(t.Context(), Options{
+		Harness:      test.Harness,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal(test.SecondChangedMessage)
+	}
+	if second.NextStep != "" {
+		t.Fatalf("idempotent install unexpectedly requires activation: %q", second.NextStep)
+	}
+}
+
+func requireTestHookCommand(t *testing.T, hooks map[string]any, event string) string {
+	t.Helper()
+	handler := requireTestHookHandler(t, hooks, event)
+	command, ok := handler["command"].(string)
+	if !ok || command == "" {
+		t.Fatalf("expected %s hook command, got %#v", event, handler["command"])
+	}
+	return command
+}
+
+func requireTestHookTimeoutSeconds(t *testing.T, hooks map[string]any, event string) float64 {
+	t.Helper()
+	handler := requireTestHookHandler(t, hooks, event)
+	timeoutSeconds, ok := handler["timeout"].(float64)
+	if !ok {
+		t.Fatalf("expected %s hook timeout, got %#v", event, handler["timeout"])
+	}
+	return timeoutSeconds
+}
+
+func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) map[string]any {
+	t.Helper()
+
+	groups, ok := hooks[event].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("expected one %s hook group, got %#v", event, hooks[event])
+	}
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s hook group object, got %#v", event, groups[0])
+	}
+	handlers, ok := group["hooks"].([]any)
+	if !ok || len(handlers) != 1 {
+		t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
+	}
+	handler, ok := handlers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
+	}
+	return handler
 }

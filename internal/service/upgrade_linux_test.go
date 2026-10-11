@@ -136,6 +136,31 @@ func assertServiceContent(t *testing.T, path, expected string) {
 	}
 }
 
+func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
+	for _, test := range []struct {
+		name, store string
+	}{
+		{name: "apostrophe", store: "/home/o'neil/state.json"},
+		{name: "dollar", store: "/srv/a$b/${HOME}/state.json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			options := Options{Binary: "/bin/aht", StorePath: test.store, Interval: 7 * time.Second}
+			if _, err := New(&recordingExecutor{}).Install(t.Context(), options); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := New(&upgradeExecutor{stopped: true}).Upgrade(t.Context(), options.Binary, true)
+			if err != nil {
+				t.Fatalf("upgrade could not read the installed unit: %v", err)
+			}
+			if !result.Current {
+				t.Fatalf("upgrade recovered different settings: %+v", result)
+			}
+		})
+	}
+}
+
 func TestUpgradeLeavesMissingForeignAndInvalidServicesAlone(t *testing.T) {
 	for _, content := range []string{"", "user service", "# aht managed observer service\n# version: 7\nExecStart=/bin/aht --unknown setting\n"} {
 		t.Run(content, func(t *testing.T) {

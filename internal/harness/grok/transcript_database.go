@@ -8,7 +8,7 @@ import (
 )
 
 const nativeQuery = `SELECT s.id AS session_id, s.title AS title, s.cwd_last AS cwd,
- s.created_at AS created, s.updated_at AS updated, CAST(m.seq AS TEXT) AS message_id,
+ s.created_at AS created, s.updated_at AS updated, CAST(m.seq AS TEXT) AS message_id, CAST(m.seq AS TEXT) AS message_order,
  m.role AS role, m.message_json AS body, m.created_at AS timestamp
  FROM sessions s JOIN messages m ON m.session_id=s.id`
 
