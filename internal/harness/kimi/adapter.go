@@ -183,7 +183,7 @@ func payloadScalarString(payload map[string]any, key string) string {
 }
 
 func kimiCodeSessionPath(sessionID string) (string, error) {
-	if sessionID == "" || filepath.Base(sessionID) != sessionID {
+	if !kimiCodeSessionDirectoryName(sessionID) {
 		return "", nil
 	}
 	home := kimiCodeHome()
@@ -213,6 +213,10 @@ func kimiCodeSessionPath(sessionID string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func kimiCodeSessionDirectoryName(sessionID string) bool {
+	return sessionID != "" && sessionID != "." && sessionID != ".." && filepath.Base(sessionID) == sessionID
 }
 
 func kimiCodeHome() string {

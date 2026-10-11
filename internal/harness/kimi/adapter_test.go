@@ -43,14 +43,22 @@ func TestKimiCodeSessionPathReturnsCurrentSessionDirectory(t *testing.T) {
 }
 
 func TestKimiCodeSessionPathRejectsPathTraversal(t *testing.T) {
-	t.Setenv("KIMI_CODE_HOME", t.TempDir())
-
-	path, err := kimiCodeSessionPath("../wanted")
-	if err != nil {
-		t.Fatal(err)
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	for _, directory := range []string{filepath.Join("sessions", "work-hash", "nested"), filepath.Join("sessions", "wanted")} {
+		if err := os.MkdirAll(filepath.Join(home, directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if path != "" {
-		t.Fatalf("session path = %q, want empty", path)
+
+	for _, sessionID := range []string{"../wanted", "..", "."} {
+		path, err := kimiCodeSessionPath(sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path != "" {
+			t.Fatalf("session path for %q = %q, want empty", sessionID, path)
+		}
 	}
 }
 
