@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 	"pgregory.net/rapid"
@@ -20,6 +21,11 @@ import (
 
 const generatedRuntimeSensitiveSentinel = "AHT_SENSITIVE_SENTINEL"
 
+var (
+	portableFileNameASCII = &unicode.RangeTable{R16: []unicode.Range16{{Lo: 0x01, Hi: 0x7f, Stride: 1}}}
+	portableFileNameRunes = []rune{'\u00a0', '\u00e9', '\u0130', '\u03a3', '\u4e16', '\U0001f680'}
+)
+
 func TestInstalledKimiHookPreservesShellArguments(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KIMI_CODE_HOME", home)
@@ -30,8 +36,8 @@ func TestInstalledKimiHookPreservesShellArguments(t *testing.T) {
 	definition := adapter.Definition()
 	script := runtimeScript(t, "sh/capture-arguments.sh")
 	rapid.Check(t, func(property *rapid.T) {
-		name := rapid.StringOfN(rapid.Rune().Filter(func(character rune) bool {
-			return character != 0 && character != '/'
+		name := rapid.StringOfN(rapid.RuneFrom(portableFileNameRunes, portableFileNameASCII).Filter(func(character rune) bool {
+			return character != '/'
 		}), 0, 24, 96).Draw(property, "binary name")
 		binary := filepath.Join(t.TempDir(), "capture-"+name)
 		if err := writeExecutableTestFile(binary, []byte(script)); err != nil {
