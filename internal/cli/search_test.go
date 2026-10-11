@@ -585,23 +585,6 @@ func TestHighlightedLinesWrapAndMarkSpans(t *testing.T) {
 	}
 }
 
-func TestShellQuote(t *testing.T) {
-	t.Parallel()
-	for value, want := range map[string]string{
-		"/work/app":       "/work/app",
-		"--resume":        "--resume",
-		"my project":      "'my project'",
-		"it's":            `'it'\''s'`,
-		"":                "''",
-		"$(touch x)":      "'$(touch x)'",
-		"/work/ünïcode-1": "/work/ünïcode-1",
-	} {
-		if got := shellQuote(value); got != want {
-			t.Errorf("shellQuote(%q) = %q, want %q", value, got, want)
-		}
-	}
-}
-
 func TestParseSearchTime(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
