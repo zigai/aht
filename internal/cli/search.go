@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/config"
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -565,13 +566,13 @@ func resumeLine(match history.Match) string {
 	}
 	quoted := make([]string, len(match.ResumeCommand))
 	for i, arg := range match.ResumeCommand {
-		quoted[i] = shellQuote(arg)
+		quoted[i] = harnesspkg.ShellQuote(arg)
 	}
 	command := strings.Join(quoted, " ")
 	if match.Conversation.CWD == "" {
 		return command
 	}
-	return "cd " + shellQuote(match.Conversation.CWD) + " && " + command
+	return "cd " + harnesspkg.ShellQuote(match.Conversation.CWD) + " && " + command
 }
 
 func pasteableResumeLine(match history.Match) string {
@@ -580,16 +581,6 @@ func pasteableResumeLine(match history.Match) string {
 		return ""
 	}
 	return resume
-}
-
-// shellQuote quotes one POSIX shell word, leaving plain words readable.
-func shellQuote(value string) string {
-	if value != "" && strings.IndexFunc(value, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("-_./:=@%+,", r)
-	}) < 0 {
-		return value
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func (app *application) writeSearchField(match history.Match, field string) error {
