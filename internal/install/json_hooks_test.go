@@ -3,6 +3,7 @@ package install
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -578,6 +579,41 @@ func TestCodexDryRunDoesNotRequireCLIOrMutateFiles(t *testing.T) {
 	options.DryRun = false
 	if _, err := Run(t.Context(), options); err == nil {
 		t.Fatal("native install succeeded without Codex")
+	}
+}
+
+func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
+	for _, test := range []struct {
+		name, harness, config string
+	}{
+		{name: "claude event object", harness: "claude", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
+		{name: "claude hooks string", harness: "claude", config: `{"hooks": "my-notifier"}`},
+		{name: "cursor event object", harness: "cursor", config: `{"version": 1, "hooks": {"stop": {"command": "my-notifier"}}}`},
+		{name: "cursor hooks string", harness: "cursor", config: `{"version": 1, "hooks": "my-notifier"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+			path := filepath.Join(home, ".cursor", "hooks.json")
+			if test.harness == "claude" {
+				path = filepath.Join(home, ".claude", "settings.json")
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(t.Context(), Options{Harness: registry.Harness(test.harness), Binary: testInstallBinary})
+			if !errors.Is(err, errHookConfigShape) {
+				t.Fatalf("install error = %v, want errHookConfigShape", err)
+			}
+			if got := readTestFile(t, path, "reading hook config"); string(got) != test.config {
+				t.Fatalf("install changed the user's config to:\n%s", got)
+			}
+		})
 	}
 }
 

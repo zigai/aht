@@ -22,6 +22,7 @@ var (
 	errUnsupportedHarness = errors.New("unsupported harness")
 	errForeignFile        = errors.New("file exists and is not managed by aht")
 	errBinaryEncoding     = errors.New("aht binary path is not valid UTF-8")
+	errHookConfigShape    = errors.New("hook config has an unexpected shape")
 )
 
 var allHarnesses = installableHarnesses()

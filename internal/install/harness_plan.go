@@ -120,31 +120,33 @@ func installJSONCommandHooks(
 func applyJSONCommandHooks(
 	harness registry.Harness,
 	plan harnesspkg.JSONCommandHookInstallPlan,
-) func(map[string]any) bool {
+) func(map[string]any) (bool, error) {
 	source := managedSource(plan.Source, harness)
 	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(harness, plan)
 
-	return func(harnessConfig map[string]any) bool {
+	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig, desiredConfig})
 		changed := false
 		hooks := harnessConfig
 		if plan.HooksAtRoot {
 			changed = removeWrappedCommandHooks(harnessConfig, isManaged)
 		} else {
-			var ok bool
-			hooks, ok = harnessConfig["hooks"].(map[string]any)
-			if !ok {
-				hooks = make(map[string]any)
-				harnessConfig["hooks"] = hooks
+			var err error
+			hooks, err = hooksObject(harnessConfig)
+			if err != nil {
+				return false, err
 			}
 		}
 		for _, event := range events {
-			updated := upsertManagedCommandHookGroups(
+			updated, err := upsertManagedCommandHookGroups(
 				hooks,
 				event,
 				desiredByEvent[event],
 				isManaged,
 			)
+			if err != nil {
+				return false, err
+			}
 			changed = changed || updated
 		}
 		for event := range hooks {
@@ -155,8 +157,34 @@ func applyJSONCommandHooks(
 			changed = changed || removed
 		}
 
-		return changed
+		return changed, nil
 	}
+}
+
+func hooksObject(harnessConfig map[string]any) (map[string]any, error) {
+	value, exists := harnessConfig["hooks"]
+	if !exists || value == nil {
+		hooks := make(map[string]any)
+		harnessConfig["hooks"] = hooks
+		return hooks, nil
+	}
+	hooks, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: hooks is not an object", errHookConfigShape)
+	}
+	return hooks, nil
+}
+
+func hookEventList(hooks map[string]any, event string) ([]any, error) {
+	value, exists := hooks[event]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	definitions, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: hooks.%s is not an array", errHookConfigShape, event)
+	}
+	return definitions, nil
 }
 
 func buildJSONCommandHooks(
@@ -213,18 +241,21 @@ func installCursorJSONHooks(
 func applyCursorJSONHooks(
 	harness registry.Harness,
 	plan harnesspkg.CursorJSONHookInstallPlan,
-) func(map[string]any) bool {
+) func(map[string]any) (bool, error) {
 	source := managedSource(plan.Source, harness)
 
-	return func(harnessConfig map[string]any) bool {
+	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig})
 		changed := ensureCursorVersion(harnessConfig)
 		for _, hook := range plan.Hooks {
-			updated := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
+			updated, err := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
+			if err != nil {
+				return false, err
+			}
 			changed = changed || updated
 		}
 
-		return changed
+		return changed, nil
 	}
 }
 
@@ -238,20 +269,19 @@ func ensureCursorVersion(harnessConfig map[string]any) bool {
 	return true
 }
 
-func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) bool {
-	hooks, ok := harnessConfig["hooks"].(map[string]any)
-	if !ok {
-		hooks = make(map[string]any)
-		harnessConfig["hooks"] = hooks
+func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) (bool, error) {
+	hooks, err := hooksObject(harnessConfig)
+	if err != nil {
+		return false, err
 	}
-	definitions, ok := hooks[event].([]any)
-	if !ok {
-		definitions = nil
+	definitions, err := hookEventList(hooks, event)
+	if err != nil {
+		return false, err
 	}
 
 	managedCount, exactCount := countManagedCursorHooks(definitions, command, isManaged)
 	if managedCount == 1 && exactCount == 1 {
-		return false
+		return false, nil
 	}
 
 	definitions, _ = removeManagedCursorHooks(definitions, isManaged)
@@ -260,7 +290,7 @@ func upsertCursorHook(harnessConfig map[string]any, event string, command string
 		"timeout": float64(harnesspkg.HookTimeoutSeconds),
 	})
 
-	return true
+	return true, nil
 }
 
 func countManagedCursorHooks(
