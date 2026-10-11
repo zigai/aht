@@ -55,7 +55,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	if host.validateSession(withNative) {
 		t.Fatal("oracle accepted start-only stuck-live native session")
 	}
-	withNative.Observations.Native.Event = "session.idle"
+	withNative.Observations.Native.Event = "session.execution.succeeded"
 	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
 	withNative.Liveness = registry.NewLiveness(withNative.Presence(), registry.ActivityValue(new(registry.ActivityUnknown)), withNative.Decision())
 	if host.validateSession(withNative) {
@@ -164,10 +164,9 @@ func idleTurnEnded(id registry.Harness, native *registry.NativeObservation, sess
 	if native.Activity == nil || *native.Activity != registry.ActivityIdle || !effectiveActivityMatches(session, registry.ActivityIdle) {
 		return false
 	}
-	// Both current OpenCode/Kilo idle notifications are native terminal
-	// evidence; either may be the last drained event.
-	return native.Event == terminalEvent(id) ||
-		((id == registry.Harness("opencode") || id == registry.Harness("kilo")) && native.Event == "session.idle")
+	// Both current Kilo idle notifications are native terminal evidence;
+	// either may be the last drained event.
+	return native.Event == terminalEvent(id) || (id == registry.Harness("kilo") && native.Event == "session.idle")
 }
 
 func nativeActivityRunning(session registry.Session) bool {
@@ -233,7 +232,9 @@ func terminalEvent(id registry.Harness) string {
 		return "session_shutdown"
 	case registry.Harness("copilot"):
 		return "sessionEnd"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.succeeded"
+	case registry.Harness("kilo"):
 		return "session.status"
 	case registry.Harness("cline"):
 		return "afterRun"
@@ -252,7 +253,9 @@ func startEvent(id registry.Harness) string {
 		return "session_start"
 	case registry.Harness("copilot"):
 		return "sessionStart"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.started"
+	case registry.Harness("kilo"):
 		return "session.created"
 	case registry.Harness("cline"):
 		return "beforeRun"

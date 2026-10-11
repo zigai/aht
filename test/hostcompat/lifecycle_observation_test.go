@@ -44,8 +44,8 @@ func (host *isolatedHost) assertInterrupted(t *testing.T) {
 		if native == nil {
 			return false
 		}
-		if host.contract.ID == registry.Harness("opencode") || host.contract.ID == registry.Harness("kilo") {
-			// Their abort API ends the held turn with native idle, without
+		if host.contract.ID == registry.Harness("kilo") {
+			// Its abort API ends the held turn with native idle, without
 			// deleting the durable session. Running was required before abort.
 			return terminalSession(host.contract.ID, session)
 		}

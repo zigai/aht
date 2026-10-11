@@ -74,7 +74,9 @@ func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 		host.runDroidRPC(t, command.Env, nil, true)
 	case registry.Harness("kimi-code"):
 		host.runKimiACP(t, command, nil, true)
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		host.runOpenCodeInterruption(t, command.Env)
+	case registry.Harness("kilo"):
 		host.runServerInterruption(t, command.Env)
 	case registry.Harness("pi"), registry.Harness("omp"):
 		runRPCInterruption(t, host, command.Env)

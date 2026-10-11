@@ -29,7 +29,9 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 		runKimiPermissionScenarios(t, contract, oracle)
 	case registry.Harness("hermes"):
 		runPythonPermissionScenarios(t, contract, oracle)
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		runOpenCodePermissionScenarios(t, contract, oracle)
+	case registry.Harness("kilo"):
 		runServerPermissionScenarios(t, contract, oracle)
 	case registry.Harness("qwen"):
 		runQwenPermissionScenarios(t, contract, oracle)
