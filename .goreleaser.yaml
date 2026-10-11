@@ -6,7 +6,8 @@ before:
     - go mod tidy -diff
 
 builds:
-  - main: ./main.go
+  - id: aht
+    main: ./main.go
     binary: aht
     env:
       - CGO_ENABLED=0
@@ -21,9 +22,29 @@ builds:
       - -X github.com/zigai/aht/v2/internal/cli.version={{.Version}}
       - -X github.com/zigai/aht/v2/internal/cli.commit={{.ShortCommit}}
       - -X github.com/zigai/aht/v2/internal/cli.date={{.Date}}
+  - id: fakeprovider
+    main: ./cmd/fakeprovider
+    binary: fakeprovider
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/zigai/aht/v2/internal/fakeprovidercli.version={{.Version}}
+      - -X github.com/zigai/aht/v2/internal/fakeprovidercli.commit={{.ShortCommit}}
+      - -X github.com/zigai/aht/v2/internal/fakeprovidercli.date={{.Date}}
 
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: aht
+    ids:
+      - aht
+      - fakeprovider
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
     files:
@@ -34,6 +55,8 @@ archives:
 
 nfpms:
   - id: aht
+    ids:
+      - aht
     package_name: aht
     vendor: zigai
     homepage: https://github.com/zigai/aht

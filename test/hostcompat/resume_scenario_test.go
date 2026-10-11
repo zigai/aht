@@ -3,7 +3,9 @@
 package hostcompat
 
 import (
+	"encoding/json"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -15,20 +17,12 @@ import (
 func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	t.Helper()
 	previous := host.waitForObservation(t, "completed native session to resume", host.validateSession)
-	oldCallID := host.provider.callID
-	oldMarker := host.provider.marker
-	host.provider.mu.Lock()
-	host.provider.step = 0
-	host.provider.requests = nil
-	host.provider.callID = "callresume"
-	if host.contract.Protocol == providerProtocolAnthropicMessages {
-		host.provider.callID = "tool_resume"
-	}
-	host.provider.mu.Unlock()
+	oldCallID := host.callID
+	host.scriptShellRoundTrip(host.scriptCallID(true), lifecycleShellCommand(host.contract.ID), false)
 	var output []byte
 	switch host.contract.ID {
 	case registry.Harness("kimi-code"):
-		host.runKimiACP(t, host.command(t, original.Env, "acp"), &previous, false)
+		host.runKimiACP(t, host.headlessCommand(t, original.Env), &previous, false)
 	case registry.Harness("cline"):
 		host.runClineResume(t, original.Env, previous)
 	case registry.Harness("droid"):
@@ -36,10 +30,10 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	default:
 		command := exec.CommandContext(t.Context(), original.Path, resumeArguments(host.contract.ID, original.Args[1:], previous)...)
 		command.Env = original.Env
-		command.Dir = host.work
+		command.Dir = host.launched.Work
 		output = host.runHostCommand(t, command)
 	}
-	host.assertResumeRestoredHistory(t, oldCallID, oldMarker)
+	host.assertResumeRestoredHistory(t, oldCallID)
 	host.waitForSession(t, output)
 	resumed := host.waitForObservation(t, "terminal resumed native identity", func(session registry.Session) bool {
 		return session.SessionID == previous.SessionID && host.validateSession(session)
@@ -52,9 +46,9 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	}
 }
 
-func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID string, oldMarker string) {
+func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID string) {
 	t.Helper()
-	if err := host.provider.Error(); err != nil {
+	if err := host.provider.Err(); err != nil {
 		t.Fatalf("resumed provider exchange failed: %v\n%s", err, providerRequestSummary(host.provider))
 	}
 	requests := host.provider.Requests()
@@ -62,12 +56,40 @@ func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID st
 		t.Fatalf("resume made %d provider requests, want a restored turn and tool continuation", len(requests))
 	}
 	if host.contract.ID == registry.Harness("droid") {
-		if !containsJSONString(requests[0].Body, "compat complete") {
+		if !jsonContainsString(requests[0].Body, compatibilityFinalText) {
 			t.Fatal("resumed model request did not restore the prior native conversation")
 		}
-	} else if !requestContainsToolResult(host.contract.Protocol, []byte(requests[0].Body), oldCallID, oldMarker) {
+	} else if !requests[0].HasToolResult(oldCallID, compatibilityMarker) {
 		t.Fatal("resumed model request did not restore the prior native tool result")
 	}
+}
+
+func jsonContainsString(body json.RawMessage, expected string) bool {
+	var value any
+	if json.Unmarshal(body, &value) != nil {
+		return false
+	}
+	return containsString(value, expected)
+}
+
+func containsString(value any, expected string) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.Contains(typed, expected)
+	case []any:
+		for _, item := range typed {
+			if containsString(item, expected) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range typed {
+			if containsString(item, expected) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resumeArguments(id registry.Harness, original []string, session registry.Session) []string {
@@ -86,7 +108,7 @@ func resumeArguments(id registry.Harness, original []string, session registry.Se
 	case registry.Harness("hermes"):
 		// Oneshot (-z) persists history but ignores --resume. The native chat
 		// query path loads that same session's full conversation from SQLite.
-		return []string{"chat", "-q", compatibilityPrompt, "-Q", "--provider", "custom", "--model", "compat", "--yolo", "--accept-hooks", "--resume", session.SessionID}
+		return []string{"chat", "-q", compatibilityPrompt, "-Q", "--provider", "custom", "--model", fakeModel, "--yolo", "--accept-hooks", "--resume", session.SessionID}
 	case registry.Harness("opencode"), registry.Harness("kilo"):
 		return append(args, "--session", session.SessionID)
 	case registry.Harness("openclaw"):

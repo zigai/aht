@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -38,18 +39,15 @@ func runServerPermissionScenarios(t *testing.T, contract hostContract, oracle st
 func runServerPermission(t *testing.T, contract hostContract, oracle string, name string, allow bool) {
 	t.Helper()
 	host := newPermissionHost(t, contract, oracle, allow)
-	configured, setup := host.lifecycleCommand(t)
-	if len(setup) != 0 {
-		t.Fatal("server permission driver does not expect setup commands")
-	}
+	configured := host.lifecycleCommand(t)
 	configName := "opencode.json"
 	if contract.ID == registry.Harness("kilo") {
 		configName = "kilo.json"
 	}
-	host.writeFile(t, filepath.Join(host.work, configName), `{"permission":{"bash":"ask"}}`)
+	host.writeFile(t, filepath.Join(host.launched.Work, configName), `{"permission":{"bash":"ask"}}`)
 
 	baseURL, client, process := startNativeServer(t, host, configured.Env)
-	query := "?directory=" + url.QueryEscape(host.work)
+	query := "?directory=" + url.QueryEscape(host.launched.Work)
 	var session struct {
 		ID string `json:"id"`
 	}
@@ -61,7 +59,7 @@ func runServerPermission(t *testing.T, contract hostContract, oracle string, nam
 	sessionURL := baseURL + "/session/" + url.PathEscape(session.ID)
 	serverPermissionJSON(t, client, sessionURL+"/prompt_async"+query, http.MethodPost,
 		map[string]any{
-			"model": map[string]string{"providerID": "aht-compat", "modelID": "compat"},
+			"model": map[string]string{"providerID": harness.LaunchProviderName, "modelID": fakeModel},
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 		}, nil)
 
@@ -287,4 +285,21 @@ func serverPermissionToolResult(t *testing.T, client *http.Client, endpoint, cal
 		}
 	}
 	t.Fatalf("native session has no tool result for permission call %s", callID)
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+	var config net.ListenConfig
+	listener, err := config.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want TCP", listener.Addr())
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return address.Port
 }

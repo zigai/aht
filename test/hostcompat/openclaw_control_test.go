@@ -15,7 +15,7 @@ import (
 // https://docs.openclaw.ai/gateway/protocol/rpc-session-control
 func (host *isolatedHost) interruptOpenClaw(t *testing.T) {
 	t.Helper()
-	output := host.openclawRPC(t, "sessions.resolve", map[string]any{"sessionId": "aht-compat"})
+	output := host.openclawRPC(t, "sessions.resolve", map[string]any{"sessionId": "aht-fakeprovider"})
 	var session struct {
 		Key string `json:"key"`
 	}
@@ -41,9 +41,9 @@ func (host *isolatedHost) openclawRPC(t *testing.T, method string, params map[st
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, host.hostPath, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
-	command.Env = host.env
-	command.Dir = host.work
+	command := exec.CommandContext(ctx, host.launched.Executable, "gateway", "call", method, "--params", string(data), "--json", "--timeout", "5000")
+	command.Env = host.launched.Env
+	command.Dir = host.launched.Work
 	output, err := compatibilityOutput(ctx, command)
 	if err != nil {
 		t.Fatalf("gateway %s: %v\n%s", method, err, output)

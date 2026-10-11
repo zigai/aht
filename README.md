@@ -80,6 +80,20 @@ go get github.com/zigai/aht/v2
 See the [package documentation](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht) for the
 API guide and examples.
 
+## Fake model provider
+
+`fakeprovider` serves a scripted Anthropic and OpenAI compatible model API for tests, and starts
+an installed harness against it in a private root. Release archives include it.
+
+```sh
+go install github.com/zigai/aht/v2/cmd/fakeprovider@latest
+fakeprovider serve
+fakeprovider start pi
+```
+
+Go tests can use [`pkg/fakeprovider`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider)
+and [`pkg/fakeprovider/launch`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider/launch).
+
 ## Hook Installation
 
 ```sh

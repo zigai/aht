@@ -55,6 +55,9 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
      from the same native files.
    - `manifest.go` + `assets/screen.toml`: `ScreenManifest` for screen authority
      or screen fallback.
+   - `launch.go`: `LaunchPlan` when the harness can use a custom model
+     endpoint. `pkg/fakeprovider/launch`, the `fakeprovider` command, and
+     `test/hostcompat` launch the harness only through it.
    - `distribution.go`: `Distribution()` with `Directory` equal to the adapter
      folder name. The architecture test derives name ownership from it.
    - `locations.go`: `Locations(projectDir)` with the config, instruction,

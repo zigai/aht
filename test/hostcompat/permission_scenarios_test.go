@@ -29,7 +29,9 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 		runKimiPermissionScenarios(t, contract, oracle)
 	case registry.Harness("hermes"):
 		runPythonPermissionScenarios(t, contract, oracle)
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		runOpenCodePermissionScenarios(t, contract, oracle)
+	case registry.Harness("kilo"):
 		runServerPermissionScenarios(t, contract, oracle)
 	case registry.Harness("qwen"):
 		runQwenPermissionScenarios(t, contract, oracle)
@@ -41,22 +43,14 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 
 func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow bool) *isolatedHost {
 	t.Helper()
-	host := newIsolatedHost(t, contract, oracle)
-	host.installIntegration(t)
-	args := lifecycleToolArgs(contract.ID)
-	command := "printf aht-compat-marker > " + permissionMarker + "; cat " + permissionMarker
+	host := newIsolatedHost(t, contract, oracle, false)
+	command := "printf " + compatibilityMarker + " > " + permissionMarker + "; cat " + permissionMarker
 	if contract.ID == registry.Harness("hermes") {
-		// Hermes asks only for dangerous shell operations. This disposable,
-		// nonexistent relative target cannot affect anything outside host.work.
+		// Hermes asks only for dangerous shell operations. This nonexistent
+		// relative target cannot affect anything outside the work directory.
 		command = "rm -rf .aht-permission-unused; " + command
 	}
-	if contract.ID == registry.Harness("codex") {
-		args["cmd"] = command
-	} else {
-		args["command"] = command
-	}
-	host.provider = newScriptedProvider(t, contract.Protocol, lifecycleToolName(contract.ID), args, "aht-compat-marker")
-	host.provider.expectRejectedTool = !allow
+	host.scriptShellRoundTrip(host.scriptCallID(false), command, !allow)
 	host.startTracker(t)
 	return host
 }
@@ -67,7 +61,7 @@ func assertPermissionWaiting(t *testing.T, host *isolatedHost) registry.Session 
 		native := session.Observations.Native
 		return native != nil && native.SessionID != "" && native.Activity != nil &&
 			*native.Activity == registry.ActivityWaiting && session.Presence() == registry.PresenceLive &&
-			filepath.Clean(session.CWD) == filepath.Clean(host.work)
+			filepath.Clean(session.CWD) == filepath.Clean(host.launched.Work)
 	})
 	if waiting.Activity() == nil || (*waiting.Activity() != registry.ActivityWaiting && *waiting.Activity() != registry.ActivityUnknown) {
 		t.Fatalf("native permission wait has incompatible effective activity: %+v", waiting)
@@ -90,7 +84,7 @@ func assertPermissionOutcome(t *testing.T, host *isolatedHost, waiting registry.
 			(session.Activity() == nil || *session.Activity() != registry.ActivityWaiting)
 	})
 	assertPermissionMarker(t, host, allow)
-	if err := host.provider.Error(); err != nil {
+	if err := host.provider.Err(); err != nil {
 		t.Fatalf("permission continuation failed: %v\n%s", err, providerRequestSummary(host.provider))
 	}
 	// Rejection may terminate the native turn without asking the model again.
@@ -102,7 +96,7 @@ func assertPermissionOutcome(t *testing.T, host *isolatedHost, waiting registry.
 
 func assertPermissionMarker(t *testing.T, host *isolatedHost, exists bool) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(host.work, permissionMarker))
+	data, err := os.ReadFile(filepath.Join(host.launched.Work, permissionMarker))
 	if !exists {
 		if !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("tool executed before approval or after rejection: marker=%q error=%v", data, err)
@@ -122,7 +116,7 @@ type permissionProcess struct {
 
 func startPermissionProcess(t *testing.T, host *isolatedHost, command *exec.Cmd) *permissionProcess {
 	t.Helper()
-	logFile, err := os.CreateTemp(host.root, "permission-*.log")
+	logFile, err := os.CreateTemp(host.launched.Root, "permission-*.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,12 +176,12 @@ func (process *permissionProcess) stopOwnedGroup(t *testing.T) {
 func logPermissionFailure(t *testing.T, host *isolatedHost, logPath string, pid int) {
 	t.Helper()
 	log, _ := os.ReadFile(logPath)
-	events, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
+	events, _ := os.ReadFile(host.nativeEvents)
 	t.Logf("isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s", log, events, providerRequestSummary(host.provider))
 	// Cleanup runs after t.Context is canceled. This diagnostic owns a
 	// fresh, short budget and must never replace the scenario failure.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
-	observed, probeErr := host.sessions(ctx)
+	observed, probeErr := host.launched.Sessions(ctx)
 	cancel()
 	sessions, encodeErr := json.MarshalIndent(observed, "", "  ")
 	t.Logf("owned launcher PID=%d; isolated native session state (probe error: %v, encode error: %v):\n%s", pid, probeErr, encodeErr, sessions)

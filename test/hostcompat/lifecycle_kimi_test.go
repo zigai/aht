@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -47,7 +47,7 @@ func (host *isolatedHost) openKimiSession(t *testing.T, wire *cliPermissionWire,
 		t.Fatal("Kimi ACP does not advertise native session loading")
 	}
 	method := "session/new"
-	params := map[string]any{"cwd": host.work, "mcpServers": []any{}}
+	params := map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}}
 	sessionID := ""
 	if previous != nil {
 		sessionID = previous.SessionID
@@ -79,7 +79,7 @@ func (host *isolatedHost) promptKimi(t *testing.T, wire *cliPermissionWire, sess
 func (host *isolatedHost) driveKimiCheckpoints(t *testing.T, wire *cliPermissionWire, process *permissionProcess, sessionID string, interrupt bool) {
 	t.Helper()
 	for expected := range 2 {
-		awaitKimiCheckpoint(t, host, process, expected)
+		hold := awaitKimiCheckpoint(t, host, process, expected)
 		if expected == 0 {
 			host.waitForKimiEvent(t, sessionID, "TurnStarted", registry.ActivityRunning)
 		}
@@ -91,28 +91,24 @@ func (host *isolatedHost) driveKimiCheckpoints(t *testing.T, wire *cliPermission
 			wire.send(t, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": sessionID}})
 			return
 		}
-		select {
-		case host.provider.release <- struct{}{}:
-		case <-process.done:
-			t.Fatalf("Kimi ACP exited before response %d: %v", expected, process.waitErr())
-		case <-time.After(30 * time.Second):
-			t.Fatalf("Kimi did not consume provider response %d", expected)
-		}
+		hold.Release()
 	}
 }
 
-func awaitKimiCheckpoint(t *testing.T, host *isolatedHost, process *permissionProcess, expected int) {
+func awaitKimiCheckpoint(t *testing.T, host *isolatedHost, process *permissionProcess, expected int) *fakeprovider.Hold {
 	t.Helper()
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != expected {
-			t.Fatalf("Kimi provider checkpoint = %d, want %d", step, expected)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != expected {
+			t.Fatalf("Kimi provider checkpoint = %d, want %d", hold.Request.Index, expected)
 		}
+		return hold
 	case <-process.done:
 		t.Fatalf("Kimi ACP exited before provider checkpoint %d: %v", expected, process.waitErr())
 	case <-time.After(30 * time.Second):
 		t.Fatalf("Kimi did not reach provider checkpoint %d", expected)
 	}
+	return nil
 }
 
 func kimiNativeSession(session registry.Session, sessionID string) bool {
@@ -200,7 +196,7 @@ func runKimiPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 		}
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
-			command, _ := host.lifecycleCommand(t)
+			command := host.lifecycleCommand(t)
 			wire, process := startCLIPermissionWire(t, host, command, false)
 			sessionID := host.openKimiSession(t, wire, nil, "default")
 			host.promptKimi(t, wire, sessionID)
@@ -212,13 +208,13 @@ func runKimiPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 				}
 				requireKimiNotification(t, request, sessionID)
 			}
-			result, err := kimiPermissionResult(request, sessionID, host.provider.callID, allow)
+			result, err := kimiPermissionResult(request, sessionID, host.callID, allow)
 			if err != nil {
 				t.Fatal(err)
 			}
 			waiting := host.waitForKimiEvent(t, sessionID, "PermissionRequest", registry.ActivityWaiting)
 			attrs := waiting.Observations.Native.Attributes
-			if attrs["kimi_code_agent_id"] != "main" || attrs["kimi_code_tool_name"] != "Bash" || attrs["kimi_code_tool_call_id"] != host.provider.callID {
+			if attrs["kimi_code_agent_id"] != "main" || attrs["kimi_code_tool_name"] != "Bash" || attrs["kimi_code_tool_call_id"] != host.callID {
 				t.Fatalf("permission hook does not identify foreground Bash call: %v", attrs)
 			}
 			assertPermissionMarker(t, host, false)
@@ -235,7 +231,7 @@ func runKimiPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 
 func (host *isolatedHost) assertKimiCallback(t *testing.T, event string, activity registry.Activity) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(host.root, "native-events"))
+	data, err := os.ReadFile(host.nativeEvents)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,7 +32,7 @@ compatibility-tests:
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
-    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m
+    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat ./test/interactive -run '^TestCurrentHarness(Lifecycle|Interactive)$' -timeout 15m
 
 # Validate built release artifacts and optional published copies
 artifacts artifact_dir="dist" published_dir="":
@@ -77,6 +77,7 @@ source-checks:
     {{ golangci_lint }} fmt --diff
     go mod tidy -diff
     go build -o /dev/null .
+    go build -o /dev/null ./cmd/fakeprovider
     just --fmt --check
     {{ actionlint }} .github/workflows/*.yml
 
@@ -99,6 +100,10 @@ install:
 # Install only the executable
 install-binary:
     go install .
+
+# Install the fake model provider command
+install-fakeprovider:
+    go install ./cmd/fakeprovider
 
 # Remove build artifacts
 clean:

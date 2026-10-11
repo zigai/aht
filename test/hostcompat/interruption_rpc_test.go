@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -24,9 +25,9 @@ func runRPCInterruption(t *testing.T, host *isolatedHost, env []string) {
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "interruption-prompt", "type": "prompt", "message": compatibilityPrompt})
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first active RPC request step = %d", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first active RPC request step = %d", hold.Request.Index)
 		}
 	case <-process.done:
 		t.Fatalf("RPC host exited before active provider request: %v", process.waitErr())
@@ -57,15 +58,15 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 	t.Helper()
 	switch host.contract.ID {
 	case registry.Harness("pi"):
-		return []string{"--mode", "rpc", "--provider", "aht-compat", "--model", "compat"}
+		return []string{"--mode", "rpc", "--provider", harness.LaunchProviderName, "--model", fakeModel}
 	case registry.Harness("omp"):
-		// lifecycleCommand has configured the isolated model and installed hook.
+		// The launch has configured the isolated model and installed the hook.
 		// Preserve its explicit managed extension loading without print-mode flags.
-		hooks, err := filepath.Glob(filepath.Join(host.root, "pi-agent", "extensions", "*"))
+		hooks, err := filepath.Glob(filepath.Join(host.launched.Root, "pi-agent", "extensions", "*"))
 		if err != nil || len(hooks) != 1 {
 			t.Fatalf("locating installed OMP interruption hook: paths=%v error=%v", hooks, err)
 		}
-		return []string{"--mode", "rpc", "--model", "aht-compat/compat", "--hook", hooks[0]}
+		return []string{"--mode", "rpc", "--model", harness.LaunchProviderName + "/" + fakeModel, "--hook", hooks[0]}
 	default:
 		t.Fatalf("unsupported native RPC interruption host %s", host.contract.ID)
 		return nil

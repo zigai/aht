@@ -4,12 +4,15 @@ package hostcompat
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
-func providerRequestSummary(provider *scriptedProvider) string {
+func providerRequestSummary(provider *fakeprovider.Server) string {
 	if provider == nil {
 		return "none"
 	}
@@ -25,14 +28,14 @@ func providerRequestSummary(provider *scriptedProvider) string {
 	return strings.Join(summary, "\n")
 }
 
-func summarizeProviderBody(body string) string {
+func summarizeProviderBody(body jsontext.Value) string {
 	var payload map[string]any
-	if json.Unmarshal([]byte(body), &payload) != nil {
-		return body
+	if json.Unmarshal(body, &payload) != nil {
+		return string(body)
 	}
 	tools, exists := payload["tools"].([]any)
 	if !exists {
-		return body
+		return string(body)
 	}
 	keys := make([]string, 0, len(payload))
 	for key := range payload {
@@ -93,4 +96,12 @@ func summarizeProviderInput(value any) string {
 		return "..." + summary[len(summary)-2000:]
 	}
 	return summary
+}
+
+func mustJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }

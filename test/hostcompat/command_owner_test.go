@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestCompatibilityCommandDeadline(t *testing.T) {
@@ -87,26 +85,21 @@ func TestCompatibilityOracleStaging(t *testing.T) {
 	if err := os.WriteFile(oracle, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract := hostContract{ID: registry.Harness("pi"), Executable: executable}
-	first := newIsolatedHost(t, contract, oracle)
+	first, _ := stageOracle(t, oracle)
 	t.Run("isolated_scenario", func(t *testing.T) {
-		second := newIsolatedHost(t, contract, oracle)
-		if first.home == second.home || first.work == second.work || first.store == second.store || first.aht == second.aht {
-			t.Fatal("scenarios share mutable host paths")
+		second, _ := stageOracle(t, oracle)
+		if first == second {
+			t.Fatal("scenarios share their staged oracle")
 		}
-		assertCompatibilityOracleContent(t, second.aht+".real", content)
-		if err := os.WriteFile(second.aht+".real", []byte("changed scenario copy"), 0o600); err != nil {
+		assertCompatibilityOracleContent(t, second+".real", content)
+		if err := os.WriteFile(second+".real", []byte("changed scenario copy"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	})
-	for _, path := range []string{oracle, first.aht + ".real"} {
+	for _, path := range []string{oracle, first + ".real"} {
 		assertCompatibilityOracleContent(t, path, content)
 	}
-	info, err := os.Stat(first.aht + ".real")
+	info, err := os.Stat(first + ".real")
 	if err != nil || info.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("staged oracle is not executable: error = %v", err)
 	}

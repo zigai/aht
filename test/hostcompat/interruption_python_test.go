@@ -24,7 +24,7 @@ func runPythonInterruption(t *testing.T, host *isolatedHost, env []string) {
 	process := startPermissionProcess(t, host, command)
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
 	wire.response(t, "initialize")
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.work, "mcpServers": []any{}}})
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}}})
 	created := wire.response(t, "new")
 	var session struct {
 		SessionID string `json:"sessionId"` //nolint:tagliatelle // ACP wire field.
@@ -34,9 +34,9 @@ func runPythonInterruption(t *testing.T, host *isolatedHost, env []string) {
 	}
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt", "params": map[string]any{"sessionId": session.SessionID, "prompt": []any{map[string]any{"type": "text", "text": compatibilityPrompt}}}})
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first active Python provider request step = %d", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first active Python provider request step = %d", hold.Request.Index)
 		}
 	case <-process.done:
 		t.Fatalf("Python host exited before active request: %v", process.waitErr())

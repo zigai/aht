@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -25,7 +26,7 @@ func (host *isolatedHost) validateSession(session registry.Session) bool {
 	if session.SessionID != "" && session.SessionID != session.Observations.Native.SessionID {
 		return false
 	}
-	if host.work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.work) {
+	if host.launched.Work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.launched.Work) {
 		return false
 	}
 	return terminalSession(host.contract.ID, session)
@@ -40,7 +41,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 			Present: true,
 		},
 	}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)}
-	host := &isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
+	host := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
 	if host.validateSession(processOnly) {
 		t.Fatal("oracle accepted process-only session for non-exempt harness")
 	}
@@ -54,7 +55,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	if host.validateSession(withNative) {
 		t.Fatal("oracle accepted start-only stuck-live native session")
 	}
-	withNative.Observations.Native.Event = "session.idle"
+	withNative.Observations.Native.Event = "session.execution.succeeded"
 	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
 	withNative.Liveness = registry.NewLiveness(withNative.Presence(), registry.ActivityValue(new(registry.ActivityUnknown)), withNative.Decision())
 	if host.validateSession(withNative) {
@@ -79,7 +80,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		t.Fatal("oracle accepted session with mismatched native session ID")
 	}
 
-	cursorHost := &isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
+	cursorHost := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
 	if !cursorHost.validateSession(processOnly) {
 		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
 	}
@@ -163,10 +164,9 @@ func idleTurnEnded(id registry.Harness, native *registry.NativeObservation, sess
 	if native.Activity == nil || *native.Activity != registry.ActivityIdle || !effectiveActivityMatches(session, registry.ActivityIdle) {
 		return false
 	}
-	// Both current OpenCode/Kilo idle notifications are native terminal
-	// evidence; either may be the last drained event.
-	return native.Event == terminalEvent(id) ||
-		((id == registry.Harness("opencode") || id == registry.Harness("kilo")) && native.Event == "session.idle")
+	// Both current Kilo idle notifications are native terminal evidence;
+	// either may be the last drained event.
+	return native.Event == terminalEvent(id) || (id == registry.Harness("kilo") && native.Event == "session.idle")
 }
 
 func nativeActivityRunning(session registry.Session) bool {
@@ -232,7 +232,9 @@ func terminalEvent(id registry.Harness) string {
 		return "session_shutdown"
 	case registry.Harness("copilot"):
 		return "sessionEnd"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.succeeded"
+	case registry.Harness("kilo"):
 		return "session.status"
 	case registry.Harness("cline"):
 		return "afterRun"
@@ -251,7 +253,9 @@ func startEvent(id registry.Harness) string {
 		return "session_start"
 	case registry.Harness("copilot"):
 		return "sessionStart"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.started"
+	case registry.Harness("kilo"):
 		return "session.created"
 	case registry.Harness("cline"):
 		return "beforeRun"
@@ -281,7 +285,7 @@ func turnEndEvent(id registry.Harness) string {
 
 func (host *isolatedHost) assertNativeEvents(t *testing.T) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(host.root, "native-events"))
+	data, err := os.ReadFile(host.nativeEvents)
 	if err != nil {
 		t.Fatalf("reading native callback evidence: %v", err)
 	}

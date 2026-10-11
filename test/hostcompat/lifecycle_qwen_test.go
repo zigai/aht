@@ -14,6 +14,7 @@ import (
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -26,14 +27,14 @@ func (host *isolatedHost) runQwenTUI(t *testing.T, command *exec.Cmd, interrupt 
 	if _, err := exec.LookPath("tmux"); err != nil && os.Getenv("AHT_TEST_TMUX_EXECUTABLE") == "" {
 		t.Fatal("Qwen Code native lifecycle requires tmux")
 	}
-	pane := host.startQwenPane(t, command)
+	pane := host.startQwenPane(t, qwenTUIArgs(command, false))
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("native Qwen Code presented screen:\n%s", captureQwenPane(t, pane))
 		}
 	})
 	for step := range 2 {
-		awaitQwenCheckpoint(t, host, step)
+		hold := awaitQwenHold(t, host, step)
 		if step == 0 {
 			host.waitForActiveSession(t)
 		}
@@ -44,7 +45,7 @@ func (host *isolatedHost) runQwenTUI(t *testing.T, command *exec.Cmd, interrupt 
 			host.waitForQwenIdle(t, "Notification")
 			break
 		}
-		host.provider.release <- struct{}{}
+		hold.Release()
 	}
 	if !interrupt {
 		host.waitForQwenIdle(t, "Stop", "Notification")
@@ -66,17 +67,7 @@ func runQwenPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 		}
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
-			command, _ := host.lifecycleCommand(t)
-			args := make([]string, 0, len(command.Args)+1)
-			for _, arg := range command.Args {
-				if arg == "--yolo" {
-					args = append(args, "--approval-mode", "default")
-				} else {
-					args = append(args, arg)
-				}
-			}
-			command.Args = args
-			pane := host.startQwenPane(t, command)
+			pane := host.startQwenPane(t, qwenTUIArgs(host.lifecycleCommand(t), true))
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("native Qwen Code presented screen:\n%s", captureQwenPane(t, pane))
@@ -93,6 +84,24 @@ func runQwenPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 			quitQwen(t, pane)
 		})
 	}
+}
+
+// qwenTUIArgs turns the headless launch into the native TUI launch, optionally
+// replacing --yolo with the approval mode that asks before shell commands.
+func qwenTUIArgs(command *exec.Cmd, ask bool) *exec.Cmd {
+	args := make([]string, 0, len(command.Args)+1)
+	for _, arg := range command.Args {
+		switch {
+		case arg == "-p":
+			args = append(args, "-i")
+		case arg == "--yolo" && ask:
+			args = append(args, "--approval-mode", "default")
+		default:
+			args = append(args, arg)
+		}
+	}
+	command.Args = args
+	return command
 }
 
 func (host *isolatedHost) startQwenPane(t *testing.T, command *exec.Cmd) gotmux.Pane {
@@ -112,23 +121,25 @@ func (host *isolatedHost) startQwenPane(t *testing.T, command *exec.Cmd) gotmux.
 	args = append(args, command.Path)
 	args = append(args, command.Args[1:]...)
 	if err := pane.Respawn(t.Context(), gotmux.RespawnOptions{
-		Dir: host.work, Program: gotmux.Exec("env", args...), KillRunning: true,
+		Dir: host.launched.Work, Program: gotmux.Exec("env", args...), KillRunning: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return pane
 }
 
-func awaitQwenCheckpoint(t *testing.T, host *isolatedHost, expected int) {
+func awaitQwenHold(t *testing.T, host *isolatedHost, expected int) *fakeprovider.Hold {
 	t.Helper()
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != expected {
-			t.Fatalf("Qwen Code provider checkpoint = %d, want %d", step, expected)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != expected {
+			t.Fatalf("Qwen Code provider request = %d, want %d", hold.Request.Index, expected)
 		}
+		return hold
 	case <-time.After(30 * time.Second):
-		t.Fatalf("Qwen Code did not reach provider checkpoint %d\nprovider requests: %s", expected, providerRequestSummary(host.provider))
+		t.Fatalf("Qwen Code did not reach provider request %d\nprovider requests: %s", expected, providerRequestSummary(host.provider))
 	}
+	return nil
 }
 
 // The interactive UI follows Stop with an idle_prompt notification, so either

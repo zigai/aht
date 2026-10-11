@@ -29,10 +29,7 @@ func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle st
 func runPythonPermission(t *testing.T, contract hostContract, oracle string, allow bool) {
 	t.Helper()
 	host := newPermissionHost(t, contract, oracle, allow)
-	configured, setup := host.lifecycleCommand(t)
-	if len(setup) != 0 {
-		t.Fatal("unexpected Python host setup commands")
-	}
+	configured := host.lifecycleCommand(t)
 	command := pythonPermissionCommand(t, host, configured.Env)
 	wire := newPythonPermissionWire(t, command)
 	process := startPermissionProcess(t, host, command)
@@ -81,7 +78,7 @@ func openPythonPermissionSession(t *testing.T, host *isolatedHost, wire *pythonP
 	t.Helper()
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
 	wire.response(t, "initialize")
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.work, "mcpServers": []any{}}})
+	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}}})
 	created := wire.response(t, "new")
 	var session struct {
 		SessionID string `json:"sessionId"` //nolint:tagliatelle // ACP wire field.

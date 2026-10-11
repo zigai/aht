@@ -347,7 +347,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	}
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
-		if !ok || !isAgentWrapper(process) {
+		if !ok || !IsAgentWrapper(process) {
 			continue
 		}
 		if _, descendantHarness, found := descendantHarnessProcess(process.PID, processes, processByPID, harnessByPID); found && descendantHarness == harnessID {
@@ -489,6 +489,19 @@ func (o *Observer) recordCycleHealth(at time.Time, result Result) error {
 	return o.recordHealth(at, false, "", nil, result)
 }
 
+func IsAgentWrapper(process processinfo.Process) bool {
+	command := filepath.Base(process.Executable)
+	if command == "" && len(process.Args) > 0 {
+		command = filepath.Base(process.Args[0])
+	}
+	switch command {
+	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv", "node", "bun", "python", "python3", "sh", "bash":
+		return true
+	default:
+		return false
+	}
+}
+
 func joinObserverHealthError(primary, healthErr error) error {
 	if healthErr == nil {
 		return primary
@@ -564,7 +577,7 @@ func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
 			return observableHarness(process, harnessID)
 		}
 	}
-	if isAgentWrapper(process) {
+	if IsAgentWrapper(process) {
 		start := min(commandArgumentPrefixCount, len(process.Args))
 		for _, arg := range process.Args[start:] {
 			if harnessID, ok := catalog.FromCommand(arg); ok {
@@ -635,19 +648,6 @@ func hasAncestorHarness(pid int, harnessID registry.Harness, processByPID map[in
 		ppid = parent.PPID
 	}
 	return false
-}
-
-func isAgentWrapper(process processinfo.Process) bool {
-	command := filepath.Base(process.Executable)
-	if command == "" && len(process.Args) > 0 {
-		command = filepath.Base(process.Args[0])
-	}
-	switch command {
-	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv", "node", "bun", "python", "python3", "sh", "bash":
-		return true
-	default:
-		return false
-	}
 }
 
 func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, sessions []registry.Session, processByPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness, locationPIDs map[int]bool, at time.Time, inspectScreen bool) []registry.Observation {
@@ -875,7 +875,7 @@ func preferForegroundProcess(candidate processinfo.Process, current processinfo.
 }
 
 func isDirectAgentProcess(process processinfo.Process) bool {
-	if isAgentWrapper(process) {
+	if IsAgentWrapper(process) {
 		return false
 	}
 	if _, ok := catalog.FromCommand(process.Executable); ok {
