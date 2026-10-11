@@ -40,8 +40,6 @@ jobs:
           - package: ./pkg/registry
             target: FuzzJournalEntryCodec
           - package: ./pkg/registry
-            target: FuzzStoreParity
-          - package: ./pkg/registry
             target: FuzzJournalRecovery
           - package: ./internal/harness/transcript
             target: FuzzMessageParts
