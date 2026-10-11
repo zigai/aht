@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,58 +237,6 @@ func TestInstallRejectsBinaryPathThatIsNotUTF8(t *testing.T) {
 	}
 }
 
-type managedReplacementCase struct {
-	Harness              registry.Harness
-	Path                 string
-	RemovedText          string
-	RequiredText         []string
-	FirstChangeMessage   string
-	SecondChangedMessage string
-}
-
-func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
-	t.Helper()
-
-	result, err := Run(t.Context(), Options{
-		Harness:      test.Harness,
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if !result.Changed {
-		t.Fatal(test.FirstChangeMessage)
-	}
-
-	text := string(readTestFile(t, test.Path, "reading installed hooks"))
-	if strings.Contains(text, test.RemovedText) {
-		t.Fatalf("expected old managed hook to be removed: %s", text)
-	}
-	requireTextContainsAll(t, text, test.RequiredText, "installed hooks")
-
-	second, err := Run(t.Context(), Options{
-		Harness:      test.Harness,
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
-	})
-	if err != nil {
-		t.Fatalf("second Run returned error: %v", err)
-	}
-	if second.Changed {
-		t.Fatal(test.SecondChangedMessage)
-	}
-	if second.NextStep != "" {
-		t.Fatalf("idempotent install unexpectedly requires activation: %q", second.NextStep)
-	}
-}
-
 func readTestFile(t *testing.T, path string, description string) []byte {
 	t.Helper()
 
@@ -322,18 +269,6 @@ func requireTextContainsAll(t *testing.T, text string, values []string, descript
 	}
 }
 
-func writeExecutableTestFile(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("writing executable test file: %w", err)
-	}
-
-	if err := os.Chmod(path, 0o700); err != nil {
-		return fmt.Errorf("marking executable test file executable: %w", err)
-	}
-
-	return nil
-}
-
 func requireTestHooks(t *testing.T, config map[string]any) map[string]any {
 	t.Helper()
 
@@ -353,46 +288,4 @@ func requireTestHookEvents(t *testing.T, hooks map[string]any, events []string) 
 			t.Fatalf("expected %s hook", event)
 		}
 	}
-}
-
-func requireTestHookCommand(t *testing.T, hooks map[string]any, event string) string {
-	t.Helper()
-	handler := requireTestHookHandler(t, hooks, event)
-	command, ok := handler["command"].(string)
-	if !ok || command == "" {
-		t.Fatalf("expected %s hook command, got %#v", event, handler["command"])
-	}
-	return command
-}
-
-func requireTestHookTimeoutSeconds(t *testing.T, hooks map[string]any, event string) float64 {
-	t.Helper()
-	handler := requireTestHookHandler(t, hooks, event)
-	timeoutSeconds, ok := handler["timeout"].(float64)
-	if !ok {
-		t.Fatalf("expected %s hook timeout, got %#v", event, handler["timeout"])
-	}
-	return timeoutSeconds
-}
-
-func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) map[string]any {
-	t.Helper()
-
-	groups, ok := hooks[event].([]any)
-	if !ok || len(groups) != 1 {
-		t.Fatalf("expected one %s hook group, got %#v", event, hooks[event])
-	}
-	group, ok := groups[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected %s hook group object, got %#v", event, groups[0])
-	}
-	handlers, ok := group["hooks"].([]any)
-	if !ok || len(handlers) != 1 {
-		t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
-	}
-	handler, ok := handlers[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
-	}
-	return handler
 }
