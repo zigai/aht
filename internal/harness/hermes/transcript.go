@@ -10,6 +10,6 @@ func (hermesHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"state.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(transcript.EnvPath("HERMES_HOME", filepath.Join(home, ".hermes")), "state.db")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(transcript.EnvPath("HERMES_HOME", filepath.Join(home, ".hermes")), "state.db")}, nil
 }

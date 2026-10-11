@@ -104,6 +104,6 @@ func (codexHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(transcript.EnvPath("CODEX_HOME", filepath.Join(home, ".codex")), "sessions"), filepath.Join(transcript.EnvPath("CODEX_HOME", filepath.Join(home, ".codex")), "archived_sessions")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(transcript.EnvPath("CODEX_HOME", filepath.Join(home, ".codex")), "sessions"), filepath.Join(transcript.EnvPath("CODEX_HOME", filepath.Join(home, ".codex")), "archived_sessions")}, nil
 }

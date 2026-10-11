@@ -25,7 +25,8 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 [`agy`](https://github.com/google-antigravity/antigravity-cli),
 [`kilo`](https://github.com/kilo-org/kilocode),
 [`droid`](https://factory.ai),
-[`amp`](https://ampcode.com).
+[`amp`](https://ampcode.com),
+[`crush`](https://github.com/charmbracelet/crush).
 
 ## Installation
 

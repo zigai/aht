@@ -18,4 +18,5 @@ const (
 	HarnessOpenClaw Harness = Harness("openclaw")
 	HarnessHermes   Harness = Harness("hermes")
 	HarnessAmp      Harness = Harness("amp")
+	HarnessCrush    Harness = Harness("crush")
 )

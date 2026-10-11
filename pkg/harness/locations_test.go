@@ -90,6 +90,13 @@ func TestLocationsForDocumentedNativePaths(t *testing.T) {
 		{name: "kimi project skills", harness: "kimi-code", path: ".kimi-code/skills", kind: harness.LocationKindSkills, isDir: true},
 		{name: "kimi relocated instructions", harness: "kimi-code", path: "custom-agent/AGENTS.md", global: true, kind: harness.LocationKindInstructions, override: "KIMI_CODE_HOME", overrideAt: "custom-agent"},
 		{name: "kimi project mcp", harness: "kimi-code", path: ".kimi-code/mcp.json", kind: harness.LocationKindMCP},
+		{name: "crush user shell config", harness: "crush", path: ".config/crush/crushrc", global: true, kind: harness.LocationKindConfig},
+		{name: "crush relocated user config", harness: "crush", path: "custom-crush/crushrc", global: true, kind: harness.LocationKindConfig, override: "CRUSH_GLOBAL_CONFIG", overrideAt: "custom-crush"},
+		{name: "crush project shell config", harness: "crush", path: ".crushrc", kind: harness.LocationKindConfig},
+		{name: "crush workspace config", harness: "crush", path: ".crush/crush.json", kind: harness.LocationKindConfig},
+		{name: "crush project instructions", harness: "crush", path: "CRUSH.md", kind: harness.LocationKindInstructions},
+		{name: "crush user commands", harness: "crush", path: ".config/crush/commands", global: true, kind: harness.LocationKindCommands, isDir: true},
+		{name: "crush relocated skills", harness: "crush", path: "custom-skills", global: true, kind: harness.LocationKindSkills, isDir: true, override: "CRUSH_SKILLS_DIR", overrideAt: "custom-skills"},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -123,7 +130,7 @@ func createLocationFixture(t *testing.T, tt locationCase) (string, string) {
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	for _, key := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_WORKSPACE_DIR", "CLAUDE_CONFIG_DIR", "CLINE_DATA_DIR", "CLINE_GLOBAL_SETTINGS_PATH", "CLINE_MCP_SETTINGS_PATH", "KIMI_CODE_HOME"} {
+	for _, key := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_WORKSPACE_DIR", "CLAUDE_CONFIG_DIR", "CLINE_DATA_DIR", "CLINE_GLOBAL_SETTINGS_PATH", "CLINE_MCP_SETTINGS_PATH", "KIMI_CODE_HOME", "CRUSH_GLOBAL_CONFIG", "CRUSH_GLOBAL_DATA", "CRUSH_SKILLS_DIR"} {
 		t.Setenv(key, "")
 	}
 	base := project

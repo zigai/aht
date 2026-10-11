@@ -45,6 +45,6 @@ func (copilotHarness) Transcript() transcript.Reader {
 	return transcript.Reader{Patterns: []string{"events.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil, LocalTitles: false, Parent: nil}
 }
 
-func transcriptSources(home string) []string {
-	return []string{filepath.Join(home, ".copilot", "session-state")}
+func transcriptSources(home string) ([]string, error) {
+	return []string{filepath.Join(home, ".copilot", "session-state")}, nil
 }

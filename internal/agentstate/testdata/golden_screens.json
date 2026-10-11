@@ -32,5 +32,14 @@
   {"agent":"pi","name":"custom-working-long-duration","screen":"Waiting for your approval\nWaiting for input\nInterrupted by user\n ⠋ Working... (2m 4s)\n ~/src · Codex · Model-A · max 18.3%/272k","want":"running"},
   {"agent":"pi","name":"custom-literal-working-history","screen":"Working...\n ~/src · Codex · Model-A · max 18.3%/272k","want":"idle"},
   {"agent":"pi","name":"custom-error-after-literal-working","screen":"Working...\nAPI Error: current request failed\n ~/src · Codex · Model-A · max 18.3%/272k","want":"failed"},
-  {"agent":"pi","name":"uncertain","screen":"ordinary shell output","want":"unknown"}
+  {"agent":"pi","name":"uncertain","screen":"ordinary shell output","want":"unknown"},
+  {"agent":"crush","name":"permission","screen":"   ✓ Bash echo h╭──────────────────────────────────────────────╮\n                │  Permission Required ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱  │\n                │ Tool bash                                    │\n                │ Path /home/user/project                      │\n                │   touch created.txt                          │\n   > Thinking...│     Allow      Allow for Session      Deny   │\n :::            │ ←/→ choose • enter confirm • esc exit        │\n                ╰──────────────────────────────────────────────╯\n esc cancel • tab focus chat • shift+tab mode • / or ctrl+p commands …","want":"waiting"},
+  {"agent":"crush","name":"question","screen":"  ?  Which color fits best?\n\n Pick one.\n\n ┃ Red\n\n   Blue\n\n   > Something else?\n\n [ prev tab • ] next tab • ↑ up • ↓ down • enter select • 1-2 quick select …","want":"waiting"},
+  {"agent":"crush","name":"tool-running","screen":"   ● Bash sleep 6\n\n   > Working...\n :::\n :::\n\n esc cancel • tab focus chat • shift+tab mode • / or ctrl+p commands …","want":"running"},
+  {"agent":"crush","name":"cancel-pending","screen":"   > Thinking...\n :::\n :::\n\n esc press again to cancel • tab focus chat • shift+tab mode • / or ctrl+p commands …","want":"running"},
+  {"agent":"crush","name":"startup","screen":"   > Ready!\n :::\n :::\n\n tab change focus • / or ctrl+p commands • shift+tab mode • ctrl+l models …","want":"idle"},
+  {"agent":"crush","name":"completion","screen":"   All done here.\n\n   ◇ Model-A via Local in 16s ──────────\n\n   > Ready for instructions\n :::\n :::\n\n tab focus chat • shift+tab mode • / or ctrl+p commands • ctrl+l models …","want":"idle"},
+  {"agent":"crush","name":"cancelled","screen":"   Canceled\n\n   > Ready...\n :::\n :::\n\n tab focus chat • shift+tab mode • / or ctrl+p commands • ctrl+l models …","want":"idle"},
+  {"agent":"crush","name":"chat-focused","screen":"   All done here.\n\n   > Ready?\n :::\n :::\n\n tab focus editor • shift+tab mode • ctrl+p commands • ctrl+l models …","want":"idle"},
+  {"agent":"crush","name":"uncertain","screen":"ordinary shell output","want":"unknown"}
 ]
