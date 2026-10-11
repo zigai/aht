@@ -11,7 +11,7 @@ import (
 
 const maxSnapshotLines = 100
 
-var ansiEscapePattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\x1b\\))`)
+var ansiEscapePattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\a\x1b]*(?:\a|\x1b\\)|)`)
 
 type Snapshot struct {
 	Lines []string
