@@ -98,6 +98,7 @@ func (app *application) newReportCommand() *cobra.Command {
 			if cmd.Flags().Changed("project-root") {
 				options.projectRootAuto = false
 			}
+			applyReportHarnessEnv(&options)
 			stdin := app.stdin
 			if stdin == nil {
 				stdin = os.Stdin
@@ -140,7 +141,29 @@ func (app *application) newReportCommand() *cobra.Command {
 }
 
 func defaultReportOptionsFromEnv() reportOptions {
-	return reportOptions{harness: firstEnv("AHT_HARNESS", "AGENT_HARNESS"), sessionID: firstEnv(catalog.EnvNames(harness.EnvSessionID)...), sessionPath: firstEnv(catalog.EnvNames(harness.EnvSessionPath)...), cwdAuto: true, projectRoot: firstEnv(catalog.EnvNames(harness.EnvProjectRoot)...), pid: firstEnvInt(catalog.EnvNames(harness.EnvPID)...), ppid: firstEnvInt("AHT_PPID", "AGENT_PPID"), tty: firstEnv("AHT_TTY", "TTY"), event: firstEnv(catalog.EnvNames(harness.EnvEvent)...), sequence: firstEnv("AHT_SEQUENCE")}
+	return reportOptions{harness: firstEnv("AHT_HARNESS", "AGENT_HARNESS"), cwdAuto: true, ppid: firstEnvInt("AHT_PPID", "AGENT_PPID"), tty: firstEnv("AHT_TTY", "TTY"), sequence: firstEnv("AHT_SEQUENCE")}
+}
+
+func applyReportHarnessEnv(opts *reportOptions) {
+	harnessID, err := catalog.Parse(opts.harness)
+	if err != nil {
+		return
+	}
+	if opts.sessionID == "" {
+		opts.sessionID = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionID)...)
+	}
+	if opts.sessionPath == "" {
+		opts.sessionPath = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionPath)...)
+	}
+	if opts.projectRoot == "" {
+		opts.projectRoot = firstEnv(catalog.EnvNames(harnessID, harness.EnvProjectRoot)...)
+	}
+	if opts.pid <= 0 {
+		opts.pid = firstEnvInt(catalog.EnvNames(harnessID, harness.EnvPID)...)
+	}
+	if opts.event == "" {
+		opts.event = firstEnv(catalog.EnvNames(harnessID, harness.EnvEvent)...)
+	}
 }
 
 func parseReportSequence(value string) (uint64, bool, error) {
