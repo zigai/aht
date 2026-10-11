@@ -147,16 +147,19 @@ func installedShim(id registry.Harness) (string, bool, error) {
 	if err != nil {
 		return "", true, fmt.Errorf("read installed shim: %w", err)
 	}
-	for line := range strings.Lines(string(data)) {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "harness_bin="); ok {
-			words, err := shlex.Split(value)
+	script := string(data)
+	offset := 0
+	for line := range strings.Lines(script) {
+		if value, ok := strings.CutPrefix(strings.TrimLeft(line, " \t"), "harness_bin="); ok {
+			target, err := shlex.NewLexer(strings.NewReader(script[offset+len(line)-len(value):])).Next()
 			if err != nil {
 				return "", true, fmt.Errorf("parse installed shim target: %w", err)
 			}
-			if len(words) == 1 && words[0] != "" {
-				return words[0], true, nil
+			if target != "" {
+				return target, true, nil
 			}
 		}
+		offset += len(line)
 	}
 	return "", true, fmt.Errorf("%w: cannot recover target from %s", errRecursiveShimTarget, path)
 }
