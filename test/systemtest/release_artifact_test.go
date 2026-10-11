@@ -399,7 +399,7 @@ func extractNativeArchive(t *testing.T, archivePath string, binaryPath string) {
 	}
 	defer closeOrFail(t, gzipReader)
 
-	required := map[string]bool{"aht": false, "LICENSE": false, "README.md": false}
+	required := map[string]bool{"aht": false, "fakeprovider": false, "LICENSE": false, "README.md": false}
 	tarReader := tar.NewReader(gzipReader)
 	for {
 		header, err := tarReader.Next()

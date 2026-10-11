@@ -77,6 +77,7 @@ source-checks:
     {{ golangci_lint }} fmt --diff
     go mod tidy -diff
     go build -o /dev/null .
+    go build -o /dev/null ./cmd/fakeprovider
     just --fmt --check
     {{ actionlint }} .github/workflows/*.yml
 
@@ -99,6 +100,10 @@ install:
 # Install only the executable
 install-binary:
     go install .
+
+# Install the fake model provider command
+install-fakeprovider:
+    go install ./cmd/fakeprovider
 
 # Remove build artifacts
 clean:
