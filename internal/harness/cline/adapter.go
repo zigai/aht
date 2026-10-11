@@ -56,9 +56,14 @@ func New() clineHarness {
 	})}
 }
 
-func (clineHarness) InstallPlan(binary string) harness.InstallPlan {
+func (clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := clineConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(clineConfigDir(), "plugins", clinePluginName)
+	dir := filepath.Join(base, "plugins", clinePluginName)
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   dir,
@@ -76,8 +81,9 @@ func (clineHarness) InstallPlan(binary string) harness.InstallPlan {
 		SnippetOrder:   []string{"package.json", "index.js", clineMarkerFileName},
 		MarkerFile:     clineMarkerFileName,
 		ImportManifest: nil,
+		Retired:        nil,
 		Registration:   nil,
-	}}}}
+	}}}}, nil
 }
 
 func (clineHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -119,7 +125,7 @@ func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 
 func renderClinePlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", harness.ScriptString(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 
@@ -145,27 +151,35 @@ func clineSessionPath(sessionID string) string {
 		return ""
 	}
 
-	return filepath.Join(clineSessionDir(), sessionID, sessionID+".messages.json")
+	dir := clineSessionDir()
+	if dir == "" {
+		return ""
+	}
+
+	return filepath.Join(dir, sessionID, sessionID+".messages.json")
 }
 
 func clineConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_DIR")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".cline")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".cline"
+	return filepath.Join(home, ".cline")
 }
 
 func clineSessionDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_SESSION_DATA_DIR")); value != "" {
 		return value
 	}
-	if value := strings.TrimSpace(os.Getenv("CLINE_DATA_DIR")); value != "" {
-		return filepath.Join(value, "sessions")
+
+	data := clineDataDir()
+	if data == "" {
+		return ""
 	}
 
-	return filepath.Join(clineConfigDir(), "data", "sessions")
+	return filepath.Join(data, "sessions")
 }

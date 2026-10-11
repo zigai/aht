@@ -17,7 +17,7 @@ type Driver struct {
 
 // NewDriver returns a Zellij driver.
 func NewDriver() Driver {
-	return Driver{ListOptions: ListOptions{Run: nil, LookPath: nil}}
+	return Driver{ListOptions: ListOptions{Run: nil, LookPath: nil, SocketDir: "", SessionInfoDir: "", Now: nil}}
 }
 
 // Kind returns [registry.MultiplexerZellij].

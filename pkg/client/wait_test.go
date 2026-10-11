@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -139,7 +139,7 @@ func TestWaitInitiallySatisfied(t *testing.T) {
 	if res.Session.ID != "sess-init" {
 		t.Errorf("res.Session.ID = %q, want sess-init", res.Session.ID)
 	}
-	if !tw.IsClosed() {
+	if !tw.Closed() {
 		t.Error("expected watcher to be closed after wait")
 	}
 }
@@ -178,7 +178,7 @@ func TestWaitInitiallySatisfiedWithStableFor(t *testing.T) {
 		if res.Session.ID != "sess-stable" {
 			t.Errorf("res.Session.ID = %q, want sess-stable", res.Session.ID)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed")
 		}
 	})
@@ -340,7 +340,7 @@ func TestWaitTimeout(t *testing.T) {
 		if !errors.Is(waitErr, client.ErrWaitTimeout) {
 			t.Fatalf("Wait() error = %v, want ErrWaitTimeout", waitErr)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed after timeout")
 		}
 	})
@@ -374,7 +374,7 @@ func TestWaitCallerCancellation(t *testing.T) {
 		if !errors.Is(waitErr, context.Canceled) {
 			t.Fatalf("Wait() error = %v, want context.Canceled", waitErr)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("expected watcher to be closed after cancellation")
 		}
 	})
@@ -557,11 +557,55 @@ func TestWaitSessionNotFoundAndDeleted(t *testing.T) {
 			synctest.Wait()
 			wg.Wait()
 
-			if !errors.Is(waitErr, registry.ErrSessionNotFound) {
-				t.Fatalf("Wait() error = %v, want ErrSessionNotFound", waitErr)
+			if !errors.Is(waitErr, client.ErrSessionDisappeared) {
+				t.Fatalf("Wait() error = %v, want ErrSessionDisappeared", waitErr)
 			}
 		})
 	})
+}
+
+func TestWaitPresenceGoneSucceedsWhenSessionIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		stableFor time.Duration
+		sequence  [][]registry.Session
+	}{
+		{name: "removed while live", sequence: [][]registry.Session{nil}},
+		{name: "gone then removed", sequence: [][]registry.Session{{makeTestSession("removed-sess", registry.PresenceGone, "")}, nil}},
+		{name: "removed with stable-for", stableFor: time.Second, sequence: [][]registry.Session{nil, nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				tw := client.NewTestWatcher()
+				tw.SendSessions(makeTestSession("removed-sess", registry.PresenceLive, registry.ActivityRunning))
+				c := client.New(client.Config{})
+				c.SetWatcherForTest(tw)
+
+				var res client.WaitResult
+				var waitErr error
+				var wg sync.WaitGroup
+				wg.Go(func() {
+					res, waitErr = c.Wait(context.Background(), client.WaitOptions{ID: "removed-sess", Presence: client.PresenceGone, StableFor: tc.stableFor})
+				})
+				synctest.Wait()
+				for _, sessions := range tc.sequence {
+					tw.SendSessions(sessions...)
+					synctest.Wait()
+				}
+				wg.Wait()
+
+				if waitErr != nil {
+					t.Fatalf("Wait() error = %v, want removal to satisfy gone", waitErr)
+				}
+				if res.Initial || res.Session.ID != "removed-sess" || res.Session.Presence() != registry.PresenceGone {
+					t.Fatalf("Wait() result = %#v, want non-initial gone session", res)
+				}
+			})
+		})
+	}
 }
 
 func TestWaitBrokerDisconnect(t *testing.T) {
@@ -716,7 +760,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("watcher was not closed on success")
 		}
 	})
@@ -743,7 +787,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 			synctest.Wait()
 			wg.Wait()
 
-			if !tw.IsClosed() {
+			if !tw.Closed() {
 				t.Error("watcher was not closed on timeout")
 			}
 		})
@@ -765,7 +809,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !tw.IsClosed() {
+		if !tw.Closed() {
 			t.Error("watcher was not closed on error")
 		}
 	})

@@ -60,6 +60,24 @@ func TestReporterIdentityHasNoAttributeKeys(t *testing.T) {
 	})
 }
 
+func TestRenamesLeaveNoDeprecatedAliases(t *testing.T) {
+	t.Parallel()
+	visitProductionGo(t, func(path string, data []byte) {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, data, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, group := range f.Comments {
+			for line := range strings.Lines(group.Text()) {
+				if strings.HasPrefix(line, "Deprecated:") {
+					t.Errorf("%s declares a deprecated identifier; rename callers instead of keeping the old name", fset.Position(group.Pos()))
+				}
+			}
+		}
+	})
+}
+
 func TestSnapshotPersistenceCannotObserve(t *testing.T) {
 	t.Parallel()
 	for _, method := range []string{"Observe", "ObserveBatch"} {
@@ -67,6 +85,54 @@ func TestSnapshotPersistenceCannotObserve(t *testing.T) {
 			t.Fatalf("FileStore exposes state mutation %s", method)
 		}
 	}
+}
+
+func TestHarnessPathsResolveHomeThroughOneHelper(t *testing.T) {
+	t.Parallel()
+	visitProductionGo(t, func(path string, data []byte) {
+		if !strings.HasPrefix(path, "internal/harness/") && !strings.HasPrefix(path, "pkg/history/") {
+			return
+		}
+		if path == "internal/harness/location.go" {
+			return
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok && looksUpHomeDirectory(call) {
+				t.Errorf("%s resolves the home directory itself; use harness.HomeDir", path)
+			}
+			return true
+		})
+	})
+}
+
+func looksUpHomeDirectory(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := selector.X.(*ast.Ident)
+	if !ok || pkg.Name != "os" {
+		return false
+	}
+	if selector.Sel.Name == "UserHomeDir" {
+		return true
+	}
+
+	return selector.Sel.Name == "Getenv" && len(call.Args) == 1 && isStringLiteral(call.Args[0], "HOME")
+}
+
+func isStringLiteral(expr ast.Expr, want string) bool {
+	literal, ok := expr.(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return false
+	}
+	value, err := strconv.Unquote(literal.Value)
+
+	return err == nil && value == want
 }
 
 func visitProductionGo(t *testing.T, visit func(string, []byte)) {

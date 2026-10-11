@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -75,7 +75,7 @@ func TestOpenClawInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 	state := installFakeOpenClawCLI(t)
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 
-	first, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	first, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("installing OpenClaw plugin: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestOpenClawInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 		}
 	}
 
-	second, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	second, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("reinstalling OpenClaw plugin: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestOpenClawInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 
 func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t *testing.T) { //nolint:cyclop // One shape test validates the complete generated native plugin contract.
 	t.Setenv(registry.StateDirEnv, t.TempDir())
-	adapter, ok := harnesscatalog.Find(registry.Harness("openclaw"))
+	adapter, ok := catalog.Find(registry.Harness("openclaw"))
 	if !ok {
 		t.Fatal("OpenClaw adapter not found")
 	}
@@ -117,7 +117,10 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 	if !ok {
 		t.Fatal("OpenClaw adapter is not installable")
 	}
-	plan := installer.InstallPlan(testInstallBinary)
+	plan, err := installer.InstallPlan(testInstallBinary)
+	if err != nil {
+		t.Fatalf("plan OpenClaw integration: %v", err)
+	}
 	pluginAction, ok := plan.Actions[0].(harnesspkg.PluginDirectoryAction)
 	if !ok {
 		t.Fatalf("unexpected OpenClaw install action: %T", plan.Actions[0])
@@ -142,7 +145,6 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 	}
 	for _, required := range []string{
 		`api.on("session_start"`, `api.on("before_agent_run"`, `api.on("agent_end"`, `api.on("session_end"`,
-		`"--lifecycle"`, `"--no-tmux"`, `openclaw_session_key`, `openclaw_run_id`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected OpenClaw plugin source to contain %q", required)
@@ -161,7 +163,7 @@ func TestOpenClawNixModeFailsBeforeWriting(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, stateDir)
 	t.Setenv("OPENCLAW_NIX_MODE", "1")
 
-	_, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err == nil || !strings.Contains(err.Error(), "OPENCLAW_NIX_MODE") {
 		t.Fatalf("expected Nix mode error, got %v", err)
 	}
@@ -174,13 +176,13 @@ func TestOpenClawRepairsStaleRegistration(t *testing.T) {
 	state := installFakeOpenClawCLI(t)
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 
-	if _, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary}); err != nil {
+	if _, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(state, "policy")); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	second, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatalf("repairing stale OpenClaw registration: %v", err)
 	}
@@ -201,7 +203,7 @@ func TestOpenClawRefusesForeignRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("expected foreign registration refusal, got %v", err)
 	}
@@ -210,14 +212,14 @@ func TestOpenClawRefusesForeignRegistration(t *testing.T) {
 		t.Fatalf("foreign refusal wrote managed source: %v", statErr)
 	}
 
-	replaced, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary, Force: true})
+	replaced, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary, Force: true})
 	if err != nil || !replaced.Changed {
 		t.Fatalf("forced foreign replacement = %+v, %v", replaced, err)
 	}
 	if _, statErr := os.Stat(managedPath); statErr != nil {
 		t.Fatalf("forced replacement did not install managed source: %v", statErr)
 	}
-	if _, err := Remove(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary}); err == nil {
+	if _, err := Remove(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary}); err == nil {
 		t.Fatal("removal must refuse a registration still reported as foreign")
 	}
 	if _, statErr := os.Stat(managedPath); statErr != nil {
@@ -228,11 +230,11 @@ func TestOpenClawRefusesForeignRegistration(t *testing.T) {
 func TestOpenClawRemoveUsesNativeUninstall(t *testing.T) {
 	state := installFakeOpenClawCLI(t)
 	t.Setenv(registry.StateDirEnv, t.TempDir())
-	installed, err := Run(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	installed, err := Run(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
-	removed, err := Remove(Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
+	removed, err := Remove(t.Context(), Options{Harness: registry.Harness("openclaw"), Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}

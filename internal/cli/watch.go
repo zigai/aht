@@ -89,26 +89,26 @@ type watchEventWriter struct {
 	headerWritten bool
 }
 
-func (app *application) prepareWatch(o watchOptions) (watchOptions, error) {
-	if o.formatSet && strings.TrimSpace(o.format) == "" {
-		return o, fmt.Errorf("%w: empty value", errInvalidWatchFormat)
+func (app *application) prepareWatch(opts watchOptions) (watchOptions, error) {
+	if opts.formatSet && strings.TrimSpace(opts.format) == "" {
+		return opts, fmt.Errorf("%w: empty value", errInvalidWatchFormat)
 	}
-	o = normalizeWatchOptions(o)
+	opts = normalizeWatchOptions(opts)
 	if app.outputJSON {
-		if o.formatSet {
-			return o, errWatchFormatJSONConflict
+		if opts.formatSet {
+			return opts, errWatchFormatJSONConflict
 		}
-		o.format = watchFormatJSON
+		opts.format = watchFormatJSON
 	}
-	if !app.outputJSON && o.format != watchFormatTable && o.format != watchFormatPlain {
-		return o, fmt.Errorf("%w: %q", errInvalidWatchFormat, o.format)
+	if !app.outputJSON && opts.format != watchFormatTable && opts.format != watchFormatPlain {
+		return opts, fmt.Errorf("%w: %q", errInvalidWatchFormat, opts.format)
 	}
-	return o, nil
+	return opts, nil
 }
 
-func (app *application) runWatch(ctx context.Context, o watchOptions) error {
+func (app *application) runWatch(ctx context.Context, opts watchOptions) error {
 	ahtClient := client.New(client.Config{StorePath: app.resolvedStorePath()})
-	err := app.runBrokerWatch(ctx, o, ahtClient)
+	err := app.runBrokerWatch(ctx, opts, ahtClient)
 	if err == nil {
 		return nil
 	}
@@ -116,17 +116,17 @@ func (app *application) runWatch(ctx context.Context, o watchOptions) error {
 		return fmt.Errorf("watching registry broker: %w", err)
 	}
 
-	return app.runFilesystemWatch(ctx, o)
+	return app.runFilesystemWatch(ctx, opts)
 }
 
 func (app *application) runBrokerWatch(
 	ctx context.Context,
-	o watchOptions,
+	opts watchOptions,
 	ahtClient *client.Client,
 ) error {
-	processor := newWatchUpdateProcessor(app, o)
+	processor := newWatchUpdateProcessor(app, opts)
 	initialized := false
-	err := ahtClient.Watch(ctx, o.filter, func(state registry.StateSnapshot) error {
+	err := ahtClient.Watch(ctx, opts.filter, func(state registry.StateSnapshot) error {
 		first := !initialized
 		if first {
 			initialized = true
@@ -139,15 +139,15 @@ func (app *application) runBrokerWatch(
 	return nil
 }
 
-func (app *application) runFilesystemWatch(ctx context.Context, o watchOptions) error {
+func (app *application) runFilesystemWatch(ctx context.Context, opts watchOptions) error {
 	s := app.store()
 	if _, _, e := watchTarget(s); e != nil {
 		return e
 	}
-	processor := newWatchUpdateProcessor(app, o)
+	processor := newWatchUpdateProcessor(app, opts)
 	err := s.Watch(ctx, registry.WatchOptions{
-		Filter:            o.filter,
-		Debounce:          o.debounce,
+		Filter:            opts.filter,
+		Debounce:          opts.debounce,
 		ReconcileInterval: 0,
 	}, func(result registry.WatchResult) error {
 		if app.reportWatchResultError(result) {
@@ -161,11 +161,11 @@ func (app *application) runFilesystemWatch(ctx context.Context, o watchOptions) 
 	return nil
 }
 
-func newWatchUpdateProcessor(app *application, o watchOptions) *watchUpdateProcessor {
+func newWatchUpdateProcessor(app *application, opts watchOptions) *watchUpdateProcessor {
 	return &watchUpdateProcessor{
 		app:      app,
-		options:  o,
-		writer:   &watchEventWriter{app: app, format: o.format},
+		options:  opts,
+		writer:   &watchEventWriter{app: app, format: opts.format},
 		previous: nil,
 	}
 }
@@ -203,17 +203,17 @@ func (app *application) reportWatchResultError(result registry.WatchResult) bool
 	return true
 }
 
-func normalizeWatchOptions(o watchOptions) watchOptions {
-	if strings.TrimSpace(o.format) == "" {
-		o.format = watchFormatTable
+func normalizeWatchOptions(opts watchOptions) watchOptions {
+	if strings.TrimSpace(opts.format) == "" {
+		opts.format = watchFormatTable
 	}
-	if o.debounce <= 0 {
-		o.debounce = defaultWatchDebounce
+	if opts.debounce <= 0 {
+		opts.debounce = defaultWatchDebounce
 	}
-	if o.now == nil {
-		o.now = func() time.Time { return time.Now().UTC() }
+	if opts.now == nil {
+		opts.now = func() time.Time { return time.Now().UTC() }
 	}
-	return o
+	return opts
 }
 
 func watchTarget(s *registry.Journal) (string, string, error) {
@@ -355,19 +355,19 @@ func sortWatchEvents(e []watchEvent) {
 	})
 }
 
-func watchMultiplexerLabel(ctx registry.Location) string {
-	if ctx.Empty() {
+func watchMultiplexerLabel(location registry.Location) string {
+	if location.Empty() {
 		return ""
 	}
-	parts := []string{string(ctx.Kind)}
-	if session := multiplexerSessionLabel(ctx); session != "-" {
+	parts := []string{string(location.Kind)}
+	if session := multiplexerSessionLabel(location); session != "-" {
 		parts = append(parts, session)
 	}
-	if container := multiplexerContainerLabel(ctx); container != "-" {
+	if container := multiplexerContainerLabel(location); container != "-" {
 		parts = append(parts, container)
 	}
-	if ctx.PaneID != "" {
-		parts = append(parts, ctx.PaneID)
+	if location.PaneID != "" {
+		parts = append(parts, location.PaneID)
 	}
 	return strings.Join(parts, ":")
 }

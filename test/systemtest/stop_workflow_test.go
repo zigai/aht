@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
@@ -46,11 +46,7 @@ func TestStopOwnedTargets(t *testing.T) {
 }
 
 func testStopOwnedProcess(t *testing.T) {
-	root, err := shortSystemTestRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := shortSystemTestRoot(t, "work", "state")
 	binary := buildSystemTestBinary(t, root)
 	codexBinary := filepath.Join(root, "codex")
 	if err := os.Link(binary, codexBinary); err != nil {
@@ -58,11 +54,6 @@ func testStopOwnedProcess(t *testing.T) {
 	}
 	workingDir := filepath.Join(root, "work")
 	stateDir := filepath.Join(root, "state")
-	for _, directory := range []string{workingDir, stateDir} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatalf("create isolated directory %q: %v", directory, err)
-		}
-	}
 	environment := systemTestEnvironment(filepath.Join(root, "home"), filepath.Join(root, "config"), stateDir)
 
 	selectedStore := filepath.Join(stateDir, "selected-child.json")
@@ -79,26 +70,29 @@ func testStopOwnedProcess(t *testing.T) {
 
 	dryRunOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", registryPath, "--json", "stop", selectedSession.SessionID, "--dry-run")
 	dryRun := decodeSystemStopResult(t, dryRunOutput)
-	if !dryRun.DryRun || dryRun.Stoppable != 1 || dryRun.Stopped != 0 || len(dryRun.Results) != 1 || dryRun.Results[0].Status != "would_stop" || dryRun.Results[0].Method != "pid-interrupt" {
+	if !dryRun.DryRun || dryRun.Stoppable != 1 || dryRun.Stopped != 0 {
 		t.Fatalf("process dry-run result = %#v", dryRun)
 	}
+	requireOneStopResult(t, "process dry-run", dryRun, systemStopSessionResult{Status: "would_stop", Method: "pid-interrupt"})
 	assertSystemTestCommandRunning(t, selected)
 	assertSystemTestCommandRunning(t, control)
 
 	staleSession := reportProcessSession(t, binary, workingDir, environment, registryPath, "stale-process", control.command.Process.Pid, controlIdentity+":stale")
 	staleOutput, staleError := runFailingSystemTestCommand(t, binary, workingDir, environment, "--store", registryPath, "--json", "stop", staleSession.SessionID)
 	stale := decodeSystemStopResult(t, staleOutput)
-	if stale.Skipped != 1 || len(stale.Results) != 1 || stale.Results[0].Status != "skipped" || stale.Results[0].Reason != "process identity changed" {
+	if stale.Skipped != 1 {
 		t.Fatalf("stale process result = %#v; stderr=%q", stale, staleError)
 	}
+	requireOneStopResult(t, "stale process", stale, systemStopSessionResult{Status: "skipped", Reason: "process identity changed"})
 	assertSystemTestCommandRunning(t, selected)
 	assertSystemTestCommandRunning(t, control)
 
 	stopOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", registryPath, "--json", "stop", selectedSession.SessionID)
 	stopped := decodeSystemStopResult(t, stopOutput)
-	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Target != strconv.Itoa(selected.command.Process.Pid) {
+	if stopped.Stopped != 1 {
 		t.Fatalf("process stop result = %#v", stopped)
 	}
+	requireOneStopResult(t, "process stop", stopped, systemStopSessionResult{Status: "stopped", Target: strconv.Itoa(selected.command.Process.Pid)})
 	waitForSystemTestCommandExit(t, selected)
 	assertSystemTestCommandRunning(t, control)
 	stopSystemTestCommand(t, control)
@@ -106,11 +100,7 @@ func testStopOwnedProcess(t *testing.T) {
 
 func testStopOwnedTmuxTarget(t *testing.T) {
 	testtmux.Executable(t)
-	root, err := shortSystemTestRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := shortSystemTestRoot(t, "state", "work")
 	binary := buildSystemTestBinary(t, root)
 	codexBinary := filepath.Join(root, "codex")
 	if err := os.Link(binary, codexBinary); err != nil {
@@ -118,11 +108,6 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 	}
 	stateDir := filepath.Join(root, "state")
 	workingDir := filepath.Join(root, "work")
-	for _, directory := range []string{stateDir, workingDir} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatalf("create isolated directory %q: %v", directory, err)
-		}
-	}
 	environment := systemTestEnvironment(filepath.Join(root, "home"), filepath.Join(root, "config"), stateDir)
 
 	targetServer := startTmuxAgentSession(t, "target", codexBinary, filepath.Join(stateDir, "target-pane.json"))
@@ -130,8 +115,8 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 
 	targetPane := requireTmuxPane(t, targetServer.Socket)
 	controlPane := requireTmuxPane(t, controlServer.Socket)
-	if targetPane.Tmux.PaneID != controlPane.Tmux.PaneID {
-		t.Fatalf("tmux fixtures must share a pane id across distinct servers: target=%q control=%q", targetPane.Tmux.PaneID, controlPane.Tmux.PaneID)
+	if targetPane.Location.PaneID != controlPane.Location.PaneID {
+		t.Fatalf("tmux fixtures must share a pane id across distinct servers: target=%q control=%q", targetPane.Location.PaneID, controlPane.Location.PaneID)
 	}
 
 	registryPath := filepath.Join(stateDir, "tmux-stop-sessions.json")
@@ -141,7 +126,7 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 
 	stopOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", registryPath, "--json", "stop", targetSession.ID)
 	stopped := decodeSystemStopResult(t, stopOutput)
-	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Method != "tmux-interrupt" || stopped.Results[0].Target != targetPane.Tmux.PaneID {
+	if stopped.Stopped != 1 || len(stopped.Results) != 1 || stopped.Results[0].Status != "stopped" || stopped.Results[0].Method != "tmux-interrupt" || stopped.Results[0].Target != targetPane.Location.PaneID {
 		t.Fatalf("tmux stop result = %#v", stopped)
 	}
 	waitForTmuxSessionExit(t, targetServer, "target")
@@ -183,6 +168,17 @@ func reportProcessSession(t *testing.T, binary string, directory string, environ
 		t.Fatalf("recorded process identity = %#v, want pid=%d start=%q", session.Process, pid, startIdentity)
 	}
 	return session
+}
+
+func requireOneStopResult(t *testing.T, label string, result systemStopResult, want systemStopSessionResult) {
+	t.Helper()
+	if len(result.Results) != 1 {
+		t.Fatalf("%s result = %#v, want one session result", label, result)
+	}
+	got := result.Results[0]
+	if got.Status != want.Status || (want.Method != "" && got.Method != want.Method) || (want.Target != "" && got.Target != want.Target) || (want.Reason != "" && got.Reason != want.Reason) {
+		t.Fatalf("%s result = %#v, want %#v", label, got, want)
+	}
 }
 
 func decodeSystemStopResult(t *testing.T, output []byte) systemStopResult {
@@ -253,7 +249,7 @@ func requireTmuxPane(t *testing.T, socket string) tmux.Pane {
 		panes, err := tmux.ListPanes(t.Context())
 		if err == nil {
 			for _, pane := range panes {
-				if pane.ServerIdentity == socket {
+				if pane.Location.ServerID == socket {
 					return pane
 				}
 			}
@@ -278,7 +274,7 @@ func seedTmuxStopSession(t *testing.T, store *registry.Journal, sessionID string
 	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at, Subject: registry.ObservationIdentity{SessionID: sessionID}, Evidence: &registry.Sighting{Process: *process, Present: present}}); err != nil {
 		t.Fatalf("record tmux process observation: %v", err)
 	}
-	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Nanosecond), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: pane.Tmux}})
+	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: at.Add(time.Nanosecond), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: pane.Location}})
 	if err != nil {
 		t.Fatalf("record tmux location observation: %v", err)
 	}

@@ -2,6 +2,7 @@ package install
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestInstallShimRequiresForceForForeignFile(t *testing.T) {
 		t.Fatalf("writing foreign shim: %v", err)
 	}
 
-	_, err := Run(Options{
+	_, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "/usr/bin/opencode",
@@ -38,7 +39,7 @@ func TestInstallShimWritesManagedScript(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(registry.StateDirEnv, dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "/usr/bin/opencode",
@@ -74,21 +75,21 @@ func TestInstallShimRepairsExecutableMode(t *testing.T) {
 		Harness: registry.Harness("opencode"), Binary: defaultBinary,
 		TargetBinary: "/usr/bin/opencode", UseShim: true,
 	}
-	first, err := Run(options)
+	first, err := Run(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(first.Path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(registry.Harness("opencode"), defaultBinary)
+	status, err := Inspect(t.Context(), registry.Harness("opencode"), defaultBinary)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status.Status != ArtifactStale {
 		t.Fatalf("non-executable shim status = %q, want stale", status.Status)
 	}
-	repaired, err := Run(options)
+	repaired, err := Run(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestInstallShimSupportsHarnessesMissingExitHooks(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv(registry.StateDirEnv, dir)
 
-			result, err := Run(Options{
+			result, err := Run(t.Context(), Options{
 				Harness:      tc.harness,
 				Binary:       defaultBinary,
 				TargetBinary: tc.targetBinary,
@@ -162,7 +163,7 @@ func TestInstallShimResolvesTargetOutsideManagedShimDir(t *testing.T) {
 		t.Fatalf("writing real harness binary: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -186,7 +187,7 @@ func TestInstallShimRejectsManagedShimTarget(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, dir)
 	shimPath := filepath.Join(dir, "shims", "opencode")
 
-	_, err := Run(Options{
+	_, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("opencode"),
 		Binary:       defaultBinary,
 		TargetBinary: shimPath,
@@ -197,4 +198,16 @@ func TestInstallShimRejectsManagedShimTarget(t *testing.T) {
 	if !errors.Is(err, errRecursiveShimTarget) {
 		t.Fatalf("expected errRecursiveShimTarget, got %v", err)
 	}
+}
+
+func writeExecutableTestFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("writing executable test file: %w", err)
+	}
+
+	if err := os.Chmod(path, 0o700); err != nil {
+		return fmt.Errorf("marking executable test file executable: %w", err)
+	}
+
+	return nil
 }

@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func (host isolatedHost) validateSession(session registry.Session) bool {
-	if host.contract.Level == compatibilityDiscovery {
+func (host *isolatedHost) validateSession(session registry.Session) bool {
+	if host.contract.Level == compatibilityLevelDiscovery {
 		return true
 	}
 	if session.Observations.Native == nil {
@@ -25,7 +26,7 @@ func (host isolatedHost) validateSession(session registry.Session) bool {
 	if session.SessionID != "" && session.SessionID != session.Observations.Native.SessionID {
 		return false
 	}
-	if host.work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.work) {
+	if host.launched.Work != "" && filepath.Clean(session.CWD) != filepath.Clean(host.launched.Work) {
 		return false
 	}
 	return terminalSession(host.contract.ID, session)
@@ -40,7 +41,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 			Present: true,
 		},
 	}, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)}
-	host := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLifecycle}}
+	host := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("opencode"), Level: compatibilityLevelLifecycle}}
 	if host.validateSession(processOnly) {
 		t.Fatal("oracle accepted process-only session for non-exempt harness")
 	}
@@ -54,7 +55,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	if host.validateSession(withNative) {
 		t.Fatal("oracle accepted start-only stuck-live native session")
 	}
-	withNative.Observations.Native.Event = "session.idle"
+	withNative.Observations.Native.Event = "session.execution.succeeded"
 	withNative.Observations.Native.Activity = new(registry.ActivityIdle)
 	withNative.Liveness = registry.NewLiveness(withNative.Presence(), registry.ActivityValue(new(registry.ActivityUnknown)), withNative.Decision())
 	if host.validateSession(withNative) {
@@ -79,7 +80,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		t.Fatal("oracle accepted session with mismatched native session ID")
 	}
 
-	cursorHost := isolatedHost{work: workDir, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityDiscovery}}
+	cursorHost := &isolatedHost{launched: &launch.Harness{Work: workDir}, contract: hostContract{ID: registry.Harness("cursor"), Level: compatibilityLevelDiscovery}}
 	if !cursorHost.validateSession(processOnly) {
 		t.Fatal("oracle rejected discovery-only state for exempt cursor harness")
 	}
@@ -102,7 +103,10 @@ func discoveryScope(id registry.Harness) string {
 	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
-	return "agy --help documents hosted model selection but no local-provider endpoint; https://docs.agy.ai/plugins was unreachable during contract review, so native lifecycle support is not asserted"
+	if id == registry.Harness("crush") {
+		return "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md documents only PreToolUse, so the hook supplies native session identity while start, idle, permission, and end come from the screen manifest; native lifecycle support is not asserted"
+	}
+	return "only plugin loading is asserted, through `agy plugin list` and `agy -p /hooks` with the documented Gemini API-key provider pointed at a local endpoint; hook inspection must not make model requests, and native lifecycle support is not asserted"
 }
 
 // Record only flags describing native observations, never stdin, tool inputs,
@@ -126,7 +130,7 @@ done
 if [ -n "$record" ]; then printf '%%s\n' "$record" >> %s; fi
 exec %s "$@"
 `, quote(evidence), quote(path+".real"))
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec // reason: G306; the launcher is an owner-only executable the native host runs in place of aht.
 		t.Fatal(err)
 	}
 }
@@ -141,39 +145,42 @@ func terminalSession(id registry.Harness, session registry.Session) bool {
 	}
 	// Hermes chat explicitly finalizes the session; oneshot ends only its turn.
 	if id == registry.Harness("hermes") && native.Event == "on_session_finalize" {
-		return native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone
+		return nativeGone(native, session)
 	}
 	switch id {
 	case registry.Harness("opencode"), registry.Harness("kilo"), registry.Harness("cline"), registry.Harness("openclaw"), registry.Harness("hermes"):
-		if native.Activity == nil || *native.Activity != registry.ActivityIdle {
-			return false
-		}
-		if !effectiveActivityMatches(session, registry.ActivityIdle) {
-			return false
-		}
-		// Both current OpenCode/Kilo idle notifications are native terminal
-		// evidence; either may be the last drained event.
-		return native.Event == terminalEvent(id) ||
-			((id == registry.Harness("opencode") || id == registry.Harness("kilo")) && native.Event == "session.idle")
+		return idleTurnEnded(id, native, session)
 	default:
 		// A process-observer tombstone is not a native SessionEnd.
-		return native.Presence != nil && *native.Presence == registry.PresenceGone &&
-			session.Presence() == registry.PresenceGone && native.Event == terminalEvent(id)
+		return nativeGone(native, session) && native.Event == terminalEvent(id)
 	}
 }
 
-func nativeActivityMatches(session registry.Session, want registry.Activity) bool {
+func nativeGone(native *registry.NativeObservation, session registry.Session) bool {
+	return native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone
+}
+
+func idleTurnEnded(id registry.Harness, native *registry.NativeObservation, session registry.Session) bool {
+	if native.Activity == nil || *native.Activity != registry.ActivityIdle || !effectiveActivityMatches(session, registry.ActivityIdle) {
+		return false
+	}
+	// Both current Kilo idle notifications are native terminal evidence;
+	// either may be the last drained event.
+	return native.Event == terminalEvent(id) || (id == registry.Harness("kilo") && native.Event == "session.idle")
+}
+
+func nativeActivityRunning(session registry.Session) bool {
 	native := session.Observations.Native
 	if native == nil {
 		return false
 	}
 	if native.Activity != nil {
-		return *native.Activity == want
+		return *native.Activity == registry.ActivityRunning
 	}
 	// A later presence-only hook replaces the native snapshot without
 	// invalidating the retained activity decision for the same incarnation.
 	decision := session.Decision()
-	return session.Activity() != nil && *session.Activity() == want && decision != nil &&
+	return session.Activity() != nil && *session.Activity() == registry.ActivityRunning && decision != nil &&
 		decision.Authority == "hook" && decision.Process.Equal(native.Process)
 }
 
@@ -183,24 +190,24 @@ func TestNativeActivityOracleRetainsPresenceOnlyProvenance(t *testing.T) {
 	session := registry.Session{Observations: registry.Observations{
 		Native: &registry.NativeObservation{Event: "sessionStart", Process: process},
 	}, Liveness: registry.NewLiveness(registry.PresenceUnknown, registry.ActivityValue(new(registry.ActivityRunning)), nil)}
-	if nativeActivityMatches(session, registry.ActivityRunning) {
+	if nativeActivityRunning(session) {
 		t.Fatal("effective activity without native provenance passed")
 	}
 	session.Liveness = registry.NewLiveness(session.Presence(), registry.ActivityValue(session.Activity()), &registry.ActivityDecision{Authority: "process", Process: process})
-	if nativeActivityMatches(session, registry.ActivityRunning) {
+	if nativeActivityRunning(session) {
 		t.Fatal("process-derived activity passed as native evidence")
 	}
 	session.Decision().Authority = "hook"
-	if !nativeActivityMatches(session, registry.ActivityRunning) {
+	if !nativeActivityRunning(session) {
 		t.Fatal("presence-only callback erased same-incarnation native running proof")
 	}
 	session.Decision().Process.StartIdentity = "previous"
-	if nativeActivityMatches(session, registry.ActivityRunning) {
+	if nativeActivityRunning(session) {
 		t.Fatal("prior-incarnation activity passed as current native evidence")
 	}
 	session.Decision().Process = process
 	session.Observations.Native.Activity = new(registry.ActivityIdle)
-	if nativeActivityMatches(session, registry.ActivityRunning) {
+	if nativeActivityRunning(session) {
 		t.Fatal("retained decision overrode an explicit newer native idle state")
 	}
 }
@@ -225,7 +232,9 @@ func terminalEvent(id registry.Harness) string {
 		return "session_shutdown"
 	case registry.Harness("copilot"):
 		return "sessionEnd"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.succeeded"
+	case registry.Harness("kilo"):
 		return "session.status"
 	case registry.Harness("cline"):
 		return "afterRun"
@@ -244,7 +253,9 @@ func startEvent(id registry.Harness) string {
 		return "session_start"
 	case registry.Harness("copilot"):
 		return "sessionStart"
-	case registry.Harness("opencode"), registry.Harness("kilo"):
+	case registry.Harness("opencode"):
+		return "session.execution.started"
+	case registry.Harness("kilo"):
 		return "session.created"
 	case registry.Harness("cline"):
 		return "beforeRun"
@@ -272,16 +283,16 @@ func turnEndEvent(id registry.Harness) string {
 	}
 }
 
-func (host isolatedHost) assertNativeEvents(t *testing.T) {
+func (host *isolatedHost) assertNativeEvents(t *testing.T) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(host.root, "native-events"))
+	data, err := os.ReadFile(host.nativeEvents)
 	if err != nil {
 		t.Fatalf("reading native callback evidence: %v", err)
 	}
 	for _, event := range []string{startEvent(host.contract.ID), turnEndEvent(host.contract.ID), terminalEvent(host.contract.ID)} {
 		found := false
-		for _, line := range strings.Split(string(data), "\n") {
-			for _, field := range strings.Fields(line) {
+		for line := range strings.SplitSeq(string(data), "\n") {
+			for field := range strings.FieldsSeq(line) {
 				found = found || field == "--event="+event
 			}
 		}
@@ -295,7 +306,7 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 	t.Parallel()
 	gone := registry.PresenceGone
 	idle := registry.ActivityIdle
-	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid")} {
+	for _, id := range []registry.Harness{registry.Harness("claude"), registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"), registry.Harness("copilot"), registry.Harness("kimi-code"), registry.Harness("grok"), registry.Harness("goose"), registry.Harness("droid"), registry.Harness("qwen")} {
 		t.Run(string(id), func(t *testing.T) {
 			session := registry.Session{Observations: registry.Observations{Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle}}, Liveness: registry.NewLiveness(gone, registry.ActivityValue(nil), nil)}
 			if terminalSession(id, session) {

@@ -16,13 +16,15 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func isolateUpgradeHome(t *testing.T) {
+func isolateUpgradeHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "AGY_CONFIG_HOME", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "KILO_CONFIG_DIR", registry.StateDirEnv} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_CODE_HOME", "GROK_HOME", "PI_CODING_AGENT_DIR", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "KILO_CONFIG_DIR", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
+
+	return home
 }
 
 func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
@@ -38,7 +40,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(user), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
+	old, err := Run(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,43 +83,52 @@ func assertUpgradedHooks(t *testing.T, path string, before []byte, dry bool) {
 }
 
 func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
-	isolateUpgradeHome(t)
-	target := "/custom/harness with 'quotes'"
-	old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: target}, registry.Harness("codex"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
-	if err != nil || len(results) != 1 || results[0].Path != old.Path {
-		t.Fatalf("upgrade = %+v, %v", results, err)
-	}
-	got, exists, err := installedShim(registry.Harness("codex"))
-	if err != nil || !exists || got != target {
-		t.Fatalf("target = %q, %v, %v", got, exists, err)
-	}
-	native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
-	if err != nil || native {
-		t.Fatalf("shim migrated to native: %v, %v", native, err)
+	for _, test := range []struct {
+		name, target string
+	}{
+		{name: "quotes", target: "/custom/harness with 'quotes'"},
+		{name: "newline", target: "/custom/harness\nbin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateUpgradeHome(t)
+			old, err := installShim(Options{Binary: "/bin/old-aht", TargetBinary: test.target}, registry.Harness("codex"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+			if err != nil || len(results) != 1 || results[0].Path != old.Path {
+				t.Fatalf("upgrade = %+v, %v", results, err)
+			}
+			got, exists, err := installedShim(registry.Harness("codex"))
+			if err != nil || !exists || got != test.target {
+				t.Fatalf("target = %q, %v, %v", got, exists, err)
+			}
+			native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
+			if err != nil || native {
+				t.Fatalf("shim migrated to native: %v, %v", native, err)
+			}
+		})
 	}
 }
 
 func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	isolateUpgradeHome(t)
-	claude, err := RunContext(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
+	installFakeCodexCLI(t)
+	claude, err := Run(t.Context(), Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(claude.Path, []byte(`{"aht managed integration":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"}); err != nil {
+	if _, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/old-aht"}); err != nil {
 		t.Fatal(err)
 	}
 	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
 	if err == nil || len(results) != 2 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	status, err := InspectContext(t.Context(), registry.Harness("codex"), "/bin/new-aht")
+	status, err := Inspect(t.Context(), registry.Harness("codex"), "/bin/new-aht")
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("healthy integration was not upgraded: %+v, %v", status, err)
 	}
@@ -133,11 +144,12 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	isolateUpgradeHome(t)
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
-	for _, id := range AllHarnesses() {
+	installFakeCodexCLI(t)
+	for _, id := range Harnesses() {
 		// pi and omp intentionally share the explicit PI_CODING_AGENT_DIR; exercise
 		// one at a time to verify that ownership does not select the other adapter.
 		t.Run(string(id), func(t *testing.T) {
-			if _, err := RunContext(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
+			if _, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
 				t.Fatal(err)
 			}
 			firstResults, err := Upgrade(t.Context(), "/bin/new-aht", false)
@@ -155,7 +167,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 			}
 			assertUpgradeNextStep(t, id, firstResults[0], repeatedResults[0])
 			assertUpgradeArtifactsUntouched(t, before)
-			if _, err := RemoveContext(t.Context(), Options{Harness: id, Binary: "/bin/new-aht"}); err != nil {
+			if _, err := Remove(t.Context(), Options{Harness: id, Binary: "/bin/new-aht"}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -167,7 +179,7 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 	hermes := installFakeHermesCLI(t)
 	openclaw := installFakeOpenClawCLI(t)
 	for _, id := range []registry.Harness{registry.Harness("hermes"), registry.Harness("openclaw")} {
-		if _, err := RunContext(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
+		if _, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -276,16 +288,16 @@ func assertUpgradeArtifactsUntouched(t *testing.T, snapshots map[string]artifact
 
 func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	isolateUpgradeHome(t)
+	installFakeCodexCLI(t)
 	binary := filepath.Join(t.TempDir(), "aht")
 	if err := os.WriteFile(binary, []byte("old binary"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	installed, err := RunContext(t.Context(), Options{Harness: registry.Harness("codex"), Binary: binary})
+	installed, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: binary})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A reviewed file need not use the installer's JSON indentation. Reformatting
-	// identical hook definitions must not create a new file for Codex to review.
+	// Equivalent formatting must not rewrite the installed hook definitions.
 	data, err := os.ReadFile(installed.Path)
 	if err != nil {
 		t.Fatal(err)
@@ -305,8 +317,8 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	if err != nil || len(results) != 1 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
-	if results[0].Changed || results[0].NextStep != "" {
-		t.Fatalf("unchanged hooks requested review: %+v", results[0])
+	if results[0].Changed {
+		t.Fatalf("unchanged hooks were rewritten: %+v", results[0])
 	}
 	assertUpgradeArtifactsUntouched(t, before)
 }

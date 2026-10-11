@@ -146,7 +146,19 @@ func storeNativeObservation(session *Session, observation Observation, at time.T
 	}
 	reporter := observation.Report().Reporter
 	reporter.Sequence = clonePtr(reporter.Sequence)
-	session.Observations.Native = &NativeObservation{Reporter: reporter, Event: observation.Report().Event, Lifecycle: clonePtr(observation.Report().Lifecycle), Presence: clonePtr(observation.Report().Claim), Activity: clonePtr(observation.ActivityClaim()), SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ObservedAt: at, Attributes: cloneAttributes(observation.Report().Attributes), RawPayload: cloneRaw(observation.Report().Payload), Process: process}
+	detail := session.nativeDetail(observation.Report(), process, at)
+	session.Observations.Native = &NativeObservation{Reporter: reporter, Event: observation.Report().Event, Lifecycle: clonePtr(observation.Report().Lifecycle), Presence: clonePtr(observation.Report().Claim), Activity: session.nativeActivity(observation.Report(), process), SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ObservedAt: at, Attributes: cloneAttributes(observation.Report().Attributes), RawPayload: cloneRaw(observation.Report().Payload), Process: process, Detail: detail}
+}
+
+func (s Session) nativeActivity(report *Report, process ProcessIdentity) *Activity {
+	activity := report.Activity
+	previous := s.Observations.Native
+	if activity == nil && s.Presence() != PresenceGone && !reportEnds(report) &&
+		previous != nil && !nativeEnded(previous) && previous.Reporter.Integration == report.Reporter.Integration &&
+		s.Process != nil && s.Process.Equal(process) && previous.Process.Equal(process) {
+		activity = previous.Activity
+	}
+	return clonePtr(activity)
 }
 
 func storeProcessObservation(session *Session, observation Observation, at time.Time) {
@@ -159,7 +171,7 @@ func storeProcessObservation(session *Session, observation Observation, at time.
 }
 
 func storeMultiplexerObservation(session *Session, observation Observation, at time.Time) {
-	session.Observations.Location = &MultiplexerObservation{Process: *observation.ProcessIdentity(), Context: *observation.Location(), ObservedAt: at}
+	session.Observations.Location = &MultiplexerObservation{Process: *observation.ProcessIdentity(), Location: *observation.Location(), ObservedAt: at}
 }
 
 func storeCatalogObservation(session *Session, observation Observation, at time.Time) {

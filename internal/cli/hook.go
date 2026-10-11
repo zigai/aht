@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 	"github.com/zigai/aht/v2/pkg/tmux"
 )
@@ -59,7 +59,6 @@ func (app *application) newHookCommand() *cobra.Command {
 			return app.runManagedHook(cmd.Context(), stdin, args[0], options)
 		},
 	}
-	cmd.AddCommand(app.newWireCommand())
 	cmd.Flags().StringVar(&options.event, "event", "", "native hook event `<name>`")
 	return cmd
 }
@@ -68,12 +67,12 @@ func (app *application) runManagedHook(
 	ctx context.Context,
 	stdin io.Reader,
 	harnessName string,
-	options managedHookOptions,
+	opts managedHookOptions,
 ) error {
 	if !app.outputJSON {
 		return exitCode(errManagedHookJSONRequired, exitCodeUsage)
 	}
-	harness, err := harnesspkg.Normalize(harnessName)
+	harnessID, err := catalog.Parse(harnessName)
 	if err != nil {
 		return fmt.Errorf("normalizing hook harness: %w", err)
 	}
@@ -85,12 +84,15 @@ func (app *application) runManagedHook(
 	rawPayload := rawPayloadFromHookBytes(data)
 	payload := hookPayloadObject(rawPayload)
 	parentArgs := parentProcessArgs(ctx)
-	result, ok := harnesspkg.HandleHook(harness, options.event, rawPayload, payload, parentArgs)
+	result, ok, err := catalog.HandleHook(ctx, harnessID, opts.event, rawPayload, payload, parentArgs)
 	if !ok {
-		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harness)
+		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harnessID)
+	}
+	if err != nil {
+		return fmt.Errorf("handling managed hook: %w", err)
 	}
 	if result.ReportOK {
-		result.Report.SetProcess(reportProcessIdentity(harness, reportProcessAncestors(ctx, 0)))
+		result.Report.SetProcess(reportProcessIdentity(harnessID, reportProcessAncestors(ctx, 0)))
 	}
 
 	if err := reportManagedHook(ctx, app.registryStore(), result); err != nil {
@@ -104,11 +106,11 @@ func reportManagedHook(ctx context.Context, store observationSink, result harnes
 	if !result.ReportOK {
 		return nil
 	}
-	observation := harnesspkg.PrepareObservation(result.Report)
+	observation := catalog.PrepareObservation(result.Report)
 	if collected, err := tmux.Current(ctx); err == nil {
 		observation.SetLocation(&collected)
 	}
-	if collected := reportMultiplexerContext(); !collected.Empty() {
+	if collected := reportMultiplexerLocation(); !collected.Empty() {
 		observation.SetLocation(&collected)
 	}
 	if _, err := store.Observe(ctx, observation); err != nil {

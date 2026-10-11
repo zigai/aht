@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -98,7 +99,7 @@ func openKiloSessionDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("inspect Kilo database: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("kilo database %q: %w", path, errKiloDatabaseNotRegular)
+		return nil, fmt.Errorf("%w: %q", errKiloDatabaseNotRegular, path)
 	}
 	var databaseURL url.URL
 	databaseURL.Scheme = "file"
@@ -189,6 +190,7 @@ func kiloCommandDatabasePath(ctx context.Context, binary string) ([]string, erro
 }
 
 func kiloFallbackDatabasePaths() ([]string, error) {
+	name := "kilo.db"
 	if path := strings.TrimSpace(os.Getenv("KILO_DB")); path != "" {
 		if path == ":memory:" {
 			return nil, nil
@@ -196,9 +198,14 @@ func kiloFallbackDatabasePaths() ([]string, error) {
 		if filepath.IsAbs(path) {
 			return []string{path}, nil
 		}
-		return []string{filepath.Join(kiloDataDir(), path)}, nil
+		name = path
 	}
-	return []string{filepath.Join(kiloDataDir(), "kilo.db")}, nil
+	dir := kiloDataDir()
+	if dir == "" {
+		return nil, nil
+	}
+
+	return []string{filepath.Join(dir, name)}, nil
 }
 
 func (output *kiloDatabasePathOutput) Write(data []byte) (int, error) {
@@ -214,13 +221,14 @@ func (output *kiloDatabasePathOutput) Write(data []byte) (int, error) {
 }
 
 func kiloDataDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
 	data := os.Getenv("XDG_DATA_HOME")
 	if data == "" {
+		home := harness.HomeDir()
+		if home == "" {
+			return ""
+		}
 		data = filepath.Join(home, ".local", "share")
 	}
+
 	return filepath.Join(data, "kilo")
 }

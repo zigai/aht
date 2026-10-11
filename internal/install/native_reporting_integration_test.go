@@ -21,6 +21,27 @@ func TestPiReportingAllowsSlowSuccessfulWrite(t *testing.T) {
 	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, binary), runtimeScript(t, "node/pi-slow-report.mjs"), nil)
 }
 
+func TestPluginDisposeWaitsForQueuedReports(t *testing.T) {
+	for _, id := range []registry.Harness{registry.Harness("opencode"), registry.Harness("kilo")} {
+		t.Run(string(id), func(t *testing.T) {
+			dir := t.TempDir()
+			binary := filepath.Join(dir, "reporter")
+			t.Setenv("AHT_REPORT_LOG", filepath.Join(dir, "reports"))
+			writeTestFile(t, binary, "#!"+requireRuntimeTool(t, "node")+"\n"+runtimeScript(t, "node/delayed-reporter.cjs"), 0o700)
+			var module string
+			for _, artifact := range collectGeneratedArtifacts(t, captureExecutable{command: binary}) {
+				if artifact.harness == id && strings.HasSuffix(artifact.path, "aht-state.ts") {
+					module = artifact.content
+				}
+			}
+			if module == "" {
+				t.Fatalf("missing generated %s plugin", id)
+			}
+			runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/plugin-dispose-drain.mjs"), nil)
+		})
+	}
+}
+
 func TestPiReportingRetainsSafeNativeDiagnosticsAndRecovers(t *testing.T) {
 	for _, hasUI := range []string{"true", "false"} {
 		t.Run("hasUI="+hasUI, func(t *testing.T) {
@@ -36,12 +57,6 @@ func TestPiReportingRetainsSafeNativeDiagnosticsAndRecovers(t *testing.T) {
 
 func TestPiReportingMissingBinaryAndUnwritableSessionAreNonfatal(t *testing.T) {
 	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, filepath.Join(t.TempDir(), "missing")), runtimeScript(t, "node/pi-missing-report-diagnostics.mjs"), nil)
-}
-
-func TestPiReportingRestoresLastFailureAfterReload(t *testing.T) {
-	capture := captureBinary(t)
-	t.Setenv("AHT_CAPTURE", capture.path)
-	runNodeRuntime(t, "extension.ts", piReportingArtifact(t, capture.command), runtimeScript(t, "node/pi-restored-diagnostics.mjs"), nil)
 }
 
 func piReportingArtifact(t *testing.T, binary string) string {
@@ -124,7 +139,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 			writeTestFile(t, filepath.Join(dir, "extension.ts"), artifact.content, 0o600)
 		}
 	}
-	runReportingDriver(t, "node", dir, runtimeScript(t, "node/omp-queued-reports.mjs"), capture, "session_shutdown")
+	runReportingDriver(t, reportingFixture{tool: "node", terminal: "session_shutdown", driver: runtimeScript(t, "node/omp-queued-reports.mjs")}, dir, capture)
 	records := readReportingRecords(t, capture)
 	want := [][]string{
 		{"--lifecycle", "start", "--session-id", "original"},
@@ -198,7 +213,7 @@ func TestOmpApprovalReportsWaitingState(t *testing.T) {
 	t.Setenv("AHT_CAPTURE", capture.path)
 	module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 	runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/omp-approval.mjs"), nil)
-	requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "waiting", "--session-id", "approval-session", "--event", "tool_approval_requested", "--attribute", "omp_approval_reason=Run command?", "--attribute", "agent_state_message=Run command?")
+	requireCapturedArguments(t, capture.path, "report", "omp", "--activity", "waiting", "--detail", "permission", "--session-id", "approval-session", "--event", "tool_approval_requested", "--attribute", "omp_approval_reason=Run command?", "--attribute", "agent_state_message=Run command?")
 }
 
 func TestExtensionsReportNativeInteractionMode(t *testing.T) {

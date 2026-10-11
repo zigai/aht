@@ -40,7 +40,7 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return fmt.Errorf("decoding session: %w", err)
 	}
-	if !wire.Liveness.Kind.IsValid() {
+	if !wire.Liveness.Kind.Valid() {
 		return fmt.Errorf("%w: invalid liveness %q", ErrCorruptStore, wire.Liveness.Kind)
 	}
 	if (wire.Liveness.Kind == PresenceGone) != (wire.Liveness.Activity == nil) {

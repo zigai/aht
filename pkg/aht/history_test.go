@@ -2,6 +2,7 @@ package aht_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +20,7 @@ func TestSearchHistoryCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := aht.SearchHistory(ctx, aht.HistoryQuery{Text: "needle"})
+	_, err := aht.SearchHistory(ctx, aht.HistoryQuery{Terms: []string{"needle"}})
 	if err == nil {
 		t.Fatal("SearchHistory with a canceled context returned no error")
 	}
@@ -53,7 +54,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 	}
 
 	t.Run("most recently updated first", func(t *testing.T) {
-		result, err := catalog.Search(t.Context(), aht.HistoryQuery{Text: "needle"})
+		result, err := catalog.Search(t.Context(), aht.HistoryQuery{Terms: []string{"needle"}})
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
@@ -64,7 +65,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 	})
 
 	t.Run("limit keeps the newest conversations", func(t *testing.T) {
-		result, err := catalog.Search(t.Context(), aht.HistoryQuery{Text: "needle", Limit: 1})
+		result, err := catalog.Search(t.Context(), aht.HistoryQuery{Terms: []string{"needle"}, Limit: 1})
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
@@ -101,4 +102,61 @@ func writePiHistory(t *testing.T, sessionID, text string, at time.Time) string {
 		t.Fatalf("write pi history: %v", err)
 	}
 	return path
+}
+
+func TestListHistoryReadsDefaultSourcesWithoutText(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	sessions := filepath.Join(home, ".pi", "agent", "sessions", "project")
+	if err := os.MkdirAll(sessions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for id, cwd := range map[string]string{"session-app": "/work/app", "session-other": "/work/other"} {
+		body := fmt.Sprintf(`{"type":"session","id":%q,"cwd":%q,"timestamp":"2026-09-20T10:00:00Z"}`+"\n"+`{"type":"message","message":{"role":"user","content":"hello"},"timestamp":"2026-09-20T10:01:00Z"}`+"\n", id, cwd)
+		if err := os.WriteFile(filepath.Join(sessions, id+".jsonl"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := aht.ListHistory(t.Context(), aht.HistoryListQuery{Harnesses: []aht.Harness{aht.HarnessPi}, Dir: "/work/app"})
+	if err != nil {
+		t.Fatalf("ListHistory error = %v", err)
+	}
+	if len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "session-app" || len(result.Matches[0].ResumeCommand) == 0 {
+		t.Fatalf("ListHistory = %#v", result.Matches)
+	}
+}
+
+func TestHistoryQueryKeepsTextAndHarnessFields(t *testing.T) {
+	path := writePiHistory(t, "session-text", "needle beside the haystack", time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC))
+	catalog := aht.HistoryCatalog{
+		Sources:   []aht.HistorySource{{Harness: aht.HarnessPi, Path: path}, {Harness: aht.HarnessCodex, Path: filepath.Dir(path)}},
+		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
+	}
+	for _, tt := range []struct {
+		name  string
+		query aht.HistoryQuery
+		want  int
+	}{
+		{"text alone", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessPi, Dir: "/work/app", Registry: nil, IgnoreHarnesses: nil, IgnorePaths: nil}, 1},
+		{"text and terms must all match", aht.HistoryQuery{Text: "needle", Terms: []string{"absent"}}, 0},
+		{"harness narrows sources", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessCodex}, 0},
+	} {
+		result, err := catalog.Search(t.Context(), tt.query)
+		if err != nil || len(result.Matches) != tt.want {
+			t.Fatalf("%s: matches = %d, err = %v", tt.name, len(result.Matches), err)
+		}
+	}
+	if _, err := catalog.Search(t.Context(), aht.HistoryQuery{Text: "needle", Harness: "nope"}); !errors.Is(err, aht.ErrInvalidHistoryQuery) {
+		t.Fatalf("unknown harness error = %v", err)
+	}
+
+	var decoded aht.HistoryQuery
+	if err := json.Unmarshal([]byte(`{"text":"needle","harness":"pi","dir":"/work/app","limit":1}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	result, err := catalog.Search(t.Context(), decoded)
+	if err != nil || len(result.Matches) != 1 {
+		t.Fatalf("decoded query %#v: matches = %d, err = %v", decoded, len(result.Matches), err)
+	}
 }

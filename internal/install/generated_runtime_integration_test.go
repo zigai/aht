@@ -3,17 +3,17 @@
 package install
 
 import (
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const generatedRuntimeSensitiveSentinel = "AHT_PHASE3_SENSITIVE_SENTINEL"
+const generatedRuntimeSensitiveSentinel = "AHT_SENSITIVE_SENTINEL"
 
 func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
@@ -24,7 +24,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
 		command := generatedCommandHook(t, registry.Harness("claude"))
-		runGeneratedCommand(t, exec.Command("sh", "-c", command), `{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
+		runGeneratedCommand(t, `{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`, "sh", "-c", command)
 		requireCapturedArguments(t, capture.path, "report", "claude", "--activity", "idle")
 	})
 
@@ -32,7 +32,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
 		script := writeRuntimeArtifact(t, "report.sh", generatedArtifactContent(t, registry.Harness("goose"), "scripts/report.sh"))
-		runGeneratedCommand(t, exec.Command("sh", script, "running", "UserPromptSubmit"), `{"session_id":"goose-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`)
+		runGeneratedCommand(t, `{"session_id":"goose-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`, "sh", script, "running", "UserPromptSubmit")
 		requireCapturedArguments(t, capture.path, "report", "goose", "--activity", "running")
 	})
 
@@ -71,7 +71,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 		driver := runtimeScript(t, "python/hermes-session-end.py")
 		driverPath := filepath.Join(dir, "driver.py")
 		writeTestFile(t, driverPath, driver, 0o600)
-		runGeneratedCommand(t, exec.Command("python3", driverPath, modulePath), "")
+		runGeneratedCommand(t, "", "python3", driverPath, modulePath)
 		requireCapturedArguments(t, capture.path, "report", "hermes", "--activity", "failed")
 	})
 
@@ -128,37 +128,174 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	})
 
 	t.Run("missing-binary-nonfatal", func(t *testing.T) {
-		const absentBinary = "/nonexistent/binary/absent-aht"
-		renderAbsentModule := func(h registry.Harness) string {
-			t.Helper()
-			adapter, ok := harnesscatalog.Find(h)
-			if !ok {
-				t.Fatalf("find harness %s", h)
-			}
-			installer, ok := adapter.(harnesspkg.Installable)
-			if !ok {
-				t.Fatalf("harness %s is not installable", h)
-			}
-			for _, action := range installer.InstallPlan(absentBinary).Actions {
-				if rf, ok := action.(harnesspkg.RenderedFileAction); ok {
-					if !strings.Contains(rf.Plan.Content, absentBinary) {
-						t.Fatalf("rendered %s template did not select absent binary %q", h, absentBinary)
-					}
-					return rf.Plan.Content
-				}
-			}
-			t.Fatalf("no rendered action found for %s", h)
-			return ""
-		}
+		runNodeRuntime(t, "opencode_absent.ts", renderedRuntimeModule(t, registry.Harness("opencode")), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "opencode_v2_absent.ts", renderedRuntimeModule(t, registry.Harness("opencode")), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "opencode_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "opencode_v2_absent.ts", renderAbsentModule(registry.Harness("opencode")), runtimeScript(t, "node/opencode-v2-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "kilo_absent.ts", renderedRuntimeModule(t, registry.Harness("kilo")), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "kilo_absent.ts", renderAbsentModule(registry.Harness("kilo")), runtimeScript(t, "node/kilo-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "pi_absent.ts", renderedRuntimeModule(t, registry.Harness("pi")), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
 
-		runNodeRuntime(t, "pi_absent.ts", renderAbsentModule(registry.Harness("pi")), runtimeScript(t, "node/pi-missing-reporter.mjs"), nil)
-
-		runNodeRuntime(t, "omp_absent.ts", renderAbsentModule(registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
-		runNodeRuntime(t, "plugin.ts", renderAbsentModule(registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "omp_absent.ts", renderedRuntimeModule(t, registry.Harness("omp")), runtimeScript(t, "node/omp-missing-reporter.mjs"), nil)
+		runNodeRuntime(t, "plugin.ts", renderedRuntimeModule(t, registry.Harness("amp")), runtimeScript(t, "node/amp-missing-reporter.mjs"), nil)
 	})
+}
+
+func TestGeneratedRuntimesRunBinaryOutsideBasicMultilingualPlane(t *testing.T) {
+	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
+	requireRuntimeTool(t, "node")
+	capture := captureBinaryIn(t, "tools-\U000F0000")
+	t.Setenv("AHT_CAPTURE", capture.path)
+
+	cline := generatedArtifactContentFor(t, capture, registry.Harness("cline"), "index.js")
+	runNodeRuntime(t, "index.js", cline, runtimeScript(t, "node/cline-failed.mjs"), nil)
+	requireCapturedArguments(t, capture.path, "report", "cline", "--activity", "failed")
+
+	pi := generatedArtifactContentFor(t, capture, registry.Harness("pi"), "aht-state.ts")
+	runNodeRuntime(t, "extension.ts", pi, runtimeScript(t, "node/pi-failed.mjs"), nil)
+	requireCapturedArguments(t, capture.path, "report", "pi", "--activity", "failed")
+}
+
+func TestGeneratedNativeTitleWatcherCommands(t *testing.T) {
+	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
+	requireRuntimeTool(t, "sh")
+	for _, event := range []string{"SessionStart", "FileChanged"} {
+		t.Run(event, func(t *testing.T) {
+			capture := captureBinary(t)
+			t.Setenv("AHT_CAPTURE", capture.path)
+			runGeneratedNativeTitleWatchers(t, capture.command, capture.path, event)
+		})
+	}
+}
+
+func runGeneratedNativeTitleWatchers(t *testing.T, binary, capturePath, event string) {
+	t.Helper()
+	adapter, ok := catalog.Find(registry.Harness("claude"))
+	if !ok {
+		t.Fatal("missing Claude adapter")
+	}
+	installer, ok := adapter.(harnesspkg.Installable)
+	if !ok {
+		t.Fatal("expected installable native watcher adapter")
+	}
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		t.Fatalf("plan Claude integration: %v", err)
+	}
+	found := false
+	for _, action := range plan.Actions {
+		hooks, ok := action.(harnesspkg.JSONCommandHooksAction)
+		if !ok {
+			continue
+		}
+		for _, hook := range hooks.Plan.Hooks {
+			if hook.Event == event && strings.Contains(hook.Command, " --json hook ") {
+				found = true
+				runGeneratedCommand(t, `{"session_id":"native","transcript_path":"/tmp/native.jsonl","cwd":"/tmp","hook_event_name":"`+event+`","file_path":"/tmp/native.jsonl","event":"change"}`, "sh", "-c", hook.Command)
+				requireCapturedArguments(t, capturePath, "--json", "hook", "claude", "--event", event)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no generated %s watcher", event)
+	}
+}
+
+func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
+	t.Helper()
+	const binary = "/nonexistent/binary/absent-aht"
+	adapter, ok := catalog.Find(h)
+	if !ok {
+		t.Fatalf("find harness %s", h)
+	}
+	installer, ok := adapter.(harnesspkg.Installable)
+	if !ok {
+		t.Fatalf("harness %s is not installable", h)
+	}
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		t.Fatalf("plan %s integration: %v", h, err)
+	}
+	for _, action := range plan.Actions {
+		rf, ok := action.(harnesspkg.RenderedFileAction)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(rf.Plan.Content, binary) {
+			t.Fatalf("rendered %s template did not select absent binary %q", h, binary)
+		}
+		return rf.Plan.Content
+	}
+	t.Fatalf("no rendered action found for %s", h)
+	return ""
+}
+
+func TestGeneratedWaitingDetailsAndCorrelatedResolution(t *testing.T) {
+	for _, id := range []registry.Harness{registry.Harness("omp"), registry.Harness("opencode"), registry.Harness("kilo")} {
+		t.Run(string(id), func(t *testing.T) {
+			capture := captureBinary(t)
+			t.Setenv("AHT_CAPTURE", capture.path)
+			module := generatedArtifactContent(t, id, "aht-state.ts")
+			driver := "node/plugin-waiting-details.mjs"
+			filename := "plugin.ts"
+			expected := []string{"idle:", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "idle:", "running:", "running:", "failed:", "running:"}
+			if id == registry.Harness("opencode") {
+				t.Setenv("AHT_TEST_QUESTIONS", "1")
+				expected = []string{"idle:", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "waiting:permission", "idle:", "running:", "waiting:clear", "waiting:question", "running:", "failed:", "running:"}
+			} else {
+				t.Setenv("AHT_TEST_QUESTIONS", "0")
+			}
+			if id == registry.Harness("omp") {
+				driver, filename = "node/omp-waiting-details.mjs", "extension.ts"
+				expected = []string{"idle:", "running:", "waiting:permission", "waiting:clear", "waiting:question", "running:"}
+			}
+			runNodeRuntime(t, filename, module, runtimeScript(t, driver), nil)
+			data, err := os.ReadFile(capture.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			states := capturedActivityStates(parseCapturedInvocations(string(data)))
+			if strings.Join(states, ",") != strings.Join(expected, ",") {
+				t.Fatalf("generated states = %v, want %v", states, expected)
+			}
+		})
+	}
+}
+
+func capturedActivityStates(invocations [][]string) []string {
+	var states []string
+	for _, invocation := range invocations {
+		activity, detail := "", ""
+		for i := 0; i+1 < len(invocation); i++ {
+			switch invocation[i] {
+			case "--activity":
+				activity = invocation[i+1]
+			case "--detail":
+				detail = invocation[i+1]
+			}
+		}
+		if activity != "" {
+			states = append(states, activity+":"+detail)
+		}
+	}
+	return states
+}
+
+func TestAmpTitleReportsMetadataWithoutReplacingWaitingEvidence(t *testing.T) {
+	capture := captureBinary(t)
+	t.Setenv("AHT_CAPTURE", capture.path)
+	module := generatedArtifactContent(t, registry.Harness("amp"), "aht-state.ts")
+	runNodeRuntime(t, "plugin.ts", module, runtimeScript(t, "node/amp-title-metadata.mjs"), nil)
+	data, err := os.ReadFile(capture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocations := parseCapturedInvocations(string(data))
+	if len(invocations) != 3 || !matchInvocation(invocations[1], []string{"--activity", "waiting"}) || !matchInvocation(invocations[2], []string{"--event", "thread.title"}) {
+		t.Fatalf("Amp reports = %v", invocations)
+	}
+	for _, arg := range invocations[2] {
+		if arg == "--activity" || arg == "--presence" || arg == "--detail" {
+			t.Fatal("title metadata replaced state evidence")
+		}
+	}
 }

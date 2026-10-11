@@ -180,8 +180,8 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 }
 
 //nolint:gocognit,cyclop // service installation coordinates platform manager and atomic file transitions
-func (s *Service) apply(ctx context.Context, options Options, update bool) (Result, error) {
-	backend, err := platformBackend(options)
+func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result, error) {
+	backend, err := platformBackend(opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -197,13 +197,13 @@ func (s *Service) apply(ctx context.Context, options Options, update bool) (Resu
 	result.Installed = installed
 	result.Current = installed && string(content) == backend.content()
 	if installed && result.Current {
-		return s.applyCurrent(ctx, options, backend, result, update)
+		return s.applyCurrent(ctx, opts, backend, result, update)
 	}
 	if installed && !result.Current && !update {
 		result.Message = "stale; run update"
 		return result, nil
 	}
-	if options.DryRun {
+	if opts.DryRun {
 		if installed {
 			result.Message = "would update"
 		} else {
@@ -233,13 +233,13 @@ func (s *Service) apply(ctx context.Context, options Options, update bool) (Resu
 	return result, nil
 }
 
-func (s *Service) applyCurrent(ctx context.Context, options Options, backend backend, result Result, update bool) (Result, error) {
+func (s *Service) applyCurrent(ctx context.Context, opts Options, backend backend, result Result, update bool) (Result, error) {
 	running, _, err := backend.running(ctx, s.executor)
 	if err != nil {
 		return result, err
 	}
 	if !running {
-		if options.DryRun {
+		if opts.DryRun {
 			result.Message = "would start"
 			return result, nil
 		}
@@ -254,7 +254,7 @@ func (s *Service) applyCurrent(ctx context.Context, options Options, backend bac
 	// An unchanged service definition does not imply an unchanged executable.
 	// Explicit updates restart the tracker so an installed replacement takes effect.
 	if update {
-		if options.DryRun {
+		if opts.DryRun {
 			result.Message = "would restart"
 			return result, nil
 		}

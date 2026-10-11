@@ -10,15 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Cline --acp implements ACP's active-turn cancellation:
 // https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation
 // Cline: apps/cli/src/acp/acpAgent.ts, cancel() -> ClineCore.abort().
-// Closing stdin happens only after the pending prompt reports "cancelled";
+// Closing stdin happens only after the pending prompt reports its cancellation stop reason;
 // process exit alone is not evidence that a native turn was interrupted.
-func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
+func runCLIInterruption(t *testing.T, host *isolatedHost, env []string) {
 	t.Helper()
 	var command *exec.Cmd
 	switch host.contract.ID {
@@ -26,7 +27,7 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 		// ACP branches before the CLI's ordinary provider/sandbox argument
 		// handling. Its documented environment supplies provider selection;
 		// force the native local backend to avoid a detached hub daemon.
-		command = clineACPCommand(host, env)
+		command = clineACPCommand(t, host, env)
 	default:
 		t.Fatalf("no native CLI interruption driver for %s", host.contract.ID)
 	}
@@ -36,22 +37,22 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 		"clientInfo":         map[string]string{"name": "aht-compat", "version": "1"},
 		"clientCapabilities": map[string]any{},
 	})
-	created := cliInterruptionCall(t, wire, "new", "session/new", map[string]any{"cwd": host.work, "mcpServers": []any{}})
+	created := cliInterruptionCall(t, wire, "new", "session/new", map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}})
 	sessionID := cliString(t, cliField(t, created, "sessionId"))
 	if sessionID == "" {
 		t.Fatal("native ACP session has no identity")
 	}
 	// ACP model defaults are catalog-scoped; explicitly select our fake
 	// model through the native model setter even if absent from a catalog.
-	cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": sessionID, "modelId": "compat"})
+	cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": sessionID, "modelId": fakeModel})
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt", "params": map[string]any{
 		"sessionId": sessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 	}})
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first native CLI provider request step = %d, want 0", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first native CLI provider request step = %d, want 0", hold.Request.Index)
 		}
 	case <-process.done:
 		t.Fatalf("native CLI exited before active provider request: %v", process.waitErr())
@@ -61,8 +62,8 @@ func runCLIInterruption(t *testing.T, host isolatedHost, env []string) {
 	host.waitForActiveSession(t)
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": sessionID}})
 	result := cliInterruptionResponse(t, wire, "prompt")
-	if reason := cliString(t, cliField(t, result, "stopReason")); reason != "cancelled" {
-		t.Fatalf("native CLI interruption stop reason = %q, want cancelled", reason)
+	if reason := cliString(t, cliField(t, result, "stopReason")); reason != acpCancelledStopReason {
+		t.Fatalf("native CLI interruption stop reason = %q, want %q", reason, acpCancelledStopReason)
 	}
 	if count := len(host.provider.Requests()); count != 1 {
 		t.Fatalf("interrupted native CLI sent %d model requests, want one held request", count)
@@ -106,19 +107,20 @@ func cliInterruptionResponse(t *testing.T, wire *cliPermissionWire, id string) j
 	}
 }
 
-func clineACPCommand(host isolatedHost, env []string) *exec.Cmd {
-	env = append(env, "CLINE_PROVIDER=openai-compatible", "CLINE_API_KEY=compat", "CLINE_MODEL=compat", "CLINE_SESSION_BACKEND_MODE=local")
-	return host.command(env, "--config", filepath.Join(host.root, "cline"), "--acp", "--auto-approve", "true")
+func clineACPCommand(t *testing.T, host *isolatedHost, env []string) *exec.Cmd {
+	t.Helper()
+	env = append(env, "CLINE_PROVIDER=openai-compatible", "CLINE_API_KEY="+fakeAPIKey, "CLINE_MODEL="+fakeModel, "CLINE_SESSION_BACKEND_MODE=local")
+	return host.command(t, env, "--config", filepath.Join(host.launched.Root, "cline"), "--acp", "--auto-approve", "true")
 }
 
 // ACP loads the persisted core session under its original session ID. No
 // exported transcript or test-side history conversion is involved.
-func (host isolatedHost) runClineResume(t *testing.T, env []string, previous registry.Session) {
+func (host *isolatedHost) runClineResume(t *testing.T, env []string, previous registry.Session) {
 	t.Helper()
 	if previous.SessionID == "" {
 		t.Fatal("Cline resume requires the recorded native session ID")
 	}
-	wire, process := startCLIPermissionWire(t, host, clineACPCommand(host, env), false)
+	wire, process := startCLIPermissionWire(t, host, clineACPCommand(t, host, env), false)
 	cliInterruptionCall(t, wire, "initialize", "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]string{"name": "aht-compat", "version": "1"},
@@ -126,19 +128,20 @@ func (host isolatedHost) runClineResume(t *testing.T, env []string, previous reg
 	})
 	// Loading replays historical tool calls, not requests to execute them.
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "load", "method": "session/load", "params": map[string]any{
-		"sessionId": previous.SessionID, "cwd": host.work, "mcpServers": []any{},
+		"sessionId": previous.SessionID, "cwd": host.launched.Work, "mcpServers": []any{},
 	}})
 	clineResumeResponse(t, wire, "load")
-	cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": previous.SessionID, "modelId": "compat"})
+	cliInterruptionCall(t, wire, "model", "session/set_model", map[string]any{"sessionId": previous.SessionID, "modelId": fakeModel})
 	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt", "params": map[string]any{
 		"sessionId": previous.SessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 	}})
 	for expected := range 2 {
+		var hold *fakeprovider.Hold
 		select {
-		case step := <-host.provider.checkpoints:
-			if step != expected {
-				t.Fatalf("resumed Cline provider step = %d, want %d", step, expected)
+		case hold = <-host.provider.Holds():
+			if hold.Request.Index != expected {
+				t.Fatalf("resumed Cline provider step = %d, want %d", hold.Request.Index, expected)
 			}
 		case <-process.done:
 			t.Fatalf("Cline exited before resumed request %d: %v", expected, process.waitErr())
@@ -146,13 +149,7 @@ func (host isolatedHost) runClineResume(t *testing.T, env []string, previous reg
 			t.Fatalf("Cline did not reach resumed provider request %d", expected)
 		}
 		host.waitForActiveSession(t)
-		select {
-		case host.provider.release <- struct{}{}:
-		case <-process.done:
-			t.Fatalf("Cline exited before resumed response %d: %v", expected, process.waitErr())
-		case <-time.After(30 * time.Second):
-			t.Fatalf("Cline did not consume resumed response %d", expected)
-		}
+		hold.Release()
 	}
 	result := clineResumeResponse(t, wire, "prompt")
 	if reason := cliString(t, cliField(t, result, "stopReason")); reason != "end_turn" {

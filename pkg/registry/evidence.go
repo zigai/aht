@@ -20,16 +20,18 @@ type Observation struct {
 }
 
 type Report struct {
-	Reporter   Reporter          `json:"reporter"`
-	Event      string            `json:"event,omitempty"`
-	Lifecycle  *NativeLifecycle  `json:"lifecycle,omitempty"`
-	Claim      *Presence         `json:"claim,omitempty"`
-	Activity   *Activity         `json:"activity,omitempty"`
-	Process    *ProcessIdentity  `json:"process,omitempty"`
-	Location   *Location         `json:"location,omitempty"`
-	Listing    *Listing          `json:"listing,omitempty"`
-	Attributes map[string]string `json:"attributes,omitempty"`
-	Payload    json.RawMessage   `json:"payload,omitempty"`
+	DetailObservedAt *time.Time        `json:"detail_observed_at,omitempty"`
+	Detail           *ActivityDetail   `json:"detail,omitempty"`
+	Reporter         Reporter          `json:"reporter"`
+	Event            string            `json:"event,omitempty"`
+	Lifecycle        *NativeLifecycle  `json:"lifecycle,omitempty"`
+	Claim            *Presence         `json:"claim,omitempty"`
+	Activity         *Activity         `json:"activity,omitempty"`
+	Process          *ProcessIdentity  `json:"process,omitempty"`
+	Location         *Location         `json:"location,omitempty"`
+	Listing          *Listing          `json:"listing,omitempty"`
+	Attributes       map[string]string `json:"attributes,omitempty"`
+	Payload          json.RawMessage   `json:"payload,omitempty"`
 }
 
 type Sighting struct {

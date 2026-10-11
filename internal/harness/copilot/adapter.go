@@ -53,14 +53,19 @@ func New() copilotHarness {
 	})}
 }
 
-func (copilotHarness) InstallPlan(binary string) harness.InstallPlan {
+func (copilotHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := copilotHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(copilotHome(), "hooks", copilotHookFileName),
+		Path:        filepath.Join(base, "hooks", copilotHookFileName),
 		Label:       "copilot hooks",
 		ConfigLabel: "copilot hooks",
 		Content:     "",
 		JSONContent: copilotHookConfig(binary),
-	}}}}
+	}}}}, nil
 }
 
 func (copilotHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -77,6 +82,7 @@ func (copilotHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (copilotHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "copilot_notification_type", harness.PayloadStringAny(payload, "notificationType", "notification_type"))
 	harness.AddAttributeString(attributes, "copilot_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"))
 	harness.AddAttributeString(attributes, "copilot_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
 	harness.AddAttributeString(attributes, "copilot_start_source", harness.PayloadString(payload, "source"))
@@ -159,14 +165,12 @@ func copilotHome() string {
 	if value := strings.TrimSpace(os.Getenv("COPILOT_HOME")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".copilot")
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".copilot")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".copilot"
+	return filepath.Join(home, ".copilot")
 }
 
 func (copilotHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

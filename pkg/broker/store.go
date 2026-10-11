@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -94,6 +94,11 @@ func (s *Store) Get(ctx context.Context, id string) (registry.Session, error) {
 	}
 
 	return session, nil
+}
+
+// Summary returns filtered multiplexer-session summaries from broker or fallback.
+func (s *Store) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
 }
 
 // SummaryWithOptions returns filtered summaries with options from broker or fallback.

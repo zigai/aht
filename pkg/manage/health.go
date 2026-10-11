@@ -153,7 +153,7 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 			Age:                          0,
 			Status:                       HealthStatusCorrupt,
 			Message:                      err.Error(),
-		}, fmt.Errorf("%w: reading tracker health sidecar %s: %w", ErrHealthCorrupt, path, err)
+		}, fmt.Errorf("%w: %w", ErrHealthCorrupt, err)
 	}
 
 	var raw observerHealthRaw

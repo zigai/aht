@@ -32,15 +32,15 @@ func (d Driver) Kind() registry.MultiplexerKind {
 // Current returns the enclosing tmux context for the caller.
 // If the caller is not inside tmux, it returns an empty context and nil error.
 func (d Driver) Current(ctx context.Context) (registry.Location, error) {
-	tmuxCtx, err := Current(ctx)
+	location, err := Current(ctx)
 	if err != nil {
 		var empty registry.Location
-		if errors.Is(err, ErrNoTmuxContext) {
+		if errors.Is(err, ErrNotInTmux) {
 			return empty, nil
 		}
 		return empty, err
 	}
-	return tmuxCtx, nil
+	return location, nil
 }
 
 // ListPanes enumerates live tmux panes converted to [mux.Pane].
@@ -68,10 +68,9 @@ func (d Driver) ListPanes(ctx context.Context) ([]mux.Pane, error) {
 // CapturePane captures the screen text and title for pane.
 func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
 	tmuxPane := Pane{
-		Tmux:           pane.Location,
-		ServerIdentity: pane.Location.ServerID,
-		PanePID:        pane.Location.PanePID,
-		PaneTTY:        pane.Location.PaneTTY,
+		Location: pane.Location,
+		PanePID:  pane.Location.PanePID,
+		PaneTTY:  pane.Location.PaneTTY,
 	}
 	return CapturePane(ctx, tmuxPane)
 }

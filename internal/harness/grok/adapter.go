@@ -19,6 +19,7 @@ type grokHarness struct{ harness.BaseAdapter }
 
 type grokHookSpec struct {
 	event   string
+	matcher string
 	command string
 }
 
@@ -52,14 +53,19 @@ func New() grokHarness {
 	})}
 }
 
-func (grokHarness) InstallPlan(binary string) harness.InstallPlan {
+func (grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := grokHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(grokHome(), "hooks", grokHookFileName),
+		Path:        filepath.Join(base, "hooks", grokHookFileName),
 		Label:       "grok hooks",
 		ConfigLabel: "grok hooks",
 		Content:     "",
 		JSONContent: grokHookConfig(binary),
-	}}}}
+	}}}}, nil
 }
 
 func (grokHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -111,54 +117,61 @@ func grokHookConfig(binary string) map[string]any {
 	specs := []grokHookSpec{
 		{
 			event:   harness.HookEventSessionStart,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
 		},
 		{
 			event:   harness.HookEventUserPromptSubmit,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
 		},
 		{
 			event:   harness.HookEventPreToolUse,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
 		},
 		{
 			event:   harness.HookEventPostToolUse,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
 		},
 		{
 			event:   harness.HookEventPostToolUseFailure,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
 		},
 		{
 			event:   "PermissionDenied",
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityIdle, "PermissionDenied"),
 		},
-		{
-			event:   "SubagentStart",
-			command: grokHookCommand(binary, registry.ActivityRunning, "SubagentStart"),
-		},
-		{
-			event:   "SubagentStop",
-			command: grokHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
-		},
+		// SubagentStart and SubagentStop fire inside child agents while the
+		// parent turn keeps running until Stop.
 		{
 			event:   "PreCompact",
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityRunning, "PreCompact"),
 		},
+		// Automatic compaction continues the running turn; only manual
+		// compaction returns the session to idle.
 		{
 			event:   "PostCompact",
+			matcher: "manual",
 			command: grokHookCommand(binary, registry.ActivityIdle, "PostCompact"),
 		},
 		{
 			event:   harness.HookEventStop,
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
 		},
 		{
 			event:   "StopFailure",
+			matcher: "",
 			command: grokHookCommand(binary, registry.ActivityFailed, "StopFailure"),
 		},
 		{
 			event:   "SessionEnd",
+			matcher: "",
 			command: grokHookCommand(binary, registry.PresenceGone, "SessionEnd"),
 		},
 	}
@@ -169,14 +182,14 @@ func grokHookConfig(binary string) map[string]any {
 		if !ok {
 			existing = nil
 		}
-		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.command))
+		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.matcher, spec.command))
 	}
 
 	return map[string]any{"hooks": hooks}
 }
 
-func grokCommandHookGroup(command string) map[string]any {
-	return map[string]any{
+func grokCommandHookGroup(matcher string, command string) map[string]any {
+	group := map[string]any{
 		"hooks": []any{
 			map[string]any{
 				"type":          harness.HookTypeCommand,
@@ -186,6 +199,11 @@ func grokCommandHookGroup(command string) map[string]any {
 			},
 		},
 	}
+	if matcher != "" {
+		group["matcher"] = matcher
+	}
+
+	return group
 }
 
 func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
@@ -196,11 +214,12 @@ func grokHome() string {
 	if value := strings.TrimSpace(os.Getenv("GROK_HOME")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".grok")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".grok"
+	return filepath.Join(home, ".grok")
 }
 
 func (grokHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

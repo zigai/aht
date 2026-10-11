@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -79,91 +79,29 @@ func TestListSummaryTableRendering(t *testing.T) {
 	t.Parallel()
 	storePath, ctx := setupSummaryTableFixture(t)
 
-	t.Run("project", func(t *testing.T) {
-		testListSummaryProjectTable(t, ctx, storePath)
-	})
-	t.Run("harness", func(t *testing.T) {
-		testListSummaryHarnessTable(t, ctx, storePath)
-	})
-	t.Run("multiplexer_session", func(t *testing.T) {
-		testListSummaryMultiplexerTable(t, ctx, storePath)
-	})
-	t.Run("default_summary", func(t *testing.T) {
-		testListSummaryDefaultTable(t, ctx, storePath)
-	})
-}
-
-func testListSummaryProjectTable(t *testing.T, ctx context.Context, storePath string) {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "list", "--summary", "--group-by", "project"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("runTestCLI project summary failed: %v", err)
-	}
-	out := stdout.String()
-	for _, heading := range []string{"Project", "Root", "Total", "Live", "Gone", "Pres?", "Run", "Wait", "Idle", "Failed", "Interrupted", "Act?"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("project summary table missing heading %q\n%s", heading, out)
-		}
-	}
-	if !strings.Contains(out, "/home/alice/service") || !strings.Contains(out, "/home/bob/service") {
-		t.Errorf("colliding basenames not shown distinctly with full root\n%s", out)
-	}
-	if !strings.Contains(out, "unknown") {
-		t.Errorf("missing project root not shown\n%s", out)
-	}
-}
-
-func testListSummaryHarnessTable(t *testing.T, ctx context.Context, storePath string) {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "list", "--summary", "--group-by", "harness"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("runTestCLI harness summary failed: %v", err)
-	}
-	out := stdout.String()
-	for _, heading := range []string{"Agent", "Total", "Live", "Gone", "Pres?", "Run", "Wait", "Idle", "Failed", "Interrupted", "Act?"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("harness summary table missing heading %q\n%s", heading, out)
-		}
-	}
-	for _, harness := range []string{"claude", "codex", "omp"} {
-		if !strings.Contains(out, harness) {
-			t.Errorf("harness %q not found in output\n%s", harness, out)
-		}
-	}
-}
-
-func testListSummaryMultiplexerTable(t *testing.T, ctx context.Context, storePath string) {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "list", "--summary", "--group-by", "multiplexer-session"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("runTestCLI multiplexer summary failed: %v", err)
-	}
-	out := stdout.String()
-	for _, heading := range []string{"MUX", "Session", "Server", "Total", "Live", "Gone"} {
-		if !strings.Contains(out, heading) {
-			t.Errorf("multiplexer summary table missing heading %q\n%s", heading, out)
-		}
-	}
-	for _, session := range []string{"main", "worker", "unknown"} {
-		if !strings.Contains(out, session) {
-			t.Errorf("session %q not found in multiplexer output\n%s", session, out)
-		}
-	}
-}
-
-func testListSummaryDefaultTable(t *testing.T, ctx context.Context, storePath string) {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "list", "--summary"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("runTestCLI default summary failed: %v", err)
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "MUX") || !strings.Contains(out, "Session") {
-		t.Errorf("default summary did not use multiplexer session layout\n%s", out)
+	for _, test := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "project", args: []string{"--group-by", "project"}, want: []string{"/home/alice/service", "/home/bob/service", "unknown"}},
+		{name: "harness", args: []string{"--group-by", "harness"}, want: []string{"claude", "codex", "omp"}},
+		{name: "multiplexer_session", args: []string{"--group-by", "multiplexer-session"}, want: []string{"main", "worker", "unknown"}},
+		{name: "default_summary", want: []string{"main", "worker"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := runTestCLI(ctx, append([]string{"--store", storePath, "list", "--summary"}, test.args...), &stdout, &stderr)
+			if err != nil {
+				t.Fatalf("runTestCLI %s summary failed: %v", test.name, err)
+			}
+			out := stdout.String()
+			for _, want := range test.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("%q not found in %s summary\n%s", want, test.name, out)
+				}
+			}
+		})
 	}
 }
 

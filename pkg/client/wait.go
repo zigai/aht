@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -120,10 +120,10 @@ func (o WaitOptions) validateConditions() error {
 	if o.Activity == "" && o.Presence == "" {
 		return ErrConditionRequired
 	}
-	if o.Presence != "" && !o.Presence.IsValid() {
+	if o.Presence != "" && !o.Presence.Valid() {
 		return fmt.Errorf("%w: %q", registry.ErrUnknownPresence, o.Presence)
 	}
-	if o.Activity != "" && !o.Activity.IsValid() {
+	if o.Activity != "" && !o.Activity.Valid() {
 		return fmt.Errorf("%w: %q", registry.ErrUnknownActivity, o.Activity)
 	}
 	if o.Presence == PresenceGone && o.Activity != "" {
@@ -148,18 +148,26 @@ func emptyFilter() registry.Filter {
 // Wait waits for a session condition to be met, optionally requiring the condition
 // to hold across observed snapshots for options.StableFor before returning.
 //
+// The tracker removes a session from the registry once it no longer needs a
+// tombstone: immediately for sessions known only by their process, and after
+// the tombstone TTL for sessions with a native identity. A session that
+// disappears after Wait has seen it satisfies a gone presence condition; the
+// result is the last observed session with a Gone liveness whose reason is
+// "session_removed". For any other condition it returns ErrSessionDisappeared.
+// A session missing from the first snapshot returns registry.ErrSessionNotFound.
+//
 //nolint:cyclop,gocognit // Wait coordinates multiple lifecycle events: timers, context, stream, and condition matching.
-func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, error) {
+func (c *Client) Wait(ctx context.Context, opts WaitOptions) (WaitResult, error) {
 	if c.configErr != nil {
 		return WaitResult{}, c.configErr
 	}
-	if err := options.Validate(); err != nil {
+	if err := opts.Validate(); err != nil {
 		return WaitResult{}, err
 	}
 
-	if options.Timeout > 0 {
+	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
@@ -177,6 +185,7 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 	var stableTimer *time.Timer
 	var stableTimerCh <-chan time.Time
 	var candidateSession *registry.Session
+	var lastSeen *registry.Session
 	seenInitial := false
 	stableReady := false
 
@@ -219,7 +228,7 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 			resetStableTimer()
 			if c.mode == ModeAuto && !durable {
 				stream.Close()
-				stream = newDurableWatcher(ctx, c.storePath)
+				stream = startDurableWatcher(ctx, c.storePath)
 				durable = true
 				continue
 			}
@@ -230,7 +239,7 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 			resetStableTimer()
 			if c.mode == ModeAuto && !durable && (IsUnavailable(ev.err) || broker.IsUnavailable(ev.err)) {
 				stream.Close()
-				stream = newDurableWatcher(ctx, c.storePath)
+				stream = startDurableWatcher(ctx, c.storePath)
 				durable = true
 				continue
 			}
@@ -242,25 +251,30 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 
 		var currentSession *registry.Session
 		for i := range ev.sessions {
-			if ev.sessions[i].ID == options.ID {
+			if ev.sessions[i].ID == opts.ID {
 				currentSession = &ev.sessions[i]
 				break
 			}
 		}
 
 		if currentSession == nil {
-			resetStableTimer()
-			return WaitResult{}, registry.ErrSessionNotFound
+			if lastSeen == nil {
+				resetStableTimer()
+				return WaitResult{}, registry.ErrSessionNotFound
+			}
+			removed := removedSession(*lastSeen, time.Now().UTC())
+			currentSession = &removed
 		}
+		lastSeen = currentSession
 
-		matched, outcomeErr := evaluateCondition(*currentSession, options)
+		matched, outcomeErr := evaluateCondition(*currentSession, opts)
 		if outcomeErr != nil {
 			resetStableTimer()
 			return WaitResult{}, outcomeErr
 		}
 
 		if matched {
-			if options.StableFor == 0 {
+			if opts.StableFor == 0 {
 				return WaitResult{Session: *currentSession, Initial: isInitial}, nil
 			}
 			if candidateSession != nil && !sameWaitProcess(candidateSession.Process, currentSession.Process) {
@@ -268,7 +282,7 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 			}
 			candidateSession = currentSession
 			if stableTimer == nil {
-				stableTimer = time.NewTimer(options.StableFor)
+				stableTimer = time.NewTimer(opts.StableFor)
 				stableTimerCh = stableTimer.C
 			}
 		} else {
@@ -277,35 +291,46 @@ func (c *Client) Wait(ctx context.Context, options WaitOptions) (WaitResult, err
 	}
 }
 
+// removedSession describes a session the registry deleted after Wait saw it.
+// Deletion only follows the gone transition, so the session is gone.
+func removedSession(session registry.Session, at time.Time) registry.Session {
+	if session.Presence() == PresenceGone {
+		return session
+	}
+	session.Liveness = registry.Gone{At: at, Reason: "session_removed", Decision: session.Decision()}
+	session.PresenceChangedAt = at
+	return session
+}
+
 func (c *Client) startWatcher(ctx context.Context) (sessionWatcher, error) {
 	if c.newWatcher != nil {
 		return c.newWatcher(ctx, emptyFilter())
 	}
 	switch c.mode {
 	case ModeRealtimeOnly:
-		w, err := newRealtimeWatcher(ctx, c.realtime, emptyFilter())
+		w, err := openBrokerWatcher(ctx, c.realtime, emptyFilter())
 		if err != nil {
 			return nil, publicError(err)
 		}
 		return w, nil
 	case ModeDurableOnly:
-		return newDurableWatcher(ctx, c.storePath), nil
+		return startDurableWatcher(ctx, c.storePath), nil
 	case ModeAuto:
-		w, err := newRealtimeWatcher(ctx, c.realtime, emptyFilter())
+		w, err := openBrokerWatcher(ctx, c.realtime, emptyFilter())
 		if err == nil {
 			return w, nil
 		}
 		if !IsUnavailable(err) && !broker.IsUnavailable(err) {
 			return nil, publicError(err)
 		}
-		return newDurableWatcher(ctx, c.storePath), nil
+		return startDurableWatcher(ctx, c.storePath), nil
 	default:
 		return nil, ErrInvalidMode
 	}
 }
 
-func evaluateCondition(session registry.Session, options WaitOptions) (bool, error) {
-	if options.Presence == PresenceGone {
+func evaluateCondition(session registry.Session, opts WaitOptions) (bool, error) {
+	if opts.Presence == PresenceGone {
 		return session.Presence() == PresenceGone, nil
 	}
 
@@ -314,27 +339,27 @@ func evaluateCondition(session registry.Session, options WaitOptions) (bool, err
 	}
 
 	if session.Presence() == PresenceUnknown {
-		if options.Presence == PresenceUnknown {
+		if opts.Presence == PresenceUnknown {
 			return true, nil
 		}
 		return false, ErrUnknownState
 	}
 
-	if options.Presence != "" && options.Presence != PresenceLive {
+	if opts.Presence != "" && opts.Presence != PresenceLive {
 		return false, nil
 	}
 
-	if options.Activity != "" {
+	if opts.Activity != "" {
 		if session.Activity() == nil {
 			return false, nil
 		}
-		return *session.Activity() == options.Activity, nil
+		return *session.Activity() == opts.Activity, nil
 	}
 
 	return true, nil
 }
 
-func newRealtimeWatcher(ctx context.Context, brokerClient *broker.Client, filter registry.Filter) (*brokerSessionWatcher, error) {
+func openBrokerWatcher(ctx context.Context, brokerClient *broker.Client, filter registry.Filter) (*brokerSessionWatcher, error) {
 	sub, err := brokerClient.Subscribe(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("subscribing to broker: %w", err)
@@ -367,9 +392,9 @@ func (w *brokerSessionWatcher) run(ctx context.Context) {
 	defer close(w.events)
 
 	snapshots := w.subscription.Snapshots
-	errorsChan := w.subscription.Errors
+	errCh := w.subscription.Errors
 
-	for snapshots != nil || errorsChan != nil {
+	for snapshots != nil || errCh != nil {
 		select {
 		case <-ctx.Done():
 			return
@@ -381,9 +406,9 @@ func (w *brokerSessionWatcher) run(ctx context.Context) {
 			if !w.forwardEvent(ctx, watchEvent{sessions: snap.Sessions, err: nil}) {
 				return
 			}
-		case err, ok := <-errorsChan:
+		case err, ok := <-errCh:
 			if !ok {
-				errorsChan = nil
+				errCh = nil
 				continue
 			}
 			if err != nil && !w.forwardEvent(ctx, watchEvent{sessions: nil, err: err}) {
@@ -402,7 +427,7 @@ func (w *brokerSessionWatcher) forwardEvent(ctx context.Context, ev watchEvent) 
 	}
 }
 
-func newDurableWatcher(ctx context.Context, storePath string) *durableSessionWatcher {
+func startDurableWatcher(ctx context.Context, storePath string) *durableSessionWatcher {
 	watchCtx, cancel := context.WithCancel(ctx)
 	w := &durableSessionWatcher{
 		cancel: cancel,

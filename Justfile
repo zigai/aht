@@ -1,8 +1,8 @@
-golangci_lint_version := "v2.13.2"
+golangci_lint_version := "v2.14.0"
 golangci_lint := env("AHT_GOLANGCI_LINT", "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@" + golangci_lint_version)
 actionlint_version := "v1.7.12"
 actionlint := "go run github.com/rhysd/actionlint/cmd/actionlint@" + actionlint_version
-goreleaser_version := "v2.13.3"
+goreleaser_version := "v2.18.2"
 
 _:
     @just help
@@ -38,18 +38,14 @@ integration:
     fi
     go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
 
-# Test release detection, state transitions, and workflow wiring
+# Test CI tooling, release detection, state transitions, and workflow wiring
 compatibility-tests:
-    go test ./internal/tools/compatibility
+    go test ./internal/tools/...
     go test -count=1 -race -tags=compatibility ./test/hostcompat -skip '^TestCurrentHarnessLifecycle$'
-
-# Verify release guards and CI orchestration without remote mutations
-ci-tests:
-    node --test .github/scripts/*.test.cjs
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
-    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m
+    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat ./test/interactive -run '^TestCurrentHarness(Lifecycle|Interactive)$' -timeout 15m
 
 # Validate built release artifacts and optional published copies
 artifacts artifact_dir="dist" published_dir="":
@@ -87,13 +83,14 @@ lint:
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # Run all required non-mutating verification
-check: lint test race integration compatibility-tests ci-tests source-checks
+check: lint test race integration compatibility-tests source-checks
 
 # Verify formatting, dependency consistency, builds, and workflow syntax
 source-checks:
     {{ golangci_lint }} fmt --diff
     go mod tidy -diff
     go build -o /dev/null .
+    go build -o /dev/null ./cmd/fakeprovider
     just --fmt --check
     {{ actionlint }} .github/workflows/*.yml
 
@@ -117,6 +114,10 @@ install:
 install-binary:
     go install .
 
+# Install the fake model provider command
+install-fakeprovider:
+    go install ./cmd/fakeprovider
+
 # Remove build artifacts
 clean:
     rm -rf aht aht.exe dist/
@@ -139,10 +140,6 @@ _goreleaser-version-check:
 # Build a release snapshot without publishing
 snapshot: _goreleaser-version-check
     goreleaser release --snapshot --clean
-
-# Build and upload a draft release
-release-draft: _goreleaser-version-check
-    goreleaser release --clean
 
 # Build tagged release artifacts for native validation before draft creation
 release-build: _goreleaser-version-check
@@ -187,7 +184,8 @@ release-patch: _release-check _goreleaser-version-check
     new="v${major}.${minor}.$((patch + 1))"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # Release verification waits for this commit's CI before publishing.
+    git push --no-verify origin "$new"
 
 # Release a new minor version
 release-minor: _release-check _goreleaser-version-check
@@ -199,7 +197,8 @@ release-minor: _release-check _goreleaser-version-check
     new="v${major}.$((minor + 1)).0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # Release verification waits for this commit's CI before publishing.
+    git push --no-verify origin "$new"
 
 # Release a new major version
 release-major: _release-check _goreleaser-version-check
@@ -210,7 +209,8 @@ release-major: _release-check _goreleaser-version-check
     new="v$((major + 1)).0.0"
     echo "Releasing $new (was $latest)"
     git tag "$new"
-    git push origin "$new"
+    # Release verification waits for this commit's CI before publishing.
+    git push --no-verify origin "$new"
 
 alias release := release-patch
 

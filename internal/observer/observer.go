@@ -17,15 +17,21 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	harness "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	defaultObserverInterval    = time.Second
-	defaultMissingSnapshots    = 2
+	defaultObserverInterval = time.Second
+	defaultMissingSnapshots = 2
+	// defaultProcessConfirmation is how long a process found only by command
+	// name must keep running before it becomes a registry session.
+	defaultProcessConfirmation = 3 * time.Second
+	// healthWriteInterval bounds how stale the health file may get while the
+	// observer status and error category stay unchanged.
+	healthWriteInterval        = 30 * time.Second
 	commandArgumentPrefixCount = 2
 	initialScreenConfirmations = 2
 )
@@ -72,9 +78,15 @@ type Options struct {
 	// Native multiplexer activity remains available without reading screen text.
 	DisableScreenInspection bool
 	DetectionConfigDir      string
-	Now                     func() time.Time
-	ErrorWriter             io.Writer
-	Quiet                   bool
+	// ProcessConfirmation is how long a continuously running observer waits
+	// before recording a process discovered only by its command name. Native
+	// reports, current catalog entries, and existing sessions confirm a process
+	// at once. Zero uses a 3 second default; a negative value confirms at once.
+	// Single-cycle runs confirm at once because they have no history.
+	ProcessConfirmation time.Duration
+	Now                 func() time.Time
+	ErrorWriter         io.Writer
+	Quiet               bool
 }
 
 type Result struct {
@@ -137,11 +149,13 @@ type Observer struct {
 	now                     func() time.Time
 	errorWriter             io.Writer
 	quiet                   bool
+	confirmAfter            time.Duration
 
 	mu              sync.Mutex
 	startedAt       time.Time
 	initialized     bool
 	tracked         map[processKey]trackedProcess
+	candidates      map[processKey]time.Time
 	screenPending   map[processKey]pendingScreenDecision
 	health          Health
 	lastHealthWrite time.Time
@@ -160,7 +174,7 @@ func New(opts Options) *Observer {
 		if storePath == "" {
 			storePath = registry.DefaultStorePath()
 		}
-		store = registry.NewJournal(storePath, harness.Rules{})
+		store = registry.NewJournal(storePath, catalog.Rules{})
 	} else if providedStorePath == "" {
 		storePath = ""
 	}
@@ -200,13 +214,17 @@ func New(opts Options) *Observer {
 	if screenCapture == nil {
 		screenCapture = captureMultiplexerPane
 	}
+	confirmAfter := opts.ProcessConfirmation
+	if confirmAfter == 0 {
+		confirmAfter = defaultProcessConfirmation
+	}
 	return &Observer{
 		store: store, interval: interval, grace: opts.GracePeriod,
 		healthPath: healthPath, processList: processList, paneList: paneList, catalogList: catalogList,
 		screenCapture: screenCapture, manifestLoader: agentstate.Loader{ConfigDir: opts.DetectionConfigDir},
 		disableScreenInspection: opts.DisableScreenInspection,
-		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet,
-		tracked: make(map[processKey]trackedProcess), screenPending: make(map[processKey]pendingScreenDecision),
+		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet, confirmAfter: confirmAfter,
+		tracked: make(map[processKey]trackedProcess), candidates: make(map[processKey]time.Time), screenPending: make(map[processKey]pendingScreenDecision),
 		mu: sync.Mutex{}, startedAt: time.Time{}, initialized: false, health: Health{PID: 0, StartIdentity: "", Interval: 0, GracePeriod: 0, StartedAt: time.Time{}, LastAttemptAt: time.Time{}, LastSuccessAt: time.Time{}, LastEnumerationErrorCategory: "", LastEnumerationError: "", Cycles: 0, Observations: 0, Sessions: 0, Degraded: false},
 		lastHealthWrite: time.Time{}, lockPath: lockPath, lockFile: nil, running: false, continuous: false,
 	}
@@ -291,24 +309,24 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		return cmp.Compare(multiplexerPriority(right.Location.Kind), multiplexerPriority(left.Location.Kind))
 	})
 	paneCommandCounts := commandPaneCounts(panes)
-	catalog, catalogErr := o.catalogList(ctx)
+	catalogEntries, catalogErr := o.catalogList(ctx)
 	if catalogErr != nil {
 		result.Degraded = true
 		result.Error = catalogErr.Error()
 	}
-	result.Catalog = len(catalog)
+	result.Catalog = len(catalogEntries)
 	knownSessions, sessionErr := o.store.List(ctx, registry.Filter{Harness: "", Presence: "", Activity: "", MultiplexerSession: "", Project: "", ProjectSubtree: false, CWD: "", MultiplexerKind: "", MultiplexerServer: "", MultiplexerPane: ""})
 	if sessionErr != nil {
 		return o.failCycle(at, "registry", sessionErr, "listing sessions for state detection", result)
 	}
 
 	catalogByPID := make(map[int]CatalogEntry)
-	for _, entry := range catalog {
+	for _, entry := range catalogEntries {
 		if entry.Current && entry.ProcessPID > 0 {
 			catalogByPID[entry.ProcessPID] = entry
 		}
 	}
-	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalog))
+	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalogEntries))
 	current := make(map[processKey]trackedProcess)
 	processByPID := make(map[int]processinfo.Process, len(processes))
 	harnessByPID := make(map[int]registry.Harness, len(processes))
@@ -329,7 +347,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	}
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
-		if !ok || !isAgentWrapper(process) {
+		if !ok || !IsAgentWrapper(process) {
 			continue
 		}
 		if _, descendantHarness, found := descendantHarnessProcess(process.PID, processes, processByPID, harnessByPID); found && descendantHarness == harnessID {
@@ -345,6 +363,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 			delete(harnessByPID, process.PID)
 		}
 	}
+	o.holdUnconfirmedProcesses(knownSessions, catalogByPID, processByPID, harnessByPID, at)
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
 		if !ok {
@@ -392,7 +411,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	if paneErr == nil {
 		observations = append(observations, observationsForUnlocatedProcesses(o.manifestLoader, knownSessions, processByPID, harnessByPID, locationPIDs, at, !o.disableScreenInspection)...)
 	}
-	for _, entry := range catalog {
+	for _, entry := range catalogEntries {
 		if entry.Harness == "" || entry.SessionID == "" {
 			continue
 		}
@@ -470,6 +489,19 @@ func (o *Observer) recordCycleHealth(at time.Time, result Result) error {
 	return o.recordHealth(at, false, "", nil, result)
 }
 
+func IsAgentWrapper(process processinfo.Process) bool {
+	command := filepath.Base(process.Executable)
+	if command == "" && len(process.Args) > 0 {
+		command = filepath.Base(process.Args[0])
+	}
+	switch command {
+	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv", "node", "bun", "python", "python3", "sh", "bash":
+		return true
+	default:
+		return false
+	}
+}
+
 func joinObserverHealthError(primary, healthErr error) error {
 	if healthErr == nil {
 		return primary
@@ -478,24 +510,77 @@ func joinObserverHealthError(primary, healthErr error) error {
 	return errors.Join(primary, fmt.Errorf("recording observer health: %w", healthErr))
 }
 
+// holdUnconfirmedProcesses removes processes matched only by command name from
+// this cycle until they are confirmed, so short-lived commands that share a
+// harness executable name never become registry sessions.
+//
+//nolint:funcorder // confirmation runs as part of reconciliation near its call site
+func (o *Observer) holdUnconfirmedProcesses(
+	sessions []registry.Session,
+	catalogByPID map[int]CatalogEntry,
+	processByPID map[int]processinfo.Process,
+	harnessByPID map[int]registry.Harness,
+	at time.Time,
+) {
+	pending := make(map[processKey]time.Time)
+	for pid, harnessID := range harnessByPID {
+		key := processKey{harness: harnessID, pid: pid, start: processByPID[pid].StartIdentity}
+		if o.processConfirmed(key, sessions, catalogByPID, at) {
+			continue
+		}
+		firstSeen, ok := o.candidates[key]
+		if !ok {
+			firstSeen = at
+		}
+		pending[key] = firstSeen
+		delete(harnessByPID, pid)
+	}
+	o.candidates = pending
+}
+
+// processConfirmed reports whether a harness process may create or update a
+// registry session. A process is confirmed by an existing session for the same
+// process (native reports create one), by a current catalog entry, by earlier
+// tracking, or by running for the confirmation period.
+//
+//nolint:funcorder // confirmation runs as part of reconciliation near its call site
+func (o *Observer) processConfirmed(key processKey, sessions []registry.Session, catalogByPID map[int]CatalogEntry, at time.Time) bool {
+	if !o.continuous || o.confirmAfter < 0 {
+		return true
+	}
+	if _, ok := o.tracked[key]; ok {
+		return true
+	}
+	if entry, ok := catalogByPID[key.pid]; ok && entry.Harness == key.harness {
+		return true
+	}
+	for _, session := range sessions {
+		if session.Harness == key.harness && session.Process != nil && session.Process.PID == key.pid && session.Process.StartIdentity == key.start {
+			return true
+		}
+	}
+	firstSeen, ok := o.candidates[key]
+	return ok && at.Sub(firstSeen) >= o.confirmAfter
+}
+
 func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
 	if process.AgentHint != "" {
-		if harnessID, err := harness.Normalize(process.AgentHint); err == nil {
+		if harnessID, err := catalog.Parse(process.AgentHint); err == nil {
 			return observableHarness(process, harnessID)
 		}
 	}
-	if harnessID, ok := harness.FromCommand(process.Executable); ok {
+	if harnessID, ok := catalog.FromCommand(process.Executable); ok {
 		return observableHarness(process, harnessID)
 	}
 	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if harnessID, ok := harness.FromCommand(arg); ok {
+		if harnessID, ok := catalog.FromCommand(arg); ok {
 			return observableHarness(process, harnessID)
 		}
 	}
-	if isAgentWrapper(process) {
+	if IsAgentWrapper(process) {
 		start := min(commandArgumentPrefixCount, len(process.Args))
 		for _, arg := range process.Args[start:] {
-			if harnessID, ok := harness.FromCommand(arg); ok {
+			if harnessID, ok := catalog.FromCommand(arg); ok {
 				return observableHarness(process, harnessID)
 			}
 		}
@@ -512,7 +597,7 @@ func observableHarness(process processinfo.Process, harnessID registry.Harness) 
 			return "", false
 		}
 	}
-	if filter, ok := harness.ProcessFilterFor(harnessID); ok {
+	if filter, ok := catalog.ProcessFilterFor(harnessID); ok {
 		if !filter.ObservableProcess(process) {
 			return "", false
 		}
@@ -565,19 +650,6 @@ func hasAncestorHarness(pid int, harnessID registry.Harness, processByPID map[in
 	return false
 }
 
-func isAgentWrapper(process processinfo.Process) bool {
-	command := filepath.Base(process.Executable)
-	if command == "" && len(process.Args) > 0 {
-		command = filepath.Base(process.Args[0])
-	}
-	switch command {
-	case "env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv", "node", "bun", "python", "python3", "sh", "bash":
-		return true
-	default:
-		return false
-	}
-}
-
 func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, sessions []registry.Session, processByPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness, locationPIDs map[int]bool, at time.Time, inspectScreen bool) []registry.Observation {
 	observations := make([]registry.Observation, 0, len(harnessByPID))
 	for pid, harnessID := range harnessByPID {
@@ -586,8 +658,8 @@ func observationsForUnlocatedProcesses(manifestLoader agentstate.Loader, session
 		}
 		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
 		process := processByPID[pid]
-		emptyContext := registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
-		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: emptyContext}})
+		emptyLocation := registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}
+		observations = append(observations, registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: &registry.Placement{Process: *processIdentity(process), Location: emptyLocation}})
 		if !inspectScreen {
 			continue
 		}
@@ -641,7 +713,7 @@ func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, 
 		Incarnation:   incarnation,
 		IdentityState: "", Liveness: nil, SchemaVersion: 0, ID: "", SessionID: "", SessionPath: "", ResumeCommand: nil, CWD: "", ProjectRoot: "", Location: registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, Observations: registry.Observations{Native: nil, Process: nil, Location: nil, Catalog: nil, Screen: nil}, CreatedAt: time.Time{}, UpdatedAt: time.Time{}, PresenceChangedAt: time.Time{}, ActivityChangedAt: time.Time{},
 		Harness: harnessID,
-		Process: identity,
+		Process: identity, Detail: nil,
 	}
 	for _, candidate := range sessions {
 		if candidate.Harness == harnessID && candidate.Process != nil && candidate.Process.Equal(*identity) {
@@ -652,7 +724,7 @@ func sessionForProcess(sessions []registry.Session, harnessID registry.Harness, 
 }
 
 func screenFallbackMetadata(session registry.Session, harnessID registry.Harness, at time.Time) (string, string) {
-	policy := (harness.Rules{}).Policy(harnessID)
+	policy := (catalog.Rules{}).Policy(harnessID)
 	if policy.Authority != registry.AuthorityHook {
 		return "", ""
 	}
@@ -672,7 +744,7 @@ func unavailableScreenState(manifestLoader agentstate.Loader, sessions []registr
 	}
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
 	unknown := registry.ActivityUnknown
-	screen := &registry.ScreenObservation{Activity: unknown, Authority: registry.AuthorityScreen, Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at}
+	screen := &registry.ScreenObservation{Activity: unknown, Authority: registry.AuthorityScreen, Reason: reason, RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: at, Detail: ""}
 	observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	return observation, true
 }
@@ -699,7 +771,7 @@ func (o *Observer) detectScreenState(ctx context.Context, sessions []registry.Se
 			Activity: *pane.Activity, Authority: registry.AuthorityScreen, Reason: reason,
 			RuleID: "", ManifestSource: "", ManifestVersion: 0,
 			FallbackForIntegration: fallback, FallbackReason: fallbackReason,
-			Process: *identity, ObservedAt: at,
+			Process: *identity, ObservedAt: at, Detail: "",
 		}
 		observation := registry.Observation{Harness: harnessID, At: at, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 		return observation, true, nil
@@ -773,11 +845,11 @@ func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedPro
 }
 
 func shouldDetectScreen(session registry.Session, at time.Time) bool {
-	if harness.SupportsScreen(session.Harness) {
-		authority, _ := registry.ActivityAuthority(session, (harness.Rules{}).Policy(session.Harness), at)
+	if catalog.SupportsScreen(session.Harness) {
+		authority, _ := registry.ActivityAuthority(session, (catalog.Rules{}).Policy(session.Harness), at)
 		return authority == registry.AuthorityScreen
 	}
-	policy := (harness.Rules{}).Policy(session.Harness)
+	policy := (catalog.Rules{}).Policy(session.Harness)
 	return policy.Authority == registry.AuthorityHook && !registry.EvaluateHook(session, policy, at).Active
 }
 
@@ -803,14 +875,14 @@ func preferForegroundProcess(candidate processinfo.Process, current processinfo.
 }
 
 func isDirectAgentProcess(process processinfo.Process) bool {
-	if isAgentWrapper(process) {
+	if IsAgentWrapper(process) {
 		return false
 	}
-	if _, ok := harness.FromCommand(process.Executable); ok {
+	if _, ok := catalog.FromCommand(process.Executable); ok {
 		return true
 	}
 	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if _, ok := harness.FromCommand(arg); ok {
+		if _, ok := catalog.FromCommand(arg); ok {
 			return true
 		}
 	}
@@ -905,6 +977,7 @@ func (o *Observer) releaseLock() {
 func (o *Observer) recordHealth(at time.Time, degraded bool, category string, err error, result Result) error {
 	o.mu.Lock()
 	wasDegraded := o.health.Degraded
+	previousCategory := o.health.LastEnumerationErrorCategory
 	if o.startedAt.IsZero() {
 		o.startedAt = at
 		o.health.PID = os.Getpid()
@@ -926,7 +999,10 @@ func (o *Observer) recordHealth(at time.Time, degraded bool, category string, er
 		o.health.LastEnumerationError = ""
 	}
 	health := o.health
-	shouldWrite := o.lastHealthWrite.IsZero() || at.Sub(o.lastHealthWrite) >= 30*time.Second || err != nil || degraded != wasDegraded
+	// Rewrite only on a status or error-category change, or on the slow
+	// interval, so steady and persistently degraded cycles do not write.
+	shouldWrite := o.lastHealthWrite.IsZero() || at.Sub(o.lastHealthWrite) >= healthWriteInterval ||
+		degraded != wasDegraded || o.health.LastEnumerationErrorCategory != previousCategory
 	o.mu.Unlock()
 	if !shouldWrite || o.healthPath == "" {
 		return nil
@@ -1019,7 +1095,7 @@ func (o *Observer) captureScreenState(ctx context.Context, session registry.Sess
 	}
 	observedAt := screenObservationTime(at, o.now().UTC())
 	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-	screen := &registry.ScreenObservation{Activity: decision.Activity, Authority: registry.AuthorityScreen, Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
+	screen := &registry.ScreenObservation{Activity: decision.Activity, Detail: decision.Detail, Authority: registry.AuthorityScreen, Reason: decision.Reason, RuleID: decision.RuleID, ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion, FallbackForIntegration: fallback, FallbackReason: fallbackReason, Process: *identity, ObservedAt: observedAt}
 	observation := registry.Observation{Harness: harnessID, At: observedAt, Subject: registry.ObservationIdentity{SessionID: "", SessionPath: "", CWD: "", Attributes: nil}, Evidence: (*registry.Reading)(screen)}
 	if manifest.Warning != "" {
 		return observation, true, fmt.Errorf("%w: %s", errDetectionOverrideInvalid, manifest.Warning)

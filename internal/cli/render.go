@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	prettytable "github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -302,12 +303,16 @@ func (app *application) writeHumanDetails(details []humanDetail) error {
 
 func sanitizeHumanText(value string) string {
 	value = strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) || isBidiControl(character) {
+		if isTerminalControl(character) {
 			return ' '
 		}
 		return character
 	}, value)
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func isTerminalControl(character rune) bool {
+	return unicode.IsControl(character) || isBidiControl(character)
 }
 
 func isBidiControl(character rune) bool {
@@ -361,10 +366,11 @@ func wrapDelimitedHumanText(value string, width int, delimiters string) []string
 	var lines []string
 	width = max(1, width)
 	for text.StringWidth(value) > width {
-		cut, delimiterCut := 0, 0
+		cut, delimiterCut, used := 0, 0, 0
 		for index, character := range value {
-			end := index + len(string(character))
-			if text.StringWidth(value[:end]) > width {
+			end := index + utf8.RuneLen(character)
+			used += text.StringWidth(string(character))
+			if used > width {
 				// A single wide glyph cannot fit a one-cell viewport; preserve it.
 				if cut == 0 {
 					cut = end

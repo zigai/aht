@@ -7,15 +7,17 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 // The native abort endpoint ends the active turn, not the durable session.
 // https://opencode.ai/docs/server/#sessions
 // https://github.com/Kilo-Org/kilocode/blob/main/packages/sdk/js/src/v2/gen/types.gen.ts
-func (host isolatedHost) runServerInterruption(t *testing.T, env []string) {
+func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	t.Helper()
 	baseURL, client, process := startNativeServer(t, host, env)
-	query := "?directory=" + url.QueryEscape(host.work)
+	query := "?directory=" + url.QueryEscape(host.launched.Work)
 	var session struct {
 		ID string `json:"id"`
 	}
@@ -27,13 +29,13 @@ func (host isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	sessionURL := baseURL + "/session/" + url.PathEscape(session.ID)
 	serverPermissionJSON(t, client, sessionURL+"/prompt_async"+query, http.MethodPost,
 		map[string]any{
-			"model": map[string]string{"providerID": "aht-compat", "modelID": "compat"},
+			"model": map[string]string{"providerID": harness.LaunchProviderName, "modelID": fakeModel},
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 		}, nil)
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first active request step = %d", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first active request step = %d", hold.Request.Index)
 		}
 	case <-process.done:
 		t.Fatalf("server exited before active request: %v", process.waitErr())

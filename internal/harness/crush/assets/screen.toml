@@ -1,0 +1,34 @@
+version = 1
+agent = "crush"
+
+[[rules]]
+id = "permission_prompt"
+state = "waiting"
+detail = "permission"
+priority = 300
+region = "all"
+regex_all = ['(?m)^[^\n]*│[ \t]+Permission Required[ \t╱]*│[ \t]*$']
+regex_any = ['(?m)^[^\n]*│[ \t]+Allow[ \t]+Allow for Session[ \t]+Deny[ \t]*│[ \t]*$', '(?m)^[^\n]*│[ \t]+←/→ choose • enter confirm • esc exit[ \t]*│[ \t]*$']
+
+[[rules]]
+id = "question_prompt"
+state = "waiting"
+detail = "question"
+priority = 250
+region = "bottom:2"
+any = ["] next tab", "quick select", "y yes"]
+
+[[rules]]
+id = "working_interruptible"
+state = "running"
+priority = 200
+region = "bottom:2"
+any = ["esc cancel", "press again to cancel", "esc clear queue"]
+
+[[rules]]
+id = "input_prompt"
+state = "idle"
+priority = 100
+region = "bottom:2"
+any = ["ctrl+p commands", "shift+tab mode", "tab focus chat", "tab focus editor", "tab change focus"]
+none = ["esc cancel", "press again to cancel", "esc clear queue"]

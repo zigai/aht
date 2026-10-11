@@ -1,2 +1,2 @@
-f4bf83f0b64f055c42b28fc9a38861839f69c096e61c788e72dfaae412011789  golangci-lint-2.13.2-darwin-arm64.tar.gz
-2277d43b98ec0054280f2ac26b53268bae97682444678a59a657dd565da021d6  golangci-lint-2.13.2-linux-amd64.tar.gz
+5ef5f36a7147e91dc58ef9ef4d11bb7bad5ead0c76eb6c01327a73c641d1dcc3  golangci-lint-2.14.0-darwin-arm64.tar.gz
+ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab  golangci-lint-2.14.0-linux-amd64.tar.gz

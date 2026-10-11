@@ -9,6 +9,7 @@ hooks.get("session_start")({ type: "session_start" }, ctx);
 hooks.get("tool_approval_requested")(
   {
     type: "tool_approval_requested",
+    toolCallId: "approval-tool",
     reason: "Run command?",
     toolName: "bash",
     approvalMode: "ask",

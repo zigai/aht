@@ -28,6 +28,12 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 
 	session := fmt.Sprintf("aht-zellij-%d", time.Now().UnixNano())
 	configDir := t.TempDir()
+	socketDir, err := os.MkdirTemp("/tmp", "aht-zellij-sock-") //nolint:usetesting // reason: Zellij socket paths under t.TempDir can exceed the Unix socket path limit; cleanup is registered below.
+	if err != nil {
+		t.Fatalf("create short Zellij socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	t.Setenv("ZELLIJ_SOCKET_DIR", socketDir)
 	t.Setenv("ZELLIJ_CONFIG_DIR", configDir)
 	configPath := filepath.Join(configDir, "config.kdl")
 	if err := os.WriteFile(configPath, []byte("show_startup_tips false\nshow_release_notes false\n"), 0o600); err != nil {
@@ -42,7 +48,7 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 		harness.ShellQuote(zellijBinary), "--config-dir", harness.ShellQuote(configDir),
 		"--session", harness.ShellQuote(session),
 	}, " ")
-	process := exec.Command(script, "-q", "-c", commandLine, logPath)
+	process := exec.CommandContext(t.Context(), script, "-q", "-c", commandLine, os.DevNull)
 	process.Stdout = logFile
 	process.Stderr = logFile
 	stdin, err := process.StdinPipe()
@@ -70,9 +76,10 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 		}
 	})
 
-	waitForCommandSuccess(t, 15*time.Second, zellijBinary, "--config-dir", configDir, "--session", session, "action", "list-panes", "--all", "--json")
+	waitForZellijRender(t, 15*time.Second, logPath)
+	waitForCommandOutput(t, 15*time.Second, "terminal_0", zellijBinary, "--config-dir", configDir, "--session", session, "action", "list-panes")
 	marker := "AHT_ZELLIJ_CURRENT_VERSION_CAPTURE"
-	run := exec.Command(zellijBinary, "--config-dir", configDir, "--session", session, "run", "--", "sh", "-c", "printf '%s\\n' "+harness.ShellQuote(marker)+"; sleep 30")
+	run := exec.CommandContext(t.Context(), zellijBinary, "--config-dir", configDir, "--session", session, "run", "--", "sh", "-c", "printf '%s\\n' "+harness.ShellQuote(marker)+"; sleep 30")
 	output, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("create Zellij test pane: %v\n%s\n%s", err, output, readProbeLog(logPath))
@@ -80,9 +87,7 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerZellij, session, strings.TrimSpace(string(output)), func(ctx context.Context) ([]mux.Pane, error) {
-		return zellij.ListPanes(ctx)
-	})
+	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerZellij, session, strings.TrimSpace(string(output)), zellij.ListPanes)
 	waitForPaneCapture(t, ctx, pane, marker, zellij.CapturePane)
 }
 
@@ -90,7 +95,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	herdrBinary := requireDeclaredMultiplexer(t, "herdr")
 
 	session := fmt.Sprintf("aht-herdr-%d", time.Now().UnixNano())
-	home, err := os.MkdirTemp("/tmp", "aht-herdr-home-")
+	home, err := os.MkdirTemp("/tmp", "aht-herdr-home-") //nolint:usetesting // reason: Herdr socket paths under t.TempDir exceed the Unix socket path limit; cleanup is registered below.
 	if err != nil {
 		t.Fatalf("create short Herdr home: %v", err)
 	}
@@ -102,7 +107,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Herdr log: %v", err)
 	}
-	process := exec.Command(herdrBinary, "server")
+	process := exec.CommandContext(t.Context(), herdrBinary, "server")
 	process.Stdout = logFile
 	process.Stderr = logFile
 	if err := process.Start(); err != nil {
@@ -123,7 +128,7 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 	})
 
 	waitForCommandSuccess(t, 10*time.Second, herdrBinary, "api", "snapshot")
-	workspace := exec.Command(herdrBinary, "workspace", "create", "--cwd", t.TempDir(), "--label", "aht-test", "--no-focus")
+	workspace := exec.CommandContext(t.Context(), herdrBinary, "workspace", "create", "--cwd", t.TempDir(), "--label", "aht-test", "--no-focus")
 	workspace.Env = os.Environ()
 	output, err := workspace.CombinedOutput()
 	if err != nil {
@@ -132,11 +137,9 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerHerdr, session, "", func(ctx context.Context) ([]mux.Pane, error) {
-		return herdr.ListPanes(ctx)
-	})
+	pane := waitForMultiplexerPane(t, ctx, registry.MultiplexerHerdr, session, "", herdr.ListPanes)
 	marker := "AHT_HERDR_CURRENT_VERSION_CAPTURE"
-	run := exec.Command(herdrBinary, "pane", "run", pane.Location.PaneID, "printf '%s\\n' "+harness.ShellQuote(marker))
+	run := exec.CommandContext(t.Context(), herdrBinary, "pane", "run", pane.Location.PaneID, "printf '%s\\n' "+harness.ShellQuote(marker))
 	run.Env = os.Environ()
 	output, err = run.CombinedOutput()
 	if err != nil {
@@ -147,6 +150,11 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 
 func waitForCommandSuccess(t *testing.T, timeout time.Duration, name string, args ...string) {
 	t.Helper()
+	waitForCommandOutput(t, timeout, "", name, args...)
+}
+
+func waitForCommandOutput(t *testing.T, timeout time.Duration, text string, name string, args ...string) {
+	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var output []byte
 	var err error
@@ -156,12 +164,24 @@ func waitForCommandSuccess(t *testing.T, timeout time.Duration, name string, arg
 		command.Env = os.Environ()
 		output, err = command.CombinedOutput()
 		cancel()
-		if err == nil {
+		if err == nil && strings.Contains(string(output), text) {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("command %s %s did not become ready: %v\n%s", name, strings.Join(args, " "), err, output)
+}
+
+func waitForZellijRender(t *testing.T, timeout time.Duration, logPath string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), "Tab #1") {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("Zellij client did not render its tab bar within %s\n%s", timeout, readProbeLog(logPath))
 }
 
 func waitForMultiplexerPane(

@@ -11,6 +11,7 @@ extension({
   registerCommand: (name, options) => commands.set(name, options.handler),
   appendEntry: (type, data) => entries.push({ type, data }),
 });
+assert.equal(commands.size, 0, "pi extension must not register commands");
 const hasUI = process.env.AHT_TEST_HAS_UI === "true";
 const ui = {
   notify: (message) => notifications.push(message),
@@ -22,14 +23,16 @@ await hooks.get("session_shutdown")({ type: "session_shutdown" }, ctx);
 assert.equal(entries.length, 1, "repeated failures should not flood session history");
 assert.equal(entries[0].type, "aht-reporting");
 assert.match(entries[0].data.message, /disk is full/);
+assert.doesNotMatch(entries[0].data.message, /aht-status/);
 assert.doesNotMatch(JSON.stringify({ entries, notifications, statuses }), /SECRET|private/);
 assert.equal(notifications.length, hasUI ? 1 : 0);
 assert.equal(statuses.length, hasUI ? 1 : 0);
-await commands.get("aht-status")("", { hasUI: true, ui });
-assert.match(notifications.at(-1), /degraded.*\nLast failure: state write failed: disk is full/s);
+if (hasUI) {
+  assert.equal(statuses[0].key, "aht");
+  assert.equal(statuses[0].text, "aht: tracking degraded");
+  assert.match(notifications[0], /state write failed: disk is full/);
+  assert.doesNotMatch(notifications[0], /aht-status/);
+}
 fs.writeFileSync(process.env.AHT_REPORT_RECOVERED, "ready");
 await hooks.get("session_shutdown")({ type: "session_shutdown" }, ctx);
 if (hasUI) assert.deepEqual(statuses.at(-1), { key: "aht", text: undefined });
-await commands.get("aht-status")("", { hasUI: true, ui });
-assert.match(notifications.at(-1), /no current failure/);
-assert.match(notifications.at(-1), /Last failure: state write failed: disk is full/);

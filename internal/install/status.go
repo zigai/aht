@@ -7,9 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"unicode/utf8"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -27,14 +28,9 @@ type inspectedArtifact struct {
 	status ArtifactStatus
 }
 
-// Inspect reports whether a harness integration or its shim fallback is current.
-func Inspect(harnessID registry.Harness, binary string) (IntegrationStatus, error) {
-	return InspectContext(context.Background(), harnessID, binary)
-}
-
-// InspectContext reports whether a harness integration is current, honoring
-// cancellation while consulting native harness CLIs.
-func InspectContext(ctx context.Context, harnessID registry.Harness, binary string) (IntegrationStatus, error) {
+// Inspect reports whether a harness integration or its shim fallback is
+// current, honoring cancellation while consulting native harness CLIs.
+func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (IntegrationStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return IntegrationStatus{}, fmt.Errorf("inspect integration context: %w", err)
 	}
@@ -70,7 +66,7 @@ func InspectContext(ctx context.Context, harnessID registry.Harness, binary stri
 }
 
 func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspkg.InstallPlan, harnesspkg.InstallAdvisor, error) {
-	adapter, ok := harnesscatalog.Find(harnessID)
+	adapter, ok := catalog.Find(harnessID)
 	if !ok {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
@@ -79,8 +75,16 @@ func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspk
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
 
+	if !utf8.ValidString(binary) {
+		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errBinaryEncoding, binary)
+	}
 	advisor, _ := adapter.(harnesspkg.InstallAdvisor)
-	return installer.InstallPlan(binary), advisor, nil
+	plan, err := installer.InstallPlan(binary)
+	if err != nil {
+		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("plan %s integration: %w", harnessID, err)
+	}
+
+	return plan, advisor, nil
 }
 
 func inspectIntegrationPlan(ctx context.Context, plan harnesspkg.InstallPlan, result *IntegrationStatus) error {
@@ -104,7 +108,7 @@ func markDesiredIntegrationState(ctx context.Context, harnessID registry.Harness
 	if result.Status != ArtifactCurrent {
 		return nil
 	}
-	dryRun, err := RunContext(ctx, Options{
+	dryRun, err := Run(ctx, Options{
 		Harness:      harnessID,
 		Binary:       binary,
 		TargetBinary: "",
@@ -156,7 +160,7 @@ func mergeInspectedArtifact(result *IntegrationStatus, item inspectedArtifact) {
 func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]inspectedArtifact, error) {
 	switch value := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		return inspectSharedFile(value.Plan.Path)
+		return inspectCommandHooks(ctx, value.Plan)
 	case harnesspkg.CursorJSONHooksAction:
 		return inspectSharedFile(value.Plan.Path)
 	case harnesspkg.ManagedTextBlockAction:
@@ -168,6 +172,21 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 	default:
 		return nil, nil
 	}
+}
+
+func inspectCommandHooks(ctx context.Context, plan harnesspkg.JSONCommandHookInstallPlan) ([]inspectedArtifact, error) {
+	statuses, err := inspectSharedFile(plan.Path)
+	if err != nil || plan.Trust == nil || statuses[0].status == ArtifactMissing {
+		return statuses, err
+	}
+	trusted, err := plan.Trust.Inspect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting %s hook trust: %w", plan.Label, err)
+	}
+	if !trusted {
+		statuses = append(statuses, inspectedArtifact{path: plan.Label + " trust", status: ArtifactStale})
+	}
+	return statuses, nil
 }
 
 func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
@@ -182,6 +201,11 @@ func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryIns
 		}
 		return append(result, registration), nil
 	}
+	retired, err := inspectRetiredPlugins(plan)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, retired...)
 	if plan.ImportManifest == nil {
 		return result, nil
 	}
@@ -191,21 +215,38 @@ func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryIns
 	}
 	status := ArtifactMissing
 	for _, entry := range manifest.Imports {
-		if entry.Name != plan.ImportManifest.Name {
+		if entry.name() != plan.ImportManifest.Name {
 			continue
 		}
 		status = ArtifactCurrent
-		if entry.Source != plan.ImportManifest.Source {
+		if entry.source() != plan.ImportManifest.Source {
 			status = ArtifactStale
 		}
 		for _, component := range plan.ImportManifest.Components {
-			if !slices.Contains(entry.Components, component) {
+			if !slices.Contains(entry.components(), component) {
 				status = ArtifactStale
 			}
 		}
 		break
 	}
 	return append(result, inspectedArtifact{path: plan.ImportManifest.Path, status: status}), nil
+}
+
+// inspectRetiredPlugins reports managed plugins at former locations as stale
+// so that an upgrade moves them.
+func inspectRetiredPlugins(plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
+	var stale []inspectedArtifact
+	for _, retired := range plan.Retired {
+		status, err := ClassifyArtifact(retired.Dir)
+		if err != nil {
+			return nil, err
+		}
+		if status == ArtifactCurrent || status == ArtifactStale {
+			stale = append(stale, inspectedArtifact{path: retired.Dir, status: ArtifactStale})
+		}
+	}
+
+	return stale, nil
 }
 
 func inspectSharedFile(path string) ([]inspectedArtifact, error) {

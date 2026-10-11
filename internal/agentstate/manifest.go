@@ -18,7 +18,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -48,19 +48,20 @@ type Manifest struct {
 }
 
 type Rule struct {
-	ID            string   `json:"id"                        toml:"id"`
-	State         string   `json:"state"                     toml:"state"`
-	Priority      int      `json:"priority"                  toml:"priority"`
-	Region        string   `json:"region"                    toml:"region"`
-	CaseSensitive bool     `json:"case_sensitive"            toml:"case_sensitive"`
-	All           []string `json:"all,omitempty"             toml:"all"`
-	Any           []string `json:"any,omitempty"             toml:"any"`
-	None          []string `json:"none,omitempty"            toml:"none"`
-	RegexAll      []string `json:"regex_all,omitempty"       toml:"regex_all"`
-	RegexAny      []string `json:"regex_any,omitempty"       toml:"regex_any"`
-	RegexNone     []string `json:"regex_none,omitempty"      toml:"regex_none"`
-	TitleAny      []string `json:"title_any,omitempty"       toml:"title_any"`
-	TitleRegexAny []string `json:"title_regex_any,omitempty" toml:"title_regex_any"`
+	Detail        registry.ActivityDetail `json:"detail,omitempty"          toml:"detail"`
+	ID            string                  `json:"id"                        toml:"id"`
+	State         string                  `json:"state"                     toml:"state"`
+	Priority      int                     `json:"priority"                  toml:"priority"`
+	Region        string                  `json:"region"                    toml:"region"`
+	CaseSensitive bool                    `json:"case_sensitive"            toml:"case_sensitive"`
+	All           []string                `json:"all,omitempty"             toml:"all"`
+	Any           []string                `json:"any,omitempty"             toml:"any"`
+	None          []string                `json:"none,omitempty"            toml:"none"`
+	RegexAll      []string                `json:"regex_all,omitempty"       toml:"regex_all"`
+	RegexAny      []string                `json:"regex_any,omitempty"       toml:"regex_any"`
+	RegexNone     []string                `json:"regex_none,omitempty"      toml:"regex_none"`
+	TitleAny      []string                `json:"title_any,omitempty"       toml:"title_any"`
+	TitleRegexAny []string                `json:"title_regex_any,omitempty" toml:"title_regex_any"`
 
 	regexAllCompiled      []*regexp.Regexp
 	regexAnyCompiled      []*regexp.Regexp
@@ -84,17 +85,17 @@ func DefaultConfigDir() string {
 	return filepath.Join(configDir, "aht", "detection")
 }
 
-func (l Loader) Supports(harness registry.Harness) bool {
-	if harnesscatalog.SupportsScreen(harness) {
+func (l Loader) Supports(harnessID registry.Harness) bool {
+	if catalog.SupportsScreen(harnessID) {
 		return true
 	}
-	_, err := os.Stat(l.overridePath(harness))
+	_, err := os.Stat(l.overridePath(harnessID))
 	return err == nil
 }
 
-func (l Loader) Load(harness registry.Harness) (Manifest, error) {
-	path := l.overridePath(harness)
-	key := string(harness) + "\x00" + path
+func (l Loader) Load(harnessID registry.Harness) (Manifest, error) {
+	path := l.overridePath(harnessID)
+	key := string(harnessID) + "\x00" + path
 	fingerprint := manifestFileFingerprint(path)
 	if cached, ok := manifestCache.Load(key); ok {
 		if entry, valid := cached.(manifestCacheEntry); valid &&
@@ -103,7 +104,7 @@ func (l Loader) Load(harness registry.Harness) (Manifest, error) {
 		}
 	}
 
-	manifest, err := loadUncached(harness, path)
+	manifest, err := loadUncached(harnessID, path)
 	manifestCache.Store(key, manifestCacheEntry{
 		fingerprint: fingerprint,
 		manifest:    manifest,
@@ -113,7 +114,7 @@ func (l Loader) Load(harness registry.Harness) (Manifest, error) {
 	return manifest, err
 }
 
-func (l Loader) overridePath(harness registry.Harness) string {
+func (l Loader) overridePath(harnessID registry.Harness) string {
 	configDir := l.ConfigDir
 	if configDir == "" {
 		configDir = DefaultConfigDir()
@@ -121,10 +122,10 @@ func (l Loader) overridePath(harness registry.Harness) string {
 	if configDir == "" {
 		return ""
 	}
-	return filepath.Join(configDir, string(harness)+".toml")
+	return filepath.Join(configDir, string(harnessID)+".toml")
 }
 
-func ParseManifest(data []byte, harness registry.Harness) (Manifest, error) {
+func ParseManifest(data []byte, harnessID registry.Harness) (Manifest, error) {
 	if len(data) > maxManifestBytes {
 		return Manifest{}, errManifestTooLarge
 	}
@@ -132,8 +133,8 @@ func ParseManifest(data []byte, harness registry.Harness) (Manifest, error) {
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&manifest); err != nil {
 		return Manifest{}, fmt.Errorf("%w: parsing TOML: %w", errManifestInvalid, err)
 	}
-	if manifest.Agent != string(harness) {
-		return Manifest{}, fmt.Errorf("%w: agent %q does not match %q", errManifestInvalid, manifest.Agent, harness)
+	if manifest.Agent != string(harnessID) {
+		return Manifest{}, fmt.Errorf("%w: agent %q does not match %q", errManifestInvalid, manifest.Agent, harnessID)
 	}
 	if err := manifest.validate(); err != nil {
 		return Manifest{}, err
@@ -147,12 +148,12 @@ func ParseManifest(data []byte, harness registry.Harness) (Manifest, error) {
 
 // LoadExplicitManifest loads, bounds, and parses an explicit manifest file from path for harness.
 // Unlike ambient override loading, any read or parse failure returns an error without fallback.
-func LoadExplicitManifest(path string, harness registry.Harness) (Manifest, error) {
+func LoadExplicitManifest(path string, harnessID registry.Harness) (Manifest, error) {
 	data, err := readManifestFile(path)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("reading detection manifest: %w", err)
 	}
-	manifest, err := ParseManifest(data, harness)
+	manifest, err := ParseManifest(data, harnessID)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("parsing detection manifest: %w", err)
 	}
@@ -189,40 +190,40 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 	return string(data), nil
 }
 
-func loadUncached(harness registry.Harness, path string) (Manifest, error) {
+func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
-	if harnesscatalog.SupportsScreen(harness) {
+	if catalog.SupportsScreen(harnessID) {
 		var err error
-		bundled, err = loadBundled(harness)
+		bundled, err = loadBundled(harnessID)
 		if err != nil {
 			return Manifest{}, err
 		}
 	}
 	if path == "" {
-		if harnesscatalog.SupportsScreen(harness) {
+		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
-		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harness)
+		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
 	}
 
 	data, readErr := readManifestFile(path)
 	if errors.Is(readErr, os.ErrNotExist) {
-		if harnesscatalog.SupportsScreen(harness) {
+		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
-		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harness)
+		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
 	}
 	if readErr != nil {
-		if !harnesscatalog.SupportsScreen(harness) {
+		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("reading local override %s: %w", path, readErr)
 		}
 		bundled.Warning = fmt.Sprintf("reading local override %s: %v", path, readErr)
 		return bundled, nil
 	}
 
-	local, parseErr := ParseManifest(data, harness)
+	local, parseErr := ParseManifest(data, harnessID)
 	if parseErr != nil {
-		if !harnesscatalog.SupportsScreen(harness) {
+		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("loading local override %s: %w", path, parseErr)
 		}
 		bundled.Warning = fmt.Sprintf("ignoring invalid local override %s: %v", path, parseErr)
@@ -299,7 +300,7 @@ func compileRuleExpressions(expressions []string, caseSensitive bool) ([]*regexp
 }
 
 func loadBundled(harnessID registry.Harness) (Manifest, error) {
-	adapter, ok := harnesscatalog.Find(harnessID)
+	adapter, ok := catalog.Find(harnessID)
 	if !ok {
 		return Manifest{}, fmt.Errorf("reading bundled manifest for %s: %w", harnessID, errBundledManifestNotFound)
 	}
@@ -339,6 +340,9 @@ func (rule Rule) validate() error {
 	activity, err := registry.NormalizeActivity(rule.State)
 	if err != nil || activity == registry.ActivityUnknown || activity == "" {
 		return fmt.Errorf("%w: rule %q has unsupported state %q", errManifestInvalid, rule.ID, rule.State)
+	}
+	if rule.Detail != "" && !rule.Detail.ValidFor(activity) {
+		return fmt.Errorf("%w: rule %q has invalid activity detail", errManifestInvalid, rule.ID)
 	}
 	if _, err := selectRegion(rule.Region, nil); err != nil {
 		return fmt.Errorf("%w: rule %q: %w", errManifestInvalid, rule.ID, err)

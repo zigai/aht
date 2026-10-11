@@ -1,9 +1,9 @@
 package agy
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,7 +23,7 @@ const (
 	agyIntegrationID               = "agy"
 	agyHookSource                  = "agy-hook"
 	agyHookAdditionalAttributeKeys = 3
-	integrationVersion             = 9
+	integrationVersion             = 10
 )
 
 type agyHarness struct{ harness.BaseAdapter }
@@ -63,8 +63,11 @@ func New() agyHarness {
 	})}
 }
 
-func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
+func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	configDir := agyConfigDir()
+	if configDir == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
 
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 		Dir:   filepath.Join(configDir, "plugins", agyPluginName),
@@ -86,16 +89,38 @@ func (agyHarness) InstallPlan(binary string) harness.InstallPlan {
 				JSONContent: nil,
 			},
 		},
-		SnippetOrder: []string{"plugin.json", "hooks.json", agyMarkerFileName},
-		MarkerFile:   agyMarkerFileName,
-		ImportManifest: &harness.ImportManifestInstallPlan{
-			Path:       filepath.Join(configDir, agyImportManifestName),
-			Name:       agyPluginName,
-			Source:     agyImportSource,
-			Components: []string{agyImportComponent},
-		},
-		Registration: nil,
-	}}, harness.ShimAction{}}}
+		SnippetOrder:   []string{"plugin.json", "hooks.json", agyMarkerFileName},
+		MarkerFile:     agyMarkerFileName,
+		ImportManifest: agyImportManifest(configDir),
+		Registration:   nil,
+		Retired:        []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
+	}}, harness.ShimAction{}}}, nil
+}
+
+func agyImportManifest(dir string) *harness.ImportManifestInstallPlan {
+	return &harness.ImportManifestInstallPlan{
+		Path:       filepath.Join(dir, agyImportManifestName),
+		Name:       agyPluginName,
+		Source:     agyImportSource,
+		Components: []string{agyImportComponent},
+	}
+}
+
+// agyRetiredPlugin describes where earlier integration versions installed the
+// plugin, before agy moved plugin discovery to the shared config directory.
+func agyRetiredPlugin() harness.PluginDirectoryInstallPlan {
+	dir := agyApplicationDir()
+
+	return harness.PluginDirectoryInstallPlan{
+		Dir:            filepath.Join(dir, "plugins", agyPluginName),
+		Label:          "agy plugin",
+		Files:          nil,
+		SnippetOrder:   nil,
+		MarkerFile:     agyMarkerFileName,
+		ImportManifest: agyImportManifest(dir),
+		Registration:   nil,
+		Retired:        nil,
+	}
 }
 
 func (agyHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -119,10 +144,10 @@ func (agyHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaul
 	return agyPayloadDefaults(payload), nil
 }
 
-func (agyHarness) HandleHook(invocation harness.HookInvocation) harness.HookResult {
+func (agyHarness) HandleHook(_ context.Context, invocation harness.HookInvocation) (harness.HookResult, error) {
 	invocation.Event = agyHookEvent(invocation.Payload, invocation.Event)
 
-	return agyHandleHook(invocation)
+	return agyHandleHook(invocation), nil
 }
 
 func agyHookConfig(binary string) map[string]any {
@@ -174,14 +199,27 @@ func agyMarkerContent() string {
 }
 
 func agyConfigDir() string {
-	if value := strings.TrimSpace(os.Getenv("AGY_CONFIG_HOME")); value != "" {
-		return value
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".gemini", "antigravity-cli")
-	}
+	return filepath.Join(dir, "config")
+}
 
-	return filepath.Join(".gemini", "antigravity-cli")
+func agyApplicationDir() string {
+	dir := agyGeminiDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "antigravity-cli")
+}
+
+func agyGeminiDir() string {
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".gemini")
 }
 
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
@@ -238,13 +276,16 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 		SessionPath: defaults.SessionPath,
 		CWD:         defaults.CWD,
 		Attributes:  defaults.Attributes,
-	}, Evidence: &registry.Report{Lifecycle: nil, Claim: nil, Process: nil, Location: nil, Reporter: registry.Reporter{Sequence: nil, Integration: agyHookSource, Version: integrationVersion, MultiSession: false}, Event: invocation.Event, Activity: activity, Listing: &registry.Listing{
-		ResumeCommand: agyResumeCommand(defaults.SessionID),
-		CWD:           defaults.CWD,
-		ProjectRoot:   defaults.ProjectRoot,
-		ProcessPID:    0,
-		Current:       false,
-	}, Attributes: agyHookAttributes(defaults.Attributes, invocation.Event), Payload: invocation.RawPayload}}, true
+	}, Evidence: &registry.Report{
+		DetailObservedAt: nil,
+		Lifecycle:        nil, Claim: nil, Process: nil, Location: nil, Reporter: registry.Reporter{Sequence: nil, Integration: agyHookSource, Version: integrationVersion, MultiSession: false}, Event: invocation.Event, Activity: activity, Listing: &registry.Listing{
+			ResumeCommand: agyResumeCommand(defaults.SessionID),
+			CWD:           defaults.CWD,
+			ProjectRoot:   defaults.ProjectRoot,
+			ProcessPID:    0,
+			Current:       false,
+		}, Attributes: agyHookAttributes(defaults.Attributes, invocation.Event), Payload: invocation.RawPayload, Detail: nil,
+	}}, true
 }
 
 func agyResumeCommand(sessionID string) []string {

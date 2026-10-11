@@ -46,13 +46,14 @@ type Inspection struct {
 
 // Decision records the first matching rule in manifest priority order.
 type Decision struct {
-	Activity        registry.Activity `json:"activity"`
-	Reason          string            `json:"reason"`
-	RuleID          string            `json:"rule_id,omitempty"`
-	ManifestSource  string            `json:"manifest_source"`
-	ManifestVersion int               `json:"manifest_version"`
-	Warning         string            `json:"warning,omitempty"`
-	Evidence        []RuleEvidence    `json:"evidence"`
+	Activity        registry.Activity       `json:"activity"`
+	Detail          registry.ActivityDetail `json:"detail,omitempty"`
+	Reason          string                  `json:"reason"`
+	RuleID          string                  `json:"rule_id,omitempty"`
+	ManifestSource  string                  `json:"manifest_source"`
+	ManifestVersion int                     `json:"manifest_version"`
+	Warning         string                  `json:"warning,omitempty"`
+	Evidence        []RuleEvidence          `json:"evidence"`
 }
 
 // RuleEvidence records a rule considered before or at the winning rule.
@@ -84,7 +85,7 @@ type MatcherInspection struct {
 // rules as live tracking. Only the last 100 normalized lines are evaluated.
 // An explicit manifest fails on invalid input; ambient overrides retain the
 // tracker's bundled fallback policy. Custom harness names require an explicit manifest.
-func Inspect(ctx context.Context, harness registry.Harness, screen string, options Options) (Inspection, error) {
+func Inspect(ctx context.Context, harness registry.Harness, screen string, opts Options) (Inspection, error) {
 	var empty Inspection
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
@@ -92,15 +93,15 @@ func Inspect(ctx context.Context, harness registry.Harness, screen string, optio
 	if len(screen) > MaxScreenBytes {
 		return empty, ErrScreenTooLarge
 	}
-	if options.ManifestPath != "" && options.ConfigDir != "" {
+	if opts.ManifestPath != "" && opts.ConfigDir != "" {
 		return empty, ErrManifestOptions
 	}
 	var manifest agentstate.Manifest
 	var err error
-	if options.ManifestPath != "" {
-		manifest, err = agentstate.LoadExplicitManifest(options.ManifestPath, harness)
+	if opts.ManifestPath != "" {
+		manifest, err = agentstate.LoadExplicitManifest(opts.ManifestPath, harness)
 	} else {
-		manifest, err = (agentstate.Loader{ConfigDir: options.ConfigDir}).Load(harness)
+		manifest, err = (agentstate.Loader{ConfigDir: opts.ConfigDir}).Load(harness)
 	}
 	if err != nil {
 		return empty, fmt.Errorf("load detection manifest: %w", err)
@@ -108,9 +109,9 @@ func Inspect(ctx context.Context, harness registry.Harness, screen string, optio
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
 	}
-	raw := manifest.Inspect(agentstate.NormalizeSnapshot(screen, options.Title))
+	raw := manifest.Inspect(agentstate.NormalizeSnapshot(screen, opts.Title))
 	result := inspectionFromRaw(raw)
-	if options.IncludeScreen {
+	if opts.IncludeScreen {
 		result.Screen = screen
 	}
 	return result, nil
@@ -122,7 +123,7 @@ func inspectionFromRaw(raw agentstate.Inspection) Inspection {
 		Harness: raw.Harness, ManifestSource: raw.ManifestSource, ManifestVersion: raw.ManifestVersion,
 		Warning: raw.Warning, LinesEvaluated: raw.LinesEvaluated, Title: raw.Title,
 		Decision: Decision{
-			Activity: decision.Activity, Reason: decision.Reason, RuleID: decision.RuleID,
+			Activity: decision.Activity, Detail: decision.Detail, Reason: decision.Reason, RuleID: decision.RuleID,
 			ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion,
 			Warning: decision.Warning, Evidence: make([]RuleEvidence, 0, len(decision.Evidence)),
 		},

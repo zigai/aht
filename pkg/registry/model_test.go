@@ -8,7 +8,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestPresenceIsValid(t *testing.T) {
+func TestPresenceValid(t *testing.T) {
 	t.Parallel()
 
 	valid := []registry.Presence{
@@ -17,20 +17,20 @@ func TestPresenceIsValid(t *testing.T) {
 		registry.PresenceUnknown,
 	}
 	for _, p := range valid {
-		if !p.IsValid() {
+		if !p.Valid() {
 			t.Errorf("expected presence %q to be valid", p)
 		}
 	}
 
 	invalid := []registry.Presence{"", "active", "online", "LIVE"}
 	for _, p := range invalid {
-		if p.IsValid() {
+		if p.Valid() {
 			t.Errorf("expected presence %q to be invalid", p)
 		}
 	}
 }
 
-func TestActivityIsValid(t *testing.T) {
+func TestActivityValid(t *testing.T) {
 	t.Parallel()
 
 	valid := []registry.Activity{
@@ -42,20 +42,20 @@ func TestActivityIsValid(t *testing.T) {
 		registry.ActivityUnknown,
 	}
 	for _, a := range valid {
-		if !a.IsValid() {
+		if !a.Valid() {
 			t.Errorf("expected activity %q to be valid", a)
 		}
 	}
 
 	invalid := []registry.Activity{"", "busy", "stopped", "RUNNING"}
 	for _, a := range invalid {
-		if a.IsValid() {
+		if a.Valid() {
 			t.Errorf("expected activity %q to be invalid", a)
 		}
 	}
 }
 
-func TestNativeLifecycleIsValid(t *testing.T) {
+func TestNativeLifecycleValid(t *testing.T) {
 	t.Parallel()
 
 	valid := []registry.NativeLifecycle{
@@ -64,20 +64,20 @@ func TestNativeLifecycleIsValid(t *testing.T) {
 		registry.NativeLifecycleEnd,
 	}
 	for _, l := range valid {
-		if !l.IsValid() {
+		if !l.Valid() {
 			t.Errorf("expected lifecycle %q to be valid", l)
 		}
 	}
 
 	invalid := []registry.NativeLifecycle{"", "stop", "restart"}
 	for _, l := range invalid {
-		if l.IsValid() {
+		if l.Valid() {
 			t.Errorf("expected lifecycle %q to be invalid", l)
 		}
 	}
 }
 
-func TestMultiplexerKindIsValid(t *testing.T) {
+func TestMultiplexerKindValid(t *testing.T) {
 	t.Parallel()
 
 	valid := []registry.MultiplexerKind{
@@ -86,14 +86,14 @@ func TestMultiplexerKindIsValid(t *testing.T) {
 		registry.MultiplexerHerdr,
 	}
 	for _, k := range valid {
-		if !k.IsValid() {
+		if !k.Valid() {
 			t.Errorf("expected multiplexer kind %q to be valid", k)
 		}
 	}
 
 	invalid := []registry.MultiplexerKind{"", "screen", "unknown"}
 	for _, k := range invalid {
-		if k.IsValid() {
+		if k.Valid() {
 			t.Errorf("expected multiplexer kind %q to be invalid", k)
 		}
 	}

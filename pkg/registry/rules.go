@@ -19,11 +19,14 @@ type Rules interface {
 }
 
 type Policy struct {
-	ExclusiveProcess bool
-	Authority        Authority
-	ScreenFallback   bool
-	Reporter         string
-	CatalogCreates   bool
+	DetailReporters      []string
+	Details              DetailCapabilities
+	ExclusiveProcess     bool
+	Authority            Authority
+	ScreenFallback       bool
+	RetainNativeActivity bool
+	Reporter             string
+	CatalogCreates       bool
 }
 
 type Reducer struct {
@@ -40,16 +43,16 @@ func NewReducer(rules Rules) Reducer {
 }
 
 func (r Reducer) Apply(state State, batch []Observation, receivedAt time.Time) (State, []Change, error) {
-	previous := snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, Sessions: state.Sessions, UpdatedAt: state.UpdatedAt}
+	previous := snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, Sessions: state.Sessions, UpdatedAt: state.UpdatedAt, EndedProcesses: nil}
 	candidate := cloneRegistrySnapshot(previous)
-	if _, err := r.applyObservationBatch(context.Background(), &candidate, batch, receivedAt); err != nil {
+	if _, _, err := r.applyObservationBatch(context.Background(), &candidate, batch, receivedAt); err != nil {
 		return state, nil, err
 	}
 	result := State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt}
 	return result, stateChanges(state, result), nil
 }
 
-func (a Authority) IsValid() bool {
+func (a Authority) Valid() bool {
 	switch a {
 	case AuthorityHook, AuthorityScreen, AuthorityProcess:
 		return true

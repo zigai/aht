@@ -3,7 +3,19 @@ package aht
 import (
 	"context"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/history"
+)
+
+const (
+	// HistorySortUpdated orders by most recent activity first.
+	HistorySortUpdated = history.SortUpdated
+	// HistorySortCreated orders by most recently started conversation first.
+	HistorySortCreated = history.SortCreated
+	// HistorySortMatches orders search results by most matching message parts.
+	HistorySortMatches = history.SortMatches
+	// HistorySortMessages orders by most user and assistant messages first.
+	HistorySortMessages = history.SortMessages
 )
 
 var (
@@ -11,17 +23,28 @@ var (
 	ErrHistoryIncomplete = history.ErrIncomplete
 	// ErrInvalidHistoryQuery identifies invalid search options.
 	ErrInvalidHistoryQuery = history.ErrInvalidQuery
+	// ErrHistoryIndexUnavailable identifies a history index refresh that could
+	// not use the disposable index.
+	ErrHistoryIndexUnavailable = history.ErrIndexUnavailable
 )
 
 type (
-	// HistoryQuery configures literal conversation-content search.
+	// HistoryQuery configures conversation-content search.
 	HistoryQuery = history.Query
+	// HistoryListQuery lists conversations by metadata without searching text.
+	HistoryListQuery = history.ListQuery
+	// HistoryFilter selects conversations by native metadata.
+	HistoryFilter = history.Filter
+	// HistorySort orders history results.
+	HistorySort = history.Sort
 	// HistoryResult includes matches and source coverage.
 	HistoryResult = history.Result
 	// HistoryCatalog supports explicit sources instead of default discovery.
 	HistoryCatalog = history.Catalog
 	// HistorySource identifies a native history directory or SQLite database.
 	HistorySource = history.Source
+	// HistoryProgress reports scanning of one history source.
+	HistoryProgress = history.Progress
 )
 
 // SearchHistory searches retained local histories independently of the tracker.
@@ -44,4 +67,23 @@ func SearchHistory(ctx context.Context, query HistoryQuery) (HistoryResult, erro
 		return result, err
 	}
 	return result, nil
+}
+
+// ListHistory lists retained local conversations selected by the filter, with
+// the same coverage and error contract as [SearchHistory].
+func ListHistory(ctx context.Context, query HistoryListQuery) (HistoryResult, error) {
+	var historyCatalog HistoryCatalog
+	result, err := historyCatalog.List(ctx, query)
+	if err != nil {
+		//nolint:wrapcheck // the returned error already carries operation context
+		return result, err
+	}
+	return result, nil
+}
+
+// ResumeCommand returns the native command that resumes a harness session, to
+// run in the session's working directory. sessionPath is the native transcript
+// path when known. It returns nil when the harness cannot resume by identity.
+func ResumeCommand(harness Harness, sessionID, sessionPath string) []string {
+	return catalog.ResumeCommandFor(harness, sessionID, sessionPath)
 }

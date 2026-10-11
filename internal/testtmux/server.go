@@ -58,18 +58,18 @@ func Executable(t *testing.T) string {
 }
 
 // New starts a detached session without loading personal tmux or shell config.
-func New(t *testing.T, options gotmux.NewSessionOptions) *Server {
+func New(t *testing.T, opts gotmux.NewSessionOptions) *Server {
 	t.Helper()
-	return newServer(t, "", options)
+	return newServer(t, "", opts)
 }
 
 // NewNamed starts through -L so tests can exercise named-server discovery.
-func NewNamed(t *testing.T, name string, options gotmux.NewSessionOptions) *Server {
+func NewNamed(t *testing.T, name string, opts gotmux.NewSessionOptions) *Server {
 	t.Helper()
-	return newServer(t, name, options)
+	return newServer(t, name, opts)
 }
 
-func newServer(t *testing.T, name string, options gotmux.NewSessionOptions) *Server {
+func newServer(t *testing.T, name string, opts gotmux.NewSessionOptions) *Server {
 	t.Helper()
 	executable := Executable(t)
 	// Unix socket paths must stay short. Cleanup owns this directory so a
@@ -101,7 +101,7 @@ func newServer(t *testing.T, name string, options gotmux.NewSessionOptions) *Ser
 	t.Cleanup(func() { server.cleanup(t) })
 	ctx, cancel := context.WithTimeout(t.Context(), commandTimeout)
 	defer cancel()
-	server.start(ctx, t, name, options)
+	server.start(ctx, t, name, opts)
 	return server
 }
 
@@ -174,13 +174,13 @@ func (server *Server) killTmuxServer(ctx context.Context) error {
 		server.pid = server.identity.PID
 		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	}
-	if err := server.Tmux.KillIfIdentity(ctx, server.identity); err != nil && !errors.Is(err, gotmux.ErrNoServer) {
+	if err := server.Tmux.KillMatching(ctx, server.identity); err != nil && !errors.Is(err, gotmux.ErrNoServer) {
 		return fmt.Errorf("stop test tmux: %w", err)
 	}
 	return nil
 }
 
-func (server *Server) start(ctx context.Context, t *testing.T, name string, options gotmux.NewSessionOptions) {
+func (server *Server) start(ctx context.Context, t *testing.T, name string, opts gotmux.NewSessionOptions) {
 	t.Helper()
 	gotmuxConfig := gotmux.Config{ //nolint:exhaustruct_v5 // remaining options default
 		Binary:     server.executable,
@@ -198,11 +198,11 @@ func (server *Server) start(ctx context.Context, t *testing.T, name string, opti
 	}
 	server.Tmux = gotmuxServer
 
-	options.Start = gotmux.AllowStart
-	session, err := server.Tmux.NewSession(ctx, options)
+	opts.Start = gotmux.StartPolicyAllowStart
+	session, err := server.Tmux.NewSession(ctx, opts)
 	if session.Valid() {
 		server.Session = session
-		server.identity = session.Identity()
+		server.identity = session.ServerIdentity()
 		server.pid = server.identity.PID
 		server.startIdentity = processinfo.StartIdentity(ctx, server.pid)
 	}

@@ -12,8 +12,10 @@ import (
 	"time"
 )
 
+const StoreSchemaVersion = 3
+
 const (
-	storeSchemaVersion      = 3
+	storeSchemaVersion      = StoreSchemaVersion
 	maxObservedAtFutureSkew = 5 * time.Minute
 	maxSnapshotBytes        = 64 << 20
 
@@ -27,8 +29,11 @@ var (
 	ErrHarnessRequired     = errors.New("harness is required")
 	ErrObservationIdentity = errors.New("observation requires identity")
 	ErrObservationConflict = errors.New("observation conflicts with accepted evidence")
-	ErrCorruptStore        = errors.New("corrupt registry store")
-	ErrStoreTooLarge       = errors.New("registry store exceeds size limit")
+	// ErrProcessEnded reports a native report dropped because its process
+	// already ended and its process-only session was removed.
+	ErrProcessEnded  = errors.New("reporting process already ended")
+	ErrCorruptStore  = errors.New("corrupt registry store")
+	ErrStoreTooLarge = errors.New("registry store exceeds size limit")
 
 	_ Store = (*Journal)(nil)
 )
@@ -43,6 +48,10 @@ type snapshot struct {
 	SchemaVersion   int                `json:"schema_version"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	Sessions        map[string]Session `json:"sessions"`
+	// EndedProcesses maps endedProcessKey to the time a removed process-only
+	// session went gone. A process start identity never recurs, so native
+	// reports from these processes are late and must not create sessions.
+	EndedProcesses map[string]time.Time `json:"ended_processes,omitempty"`
 }
 
 type GCResult struct {
@@ -91,7 +100,7 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 	if err := ctx.Err(); err != nil {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
-	snap, err := s.loadContext(ctx)
+	snap, err := s.load(ctx)
 	if err != nil {
 		return Session{}, err
 	}
@@ -100,14 +109,21 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 		return Session{}, ErrSessionNotFound
 	}
 	session.SchemaVersion = storeSchemaVersion
+	session.resolveDetail(s.reducer.rules.Policy(session.Harness), s.now().UTC())
 	return session, nil
 }
 
+// Summary returns filtered multiplexer-session summaries.
+func (s *FileStore) Summary(ctx context.Context, filter Filter) ([]Summary, error) {
+	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+}
+
+// SummaryWithOptions returns filtered summaries grouped according to opts.
 func (s *FileStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
 	}
-	if opts.GroupBy != "" && !opts.GroupBy.IsValid() {
+	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 	sessions, _, err := s.watchSnapshot(ctx, filter)
@@ -209,11 +225,11 @@ func readSnapshotFile(path string) ([]byte, error) {
 }
 
 func newSnapshot() snapshot {
-	return snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session)}
+	return snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session), EndedProcesses: nil}
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	data, err := json.Marshal(snap)
 	if err != nil {
 		return fmt.Errorf("encoding store: %w", err)
 	}

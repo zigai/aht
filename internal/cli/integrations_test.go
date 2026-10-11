@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,21 +77,19 @@ func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCodexInstallAndStatusSurfaceHookTrustStep(t *testing.T) {
+func TestCodexInstallFailsWhenNativeCLIIsMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+	t.Setenv("PATH", t.TempDir())
 
 	var stdout bytes.Buffer
-	executeSurfaceCommand(t, &stdout, "manage", "integrations", "install", "codex", "--binary", "/bin/aht-v1")
-	requireSurfaceOutput(t, stdout.String(), "Codex install omitted trust activation", "next:", "/hooks")
-
-	executeSurfaceCommand(t, &stdout, "manage", "integrations", "status", "codex", "--binary", "/bin/aht-v1")
-	requireSurfaceOutput(t, stdout.String(), "Codex status omitted trust verification", "current", "/hooks", "trust status")
-
-	executeSurfaceCommand(t, &stdout, "--json", "manage", "integrations", "install", "codex", "--binary", "/bin/aht-v2")
-	requireCodexUpdateTrustJSON(t, stdout.Bytes())
+	err := runTestCLI(t.Context(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht"}, &stdout, &bytes.Buffer{})
+	var missingCLI *exec.Error
+	if !errors.As(err, &missingCLI) || missingCLI.Name != "codex" {
+		t.Fatalf("install error = %v, want missing Codex executable", err)
+	}
 }
 
 func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T) {
@@ -98,6 +97,7 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+	t.Setenv("PATH", t.TempDir())
 
 	var concise bytes.Buffer
 	if err := runTestCLI(context.Background(), []string{"manage", "integrations", "install", "codex", "--binary", "/bin/aht", "--dry-run"}, &concise, &bytes.Buffer{}); err != nil {
@@ -122,21 +122,6 @@ func TestIntegrationsInstallShowsGeneratedContentOnlyWhenRequested(t *testing.T)
 	var results []map[string]any
 	if err := json.Unmarshal(machine.Bytes(), &results); err != nil || len(results) != 1 {
 		t.Fatalf("install JSON is not an array: %q, %v", machine.String(), err)
-	}
-}
-
-func requireCodexUpdateTrustJSON(t *testing.T, data []byte) {
-	t.Helper()
-	var results []map[string]any
-	if err := json.Unmarshal(data, &results); err != nil {
-		t.Fatalf("Codex update JSON = %q, %v", data, err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("Codex update JSON = %q, want one result", data)
-	}
-	nextStep, ok := results[0]["next_step"].(string)
-	if !ok || results[0]["changed"] != true || !strings.Contains(nextStep, "/hooks") {
-		t.Fatalf("Codex update omitted trust activation: %#v", results[0])
 	}
 }
 
@@ -211,9 +196,9 @@ func TestSetupEnablesTrackerWhenIntegrationFails(t *testing.T) {
 
 func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing.T) {
 	rows := [][]string{
-		{"codex", "false", "/home/user/.codex/hooks.json", "codex hooks already installed"},
-		{"grok", "false", "/home/user/.grok/hooks/aht-state.json", "grok hooks already installed"},
-		{"openclaw", "false", "/home/user/.local/state/aht/integrations/openclaw/aht-state", "OpenClaw plugin already installed; next: restart the harness to load updated plugin code; registration and permissions preserved"},
+		{"codex", "false", "/home/user/.codex/hooks.json", "already installed"},
+		{"grok", "false", "/home/user/.grok/hooks/aht-state.json", "already installed"},
+		{"openclaw", "false", "/home/user/.local/state/aht/integrations/openclaw/aht-state", "already installed; next: restart the harness to load updated plugin code; registration and permissions preserved"},
 	}
 
 	// In standard 120-column terminal, Path must be allocated enough space to fit all paths without truncation/wrapping.
@@ -222,17 +207,15 @@ func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing
 	if cols120[2].width < longestPath {
 		t.Fatalf("Path column width in 120-column terminal = %d, want >= %d", cols120[2].width, longestPath)
 	}
-	if cols120[2].wrap == nil {
-		t.Fatal("Path column wrap function should be set to wrapHumanPath")
-	}
 
-	// In 200-column terminal, Path fits completely and Result gets all remaining space (120 cols).
+	longestResult := len("already installed; next: restart the harness to load updated plugin code; registration and permissions preserved")
+	// In 200-column terminal, Path and Result both fit completely.
 	cols200 := integrationResultTableColumns(rows, 200)
 	if cols200[2].width < longestPath {
 		t.Fatalf("Path column width in 200-column terminal = %d, want >= %d", cols200[2].width, longestPath)
 	}
-	if cols200[3].width < 120 {
-		t.Fatalf("Result column width in 200-column terminal = %d, want >= 120", cols200[3].width)
+	if cols200[3].width < longestResult {
+		t.Fatalf("Result column width in 200-column terminal = %d, want >= %d", cols200[3].width, longestResult)
 	}
 
 	// In 220-column terminal, both Path and Result columns fit completely without any wrapping.
@@ -240,7 +223,6 @@ func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing
 	if cols220[2].width < longestPath {
 		t.Fatalf("Path column width in 220-column terminal = %d, want >= %d", cols220[2].width, longestPath)
 	}
-	longestResult := len("OpenClaw plugin already installed; next: restart the harness to load updated plugin code; registration and permissions preserved")
 	if cols220[3].width < longestResult {
 		t.Fatalf("Result column width in 220-column terminal = %d, want >= %d", cols220[3].width, longestResult)
 	}
@@ -258,7 +240,7 @@ func TestWriteIntegrationResultsRendersFullPathsWithoutWrapping(t *testing.T) {
 	app := &application{stdout: &stdout}
 	results := []install.Result{
 		{Harness: "grok", Changed: false, Path: "/home/user/.grok/hooks/aht-state.json", Message: "grok hooks already installed"},
-		{Harness: "openclaw", Changed: false, Path: "/home/user/.local/state/aht/integrations/openclaw/aht-state", Message: "OpenClaw plugin already installed"},
+		{Harness: "openclaw", Changed: false, Path: "/home/user/.local/state/aht/integrations/openclaw/aht-state", Message: "already installed"},
 	}
 	if err := app.writeIntegrationResults(results, false); err != nil {
 		t.Fatal(err)
@@ -270,6 +252,12 @@ func TestWriteIntegrationResultsRendersFullPathsWithoutWrapping(t *testing.T) {
 	if !strings.Contains(output, "/home/user/.local/state/aht/integrations/openclaw/aht-state") {
 		t.Fatalf("output wrapped or truncated openclaw path:\n%s", output)
 	}
+	if !strings.Contains(output, "already installed") {
+		t.Fatalf("output missing 'already installed':\n%s", output)
+	}
+	if strings.Contains(output, "grok hooks already installed") || strings.Contains(output, "OpenClaw plugin already installed") {
+		t.Fatalf("output repeats harness name when already installed:\n%s", output)
+	}
 	if strings.Contains(output, "restart the harness") {
 		t.Fatalf("output unexpectedly contains restart instructions for unchanged plugin:\n%s", output)
 	}
@@ -277,6 +265,32 @@ func TestWriteIntegrationResultsRendersFullPathsWithoutWrapping(t *testing.T) {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "on" || trimmed == "e" || trimmed == "-state.ts" {
 			t.Fatalf("found fragmented path line %q in output:\n%s", trimmed, output)
+		}
+	}
+}
+
+func TestWriteIntegrationResultsAlreadyInstalledDoesNotRepeatHarnessName(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &application{stdout: &stdout}
+	results := []install.Result{
+		{Harness: "cline", Changed: false, Path: "/home/user/.cline/plugins/aht-state", Message: "already installed"},
+		{Harness: "omp", Changed: false, Path: "/home/user/.omp/agent/extensions/aht-state.ts", Message: "already installed"},
+		{Harness: "openclaw", Changed: false, Path: "/home/user/.local/state/aht/integrations/openclaw/aht-state", Message: "OpenClaw plugin already installed"},
+		{Harness: "hermes", Changed: false, Path: "/home/user/.hermes/plugins/aht-state", Message: "Hermes plugin already installed"},
+		{Harness: "claude", Changed: true, Path: "/home/user/.claude/settings.json", Message: "claude hooks installed"},
+	}
+	if err := app.writeIntegrationResults(results, false); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	for row := range strings.SplitSeq(output, "\n") {
+		if strings.Contains(row, "cline") || strings.Contains(row, "omp") || strings.Contains(row, "openclaw") || strings.Contains(row, "hermes") {
+			if !strings.Contains(row, "already installed") {
+				t.Errorf("expected row to say 'already installed': %q", row)
+			}
+			if strings.Contains(row, "plugin already installed") || strings.Contains(row, "extension already installed") {
+				t.Errorf("row repeats plugin/extension label: %q", row)
+			}
 		}
 	}
 }

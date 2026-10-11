@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestV2CatalogCreationPolicyAndJSON(t *testing.T) {
+func TestCatalogCreationPolicyAndJSON(t *testing.T) {
 	t.Parallel()
 	store := NewJournal(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
 	at := time.Now().UTC().Add(-time.Minute)
@@ -39,9 +39,6 @@ func TestV2CatalogCreationPolicyAndJSON(t *testing.T) {
 	var wire map[string]any
 	if err := json.Unmarshal(data, &wire); err != nil {
 		t.Fatal(err)
-	}
-	if _, ok := wire["state"]; ok {
-		t.Fatalf("legacy state in wire: %s", data)
 	}
 	if wire["schema_version"] != float64(storeSchemaVersion) {
 		t.Fatalf("schema version: %s", data)
@@ -126,7 +123,7 @@ func TestMemoryStoreConcurrentFlushPersistsLatestState(t *testing.T) {
 		})
 	}
 	group.Wait()
-	persisted, err := NewJournal(store.Path(), fixtureRules{}).load()
+	persisted, err := NewJournal(store.Path(), fixtureRules{}).load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

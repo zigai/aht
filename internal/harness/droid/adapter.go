@@ -2,9 +2,7 @@ package droid
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -59,15 +57,21 @@ func New() droidHarness {
 	})}
 }
 
-func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
+func (droidHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := droidConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(droidConfigDir(), "hooks.json"),
+		Path:              filepath.Join(base, "hooks.json"),
 		Source:            droidIntegrationSource,
 		Label:             "droid hooks",
 		ConfigLabel:       "factory config",
 		StatusMessage:     "",
 		OmitStatusMessage: true,
 		HooksAtRoot:       true,
+		Trust:             nil,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
@@ -104,11 +108,8 @@ func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "",
 				Command: droidHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
 			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: droidHookCommand(binary, registry.ActivityIdle, "SubagentStop"),
-			},
+			// SubagentStop fires when a Task sub-droid finishes while the
+			// parent turn keeps running until Stop.
 			{
 				Event:   "PreCompact",
 				Matcher: "",
@@ -120,7 +121,7 @@ func (droidHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: droidHookCommand(binary, registry.PresenceGone, "SessionEnd"),
 			},
 		},
-	}}}}
+	}}}}, nil
 }
 
 func (droidHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -137,6 +138,7 @@ func (droidHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (droidHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
+	harness.AddAttributeString(attributes, "droid_notification_type", harness.PayloadString(payload, "notification_type"))
 	harness.AddAttributeString(attributes, "droid_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "droid_tool_name", harness.PayloadString(payload, "tool_name"))
 	harness.AddAttributeString(attributes, "droid_permission_mode", harness.PayloadString(payload, "permission_mode"))
@@ -159,11 +161,12 @@ func droidHookCommand[T harness.Transition](binary string, transition T, event s
 }
 
 func droidConfigDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".factory")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".factory"
+	return filepath.Join(home, ".factory")
 }
 
 func (droidHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

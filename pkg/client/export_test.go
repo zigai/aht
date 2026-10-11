@@ -39,7 +39,7 @@ func (w *TestWatcher) CloseEvents() {
 	close(w.events)
 }
 
-func (w *TestWatcher) IsClosed() bool {
+func (w *TestWatcher) Closed() bool {
 	return w.closed
 }
 

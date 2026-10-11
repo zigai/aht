@@ -20,7 +20,7 @@ func Sessions(sessions []registry.Session) error {
 		projected[index] = core.Session{
 			ID: session.ID, Harness: string(session.Harness), CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
 			HasLiveness: session.Liveness != nil, Presence: string(session.Presence()), Activity: activity,
-			ValidState:  session.Presence().IsValid() && (session.Activity() == nil || session.Activity().IsValid()),
+			ValidState:  session.Presence().Valid() && (session.Activity() == nil || session.Activity().Valid()),
 			NativeEnded: session.Observations.Native != nil && session.Observations.Native.Lifecycle != nil && *session.Observations.Native.Lifecycle == registry.NativeLifecycleEnd,
 		}
 	}

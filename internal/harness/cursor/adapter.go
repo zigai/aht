@@ -2,10 +2,8 @@ package cursor
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/processinfo"
@@ -56,9 +54,14 @@ func New() cursorHarness {
 	})}
 }
 
-func (cursorHarness) InstallPlan(binary string) harness.InstallPlan {
+func (cursorHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := cursorHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.CursorJSONHooksAction{Plan: harness.CursorJSONHookInstallPlan{
-		Path:        filepath.Join(cursorHome(), "hooks.json"),
+		Path:        filepath.Join(base, "hooks.json"),
 		Source:      cursorIntegrationSource,
 		Label:       "cursor hooks",
 		ConfigLabel: "cursor config",
@@ -80,7 +83,7 @@ func (cursorHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: cursorHookCommand(binary, registry.PresenceGone, "sessionEnd", "{}"),
 			},
 		},
-	}}}}
+	}}}}, nil
 }
 
 func (cursorHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -138,14 +141,12 @@ func cursorHookCommand[T harness.Transition](binary string, transition T, event 
 }
 
 func cursorHome() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".cursor")
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".cursor")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".cursor"
+	return filepath.Join(home, ".cursor")
 }
 
 func (cursorHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

@@ -50,14 +50,21 @@ func New() codexHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  codexIntegrationSource,
-		StateAuthority:     registry.AuthorityScreen,
-		ScreenFallback:     false,
+		StateAuthority:     registry.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
 
-func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(codexHome(), "hooks.json"),
+func (codexHarness) RetainNativeActivity() bool { return true }
+
+func (codexHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := codexHome()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
+	plan := harness.JSONCommandHookInstallPlan{
+		Path:              filepath.Join(base, "hooks.json"),
 		Source:            codexIntegrationSource,
 		Label:             "codex hooks",
 		ConfigLabel:       "codex config",
@@ -67,8 +74,15 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
-				Matcher: "startup|resume|clear|compact",
+				Matcher: "startup|resume|clear",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventSessionStart, codexIntegrationSource),
+			},
+			// Automatic compaction also fires SessionStart inside a turn that
+			// keeps running, so compaction reports presence without activity.
+			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "compact",
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceLive, harness.HookEventSessionStart, codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
@@ -90,25 +104,24 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "PreCompact", codexIntegrationSource),
 			},
+			// Automatic compaction continues the running turn; only manual
+			// compaction returns the session to idle.
 			{
 				Event:   "PostCompact",
-				Matcher: "",
+				Matcher: "manual",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "PostCompact", codexIntegrationSource),
 			},
-			{
-				Event:   "SubagentStart",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "SubagentStart", codexIntegrationSource),
-			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "SubagentStop", codexIntegrationSource),
-			},
+			// SubagentStart and SubagentStop describe child agents inside the
+			// parent turn, which keeps running until Stop.
 			{
 				Event:   harness.HookEventStop,
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventStop, codexIntegrationSource),
+			},
+			{
+				Event:   "Interrupt",
+				Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityInterrupted, "Interrupt", codexIntegrationSource),
 			},
 			{
 				Event:   harness.HookEventSessionEnd,
@@ -116,7 +129,10 @@ func (codexHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
 			},
 		},
-	}}, harness.ShimAction{}}}
+		Trust: nil,
+	}
+	plan.Trust = hookTrust{path: plan.Path, hooks: plan.Hooks}
+	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: plan}, harness.ShimAction{}}}, nil
 }
 
 func (codexHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -154,11 +170,12 @@ func codexHome() string {
 	if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".codex")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".codex"
+	return filepath.Join(home, ".codex")
 }
 
 func (codexHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
@@ -168,10 +185,10 @@ func (codexHarness) LifecycleDefaults(event string, attributes map[string]string
 	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"))
 }
 
-func (codexHarness) HookTimeout(event string) int {
-	const endTimeout = 3
-	if event == harness.HookEventSessionEnd {
-		return endTimeout
+func (codexHarness) HookTimeoutSeconds(event string) int {
+	const terminalTimeoutSeconds = 3
+	if event == harness.HookEventSessionEnd || event == "Interrupt" {
+		return terminalTimeoutSeconds
 	}
 	return harness.HookTimeoutSeconds
 }

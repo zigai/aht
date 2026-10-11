@@ -1,10 +1,12 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/agy"
@@ -13,6 +15,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/cline"
 	"github.com/zigai/aht/v2/internal/harness/codex"
 	"github.com/zigai/aht/v2/internal/harness/copilot"
+	"github.com/zigai/aht/v2/internal/harness/crush"
 	"github.com/zigai/aht/v2/internal/harness/cursor"
 	"github.com/zigai/aht/v2/internal/harness/droid"
 	"github.com/zigai/aht/v2/internal/harness/goose"
@@ -24,6 +27,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/openclaw"
 	"github.com/zigai/aht/v2/internal/harness/opencode"
 	"github.com/zigai/aht/v2/internal/harness/pi"
+	"github.com/zigai/aht/v2/internal/harness/qwen"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -61,19 +65,28 @@ var adapters = []harness.Adapter{
 	openclaw.New(),
 	hermes.New(),
 	amp.New(),
+	crush.New(),
+	qwen.New(),
 }
+
+var adaptersByID = func() map[registry.Harness]harness.Adapter {
+	byID := make(map[registry.Harness]harness.Adapter, len(adapters))
+	for _, adapter := range adapters {
+		id := adapter.Definition().ID
+		if _, exists := byID[id]; !exists {
+			byID[id] = adapter
+		}
+	}
+	return byID
+}()
 
 func All() []harness.Adapter {
 	return append([]harness.Adapter(nil), adapters...)
 }
 
 func Find(harnessID registry.Harness) (harness.Adapter, bool) {
-	for _, adapter := range adapters {
-		if adapter.Definition().ID == harnessID {
-			return adapter, true
-		}
-	}
-	return nil, false
+	adapter, ok := adaptersByID[harnessID]
+	return adapter, ok
 }
 
 func SupportsScreen(harnessID registry.Harness) bool {
@@ -94,15 +107,6 @@ func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) 
 	return filter, ok
 }
 
-func WireRunnerFor(harnessID registry.Harness) (harness.WireRunner, bool) {
-	adapter, ok := Find(harnessID)
-	if !ok {
-		return nil, false
-	}
-	runner, ok := adapter.(harness.WireRunner)
-	return runner, ok
-}
-
 func IntegrationVersionFor(harnessID registry.Harness) int {
 	adapter, ok := Find(harnessID)
 	if !ok {
@@ -111,7 +115,7 @@ func IntegrationVersionFor(harnessID registry.Harness) int {
 	return adapter.Definition().IntegrationVersion
 }
 
-func Normalize(value string) (registry.Harness, error) {
+func Parse(value string) (registry.Harness, error) {
 	normalized := normalizeToken(value)
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
@@ -122,7 +126,7 @@ func Normalize(value string) (registry.Harness, error) {
 			return definition.ID, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %q", registry.ErrUnknownHarness, value)
+	return "", fmt.Errorf("%w %q", registry.ErrUnknownHarness, value)
 }
 
 func SupportedNames() []string {
@@ -160,7 +164,7 @@ func ProcessNames(harnessID registry.Harness) []string {
 	return adapter.Definition().ProcessNames
 }
 
-func DefaultsFromPayloadWithError(harnessID registry.Harness, rawPayload json.RawMessage) (harness.PayloadDefaults, error) {
+func PayloadDefaults(harnessID registry.Harness, rawPayload json.RawMessage) (harness.PayloadDefaults, error) {
 	if len(rawPayload) == 0 {
 		return emptyPayloadDefaults, nil
 	}
@@ -183,7 +187,34 @@ func DefaultsFromPayloadWithError(harnessID registry.Harness, rawPayload json.Ra
 	return defaults, nil
 }
 
-func PayloadCompatibleWithHarness(harnessID registry.Harness, rawPayload json.RawMessage) bool {
+// ActivityFromPayload returns the activity a report records after the harness
+// refines the generated hook's declared activity from its native payload.
+func ActivityFromPayload(
+	harnessID registry.Harness,
+	event string,
+	activity registry.Activity,
+	rawPayload json.RawMessage,
+	at time.Time,
+) (registry.Activity, error) {
+	if len(rawPayload) == 0 || activity == "" {
+		return activity, nil
+	}
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return activity, nil
+	}
+	activityAdapter, ok := adapter.(harness.PayloadActivityAdapter)
+	if !ok {
+		return activity, nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return activity, fmt.Errorf("decoding hook payload activity: %w", err)
+	}
+	return activityAdapter.PayloadActivity(event, activity, payload, at), nil
+}
+
+func PayloadCompatible(harnessID registry.Harness, rawPayload json.RawMessage) bool {
 	if len(rawPayload) == 0 {
 		return true
 	}
@@ -208,6 +239,20 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 		return nil
 	}
 	return resumable.ResumeCommand(sessionID, sessionPath)
+}
+
+// LocationsFor lists the documented configuration locations of a harness. It
+// reports false when the harness is unknown or does not expose locations.
+func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Location, bool) {
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return nil, false
+	}
+	provider, ok := adapter.(harness.LocationProvider)
+	if !ok {
+		return nil, false
+	}
+	return provider.Locations(projectDir), true
 }
 
 func WithResumeCommand(observation registry.Observation) registry.Observation {
@@ -237,21 +282,22 @@ func WithResumeCommand(observation registry.Observation) registry.Observation {
 }
 
 func HandleHook(
+	ctx context.Context,
 	harnessID registry.Harness,
 	explicitEvent string,
 	rawPayload json.RawMessage,
 	payload map[string]any,
 	parentArgs []string,
-) (harness.HookResult, bool) {
+) (harness.HookResult, bool, error) {
 	adapter, ok := Find(harnessID)
 	if !ok {
-		return emptyHookResult, false
+		return emptyHookResult, false, nil
 	}
 	hookAdapter, ok := adapter.(harness.HookAdapter)
 	if !ok {
-		return emptyHookResult, false
+		return emptyHookResult, false, nil
 	}
-	result := hookAdapter.HandleHook(harness.HookInvocation{
+	result, err := hookAdapter.HandleHook(ctx, harness.HookInvocation{
 		Event:      explicitEvent,
 		RawPayload: rawPayload,
 		Payload:    payload,
@@ -260,7 +306,10 @@ func HandleHook(
 	if result.Response == nil {
 		result.Response = map[string]any{}
 	}
-	return result, true
+	if err != nil {
+		return result, true, fmt.Errorf("handle %s hook: %w", harnessID, err)
+	}
+	return result, true, nil
 }
 
 func LifecycleFor(id registry.Harness, event string, attributes map[string]string) harness.LifecycleDefaults {
@@ -273,23 +322,35 @@ func LifecycleFor(id registry.Harness, event string, attributes map[string]strin
 }
 
 func PrepareObservation(observation registry.Observation) registry.Observation {
-	if observation.Kind() == "report" {
-		defaults := LifecycleFor(observation.Harness, observation.Report().Event, observation.Report().Attributes)
-		observation.Report().Event = defaults.Event
-		if observation.Report().Lifecycle == nil && defaults.Lifecycle != "" {
-			observation.Report().Lifecycle = &defaults.Lifecycle
-		}
-		if observation.Report().Claim == nil && defaults.Presence != "" {
-			observation.Report().Claim = &defaults.Presence
+	if observation.Kind() != "report" {
+		return observation
+	}
+	report := observation.Report()
+	defaults := LifecycleFor(observation.Harness, report.Event, report.Attributes)
+	report.Event = defaults.Event
+	if report.Lifecycle == nil && defaults.Lifecycle != "" {
+		report.Lifecycle = &defaults.Lifecycle
+	}
+	if report.Claim == nil && defaults.Presence != "" {
+		report.Claim = &defaults.Presence
+	}
+	prepareDetail(observation)
+	return WithResumeCommand(observation)
+}
+
+func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
+	if adapter, ok := Find(id); ok {
+		if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
+			return detailAdapter.DetailCapabilities()
 		}
 	}
-	return WithResumeCommand(observation)
+	return registry.DetailCapabilities{Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}, Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}}
 }
 
 func HookTimeoutSecondsFor(id registry.Harness, event string) int {
 	if adapter, ok := Find(id); ok {
-		if policy, ok := adapter.(interface{ HookTimeout(event string) int }); ok {
-			return policy.HookTimeout(event)
+		if policy, ok := adapter.(interface{ HookTimeoutSeconds(event string) int }); ok {
+			return policy.HookTimeoutSeconds(event)
 		}
 	}
 	return harness.HookTimeoutSeconds
@@ -355,4 +416,18 @@ func containsNormalizedToken(values []string, normalized string) bool {
 		}
 	}
 	return false
+}
+
+func prepareDetail(observation registry.Observation) {
+	report := observation.Report()
+	if report.Detail != nil || report.Activity == nil {
+		return
+	}
+	adapter, ok := Find(observation.Harness)
+	if !ok {
+		return
+	}
+	if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
+		report.Detail = detailAdapter.ActivityDetail(report.Event, *report.Activity, report.Attributes)
+	}
 }

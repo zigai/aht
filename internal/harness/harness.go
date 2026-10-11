@@ -1,17 +1,16 @@
 package harness
 
 import (
-	"context"
 	"encoding/json"
-	"os"
 	"slices"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	IntegrationVersion = 9
+	IntegrationVersion = 14
 
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
@@ -73,8 +72,11 @@ type ScreenManifestProvider interface {
 	ScreenManifest() string
 }
 
+// Installable adapters describe the files an integration manages. InstallPlan
+// returns [ErrHomeUnknown] when the target lies under a home directory that is
+// not known.
 type Installable interface {
-	InstallPlan(binary string) InstallPlan
+	InstallPlan(binary string) (InstallPlan, error)
 }
 type InstallAdvisor interface {
 	InstallNextStep(changed bool, dryRun bool) string
@@ -90,28 +92,21 @@ type PayloadAdapter interface {
 	PayloadDefaults(payload map[string]any) (PayloadDefaults, error)
 }
 
+// PayloadActivityAdapter refines the activity a generated hook declares when
+// the native payload distinguishes states that the hook event alone cannot.
+type PayloadActivityAdapter interface {
+	PayloadActivity(event string, activity registry.Activity, payload map[string]any, at time.Time) registry.Activity
+}
+
+type ActivityDetailAdapter interface {
+	ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail
+	DetailCapabilities() registry.DetailCapabilities
+}
+
 type ProcessFilter interface {
 	ObservableProcess(process processinfo.Process) bool
 }
 
-type WireRunner interface {
-	ValidateWireArgs(args []string) error
-	RunWire(ctx context.Context, options WireOptions) error
-}
-
-type WireSink interface {
-	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
-	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
-}
-
-type WireOptions struct {
-	Sink      WireSink
-	Args      []string
-	StorePath string
-	Stdin     *os.File
-	Stdout    *os.File
-	Stderr    *os.File
-}
 type BaseAdapter struct {
 	definition Definition
 }

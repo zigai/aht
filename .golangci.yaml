@@ -2,6 +2,9 @@ version: "2"
 
 run:
   timeout: 3m
+  build-tags:
+    - integration
+    - compatibility
 
 formatters:
   enable:
@@ -113,6 +116,8 @@ linters:
     - zerologlint
 
   settings:
+    embeddedstructfieldcheck:
+      forbid-mutex: true
     depguard:
       rules:
         registry:
@@ -130,7 +135,7 @@ linters:
               desc: Registry tests may import only the shared registry checker core.
         adapter_consumers:
           list-mode: lax
-          files: ["**/internal/cli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
+          files: ["**/internal/cli/*.go", "**/internal/fakeprovidercli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
           allow:
             - github.com/zigai/aht/v2/internal/harness/catalog$
             - github.com/zigai/aht/v2/internal/harness/transcript
@@ -140,7 +145,7 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        - pattern: '(^|\.)Harness(Claude|Codex|Cursor|Copilot|Cline|KimiCode|Grok|Goose|Pi|Omp|OpenCode|Agy|Kilo|Droid|OpenClaw|Hermes|Amp)$'
+        - pattern: '(^|\.)Harness(Claude|Codex|Cursor|Copilot|Cline|KimiCode|Grok|Goose|Pi|Omp|OpenCode|Agy|Kilo|Droid|OpenClaw|Hermes|Amp|Crush|Qwen)$'
           msg: Harness names belong to adapters and the public constants file.
     errcheck:
       check-type-assertions: true
@@ -199,6 +204,29 @@ linters:
         - name: error-naming
         - name: if-return
         - name: var-naming
+          arguments: [[], ["GRPC", "IOS"]]
+        - name: context-as-argument
+          arguments:
+            - allow-types-before: "*testing.T,testing.TB,*testing.B,*testing.F"
+        - name: import-shadowing
+        - name: package-naming
+          arguments:
+            - check-extra-bad-name: true
+              user-defined-bad-names: [handlers]
+        - name: package-directory-mismatch
+        - name: filename-format
+          arguments: ["^[a-z0-9][a-z0-9_]*\\.go$"]
+        - name: exported
+          arguments:
+            - disable-checks-on-constants
+            - disable-checks-on-functions
+            - disable-checks-on-methods
+            - disable-checks-on-types
+            - disable-checks-on-variables
+        - name: redundant-import-alias
+        - name: import-alias-naming
+        - name: dot-imports
+        - name: blank-imports
         - name: error-strings
         - name: receiver-naming
         - name: indent-error-flow
@@ -237,6 +265,8 @@ linters:
         - "github.com/urfave/cli\\..*"
         - "github.com/spf13/cobra\\..*"
         - "github.com/spf13/pflag\\..*"
+        - "github.com/anthropics/anthropic-sdk-go.*"
+        - "github.com/openai/openai-go/v3.*"
   exclusions:
     warn-unused: false
     presets: []

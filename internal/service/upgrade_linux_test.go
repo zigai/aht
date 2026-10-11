@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func verifyTrackerUpgrade(t *testing.T, stopped, stale, dryRun bool) {
 	}
 	previous := want
 	if stale {
-		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: 8", "version: 7"), "/tmp/new aht", "/tmp/old aht")
+		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: "+strconv.Itoa(ManagedVersion), "version: "+strconv.Itoa(ManagedVersion-1)), "/tmp/new aht", "/tmp/old aht")
 	}
 	path := filepath.Join(dir, "systemd", "user", linuxUnitName)
 	if err := writeAtomic(path, []byte(previous)); err != nil {
@@ -132,6 +133,31 @@ func assertServiceContent(t *testing.T, path, expected string) {
 	}
 	if err != nil || string(got) != expected {
 		t.Fatalf("service content = %q, %v; want %q", got, err, expected)
+	}
+}
+
+func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
+	for _, test := range []struct {
+		name, store string
+	}{
+		{name: "apostrophe", store: "/home/o'neil/state.json"},
+		{name: "dollar", store: "/srv/a$b/${HOME}/state.json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			options := Options{Binary: "/bin/aht", StorePath: test.store, Interval: 7 * time.Second}
+			if _, err := New(&recordingExecutor{}).Install(t.Context(), options); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := New(&upgradeExecutor{stopped: true}).Upgrade(t.Context(), options.Binary, true)
+			if err != nil {
+				t.Fatalf("upgrade could not read the installed unit: %v", err)
+			}
+			if !result.Current {
+				t.Fatalf("upgrade recovered different settings: %+v", result)
+			}
+		})
 	}
 }
 

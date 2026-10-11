@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -17,31 +18,16 @@ import (
 // session_shutdown; no synthetic callback or signal supplies cancellation.
 // Sources: Pi docs/rpc.md and dist/modes/rpc/rpc-mode.js; OMP
 // src/modes/rpc/rpc-mode.ts and src/session/agent-session.ts (installed packages).
-func runRPCInterruption(t *testing.T, host isolatedHost, env []string) {
+func runRPCInterruption(t *testing.T, host *isolatedHost, env []string) {
 	t.Helper()
-	var args []string
-	switch host.contract.ID {
-	case registry.Harness("pi"):
-		args = []string{"--mode", "rpc", "--provider", "aht-compat", "--model", "compat"}
-	case registry.Harness("omp"):
-		// lifecycleCommand has configured the isolated model and installed hook.
-		// Preserve its explicit managed extension loading without print-mode flags.
-		hooks, err := filepath.Glob(filepath.Join(host.root, "pi-agent", "extensions", "*"))
-		if err != nil || len(hooks) != 1 {
-			t.Fatalf("locating installed OMP interruption hook: paths=%v error=%v", hooks, err)
-		}
-		args = []string{"--mode", "rpc", "--model", "aht-compat/compat", "--hook", hooks[0]}
-	default:
-		t.Fatalf("unsupported native RPC interruption host %s", host.contract.ID)
-	}
-	cmd := host.command(env, args...)
+	cmd := host.command(t, env, rpcInterruptionArguments(t, host)...)
 	input, next := permissionJSONPipes(t, cmd)
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "interruption-prompt", "type": "prompt", "message": compatibilityPrompt})
 	select {
-	case step := <-host.provider.checkpoints:
-		if step != 0 {
-			t.Fatalf("first active RPC request step = %d", step)
+	case hold := <-host.provider.Holds():
+		if hold.Request.Index != 0 {
+			t.Fatalf("first active RPC request step = %d", hold.Request.Index)
 		}
 	case <-process.done:
 		t.Fatalf("RPC host exited before active provider request: %v", process.waitErr())
@@ -52,48 +38,11 @@ func runRPCInterruption(t *testing.T, host isolatedHost, env []string) {
 	// Deliberately never release the held model response: no tool call has yet
 	// been delivered, and this command must cancel actual in-flight model IO.
 	sendPermissionJSON(t, input, map[string]any{"id": "interruption-abort", "type": "abort"})
-	acknowledged, ended, settled, started := false, false, false, false
-	for !acknowledged || !ended || !settled {
-		frame := next()
-		switch frame["type"] {
-		case "response":
-			if frame["id"] == "interruption-abort" {
-				if frame["command"] != "abort" || frame["success"] != true {
-					t.Fatalf("native RPC abort was not acknowledged: %v", frame)
-				}
-				acknowledged = true
-			}
-		case "agent_start":
-			if started {
-				t.Fatal("RPC host continued the canceled agent run")
-			}
-			started = true
-		case "tool_execution_start", "tool_execution_end", "auto_retry_start", "auto_compaction_start":
-			t.Fatalf("RPC host executed a tool or continued after held request cancellation: %v", frame)
-		case "agent_end":
-			if ended || frame["willRetry"] == true || frame["isTerminal"] == false {
-				t.Fatalf("RPC cancellation did not end a single terminal run: %v", frame)
-			}
-			messages, ok := frame["messages"].([]any)
-			if !ok || len(messages) == 0 {
-				t.Fatalf("RPC canceled completion lacks messages: %v", frame)
-			}
-			last, ok := messages[len(messages)-1].(map[string]any)
-			if !ok || last["role"] != "assistant" || last["stopReason"] != "aborted" {
-				t.Fatalf("RPC completion was not a canceled assistant response: %v", frame)
-			}
-			ended = true
-			if host.contract.ID == registry.Harness("omp") {
-				if frame["isTerminal"] != true {
-					t.Fatalf("OMP cancellation lacks terminal agent_end: %v", frame)
-				}
-				settled = true
-			}
-		case "agent_settled":
-			settled = true
-		}
+	abort := rpcAbortProgress{terminalEnd: host.contract.ID == registry.Harness("omp")}
+	for !abort.acknowledged || !abort.ended || !abort.settled {
+		abort.observe(t, next())
 	}
-	if !started {
+	if !abort.started {
 		t.Fatal("RPC cancellation lacked native agent_start")
 	}
 	// EOF is an orderly disposal boundary only after native abort completed.
@@ -103,4 +52,77 @@ func runRPCInterruption(t *testing.T, host isolatedHost, env []string) {
 		t.Fatal(err)
 	}
 	process.wait(t)
+}
+
+func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
+	t.Helper()
+	switch host.contract.ID {
+	case registry.Harness("pi"):
+		return []string{"--mode", "rpc", "--provider", harness.LaunchProviderName, "--model", fakeModel}
+	case registry.Harness("omp"):
+		// The launch has configured the isolated model and installed the hook.
+		// Preserve its explicit managed extension loading without print-mode flags.
+		hooks, err := filepath.Glob(filepath.Join(host.launched.Root, "pi-agent", "extensions", "*"))
+		if err != nil || len(hooks) != 1 {
+			t.Fatalf("locating installed OMP interruption hook: paths=%v error=%v", hooks, err)
+		}
+		return []string{"--mode", "rpc", "--model", harness.LaunchProviderName + "/" + fakeModel, "--hook", hooks[0]}
+	default:
+		t.Fatalf("unsupported native RPC interruption host %s", host.contract.ID)
+		return nil
+	}
+}
+
+type rpcAbortProgress struct {
+	terminalEnd  bool
+	acknowledged bool
+	started      bool
+	ended        bool
+	settled      bool
+}
+
+func (progress *rpcAbortProgress) observe(t *testing.T, frame map[string]any) {
+	t.Helper()
+	switch frame["type"] {
+	case "response":
+		if frame["id"] == "interruption-abort" {
+			if frame["command"] != "abort" || frame["success"] != true {
+				t.Fatalf("native RPC abort was not acknowledged: %v", frame)
+			}
+			progress.acknowledged = true
+		}
+	case "agent_start":
+		if progress.started {
+			t.Fatal("RPC host continued the canceled agent run")
+		}
+		progress.started = true
+	case "tool_execution_start", "tool_execution_end", "auto_retry_start", "auto_compaction_start":
+		t.Fatalf("RPC host executed a tool or continued after held request cancellation: %v", frame)
+	case "agent_end":
+		progress.observeEnd(t, frame)
+	case "agent_settled":
+		progress.settled = true
+	}
+}
+
+func (progress *rpcAbortProgress) observeEnd(t *testing.T, frame map[string]any) {
+	t.Helper()
+	if progress.ended || frame["willRetry"] == true || frame["isTerminal"] == false {
+		t.Fatalf("RPC cancellation did not end a single terminal run: %v", frame)
+	}
+	messages, ok := frame["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("RPC canceled completion lacks messages: %v", frame)
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok || last["role"] != "assistant" || last["stopReason"] != "aborted" {
+		t.Fatalf("RPC completion was not a canceled assistant response: %v", frame)
+	}
+	progress.ended = true
+	if progress.terminalEnd {
+		if frame["isTerminal"] != true {
+			t.Fatalf("OMP cancellation lacks terminal agent_end: %v", frame)
+		}
+		progress.settled = true
+	}
 }

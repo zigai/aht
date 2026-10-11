@@ -1,7 +1,6 @@
 package history
 
 import (
-	"bytes"
 	"strings"
 	"unicode/utf8"
 
@@ -55,71 +54,28 @@ func foldRuneIndex(text string, foldedOffset int) int {
 	return index
 }
 
-func isASCII(s string) bool {
-	for i := range len(s) {
-		if s[i] >= utf8.RuneSelf {
-			return false
+// foldWithOffsets folds text rune by rune and maps each byte of the folded
+// result to the byte offset in text of the rune that produced it, plus a final
+// entry for the end of text. Matches found in folded text map back through it.
+func foldWithOffsets(text string) (string, []int) {
+	var folded strings.Builder
+	folded.Grow(len(text))
+	starts := make([]int, 0, len(text)+1)
+	for offset, character := range text {
+		mapped := fold(string(character))
+		folded.WriteString(mapped)
+		for range len(mapped) {
+			starts = append(starts, offset)
 		}
 	}
-	return true
+	starts = append(starts, len(text))
+	return folded.String(), starts
 }
 
-func containsFoldASCII(s []byte, needle string) bool {
-	n := len(needle)
-	if n == 0 {
-		return true
-	}
-	if len(s) < n {
-		return false
-	}
-	firstLower := needle[0]
-	firstUpper := firstLower
-	if firstLower >= 'a' && firstLower <= 'z' {
-		firstUpper = firstLower - ('a' - 'A')
-	}
-	limit := len(s) - n
-	for i := 0; i <= limit; {
-		idx1 := bytes.IndexByte(s[i:], firstLower)
-		idx2 := -1
-		if firstLower != firstUpper {
-			idx2 = bytes.IndexByte(s[i:], firstUpper)
-		}
-		next := nextByteIndex(idx1, idx2)
-		if next < 0 {
-			return false
-		}
-		pos := i + next
-		if pos > limit {
-			return false
-		}
-		if matchFoldASCII(s[pos:pos+n], needle) {
-			return true
-		}
-		i = pos + 1
-	}
-	return false
-}
-
-func matchFoldASCII(b []byte, needle string) bool {
-	for i := range len(needle) {
-		c := b[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		if c != needle[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func nextByteIndex(idx1, idx2 int) int {
-	switch {
-	case idx1 >= 0 && idx2 >= 0:
-		return min(idx1, idx2)
-	case idx1 >= 0:
-		return idx1
-	default:
-		return idx2
-	}
+// originalEnd maps the exclusive end of a nonempty folded match to the end of
+// the original rune that produced its last byte.
+func originalEnd(text string, starts []int, end int) int {
+	start := starts[end-1]
+	_, size := utf8.DecodeRuneInString(text[start:])
+	return start + size
 }

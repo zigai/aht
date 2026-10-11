@@ -169,18 +169,14 @@ func (c *releaseClient) pypiVersion(ctx context.Context, spec harnessSpec) (stri
 // latest directly so an upstream release beyond that cap remains visible.
 func (c *releaseClient) supported(ctx context.Context, spec harnessSpec) (string, error) {
 	version, err := c.latest(ctx, spec)
-	if err != nil || spec.MaxVersion == "" {
-		return version, err
-	}
-	maximum, err := parseVersion(spec.MaxVersion)
 	if err != nil {
 		return "", err
 	}
-	current, err := parseVersion(version)
+	above, err := aboveMaximum(spec, version)
 	if err != nil {
 		return "", err
 	}
-	if slices.Compare(current[:], maximum[:]) > 0 {
+	if above {
 		return spec.MaxVersion, nil
 	}
 	return version, nil
@@ -216,11 +212,9 @@ func (c *releaseClient) restoreState(ctx context.Context, repository, branch, ru
 		return state, fmt.Errorf("%w: GITHUB_REPOSITORY and AHT_DEFAULT_BRANCH are required", errCompatibility)
 	}
 	base := c.githubBase + "/repos/" + repository + "/actions"
-	for _, name := range []string{stateArtifact, "compatibility-release-state-v1"} {
-		restored, found, err := c.restoreArtifactState(ctx, base, name, branch, runID)
-		if err != nil || found {
-			return restored, err
-		}
+	restored, found, err := c.restoreArtifactState(ctx, base, stateArtifact, branch, runID)
+	if err != nil || found {
+		return restored, err
 	}
 	return state, nil
 }

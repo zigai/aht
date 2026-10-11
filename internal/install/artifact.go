@@ -27,7 +27,7 @@ type renderedFileInstall struct {
 type jsonHookFileInstall struct {
 	Harness                 registry.Harness
 	Path                    string
-	Apply                   func(map[string]any) bool
+	Apply                   func(map[string]any) (bool, error)
 	EncodeError             string
 	CreateDirError          string
 	WriteError              string
@@ -36,13 +36,13 @@ type jsonHookFileInstall struct {
 	DryRunMessage           string
 }
 
-func installRenderedFile(options Options, file renderedFileInstall) (Result, error) {
-	changed, err := fileNeedsUpdate(file.Path, file.Content, options.Force)
+func installRenderedFile(opts Options, file renderedFileInstall) (Result, error) {
+	changed, err := fileNeedsUpdate(file.Path, file.Content, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
 
-	if err := writeInstallFile(file.Path, []byte(file.Content), changed, options.DryRun, file.CreateDirError, file.WriteError); err != nil {
+	if err := writeInstallFile(file.Path, []byte(file.Content), changed, opts.DryRun, file.CreateDirError, file.WriteError); err != nil {
 		return Result{}, err
 	}
 
@@ -50,7 +50,7 @@ func installRenderedFile(options Options, file renderedFileInstall) (Result, err
 		Harness:  string(file.Harness),
 		Path:     file.Path,
 		Changed:  changed,
-		Message:  installStatusMessage(changed, options.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
+		Message:  installStatusMessage(changed, opts.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
 		NextStep: "",
 		Snippet:  file.Content,
 		Error:    "",
@@ -73,7 +73,10 @@ func installJSONHookFile(opts Options, file jsonHookFileInstall) (Result, error)
 		return Result{}, err
 	}
 
-	changed := file.Apply(harnessConfig)
+	changed, err := file.Apply(harnessConfig)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s: %w", file.Path, err)
+	}
 	data, err := json.MarshalIndent(harnessConfig, "", "  ")
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", file.EncodeError, err)

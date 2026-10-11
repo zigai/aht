@@ -55,7 +55,7 @@ func New() openclawHarness {
 	})}
 }
 
-func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
+func (openclawHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	version := strconv.Itoa(integrationVersion)
 	dir := filepath.Join(registry.DefaultStateDir(), "integrations", "openclaw", openclawPluginName)
 
@@ -79,8 +79,9 @@ func (openclawHarness) InstallPlan(binary string) harness.InstallPlan {
 		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openclawMarkerFileName},
 		MarkerFile:     openclawMarkerFileName,
 		ImportManifest: nil,
+		Retired:        nil,
 		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
-	}}}}
+	}}}}, nil
 }
 
 func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -93,7 +94,7 @@ func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {
 
 func renderOpenclawPlugin(binary string, version string) string {
 	replacer := strings.NewReplacer(
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", harness.ScriptString(binary),
 		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
 	)
 

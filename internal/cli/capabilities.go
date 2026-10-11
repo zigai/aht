@@ -26,11 +26,11 @@ func (app *application) newCapabilitiesCommand() *cobra.Command {
 			if options.harness != "" {
 				harnessID, err := harness.Parse(options.harness)
 				if err != nil {
-					return exitCode(fmt.Errorf("%w: unknown harness %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
+					return exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
 				}
 				caps, ok := harness.CapabilitiesFor(harnessID)
 				if !ok {
-					return exitCode(fmt.Errorf("%w: unknown harness %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
+					return exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
 				}
 				if app.outputJSON {
 					return app.writeJSON(caps)

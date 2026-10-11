@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -84,6 +86,12 @@ type JSONCommandHookInstallPlan struct {
 	OmitStatusMessage bool
 	HooksAtRoot       bool
 	Hooks             []CommandHookInstallSpec
+	Trust             JSONCommandHookTrust
+}
+
+type JSONCommandHookTrust interface {
+	Install(ctx context.Context) error
+	Inspect(ctx context.Context) (bool, error)
 }
 
 type CommandHookInstallSpec struct {
@@ -136,6 +144,9 @@ type PluginDirectoryInstallPlan struct {
 	MarkerFile     string
 	ImportManifest *ImportManifestInstallPlan
 	Registration   PluginRegistration
+	// Retired lists former locations of this plugin. Installing or removing
+	// the plugin also removes aht-managed artifacts found there.
+	Retired []PluginDirectoryInstallPlan
 }
 type PluginRegistrationState uint8
 
@@ -201,12 +212,22 @@ func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+func ScriptString(value string) string {
+	var encoded strings.Builder
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		panic(fmt.Errorf("encode script string: %w", err))
+	}
+	return strings.TrimSuffix(encoded.String(), "\n")
+}
+
 func RenderScriptTemplate(template string, integrationID string, binary string, source string, version int) string {
 	return strings.NewReplacer(
 		"{{MANAGED_MARKER}}", ManagedMarker,
 		"{{INTEGRATION_ID}}", integrationID,
 		"{{INTEGRATION_VERSION}}", strconv.Itoa(version),
-		"{{BINARY}}", strconv.Quote(binary),
+		"{{BINARY}}", ScriptString(binary),
 		"{{SOURCE}}", strconv.Quote(source),
 		"{{TYPESCRIPT_QUEUE}}", typeScriptQueueTemplate,
 		"{{TYPESCRIPT_EVENT_PARSER}}", typeScriptEventParserTemplate,

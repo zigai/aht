@@ -4,6 +4,7 @@ agent = "pi"
 [[rules]]
 id = "permission_prompt"
 state = "waiting"
+detail = "permission"
 priority = 300
 region = "bottom:30"
 any = ["Allow this command?", "Approve this action?", "Permission required", "Waiting for your approval"]
@@ -12,6 +13,7 @@ regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-
 [[rules]]
 id = "question_prompt"
 state = "waiting"
+detail = "question"
 priority = 250
 region = "bottom:30"
 any = ["Waiting for input", "Select an option", "Answer the question"]
@@ -50,8 +52,19 @@ none = ["esc to interrupt", "ctrl+c to interrupt"]
 regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
 
 [[rules]]
+id = "usage_limit_prompt"
+state = "failed"
+detail = "usage_limit"
+priority = 360
+region = "bottom:30"
+any = ["Rate limit exceeded"]
+none = ["esc to interrupt"]
+regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+
+[[rules]]
 id = "error_prompt"
 state = "failed"
+detail = "general"
 priority = 350
 region = "bottom:30"
 any = ["API Error", "Failed to execute", "Rate limit exceeded", "Execution failed"]

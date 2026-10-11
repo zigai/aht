@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/pkg/broker"
@@ -39,6 +39,7 @@ type (
 		FinalActivity     string                     `json:"final_activity"`
 		Hook              HookExplanation            `json:"hook"`
 		Screen            ScreenExplanation          `json:"screen"`
+		RegistryDetail    *registry.StateDetail      `json:"registry_detail,omitempty"`
 		RegistryActivity  *registry.Activity         `json:"registry_activity"`
 		RegistryDecision  *registry.ActivityDecision `json:"registry_decision,omitempty"`
 	}
@@ -65,13 +66,14 @@ type (
 
 	// ScreenDecision represents the outcome of evaluating a screen state detection rule.
 	ScreenDecision struct {
-		Activity        registry.Activity `json:"activity"`
-		Reason          string            `json:"reason"`
-		RuleID          string            `json:"rule_id,omitempty"`
-		ManifestSource  string            `json:"manifest_source"`
-		ManifestVersion int               `json:"manifest_version"`
-		Warning         string            `json:"warning,omitempty"`
-		Evidence        []RuleEvidence    `json:"evidence,omitempty"`
+		Activity        registry.Activity       `json:"activity"`
+		Detail          registry.ActivityDetail `json:"detail,omitempty"`
+		Reason          string                  `json:"reason"`
+		RuleID          string                  `json:"rule_id,omitempty"`
+		ManifestSource  string                  `json:"manifest_source"`
+		ManifestVersion int                     `json:"manifest_version"`
+		Warning         string                  `json:"warning,omitempty"`
+		Evidence        []RuleEvidence          `json:"evidence,omitempty"`
 	}
 
 	// RuleEvidence records whether an individual detection rule matched during screen evaluation.
@@ -103,16 +105,16 @@ type (
 // capturing screens or modifying registry state.
 // When options.LiveScreen is true and authority is "screen", it additionally performs
 // live terminal multiplexer screen capture and manifest re-evaluation.
-func ExplainSession(ctx context.Context, session registry.Session, options ExplainOptions) (Explanation, error) {
+func ExplainSession(ctx context.Context, session registry.Session, opts ExplainOptions) (Explanation, error) {
 	if err := ctx.Err(); err != nil {
 		var empty Explanation
 		return empty, fmt.Errorf("explain session: %w", err)
 	}
-	now := options.Now
+	now := opts.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	policy := (harnesscatalog.Rules{}).Policy(session.Harness)
+	policy := (catalog.Rules{}).Policy(session.Harness)
 	hookEvaluation := registry.EvaluateHook(session, policy, now)
 	selected, reason := registry.ActivityAuthority(session, policy, now)
 	authority := string(selected)
@@ -124,7 +126,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 	result := buildBaseExplanation(session, now, authority, fallbackReason, hookEvaluation)
 	populateStoredScreenDecision(&result, session)
 
-	if !options.LiveScreen {
+	if !opts.LiveScreen {
 		if session.Decision() != nil {
 			result.SelectedAuthority = string(session.Decision().Authority)
 			result.FallbackReason = ""
@@ -137,7 +139,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 		return result, nil
 	}
 
-	screen, finalActivity, screenErr := evaluateExplanationScreen(ctx, session, options.ConfigDir, authority, result.FinalActivity)
+	screen, finalActivity, screenErr := evaluateExplanationScreen(ctx, session, opts.ConfigDir, authority, result.FinalActivity)
 	result.Screen = screen
 	result.FinalActivity = finalActivity
 	if screenErr != nil {
@@ -147,7 +149,7 @@ func ExplainSession(ctx context.Context, session registry.Session, options Expla
 }
 
 // Explain returns an Explanation for the session identified by sessionID.
-func (m *Manager) Explain(ctx context.Context, sessionID string, options ExplainOptions) (Explanation, error) {
+func (m *Manager) Explain(ctx context.Context, sessionID string, opts ExplainOptions) (Explanation, error) {
 	storePath := m.config.StorePath
 	if storePath == "" {
 		storePath = registry.DefaultStorePath()
@@ -165,12 +167,13 @@ func (m *Manager) Explain(ctx context.Context, sessionID string, options Explain
 			FallbackReason:    "",
 			FinalActivity:     "",
 			Hook:              HookExplanation{Event: "", Integration: "", ObservedAt: time.Time{}, Age: "", ProcessMatches: false, Fresh: false, FreshnessReason: "", Active: false},
-			Screen:            ScreenExplanation{Evaluated: false, UnavailableReason: "", Decision: ScreenDecision{Activity: registry.ActivityUnknown, Reason: "", RuleID: "", ManifestSource: "", ManifestVersion: 0, Warning: "", Evidence: nil}, Error: ""},
+			Screen:            ScreenExplanation{Evaluated: false, UnavailableReason: "", Decision: ScreenDecision{Activity: registry.ActivityUnknown, Reason: "", RuleID: "", ManifestSource: "", ManifestVersion: 0, Warning: "", Evidence: nil, Detail: ""}, Error: ""},
+			RegistryDetail:    nil,
 			RegistryActivity:  nil,
 			RegistryDecision:  nil,
 		}, fmt.Errorf("get session for explanation: %w", err)
 	}
-	return ExplainSession(ctx, session, options)
+	return ExplainSession(ctx, session, opts)
 }
 
 func buildBaseExplanation(
@@ -209,10 +212,12 @@ func buildBaseExplanation(
 				ManifestSource:  "",
 				ManifestVersion: 0,
 				Warning:         "",
+				Detail:          "",
 				Evidence:        nil,
 			},
 			Error: "",
 		},
+		RegistryDetail:   cloneStateDetail(session.Detail),
 		RegistryActivity: cloneActivity(session.Activity()),
 		RegistryDecision: cloneActivityDecision(session.Decision()),
 	}
@@ -228,6 +233,10 @@ func buildBaseExplanation(
 }
 
 func populateStoredScreenDecision(result *Explanation, session registry.Session) {
+	detail := registry.ActivityDetail("")
+	if session.Detail != nil {
+		detail = session.Detail.Value
+	}
 	if session.Decision() != nil && session.Decision().Authority == registry.AuthorityScreen {
 		activity := registry.ActivityUnknown
 		if session.Activity() != nil {
@@ -240,6 +249,7 @@ func populateStoredScreenDecision(result *Explanation, session registry.Session)
 			ManifestSource:  session.Decision().ManifestSource,
 			ManifestVersion: session.Decision().ManifestVersion,
 			Warning:         "",
+			Detail:          detail,
 			Evidence:        nil,
 		}
 		return
@@ -247,6 +257,7 @@ func populateStoredScreenDecision(result *Explanation, session registry.Session)
 	if session.Observations.Screen != nil {
 		result.Screen.Decision = ScreenDecision{
 			Activity:        session.Observations.Screen.Activity,
+			Detail:          session.Observations.Screen.Detail,
 			Reason:          session.Observations.Screen.Reason,
 			RuleID:          session.Observations.Screen.RuleID,
 			ManifestSource:  session.Observations.Screen.ManifestSource,
@@ -275,6 +286,7 @@ func evaluateExplanationScreen(
 				ManifestSource:  "",
 				ManifestVersion: 0,
 				Warning:         "",
+				Detail:          "",
 				Evidence:        nil,
 			},
 			Error: "",
@@ -291,6 +303,7 @@ func evaluateExplanationScreen(
 				ManifestSource:  "",
 				ManifestVersion: 0,
 				Warning:         "",
+				Detail:          "",
 				Evidence:        nil,
 			},
 			Error: "",
@@ -349,6 +362,7 @@ func evaluateNonTmuxLiveScreen(
 			ManifestSource:  "",
 			ManifestVersion: 0,
 			Warning:         "",
+			Detail:          "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
 	}
@@ -367,6 +381,7 @@ func evaluateNonTmuxLiveScreen(
 			ManifestSource:  "",
 			ManifestVersion: 0,
 			Warning:         "",
+			Detail:          "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("%w: %s", ErrUnsupportedMultiplexer, session.Location.Kind)
 	}
@@ -379,6 +394,7 @@ func evaluateNonTmuxLiveScreen(
 			ManifestSource:  "",
 			ManifestVersion: 0,
 			Warning:         "",
+			Detail:          "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("capture %s pane: %w", session.Location.Kind, err)
 	}
@@ -400,11 +416,12 @@ func evaluateTmuxLiveScreen(
 			ManifestSource:  "",
 			ManifestVersion: 0,
 			Warning:         "",
+			Detail:          "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("list tmux panes: %w", err)
 	}
 	for _, pane := range panes {
-		if pane.Tmux.PaneID != session.Location.PaneID || !sameTmuxServer(pane.ServerIdentity, session.Location.ServerID) {
+		if pane.Location.PaneID != session.Location.PaneID || !sameTmuxServer(pane.Location.ServerID, session.Location.ServerID) {
 			continue
 		}
 		snapshot, captureErr := tmux.CapturePane(ctx, pane)
@@ -416,6 +433,7 @@ func evaluateTmuxLiveScreen(
 				ManifestSource:  "",
 				ManifestVersion: 0,
 				Warning:         "",
+				Detail:          "",
 				Evidence:        nil,
 			}, false, fmt.Errorf("capture tmux pane: %w", captureErr)
 		}
@@ -428,6 +446,7 @@ func evaluateTmuxLiveScreen(
 		ManifestSource:  "",
 		ManifestVersion: 0,
 		Warning:         "",
+		Detail:          "",
 		Evidence:        nil,
 	}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
 }
@@ -448,6 +467,7 @@ func evaluateSnapshotText(
 			ManifestSource:  "",
 			ManifestVersion: 0,
 			Warning:         "",
+			Detail:          "",
 			Evidence:        nil,
 		}, false, fmt.Errorf("load detection manifest: %w", err)
 	}
@@ -461,6 +481,7 @@ func evaluateSnapshotText(
 	}
 	decision := ScreenDecision{
 		Activity:        rawDecision.Activity,
+		Detail:          rawDecision.Detail,
 		Reason:          rawDecision.Reason,
 		RuleID:          rawDecision.RuleID,
 		ManifestSource:  rawDecision.ManifestSource,
@@ -524,4 +545,12 @@ func cloneActivityDecision(d *registry.ActivityDecision) *registry.ActivityDecis
 	}
 	val := *d
 	return &val
+}
+
+func cloneStateDetail(detail *registry.StateDetail) *registry.StateDetail {
+	if detail == nil {
+		return nil
+	}
+	value := *detail
+	return &value
 }

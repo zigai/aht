@@ -114,6 +114,14 @@ func (m *crashFS) Remove(path string) error {
 
 func (m *crashFS) MkdirAll(string, os.FileMode) error { return nil }
 
+func (m *crashFS) Lstat(path string) (os.FileInfo, error) {
+	file, ok := m.live[path]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return crashInfo{size: int64(len(file.live))}, nil
+}
+
 func (m *crashFS) capture(boundary string) {
 	// A crash may retain either directory image. File sync fixes contents, while an
 	// unsynced write may retain any prefix; the selected prefixes cover the

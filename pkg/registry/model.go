@@ -42,8 +42,8 @@ const (
 )
 
 const (
-	Provisional IdentityState = "provisional"
-	Identified  IdentityState = "identified"
+	IdentityProvisional IdentityState = "provisional"
+	IdentityIdentified  IdentityState = "identified"
 )
 
 var (
@@ -109,6 +109,7 @@ type Reporter struct {
 }
 
 type NativeObservation struct {
+	Detail      *DetailEvidence   `json:"detail,omitempty"`
 	Reporter    Reporter          `json:"reporter"`
 	Event       string            `json:"event,omitempty"`
 	Lifecycle   *NativeLifecycle  `json:"lifecycle,omitempty"`
@@ -123,6 +124,7 @@ type NativeObservation struct {
 }
 
 type ScreenObservation struct {
+	Detail                 ActivityDetail  `json:"detail,omitempty"`
 	Activity               Activity        `json:"activity"`
 	Authority              Authority       `json:"authority"`
 	Reason                 string          `json:"reason"`
@@ -154,7 +156,7 @@ type ProcessObservation struct {
 
 type MultiplexerObservation struct {
 	Process    ProcessIdentity `json:"process"`
-	Context    Location        `json:"context"`
+	Location   Location        `json:"context"`
 	ObservedAt time.Time       `json:"observed_at"`
 }
 
@@ -178,6 +180,7 @@ type Observations struct {
 
 //nolint:recvcheck // Value marshaling must also apply to sessions stored in maps.
 type Session struct {
+	Detail            *StateDetail     `json:"detail,omitempty"`
 	Incarnation       Incarnation      `json:"incarnation"`
 	IdentityState     IdentityState    `json:"identity_state"`
 	Liveness          Liveness         `json:"-"`
@@ -257,7 +260,7 @@ type Summary struct {
 	ActivityUnknown        int             `json:"activity_unknown"`
 }
 
-func (g SummaryGroupBy) IsValid() bool {
+func (g SummaryGroupBy) Valid() bool {
 	switch g {
 	case SummaryGroupByMultiplexerSession, SummaryGroupByProject, SummaryGroupByHarness:
 		return true
@@ -266,7 +269,7 @@ func (g SummaryGroupBy) IsValid() bool {
 	}
 }
 
-func (p Presence) IsValid() bool {
+func (p Presence) Valid() bool {
 	switch p {
 	case PresenceLive, PresenceGone, PresenceUnknown:
 		return true
@@ -274,7 +277,7 @@ func (p Presence) IsValid() bool {
 	return false
 }
 
-func (a Activity) IsValid() bool {
+func (a Activity) Valid() bool {
 	switch a {
 	case ActivityRunning, ActivityWaiting, ActivityIdle, ActivityFailed, ActivityInterrupted, ActivityUnknown:
 		return true
@@ -282,7 +285,7 @@ func (a Activity) IsValid() bool {
 	return false
 }
 
-func (l NativeLifecycle) IsValid() bool {
+func (l NativeLifecycle) Valid() bool {
 	switch l {
 	case NativeLifecycleStart, NativeLifecycleResume, NativeLifecycleEnd:
 		return true
@@ -290,7 +293,7 @@ func (l NativeLifecycle) IsValid() bool {
 	return false
 }
 
-func (k MultiplexerKind) IsValid() bool {
+func (k MultiplexerKind) Valid() bool {
 	switch k {
 	case MultiplexerTmux, MultiplexerZellij, MultiplexerHerdr:
 		return true
@@ -298,8 +301,8 @@ func (k MultiplexerKind) IsValid() bool {
 	return false
 }
 
-func (c Location) Empty() bool {
-	return c == (Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""})
+func (l Location) Empty() bool {
+	return l == (Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""})
 }
 
 func (p ProcessIdentity) Complete() bool { return p.PID > 0 && p.StartIdentity != "" }

@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	harnesscatalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -28,9 +26,9 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 		name string
 		run  func() error
 	}{
-		{name: "install", run: func() error { _, err := RunContext(ctx, options); return err }},
-		{name: "remove", run: func() error { _, err := RemoveContext(ctx, options); return err }},
-		{name: "inspect", run: func() error { _, err := InspectContext(ctx, options.Harness, options.Binary); return err }},
+		{name: "install", run: func() error { _, err := Run(ctx, options); return err }},
+		{name: "remove", run: func() error { _, err := Remove(ctx, options); return err }},
+		{name: "inspect", run: func() error { _, err := Inspect(ctx, options.Harness, options.Binary); return err }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.run(); !errors.Is(err, context.Canceled) {
@@ -43,20 +41,21 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 func TestRunAllInstallsEveryHarness(t *testing.T) {
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
+	installFakeCodexCLI(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("GROK_HOME", t.TempDir())
-	t.Setenv("KIMI_SHARE_DIR", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("AGY_CLI_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 
-	harnesses := AllHarnesses()
+	harnesses := Harnesses()
 	results := make([]Result, 0, len(harnesses))
 	for _, h := range harnesses {
-		res, err := RunContext(context.Background(), Options{
+		res, err := Run(context.Background(), Options{
 			Harness:      h,
 			Binary:       defaultBinary,
 			TargetBinary: "/usr/bin/opencode",
@@ -65,7 +64,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 			UseShim:      false,
 		})
 		if err != nil {
-			t.Fatalf("RunContext for %s returned error: %v", h, err)
+			t.Fatalf("Run for %s returned error: %v", h, err)
 		}
 		results = append(results, res)
 	}
@@ -83,32 +82,121 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 	t.Parallel()
 
-	for _, adapter := range harnesscatalog.All() {
+	for _, adapter := range catalog.All() {
 		if _, ok := adapter.(harnesspkg.Installable); !ok {
 			t.Fatalf("harness %q has no install plan", adapter.Definition().ID)
 		}
 	}
 
-	for _, harness := range AllHarnesses() {
-		adapter, ok := harnesscatalog.Find(harness)
+	for _, harness := range Harnesses() {
+		adapter, ok := catalog.Find(harness)
 		if !ok {
-			t.Fatalf("AllHarnesses contains unknown harness %q", harness)
+			t.Fatalf("Harnesses contains unknown harness %q", harness)
 		}
 		if _, installable := adapter.(harnesspkg.Installable); !installable {
-			t.Fatalf("AllHarnesses contains %q without install plan", harness)
+			t.Fatalf("Harnesses contains %q without install plan", harness)
 		}
 	}
 }
 
-func TestAllHarnesses(t *testing.T) {
-	t.Parallel()
-
-	harnesses := AllHarnesses()
-	if len(harnesses) == 0 {
-		t.Fatal("expected installable harnesses")
+// withoutHome clears the whole environment, so no home directory and no
+// adapter override is known, and moves the working directory into an empty
+// directory where any path built from a missing home would land.
+func withoutHome(t *testing.T) string {
+	t.Helper()
+	for _, entry := range os.Environ() {
+		if name, _, _ := strings.Cut(entry, "="); name != "" {
+			t.Setenv(name, "")
+		}
 	}
-	if !slices.Contains(harnesses, registry.Harness("codex")) {
-		t.Fatalf("AllHarnesses() = %v, want codex", harnesses)
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	return workDir
+}
+
+func TestInstallPlansWithoutHomeFailOrStayAbsolute(t *testing.T) {
+	withoutHome(t)
+
+	for _, harness := range Harnesses() {
+		t.Run(string(harness), func(t *testing.T) {
+			plan, _, err := installPlanForHarness(harness, testInstallBinary)
+			if err != nil {
+				if !errors.Is(err, harnesspkg.ErrHomeUnknown) {
+					t.Fatalf("plan error = %v, want %v", err, harnesspkg.ErrHomeUnknown)
+				}
+				return
+			}
+			for _, path := range planPaths(plan) {
+				if !filepath.IsAbs(path) {
+					t.Errorf("plan path %q is relative without a home directory", path)
+				}
+			}
+		})
+	}
+}
+
+func TestIntegrationEntryPointsWithoutHomeFailWithoutTouchingWorkingDirectory(t *testing.T) {
+	workDir := withoutHome(t)
+	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
+
+	for _, test := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "install", run: func() error { _, err := Run(t.Context(), options); return err }},
+		{name: "remove", run: func() error { _, err := Remove(t.Context(), options); return err }},
+		{name: "inspect", run: func() error { _, err := Inspect(t.Context(), options.Harness, options.Binary); return err }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); !errors.Is(err, harnesspkg.ErrHomeUnknown) {
+				t.Fatalf("%s error = %v, want %v", test.name, err, harnesspkg.ErrHomeUnknown)
+			}
+		})
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("working directory entries = %v, %v, want none", entries, err)
+	}
+}
+
+func TestInstallPlanFollowsEnvironmentOverrideWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+	}{
+		{registry.Harness("claude"), "CLAUDE_CONFIG_DIR"},
+		{registry.Harness("codex"), "CODEX_HOME"},
+		{registry.Harness("copilot"), "COPILOT_HOME"},
+		{registry.Harness("cline"), "CLINE_DIR"},
+		{registry.Harness("grok"), "GROK_HOME"},
+		{registry.Harness("hermes"), "HERMES_HOME"},
+		{registry.Harness("kimi-code"), "KIMI_CODE_HOME"},
+		{registry.Harness("pi"), "PI_CODING_AGENT_DIR"},
+		{registry.Harness("omp"), "PI_CODING_AGENT_DIR"},
+		{registry.Harness("kilo"), "KILO_CONFIG_DIR"},
+		{registry.Harness("opencode"), "OPENCODE_CONFIG_DIR"},
+		{registry.Harness("amp"), "XDG_CONFIG_HOME"},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			withoutHome(t)
+			override := t.TempDir()
+			t.Setenv(test.variable, override)
+
+			plan, _, err := installPlanForHarness(test.harness, testInstallBinary)
+			if err != nil {
+				t.Fatalf("plan with %s set and no home: %v", test.variable, err)
+			}
+			paths := planPaths(plan)
+			if len(paths) == 0 {
+				t.Fatal("plan has no paths")
+			}
+			for _, path := range paths {
+				if !strings.HasPrefix(path, override+string(filepath.Separator)) {
+					t.Errorf("plan path %q is outside %s=%q", path, test.variable, override)
+				}
+			}
+		})
 	}
 }
 
@@ -134,104 +222,51 @@ const (
 	hookEventStop         = harnesspkg.HookEventStop
 )
 
-type managedReplacementCase struct {
-	Harness              registry.Harness
-	Path                 string
-	RemovedText          string
-	RequiredText         []string
-	FirstChangeMessage   string
-	SecondChangedMessage string
-	ExpectedNextStep     string
-}
+func TestInstallRejectsBinaryPathThatIsNotUTF8(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
 
-func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
-	t.Helper()
-
-	result, err := Run(Options{
-		Harness:      test.Harness,
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	_, err := Run(t.Context(), Options{Harness: registry.Harness("pi"), Binary: "/opt/caf\xe9/aht"})
+	if !errors.Is(err, errBinaryEncoding) {
+		t.Fatalf("install error = %v, want errBinaryEncoding", err)
 	}
-	if !result.Changed {
-		t.Fatal(test.FirstChangeMessage)
-	}
-	if result.NextStep != test.ExpectedNextStep {
-		t.Fatalf("install next step = %q, want %q", result.NextStep, test.ExpectedNextStep)
-	}
-
-	text := string(readTestFile(t, test.Path, "reading installed hooks"))
-	if strings.Contains(text, test.RemovedText) {
-		t.Fatalf("expected old managed hook to be removed: %s", text)
-	}
-	requireTextContainsAll(t, text, test.RequiredText, "installed hooks")
-
-	second, err := Run(Options{
-		Harness:      test.Harness,
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
-	})
-	if err != nil {
-		t.Fatalf("second Run returned error: %v", err)
-	}
-	if second.Changed {
-		t.Fatal(test.SecondChangedMessage)
-	}
-	if second.NextStep != "" {
-		t.Fatalf("idempotent install unexpectedly requires activation: %q", second.NextStep)
+	entries, readErr := os.ReadDir(home)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("rejected install wrote %v (%v)", entries, readErr)
 	}
 }
 
-func readTestFile(t *testing.T, path string, context string) []byte {
+func readTestFile(t *testing.T, path string, description string) []byte {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%s: %v", context, err)
+		t.Fatalf("%s: %v", description, err)
 	}
 
 	return data
 }
 
-func decodeTestJSONObject(t *testing.T, data []byte, context string) map[string]any {
+func decodeTestJSONObject(t *testing.T, data []byte, description string) map[string]any {
 	t.Helper()
 
 	var config map[string]any
 	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("invalid JSON for %s: %v", context, err)
+		t.Fatalf("invalid JSON for %s: %v", description, err)
 	}
 
 	return config
 }
 
-func requireTextContainsAll(t *testing.T, text string, values []string, context string) {
+func requireTextContainsAll(t *testing.T, text string, values []string, description string) {
 	t.Helper()
 
 	for _, value := range values {
 		if !strings.Contains(text, value) {
-			t.Fatalf("expected %q in %s: %s", value, context, text)
+			t.Fatalf("expected %q in %s: %s", value, description, text)
 		}
 	}
-}
-
-func writeExecutableTestFile(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("writing executable test file: %w", err)
-	}
-
-	if err := os.Chmod(path, 0o700); err != nil {
-		return fmt.Errorf("marking executable test file executable: %w", err)
-	}
-
-	return nil
 }
 
 func requireTestHooks(t *testing.T, config map[string]any) map[string]any {
@@ -253,46 +288,4 @@ func requireTestHookEvents(t *testing.T, hooks map[string]any, events []string) 
 			t.Fatalf("expected %s hook", event)
 		}
 	}
-}
-
-func requireTestHookCommand(t *testing.T, hooks map[string]any, event string) string {
-	t.Helper()
-	handler := requireTestHookHandler(t, hooks, event)
-	command, ok := handler["command"].(string)
-	if !ok || command == "" {
-		t.Fatalf("expected %s hook command, got %#v", event, handler["command"])
-	}
-	return command
-}
-
-func requireTestHookTimeout(t *testing.T, hooks map[string]any, event string) float64 {
-	t.Helper()
-	handler := requireTestHookHandler(t, hooks, event)
-	timeout, ok := handler["timeout"].(float64)
-	if !ok {
-		t.Fatalf("expected %s hook timeout, got %#v", event, handler["timeout"])
-	}
-	return timeout
-}
-
-func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) map[string]any {
-	t.Helper()
-
-	groups, ok := hooks[event].([]any)
-	if !ok || len(groups) != 1 {
-		t.Fatalf("expected one %s hook group, got %#v", event, hooks[event])
-	}
-	group, ok := groups[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected %s hook group object, got %#v", event, groups[0])
-	}
-	handlers, ok := group["hooks"].([]any)
-	if !ok || len(handlers) != 1 {
-		t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
-	}
-	handler, ok := handlers[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
-	}
-	return handler
 }

@@ -10,10 +10,24 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+// Git hooks export GIT_DIR, GIT_INDEX_FILE and similar variables. Git
+// commands run in fixture repositories would otherwise act on the repository
+// running the hook.
+func TestMain(m *testing.M) {
+	for _, entry := range os.Environ() {
+		if name, _, _ := strings.Cut(entry, "="); strings.HasPrefix(name, "GIT_") {
+			_ = os.Unsetenv(name)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 func TestResultRejectsVersionDrift(t *testing.T) {
 	directory := t.TempDir()
@@ -53,6 +67,42 @@ func TestResultRemainsRetryableWhenLogMissing(t *testing.T) {
 func TestWorkflowOutputsAndStateRoundTrip(t *testing.T) {
 	directory := t.TempDir()
 	var saved atomic.Pointer[[]byte]
+	server := compatibilityStateServer(t, &saved)
+	t.Cleanup(server.Close)
+	output := filepath.Join(directory, "output")
+	env := map[string]string{"AHT_COMPAT_WORK": directory, "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "GITHUB_SERVER_URL": "https://github.com", "AHT_COMPAT_SELECTION": "droid", "GITHUB_OUTPUT": output}
+	var stdout bytes.Buffer
+	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard}
+	runTestCommand(t, app, "detect")
+	var plan releasePlan
+	if err := readJSON(filepath.Join(directory, "plan.json"), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Matrix.Include) != 1 || plan.Matrix.Include[0].Harness != "droid" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if err := app.writeJSON("droid-result.json", hostResult{Harness: "droid", Version: "1.2.3", Outcome: "failure"}); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, app, "finish")
+	assertOutputs(t, output, "changed=true\n", "failed=true\n")
+	assertOpenIssues(t, directory, []string{"droid"})
+	stateData := readTestFile(t, filepath.Join(directory, "state.json"))
+	archive := stateZip(t, stateData)
+	saved.Store(&archive)
+	if err := os.WriteFile(output, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, app, "detect")
+	assertOutputs(t, output, "matrix={\"include\":[]}\n", "changed=false\n")
+	runTestCommand(t, app, "finish")
+	// The known regression stays tracked by its issue instead of failing again.
+	assertOutputs(t, output, "failed=false\n")
+	assertOpenIssues(t, directory, []string{"droid"})
+}
+
+func compatibilityStateServer(t *testing.T, saved *atomic.Pointer[[]byte]) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/github/repos/owner/repo/actions/artifacts":
@@ -72,34 +122,112 @@ func TestWorkflowOutputsAndStateRoundTrip(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
-	output := filepath.Join(directory, "output")
-	env := map[string]string{"AHT_COMPAT_WORK": directory, "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "GITHUB_SERVER_URL": "https://github.com", "AHT_COMPAT_SELECTION": "droid", "GITHUB_OUTPUT": output}
-	var stdout bytes.Buffer
-	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard}
-	runTestCommand(t, app, "detect")
-	var plan releasePlan
-	if err := readJSON(filepath.Join(directory, "plan.json"), &plan); err != nil {
+	return server
+}
+
+func TestDetectionRechecksChangedBinaryRevision(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		previous string
+		current  string
+		selected bool
+	}{
+		{name: "new binary", previous: "old-release", current: "new-release", selected: true},
+		{name: "same binary", previous: "new-release", current: "new-release", selected: false},
+		{name: "unrecorded binary", current: "new-release", selected: true},
+		{name: "unspecified binary", previous: "old-release", selected: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			var saved atomic.Pointer[[]byte]
+			archive := stateZip(t, fmt.Sprintf(`{"schema":2,"harnesses":{"droid":{"source":%q,"version":"1.2.3","outcome":"success","revision":%q}},"successful":{}}`, testHarness(t, "droid").sourceKey(), test.previous))
+			saved.Store(&archive)
+			server := compatibilityStateServer(t, &saved)
+			t.Cleanup(server.Close)
+			env := map[string]string{"AHT_COMPAT_WORK": directory, "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "AHT_COMPAT_SELECTION": "droid", "AHT_COMPAT_REVISION": test.current}
+			var stdout bytes.Buffer
+			app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard}
+			runTestCommand(t, app, "detect")
+			var plan releasePlan
+			if err := readJSON(filepath.Join(directory, "plan.json"), &plan); err != nil {
+				t.Fatal(err)
+			}
+			want := []candidate{}
+			if test.selected {
+				want = []candidate{{Harness: "droid", Version: "1.2.3"}}
+			}
+			if !slices.Equal(plan.Matrix.Include, want) {
+				t.Fatalf("selected releases = %v, want %v", plan.Matrix.Include, want)
+			}
+		})
+	}
+}
+
+func assertOpenIssues(t *testing.T, directory string, want []string) {
+	t.Helper()
+	var report issueReport
+	if err := readJSON(filepath.Join(directory, "issues.json"), &report); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Matrix.Include) != 1 || plan.Matrix.Include[0].Harness != "droid" {
-		t.Fatalf("plan = %+v", plan)
+	got := make([]string, 0, len(report.Open))
+	for _, item := range report.Open {
+		got = append(got, item.Harness)
 	}
-	if err := app.writeJSON("droid-result.json", hostResult{Harness: "droid", Version: "1.2.3", Outcome: "failure"}); err != nil {
-		t.Fatal(err)
+	if !slices.Equal(got, want) {
+		t.Fatalf("open issues = %v, want %v", got, want)
 	}
-	runTestCommand(t, app, "finish")
-	assertOutputs(t, output, "changed=true\n", "failed=true\n")
-	stateData := readTestFile(t, filepath.Join(directory, "state.json"))
-	archive := stateZip(t, stateData)
-	saved.Store(&archive)
-	if err := os.WriteFile(output, nil, 0o600); err != nil {
-		t.Fatal(err)
+}
+
+func TestTrackedIssues(t *testing.T) {
+	grok, kimi, codex := testHarness(t, "grok"), testHarness(t, "kimi-code"), testHarness(t, "codex")
+	state := emptyState()
+	state.Harnesses["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.41", Outcome: "failure", RunURL: "grok-run"}
+	state.Successful["grok"] = checkedRelease{Source: grok.sourceKey(), Version: "1.0.39", Outcome: "success"}
+	state.Harnesses["kimi-code"] = checkedRelease{Source: kimi.sourceKey(), Version: "2.1.1", Outcome: "failure", RunURL: "kimi-run"}
+	state.Harnesses["codex"] = checkedRelease{Source: codex.sourceKey(), Version: "0.157.0", Outcome: "success", RunURL: "codex-run"}
+	state.Harnesses["claude"] = checkedRelease{Source: testHarness(t, "claude").sourceKey(), Version: "2.1.0", Outcome: "infrastructure"}
+	state.Harnesses["droid"] = checkedRelease{Source: "npm:old-package", Version: "1.0.0", Outcome: "failure"}
+	want := issueReport{
+		Open: []issueStatus{
+			{Harness: "kimi-code", Version: "2.1.1", RunURL: "kimi-run"},
+			{Harness: "grok", Version: "1.0.41", Successful: "1.0.39", RunURL: "grok-run"},
+		},
+		Resolved: []issueStatus{
+			{Harness: "codex", Version: "0.157.0", RunURL: "codex-run", Reason: "passed"},
+		},
 	}
-	runTestCommand(t, app, "detect")
-	assertOutputs(t, output, "matrix={\"include\":[]}\n", "changed=false\n")
-	runTestCommand(t, app, "finish")
-	assertOutputs(t, output, "failed=true\n")
+	got := trackedIssues(state)
+	slices.SortFunc(got.Resolved, func(a, b issueStatus) int { return strings.Compare(a.Harness, b.Harness) })
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("issues = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestNewRegressions(t *testing.T) {
+	spec := testHarness(t, "grok")
+	failed := checkedRelease{Source: spec.sourceKey(), Version: "1.0.41", Outcome: "failure"}
+	tests := []struct {
+		name     string
+		previous checkedRelease
+		want     []string
+	}{
+		{"after success", checkedRelease{Source: spec.sourceKey(), Version: "1.0.40", Outcome: "success"}, []string{"grok"}},
+		{"first observation", checkedRelease{}, []string{"grok"}},
+		{"after infrastructure retry", checkedRelease{Source: spec.sourceKey(), Version: "1.0.41", Outcome: "infrastructure"}, []string{"grok"}},
+		{"already failing", checkedRelease{Source: spec.sourceKey(), Version: "1.0.40", Outcome: "failure"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previous, next := emptyState(), emptyState()
+			if tt.previous.Source != "" {
+				previous.Harnesses["grok"] = tt.previous
+			}
+			next.Harnesses["grok"] = failed
+			if got := newRegressions(previous, next); !slices.Equal(got, tt.want) {
+				t.Fatalf("new regressions = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestResultOutcomes(t *testing.T) {

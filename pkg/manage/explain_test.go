@@ -103,7 +103,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 	}
 }
 
-func TestExplainScreenAuthorityDirectly(t *testing.T) {
+func TestExplainCodexScreenFallbackWithoutNativeReport(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 19, 20, 0, 0, 0, time.UTC)
 	running := registry.ActivityRunning
@@ -128,8 +128,8 @@ func TestExplainScreenAuthorityDirectly(t *testing.T) {
 	if exp.SelectedAuthority != "screen" {
 		t.Fatalf("SelectedAuthority = %q, want screen", exp.SelectedAuthority)
 	}
-	if exp.FallbackReason != "" {
-		t.Fatalf("FallbackReason = %q, want empty", exp.FallbackReason)
+	if exp.FallbackReason != "integration_report_missing" {
+		t.Fatalf("FallbackReason = %q, want integration_report_missing", exp.FallbackReason)
 	}
 }
 

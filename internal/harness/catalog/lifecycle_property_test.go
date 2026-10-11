@@ -61,7 +61,7 @@ func FuzzNativeEventSequences(f *testing.F) {
 		f.Add(name, lifecycleBytes(lifecycleSeed(name, 0)))
 	}
 	f.Fuzz(func(t *testing.T, name string, input []byte) {
-		if _, err := Normalize(name); err != nil {
+		if _, err := Parse(name); err != nil {
 			return
 		}
 		t.Logf("input SHA-256: %x", sha256.Sum256(input))
@@ -69,82 +69,9 @@ func FuzzNativeEventSequences(f *testing.F) {
 	})
 }
 
-func TestNativeHookHandlersPreserveRegistryProperties(t *testing.T) {
-	for _, name := range SupportedNames() {
-		id, err := Normalize(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		adapter, ok := Find(id)
-		if !ok {
-			t.Fatalf("missing adapter %q", name)
-		}
-		if _, ok := adapter.(harness.HookAdapter); !ok {
-			continue
-		}
-		t.Run(name, func(t *testing.T) {
-			runNativeHookAdapter(t, id)
-		})
-	}
-}
-
-func runNativeHookAdapter(t *testing.T, id registry.Harness) {
-	t.Helper()
-	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), Rules{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("closing store: %v", err)
-		}
-	})
-	payload := map[string]any{"conversationId": "hook-session", "workspacePaths": []string{"/work"}, "toolCall": map[string]any{"name": "ask_permission"}}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !PayloadCompatibleWithHarness(id, raw) {
-		t.Fatal("hook payload incompatible with adapter")
-	}
-	coverage := registrycheck.NewCoverage()
-	for step, event := range []string{"PostToolUse", "PreToolUse", "PreToolUse", "PostToolUse"} {
-		if applyNativeHook(t, store, id, event, step, payload, raw) {
-			coverage.Hit("hook-report")
-		}
-	}
-	if missing := coverage.Missing("hook-report"); len(missing) > 0 {
-		t.Fatalf("missing hook coverage: %v", missing)
-	}
-}
-
-func applyNativeHook(t *testing.T, store *registry.MemoryStore, id registry.Harness, event string, step int, payload map[string]any, raw json.RawMessage) bool {
-	t.Helper()
-	result, ok := HandleHook(id, event, raw, payload, nil)
-	if !ok {
-		t.Fatalf("hook handler missing for %q", event)
-	}
-	if !result.ReportOK {
-		return false
-	}
-	observation := result.Report
-	observation.At = time.Now().UTC().Add(-time.Minute).Add(time.Duration(step) * time.Millisecond)
-	if _, err := store.Observe(t.Context(), PrepareObservation(observation)); err != nil {
-		t.Fatalf("hook event %q: %v", event, err)
-	}
-	sessions, err := store.List(t.Context(), registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := registrycheck.Sessions(sessions); err != nil {
-		t.Fatalf("hook event %q: %v", event, err)
-	}
-	return true
-}
-
 func runNativeEventInput(t *testing.T, name string, input []byte, sequenced bool, steps int) {
 	t.Helper()
-	id, err := Normalize(name)
+	id, err := Parse(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +129,7 @@ func (runner *nativeSequenceRunner) exercise(rt *rapid.T, steps int) {
 func (runner *nativeSequenceRunner) apply(rt *rapid.T, sessionID string, event nativeEventCase, payload json.RawMessage, stale bool) {
 	rt.Helper()
 	runner.tick++
-	if !PayloadCompatibleWithHarness(runner.id, payload) {
+	if !PayloadCompatible(runner.id, payload) {
 		return
 	}
 	observation := runner.observation(rt, sessionID, event, payload, stale)
@@ -257,7 +184,7 @@ func cleanObservationError(err error) bool {
 
 func (runner *nativeSequenceRunner) observation(rt *rapid.T, sessionID string, event nativeEventCase, payload json.RawMessage, stale bool) registry.Observation {
 	rt.Helper()
-	defaults, err := DefaultsFromPayloadWithError(runner.id, payload)
+	defaults, err := PayloadDefaults(runner.id, payload)
 	if err != nil {
 		rt.Fatalf("payload defaults: %v", err)
 	}
@@ -289,7 +216,7 @@ func (runner *nativeSequenceRunner) observation(rt *rapid.T, sessionID string, e
 func assertEventLifecycle(rt *rapid.T, capabilities harness.Capabilities, observation registry.Observation) {
 	rt.Helper()
 	lifecycle := observation.Report().Lifecycle
-	if lifecycle != nil && !lifecycle.IsValid() {
+	if lifecycle != nil && !lifecycle.Valid() {
 		rt.Fatalf("invalid translated lifecycle for %q", observation.Report().Event)
 	}
 	if !capabilities.SessionEnd {

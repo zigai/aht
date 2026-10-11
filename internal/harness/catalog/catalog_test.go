@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,12 +9,97 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const testSessionID = "abc"
+
+func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	process := registry.ProcessIdentity{PID: 123, StartIdentity: "boot:123", Executable: "claude"}
+	presence := registry.PresenceLive
+	running := registry.ActivityRunning
+	idle := registry.ActivityIdle
+	observations := []registry.Observation{
+		{
+			Harness: registry.Harness("claude"), At: at,
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{Integration: "claude-hook"},
+				Event:    "UserPromptSubmit", Claim: &presence, Activity: &running, Process: &process,
+			},
+		},
+		{
+			Harness: registry.Harness("claude"), At: at.Add(time.Minute),
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: (*registry.Reading)(&registry.ScreenObservation{
+				Activity: idle, Authority: registry.AuthorityScreen, Reason: "manifest_rule",
+				RuleID: "input_prompt", Process: process, ObservedAt: at.Add(time.Minute),
+			}),
+		},
+	}
+
+	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.Activity() == nil || *session.Activity() != running || session.Decision() == nil || session.Decision().Authority != registry.AuthorityHook {
+			t.Fatalf("activity = %v, decision = %v, want running from Claude hook", session.Activity(), session.Decision())
+		}
+	}
+}
+
+func TestCrushScreenActivitySupersedesToolHookReport(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	process := registry.ProcessIdentity{PID: 321, StartIdentity: "boot:321", Executable: "crush"}
+	running := registry.ActivityRunning
+	idle := registry.ActivityIdle
+	observations := []registry.Observation{
+		{
+			Harness: registry.Harness("crush"), At: at,
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{Integration: "crush-hook"},
+				Event:    "PreToolUse", Activity: &running, Process: &process,
+			},
+		},
+		{
+			Harness: registry.Harness("crush"), At: at.Add(time.Minute),
+			Subject: registry.ObservationIdentity{SessionID: "native-session"},
+			Evidence: (*registry.Reading)(&registry.ScreenObservation{
+				Activity: idle, Authority: registry.AuthorityScreen, Reason: "manifest_rule",
+				RuleID: "input_prompt", Process: process, ObservedAt: at.Add(time.Minute),
+			}),
+		},
+	}
+
+	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.SessionID != "native-session" {
+			t.Fatalf("session id = %q, want native identity from the hook", session.SessionID)
+		}
+		if session.Activity() == nil || *session.Activity() != idle || session.Decision() == nil || session.Decision().Authority != registry.AuthorityScreen {
+			t.Fatalf("activity = %v, decision = %v, want idle from the Crush screen", session.Activity(), session.Decision())
+		}
+	}
+}
 
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
@@ -40,18 +126,6 @@ func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
 	}()
 	if !deferredPanic {
 		t.Fatal("ReportHookCommand accepted an invalid activity")
-	}
-}
-
-func TestPiIntegrationAdvertisesPromptWaiting(t *testing.T) {
-	t.Parallel()
-
-	adapter, ok := Find(registry.Harness("pi"))
-	if !ok {
-		t.Fatal("Pi adapter not found")
-	}
-	if !adapter.Definition().Capabilities.WaitingPermission {
-		t.Fatal("Pi adapter does not advertise user prompt waiting")
 	}
 }
 
@@ -184,6 +258,20 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionPath: "",
 			want:        []string{"amp", "threads", "continue", testSessionID},
 		},
+		{
+			name:        "crush",
+			harness:     registry.Harness("crush"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"crush", "--session", testSessionID},
+		},
+		{
+			name:        "qwen",
+			harness:     registry.Harness("qwen"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"qwen", "--resume", testSessionID},
+		},
 	}
 
 	for _, test := range tests {
@@ -198,7 +286,7 @@ func TestResumeCommandFor(t *testing.T) {
 	}
 }
 
-func TestNormalize(t *testing.T) {
+func TestParse(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -242,6 +330,8 @@ func TestNormalize(t *testing.T) {
 		{name: "hermes agent alias", value: "hermes-agent", want: registry.Harness("hermes")},
 		{name: "amp", value: "amp", want: registry.Harness("amp")},
 		{name: "amp alias code", value: "ampcode", want: registry.Harness("amp")},
+		{name: "qwen", value: "qwen", want: registry.Harness("qwen")},
+		{name: "qwen code alias", value: "qwen-code", want: registry.Harness("qwen")},
 		{name: "amp alias hyphen", value: "amp-code", want: registry.Harness("amp")},
 		{name: "amp alias underscore", value: "amp_code", want: registry.Harness("amp")},
 	}
@@ -250,115 +340,12 @@ func TestNormalize(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Normalize(test.value)
+			got, err := Parse(test.value)
 			if err != nil {
-				t.Fatalf("Normalize returned error: %v", err)
+				t.Fatalf("Parse returned error: %v", err)
 			}
 			if got != test.want {
 				t.Fatalf("expected %q, got %q", test.want, got)
-			}
-		})
-	}
-}
-
-func TestSupportedNames(t *testing.T) {
-	t.Parallel()
-
-	want := []string{
-		"claude",
-		"codex",
-		"cursor",
-		"copilot",
-		"cline",
-		"kimi-code",
-		"grok",
-		"goose",
-		"pi",
-		"omp",
-		"opencode",
-		"agy",
-		"kilo",
-		"droid",
-		"openclaw",
-		"hermes",
-		"amp",
-	}
-	got := SupportedNames()
-	if !slices.Equal(got, want) {
-		t.Fatalf("expected %#v, got %#v", want, got)
-	}
-}
-
-func TestEnvNames(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		field harness.EnvField
-		want  []string
-	}{
-		{
-			name:  "session id",
-			field: harness.EnvSessionID,
-			want: []string{
-				"AHT_SESSION_ID",
-				"AGENT_SESSION_ID",
-				"CLAUDE_SESSION_ID",
-				"CODEX_SESSION_ID",
-				"GROK_SESSION_ID",
-				"PI_SESSION_ID",
-				"OPENCODE_SESSION_ID",
-				"KILO_SESSION_ID",
-				"AMP_THREAD_ID",
-				"AMP_SESSION_ID",
-			},
-		},
-		{
-			name:  "event",
-			field: harness.EnvEvent,
-			want: []string{
-				"AHT_EVENT",
-				"AGENT_EVENT",
-				"GROK_HOOK_EVENT",
-				"KILO_EVENT",
-			},
-		},
-		{
-			name:  "session path",
-			field: harness.EnvSessionPath,
-			want: []string{
-				"AHT_SESSION_PATH",
-				"AGENT_SESSION_PATH",
-				"CLAUDE_SESSION_PATH",
-				"CODEX_SESSION_PATH",
-				"CURSOR_TRANSCRIPT_PATH",
-				"PI_SESSION_PATH",
-				"OPENCODE_SESSION_PATH",
-				"KILO_SESSION_PATH",
-			},
-		},
-		{
-			name:  "project root",
-			field: harness.EnvProjectRoot,
-			want: []string{
-				"AHT_PROJECT_ROOT",
-				"PROJECT_ROOT",
-				"CURSOR_PROJECT_DIR",
-				"CLAUDE_PROJECT_DIR",
-				"GROK_WORKSPACE_ROOT",
-				"KILO_PROJECT_ROOT",
-				"FACTORY_PROJECT_DIR",
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := EnvNames(test.field)
-			if !slices.Equal(got, test.want) {
-				t.Fatalf("expected %#v, got %#v", test.want, got)
 			}
 		})
 	}
@@ -381,7 +368,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "agent", want: "", wantOK: false},
 		{command: "claude", want: registry.Harness("claude"), wantOK: true},
 		{command: "kimi", want: registry.Harness("kimi-code"), wantOK: true},
-		{command: "Kimi Code", want: registry.Harness("kimi-code"), wantOK: true},
+		{command: "kimi-code", want: registry.Harness("kimi-code"), wantOK: true},
 		{command: "grok", want: registry.Harness("grok"), wantOK: true},
 		{command: "grok-build", want: registry.Harness("grok"), wantOK: true},
 		{command: "goose", want: registry.Harness("goose"), wantOK: true},
@@ -397,6 +384,7 @@ func TestFromCommand(t *testing.T) {
 		{command: "hermes", want: registry.Harness("hermes"), wantOK: true},
 		{command: "hermes-agent", want: registry.Harness("hermes"), wantOK: true},
 		{command: "amp", want: registry.Harness("amp"), wantOK: true},
+		{command: "qwen", want: registry.Harness("qwen"), wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 
@@ -412,7 +400,7 @@ func TestFromCommand(t *testing.T) {
 	}
 }
 
-func TestDefaultsFromPayload(t *testing.T) {
+func TestPayloadDefaults(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -514,8 +502,8 @@ func TestDefaultsFromPayload(t *testing.T) {
 		{
 			name:       "kimi",
 			harness:    registry.Harness("kimi-code"),
-			payload:    `{"session_id":"kimi-payload-session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","tool_name":"Bash","turn_id":7}`,
-			wantID:     "kimi-payload-session-no-index",
+			payload:    `{"session_id":"session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli","tool_name":"Bash","turn_id":7}`,
+			wantID:     "session-no-index",
 			wantPath:   "",
 			wantCWD:    "/tmp",
 			wantRoot:   "",
@@ -547,15 +535,27 @@ func TestDefaultsFromPayload(t *testing.T) {
 			wantAttr:   "droid_tool_name",
 			wantAttrKV: "Bash",
 		},
+		{
+			name:       "qwen",
+			harness:    registry.Harness("qwen"),
+			payload:    `{"session_id":"qwen-session","transcript_path":"/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl","cwd":"/repo","hook_event_name":"Notification","notification_type":"permission_prompt","permission_mode":"default"}`,
+			wantID:     "qwen-session",
+			wantPath:   "/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl",
+			wantCWD:    "/repo",
+			wantRoot:   "",
+			wantEvent:  "Notification",
+			wantAttr:   "qwen_notification_type",
+			wantAttrKV: "permission_prompt",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := DefaultsFromPayloadWithError(test.harness, json.RawMessage(test.payload))
+			got, err := PayloadDefaults(test.harness, json.RawMessage(test.payload))
 			if err != nil {
-				t.Fatalf("unexpected error from DefaultsFromPayloadWithError: %v", err)
+				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 			}
 			if got.SessionID != test.wantID ||
 				got.SessionPath != test.wantPath ||
@@ -571,29 +571,29 @@ func TestDefaultsFromPayload(t *testing.T) {
 	}
 }
 
-func TestDefaultsFromPayloadWithErrorRejectsMalformedPayload(t *testing.T) {
+func TestPayloadDefaultsRejectsMalformedPayload(t *testing.T) {
 	t.Parallel()
 
-	if _, err := DefaultsFromPayloadWithError(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
-		t.Fatal("DefaultsFromPayloadWithError accepted a non-object payload")
+	if _, err := PayloadDefaults(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
+		t.Fatal("PayloadDefaults accepted a non-object payload")
 	}
 }
 
-func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
+func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("KIMI_SHARE_DIR", home)
+	t.Setenv("KIMI_CODE_HOME", home)
 
 	sessionDir := filepath.Join(home, "sessions", "wd_repo_abc", "kimi-index-session")
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		t.Fatalf("creating Kimi session directory: %v", err)
 	}
 
-	got, err := DefaultsFromPayloadWithError(
+	got, err := PayloadDefaults(
 		registry.Harness("kimi-code"),
-		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","source":"startup"}`),
+		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","client_type":"kimi_code_cli","source":"startup"}`),
 	)
 	if err != nil {
-		t.Fatalf("unexpected error from DefaultsFromPayloadWithError: %v", err)
+		t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 	}
 
 	if got.SessionID != "kimi-index-session" ||
@@ -602,12 +602,12 @@ func TestKimiDefaultsFromPayloadUsesCurrentSessionDirectory(t *testing.T) {
 		got.Event != "SessionStart" {
 		t.Fatalf("unexpected defaults: %#v", got)
 	}
-	if got.Attributes["kimi_code_start_source"] != "startup" {
-		t.Fatalf("expected kimi_code_start_source=startup, got %#v", got.Attributes)
+	if got.Attributes["kimi_code_source"] != "startup" {
+		t.Fatalf("expected kimi_code_source=startup, got %#v", got.Attributes)
 	}
 }
 
-func TestPayloadCompatibleWithHarness(t *testing.T) {
+func TestPayloadCompatible(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -619,13 +619,13 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		{
 			name:    "claude accepts native hook payload",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
 			want:    true,
 		},
 		{
 			name:    "codex accepts native hook payload",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
@@ -679,7 +679,7 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		{
 			name:    "kimi-code accepts native hook payload",
 			harness: registry.Harness("kimi-code"),
-			payload: `{"session_id":"kimi-session","cwd":"/repo","hook_event_name":"PermissionRequest"}`,
+			payload: `{"session_id":"session-example","cwd":"/repo","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli"}`,
 			want:    true,
 		},
 		{
@@ -715,7 +715,7 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		{
 			name:    "claude accepts configurable transcript path",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/zigai/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
 			want:    true,
 		},
 		{
@@ -727,7 +727,7 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		{
 			name:    "codex accepts configurable transcript path",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/zigai/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
 			want:    true,
 		},
 		{
@@ -790,7 +790,7 @@ func TestPayloadCompatibleWithHarness(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := PayloadCompatibleWithHarness(test.harness, json.RawMessage(test.payload))
+			got := PayloadCompatible(test.harness, json.RawMessage(test.payload))
 			if got != test.want {
 				t.Fatalf("expected %t, got %t", test.want, got)
 			}
@@ -900,7 +900,8 @@ func TestHandleHookAgy(t *testing.T) {
 func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	t.Helper()
 
-	result, ok := HandleHook(
+	result, ok, err := HandleHook(
+		t.Context(),
 		registry.Harness("agy"),
 		test.event,
 		json.RawMessage(`{"test":true}`),
@@ -909,6 +910,9 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	)
 	if !ok {
 		t.Fatal("expected agy hook adapter")
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(result.Response, test.wantResponse) {
 		t.Fatalf("expected response %#v, got %#v", test.wantResponse, result.Response)
@@ -931,7 +935,361 @@ func TestHandleHookUnsupportedHarness(t *testing.T) {
 
 	var rawPayload json.RawMessage
 	var payload map[string]any
-	if _, ok := HandleHook(registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok {
-		t.Fatal("expected codex to have no managed hook adapter")
+	if _, ok, err := HandleHook(t.Context(), registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok || err != nil {
+		t.Fatalf("expected codex to have no managed hook adapter: supported=%v err=%v", ok, err)
+	}
+}
+
+func isolateLocationEnvironment(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{
+		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "COPILOT_HOME",
+		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
+		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
+		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
+		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME", "XDG_DATA_HOME", "APPDATA", "DROID_SESSIONS_DIR", "KILO_DB",
+		"CODEX_SQLITE_HOME", "CLINE_SESSION_DATA_DIR",
+	} {
+		t.Setenv(name, "")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+func globalLocationPaths(locations []harness.Location, kind harness.LocationKind) []string {
+	var paths []string
+	for _, location := range locations {
+		if location.Kind == kind && location.Scope == harness.LocationScopeGlobal {
+			paths = append(paths, location.Path)
+		}
+	}
+	return paths
+}
+
+func TestLocationsForUnknownHarness(t *testing.T) {
+	t.Parallel()
+	locations, ok := LocationsFor(registry.Harness("no-such-harness"), t.TempDir())
+	if ok || locations != nil {
+		t.Fatalf("LocationsFor(unknown) = %v, %t, want nil, false", locations, ok)
+	}
+}
+
+func checkLocationScope(t *testing.T, id registry.Harness, location harness.Location, projectDir string) {
+	t.Helper()
+	if !filepath.IsAbs(location.Path) {
+		t.Errorf("%s: relative path %q", id, location.Path)
+	}
+	inProject := strings.HasPrefix(location.Path, projectDir+string(filepath.Separator))
+	switch location.Scope {
+	case harness.LocationScopeProject:
+		if !inProject {
+			t.Errorf("%s: project path %q is outside %q", id, location.Path, projectDir)
+		}
+	case harness.LocationScopeGlobal:
+		if inProject {
+			t.Errorf("%s: global path %q is inside the project", id, location.Path)
+		}
+	}
+}
+
+func TestLocationsStayWithinTheirScope(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	projectDir := t.TempDir()
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, ok := LocationsFor(id, projectDir)
+		if !ok || len(locations) == 0 {
+			t.Errorf("%s: LocationsFor = %d locations, %t", id, len(locations), ok)
+			continue
+		}
+		seen := make(map[harness.Location]bool, len(locations))
+		for _, location := range locations {
+			if seen[location] {
+				t.Errorf("%s: duplicate location %+v", id, location)
+			}
+			seen[location] = true
+			checkLocationScope(t, id, location, projectDir)
+		}
+
+		withoutProject, _ := LocationsFor(id, "")
+		for _, location := range withoutProject {
+			if location.Scope != harness.LocationScopeGlobal || (!strings.HasPrefix(location.Path, home) && !strings.HasPrefix(location.Path, "/etc/")) {
+				t.Errorf("%s: %+v returned without a project directory or outside the isolated home %q", id, location, home)
+			}
+		}
+	}
+}
+
+// withoutHome leaves no home directory known and moves the working directory
+// into an empty directory, so any path built from a missing home resolves there.
+func withoutHome(t *testing.T) string {
+	t.Helper()
+	isolateLocationEnvironment(t)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if home := harness.HomeDir(); home != "" {
+		t.Skipf("platform reports home directory %q without HOME", home)
+	}
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	return workDir
+}
+
+func TestLocationsOmitGlobalPathsWithoutHome(t *testing.T) {
+	projectDir := t.TempDir()
+	isolateLocationEnvironment(t)
+	withHome := map[string]bool{}
+	for _, adapter := range All() {
+		locations, _ := LocationsFor(adapter.Definition().ID, projectDir)
+		for _, location := range locations {
+			withHome[location.Path] = true
+		}
+	}
+	withoutHome(t)
+
+	for _, adapter := range All() {
+		id := adapter.Definition().ID
+		locations, _ := LocationsFor(id, projectDir)
+		for _, location := range locations {
+			if !filepath.IsAbs(location.Path) {
+				t.Errorf("%s: %+v is not absolute without a home directory", id, location)
+			}
+			if location.Scope == harness.LocationScopeGlobal && !withHome[location.Path] {
+				t.Errorf("%s: %+v resolved without a home directory or override", id, location)
+			}
+		}
+	}
+}
+
+func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+		value    func(dir string) string
+	}{
+		{harness: registry.Harness("claude"), variable: "CLAUDE_CONFIG_DIR"},
+		{harness: registry.Harness("codex"), variable: "CODEX_HOME"},
+		{harness: registry.Harness("copilot"), variable: "COPILOT_HOME"},
+		{harness: registry.Harness("cursor"), variable: "CURSOR_CONFIG_DIR"},
+		{harness: registry.Harness("cline"), variable: "CLINE_DIR"},
+		{harness: registry.Harness("cline"), variable: "CLINE_DATA_DIR"},
+		{harness: registry.Harness("kimi-code"), variable: "KIMI_CODE_HOME"},
+		{harness: registry.Harness("grok"), variable: "GROK_HOME"},
+		{harness: registry.Harness("goose"), variable: "GOOSE_PATH_ROOT"},
+		{harness: registry.Harness("hermes"), variable: "HERMES_HOME"},
+		{harness: registry.Harness("pi"), variable: "PI_CODING_AGENT_DIR"},
+		{harness: registry.Harness("kilo"), variable: "KILO_CONFIG_DIR"},
+		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_STATE_DIR"},
+		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_CONFIG_PATH", value: func(dir string) string { return filepath.Join(dir, "custom.json") }},
+	} {
+		for _, knownHome := range []bool{true, false} {
+			name := string(test.harness) + "/" + test.variable
+			if !knownHome {
+				name += "/without home"
+			}
+			t.Run(name, func(t *testing.T) {
+				isolateLocationEnvironment(t)
+				if !knownHome {
+					t.Setenv("HOME", "")
+					t.Setenv("USERPROFILE", "")
+				}
+				override := t.TempDir()
+				value := override
+				if test.value != nil {
+					value = test.value(override)
+				}
+				t.Setenv(test.variable, value)
+				locations, _ := LocationsFor(test.harness, "")
+				config := globalLocationPaths(locations, harness.LocationKindConfig)
+				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
+					return !strings.HasPrefix(path, override+string(filepath.Separator)) && !strings.HasPrefix(path, "/etc/")
+				}) {
+					t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
+				}
+			})
+		}
+	}
+}
+
+func TestAgySettingsUseApplicationDirectory(t *testing.T) {
+	home := isolateLocationEnvironment(t)
+	locations, ok := LocationsFor(registry.Harness("agy"), "")
+	if !ok {
+		t.Fatal("missing locations")
+	}
+	want := []string{filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")}
+	if got := globalLocationPaths(locations, harness.LocationKindConfig); !slices.Equal(got, want) {
+		t.Fatalf("settings locations = %v, want %v", got, want)
+	}
+}
+
+func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
+	isolateLocationEnvironment(t)
+	override := t.TempDir()
+	t.Setenv("CLINE_DIR", override)
+	locations, _ := LocationsFor(registry.Harness("cline"), "")
+	for _, kind := range []harness.LocationKind{harness.LocationKindSkills, harness.LocationKindCommands, harness.LocationKindInstructions} {
+		got := globalLocationPaths(locations, kind)
+		if !slices.ContainsFunc(got, func(path string) bool { return filepath.Dir(path) == override }) || slices.ContainsFunc(got, func(path string) bool { return strings.Contains(path, ".cline") }) {
+			t.Errorf("cline %s with CLINE_DIR = %v", kind, got)
+		}
+	}
+}
+
+func writeDecoyFile(t *testing.T, workDir string, content string, elements ...string) {
+	t.Helper()
+	path := filepath.Join(append([]string{workDir}, elements...)...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeDecoyDatabase(t *testing.T, workDir string, schema string, row string, elements ...string) {
+	t.Helper()
+	path := filepath.Join(append([]string{workDir}, elements...)...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, statement := range []string{schema, row} {
+		if _, err := db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness registry.Harness
+		plant   func(t *testing.T, workDir string)
+	}{
+		{registry.Harness("droid"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"type":"session_start","id":"abc","title":"Decoy"}`+"\n", ".factory", "sessions", "abc.jsonl")
+		}},
+		{registry.Harness("grok"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"info":{"session_id":"abc"},"generated_title":"Decoy"}`, ".grok", "sessions", "group", "abc", "summary.json")
+		}},
+		{registry.Harness("codex"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyFile(t, workDir, `{"id":"abc","thread_name":"Decoy"}`+"\n", ".codex", "session_index.jsonl")
+		}},
+		{registry.Harness("hermes"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, title TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".hermes", "state.db")
+		}},
+		{registry.Harness("goose"), func(t *testing.T, workDir string) {
+			t.Helper()
+			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, description TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".local", "share", "goose", "sessions", "sessions.db")
+		}},
+		{registry.Harness("kilo"), func(t *testing.T, workDir string) {
+			t.Helper()
+			t.Setenv("PATH", "")
+			writeDecoyDatabase(t, workDir, "CREATE TABLE session (id TEXT, title TEXT)", "INSERT INTO session VALUES ('abc', 'Decoy')", ".local", "share", "kilo", "kilo.db")
+		}},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			workDir := withoutHome(t)
+			test.plant(t, workDir)
+			adapter, ok := Find(test.harness)
+			if !ok {
+				t.Fatalf("adapter %s not found", test.harness)
+			}
+			reader, ok := adapter.(harness.TitleReader)
+			if !ok {
+				t.Fatalf("adapter %s has no title reader", test.harness)
+			}
+
+			titles, err := reader.SessionTitles(t.Context(), []registry.ObservationIdentity{{SessionID: testSessionID}})
+			if err != nil || len(titles) != 1 || titles[0] != "" {
+				t.Fatalf("SessionTitles without a home = %q, %v, want one empty title", titles, err)
+			}
+		})
+	}
+}
+
+func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness registry.Harness
+		payload string
+		plant   func(t *testing.T, workDir string)
+	}{
+		{
+			harness: registry.Harness("cline"),
+			payload: `{"sessionContext":{"rootSessionId":"abc"},"hookName":"TaskStart"}`,
+			plant:   func(*testing.T, string) {},
+		},
+		{
+			harness: registry.Harness("kimi-code"),
+			payload: `{"session_id":"abc","cwd":"/repo","hook_event_name":"SessionStart"}`,
+			plant: func(t *testing.T, workDir string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Join(workDir, ".kimi-code", "sessions", "wd", "abc"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			test.plant(t, withoutHome(t))
+
+			got, err := PayloadDefaults(test.harness, json.RawMessage(test.payload))
+			if err != nil {
+				t.Fatalf("PayloadDefaults: %v", err)
+			}
+			if got.SessionID != testSessionID || got.SessionPath != "" {
+				t.Fatalf("PayloadDefaults without a home = %+v, want session %q and no path", got, testSessionID)
+			}
+		})
+	}
+}
+
+func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		harness    registry.Harness
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{"claude", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"claude", "Elicitation", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "idle_prompt", "claude_permission_mode": "bypassPermissions"}, nil},
+		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "agent_needs_input"}, nil},
+		{"claude", "state", registry.ActivityWaiting, map[string]string{"claude_permission_mode": "plan"}, nil},
+		{"claude", "PermissionRequest", registry.ActivityRunning, nil, nil},
+		{"claude", "StopFailure", registry.ActivityFailed, map[string]string{"claude_error_type": "rate_limit"}, new(registry.ActivityDetailUsageLimit)},
+		{"claude", "PostToolUseFailure", registry.ActivityRunning, map[string]string{"claude_error_type": "rate_limit"}, nil},
+		{"codex", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"copilot", "permissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"droid", "Notification", registry.ActivityWaiting, map[string]string{"droid_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
+		{"hermes", "pre_approval_request", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"amp", "thread.state", registry.ActivityWaiting, map[string]string{"amp_thread_state": "awaiting-approval"}, new(registry.ActivityDetailPermission)},
+		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_question"}, new(registry.ActivityDetailQuestion)},
+		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_permission"}, new(registry.ActivityDetailPermission)},
+		{"opencode", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"opencode", "question.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
+		{"kilo", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"pi", "ui_prompt_start", registry.ActivityWaiting, nil, nil},
+	} {
+		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
+			report := &registry.Report{Event: test.event, Activity: &test.activity, Attributes: test.attributes}
+			observation := PrepareObservation(registry.Observation{Harness: test.harness, Evidence: report})
+			if !reflect.DeepEqual(observation.Report().Detail, test.want) {
+				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
+			}
+		})
 	}
 }

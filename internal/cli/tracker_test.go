@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/observer"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/service"
@@ -67,34 +68,41 @@ func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 	}
 }
 
-var errTestPaneList = errors.New("pane inventory unavailable")
+func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "sessions.json")
+	store := registry.NewJournal(storePath, catalog.Rules{})
+	now := time.Now().UTC()
+	for index, goneAt := range []time.Time{now.Add(-time.Hour), now.Add(-time.Minute)} {
+		process := registry.ProcessIdentity{PID: 900000 + index, StartIdentity: "boot:" + strconv.Itoa(index)}
+		running := registry.ActivityRunning
+		report := registry.Observation{Harness: registry.Harness("codex"), At: goneAt.Add(-time.Second), Subject: registry.ObservationIdentity{SessionID: "tombstone-" + strconv.Itoa(index)}, Evidence: &registry.Report{Event: "start", Activity: &running, Process: &process}}
+		gone := registry.Observation{Harness: registry.Harness("codex"), At: goneAt, Evidence: &registry.Sighting{Process: process, Present: false}}
+		if _, err := store.ObserveBatch(t.Context(), []registry.Observation{report, gone}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-type failingGoneCollector struct {
-	err error
-}
-
-func (f failingGoneCollector) GC(context.Context, time.Duration) (registry.GCResult, error) {
-	return registry.GCResult{}, f.err
-}
-
-func TestObserverReportsAutoCleanFailures(t *testing.T) {
-	for _, once := range []bool{false, true} {
-		t.Run(strconv.FormatBool(once), func(t *testing.T) {
-			var stdout bytes.Buffer
-			app := &application{stdout: &stdout}
-			watcher := observer.New(observer.Options{
-				Store:       registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
-				ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
-				PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
-				CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
-			})
-			err := app.runObserver(t.Context(), observeOptions{once: once, autoClean: true, store: failingGoneCollector{err: os.ErrPermission}}, watcher)
-			if !errors.Is(err, os.ErrPermission) || stdout.Len() != 0 {
-				t.Fatalf("cleanup failure = %v, output = %q", err, stdout.String())
-			}
-		})
+	if err := runTestCLI(t.Context(), []string{"--store", storePath, "manage", "tracker", "run", "--once", "--quiet"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil && !errors.Is(err, errObserverRunDegraded) {
+		t.Fatal(err)
+	}
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The cycle also records any real agents on the host; only the seeded
+	// tombstones matter here.
+	var tombstones []string
+	for _, session := range sessions {
+		if strings.HasPrefix(session.SessionID, "tombstone-") {
+			tombstones = append(tombstones, session.SessionID+"/"+string(session.Presence()))
+		}
+	}
+	if len(tombstones) != 1 || tombstones[0] != "tombstone-1/gone" {
+		t.Fatalf("tombstones after --once = %v, want only tombstone-1/gone", tombstones)
 	}
 }
+
+var errTestPaneList = errors.New("pane inventory unavailable")
 
 func TestQuietLongRunningObserverStreamsRequestedJSONLines(t *testing.T) {
 	t.Parallel()
@@ -153,4 +161,62 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 			t.Fatalf("human degraded result = %q", stdout.String())
 		}
 	}
+}
+
+func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
+	searchCLIHome(t)
+	settled := filepath.Join(t.TempDir(), "settled.jsonl")
+	running := filepath.Join(t.TempDir(), "running.jsonl")
+	writeSearchFixture(t, settled)
+	writeSearchFixture(t, running)
+	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	now := time.Now().UTC()
+	for _, session := range []struct {
+		id, path string
+		activity registry.Activity
+	}{{"settled", settled, registry.ActivityIdle}, {"running", running, registry.ActivityRunning}} {
+		observation := registry.Observation{Harness: registry.Harness("pi"), At: now, Subject: registry.ObservationIdentity{SessionID: session.id, SessionPath: session.path}, Evidence: &registry.Report{Event: "agent_end", Claim: new(registry.PresenceLive), Activity: new(session.activity)}}
+		if _, err := store.Observe(t.Context(), observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var stderr bytes.Buffer
+	app := &application{stderr: &stderr}
+	done := make(chan error, 1)
+	go func() { done <- app.runHistoryIndexer(ctx, store, false) }()
+	indexed := func(path string) bool { return historyIndexed(t, path) }
+	deadline := time.Now().Add(10 * time.Second)
+	for !indexed(settled) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("indexer: %v", err)
+	}
+	if !indexed(settled) || indexed(running) || stderr.Len() != 0 {
+		t.Fatalf("settled indexed=%t running indexed=%t stderr=%q", indexed(settled), indexed(running), stderr.String())
+	}
+}
+
+// historyIndexed reports whether the default history index holds path. The
+// default index lives under [os.UserCacheDir], which is not XDG_CACHE_HOME on
+// every platform.
+func historyIndexed(t *testing.T, path string) bool {
+	t.Helper()
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(cache, "aht", "history-v1.sqlite"))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = db.Close() }()
+	var count int
+	return db.QueryRowContext(t.Context(), "SELECT count(*) FROM files WHERE path=?", path).Scan(&count) == nil && count == 1
 }

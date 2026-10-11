@@ -21,7 +21,7 @@ func TestDoctorIsConciseUnlessVerbose(t *testing.T) {
 func TestDoctorFixtureIgnoresInheritedOmpProfile(t *testing.T) {
 	foreignProfile := filepath.Join(t.TempDir(), ".omp", "agent")
 	t.Setenv("PI_CODING_AGENT_DIR", foreignProfile)
-	installed, err := install.RunContext(t.Context(), install.Options{Harness: registry.Harness("omp"), Binary: defaultInstallBinary()})
+	installed, err := install.Run(t.Context(), install.Options{Harness: registry.Harness("omp"), Binary: defaultInstallBinary()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func prepareDoctorEnvironment(t *testing.T) string {
 	t.Setenv("HOME", home)
 	// Like the upgrade fixture, redirect every harness override rather than
 	// letting an inherited profile escape the temporary home directory.
-	for _, key := range []string{"XDG_CONFIG_HOME", "AHT_CONFIG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_SHARE_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "AGY_CONFIG_HOME", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "KILO_CONFIG_DIR", registry.StateDirEnv} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "AHT_CONFIG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_CODE_HOME", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "KILO_CONFIG_DIR", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
 	t.Setenv("AHT_CONFIG", filepath.Join(home, "config.toml"))
@@ -73,17 +73,17 @@ func assertDoctorSurface(t *testing.T) {
 	t.Helper()
 	path := prepareDoctorEnvironment(t)
 	concise := executeDoctorSurface(t, "--store", path, "manage", "doctor")
-	if strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+	if strings.Contains(concise, "integration.claude") || strings.Contains(concise, "integration.pi") {
 		t.Fatalf("concise doctor includes uninstalled integrations:\n%s", concise)
 	}
-	executeDoctorSurface(t, "manage", "integrations", "install", "codex", "--binary", defaultInstallBinary())
+	executeDoctorSurface(t, "manage", "integrations", "install", "claude", "--binary", defaultInstallBinary())
 	concise = executeDoctorSurface(t, "--store", path, "manage", "doctor")
-	if !strings.Contains(concise, "integration.codex") || strings.Contains(concise, "integration.pi") {
+	if !strings.Contains(concise, "integration.claude") || strings.Contains(concise, "integration.pi") {
 		t.Fatalf("concise doctor omitted installed integration or included uninstalled integrations:\n%s", concise)
 	}
 
 	verbose := executeDoctorSurface(t, "--store", path, "manage", "doctor", "--verbose")
-	if !strings.Contains(verbose, "integration.pi") || !strings.Contains(verbose, "integration.codex") {
+	if !strings.Contains(verbose, "integration.pi") || !strings.Contains(verbose, "integration.claude") {
 		t.Fatalf("verbose doctor omitted integration details:\n%s", verbose)
 	}
 	for _, mode := range []struct {

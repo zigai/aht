@@ -20,7 +20,7 @@ func FuzzStoreParity(f *testing.F) {
 		base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 		journalPath := filepath.Join(t.TempDir(), "journal.json")
 		journal := NewJournal(journalPath, fixtureRules{})
-		memory, err := OpenMemoryStore(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{})
+		memory, err := OpenMemoryStoreWithOptions(filepath.Join(t.TempDir(), "memory.json"), fixtureRules{}, MemoryStoreOptions{TombstoneTTL: 24 * time.Hour})
 		if err != nil {
 			t.Fatal(err)
 		}

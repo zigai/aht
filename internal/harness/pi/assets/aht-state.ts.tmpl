@@ -29,7 +29,7 @@ function warnReporting(reason: string): void {
   if (reportingDegraded && lastReportingFailure === reason) return;
   lastReportingFailure = reason;
   reportingDegraded = true;
-  const message = `aht: ${reason}. Session tracking may be stale. Use /aht-status for details.`;
+  const message = `aht: ${reason}. Session tracking may be stale.`;
   // Native UI owns the terminal. Raw console output is erased by TUI redraws.
   // Custom entries retain safe diagnostics without adding them to model context.
   try {
@@ -39,7 +39,7 @@ function warnReporting(reason: string): void {
     // Keep the diagnostic in memory and still show it through the native UI.
   }
   if (reportingContext?.hasUI) {
-    reportingContext.ui?.setStatus?.("aht", "aht: tracking degraded (/aht-status)");
+    reportingContext.ui?.setStatus?.("aht", "aht: tracking degraded");
     reportingContext.ui?.notify(message, "warning");
   }
 }
@@ -48,21 +48,6 @@ function reportingRecovered(): void {
   if (!reportingDegraded) return;
   reportingDegraded = false;
   if (reportingContext?.hasUI) reportingContext.ui?.setStatus?.("aht", undefined);
-}
-
-function restoreReportingFailure(ctx: ExtensionContext): void {
-  const entries = ctx.sessionManager?.getEntries?.();
-  if (!entries) return;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry?.type !== "custom" || entry.customType !== "aht-reporting") continue;
-    const data = entry.data;
-    if (typeof data === "object" && data !== null && "reason" in data &&
-        typeof data.reason === "string" && data.reason.length <= 256) {
-      lastReportingFailure = data.reason;
-      return;
-    }
-  }
 }
 
 function reportExitReason(stderr: string, code: number | null, signal: string | null): string {
@@ -161,7 +146,6 @@ type ExtensionContext = {
   readonly sessionManager?: {
     readonly getSessionFile?: () => string | undefined;
     readonly getSessionId?: () => string | undefined;
-    readonly getEntries?: () => readonly { readonly type: string; readonly customType?: string; readonly data?: unknown }[];
   };
 };
 type NativeEvent = {
@@ -177,7 +161,6 @@ type NativeEvent = {
 type ExtensionAPI = {
   on(name: string, handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>): void;
   appendEntry?(customType: string, data: { at: string; reason: string; message: string }): void;
-  registerCommand?(name: string, options: { description: string; handler: (args: string, ctx: ExtensionContext) => Promise<void> }): void;
 };
 
 // Native event payloads enter only here; fields not consumed by reporting never
@@ -321,14 +304,6 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
 }
 export default function (pi: ExtensionAPI) {
   reportingAPI = pi;
-  pi.registerCommand?.("aht-status", {
-    description: "Show AHT reporting health and the last failure",
-    handler: async (_args, ctx) => {
-      const status = reportingDegraded ? "AHT reporting is degraded" : "AHT reporting has no current failure";
-      const lastFailure = lastReportingFailure ? `\nLast failure: ${lastReportingFailure}.` : "";
-      if (ctx.hasUI) ctx.ui?.notify(`${status}.${lastFailure}\nTracker health: run aht manage doctor in a terminal.`, reportingDegraded ? "warning" : "info");
-    },
-  });
   const on = (name: string, handler: (event: NativeEvent, ctx: ExtensionContext) => void | Promise<void>): void => {
     pi.on(name, (event, ctx) => handler(parseEvent(event), ctx));
   };
@@ -336,7 +311,6 @@ export default function (pi: ExtensionAPI) {
     stopHeartbeat();
     shutdownDeadline = undefined;
     lastTurnActivity = undefined;
-    restoreReportingFailure(ctx);
     report("idle", ctx, event);
   });
 

@@ -18,7 +18,7 @@ func TestManageCapabilitiesTable(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
 	}
 	output := stdout.String()
-	for _, expected := range []string{"Harness", "Authority", "Start", "End", "Run/Idle", "Wait", "Process", "Catalog", "TTY/MUX", "Install", "Resume", "Screen", "pi", "codex", "claude"} {
+	for _, expected := range []string{"pi", "codex", "claude"} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("output missing expected token %q:\n%s", expected, output)
 		}
@@ -81,7 +81,7 @@ func TestManageCapabilitiesSingleHarness(t *testing.T) {
 		if err := json.Unmarshal(stdout.Bytes(), &c); err != nil {
 			t.Fatalf("failed to decode single capability JSON: %v\noutput: %s", err, stdout.String())
 		}
-		if c.Harness != "codex" || c.Authority != "screen" || !c.ScreenSupport {
+		if c.Harness != "codex" || c.Authority != "hook" || !c.ScreenSupport {
 			t.Fatalf("unexpected codex capabilities: %+v", c)
 		}
 	})

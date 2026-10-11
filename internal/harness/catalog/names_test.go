@@ -8,12 +8,12 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestHarnessIsValid(t *testing.T) {
+func TestHarnessesAreKnown(t *testing.T) {
 	t.Parallel()
 
 	all := catalog.Harnesses()
 	if len(all) == 0 {
-		t.Fatal("AllHarnesses() returned empty slice")
+		t.Fatal("Harnesses() returned empty slice")
 	}
 
 	for _, h := range all {
@@ -30,7 +30,7 @@ func TestHarnessIsValid(t *testing.T) {
 	}
 }
 
-func TestAllHarnessesCloned(t *testing.T) {
+func TestHarnessesCloned(t *testing.T) {
 	t.Parallel()
 
 	first := catalog.Harnesses()
@@ -42,6 +42,6 @@ func TestAllHarnessesCloned(t *testing.T) {
 
 	first[0] = "mutated"
 	if slices.Equal(first, catalog.Harnesses()) {
-		t.Fatal("AllHarnesses did not return an isolated clone")
+		t.Fatal("Harnesses did not return an isolated clone")
 	}
 }

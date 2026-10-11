@@ -17,7 +17,7 @@ func TestReleaseSources(t *testing.T) {
 	}{
 		{"claude", "/npm/@anthropic-ai%2Fclaude-code/latest", `{"name":"@anthropic-ai/claude-code","version":"1.2.3"}`, "1.2.3", false},
 		{"hermes", "/pypi/hermes-agent/json", `{"info":{"name":"hermes-agent","version":"1.2.3"},"urls":[{"yanked":false}]}`, "1.2.3", false},
-		{"kimi-code", "/pypi/kimi-cli/json", `{"info":{"name":"kimi-cli","version":"1.52.0"},"urls":[{"yanked":false}]}`, "1.52.0", false},
+		{"kimi-code", "/npm/@moonshot-ai%2Fkimi-code/latest", `{"name":"@moonshot-ai/kimi-code","version":"2.1.1"}`, "2.1.1", false},
 		{"goose", "/github/repos/aaif-goose/goose/releases/latest", `{"tag_name":"v1.2.3","assets":[{"name":"download_cli.sh","state":"uploaded"}]}`, "v1.2.3", false},
 		{"grok", "/channel", "1.2.3\n", "1.2.3", false},
 		{"droid", "/npm/droid/latest", `{"name":"different","version":"1.2.3"}`, "", true},
@@ -58,15 +58,16 @@ func TestReleaseSources(t *testing.T) {
 
 func TestSupportedCapDoesNotHideLatestRelease(t *testing.T) {
 	for _, tc := range []struct{ latest, supported string }{
-		{"1.50.0", "1.50.0"}, {"1.51.0", "1.51.0"}, {"1.52.0", "1.51.0"},
+		{"2.0.0", "2.0.0"}, {"2.1.0", "2.1.0"}, {"2.1.1", "2.1.0"},
 	} {
 		t.Run(tc.latest, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = fmt.Fprintf(w, `{"info":{"name":"kimi-cli","version":%q},"urls":[{"yanked":false}]}`, tc.latest)
+				_, _ = fmt.Fprintf(w, `{"name":"@moonshot-ai/kimi-code","version":%q}`, tc.latest)
 			}))
 			t.Cleanup(server.Close)
 			client := testClient(server)
 			spec := testHarness(t, "kimi-code")
+			spec.MaxVersion = "2.1.0"
 			version, err := client.supported(t.Context(), spec)
 			if err != nil || version != tc.supported {
 				t.Fatalf("supported = %q, %v", version, err)

@@ -48,25 +48,50 @@ func New() claudeHarness {
 		},
 		IntegrationVersion: harness.IntegrationVersion,
 		IntegrationSource:  claudeIntegrationSource,
-		StateAuthority:     registry.AuthorityScreen,
-		ScreenFallback:     false,
+		StateAuthority:     registry.AuthorityHook,
+		ScreenFallback:     true,
 	})}
 }
 
-func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
+func (claudeHarness) RetainNativeActivity() bool { return true }
+
+func (claudeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := claudeConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(claudeConfigDir(), "settings.json"),
+		Path:              filepath.Join(base, "settings.json"),
 		Source:            claudeIntegrationSource,
 		Label:             "claude hooks",
 		ConfigLabel:       "claude config",
 		StatusMessage:     "",
 		OmitStatusMessage: false,
 		HooksAtRoot:       false,
+		Trust:             nil,
 		Hooks: []harness.CommandHookInstallSpec{
 			{
 				Event:   harness.HookEventSessionStart,
-				Matcher: "startup|resume|clear|compact",
+				Matcher: "startup|resume|clear",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, harness.HookEventSessionStart, claudeIntegrationSource),
+			},
+			// Automatic compaction also fires SessionStart inside a turn that
+			// keeps running, so compaction reports presence without activity.
+			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "compact",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceLive, harness.HookEventSessionStart, claudeIntegrationSource),
+			},
+			{
+				Event:   harness.HookEventSessionStart,
+				Matcher: "",
+				Command: harness.ShellQuote(binary) + " --json hook claude --event SessionStart",
+			},
+			{
+				Event:   "FileChanged",
+				Matcher: "",
+				Command: harness.ShellQuote(binary) + " --json hook claude --event FileChanged",
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
@@ -94,6 +119,14 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "PermissionRequest", claudeIntegrationSource),
 			},
 			{
+				Event: "Elicitation", Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "Elicitation", claudeIntegrationSource),
+			},
+			{
+				Event: "ElicitationResult", Matcher: "",
+				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "ElicitationResult", claudeIntegrationSource),
+			},
+			{
 				Event:   "PermissionDenied",
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PermissionDenied", claudeIntegrationSource),
@@ -103,24 +136,19 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Matcher: "permission_prompt",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityWaiting, "Notification", claudeIntegrationSource),
 			},
-			{
-				Event:   "SubagentStart",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "SubagentStart", claudeIntegrationSource),
-			},
-			{
-				Event:   "SubagentStop",
-				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "SubagentStop", claudeIntegrationSource),
-			},
+			// SubagentStart and SubagentStop describe child agents, including
+			// Claude Code's internal prompt-suggestion agents, not the main
+			// turn. Stop reports whether delegated work keeps the turn running.
 			{
 				Event:   "PreCompact",
 				Matcher: "",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityRunning, "PreCompact", claudeIntegrationSource),
 			},
+			// Automatic compaction continues the running turn; only manual
+			// compaction returns the session to idle.
 			{
 				Event:   "PostCompact",
-				Matcher: "",
+				Matcher: "manual",
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.ActivityIdle, "PostCompact", claudeIntegrationSource),
 			},
 			{
@@ -139,7 +167,7 @@ func (claudeHarness) InstallPlan(binary string) harness.InstallPlan {
 				Command: harness.ReportHookCommand(binary, registry.Harness("claude"), registry.PresenceGone, "SessionEnd", claudeIntegrationSource),
 			},
 		},
-	}}}}
+	}}}}, nil
 }
 
 func (claudeHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -156,6 +184,10 @@ func (claudeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
+	switch kind := harness.PayloadString(payload, "error"); kind {
+	case "rate_limit", "billing_error":
+		attributes["claude_error_type"] = kind
+	}
 	harness.AddAttributeString(attributes, "claude_hook_event", harness.PayloadString(payload, "hook_event_name"))
 	harness.AddAttributeString(attributes, "claude_start_source", harness.PayloadString(payload, "source"))
 	harness.AddAttributeString(attributes, "claude_permission_mode", harness.PayloadString(payload, "permission_mode"))
@@ -177,11 +209,12 @@ func claudeConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); value != "" {
 		return value
 	}
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".claude")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return ".claude"
+	return filepath.Join(home, ".claude")
 }
 
 func (claudeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {

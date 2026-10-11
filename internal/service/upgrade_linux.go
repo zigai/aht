@@ -9,7 +9,8 @@ import (
 )
 
 // Decode the argument format emitted by RenderSystemdUnit, including quoted
-// paths and literal %% specifiers. Unknown syntax is rejected without writing.
+// paths, literal %% specifiers and $$ dollar signs. Unknown syntax is rejected
+// without writing.
 func installedArguments(content []byte) ([]string, error) {
 	var command string
 	for line := range strings.Lines(string(content)) {
@@ -29,7 +30,7 @@ func installedArguments(content []byte) ([]string, error) {
 		if strings.Contains(strings.ReplaceAll(value, "%%", ""), "%") {
 			return nil, errInstalledArguments
 		}
-		args = append(args, strings.ReplaceAll(value, "%%", "%"))
+		args = append(args, strings.ReplaceAll(strings.ReplaceAll(value, "%%", "%"), "$$", "$"))
 		command = remainder
 	}
 	if len(args) == 0 {

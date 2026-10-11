@@ -28,6 +28,7 @@ type registryFS interface {
 	Rename(oldPath, newPath string) error
 	Remove(path string) error
 	MkdirAll(path string, mode os.FileMode) error
+	Lstat(path string) (os.FileInfo, error)
 }
 
 type osRegistryFS struct{}
@@ -60,6 +61,11 @@ func (osRegistryFS) Remove(path string) error {
 func (osRegistryFS) MkdirAll(path string, mode os.FileMode) error {
 	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
 	return os.MkdirAll(path, mode)
+}
+
+func (osRegistryFS) Lstat(path string) (os.FileInfo, error) {
+	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
+	return os.Lstat(path)
 }
 
 func registryFSFor(path string) registryFS {

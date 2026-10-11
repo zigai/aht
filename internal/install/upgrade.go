@@ -19,7 +19,7 @@ import (
 func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) {
 	results := make([]Result, 0)
 	var failures []error
-	for _, id := range AllHarnesses() {
+	for _, id := range Harnesses() {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			break
@@ -88,7 +88,7 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 		}
 		return result, err
 	}
-	return RunContext(ctx, opts)
+	return Run(ctx, opts)
 }
 
 func appendUpgradeResult(results []Result, id registry.Harness, result Result, err error) []Result {
@@ -108,7 +108,7 @@ func installedNative(id registry.Harness, binary string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	paths := planPaths(plan)
+	paths := append(planPaths(plan), retiredPluginPaths(plan)...)
 	for _, path := range paths {
 		status, err := classifyArtifactForHarness(path, id)
 		if err != nil {
@@ -119,6 +119,19 @@ func installedNative(id registry.Harness, binary string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func retiredPluginPaths(plan harnesspkg.InstallPlan) []string {
+	var paths []string
+	for _, action := range plan.Actions {
+		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
+			for _, retired := range plugin.Plan.Retired {
+				paths = append(paths, retired.Dir)
+			}
+		}
+	}
+
+	return paths
 }
 
 func installedShim(id registry.Harness) (string, bool, error) {
@@ -134,16 +147,19 @@ func installedShim(id registry.Harness) (string, bool, error) {
 	if err != nil {
 		return "", true, fmt.Errorf("read installed shim: %w", err)
 	}
-	for line := range strings.Lines(string(data)) {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "harness_bin="); ok {
-			words, err := shlex.Split(value)
+	script := string(data)
+	offset := 0
+	for line := range strings.Lines(script) {
+		if value, ok := strings.CutPrefix(strings.TrimLeft(line, " \t"), "harness_bin="); ok {
+			target, err := shlex.NewLexer(strings.NewReader(script[offset+len(line)-len(value):])).Next()
 			if err != nil {
 				return "", true, fmt.Errorf("parse installed shim target: %w", err)
 			}
-			if len(words) == 1 && words[0] != "" {
-				return words[0], true, nil
+			if target != "" {
+				return target, true, nil
 			}
 		}
+		offset += len(line)
 	}
 	return "", true, fmt.Errorf("%w: cannot recover target from %s", errRecursiveShimTarget, path)
 }

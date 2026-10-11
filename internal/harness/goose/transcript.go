@@ -9,9 +9,13 @@ import (
 )
 
 func (gooseHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"sessions.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, Document: nil, Query: transcriptQuery}
+	return transcript.Reader{Patterns: []string{"sessions.db"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
 }
-func transcriptSources(home string) []string { return []string{transcriptGoosePath(home)} }
+
+func transcriptSources(home string) ([]string, error) {
+	return []string{transcriptGoosePath(home)}, nil
+}
+
 func transcriptGoosePath(home string) string {
 	root := filepath.Join(transcript.DataHome(home), "goose")
 	if runtime.GOOS == "darwin" {

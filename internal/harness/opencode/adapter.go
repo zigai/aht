@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 12
+	integrationVersion        = 14
 	opencodePluginName        = "aht-state.ts"
 	opencodeIntegrationID     = "opencode"
 	opencodeIntegrationSource = "opencode-plugin"
@@ -53,10 +53,15 @@ func New() opencodeHarness {
 	})}
 }
 
-func (opencodeHarness) InstallPlan(binary string) harness.InstallPlan {
+func (opencodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := opencodeConfigDir()
+	if base == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	return harness.InstallPlan{Actions: []harness.InstallAction{
 		harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-			Path:        filepath.Join(opencodeConfigDir(), "plugins", opencodePluginName),
+			Path:        filepath.Join(base, "plugins", opencodePluginName),
 			Label:       "opencode plugin",
 			ConfigLabel: "opencode plugin",
 			Content: harness.RenderScriptTemplate(
@@ -69,7 +74,7 @@ func (opencodeHarness) InstallPlan(binary string) harness.InstallPlan {
 			JSONContent: nil,
 		}},
 		harness.ShimAction{},
-	}}
+	}}, nil
 }
 
 func (opencodeHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -89,13 +94,18 @@ func opencodeConfigDir() string {
 		return filepath.Dir(value)
 	}
 
+	return opencodeUserConfigDir()
+}
+
+func opencodeUserConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
 		return filepath.Join(value, "opencode")
 	}
 
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".config", "opencode")
+	home := harness.HomeDir()
+	if home == "" {
+		return ""
 	}
 
-	return filepath.Join(".config", "opencode")
+	return filepath.Join(home, ".config", "opencode")
 }

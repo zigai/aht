@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
 )
 
 var (

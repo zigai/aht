@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -20,5 +21,5 @@ type HookResult struct {
 }
 
 type HookAdapter interface {
-	HandleHook(invocation HookInvocation) HookResult
+	HandleHook(ctx context.Context, invocation HookInvocation) (HookResult, error)
 }

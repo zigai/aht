@@ -4,14 +4,18 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
-func (r Reducer) applyObservationBatch(ctx context.Context, snap *snapshot, observations []Observation, receivedAt time.Time) ([]Session, error) {
+// applyObservationBatch reduces observations into snap and returns the saved
+// sessions and the number of reports dropped because their process ended.
+func (r Reducer) applyObservationBatch(ctx context.Context, snap *snapshot, observations []Observation, receivedAt time.Time) ([]Session, int, error) {
 	saved := make([]Session, 0, len(observations))
+	ended := 0
 	for index := range observations {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("checking context: %w", err)
+			return nil, 0, fmt.Errorf("checking context: %w", err)
 		}
 
 		observation := observations[index]
@@ -19,12 +23,16 @@ func (r Reducer) applyObservationBatch(ctx context.Context, snap *snapshot, obse
 			observation.At = receivedAt
 		}
 		if err := observation.Validate(r.rules); err != nil {
-			return nil, err
+			return nil, 0, err
+		}
+		if endedProcessReport(*snap, observation) {
+			ended++
+			continue
 		}
 
 		session, keep, err := r.reduceOne(snap.Sessions, observation, receivedAt)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if keep {
 			saved = append(saved, session)
@@ -33,7 +41,7 @@ func (r Reducer) applyObservationBatch(ctx context.Context, snap *snapshot, obse
 
 	snap.UpdatedAt = maxTime(snap.UpdatedAt, receivedAt)
 
-	return saved, nil
+	return saved, ended, nil
 }
 
 func (r Reducer) reduceOne(sessions map[string]Session, observation Observation, receivedAt time.Time) (Session, bool, error) {
@@ -87,7 +95,7 @@ func newSession(id string, harness Harness, now time.Time) Session {
 	var incarnation Incarnation
 	activity := ActivityUnknown
 	return Session{
-		Incarnation: incarnation, IdentityState: Provisional, SchemaVersion: storeSchemaVersion,
+		Incarnation: incarnation, IdentityState: IdentityProvisional, SchemaVersion: storeSchemaVersion,
 		ID:            id,
 		Harness:       harness,
 		SessionID:     "",
@@ -104,6 +112,7 @@ func newSession(id string, harness Harness, now time.Time) Session {
 		PresenceChangedAt: time.Time{},
 		ActivityChangedAt: time.Time{},
 		Liveness:          NewLiveness(PresenceUnknown, ActivityValue(&activity), nil),
+		Detail:            nil,
 	}
 }
 
@@ -133,6 +142,7 @@ func (r Reducer) applyObservation(session *Session, observation Observation, at,
 	}
 	machine := lifecycleMachine{session: session}
 	machine.apply(observation, r.rules.Policy(session.Harness), at)
+	session.resolveDetail(r.rules.Policy(session.Harness), receivedAt)
 	session.SchemaVersion = storeSchemaVersion
 	session.UpdatedAt = maxTime(session.UpdatedAt, receivedAt)
 	if session.Presence() != previousPresence {
@@ -157,7 +167,7 @@ func validateIncomingProcessTime(session Session, observation Observation, at ti
 
 func applyIdentity(session *Session, observation Observation) {
 	if observationHasIdentity(observation) {
-		session.IdentityState = Identified
+		session.IdentityState = IdentityIdentified
 	}
 	if observation.Subject.SessionID != "" {
 		session.SessionID = observation.Subject.SessionID
@@ -228,4 +238,102 @@ func deleteExpiredGoneSessions(
 	}
 
 	return deleted
+}
+
+// removeGoneProcessOnlySessions drops gone sessions that have only process
+// identity and records their processes as ended. No native report can match
+// them and a process start identity never recurs, so their tombstones protect
+// nothing. Removal runs after a whole batch, so matching within the batch
+// still sees them.
+func removeGoneProcessOnlySessions(snap *snapshot) int {
+	removed := 0
+	for id, session := range snap.Sessions {
+		if session.Presence() != PresenceGone || !processOnlySession(session) {
+			continue
+		}
+		if session.Process != nil && session.Process.Complete() {
+			if snap.EndedProcesses == nil {
+				snap.EndedProcesses = make(map[string]time.Time)
+			}
+			snap.EndedProcesses[endedProcessKey(*session.Process)] = goneSince(session)
+		}
+		delete(snap.Sessions, id)
+		removed++
+	}
+	return removed
+}
+
+func endedProcessKey(process ProcessIdentity) string {
+	return strconv.Itoa(process.PID) + ":" + process.StartIdentity
+}
+
+// endedProcessReport reports whether observation is a native report from an
+// ended process that no remaining session matches. Such a report arrived after
+// its process-only session was removed and would otherwise recreate it.
+func endedProcessReport(snap snapshot, observation Observation) bool {
+	process := observation.ProcessIdentity()
+	if observation.Kind() != "report" || process == nil || !process.Complete() {
+		return false
+	}
+	if _, ended := snap.EndedProcesses[endedProcessKey(*process)]; !ended {
+		return false
+	}
+	return findMatchingSession(snap.Sessions, observation) == ""
+}
+
+// pruneEndedProcesses forgets ended processes recorded at least ttl before now.
+func pruneEndedProcesses(snap *snapshot, now time.Time, ttl time.Duration) {
+	for key, at := range snap.EndedProcesses {
+		if now.Sub(at) >= ttl {
+			delete(snap.EndedProcesses, key)
+		}
+	}
+	if len(snap.EndedProcesses) == 0 {
+		snap.EndedProcesses = nil
+	}
+}
+
+func hasExpiredTombstones(snap snapshot, now time.Time, ttl time.Duration) bool {
+	for _, session := range snap.Sessions {
+		if session.Presence() == PresenceGone && (processOnlySession(session) || now.Sub(goneSince(session)) >= ttl) {
+			return true
+		}
+	}
+	for _, at := range snap.EndedProcesses {
+		if now.Sub(at) >= ttl {
+			return true
+		}
+	}
+	return false
+}
+
+func goneSince(session Session) time.Time {
+	if session.PresenceChangedAt.IsZero() {
+		return session.UpdatedAt
+	}
+	return session.PresenceChangedAt
+}
+
+// expireTombstones removes gone process-only sessions and identified gone
+// sessions that have been gone for at least ttl, and forgets ended processes
+// after the same ttl. The ttl window keeps late native reports from an ended
+// incarnation from reviving the session. It returns the sessions removed.
+func expireTombstones(snap *snapshot, now time.Time, ttl time.Duration) int {
+	removed := removeGoneProcessOnlySessions(snap)
+	for id, session := range snap.Sessions {
+		if session.Presence() != PresenceGone {
+			continue
+		}
+		if now.Sub(goneSince(session)) < ttl {
+			continue
+		}
+		delete(snap.Sessions, id)
+		removed++
+	}
+	pruneEndedProcesses(snap, now, ttl)
+	return removed
+}
+
+func processOnlySession(session Session) bool {
+	return session.IdentityState == IdentityProvisional && session.Observations.Native == nil && session.SessionID == "" && session.SessionPath == ""
 }

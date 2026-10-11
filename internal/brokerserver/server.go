@@ -282,8 +282,8 @@ func (s *Server) serveSubscription(
 
 	revision := state.Revision
 	for {
-		waitContext, cancel := context.WithTimeout(ctx, heartbeatInterval)
-		next, waitErr := s.store.WaitForRevision(waitContext, revision, request.Filter)
+		waitCtx, cancel := context.WithTimeout(ctx, heartbeatInterval)
+		next, waitErr := s.store.WaitForRevision(waitCtx, revision, request.Filter)
 		cancel()
 		if waitErr != nil {
 			if ctx.Err() != nil {
@@ -346,6 +346,8 @@ func operationErrorResponse(id string, err error) broker.Response {
 		code = "not_found"
 	case errors.Is(err, registry.ErrObservationConflict):
 		code = "observation_conflict"
+	case errors.Is(err, registry.ErrProcessEnded):
+		code = "process_ended"
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		code = "canceled"
 	}

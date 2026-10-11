@@ -4,55 +4,68 @@ package hostcompat
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
-func providerRequestSummary(provider *scriptedProvider) string {
+func providerRequestSummary(provider *fakeprovider.Server) string {
 	if provider == nil {
 		return "none"
 	}
 	requests := provider.Requests()
 	summary := make([]string, 0, len(requests))
 	for _, request := range requests {
-		body := request.Body
-		var payload map[string]any
-		if json.Unmarshal([]byte(body), &payload) == nil {
-			if tools, exists := payload["tools"].([]any); exists {
-				names := make([]string, 0, len(tools))
-				keys := make([]string, 0, len(payload))
-				for key := range payload {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-				for _, rawTool := range tools {
-					tool, ok := rawTool.(map[string]any)
-					if !ok {
-						continue
-					}
-					if name, ok := tool["name"].(string); ok {
-						names = append(names, name)
-					}
-					if function, ok := tool["function"].(map[string]any); ok {
-						if name, ok := function["name"].(string); ok {
-							names = append(names, name)
-						}
-					}
-				}
-				input := payload["input"]
-				if input == nil {
-					input = payload["messages"]
-				}
-				body = "input_tail=" + summarizeProviderInput(input) + " keys=" + strings.Join(keys, ",") + " tools=" + strings.Join(names, ",")
-			}
-		}
+		body := summarizeProviderBody(request.Body)
 		if len(body) > 2048 {
 			body = body[:2048] + "..."
 		}
 		summary = append(summary, fmt.Sprintf("%s %s %s", request.Method, request.Path, body))
 	}
 	return strings.Join(summary, "\n")
+}
+
+func summarizeProviderBody(body jsontext.Value) string {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return string(body)
+	}
+	tools, exists := payload["tools"].([]any)
+	if !exists {
+		return string(body)
+	}
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	input := payload["input"]
+	if input == nil {
+		input = payload["messages"]
+	}
+	return "input_tail=" + summarizeProviderInput(input) + " keys=" + strings.Join(keys, ",") + " tools=" + strings.Join(providerToolNames(tools), ",")
+}
+
+func providerToolNames(tools []any) []string {
+	names := make([]string, 0, len(tools))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := tool["name"].(string); ok {
+			names = append(names, name)
+		}
+		if function, ok := tool["function"].(map[string]any); ok {
+			if name, ok := function["name"].(string); ok {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 func summarizeProviderInput(value any) string {
@@ -83,4 +96,12 @@ func summarizeProviderInput(value any) string {
 		return "..." + summary[len(summary)-2000:]
 	}
 	return summary
+}
+
+func mustJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }

@@ -12,9 +12,9 @@ import (
 	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
-// CurrentContextOptions identifies the process whose enclosing agent session is requested.
+// CurrentOptions identifies the process whose enclosing agent session is requested.
 // A zero PID uses the calling process.
-type CurrentContextOptions struct{ PID int }
+type CurrentOptions struct{ PID int }
 
 type currentInspectors struct {
 	PID           int
@@ -27,11 +27,11 @@ type currentInspectors struct {
 
 // Current resolves the session for the calling agent context.
 func (c *Client) Current(ctx context.Context) (registry.Session, error) {
-	return c.CurrentWithOptions(ctx, CurrentContextOptions{PID: 0})
+	return c.CurrentWithOptions(ctx, CurrentOptions{PID: 0})
 }
 
 // CurrentWithOptions resolves an agent using process ancestry and verified terminal evidence.
-func (c *Client) CurrentWithOptions(ctx context.Context, opts CurrentContextOptions) (registry.Session, error) {
+func (c *Client) CurrentWithOptions(ctx context.Context, opts CurrentOptions) (registry.Session, error) {
 	return c.currentWithInspectors(ctx, currentInspectors{PID: opts.PID, ProcessList: nil, ProcessFind: nil, TmuxCurrent: nil, ZellijCurrent: nil, HerdrCurrent: nil})
 }
 
@@ -226,14 +226,14 @@ func resolveCurrentTmux(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	tmuxCtx, err := opts.TmuxCurrent(ctx)
+	tmuxLocation, err := opts.TmuxCurrent(ctx)
 	if err != nil {
 		return zero, false, nil //nolint:nilerr // tmux discovery errors fall back to other multiplexer detection
 	}
-	if tmuxCtx.Empty() || tmuxCtx.PaneID == "" || tmuxCtx.ServerID == "" || tmuxCtx.PaneTTY == "" {
+	if tmuxLocation.Empty() || tmuxLocation.PaneID == "" || tmuxLocation.ServerID == "" || tmuxLocation.PaneTTY == "" {
 		return zero, false, nil
 	}
-	return resolvePaneSession(ctx, sessions, registry.MultiplexerTmux, tmuxCtx.ServerID, tmuxCtx.PaneID, "", opts)
+	return resolvePaneSession(ctx, sessions, registry.MultiplexerTmux, tmuxLocation.ServerID, tmuxLocation.PaneID, "", opts)
 }
 
 func resolveCurrentZellij(
@@ -242,11 +242,11 @@ func resolveCurrentZellij(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	zCtx := opts.ZellijCurrent()
-	if zCtx.Empty() || zCtx.PaneID == "" || zCtx.SessionName == "" {
+	zellijLocation := opts.ZellijCurrent()
+	if zellijLocation.Empty() || zellijLocation.PaneID == "" || zellijLocation.SessionName == "" {
 		return zero, false, nil
 	}
-	return resolvePaneSession(ctx, sessions, registry.MultiplexerZellij, "", zCtx.PaneID, zCtx.SessionName, opts)
+	return resolvePaneSession(ctx, sessions, registry.MultiplexerZellij, "", zellijLocation.PaneID, zellijLocation.SessionName, opts)
 }
 
 func resolveCurrentHerdr(
@@ -255,11 +255,11 @@ func resolveCurrentHerdr(
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var zero registry.Session
-	hCtx := opts.HerdrCurrent()
-	if hCtx.Empty() || hCtx.PaneID == "" {
+	herdrLocation := opts.HerdrCurrent()
+	if herdrLocation.Empty() || herdrLocation.PaneID == "" {
 		return zero, false, nil
 	}
-	return resolvePaneSession(ctx, sessions, registry.MultiplexerHerdr, hCtx.ServerID, hCtx.PaneID, hCtx.SessionName, opts)
+	return resolvePaneSession(ctx, sessions, registry.MultiplexerHerdr, herdrLocation.ServerID, herdrLocation.PaneID, herdrLocation.SessionName, opts)
 }
 
 func matchesPaneLocation(

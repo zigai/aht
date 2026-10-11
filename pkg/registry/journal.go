@@ -35,6 +35,8 @@ type journalResult struct {
 	sessions []Session
 	gc       GCResult
 	reset    ResetResult
+	// ended counts reports dropped because their process already ended.
+	ended int
 }
 
 func NewJournal(path string, rules Rules) *Journal {
@@ -42,14 +44,17 @@ func NewJournal(path string, rules Rules) *Journal {
 }
 
 func (s *Journal) Observe(ctx context.Context, observation Observation) (Session, error) {
-	sessions, err := s.Append(ctx, []Observation{observation})
+	result, err := s.transact(ctx, journalEntry{Sequence: 0, ReceivedAt: s.now().UTC(), Observations: []Observation{observation}, DeleteAfter: nil, Reset: false})
 	if err != nil {
 		return Session{}, err
 	}
-	if len(sessions) > 0 {
-		return sessions[0], nil
+	if len(result.sessions) > 0 {
+		return result.sessions[0], nil
 	}
-	snap, err := s.loadContext(ctx)
+	if result.ended > 0 {
+		return Session{}, ErrProcessEnded
+	}
+	snap, err := s.load(ctx)
 	if err != nil {
 		return Session{}, err
 	}
@@ -140,14 +145,19 @@ func (r Reducer) applyJournalEntry(ctx context.Context, snap *snapshot, entry jo
 		snap.UpdatedAt = entry.ReceivedAt
 	case entry.DeleteAfter != nil:
 		result.gc.Deleted = deleteExpiredGoneSessions(snap.Sessions, entry.ReceivedAt, *entry.DeleteAfter, func(session Session) time.Time { return session.PresenceChangedAt })
+		if *entry.DeleteAfter >= 0 {
+			pruneEndedProcesses(snap, entry.ReceivedAt, *entry.DeleteAfter)
+		}
 		result.gc.Remaining = len(snap.Sessions)
 		snap.UpdatedAt = maxTime(snap.UpdatedAt, entry.ReceivedAt)
 	default:
-		saved, err := r.applyObservationBatch(ctx, snap, entry.Observations, entry.ReceivedAt)
+		saved, ended, err := r.applyObservationBatch(ctx, snap, entry.Observations, entry.ReceivedAt)
 		if err != nil {
 			return journalResult{}, err
 		}
+		removeGoneProcessOnlySessions(snap)
 		result.sessions = saved
+		result.ended = ended
 	}
 	snap.JournalSequence = entry.Sequence
 	result.changes = stateChanges(before, State{Sessions: snap.Sessions, UpdatedAt: snap.UpdatedAt})
@@ -195,6 +205,10 @@ func appendJournal(path string, entry journalEntry) error {
 		return fmt.Errorf("encoding journal: %w", err)
 	}
 	data = append(data, '\n')
+	created, err := journalMissing(path)
+	if err != nil {
+		return err
+	}
 	file, err := registryFSFor(path).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening journal: %w", err)
@@ -202,7 +216,22 @@ func appendJournal(path string, entry journalEntry) error {
 	if err := errors.Join(writeJournal(file, data), file.Close()); err != nil {
 		return err
 	}
+	if !created {
+		return nil
+	}
+	// The directory entry needs syncing only when the journal file is new.
 	return syncDir(filepath.Dir(path))
+}
+
+func journalMissing(path string) (bool, error) {
+	_, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stating journal: %w", err)
+	}
+	return false, nil
 }
 
 func writeJournal(file registryFile, data []byte) error {
@@ -226,11 +255,22 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 	if err := writeSnapshotAtomic(path, snap); err != nil {
 		return err
 	}
+	info, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
+	if err == nil && info.Size() == 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stating journal: %w", err)
+	}
+	created := err != nil
 	file, err := registryFSFor(path).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("truncating journal: %w", err)
 	}
-	return errors.Join(file.Sync(), file.Close())
+	if err := errors.Join(file.Sync(), file.Close()); err != nil || !created {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
 }
 
 func journalAppendOffset(file registryFile) (int64, error) {

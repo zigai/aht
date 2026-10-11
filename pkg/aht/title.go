@@ -10,19 +10,20 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// LookupTitles returns native display titles in session order. The caller can
+// SessionTitles returns native display titles in session order. The caller can
 // pair titles with sessions by index. A native SessionID is required. An empty
 // title means no title is recorded or the harness has no title reader.
 // [Capabilities] reports which harnesses support lookup. This function reads
 // harness metadata when called and does not change registry List or Watch results.
-// Titles are display text, never session or resume identities. Pi's current name
-// requires a transcript scan; callers rechecking the same file in a
-// latency-sensitive path should cache the result. Successful titles remain in
-// the result when another source returns a read error.
-func LookupTitles(ctx context.Context, sessions []Session) ([]string, error) {
+// Titles are display text, never session or resume identities. Claude's persistent
+// OS cache assumes append-only growth; replacement, truncation and same-size
+// rewrites reset it. Native file-watch hooks refresh that cache. Pi still scans
+// transcripts; latency-sensitive callers should cache its results. Successful
+// titles remain alongside read or cache errors.
+func SessionTitles(ctx context.Context, sessions []Session) ([]string, error) {
 	titles := make([]string, len(sessions))
 	if err := ctx.Err(); err != nil {
-		return titles, fmt.Errorf("lookup session titles: %w", err)
+		return titles, fmt.Errorf("read session titles: %w", err)
 	}
 	byHarness := make(map[registry.Harness][]int)
 	for i, session := range sessions {

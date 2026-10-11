@@ -62,14 +62,14 @@ type watchRunState struct {
 // Watch yields serialized snapshots until ctx is canceled or yield returns an
 // error. It observes the store directory before the initial scan and keeps its
 // parent watched so atomic replacement and directory recreation remain visible.
-func (s *FileStore) Watch(ctx context.Context, options WatchOptions, yield func(WatchResult) error) error {
+func (s *FileStore) Watch(ctx context.Context, opts WatchOptions, yield func(WatchResult) error) error {
 	if ctx.Err() != nil {
 		return nil
 	}
 	if yield == nil {
 		return errWatchYieldRequired
 	}
-	options = normalizeFileStoreWatchOptions(options)
+	opts = normalizeFileStoreWatchOptions(opts)
 	target, directory, err := fileStoreWatchTarget(s.path)
 	if err != nil {
 		return err
@@ -84,7 +84,7 @@ func (s *FileStore) Watch(ctx context.Context, options WatchOptions, yield func(
 	}
 	watch := fileStoreWatch{
 		store:             s,
-		options:           options,
+		options:           opts,
 		yield:             yield,
 		watcher:           watcher,
 		target:            target,
@@ -100,12 +100,22 @@ func (s *FileStore) Watch(ctx context.Context, options WatchOptions, yield func(
 }
 
 func (watch *fileStoreWatch) scan(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 	if err := watch.ensureDirectoryWatch(); err != nil {
 		return watch.yieldError(err)
 	}
 	sessions, updatedAt, err := watch.store.watchSnapshot(ctx, watch.options.Filter)
 	if err != nil {
-		return watch.yieldError(err)
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			return watch.yieldError(err)
+		}
 	}
 	initial := !watch.haveBaseline
 	unchanged := watch.haveBaseline && watchSessionsEqual(watch.baseline, sessions)
@@ -144,12 +154,13 @@ func (watch *fileStoreWatch) run(ctx context.Context) error {
 	defer reconcile.Stop()
 
 	state := watchRunState{watch: watch, debounceTimer: debounceTimer, debounce: nil, reconcile: reconcile.C}
-	for {
+	for ctx.Err() == nil {
 		done, err := state.step(ctx)
 		if err != nil || done {
 			return err
 		}
 	}
+	return nil
 }
 
 func (state *watchRunState) step(ctx context.Context) (bool, error) {
@@ -194,14 +205,14 @@ func (watch *fileStoreWatch) handleWatcherError(ctx context.Context, watchErr er
 	return watch.scan(ctx)
 }
 
-func normalizeFileStoreWatchOptions(options WatchOptions) WatchOptions {
-	if options.Debounce <= 0 {
-		options.Debounce = defaultWatchDebounce
+func normalizeFileStoreWatchOptions(opts WatchOptions) WatchOptions {
+	if opts.Debounce <= 0 {
+		opts.Debounce = defaultWatchDebounce
 	}
-	if options.ReconcileInterval <= 0 {
-		options.ReconcileInterval = defaultWatchReconcileInterval
+	if opts.ReconcileInterval <= 0 {
+		opts.ReconcileInterval = defaultWatchReconcileInterval
 	}
-	return options
+	return opts
 }
 
 func addFileStoreWatchPaths(watcher *fsnotify.Watcher, directory string) error {
@@ -295,13 +306,15 @@ func cloneWatchSessions(sessions []Session) []Session {
 }
 
 func (s *FileStore) watchSnapshot(ctx context.Context, filter Filter) ([]Session, time.Time, error) {
-	snap, err := s.loadContext(ctx)
+	snap, err := s.load(ctx)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
 	sessions := make([]Session, 0, len(snap.Sessions))
+	now := s.now().UTC()
 	for _, session := range snap.Sessions {
 		session.SchemaVersion = storeSchemaVersion
+		session.resolveDetail(s.reducer.rules.Policy(session.Harness), now)
 		sessions = append(sessions, session)
 	}
 	return FilterSessions(sessions, filter), snap.UpdatedAt, nil

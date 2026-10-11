@@ -111,7 +111,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 	}
 }
 
-func TestStorePersistsSchemaV3Envelope(t *testing.T) {
+func TestStorePersistsSchemaEnvelope(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store := NewJournal(path, fixtureRules{})
@@ -130,7 +130,7 @@ func TestStorePersistsSchemaV3Envelope(t *testing.T) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Version != 3 || len(envelope.Sessions) != 1 {
+	if envelope.Version != StoreSchemaVersion || len(envelope.Sessions) != 1 {
 		t.Fatalf("unexpected schema envelope: %#v", envelope)
 	}
 }
@@ -149,7 +149,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Location != *location || session.Observations.Location == nil || session.Observations.Location.Context != *location {
+	if session.Location != *location || session.Observations.Location == nil || session.Observations.Location.Location != *location {
 		t.Fatalf("stored session = %#v", session)
 	}
 }
@@ -280,7 +280,7 @@ func TestSummariesCountIndependentPresenceAndActivity(t *testing.T) {
 			Liveness: NewLiveness(PresenceUnknown, ActivityValue(activity(ActivityUnknown)), nil),
 		},
 	}
-	summaries := summariesForSessions(sessions)
+	summaries := Summaries(sessions)
 	if len(summaries) != 2 {
 		t.Fatalf("summaries = %#v, want work and unknown groups", summaries)
 	}
@@ -297,7 +297,7 @@ func TestSummariesCountIndependentPresenceAndActivity(t *testing.T) {
 func TestSummariesGroupNativeMultiplexerSessions(t *testing.T) {
 	t.Parallel()
 	activity := ActivityWaiting
-	summaries := summariesForSessions([]Session{{
+	summaries := Summaries([]Session{{
 		Location: Location{Kind: MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
 		Liveness: NewLiveness(PresenceLive, ActivityValue(&activity), nil),
 	}})

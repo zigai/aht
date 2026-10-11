@@ -60,7 +60,7 @@ func fuzzJournalCase(t *testing.T, snapshotBytes, journalBytes []byte) {
 }
 
 func recoverFuzzJournal(path string) (snapshot, error) {
-	return NewJournal(path, fixtureRules{}).loadContext(context.Background())
+	return NewJournal(path, fixtureRules{}).load(context.Background())
 }
 
 func checkAppendAfterTornTail(t *testing.T, path string, journalBytes []byte, sequence uint64) {

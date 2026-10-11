@@ -8,7 +8,7 @@ import (
 )
 
 //nolint:cyclop // assertions cover independent hook and screen authority invariants
-func TestScreenStateIsAuthoritativeForCodexAndClaude(t *testing.T) {
+func TestScreenStateIsAuthoritativeUnderScreenPolicy(t *testing.T) {
 	t.Parallel()
 	for _, harness := range []Harness{HarnessCodex, HarnessClaude} {
 		t.Run(string(harness), func(t *testing.T) {

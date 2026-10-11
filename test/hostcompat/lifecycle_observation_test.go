@@ -4,8 +4,6 @@ package hostcompat
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,72 +12,29 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func (host isolatedHost) sessions(ctx context.Context) ([]registry.Session, error) {
-	output, err := host.runAHT(ctx, "--json", "list", "--agent", string(host.contract.ID))
-	if err != nil {
-		return nil, err
-	}
-	var sessions []registry.Session
-	if err := json.Unmarshal(output, &sessions); err != nil {
-		return nil, fmt.Errorf("decode session observations: %w", err)
-	}
-	matching := sessions[:0]
-	for _, session := range sessions {
-		if filepath.Clean(session.CWD) == filepath.Clean(host.work) {
-			// Failure snapshots never emit raw native hook payloads.
-			if native := session.Observations.Native; native != nil {
-				native.RawPayload = nil
-			}
-			matching = append(matching, session)
-		}
-	}
-	return matching, nil
-}
-
-func (host isolatedHost) waitForActiveSession(t *testing.T) {
+func (host *isolatedHost) waitForActiveSession(t *testing.T) {
 	t.Helper()
 	host.waitForObservation(t, "live native session at held provider request", func(session registry.Session) bool {
 		native := session.Observations.Native
-		return native != nil && native.SessionID != "" && nativeActivityMatches(session, registry.ActivityRunning) &&
-			session.Presence() == registry.PresenceLive && filepath.Clean(session.CWD) == filepath.Clean(host.work) &&
+		return native != nil && native.SessionID != "" && nativeActivityRunning(session) &&
+			session.Presence() == registry.PresenceLive && filepath.Clean(session.CWD) == filepath.Clean(host.launched.Work) &&
 			effectiveActivityMatches(session, registry.ActivityRunning)
 	})
 }
 
-func (host isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
+func (host *isolatedHost) waitForObservation(t *testing.T, description string, matches func(registry.Session) bool) registry.Session {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	var latest []registry.Session
-	for {
-		sessions, err := host.sessions(ctx)
-		if err != nil && ctx.Err() == nil {
-			t.Fatalf("reading session observations: %v", err)
-		}
-		if err == nil {
-			latest = sessions
-		}
-		for _, session := range sessions {
-			if matches(session) {
-				return session
-			}
-		}
-		select {
-		case <-ctx.Done():
-			data, _ := os.ReadFile(filepath.Join(host.root, "native-events"))
-			current, encodeErr := json.MarshalIndent(latest, "", "  ")
-			if encodeErr != nil {
-				t.Logf("encoding last isolated session state: %v", encodeErr)
-			}
-			t.Fatalf("missing %s; last probe error: %v; sanitized callbacks:\n%s\nlast isolated session state:\n%s", description, err, data, current)
-		case <-ticker.C:
-		}
+	session, err := host.launched.WaitForSession(ctx, matches)
+	if err != nil {
+		data, _ := os.ReadFile(host.nativeEvents)
+		t.Fatalf("missing %s: %v\nsanitized callbacks:\n%s", description, err, data)
 	}
+	return session
 }
 
-func (host isolatedHost) assertInterrupted(t *testing.T) {
+func (host *isolatedHost) assertInterrupted(t *testing.T) {
 	t.Helper()
 	if len(host.provider.Requests()) != 1 {
 		t.Fatalf("interruption must precede the tool call, got %d provider requests", len(host.provider.Requests()))
@@ -89,16 +44,21 @@ func (host isolatedHost) assertInterrupted(t *testing.T) {
 		if native == nil {
 			return false
 		}
-		if host.contract.ID == registry.Harness("opencode") || host.contract.ID == registry.Harness("kilo") {
-			// Their abort API ends the held turn with native idle, without
+		if host.contract.ID == registry.Harness("kilo") {
+			// Its abort API ends the held turn with native idle, without
 			// deleting the durable session. Running was required before abort.
 			return terminalSession(host.contract.ID, session)
 		}
 		if host.contract.ID == registry.Harness("copilot") && session.Presence() == registry.PresenceGone {
 			return true
 		}
-		if native.Event == terminalEvent(host.contract.ID) && native.Presence != nil && *native.Presence == registry.PresenceGone && session.Presence() == registry.PresenceGone {
+		if native.Event == terminalEvent(host.contract.ID) && nativeGone(native, session) {
 			return true
+		}
+		// Grok's TUI quit must publish SessionEnd after Esc canceled the turn.
+		// An earlier interrupted Stop alone does not prove clean shutdown.
+		if host.contract.ID == registry.Harness("grok") {
+			return false
 		}
 		return native.Activity != nil && *native.Activity == registry.ActivityInterrupted &&
 			effectiveActivityMatches(session, registry.ActivityInterrupted)

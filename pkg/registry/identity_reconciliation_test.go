@@ -43,7 +43,7 @@ func TestNativeProcessIdentityReconcilesWithLiveTmuxSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmux := &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "sesh", PaneID: "%81", PaneTTY: "/dev/pts/4"}
+	tmux := &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main", PaneID: "%81", PaneTTY: "/dev/pts/4"}
 	if _, err := store.Observe(ctx, registry.Observation{Harness: registry.Harness("pi"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{}, Evidence: &registry.Placement{Process: *process, Location: *tmux}}); err != nil {
 		t.Fatal(err)
 	}

@@ -55,8 +55,13 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
      from the same native files.
    - `manifest.go` + `assets/screen.toml`: `ScreenManifest` for screen authority
      or screen fallback.
+   - `launch.go`: `LaunchPlan` when the harness can use a custom model
+     endpoint. `pkg/fakeprovider/launch`, the `fakeprovider` command, and
+     `test/hostcompat` launch the harness only through it.
    - `distribution.go`: `Distribution()` with `Directory` equal to the adapter
      folder name. The architecture test derives name ownership from it.
+   - `locations.go`: `Locations(projectDir)` with the config, instruction,
+     skill, command, and MCP paths the native docs name. Every adapter needs it.
 3. Generated integrations report with
    `aht report <name> --reporter <IntegrationSource> --reporter-version <version>`,
    plus `--sequence` for ordered reporters and `--multi-session` when one process
@@ -92,8 +97,7 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
    - The adapter is picked up automatically by the generated lifecycle
      properties in `internal/harness/catalog/lifecycle_property_test.go`. It
      must pass them without per-harness exceptions.
-7. Verify with `just lint`, `go test ./...`, `just integration`, and
-   `just compatibility-tests`.
+7. Verify with `just check`.
 
 ## Invariants and Simulation
 

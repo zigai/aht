@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	catalog "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"

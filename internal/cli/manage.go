@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -393,11 +393,11 @@ func tmuxStopTargetValidation(session registry.Session, panes []tmux.Pane) stopT
 	}
 	paneIDFound := false
 	for _, p := range panes {
-		if p.Tmux.PaneID != session.Location.PaneID {
+		if p.Location.PaneID != session.Location.PaneID {
 			continue
 		}
 		paneIDFound = true
-		if tmuxTargetMatchesSession(session.Location, p.Tmux) {
+		if tmuxTargetMatchesSession(session.Location, p.Location) {
 			return stopTargetValidation{OK: true}
 		}
 	}
@@ -445,7 +445,7 @@ func tmuxTargetMatchesSession(a, b registry.Location) bool {
 
 func harnessCommandMatches(h registry.Harness, c string) bool {
 	base := filepath.Base(strings.TrimSpace(c))
-	return slices.Contains(harnesspkg.ProcessNames(h), base)
+	return slices.Contains(catalog.ProcessNames(h), base)
 }
 
 func stopTargetForSession(s registry.Session) (stopTarget, bool) {

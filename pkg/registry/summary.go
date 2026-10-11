@@ -17,6 +17,11 @@ type summaryGroupKey struct {
 	harness     Harness
 }
 
+// Summaries aggregates sessions by multiplexer session.
+func Summaries(sessions []Session) []Summary {
+	return SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+}
+
 // SummariesWithOptions aggregates sessions into summaries according to opts.
 func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 	groupBy := opts.GroupBy
@@ -310,8 +315,4 @@ func (s *Summary) addActivity(activity *Activity) {
 	default:
 		s.ActivityUnknown++
 	}
-}
-
-func summariesForSessions(sessions []Session) []Summary {
-	return SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
 }

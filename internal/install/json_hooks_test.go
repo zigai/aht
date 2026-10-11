@@ -1,22 +1,24 @@
 package install
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	codexpkg "github.com/zigai/aht/v2/internal/harness/codex"
 )
 
 func TestInstallClaudeWritesHooks(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -64,18 +66,153 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 		"PostToolUseFailure",
 		"PermissionRequest",
 		"PermissionDenied",
+		"Elicitation",
+		"ElicitationResult",
 		"Notification",
-		"SubagentStart",
-		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
 		hookEventStop,
 		"StopFailure",
 		"SessionEnd",
+		"FileChanged",
 	} {
 		if _, ok := hooks[event]; !ok {
 			t.Fatalf("expected %s hook", event)
 		}
+	}
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
+	requireManualPostCompactIdle(t, hooks, "manual")
+	for _, event := range []string{"SessionStart", "FileChanged"} {
+		commands := requireTestHookMatcherCommands(t, hooks, event)
+		if !strings.Contains(commands[""], " --json hook claude --event "+event) {
+			t.Fatalf("%s dynamic watcher = %q, want request/response hook without matcher", event, commands[""])
+		}
+	}
+}
+
+// requireNoSubagentHooks asserts that child-agent events, which fire while the
+// parent turn keeps running, never report the main session's activity.
+func requireNoSubagentHooks(t *testing.T, hooks map[string]any, events ...string) {
+	t.Helper()
+	for _, event := range events {
+		if _, ok := hooks[event]; ok {
+			t.Fatalf("expected no %s hook: subagent events do not describe the main turn", event)
+		}
+	}
+}
+
+// requireCompactionKeepsTurnRunning asserts that SessionStart reports idle only
+// for real session starts, while compaction-sourced SessionStart, which also
+// fires after automatic compaction inside a running turn, claims presence alone.
+func requireCompactionKeepsTurnRunning(t *testing.T, hooks map[string]any, idleMatcher string) {
+	t.Helper()
+	commands := requireTestHookMatcherCommands(t, hooks, hookEventSessionStart)
+	for matcher, command := range commands {
+		if !strings.Contains(command, " report ") {
+			delete(commands, matcher)
+		}
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected idle and compact SessionStart hooks, got %#v", commands)
+	}
+	if command := commands[idleMatcher]; !strings.Contains(command, "--activity idle --event SessionStart") {
+		t.Fatalf("SessionStart %q hook = %q, want idle report", idleMatcher, command)
+	}
+	compact := commands["compact"]
+	if !strings.Contains(compact, "--presence live --event SessionStart") || strings.Contains(compact, "--activity") {
+		t.Fatalf("SessionStart compact hook = %q, want presence-only report", compact)
+	}
+}
+
+// requireManualPostCompactIdle asserts that only manual compaction returns the
+// session to idle; automatic compaction continues the running turn.
+func requireManualPostCompactIdle(t *testing.T, hooks map[string]any, manualMatcher string) {
+	t.Helper()
+	commands := requireTestHookMatcherCommands(t, hooks, "PostCompact")
+	if len(commands) != 1 || !strings.Contains(commands[manualMatcher], "--activity idle --event PostCompact") {
+		t.Fatalf("PostCompact hooks = %#v, want one idle report matching %q", commands, manualMatcher)
+	}
+}
+
+func requireTestHookMatcherCommands(t *testing.T, hooks map[string]any, event string) map[string]string {
+	t.Helper()
+	groups, ok := hooks[event].([]any)
+	if !ok {
+		t.Fatalf("expected %s hook groups, got %#v", event, hooks[event])
+	}
+	commands := make(map[string]string, len(groups))
+	for _, value := range groups {
+		group, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook group object, got %#v", event, value)
+		}
+		matcher, _ := group["matcher"].(string)
+		handlers, ok := group["hooks"].([]any)
+		if !ok || len(handlers) != 1 {
+			t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
+		}
+		handler, ok := handlers[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
+		}
+		command, _ := handler["command"].(string)
+		commands[matcher] = command
+	}
+	return commands
+}
+
+func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+	userCommand := "notify-send subagent-finished"
+	oldConfig := `{"hooks":{` +
+		`"SubagentStart":[{"hooks":[{"type":"command","command":"aht report claude --activity running --event SubagentStart --reporter-version 9 --reporter claude-hook --raw-stdin --quiet"}]}],` +
+		`"SubagentStop":[{"hooks":[` +
+		`{"type":"command","command":"aht report claude --activity idle --event SubagentStop --reporter-version 9 --reporter claude-hook --raw-stdin --quiet"},` +
+		`{"type":"command","command":"` + userCommand + `"}]}]}}`
+	if err := os.WriteFile(path, []byte(oldConfig), 0o600); err != nil {
+		t.Fatalf("writing old hooks: %v", err)
+	}
+
+	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
+	options.DryRun = true
+	dryRun, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatalf("dry run returned error: %v", err)
+	}
+	if !dryRun.Changed {
+		t.Fatal("expected stale managed subagent hooks to make the integration differ")
+	}
+	options.DryRun = false
+	if _, err := Run(t.Context(), options); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	data := readTestFile(t, path, "reading claude hooks")
+	config := decodeTestJSONObject(t, data, "claude hooks")
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hooks object")
+	}
+	if _, ok := hooks["SubagentStart"]; ok {
+		t.Fatalf("expected managed SubagentStart hook to be removed: %s", data)
+	}
+	text := string(data)
+	if !strings.Contains(text, userCommand) {
+		t.Fatalf("expected user SubagentStop hook to be preserved: %s", data)
+	}
+	if strings.Contains(text, "--event SubagentStop") {
+		t.Fatalf("expected managed SubagentStop hook to be removed: %s", data)
+	}
+
+	second, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal("expected second claude install to be idempotent")
 	}
 }
 
@@ -105,7 +242,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 
-	first, err := Run(Options{
+	first, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -137,7 +274,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 		t.Fatalf("writing modified hooks: %v", err)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("claude"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -161,8 +298,9 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 //nolint:cyclop // one install assertion verifies every required Codex hook shape
 func TestInstallCodexMergesHooks(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
+	installFakeCodexCLI(t)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("codex"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -175,9 +313,6 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	}
 	if !result.Changed {
 		t.Fatal("expected codex install to report changed")
-	}
-	if result.NextStep != codexpkg.HookTrustNextStep {
-		t.Fatalf("Codex install next step = %q", result.NextStep)
 	}
 
 	data, err := os.ReadFile(result.Path)
@@ -202,17 +337,20 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	if !hasUserPrompt {
 		t.Fatal("expected UserPromptSubmit hook")
 	}
-	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", harnesspkg.HookEventSessionEnd} {
+	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", harnesspkg.HookEventSessionEnd} {
 		if _, ok := hooks[event]; !ok {
 			t.Fatalf("expected %s hook", event)
 		}
 	}
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
+	requireManualPostCompactIdle(t, hooks, "manual")
 	postToolCommand := requireTestHookCommand(t, hooks, "PostToolUse")
 	if !strings.Contains(postToolCommand, "--raw-stdin-defaults-only") || strings.Contains(postToolCommand, "--raw-stdin ") {
 		t.Fatalf("Codex PostToolUse hook stores full tool output: %q", postToolCommand)
 	}
-	if timeout := requireTestHookTimeout(t, hooks, harnesspkg.HookEventSessionEnd); timeout != 3 {
-		t.Fatalf("Codex SessionEnd hook timeout = %v, want 3", timeout)
+	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, harnesspkg.HookEventSessionEnd); timeoutSeconds != 3 {
+		t.Fatalf("Codex SessionEnd hook timeout = %v, want 3", timeoutSeconds)
 	}
 	if !strings.Contains(string(data), "--presence gone --event SessionEnd") || !strings.Contains(string(data), `"matcher": "other"`) {
 		t.Fatalf("Codex SessionEnd hook is incomplete: %s", data)
@@ -222,6 +360,7 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 func TestInstallCodexReplacesManagedHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
+	installFakeCodexCLI(t)
 	path := filepath.Join(dir, "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("creating codex dir: %v", err)
@@ -238,16 +377,16 @@ func TestInstallCodexReplacesManagedHooks(t *testing.T) {
 		RequiredText:         []string{"--raw-stdin", "--quiet"},
 		FirstChangeMessage:   "expected codex install to replace old managed hook",
 		SecondChangedMessage: "expected second codex install to be idempotent",
-		ExpectedNextStep:     codexpkg.HookTrustNextStep,
 	})
 }
 
 func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
+	installFakeCodexCLI(t)
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "hooks.json")
-	oldConfig := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"plannotator","timeout":345600}]},{"hooks":[{"type":"command","command":"aht report codex --activity idle --event Stop --attribute aht_integration_version=4 --attribute aht_integration=codex-hook --queue --raw-stdin --quiet"}]}]}}`
+	oldConfig := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-stop-hook","timeout":600}]},{"hooks":[{"type":"command","command":"aht report codex --activity idle --event Stop --attribute aht_integration_version=4 --attribute aht_integration=codex-hook --queue --raw-stdin --quiet"}]}]}}`
 	if err := os.WriteFile(targetPath, []byte(oldConfig), 0o600); err != nil {
 		t.Fatalf("writing target hooks: %v", err)
 	}
@@ -256,7 +395,7 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatalf("creating symlink: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness: registry.Harness("codex"),
 		Binary:  "/bin/aht-test",
 	})
@@ -282,8 +421,8 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatalf("reading target file: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "plannotator") {
-		t.Fatalf("expected user plannotator hook to be preserved: %s", content)
+	if !strings.Contains(content, "user-stop-hook") {
+		t.Fatalf("expected user stop hook to be preserved: %s", content)
 	}
 	if strings.Contains(content, "aht_integration_version=4") {
 		t.Fatalf("expected stale aht hook to be removed: %s", content)
@@ -293,11 +432,196 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 	}
 }
 
+func requireCodexFixtureObject(t *testing.T, value any) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("fixture config value has type %T, want object", value)
+	}
+	return object
+}
+
+func TestCodexInstallTrustsOwnHooksAndRepairsUnchangedReinstall(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	statePath := installFakeCodexCLI(t)
+	userHooks := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"user-start-command"}]}]}}`
+	if err := writeCodexFixtureFile(filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json"), []byte(userHooks)); err != nil {
+		t.Fatal(err)
+	}
+	before := readCodexFixtureConfig(t, statePath)
+	beforeState := requireCodexFixtureObject(t, requireTestHooks(t, before)["state"])
+	disabledKey := filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json") + ":session_start:1:0"
+	beforeState[disabledKey] = map[string]any{"enabled": false, "trusted_hash": "sha256:previous"}
+	writeCodexFixtureConfig(t, statePath, before)
+	options := Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht"}
+	installed, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+	hookBytes := readTestFile(t, installed.Path, "reading installed hooks")
+	config := readCodexFixtureConfig(t, statePath)
+	state := requireCodexFixtureObject(t, requireTestHooks(t, config)["state"])
+	delete(requireCodexFixtureObject(t, state[disabledKey]), "trusted_hash")
+	writeCodexFixtureConfig(t, statePath, config)
+	unapproved := readTestFile(t, statePath, "reading unapproved config")
+	status, err := Inspect(t.Context(), options.Harness, options.Binary)
+	if err != nil || status.Status != ArtifactStale {
+		t.Fatalf("missing approval status = %+v, %v", status, err)
+	}
+	if string(readTestFile(t, statePath, "reading config after inspection")) != string(unapproved) {
+		t.Fatal("status inspection mutated native approval config")
+	}
+	reinstalled, err := Run(t.Context(), options)
+	if err != nil || reinstalled.Changed {
+		t.Fatalf("unchanged reinstall = %+v, %v", reinstalled, err)
+	}
+	if string(readTestFile(t, installed.Path, "reading unchanged hooks")) != string(hookBytes) {
+		t.Fatal("approval repair changed hook definitions")
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+	status, err = Inspect(t.Context(), options.Harness, options.Binary)
+	if err != nil || status.Status != ArtifactCurrent {
+		t.Fatalf("repaired approval status = %+v, %v", status, err)
+	}
+	options.Binary = "/bin/updated-fixture-aht"
+	if _, err := Run(t.Context(), options); err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixtureTrust(t, statePath, before)
+}
+
+func assertCodexFixtureTrust(t *testing.T, path string, before map[string]any) {
+	t.Helper()
+	config, state, err := loadCodexFixtureConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCodexFixturePreservedSettings(t, config, state, before)
+	metadata, err := codexFixtureHooks(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := 0
+	for _, hook := range metadata {
+		if hook["command"] == "user-start-command" {
+			key, ok := hook["key"].(string)
+			if !ok {
+				t.Fatalf("fixture hook key has type %T, want string", hook["key"])
+			}
+			if _, exists := state[key]; exists {
+				t.Fatal("installer approved an unrelated user command")
+			}
+			continue
+		}
+		owned++
+		if hook["trustStatus"] != "trusted" {
+			t.Fatalf("installed command has no current native approval: %#v", hook)
+		}
+	}
+	if owned == 0 || len(state) != owned+1 {
+		t.Fatalf("approved hooks = %d, config state = %#v", owned, state)
+	}
+}
+
+func assertCodexFixturePreservedSettings(t *testing.T, config, state, before map[string]any) {
+	t.Helper()
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("fixture hooks config is not an object")
+	}
+	beforeHooks, ok := before["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("initial fixture hooks config is not an object")
+	}
+	beforeState, ok := beforeHooks["state"].(map[string]any)
+	if !ok {
+		t.Fatal("initial fixture approval state is not an object")
+	}
+	if config["model"] != before["model"] || hooks["enabled"] != false || !reflect.DeepEqual(state["unrelated-native-key"], beforeState["unrelated-native-key"]) {
+		t.Fatalf("approval altered unrelated settings: %#v", config)
+	}
+	disabledKey := filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json") + ":session_start:1:0"
+	if approval, ok := state[disabledKey].(map[string]any); !ok || approval["enabled"] != false {
+		t.Fatalf("approval changed the existing disabled flag: %#v", state[disabledKey])
+	}
+}
+
+func TestCodexInstallPropagatesNativeTrustFailures(t *testing.T) {
+	for _, failure := range []string{"rpc", "discovery", "hash", "missing command", "write", "verification"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Setenv("CODEX_HOME", t.TempDir())
+			installFakeCodexCLI(t)
+			t.Setenv("AHT_TEST_CODEX_FAILURE", failure)
+			if _, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht"}); err == nil {
+				t.Fatalf("installation succeeded despite native %s failure", failure)
+			}
+		})
+	}
+}
+
+func TestCodexDryRunDoesNotRequireCLIOrMutateFiles(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	statePath := installFakeCodexCLI(t)
+	before := readTestFile(t, statePath, "reading fixture config")
+	t.Setenv("PATH", t.TempDir())
+	options := Options{Harness: registry.Harness("codex"), Binary: "/bin/fixture-aht", DryRun: true}
+	result, err := Run(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(result.Path); !os.IsNotExist(err) {
+		t.Fatalf("dry run created hook definitions: %v", err)
+	}
+	if string(readTestFile(t, statePath, "reading fixture config after preview")) != string(before) {
+		t.Fatal("dry run changed native approval config")
+	}
+	options.DryRun = false
+	if _, err := Run(t.Context(), options); err == nil {
+		t.Fatal("native install succeeded without Codex")
+	}
+}
+
+func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
+	for _, test := range []struct {
+		name, harness, config string
+	}{
+		{name: "claude event object", harness: "claude", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
+		{name: "claude hooks string", harness: "claude", config: `{"hooks": "my-notifier"}`},
+		{name: "cursor event object", harness: "cursor", config: `{"version": 1, "hooks": {"stop": {"command": "my-notifier"}}}`},
+		{name: "cursor hooks string", harness: "cursor", config: `{"version": 1, "hooks": "my-notifier"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+			path := filepath.Join(home, ".cursor", "hooks.json")
+			if test.harness == "claude" {
+				path = filepath.Join(home, ".claude", "settings.json")
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(t.Context(), Options{Harness: registry.Harness(test.harness), Binary: testInstallBinary})
+			if !errors.Is(err, errHookConfigShape) {
+				t.Fatalf("install error = %v, want errHookConfigShape", err)
+			}
+			if got := readTestFile(t, path, "reading hook config"); string(got) != test.config {
+				t.Fatalf("install changed the user's config to:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestInstallCursorWritesHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -352,7 +676,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("writing old hooks: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -379,7 +703,7 @@ func TestInstallCursorReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("expected user hook to be preserved: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("cursor"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -399,7 +723,7 @@ func TestInstallCopilotWritesHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("COPILOT_HOME", dir)
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("copilot"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -460,7 +784,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -495,10 +819,10 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		"PostToolUse",
 		"Notification",
 		hookEventStop,
-		"SubagentStop",
 		"PreCompact",
 		"SessionEnd",
 	})
+	requireNoSubagentHooks(t, hooks, "SubagentStop")
 	text := string(data)
 	requireTextContainsAll(t, text, []string{
 		"--raw-stdin-defaults-only",
@@ -508,7 +832,7 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 		t.Fatalf("expected Droid hooks not to include unsupported statusMessage field: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("droid"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -524,10 +848,114 @@ func TestInstallDroidWritesHooks(t *testing.T) {
 	}
 }
 
+func TestInstallQwenWritesHooks(t *testing.T) {
+	qwenHome := t.TempDir()
+	t.Setenv("QWEN_HOME", qwenHome)
+	settingsPath := filepath.Join(qwenHome, "settings.json")
+	userCommand := "/opt/local/bin/user-qwen-hook"
+	initial := `{
+  "$version": 3,
+  "security": {"auth": {"selectedType": "openai"}},
+  "hooks": {
+    "PreToolUse": [{"matcher": "^run_shell_command$", "hooks": [{"type": "command", "command": "` + userCommand + `"}]}]
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := installQwen(t)
+	if !result.Changed || result.Path != settingsPath {
+		t.Fatalf("unexpected qwen install result: %#v", result)
+	}
+
+	data := readTestFile(t, settingsPath, "reading qwen settings")
+	config := decodeTestJSONObject(t, data, "qwen settings")
+	if config["$version"] == nil || config["security"] == nil || !strings.Contains(string(data), userCommand) {
+		t.Fatalf("Qwen install did not preserve foreign settings/hooks: %s", data)
+	}
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("Qwen hooks must live under the settings hooks key: %s", data)
+	}
+	requireTestHookEvents(t, hooks, []string{
+		hookEventSessionStart,
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PostToolUseFailure",
+		"Notification",
+		"PreCompact",
+		"PostCompact",
+		hookEventStop,
+		"StopFailure",
+		"SessionEnd",
+	})
+	requireNoSubagentHooks(t, hooks, "SubagentStop")
+	if _, ok := hooks["PermissionRequest"]; ok {
+		t.Fatalf("Qwen PermissionRequest also fires for auto-denied background agents: %s", data)
+	}
+	text := string(data)
+	requireTextContainsAll(t, text, []string{
+		"--raw-stdin-defaults-only",
+		"--reporter qwen-hook",
+		`"matcher": "permission_prompt"`,
+		`"matcher": "idle_prompt"`,
+	}, "qwen hooks")
+	if strings.Contains(text, "statusMessage") {
+		t.Fatalf("Qwen shows statusMessage while a hook runs; managed hooks must omit it: %s", text)
+	}
+
+	if installQwen(t).Changed {
+		t.Fatal("expected second qwen install to be idempotent")
+	}
+}
+
+func TestInstallQwenExpandsHome(t *testing.T) {
+	for _, override := range []string{"~", "~/config", `~\config`} {
+		t.Run(override, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("QWEN_HOME", override)
+			t.Chdir(t.TempDir())
+			settingsPath := filepath.Join(home, "settings.json")
+			if override != "~" {
+				settingsPath = filepath.Join(home, "config", "settings.json")
+			}
+
+			result := installQwen(t)
+			if result.Path != settingsPath {
+				t.Fatalf("installed path = %q, want %q", result.Path, settingsPath)
+			}
+			data := readTestFile(t, settingsPath, "reading expanded Qwen settings")
+			config := decodeTestJSONObject(t, data, "Qwen settings")
+			if _, ok := config["hooks"].(map[string]any); !ok {
+				t.Fatalf("expanded Qwen settings contain no hooks: %s", data)
+			}
+		})
+	}
+}
+
+func installQwen(t *testing.T) Result {
+	t.Helper()
+	result, err := Run(t.Context(), Options{
+		Harness:      registry.Harness("qwen"),
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	return result
+}
+
 func TestInstallGrokWritesHooks(t *testing.T) {
 	t.Setenv("GROK_HOME", t.TempDir())
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       defaultBinary,
 		TargetBinary: "",
@@ -563,8 +991,6 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 		"PostToolUse",
 		"PostToolUseFailure",
 		"PermissionDenied",
-		"SubagentStart",
-		"SubagentStop",
 		"PreCompact",
 		"PostCompact",
 		hookEventStop,
@@ -575,6 +1001,8 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 			t.Fatalf("expected %s hook", event)
 		}
 	}
+	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
+	requireManualPostCompactIdle(t, hooks, "manual")
 
 	text := string(data)
 	if !strings.Contains(text, "--raw-stdin") || !strings.Contains(text, "--quiet") {
@@ -600,7 +1028,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("writing old hooks: %v", err)
 	}
 
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -624,7 +1052,7 @@ func TestInstallGrokReplacesManagedHooks(t *testing.T) {
 		t.Fatalf("expected old managed hook to be removed: %s", text)
 	}
 
-	second, err := Run(Options{
+	second, err := Run(t.Context(), Options{
 		Harness:      registry.Harness("grok"),
 		Binary:       testInstallBinary,
 		TargetBinary: "",
@@ -660,7 +1088,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Install Droid hooks
-	result, err := Run(Options{
+	result, err := Run(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -683,7 +1111,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Second install should be idempotent (no change needed despite 5.0 vs float64(5))
-	secondResult, err := Run(Options{
+	secondResult, err := Run(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -695,7 +1123,7 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	}
 
 	// Remove hooks
-	removeResult, err := Remove(Options{
+	removeResult, err := Remove(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
 	})
@@ -711,10 +1139,267 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 	assertLargeNumbersPreserved(t, cleanedData, "during removal")
 }
 
-func assertLargeNumbersPreserved(t *testing.T, data []byte, context string) {
+func assertLargeNumbersPreserved(t *testing.T, data []byte, phase string) {
 	t.Helper()
 	text := string(data)
 	if !strings.Contains(text, "9007199254740993") || !strings.Contains(text, "9007199254740995") {
-		t.Fatalf("large integers were corrupted %s: %s", context, data)
+		t.Fatalf("large integers were corrupted %s: %s", phase, data)
 	}
+}
+
+func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
+	installFakeCodexCLI(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	result, err := Run(t.Context(), Options{Harness: registry.Harness("codex"), Binary: defaultBinary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(result.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("missing hooks object")
+	}
+	command := requireTestHookCommand(t, hooks, "Interrupt")
+	if !strings.Contains(command, "--activity interrupted --event Interrupt") || !strings.Contains(command, "--quiet") {
+		t.Fatalf("Interrupt command = %q", command)
+	}
+	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, "Interrupt"); timeoutSeconds != 3 {
+		t.Fatalf("Interrupt timeout = %v, want 3", timeoutSeconds)
+	}
+}
+
+func TestClaudeWatcherUpgradePreservesUserHooksAndIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "settings.json")
+	userCommands := []string{
+		"notify-send transcript-changed",
+		"echo '/usr/local/bin/aht --json hook claude --event FileChanged'",
+		"sh -c '/usr/local/bin/aht --json hook claude --event FileChanged'",
+	}
+	writeOldClaudeWatcherFixture(t, path, userCommands)
+	id := registry.Harness("claude")
+	if status, err := Inspect(t.Context(), id, testInstallBinary); err != nil || status.Status != ArtifactStale {
+		t.Fatalf("old watcher status = %+v, %v", status, err)
+	}
+	if result, err := upgradeNative(t.Context(), Options{Harness: id, Binary: testInstallBinary}); err != nil || !result.Changed {
+		t.Fatalf("watcher upgrade = %+v, %v", result, err)
+	}
+	data := readTestFile(t, path, "reading upgraded watcher")
+	config := decodeTestJSONObject(t, data, "upgraded watcher")
+	if config["theme"] != "dark" {
+		t.Fatalf("user settings lost: %s", data)
+	}
+	requirePreservedUserHookCommands(t, data, userCommands)
+	if strings.Contains(string(data), "/old/bin/renamed tracker") {
+		t.Fatalf("old managed endpoint preserved: %s", data)
+	}
+	requireClaudeNativeWatchers(t, config)
+	if status, err := Inspect(t.Context(), id, testInstallBinary); err != nil || status.Status != ArtifactCurrent {
+		t.Fatalf("upgraded watcher status = %+v, %v", status, err)
+	}
+	if result, err := Run(t.Context(), Options{Harness: id, Binary: testInstallBinary}); err != nil || result.Changed {
+		t.Fatalf("watcher reinstall = %+v, %v", result, err)
+	}
+	requireClaudeWatcherRemoval(t, id, path, userCommands)
+}
+
+func writeOldClaudeWatcherFixture(t *testing.T, path string, userCommands []string) {
+	t.Helper()
+	handlers := make([]any, 0, 1+len(userCommands))
+	handlers = append(handlers, map[string]any{"type": "command", "command": "'/old/bin/renamed tracker' --json hook claude --event FileChanged"})
+	for _, command := range userCommands {
+		handlers = append(handlers, map[string]any{"type": "command", "command": command})
+	}
+	config := map[string]any{"theme": "dark", "hooks": map[string]any{
+		"SessionStart": []any{map[string]any{"matcher": "startup|resume|clear", "hooks": []any{map[string]any{"type": "command", "command": "'/old/bin/renamed tracker' report claude --activity idle --event SessionStart --reporter-version 13 --reporter claude-hook --raw-stdin --quiet"}}}},
+		"FileChanged":  []any{map[string]any{"matcher": "user.txt", "hooks": handlers}},
+	}}
+	data, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requireClaudeWatcherRemoval(t *testing.T, id registry.Harness, path string, commands []string) {
+	t.Helper()
+	if result, err := Remove(t.Context(), Options{Harness: id, Binary: testInstallBinary}); err != nil || !result.Changed {
+		t.Fatalf("watcher removal = %+v, %v", result, err)
+	}
+	data := readTestFile(t, path, "reading removed watcher")
+	if strings.Contains(string(data), `"command": "/usr/local/bin/aht --json hook`) {
+		t.Fatalf("managed watcher remained after removal: %s", data)
+	}
+	requirePreservedUserHookCommands(t, data, commands)
+}
+
+func requirePreservedUserHookCommands(t *testing.T, data []byte, commands []string) {
+	t.Helper()
+	for _, command := range commands {
+		encoded, err := json.Marshal(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, encoded) {
+			t.Fatalf("user hook %q lost: %s", command, data)
+		}
+	}
+}
+
+func requireClaudeNativeWatchers(t *testing.T, config map[string]any) {
+	t.Helper()
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected installed hook object")
+	}
+	for _, event := range []string{"SessionStart", "FileChanged"} {
+		groups, ok := hooks[event].([]any)
+		if !ok {
+			t.Fatalf("expected %s hook groups", event)
+		}
+		requireClaudeNativeWatcher(t, groups, event)
+	}
+}
+
+func requireClaudeNativeWatcher(t *testing.T, groups []any, event string) {
+	t.Helper()
+	watchers := 0
+	for _, value := range groups {
+		group, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook group object", event)
+		}
+		watchers += countClaudeNativeWatcherHooks(t, group, event)
+	}
+	if watchers != 1 {
+		t.Fatalf("%s watcher count = %d, want one", event, watchers)
+	}
+}
+
+func countClaudeNativeWatcherHooks(t *testing.T, group map[string]any, event string) int {
+	t.Helper()
+	hooks, ok := group["hooks"].([]any)
+	if !ok {
+		t.Fatalf("expected %s hook handlers", event)
+	}
+	watchers := 0
+	for _, value := range hooks {
+		handler, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("expected %s hook handler object", event)
+		}
+		if handler["command"] != testInstallBinary+" --json hook claude --event "+event {
+			continue
+		}
+		watchers++
+		if _, exists := group["matcher"]; exists {
+			t.Fatalf("dynamic %s watcher has matcher: %#v", event, group)
+		}
+	}
+	return watchers
+}
+
+type managedReplacementCase struct {
+	Harness              registry.Harness
+	Path                 string
+	RemovedText          string
+	RequiredText         []string
+	FirstChangeMessage   string
+	SecondChangedMessage string
+}
+
+func requireManagedReplacement(t *testing.T, test managedReplacementCase) {
+	t.Helper()
+
+	result, err := Run(t.Context(), Options{
+		Harness:      test.Harness,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal(test.FirstChangeMessage)
+	}
+
+	text := string(readTestFile(t, test.Path, "reading installed hooks"))
+	if strings.Contains(text, test.RemovedText) {
+		t.Fatalf("expected old managed hook to be removed: %s", text)
+	}
+	requireTextContainsAll(t, text, test.RequiredText, "installed hooks")
+
+	second, err := Run(t.Context(), Options{
+		Harness:      test.Harness,
+		Binary:       testInstallBinary,
+		TargetBinary: "",
+		DryRun:       false,
+		Force:        false,
+		UseShim:      false,
+	})
+	if err != nil {
+		t.Fatalf("second Run returned error: %v", err)
+	}
+	if second.Changed {
+		t.Fatal(test.SecondChangedMessage)
+	}
+	if second.NextStep != "" {
+		t.Fatalf("idempotent install unexpectedly requires activation: %q", second.NextStep)
+	}
+}
+
+func requireTestHookCommand(t *testing.T, hooks map[string]any, event string) string {
+	t.Helper()
+	handler := requireTestHookHandler(t, hooks, event)
+	command, ok := handler["command"].(string)
+	if !ok || command == "" {
+		t.Fatalf("expected %s hook command, got %#v", event, handler["command"])
+	}
+	return command
+}
+
+func requireTestHookTimeoutSeconds(t *testing.T, hooks map[string]any, event string) float64 {
+	t.Helper()
+	handler := requireTestHookHandler(t, hooks, event)
+	timeoutSeconds, ok := handler["timeout"].(float64)
+	if !ok {
+		t.Fatalf("expected %s hook timeout, got %#v", event, handler["timeout"])
+	}
+	return timeoutSeconds
+}
+
+func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) map[string]any {
+	t.Helper()
+
+	groups, ok := hooks[event].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("expected one %s hook group, got %#v", event, hooks[event])
+	}
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s hook group object, got %#v", event, groups[0])
+	}
+	handlers, ok := group["hooks"].([]any)
+	if !ok || len(handlers) != 1 {
+		t.Fatalf("expected one %s hook handler, got %#v", event, group["hooks"])
+	}
+	handler, ok := handlers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s hook handler object, got %#v", event, handlers[0])
+	}
+	return handler
 }

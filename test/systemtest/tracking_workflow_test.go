@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,21 +43,12 @@ type systemWatchEvent struct {
 }
 
 func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
-	root, err := shortSystemTestRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := shortSystemTestRoot(t, "home", "config", "state", "work")
 	binary := buildSystemTestBinary(t, root)
 	home := filepath.Join(root, "home")
 	configHome := filepath.Join(root, "config")
 	stateDir := filepath.Join(root, "state")
 	workingDir := filepath.Join(root, "work")
-	for _, directory := range []string{home, configHome, stateDir, workingDir} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatalf("create isolated directory %q: %v", directory, err)
-		}
-	}
 
 	environment := systemTestEnvironment(home, configHome, stateDir)
 	storePath := filepath.Join(stateDir, "sessions.json")
@@ -70,10 +62,10 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 		t.Fatalf("initial watch event = %#v, want empty snapshot", initial)
 	}
 
-	const sensitiveSentinel = "AHT_PHASE_ONE_PRIVATE_PROMPT"
-	maliciousSessionID := "phase-one-session\x1b]0;owned\x07\u202ereordered"
+	const sensitiveSentinel = "AHT_PRIVATE_PROMPT_SENTINEL"
+	maliciousSessionID := "tracked-session\x1b]0;owned\x07\u202ereordered"
 	maliciousCWD := workingDir + "/\x1b[31mcolored\x1b[0m"
-	reportInput := strings.NewReader(`{"session_id":"phase-one-session","cwd":"` + workingDir + `","hook_event_name":"UserPromptSubmit","model":"gpt-5","prompt":"` + sensitiveSentinel + `","tool_input":{"command":"private"}}`)
+	reportInput := strings.NewReader(`{"session_id":"tracked-session","cwd":"` + workingDir + `","hook_event_name":"UserPromptSubmit","model":"gpt-5","prompt":"` + sensitiveSentinel + `","tool_input":{"command":"private"}}`)
 	reportOutput := runSystemTestCommand(
 		t,
 		binary,
@@ -95,11 +87,11 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	if err := json.Unmarshal(reportOutput, &reported); err != nil {
 		t.Fatalf("decode report output %q: %v", reportOutput, err)
 	}
-	assertPhaseOneSession(t, reported, maliciousSessionID, maliciousCWD)
+	assertTrackedSession(t, reported, maliciousSessionID, maliciousCWD)
 
 	observed := receiveSessionWatchEvent(t, watchCommand, watchEvents, reported.SessionID)
-	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityUnknown {
-		t.Fatalf("watch event = %#v, want live Codex session with screen-authoritative activity pending", observed)
+	if observed.Harness != registry.Harness("codex") || observed.Presence != registry.PresenceLive || observed.Activity == nil || *observed.Activity != registry.ActivityRunning {
+		t.Fatalf("watch event = %#v, want live Codex session running from native report", observed)
 	}
 	stopSystemTestCommand(t, watchCommand)
 
@@ -112,8 +104,8 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	if err := json.Unmarshal(infoOutput, &info); err != nil {
 		t.Fatalf("decode info output %q: %v", infoOutput, err)
 	}
-	assertSamePhaseOneSession(t, reported, listed)
-	assertSamePhaseOneSession(t, reported, info)
+	assertSameTrackedSession(t, reported, listed)
+	assertSameTrackedSession(t, reported, info)
 
 	assertHumanCommandSafe(t, &transcript, binary, workingDir, environment, []string{"--store", storePath, "list", "--full"})
 	assertHumanCommandSafe(t, &transcript, binary, workingDir, environment, []string{"--store", storePath, "info", reported.SessionID})
@@ -129,7 +121,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	restartedListOutput := runSystemTestCommand(t, binary, workingDir, environment, nil, "--store", storePath, "--json", "list")
 	transcript.Write(restartedListOutput)
 	restarted := decodeSessionByID(t, "restarted list", restartedListOutput, reported.SessionID)
-	assertSamePhaseOneSession(t, reported, restarted)
+	assertSameTrackedSession(t, reported, restarted)
 	if restarted.UpdatedAt.Before(reported.UpdatedAt) {
 		t.Fatalf("restarted session updated_at = %s, before reported %s", restarted.UpdatedAt, reported.UpdatedAt)
 	}
@@ -138,8 +130,23 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	assertSensitiveSentinelAbsent(t, root, sensitiveSentinel, transcript.Bytes())
 }
 
-func shortSystemTestRoot() (string, error) {
-	return os.MkdirTemp("/tmp", "aht-systest-")
+func shortSystemTestRoot(t *testing.T, directories ...string) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/tmp", "aht-systest-") //nolint:usetesting // reason: broker socket paths under t.TempDir and macOS TMPDIR exceed the Unix socket path limit; cleanup is registered below.
+	if err != nil {
+		t.Fatalf("create system test root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Errorf("remove system test root: %v", err)
+		}
+	})
+	for _, directory := range directories {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
+			t.Fatalf("create isolated directory %q: %v", directory, err)
+		}
+	}
+	return root
 }
 
 func buildSystemTestBinary(t *testing.T, root string) string {
@@ -149,7 +156,7 @@ func buildSystemTestBinary(t *testing.T, root string) string {
 		t.Fatalf("resolve repository root: %v", err)
 	}
 	binary := filepath.Join(root, "aht")
-	command := exec.Command("go", "build", "-o", binary, ".")
+	command := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
 	command.Dir = repositoryRoot
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -179,10 +186,7 @@ func systemTestEnvironment(home string, configHome string, stateDir string) []st
 
 func startSystemTestCommand(t *testing.T, binary string, directory string, environment []string, args ...string) *runningTestCommand {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, args...), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
-	process.command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	process := newRunningTestCommand(t, binary, directory, environment, args...)
 	process.command.Stdout = &process.stdout
 	process.command.Stderr = &process.stderr
 	if err := process.command.Start(); err != nil {
@@ -198,6 +202,18 @@ func startSystemTestCommand(t *testing.T, binary string, directory string, envir
 		}
 	})
 	return process
+}
+
+func newRunningTestCommand(t *testing.T, binary string, directory string, environment []string, args ...string) *runningTestCommand {
+	t.Helper()
+	command := exec.CommandContext(t.Context(), binary, args...)
+	command.Dir = directory
+	command.Env = environment
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	}
+	return &runningTestCommand{command: command, done: make(chan error, 1)}
 }
 
 func stopSystemTestCommand(t *testing.T, process *runningTestCommand) {
@@ -251,9 +267,7 @@ type watchResult struct {
 
 func startJSONWatch(t *testing.T, binary string, directory string, environment []string, storePath string) (*runningTestCommand, <-chan watchResult) {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, "--store", storePath, "--json", "watch"), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
+	process := newRunningTestCommand(t, binary, directory, environment, "--store", storePath, "--json", "watch")
 	stdout, err := process.command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("create watch stdout pipe: %v", err)
@@ -363,13 +377,13 @@ func decodeSessionByID(t *testing.T, source string, data []byte, sessionID strin
 	return registry.Session{}
 }
 
-func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
+func assertTrackedSession(t *testing.T, session registry.Session, sessionID string, cwd string) {
 	t.Helper()
-	if session.SchemaVersion != 3 || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
-		t.Fatalf("session identity = %#v, want schema-v3 phase-one Codex session", session)
+	if session.SchemaVersion != registry.StoreSchemaVersion || session.SessionID != sessionID || session.Harness != registry.Harness("codex") {
+		t.Fatalf("session identity = %#v, want reported Codex session", session)
 	}
-	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityUnknown {
-		t.Fatalf("effective session state = presence %q activity %v, want live/unknown until screen evidence", session.Presence(), session.Activity())
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityRunning {
+		t.Fatalf("effective session state = presence %q activity %v, want live/running from native report", session.Presence(), session.Activity())
 	}
 	if session.Observations.Native == nil || session.Observations.Native.Activity == nil || *session.Observations.Native.Activity != registry.ActivityRunning {
 		t.Fatalf("reported activity = %#v, want running native observation", session.Observations.Native)
@@ -379,11 +393,14 @@ func assertPhaseOneSession(t *testing.T, session registry.Session, sessionID str
 	}
 }
 
-func assertSamePhaseOneSession(t *testing.T, want registry.Session, got registry.Session) {
+func assertSameTrackedSession(t *testing.T, want registry.Session, got registry.Session) {
 	t.Helper()
-	assertPhaseOneSession(t, got, want.SessionID, want.CWD)
+	assertTrackedSession(t, got, want.SessionID, want.CWD)
 	if got.ID != want.ID || !got.CreatedAt.Equal(want.CreatedAt) || got.UpdatedAt.Before(want.UpdatedAt) {
 		t.Fatalf("session changed across surfaces: want=%#v got=%#v", want, got)
+	}
+	if !got.ActivityChangedAt.Equal(want.ActivityChangedAt) {
+		t.Fatalf("activity clock = %s, want %s", got.ActivityChangedAt, want.ActivityChangedAt)
 	}
 }
 
@@ -399,10 +416,31 @@ func assertHumanCommandSafe(t *testing.T, transcript *bytes.Buffer, binary strin
 
 func assertHumanWatchSafe(t *testing.T, transcript *bytes.Buffer, binary string, directory string, environment []string, storePath string) {
 	t.Helper()
-	process := &runningTestCommand{command: exec.Command(binary, "--store", storePath, "watch", "--format", "plain"), done: make(chan error, 1)}
-	process.command.Dir = directory
-	process.command.Env = environment
-	process.command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	process, line, scannerDone := startPlainWatch(t, binary, directory, environment, storePath)
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case output, ok := <-line:
+		if !ok {
+			t.Fatalf("human watch closed without output; stderr=%q", process.stderr.String())
+		}
+		transcript.Write(output)
+		assertTerminalSafe(t, output)
+		if !bytes.Contains(output, []byte("owned")) || !bytes.Contains(output, []byte("reordered")) {
+			t.Fatalf("human watch lost recognizable safe text: %q", output)
+		}
+	case err := <-process.done:
+		t.Fatalf("human watch exited before snapshot: %v; stderr=%q", err, process.stderr.String())
+	case <-timer.C:
+		t.Fatalf("timed out waiting for human watch snapshot; stderr=%q", process.stderr.String())
+	}
+	stopSystemTestCommand(t, process)
+	<-scannerDone
+}
+
+func startPlainWatch(t *testing.T, binary string, directory string, environment []string, storePath string) (*runningTestCommand, <-chan []byte, <-chan struct{}) {
+	t.Helper()
+	process := newRunningTestCommand(t, binary, directory, environment, "--store", storePath, "watch", "--format", "plain")
 	stdout, err := process.command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("create human watch stdout pipe: %v", err)
@@ -441,25 +479,7 @@ func assertHumanWatchSafe(t *testing.T, transcript *bytes.Buffer, binary string,
 		}
 		<-scannerDone
 	})
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case output, ok := <-line:
-		if !ok {
-			t.Fatalf("human watch closed without output; stderr=%q", process.stderr.String())
-		}
-		transcript.Write(output)
-		assertTerminalSafe(t, output)
-		if !bytes.Contains(output, []byte("owned")) || !bytes.Contains(output, []byte("reordered")) {
-			t.Fatalf("human watch lost recognizable safe text: %q", output)
-		}
-	case err := <-process.done:
-		t.Fatalf("human watch exited before snapshot: %v; stderr=%q", err, process.stderr.String())
-	case <-timer.C:
-		t.Fatalf("timed out waiting for human watch snapshot; stderr=%q", process.stderr.String())
-	}
-	stopSystemTestCommand(t, process)
-	<-scannerDone
+	return process, line, scannerDone
 }
 
 func assertTerminalSafe(t *testing.T, output []byte) {
@@ -489,23 +509,32 @@ func assertSensitiveSentinelAbsent(t *testing.T, root string, sentinel string, t
 	if bytes.Contains(transcript, []byte(sentinel)) {
 		t.Fatalf("sensitive sentinel appears in command output")
 	}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := rootFS.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	err = fs.WalkDir(rootFS.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := rootFS.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 		if bytes.Contains(data, []byte(sentinel)) {
-			return fmt.Errorf("sensitive sentinel appears in %s", path)
+			t.Errorf("sensitive sentinel appears in %s", path)
 		}
 		return nil
 	})
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 }

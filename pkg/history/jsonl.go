@@ -2,7 +2,6 @@ package history
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,21 +22,57 @@ import (
 const (
 	excerptRunes        = 240
 	scannerInitialBytes = 4096
-	titleRunes          = 80
+	promptRunes         = 160
 )
 
 var errInvalidRecord = native.ErrInvalidRecord
 
 type transcript struct {
-	match      Match
-	recognized bool
+	match       Match
+	recognized  bool
+	hits        []bool
+	excluded    bool
+	lastMessage string
 }
 
-func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File) {
+func newDatabaseTranscript(c Conversation) transcript {
+	return transcript{
+		match:       Match{Conversation: c, Excerpts: nil, MatchingParts: 0, ResumeCommand: nil, RegistryStates: nil},
+		recognized:  true,
+		hits:        nil,
+		excluded:    false,
+		lastMessage: "",
+	}
+}
+
+// absorb folds the text matches of a child history into t. Conversation
+// metadata stays t's own, so filters judge the session its parent recorded.
+func (t *transcript) absorb(child *transcript, excerpts int) {
+	t.excluded = t.excluded || child.excluded
+	t.match.MatchingParts += child.match.MatchingParts
+	if t.hits == nil && child.hits != nil {
+		t.hits = make([]bool, len(child.hits))
+	}
+	for i, hit := range child.hits {
+		t.hits[i] = t.hits[i] || hit
+	}
+	room := max(excerpts-len(t.match.Excerpts), 0)
+	t.match.Excerpts = append(t.match.Excerpts, child.match.Excerpts[:min(room, len(child.match.Excerpts))]...)
+}
+
+// qualifies reports whether every term matched and no exclusion did.
+func (t *transcript) qualifies(terms int) bool {
+	if t.excluded || t.match.MatchingParts == 0 || len(t.hits) < terms {
+		return false
+	}
+	return !slices.Contains(t.hits, false)
+}
+
+func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File) *transcript {
 	info, err := file.Stat()
 	if err != nil {
 		s.issue(source, path, err)
-		return
+		return nil
 	}
 
 	var t transcript
@@ -58,11 +94,10 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		input = io.TeeReader(input, s.writer.hash)
 	}
 	reader := bufio.NewReaderSize(input, scannerInitialBytes)
-	lines, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines)
-	if ctx.Err() == nil && !t.identified() {
+	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines)
+	if ctx.Err() == nil && !t.identified() && (records > 0 || start > 0) {
 		s.issue(source, path, errUnknownFormat)
 	}
-	s.add(ctx, t.match)
 	if s.writer != nil {
 		s.writer.checkpoint.Conversation = t.match.Conversation
 		s.writer.checkpoint.Recognized = t.recognized
@@ -71,10 +106,14 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		s.writer.checkpoint.Size = info.Size()
 		s.writer.checkpoint.Digest = hex.EncodeToString(s.writer.hash.Sum(nil))
 	}
+	return &t
 }
 
-func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int) (int, bool) {
+func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int) (int, int, bool) {
 	complete := false
+	records := 0
+	readerSpec := catalog.TranscriptFor(source.Harness)
+	decoder := s.decoder(source, t)
 	for line := lines + 1; ; line++ {
 		data, readErr := readRecordLine(ctx, reader)
 		if errors.Is(readErr, io.EOF) || ctx.Err() != nil {
@@ -92,20 +131,20 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		if len(strings.TrimSpace(string(data))) == 0 {
 			continue
 		}
-		if s.canQuickUpdate(t, data) {
-			s.quickUpdateMetadata(t, data)
+		records++
+		if readerSpec.FastRecord != nil && readerSpec.FastRecord(ctx, decoder, data, line) {
 			continue
 		}
 		var r native.Record
 		if json.Unmarshal(data, &r) != nil {
-			s.issue(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
+			s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
 			continue
 		}
-		if parse := catalog.TranscriptFor(source.Harness).Record; parse != nil {
-			parse(ctx, s.decoder(source, t), r, line)
+		if readerSpec.Record != nil {
+			readerSpec.Record(ctx, decoder, r, line)
 		}
 	}
-	return lines, complete
+	return lines, records, complete
 }
 
 func readRecordLine(ctx context.Context, reader *bufio.Reader) ([]byte, error) {
@@ -154,68 +193,131 @@ func (t *transcript) identified() bool { return t.recognized && t.match.Conversa
 // either appends it to the index writer or matches it. Metadata is
 // mode-independent: IncludeTools filtering belongs to the writer and to
 // matchText, never here.
-func (s *search) capture(ctx context.Context, t *transcript, role, body, id string, line int, timestamp time.Time) {
+func (s *search) capture(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	c := &t.match.Conversation
-	if !timestamp.IsZero() {
-		if c.CreatedAt.IsZero() || timestamp.Before(c.CreatedAt) {
-			c.CreatedAt = timestamp
-		}
-		if timestamp.After(c.UpdatedAt) {
-			c.UpdatedAt = timestamp
-		}
-	}
-	if c.Title == "" && role == "user" {
-		c.Title = clip(cleanPromptTitle(body), titleRunes)
+	extendTimes(c, timestamp)
+	t.countMessage(role, id, line)
+	if c.Prompt == "" && role == "user" {
+		c.Prompt = clip(cleanPrompt(body), promptRunes)
 	}
 	if s.writer != nil {
-		s.writer.append(ctx, Excerpt{Role: role, Text: body, MessageID: id, Line: line, Timestamp: timestamp})
+		s.writer.append(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
 		return
 	}
 	s.matchText(t, role, body, id, line, timestamp)
 }
 
-// matchText records the first match of the normalized needle in one message part
-// and builds a bounded window around it. Tool parts are skipped unless the query
-// includes tools: this is the only place that decision is made for matching, so
+func extendTimes(c *Conversation, timestamp time.Time) {
+	if timestamp.IsZero() {
+		return
+	}
+	if c.CreatedAt.IsZero() || timestamp.Before(c.CreatedAt) {
+		c.CreatedAt = timestamp
+	}
+	if timestamp.After(c.UpdatedAt) {
+		c.UpdatedAt = timestamp
+	}
+}
+
+func (t *transcript) countMessage(role, id string, line int) {
+	if role != "user" && role != "assistant" {
+		return
+	}
+	if key := id + "\x00" + strconv.Itoa(line); key != t.lastMessage || (id == "" && line == 0) {
+		t.lastMessage = key
+		t.match.Conversation.Messages++
+	}
+}
+
+// matchText records the first match of any term in one message part and builds
+// a bounded window around it. Tool parts are skipped unless the query includes
+// tools: this is the only place that decision is made for matching, so
 // conversation metadata stays independent of IncludeTools.
 func (s *search) matchText(t *transcript, role, body, id string, line int, timestamp time.Time) {
-	if role == "tool" && !s.query.IncludeTools {
+	if s.skipsPart(t, role) {
 		return
 	}
-	if s.query.Role != "" && s.query.Role != role {
-		return
-	}
-	value := body
+	normalized := body
 	if !s.query.CaseSensitive {
-		value = fold(value)
+		normalized = fold(body)
 	}
-	offset := strings.Index(value, s.needle)
-	if offset < 0 {
+	for _, m := range s.exclude {
+		if m.matches(body, normalized) {
+			t.excluded = true
+			return
+		}
+	}
+	if t.hits == nil {
+		t.hits = make([]bool, len(s.terms))
+	}
+	anchor, length, matched := t.recordHits(s.terms, body, normalized)
+	if !matched {
 		return
 	}
 	t.match.MatchingParts++
-	if len(t.match.Excerpts) >= maxExcerpts {
+	if len(t.match.Excerpts) >= s.query.Excerpts {
 		return
 	}
-	// The match offset belongs to folded text. Folding can change the rune count
-	// (ß folds to ss), so the window anchor is the unfolded rune index whose
-	// folded prefix covers that offset; case-sensitive matching never folds.
-	anchor := utf8.RuneCountInString(value[:offset])
-	runes := []rune(body)
-	if !s.query.CaseSensitive {
-		anchor = foldRuneIndex(body, anchor)
+	text := excerptWindow(body, anchor, length)
+	t.match.Excerpts = append(t.match.Excerpts, Excerpt{Role: role, Text: text, Spans: spans(text, s.terms), MessageID: id, Line: line, Timestamp: timestamp})
+}
+
+func (s *search) skipsPart(t *transcript, role string) bool {
+	if s.mode != modeSearch || t.excluded {
+		return true
 	}
-	anchor = min(max(anchor, 0), len(runes))
+	if role == "tool" && !s.query.IncludeTools {
+		return true
+	}
+	return s.query.Role != "" && s.query.Role != role
+}
+
+func (t *transcript) recordHits(terms []matcher, body, normalized string) (int, int, bool) {
+	anchor, length, matched := 0, 0, false
+	for i, m := range terms {
+		offset, runes, ok := m.first(body, normalized)
+		if !ok {
+			continue
+		}
+		t.hits[i] = true
+		if !matched || offset < anchor {
+			anchor, length = offset, runes
+		}
+		matched = true
+	}
+	return anchor, length, matched
+}
+
+func excerptWindow(body string, anchor, needleRunes int) string {
 	start := max(0, anchor-excerptRunes/4)
-	end := min(len(runes), start+max(excerptRunes, utf8.RuneCountInString(s.needle)))
-	excerpt := string(runes[start:end])
-	if start > 0 {
-		excerpt = "…" + excerpt
+	end := start + max(excerptRunes, needleRunes)
+	startByte, endByte := len(body), len(body)
+	runeIndex := 0
+	for byteOffset := range body {
+		if runeIndex == start {
+			startByte = byteOffset
+		}
+		if runeIndex == end {
+			endByte = byteOffset
+			break
+		}
+		runeIndex++
 	}
-	if end < len(runes) {
-		excerpt += "…"
+	if anchor > runeIndex {
+		return excerptWindow(body, runeIndex, needleRunes)
 	}
-	t.match.Excerpts = append(t.match.Excerpts, Excerpt{Role: role, Text: excerpt, MessageID: id, Line: line, Timestamp: timestamp})
+	excerpt := body[startByte:endByte]
+	if !utf8.ValidString(excerpt) {
+		excerpt = string([]rune(excerpt))
+	}
+	prefix, suffix := "", ""
+	if startByte > 0 {
+		prefix = "…"
+	}
+	if endByte < len(body) {
+		suffix = "…"
+	}
+	return prefix + excerpt + suffix
 }
 
 func clip(value string, limit int) string {
@@ -226,117 +328,11 @@ func clip(value string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
-func cleanPromptTitle(body string) string {
-	text := strings.TrimSpace(body)
-	if _, after, ok := strings.Cut(text, "</INSTRUCTIONS>"); ok {
-		if trimmed := strings.TrimSpace(after); trimmed != "" {
-			return trimmed
-		}
-	}
-	if _, after, ok := strings.Cut(text, "<INSTRUCTIONS>"); ok {
-		if trimmed := strings.TrimSpace(after); trimmed != "" {
-			return trimmed
-		}
-	}
-	if _, after, ok := strings.Cut(text, "</environment_context>"); ok {
-		if trimmed := strings.TrimSpace(after); trimmed != "" {
-			return trimmed
-		}
-	}
-	if strings.HasPrefix(text, "# AGENTS.md instructions") {
-		for line := range strings.SplitSeq(text, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "<") {
-				return trimmed
-			}
-		}
-	}
-	return text
-}
-
-func isSessionHeader(data []byte) bool {
-	return bytes.Contains(data, []byte(`"session"`)) ||
-		bytes.Contains(data, []byte(`"session_meta"`)) ||
-		bytes.Contains(data, []byte(`"session_info"`)) ||
-		bytes.Contains(data, []byte(`"title"`)) ||
-		bytes.Contains(data, []byte(`"custom-title"`)) ||
-		bytes.Contains(data, []byte(`"sessionId"`)) ||
-		bytes.Contains(data, []byte(`"cwd"`))
-}
-
-func (s *search) quickUpdateMetadata(t *transcript, data []byte) {
-	if ts := extractLineTimestamp(data); !ts.IsZero() {
-		c := &t.match.Conversation
-		if c.CreatedAt.IsZero() || ts.Before(c.CreatedAt) {
-			c.CreatedAt = ts
-		}
-		if ts.After(c.UpdatedAt) {
-			c.UpdatedAt = ts
-		}
-	}
-}
-
-func extractLineTimestamp(data []byte) time.Time {
-	_, after, ok := bytes.Cut(data, []byte(`"timestamp"`))
-	if !ok {
-		return time.Time{}
-	}
-	rest := bytes.TrimLeft(after, " \t:")
-	if len(rest) == 0 {
-		return time.Time{}
-	}
-	if rest[0] == '"' {
-		return extractStringTimestamp(rest)
-	}
-	return extractNumericTimestamp(rest)
-}
-
-func extractStringTimestamp(rest []byte) time.Time {
-	end := bytes.IndexByte(rest[1:], '"')
-	if end < 0 {
-		return time.Time{}
-	}
-	raw := rest[1 : end+1]
-	if bytes.IndexByte(raw, '\\') < 0 {
-		return native.NativeTime(string(raw))
-	}
-	var text string
-	if json.Unmarshal(rest[:end+2], &text) == nil {
-		return native.NativeTime(text)
-	}
-	return time.Time{}
-}
-
-func extractNumericTimestamp(rest []byte) time.Time {
-	end := 0
-	for end < len(rest) && (rest[end] >= '0' && rest[end] <= '9' || rest[end] == '.') {
-		end++
-	}
-	if end == 0 {
-		return time.Time{}
-	}
-	number, err := strconv.ParseFloat(string(rest[:end]), 64)
-	if err != nil || !(number > 0) {
-		return time.Time{}
-	}
-	const millisThreshold = 1e11
-	const millisPerSecond = 1000
-	if number >= millisThreshold {
-		number /= millisPerSecond
-	}
-	const latestUnixSecond = 253402300799
-	if number > latestUnixSecond {
-		return time.Time{}
-	}
-	seconds := int64(number)
-	return time.Unix(seconds, int64((number-float64(seconds))*float64(time.Second))).UTC()
-}
-
 func (s *search) handleLineReadError(source Source, path string, line int, err error) bool {
+	if errors.Is(err, errRecordSize) {
+		s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
+		return true
+	}
 	s.issue(source, path, fmt.Errorf("line %d: %w", line, err))
-	return errors.Is(err, errRecordSize)
-}
-
-func (s *search) canQuickUpdate(t *transcript, data []byte) bool {
-	return s.writer == nil && !s.containsNeedle(data) && t.identified() && !isSessionHeader(data) && t.match.Conversation.Title != ""
+	return false
 }

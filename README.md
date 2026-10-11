@@ -20,12 +20,14 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 [`hermes`](https://github.com/NousResearch/hermes-agent),
 [`openclaw`](https://github.com/openclaw/openclaw), [`grok`](https://github.com/superagent-ai/grok-cli),
 [`cursor`](https://cursor.com), [`copilot`](https://github.com/features/copilot),
-[`cline`](https://github.com/cline/cline), [`kimi-code`](https://github.com/MoonshotAI/kimi-cli),
+[`cline`](https://github.com/cline/cline), [`kimi-code`](https://github.com/MoonshotAI/kimi-code),
 [`goose`](https://github.com/block/goose),
 [`agy`](https://github.com/google-antigravity/antigravity-cli),
 [`kilo`](https://github.com/kilo-org/kilocode),
 [`droid`](https://factory.ai),
-[`amp`](https://ampcode.com).
+[`amp`](https://ampcode.com),
+[`crush`](https://github.com/charmbracelet/crush),
+[`qwen`](https://github.com/QwenLM/qwen-code).
 
 ## Installation
 
@@ -78,6 +80,20 @@ go get github.com/zigai/aht/v2
 See the [package documentation](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht) for the
 API guide and examples.
 
+## Fake model provider
+
+`fakeprovider` serves a scripted Anthropic and OpenAI compatible model API for tests, and starts
+an installed harness against it in a private root. Release archives include it.
+
+```sh
+go install github.com/zigai/aht/v2/cmd/fakeprovider@latest
+fakeprovider serve
+fakeprovider start pi
+```
+
+Go tests can use [`pkg/fakeprovider`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider)
+and [`pkg/fakeprovider/launch`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider/launch).
+
 ## Hook Installation
 
 ```sh
@@ -86,7 +102,9 @@ aht manage integrations install all
 aht manage integrations install codex --dry-run --show-content
 ```
 
-`<harness>` is a supported harness name from the list above.
+`<harness>` is a supported harness name from the list above. Codex installs and
+updates automatically trust only AHT hooks through the installed Codex CLI;
+missing Codex or failed trust updates fail the installation.
 
 ## License
 

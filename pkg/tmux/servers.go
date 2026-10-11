@@ -13,11 +13,11 @@ type serverSpec struct {
 	Identity string
 }
 
-func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, error) {
+func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("discover tmux servers: %w", err)
 	}
-	sockets := options.SocketPaths
+	sockets := opts.SocketPaths
 	if sockets == nil {
 		var err error
 		sockets, err = gotmux.DiscoverSockets()
@@ -28,7 +28,7 @@ func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, er
 	// gotmux discovers standard socket directories. Process inspection remains
 	// a fallback for custom -S paths outside those directories; it can only
 	// recover paths that the OS exposes in the server's process arguments.
-	processes, err := options.ServerProcesses(ctx)
+	processes, err := opts.ServerProcesses(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func discoverServers(ctx context.Context, options ListOptions) ([]serverSpec, er
 		servers = append(servers, server)
 	}
 
-	if socket := tmuxServerSocket(options.Env.TMUX); socket != "" {
+	if socket := tmuxServerSocket(opts.Env.TMUX); socket != "" {
 		add(serverSpec{Identity: socket})
 	}
 	for _, socket := range sockets {

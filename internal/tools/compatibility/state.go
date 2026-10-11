@@ -14,6 +14,18 @@ func emptyState() releaseState {
 	return releaseState{Schema: stateSchema, Harnesses: map[string]checkedRelease{}, Successful: map[string]checkedRelease{}}
 }
 
+func (state releaseState) invalidateOtherRevisions(revision string) {
+	if revision == "" {
+		return
+	}
+	for id, record := range state.Harnesses {
+		if record.Revision != revision {
+			record.Outcome = "incomplete"
+			state.Harnesses[id] = record
+		}
+	}
+}
+
 func validateState(state releaseState) error {
 	if state.Schema != stateSchema || state.Harnesses == nil || state.Successful == nil {
 		return fmt.Errorf("%w: invalid state; refusing to reset release history", errCompatibility)
@@ -63,34 +75,15 @@ func decodeStateArchive(body []byte) (releaseState, error) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return state, fmt.Errorf("decode state.json: %w", err)
 	}
-	if decoded.Schema == 1 {
-		// V1 did not distinguish install failures or retain earlier successes.
-		// Preserve all observations; only successful records can seed that history.
-		decoded.Schema = stateSchema
-		decoded.Successful = map[string]checkedRelease{}
-		for id, record := range decoded.Harnesses {
-			if record.Outcome != "success" && record.Outcome != "failure" {
-				return state, fmt.Errorf("%w: invalid legacy result", errCompatibility)
-			}
-			if record.Outcome == "success" {
-				decoded.Successful[id] = record
-			} else {
-				// A legacy failure may be an installation failure. Retry once
-				// under V2 to classify it without erasing the failed observation.
-				record.Outcome = "incomplete"
-				decoded.Harnesses[id] = record
-			}
-		}
-	}
 	return decoded, validateState(decoded)
 }
 
 func mergeResults(state releaseState, candidates []candidate, results []hostResult, runURL string) (releaseState, []string, error) {
 	next := releaseState{Schema: state.Schema, Harnesses: maps.Clone(state.Harnesses), Successful: maps.Clone(state.Successful)}
-	resultMap := make(map[string]hostResult, len(results))
+	resultsByRelease := make(map[string]hostResult, len(results))
 	for _, res := range results {
 		if recordedOutcome(res.Outcome) {
-			resultMap[res.Harness+":"+res.Version] = res
+			resultsByRelease[res.Harness+":"+res.Version] = res
 		}
 	}
 	var incomplete []string
@@ -99,7 +92,7 @@ func mergeResults(state releaseState, candidates []candidate, results []hostResu
 		if err != nil {
 			return next, incomplete, err
 		}
-		result, ok := resultMap[selected.Harness+":"+selected.Version]
+		result, ok := resultsByRelease[selected.Harness+":"+selected.Version]
 		if !ok {
 			result = hostResult{Harness: selected.Harness, Version: selected.Version, Outcome: "incomplete", Revision: ""}
 		}
