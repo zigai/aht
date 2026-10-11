@@ -101,17 +101,17 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
 
 ## Invariants and Simulation
 
-Registry, journal, and observer behavior is guarded by named invariants and
-seeded simulations, not only example tests:
+Registry, journal, and observer behavior is checked by named invariants and
+seeded simulations:
 
 - Session invariants live in `internal/registrycheck` (`core` holds the rules
-  so `pkg/registry` tests can share them). Cross-step registry invariants live in
-  `pkg/registry/invariants_test.go`.
-- When you change registry or observer behavior, add or extend a named
-  invariant, and make the parity, journal-crash, observer-simulation, or adapter
-  lifecycle generators reach the new situation. Record it as a required
+  `pkg/registry` tests share); cross-step registry invariants live in
+  `pkg/registry/invariants_test.go`. When a change introduces a new rule about
+  session state, add it there and record the situation as a required
   `registrycheck.Coverage` name so the property cannot pass vacuously.
-- A failing randomized test prints its seed. Reproduce it from that seed and
-  keep a regression case. Never weaken an invariant to make a run pass.
-- Run `just explore` (extended seeds via `AHT_EXTENDED_PARITY` and bounded
-  fuzzing) before merging risky registry, journal, or observer changes.
+- Registry file I/O goes through `registryFSFor` (`pkg/registry/fs.go`), so the
+  journal crash tests see every write, sync, and rename.
+- A failing randomized test prints its seed. Reproduce from that seed, fix the
+  code, and keep the seed as a regression case.
+- Run `just explore` (extended seeds and bounded fuzzing) before merging
+  registry, journal, or observer changes.
