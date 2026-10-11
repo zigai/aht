@@ -4,9 +4,14 @@ package install
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+	"pgregory.net/rapid"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -14,6 +19,65 @@ import (
 )
 
 const generatedRuntimeSensitiveSentinel = "AHT_SENSITIVE_SENTINEL"
+
+func TestInstalledKimiHookPreservesShellArguments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	adapter, found := catalog.Find(registry.Harness("kimi-code"))
+	if !found {
+		t.Fatal("Kimi adapter is missing")
+	}
+	definition := adapter.Definition()
+	script := runtimeScript(t, "sh/capture-arguments.sh")
+	rapid.Check(t, func(property *rapid.T) {
+		name := rapid.StringOfN(rapid.Rune().Filter(func(character rune) bool {
+			return character != 0 && character != '/'
+		}), 0, 24, 96).Draw(property, "binary name")
+		binary := filepath.Join(t.TempDir(), "capture-"+name)
+		if err := writeExecutableTestFile(binary, []byte(script)); err != nil {
+			property.Fatal(err)
+		}
+		result, err := Run(property.Context(), Options{Harness: definition.ID, Binary: binary})
+		if err != nil {
+			property.Fatal(err)
+		}
+		hook := installedKimiPermissionCommand(property, result.Path)
+		command := exec.CommandContext(property.Context(), "sh", "-c", hook)
+		command.Dir = home
+		output, err := command.Output()
+		if err != nil {
+			property.Fatalf("installed hook rejected for binary %q: %v", binary, err)
+		}
+		expected := strings.Join([]string{binary, "report", "kimi-code", "--activity", "waiting", "--event", "PermissionRequest", "--reporter-version", strconv.Itoa(definition.IntegrationVersion), "--reporter", definition.IntegrationSource, "--multi-session", "--raw-stdin", "--quiet", ""}, "\x00")
+		if string(output) != expected {
+			property.Fatalf("installed hook argv = %q, want %q", output, expected)
+		}
+	})
+}
+
+func installedKimiPermissionCommand(property *rapid.T, path string) string {
+	property.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		property.Fatal(err)
+	}
+	var config struct {
+		Hooks []struct {
+			Event   string `toml:"event"`
+			Command string `toml:"command"`
+		} `toml:"hooks"`
+	}
+	if err := toml.Unmarshal(data, &config); err != nil {
+		property.Fatalf("installed TOML rejected: %v", err)
+	}
+	for _, hook := range config.Hooks {
+		if hook.Event == "PermissionRequest" {
+			return hook.Command
+		}
+	}
+	property.Fatal("installed configuration has no PermissionRequest hook")
+	return ""
+}
 
 func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)

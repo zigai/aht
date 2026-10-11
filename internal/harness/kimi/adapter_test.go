@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -114,6 +116,20 @@ func TestNativePermissionDetailClearsAfterResolution(t *testing.T) {
 	}
 }
 
+func TestTOMLQuoteStringPreservesGeneratedStrings(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(property *rapid.T) {
+		value := rapid.String().Draw(property, "value")
+		var decoded map[string]string
+		if err := toml.Unmarshal([]byte("value = "+tomlQuoteString(value)), &decoded); err != nil {
+			property.Fatalf("TOML parser rejected %q: %v", value, err)
+		}
+		if decoded["value"] != value {
+			property.Fatalf("TOML round trip = %q, want %q", decoded["value"], value)
+		}
+	})
+}
+
 func TestTOMLQuoteStringRoundTrip(t *testing.T) {
 	t.Parallel()
 	cases := []string{
@@ -128,18 +144,12 @@ func TestTOMLQuoteStringRoundTrip(t *testing.T) {
 	}
 	for _, tc := range cases {
 		quoted := tomlQuoteString(tc)
-		if strings.Contains(quoted, "\x7f") {
-			t.Errorf("quoted string contains literal DEL: %q", quoted)
+		var decoded map[string]string
+		if err := toml.Unmarshal([]byte("value = "+quoted), &decoded); err != nil {
+			t.Fatalf("TOML parser rejected %q: %v", quoted, err)
 		}
-		if strings.Contains(quoted, `\a`) || strings.Contains(quoted, `\v`) {
-			t.Errorf("quoted string contains invalid TOML escape \\a or \\v: %q", quoted)
-		}
-		var unquoted string
-		if err := json.Unmarshal([]byte(quoted), &unquoted); err != nil {
-			t.Errorf("unmarshal failed for %q: %v", quoted, err)
-		}
-		if unquoted != tc {
-			t.Errorf("roundtrip mismatch: got %q, want %q", unquoted, tc)
+		if decoded["value"] != tc {
+			t.Errorf("roundtrip mismatch: got %q, want %q", decoded["value"], tc)
 		}
 	}
 }

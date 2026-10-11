@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -104,10 +106,220 @@ func TestIndexMatchesDirectScan(t *testing.T) {
 	for _, text := range []string{"needle", "NEEDLE", "istanbul", "你好", "你好世", "%b_", `"quoted"`, "AND OR", "a", "é", "after-token", "\x00after", "not-present"} {
 		for _, dir := range []string{"", "/work/a", "/"} {
 			for _, sensitive := range []bool{false, true} {
-				q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: 1, Dir: dir}
-				compareIndexedSearch(t, c, q)
+				for _, limit := range []int{0, 1, 2, 3} {
+					q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: limit, Dir: dir}
+					compareIndexedSearch(t, c, q)
+				}
 			}
 		}
+	}
+}
+
+func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(property *rapid.T) {
+		rootDir := t.TempDir()
+		root, err := os.OpenRoot(rootDir)
+		if err != nil {
+			property.Fatal(err)
+		}
+		property.Cleanup(func() {
+			if err := root.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		harness := rapid.SampledFrom([]registry.Harness{"pi", "omp", "codex", "claude"}).Draw(property, "harness")
+		count := rapid.IntRange(2, 5).Draw(property, "transcripts")
+		paths := make([]string, count)
+		for index := range paths {
+			paths[index] = "rollout-" + strconv.Itoa(index) + ".jsonl"
+			body := generatedHistory(property, harness, "native-"+strconv.Itoa(index))
+			if err := root.WriteFile(paths[index], body, 0o600); err != nil {
+				property.Fatal(err)
+			}
+		}
+		catalog := Catalog{Sources: []Source{{Harness: harness, Path: rootDir}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
+		initial := compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}})
+		if len(initial.Matches) != count {
+			property.Fatalf("generated native transcripts produced %d matches, want %d", len(initial.Matches), count)
+		}
+		mutations := rapid.SliceOfN(rapid.SampledFrom([]string{"append", "rewrite", "replace", "truncate", "remove", "restore", "tail", "same-size"}), 1, 20).Draw(property, "mutations")
+		checkGeneratedHistoryQueries(property, catalog, count)
+		for _, mutation := range mutations {
+			index := rapid.IntRange(0, count-1).Draw(property, "transcript")
+			mutateGeneratedHistory(property, root, paths[index], harness, "native-"+strconv.Itoa(index), mutation)
+			checkGeneratedHistoryQueries(property, catalog, count)
+		}
+	})
+}
+
+func checkGeneratedHistoryQueries(property *rapid.T, catalog Catalog, count int) {
+	for _, limit := range []int{0, 1, rapid.IntRange(2, count+2).Draw(property, "limit")} {
+		compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}, Limit: limit})
+	}
+	compareGeneratedHistorySearch(property, catalog, generatedHistoryQuery(property, count))
+}
+
+func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Query) Result {
+	property.Helper()
+	want, wantErr := catalog.searchDirect(property.Context(), query)
+	got, gotErr := catalog.Search(property.Context(), query)
+	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
+		property.Fatalf("query=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		property.Fatalf("query=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
+	}
+	return got
+}
+
+func generatedHistoryQuery(property *rapid.T, count int) Query {
+	terms := []string{"shared-token", "edited-token", "needle", "STRASSE", "\u0130stanbul", "\u754c", "absent-token"}
+	query := Query{
+		Terms:         rapid.SliceOfN(rapid.SampledFrom(terms), 1, 3).Draw(property, "terms"),
+		Exclude:       rapid.SliceOfN(rapid.SampledFrom(terms), 0, 2).Draw(property, "exclude"),
+		Regex:         rapid.Bool().Draw(property, "regex"),
+		Word:          rapid.Bool().Draw(property, "word"),
+		Role:          rapid.SampledFrom([]string{"", "user", "assistant", "tool", "all"}).Draw(property, "role"),
+		IncludeTools:  rapid.Bool().Draw(property, "include tools"),
+		CaseSensitive: rapid.Bool().Draw(property, "case sensitive"),
+		Excerpts:      rapid.IntRange(0, 5).Draw(property, "excerpts"),
+		Sort:          rapid.SampledFrom([]Sort{SortUpdated, SortCreated, SortMatches, SortMessages}).Draw(property, "sort"),
+		Limit:         rapid.IntRange(0, count+2).Draw(property, "query limit"),
+		Dir:           rapid.SampledFrom([]string{"", "/work", "/work/alpha", "/work/beta", "/other"}).Draw(property, "directory"),
+		ExcludeDirs:   rapid.SliceOfN(rapid.SampledFrom([]string{"/work/alpha", "/work/beta"}), 0, 1).Draw(property, "excluded directories"),
+		Model:         rapid.SampledFrom([]string{"", "model", "large", "absent"}).Draw(property, "model"),
+		MinMessages:   rapid.IntRange(0, 8).Draw(property, "minimum messages"),
+	}
+	if query.Regex {
+		for index, term := range query.Terms {
+			query.Terms[index] = regexp.QuoteMeta(term)
+		}
+		for index, term := range query.Exclude {
+			query.Exclude[index] = regexp.QuoteMeta(term)
+		}
+	}
+	return query
+}
+
+func generatedHistory(property *rapid.T, harness registry.Harness, id string) []byte {
+	property.Helper()
+	cwd := rapid.SampledFrom([]string{"/work/alpha", "/work/beta/subdir", "/other"}).Draw(property, "cwd")
+	timestamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(rapid.IntRange(0, 86400).Draw(property, "session time")) * time.Second).Format(time.RFC3339)
+	var header map[string]any
+	switch harness {
+	case "pi", "omp":
+		header = map[string]any{"type": "session", "id": id, "cwd": cwd, "timestamp": timestamp}
+	case "codex":
+		header = map[string]any{"type": "session_meta", "timestamp": timestamp, "payload": map[string]any{"id": id, "cwd": cwd, "model": "large-model"}}
+	case "claude":
+		header = map[string]any{"type": "user", "sessionId": id, "cwd": cwd, "timestamp": timestamp, "message": map[string]any{"role": "user", "content": "shared-token"}}
+	}
+	body := marshalGeneratedHistoryRecord(property, header)
+	body = append(body, generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "prompt"))...)
+	for range rapid.IntRange(1, 6).Draw(property, "message count") {
+		role := rapid.SampledFrom([]string{"user", "assistant", "toolResult"}).Draw(property, "message role")
+		text := rapid.SampledFrom([]string{"needle", "Stra\u00dfe", "\u0130stanbul", "\u754c", "shared-token"}).Draw(property, "message term") + " " + rapid.String().Draw(property, "message text")
+		body = append(body, generatedHistoryMessage(property, harness, id, role, text)...)
+	}
+	return body
+}
+
+func generatedHistoryMessage(property *rapid.T, harness registry.Harness, id, role, text string) []byte {
+	timestamp := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC).Add(time.Duration(rapid.IntRange(0, 86400).Draw(property, "message time")) * time.Second).Format(time.RFC3339)
+	message := map[string]any{"role": role, "content": text, "model": "large-model"}
+	var record map[string]any
+	switch harness {
+	case "pi", "omp":
+		record = map[string]any{"type": "message", "timestamp": timestamp, "message": message}
+	case "codex":
+		payload := map[string]any{"type": "message", "role": role, "content": []map[string]any{{"type": "input_text", "text": text}}}
+		if role == "toolResult" {
+			payload = map[string]any{"type": "function_call_output", "output": text}
+		}
+		record = map[string]any{"type": "response_item", "timestamp": timestamp, "payload": payload}
+	case "claude":
+		record = map[string]any{"type": role, "sessionId": id, "timestamp": timestamp, "message": message}
+	}
+	return marshalGeneratedHistoryRecord(property, record)
+}
+
+func marshalGeneratedHistoryRecord(property *rapid.T, record map[string]any) []byte {
+	property.Helper()
+	data, err := json.Marshal(record)
+	if err != nil {
+		property.Fatal(err)
+	}
+	return append(data, '\n')
+}
+
+func mutateGeneratedHistory(property *rapid.T, root *os.Root, path string, harness registry.Harness, id, mutation string) {
+	property.Helper()
+	body, err := root.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		property.Fatal(err)
+	}
+	if mutation == "remove" {
+		if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			property.Fatal(err)
+		}
+		return
+	}
+	if mutation == "same-size" {
+		mutateHistorySameSize(property, root, path, body)
+		return
+	}
+	body = generatedHistoryMutation(property, harness, id, mutation, body)
+	if mutation == "replace" {
+		pathReplacement := path + ".replacement"
+		if err := root.WriteFile(pathReplacement, body, 0o600); err != nil {
+			property.Fatal(err)
+		}
+		if err := root.Rename(pathReplacement, path); err != nil {
+			property.Fatal(err)
+		}
+		return
+	}
+	if err := root.WriteFile(path, body, 0o600); err != nil {
+		property.Fatal(err)
+	}
+}
+
+func generatedHistoryMutation(property *rapid.T, harness registry.Harness, id, mutation string, body []byte) []byte {
+	switch mutation {
+	case "append", "tail":
+		record := generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "appended text"))
+		if mutation == "tail" {
+			record = record[:rapid.IntRange(0, len(record)-1).Draw(property, "partial record bytes")]
+		}
+		return append(body, record...)
+	case "rewrite", "restore":
+		return generatedHistory(property, harness, id)
+	case "replace":
+		return generatedHistory(property, harness, "replacement-"+id)
+	case "truncate":
+		return body[:rapid.IntRange(0, len(body)).Draw(property, "remaining bytes")]
+	default:
+		property.Fatalf("unknown mutation %q", mutation)
+		return nil
+	}
+}
+
+func mutateHistorySameSize(property *rapid.T, root *os.Root, path string, body []byte) {
+	property.Helper()
+	info, err := root.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		property.Fatal(err)
+	}
+	changed := strings.ReplaceAll(string(body), "shared-token", "edited-token")
+	if err := root.WriteFile(path, []byte(changed), 0o600); err != nil {
+		property.Fatal(err)
+	}
+	if err := root.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		property.Fatal(err)
 	}
 }
 

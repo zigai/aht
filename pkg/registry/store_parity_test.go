@@ -1,16 +1,467 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	rand "math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"pgregory.net/rapid"
 )
+
+type registryModelValue struct {
+	Presence       Presence
+	Activity       Activity
+	Process        ProcessIdentity
+	CWD            string
+	Sequence       uint64
+	Event          string
+	NativeActivity Activity
+	NativeEnded    bool
+}
+
+type registryModelSession struct {
+	Value    registryModelValue
+	GoneAt   time.Time
+	NativeAt time.Time
+}
+
+type registryModelCommand struct {
+	ID       string
+	Kind     string
+	Activity Activity
+	Process  ProcessIdentity
+	Sequence uint64
+	At       time.Time
+}
+
+type registryStateMachine struct {
+	store interface {
+		Store
+		Reset(ctx context.Context) (ResetResult, error)
+	}
+	memory      *MemoryStore
+	path        string
+	backend     string
+	clock       time.Time
+	ttl         time.Duration
+	names       []string
+	generations map[string]int
+	sessions    map[string]registryModelSession
+	handles     map[string]string
+}
+
+func TestStoreBackendsMatchIndependentStateModel(t *testing.T) {
+	t.Parallel()
+	for _, backend := range []string{"journal", "memory"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			rapid.Check(t, func(property *rapid.T) {
+				machine := &registryStateMachine{
+					path: filepath.Join(t.TempDir(), "state.json"), backend: backend,
+					clock:       time.Now().UTC().Add(time.Hour),
+					ttl:         time.Duration(rapid.IntRange(1, 10).Draw(property, "tombstone minutes")) * time.Minute,
+					generations: map[string]int{}, sessions: map[string]registryModelSession{}, handles: map[string]string{},
+				}
+				for index := range rapid.IntRange(2, 5).Draw(property, "native identities") {
+					machine.names = append(machine.names, "native-"+strconv.Itoa(index)+"-"+rapid.StringMatching(`[[:alnum:]_-]+`).Draw(property, "native name"))
+				}
+				machine.open(property)
+				property.Cleanup(func() {
+					if machine.memory != nil {
+						if err := machine.memory.Close(); err != nil {
+							t.Error(err)
+						}
+					}
+				})
+				actions := map[string]func(*rapid.T){
+					"":              machine.check,
+					"screen":        machine.screen,
+					"process-gone":  machine.processGone,
+					"invalid-batch": machine.invalidBatch,
+					"batch":         machine.batch,
+					"gc":            machine.gc,
+					"advance":       machine.advance,
+					"reset":         machine.reset,
+					"reload":        machine.reload,
+				}
+				for _, kind := range []string{"start", "activity", "presence", "end", "resume", "replay", "stale", "unsequenced"} {
+					actions[kind] = func(property *rapid.T) { machine.report(property, kind) }
+				}
+				property.Repeat(actions)
+			})
+		})
+	}
+}
+
+func (machine *registryStateMachine) open(property *rapid.T) {
+	property.Helper()
+	if machine.backend == "journal" {
+		journal := NewJournal(machine.path, fixtureRules{})
+		journal.setNowForTest(func() time.Time { return machine.clock })
+		machine.store = journal
+		return
+	}
+	memory, err := OpenMemoryStoreWithOptions(machine.path, fixtureRules{}, MemoryStoreOptions{TombstoneTTL: machine.ttl})
+	if err != nil {
+		property.Fatal(err)
+	}
+	memory.setNowForTest(func() time.Time { return machine.clock })
+	machine.memory = memory
+	machine.store = memory
+}
+
+func (machine *registryStateMachine) command(property *rapid.T, index int, kind string) registryModelCommand {
+	id := machine.names[index]
+	previous, exists := machine.sessions[id]
+	process := previous.Value.Process
+	if !exists || kind == "resume" || (kind == "start" && previous.Value.Presence == PresenceGone) {
+		machine.generations[id]++
+		process = ProcessIdentity{PID: 100 + index, StartIdentity: id + ":" + strconv.Itoa(machine.generations[id]), Executable: "/agent", CWD: rapid.SampledFrom([]string{"/work/alpha", "/work/beta"}).Draw(property, "process cwd")}
+	}
+	machine.clock = machine.clock.Add(time.Millisecond)
+	activity := rapid.SampledFrom([]Activity{ActivityIdle, ActivityRunning, ActivityWaiting, ActivityFailed, ActivityInterrupted, ActivityUnknown}).Draw(property, "activity")
+	if kind == "presence" || kind == "end" {
+		activity = ""
+	}
+	return registryModelCommand{ID: id, Kind: kind, Activity: activity, Process: process, Sequence: previous.Value.Sequence + rapid.Uint64Range(2, 10).Draw(property, "sequence increase"), At: machine.clock}
+}
+
+func registryModelObservation(command registryModelCommand) Observation {
+	report := &Report{Reporter: Reporter{Integration: "model-extension", Sequence: new(command.Sequence)}, Event: command.Kind, Claim: new(PresenceLive), Process: new(command.Process)}
+	if command.Activity != "" {
+		report.Activity = new(command.Activity)
+	}
+	switch command.Kind {
+	case "start", "presence":
+		report.Lifecycle = new(NativeLifecycleStart)
+	case "resume":
+		report.Lifecycle = new(NativeLifecycleResume)
+	case "end":
+		report.Lifecycle = new(NativeLifecycleEnd)
+		report.Claim = new(PresenceGone)
+	}
+	return Observation{Harness: "model", At: command.At, Subject: ObservationIdentity{SessionID: command.ID, CWD: command.Process.CWD}, Evidence: report}
+}
+
+func (machine *registryStateMachine) accept(command registryModelCommand) {
+	previous, exists := machine.sessions[command.ID]
+	revives := command.Kind == "start" || command.Kind == "resume" || command.Kind == "presence"
+	if exists && previous.Value.Presence == PresenceGone && !revives {
+		return
+	}
+	current := previous
+	if !exists || previous.Value.Presence == PresenceGone || previous.Value.Process != command.Process {
+		current.Value.Activity = ActivityUnknown
+		current.Value.NativeActivity = ""
+	}
+	current.Value.Presence = PresenceLive
+	current.Value.Process = command.Process
+	current.Value.CWD = command.Process.CWD
+	current.Value.Sequence = command.Sequence
+	current.Value.Event = command.Kind
+	current.Value.NativeEnded = command.Kind == "end"
+	current.NativeAt = command.At
+	if command.Activity != "" {
+		current.Value.Activity = command.Activity
+		current.Value.NativeActivity = command.Activity
+	} else if current.Value.NativeActivity != "" {
+		current.Value.Activity = current.Value.NativeActivity
+	}
+	if command.Kind == "end" {
+		current.Value.Presence = PresenceGone
+		current.Value.Activity = ""
+		current.Value.NativeActivity = ""
+		current.GoneAt = command.At
+	}
+	machine.sessions[command.ID] = current
+}
+
+func (machine *registryStateMachine) report(property *rapid.T, kind string) {
+	index := rapid.IntRange(0, len(machine.names)-1).Draw(property, "session")
+	command := machine.command(property, index, kind)
+	if kind == "replay" || kind == "stale" || kind == "unsequenced" {
+		machine.rejectSequence(property, command)
+		return
+	}
+	if _, err := machine.store.Observe(property.Context(), registryModelObservation(command)); err != nil {
+		property.Fatalf("%s report: %v", kind, err)
+	}
+	machine.accept(command)
+	machine.expire()
+}
+
+func (machine *registryStateMachine) rejectSequence(property *rapid.T, command registryModelCommand) {
+	previous, exists := machine.sessions[command.ID]
+	if !exists || previous.Value.Sequence == 0 {
+		command.Kind = "start"
+		if _, err := machine.store.Observe(property.Context(), registryModelObservation(command)); err != nil {
+			property.Fatal(err)
+		}
+		machine.accept(command)
+		machine.expire()
+		return
+	}
+	observation := registryModelObservation(command)
+	switch command.Kind {
+	case "replay":
+		observation.Report().Reporter.Sequence = new(previous.Value.Sequence)
+	case "stale":
+		observation.Report().Reporter.Sequence = new(previous.Value.Sequence - 1)
+	case "unsequenced":
+		observation.Report().Reporter.Sequence = nil
+	}
+	if _, err := machine.store.Observe(property.Context(), observation); !errors.Is(err, ErrObservationConflict) {
+		property.Fatalf("%s sequence error = %v, want conflict", command.Kind, err)
+	}
+}
+
+func (machine *registryStateMachine) screen(property *rapid.T) {
+	index := rapid.IntRange(0, len(machine.names)-1).Draw(property, "session")
+	id := machine.names[index]
+	previous, exists := machine.sessions[id]
+	if !exists {
+		command := machine.command(property, index, "start")
+		if _, err := machine.store.Observe(property.Context(), registryModelObservation(command)); err != nil {
+			property.Fatal(err)
+		}
+		machine.accept(command)
+		previous = machine.sessions[id]
+	}
+	machine.clock = machine.clock.Add(time.Millisecond)
+	activity := rapid.SampledFrom([]Activity{ActivityIdle, ActivityRunning, ActivityWaiting, ActivityFailed, ActivityInterrupted, ActivityUnknown}).Draw(property, "screen activity")
+	observation := Observation{Harness: "model", At: machine.clock, Subject: ObservationIdentity{SessionID: id}, Evidence: &Reading{Activity: activity, Authority: AuthorityScreen, Reason: "manifest_rule", Process: previous.Value.Process}}
+	if _, err := machine.store.Observe(property.Context(), observation); err != nil {
+		property.Fatal(err)
+	}
+	if previous.Value.Presence != PresenceGone && (previous.Value.NativeActivity == "" || previous.Value.NativeActivity == ActivityUnknown || machine.clock.Sub(previous.NativeAt) > IntegrationActivityLease) {
+		previous.Value.Activity = activity
+		machine.sessions[id] = previous
+	}
+	machine.expire()
+}
+
+func (machine *registryStateMachine) processGone(property *rapid.T) {
+	index := rapid.IntRange(0, len(machine.names)-1).Draw(property, "session")
+	id := machine.names[index]
+	if _, exists := machine.sessions[id]; !exists {
+		command := machine.command(property, index, "start")
+		if _, err := machine.store.Observe(property.Context(), registryModelObservation(command)); err != nil {
+			property.Fatal(err)
+		}
+		machine.accept(command)
+	}
+	previous := machine.sessions[id]
+	machine.clock = machine.clock.Add(time.Millisecond)
+	observation := Observation{Harness: "model", At: machine.clock, Subject: ObservationIdentity{SessionID: id}, Evidence: &Sighting{Process: previous.Value.Process, Present: false}}
+	if _, err := machine.store.Observe(property.Context(), observation); err != nil {
+		property.Fatal(err)
+	}
+	if previous.Value.Presence != PresenceGone {
+		previous.GoneAt = machine.clock
+	}
+	previous.Value.Presence = PresenceGone
+	previous.Value.Activity = ""
+	machine.sessions[id] = previous
+	machine.expire()
+}
+
+func (machine *registryStateMachine) invalidBatch(property *rapid.T) {
+	index := rapid.IntRange(0, len(machine.names)-1).Draw(property, "session")
+	command := machine.command(property, index, "resume")
+	invalid := registryModelObservation(command)
+	invalid.Harness = "unknown"
+	batch := []Observation{registryModelObservation(command), invalid}
+	if _, err := machine.store.ObserveBatch(property.Context(), batch); !errors.Is(err, ErrInvalidObservation) {
+		property.Fatalf("invalid batch error = %v, want invalid observation", err)
+	}
+}
+
+func (machine *registryStateMachine) batch(property *rapid.T) {
+	first := rapid.IntRange(0, len(machine.names)-1).Draw(property, "first session")
+	second := (first + rapid.IntRange(1, len(machine.names)-1).Draw(property, "second session offset")) % len(machine.names)
+	commands := []registryModelCommand{machine.command(property, first, "resume"), machine.command(property, second, "activity")}
+	observations := []Observation{registryModelObservation(commands[0]), registryModelObservation(commands[1])}
+	if _, err := machine.store.ObserveBatch(property.Context(), observations); err != nil {
+		property.Fatal(err)
+	}
+	for _, command := range commands {
+		machine.accept(command)
+	}
+	machine.expire()
+}
+
+func (machine *registryStateMachine) gc(property *rapid.T) {
+	ages := []time.Duration{0, time.Duration(rapid.IntRange(0, 12).Draw(property, "GC age minutes")) * time.Minute}
+	for _, id := range machine.names {
+		session, exists := machine.sessions[id]
+		if !exists || session.Value.Presence != PresenceGone {
+			continue
+		}
+		elapsed := machine.clock.Sub(session.GoneAt)
+		ages = append(ages, elapsed, elapsed+time.Nanosecond)
+		if elapsed > 0 {
+			ages = append(ages, elapsed-time.Nanosecond)
+		}
+	}
+	age := rapid.SampledFrom(ages).Draw(property, "GC age")
+	deleted := 0
+	for id, session := range machine.sessions {
+		if session.Value.Presence == PresenceGone && machine.clock.Sub(session.GoneAt) >= age {
+			delete(machine.sessions, id)
+			delete(machine.handles, id)
+			deleted++
+		}
+	}
+	result, err := machine.store.GC(property.Context(), age)
+	if err != nil {
+		property.Fatal(err)
+	}
+	if result.Deleted != deleted || result.Remaining != len(machine.sessions) {
+		property.Fatalf("GC = %#v, want deleted=%d remaining=%d", result, deleted, len(machine.sessions))
+	}
+	machine.expire()
+}
+
+func (machine *registryStateMachine) advance(property *rapid.T) {
+	machine.clock = machine.clock.Add(time.Duration(rapid.IntRange(0, 12).Draw(property, "elapsed minutes")) * time.Minute)
+	if _, err := machine.store.ObserveBatch(property.Context(), nil); err != nil {
+		property.Fatal(err)
+	}
+	machine.expire()
+}
+
+func (machine *registryStateMachine) expire() {
+	if machine.backend != "memory" {
+		return
+	}
+	for id, session := range machine.sessions {
+		if session.Value.Presence == PresenceGone && machine.clock.Sub(session.GoneAt) >= machine.ttl {
+			delete(machine.sessions, id)
+			delete(machine.handles, id)
+		}
+	}
+}
+
+func (machine *registryStateMachine) reset(property *rapid.T) {
+	result, err := machine.store.Reset(property.Context())
+	if err != nil {
+		property.Fatal(err)
+	}
+	if result.Cleared != len(machine.sessions) || result.Remaining != 0 {
+		property.Fatalf("reset = %#v, want cleared=%d remaining=0", result, len(machine.sessions))
+	}
+	clear(machine.sessions)
+	clear(machine.handles)
+}
+
+func (machine *registryStateMachine) reload(property *rapid.T) {
+	if machine.memory != nil {
+		if err := machine.memory.Close(); err != nil {
+			property.Fatal(err)
+		}
+	}
+	machine.open(property)
+}
+
+func (machine *registryStateMachine) check(property *rapid.T) {
+	property.Helper()
+	sessions, err := machine.store.List(property.Context(), Filter{})
+	if err != nil {
+		property.Fatal(err)
+	}
+	got := map[string]registryModelValue{}
+	for _, session := range sessions {
+		if _, duplicate := got[session.SessionID]; duplicate {
+			property.Fatalf("duplicate native identity %q", session.SessionID)
+		}
+		if session.Harness != "model" || session.IdentityState != IdentityIdentified || session.Process == nil {
+			property.Fatalf("native identity lost: %#v", session)
+		}
+		if handle, exists := machine.handles[session.SessionID]; exists && handle != session.ID {
+			property.Fatalf("durable identity changed from %q to %q", handle, session.ID)
+		}
+		machine.handles[session.SessionID] = session.ID
+		got[session.SessionID] = registryModelProjection(session)
+		machine.checkGet(property, session)
+	}
+	want := map[string]registryModelValue{}
+	for id, session := range machine.sessions {
+		want[id] = session.Value
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		property.Fatalf("%s disagrees with independent model (-model +store):\n%s", machine.backend, diff)
+	}
+	machine.checkFilter(property)
+}
+
+func (machine *registryStateMachine) checkGet(property *rapid.T, listed Session) {
+	property.Helper()
+	want, exists := machine.sessions[listed.SessionID]
+	if !exists || listed.ID == "" {
+		property.Fatalf("unexpected identity %#v", listed)
+	}
+	got, err := machine.store.Get(property.Context(), listed.ID)
+	if err != nil {
+		property.Fatal(err)
+	}
+	if got.SessionID != listed.SessionID || got.Process == nil {
+		property.Fatalf("Get lost native identity: %#v", got)
+	}
+	if diff := cmp.Diff(want.Value, registryModelProjection(got)); diff != "" {
+		property.Fatalf("Get disagrees with independent model (-model +store):\n%s", diff)
+	}
+}
+
+func (machine *registryStateMachine) checkFilter(property *rapid.T) {
+	filter := Filter{
+		Presence: rapid.SampledFrom([]Presence{"", PresenceLive, PresenceGone, PresenceUnknown}).Draw(property, "presence filter"),
+		Activity: rapid.SampledFrom([]Activity{"", ActivityIdle, ActivityRunning, ActivityWaiting, ActivityFailed, ActivityInterrupted, ActivityUnknown}).Draw(property, "activity filter"),
+	}
+	filtered, err := machine.store.List(property.Context(), filter)
+	if err != nil {
+		property.Fatal(err)
+	}
+	want := map[string]registryModelValue{}
+	for id, session := range machine.sessions {
+		if (filter.Presence == "" || filter.Presence == session.Value.Presence) && (filter.Activity == "" || filter.Activity == session.Value.Activity) {
+			want[id] = session.Value
+		}
+	}
+	got := map[string]registryModelValue{}
+	for _, session := range filtered {
+		if session.Process == nil {
+			property.Fatalf("filtered session lost process: %#v", session)
+		}
+		got[session.SessionID] = registryModelProjection(session)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		property.Fatalf("filtered result disagrees with independent model (-model +store):\n%s", diff)
+	}
+}
+
+func registryModelProjection(session Session) registryModelValue {
+	value := registryModelValue{Presence: session.Presence(), CWD: session.CWD, Process: *session.Process, NativeEnded: session.Incarnation.NativeEnded}
+	if activity := session.Activity(); activity != nil {
+		value.Activity = *activity
+	}
+	if native := session.Observations.Native; native != nil {
+		value.Event = native.Event
+		if native.Reporter.Sequence != nil {
+			value.Sequence = *native.Reporter.Sequence
+		}
+		if native.Activity != nil {
+			value.NativeActivity = *native.Activity
+		}
+	}
+	return value
+}
 
 func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 	t.Parallel()
