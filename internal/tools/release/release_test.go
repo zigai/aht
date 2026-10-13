@@ -44,14 +44,13 @@ func successfulJobs() []workflowJob {
 	return jobs
 }
 
-// fakeGitHub serves the release, workflow, and issue endpoints for fixture/aht.
+// fakeGitHub serves the release and workflow endpoints for fixture/aht.
 type fakeGitHub struct {
 	mu           sync.Mutex
 	release      *release
 	deleted      []int64
 	runs         []workflowRun
 	jobs         []workflowJob
-	issues       []regressionIssue
 	runSnapshots [][]workflowRun
 	// fail, keyed by "METHOD /path", returns a status after optionally applying
 	// the request, simulating a rejected call or a lost response.
@@ -130,13 +129,6 @@ func (f *fakeGitHub) registerGateHandlers(t *testing.T, mux *http.ServeMux) {
 			t.Errorf("jobs query = %s", r.URL.RawQuery)
 		}
 		writeJSON(w, map[string]any{"jobs": f.jobs})
-	})
-	mux.HandleFunc("GET /repos/fixture/aht/issues", func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		if query.Get("state") != "open" || query.Get("creator") != issueCreator || query.Get("per_page") != "100" {
-			t.Errorf("issues query = %s", r.URL.RawQuery)
-		}
-		writeJSON(w, f.issues)
 	})
 }
 
@@ -308,71 +300,10 @@ func TestReleaseCancelsWhileWaitingForCI(t *testing.T) {
 	}
 }
 
-func trackedIssue(url string) regressionIssue {
-	issue := regressionIssue{
-		Body:  "Compatibility regression\n\n<!-- aht-compatibility:grok -->\n",
-		State: "open", HTMLURL: url,
-	}
-	issue.User.Login = issueCreator
-	return issue
-}
-
-func TestReleaseRejectsOnlyOpenTrackedBotRegressionIssues(t *testing.T) {
-	tests := []struct {
-		name   string
-		change func(*regressionIssue)
-		block  bool
-	}{
-		{"tracked bot issue", func(*regressionIssue) {}, true},
-		{"closed issue", func(i *regressionIssue) { i.State = "closed" }, false},
-		{"human issue", func(i *regressionIssue) { i.User.Login = "contributor" }, false},
-		{"different bot", func(i *regressionIssue) { i.User.Login = "other[bot]" }, false},
-		{"pull request", func(i *regressionIssue) { i.PullRequest = &struct{}{} }, false},
-		{"untracked issue", func(i *regressionIssue) { i.Body = "A different problem" }, false},
-		{"inline marker", func(i *regressionIssue) { i.Body = "Quoted <!-- aht-compatibility:grok -->" }, false},
-		{"marker suffix", func(i *regressionIssue) { i.Body = "<!-- aht-compatibility:grok --> extra" }, false},
-		{"invalid marker", func(i *regressionIssue) { i.Body = "<!-- aht-compatibility: -->" }, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newFixture(t)
-			issue := trackedIssue("https://example.invalid/issues/1")
-			tt.change(&issue)
-			f.github.issues = []regressionIssue{issue}
-			err := f.run(t, "require-ci")
-			if tt.block {
-				if !errors.Is(err, errRelease) || !strings.Contains(err.Error(), issue.HTMLURL) {
-					t.Fatalf("require-ci = %v, want tracked regression URL", err)
-				}
-			} else if err != nil {
-				t.Fatalf("untracked issue prevented release: %v", err)
-			}
-		})
-	}
-}
-
-func TestReleaseListsEveryTrackedRegressionURL(t *testing.T) {
-	f := newFixture(t)
-	f.github.issues = []regressionIssue{
-		trackedIssue("https://example.invalid/issues/1"),
-		trackedIssue("https://example.invalid/issues/2"),
-	}
-	err := f.run(t, "require-ci")
-	if !errors.Is(err, errRelease) {
-		t.Fatalf("require-ci = %v, want tracked regression failure", err)
-	}
-	for _, url := range []string{"https://example.invalid/issues/1", "https://example.invalid/issues/2"} {
-		if !strings.Contains(err.Error(), url) {
-			t.Errorf("regression failure %q lacks %s", err, url)
-		}
-	}
-}
-
 func TestReleasePropagatesGateAPIErrors(t *testing.T) {
 	for _, path := range []string{
 		"/repos/fixture/aht/actions/workflows/ci.yml/runs",
 		"/repos/fixture/aht/actions/runs/10/jobs",
-		"/repos/fixture/aht/issues",
 	} {
 		t.Run(path, func(t *testing.T) {
 			f := newFixture(t)
@@ -411,15 +342,6 @@ func paginationCases() []paginationCase {
 				map[string]any{"jobs": successfulJobs()[:2]},
 				map[string]any{"jobs": successfulJobs()[2:]},
 			},
-		},
-		{
-			name: "regression is on second page",
-			path: "/repos/fixture/aht/issues",
-			pages: [2]any{
-				[]regressionIssue{},
-				[]regressionIssue{trackedIssue("https://example.invalid/issues/2")},
-			},
-			wantText: "https://example.invalid/issues/2",
 		},
 	}
 }
