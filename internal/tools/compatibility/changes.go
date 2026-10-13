@@ -159,7 +159,7 @@ func (a application) changes(ctx context.Context) error {
 		}
 		// Without proven history, resolve each selected distribution once and
 		// pin the host job to the current supported release.
-		resolved, err := detect(ctx, emptyState(), id, false, client.supported)
+		resolved, err := detect(ctx, emptyState(), id, false, everyHarness, client.supported)
 		if err != nil {
 			return err
 		}

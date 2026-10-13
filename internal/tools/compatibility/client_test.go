@@ -72,7 +72,7 @@ func TestSupportedCapDoesNotHideLatestRelease(t *testing.T) {
 			if err != nil || version != tc.supported {
 				t.Fatalf("supported = %q, %v", version, err)
 			}
-			plan, err := detect(t.Context(), emptyState(), spec.ID, false, client.latest)
+			plan, err := detect(t.Context(), emptyState(), spec.ID, false, everyHarness, client.latest)
 			if err != nil || len(plan.Matrix.Include) != 1 || plan.Matrix.Include[0].Version != tc.latest {
 				t.Fatalf("upstream detection = %+v, %v", plan, err)
 			}

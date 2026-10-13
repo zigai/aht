@@ -59,6 +59,7 @@ type observation struct {
 type releasePlan struct {
 	Matrix       matrix        `json:"matrix"`
 	Observations []observation `json:"observations"`
+	Unreleased   []string      `json:"unreleased,omitempty"`
 }
 
 type checkedRelease struct {
@@ -161,7 +162,9 @@ func regression(spec harnessSpec, record checkedRelease) bool {
 	return err != nil || !above
 }
 
-func detect(ctx context.Context, state releaseState, selection string, force bool, latest func(context.Context, harnessSpec) (string, error)) (releasePlan, error) {
+func everyHarness(harnessSpec) bool { return true }
+
+func detect(ctx context.Context, state releaseState, selection string, force bool, released func(harnessSpec) bool, latest func(context.Context, harnessSpec) (string, error)) (releasePlan, error) {
 	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}}
 	if selection != "all" {
 		spec, err := findHarness(selection)
@@ -174,9 +177,14 @@ func detect(ctx context.Context, state releaseState, selection string, force boo
 	}
 	var entries []harnessSpec
 	for _, spec := range defaultCatalog {
-		if spec.Source != "weekly" && (selection == "all" || selection == spec.ID) {
-			entries = append(entries, spec)
+		if spec.Source == "weekly" || (selection != "all" && selection != spec.ID) {
+			continue
 		}
+		if !released(spec) {
+			plan.Unreleased = append(plan.Unreleased, spec.ID)
+			continue
+		}
+		entries = append(entries, spec)
 	}
 	plan.Observations = make([]observation, len(entries))
 	// Concurrency is bounded by the fixed catalog; every request has a timeout.

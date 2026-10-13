@@ -387,6 +387,24 @@ func assertChangeProcess(t *testing.T, command *exec.Cmd, output string, selecte
 	assertOutputs(t, output, fmt.Sprintf("selected=%t\n", selected))
 }
 
+func TestReleasedAdaptersListRevision(t *testing.T) {
+	dir := changeRepository(t)
+	commitChange(t, dir, "internal/harness/cursor/adapter.go", "package cursor")
+	release := commitChange(t, dir, "internal/harness/pi/adapter.go", "package pi")
+	commitChange(t, dir, "internal/harness/droid/adapter.go", "package droid")
+	t.Chdir(dir)
+	directories, err := releasedAdapters(t.Context(), release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(directories, []string{"cursor", "pi"}) {
+		t.Fatalf("adapters = %q", directories)
+	}
+	if _, err := releasedAdapters(t.Context(), strings.Repeat("0", 40)); err == nil {
+		t.Fatal("an unavailable release revision was treated as having no adapters")
+	}
+}
+
 func changeRepository(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
