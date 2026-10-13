@@ -25,6 +25,11 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if noInstallRequiredHarness(opts.Harness) {
+		if action, ok := nativeCatalogAction(plan); ok {
+			return noInstallRequiredResult(opts.Harness, action.Label), nil
+		}
+	}
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(opts.Harness))
 	shimStatus, err := ClassifyArtifact(shimPath)
 	if err != nil {
@@ -91,6 +96,8 @@ func removePlanAction(ctx context.Context, opts Options, harnessID registry.Harn
 	case harnesspkg.PluginDirectoryAction:
 		result, err := removePluginDirectoryWithRetired(ctx, opts, harnessID, typed.Plan)
 		return result, true, err
+	case harnesspkg.NativeCatalogAction:
+		return noInstallRequiredResult(harnessID, typed.Label), true, nil
 	case harnesspkg.ShimAction:
 		var result Result
 		return result, false, nil

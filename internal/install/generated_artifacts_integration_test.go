@@ -34,6 +34,9 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 		seenHarnesses[artifact.harness] = true
 	}
 	for _, harness := range Harnesses() {
+		if noInstallRequiredHarness(harness) {
+			continue
+		}
 		if !seenHarnesses[harness] {
 			t.Fatalf("generated artifact validation missed harness %q", harness)
 		}
@@ -148,6 +151,8 @@ func generatedActionArtifacts(t *testing.T, harness registry.Harness, binary cap
 			artifacts = append(artifacts, generatedArtifact{harness: harness, path: file.Name, content: content})
 		}
 		return artifacts
+	case harnesspkg.NativeCatalogAction:
+		return nil
 	case harnesspkg.ShimAction:
 		return []generatedArtifact{{harness: harness, path: string(harness) + ".sh", content: shimScript(binary.command, string(harness), "/usr/bin/true", catalog.IntegrationVersionFor(harness))}}
 	default:

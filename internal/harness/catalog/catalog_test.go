@@ -1,8 +1,10 @@
 package catalog
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +18,48 @@ import (
 )
 
 const testSessionID = "abc"
+
+var errTestCatalogCommand = errors.New("catalog command failed")
+
+type testCatalogAdapter struct {
+	harness.BaseAdapter
+
+	sessions []harness.CatalogSession
+	err      error
+}
+
+func (adapter testCatalogAdapter) Catalog(context.Context) ([]harness.CatalogSession, error) {
+	return adapter.sessions, adapter.err
+}
+
+func newTestCatalogAdapter(id registry.Harness, source string, sessions []harness.CatalogSession, err error) testCatalogAdapter {
+	return testCatalogAdapter{
+		BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+			ID: id, IntegrationSource: source, IntegrationVersion: 7,
+		}),
+		sessions: sessions,
+		err:      err,
+	}
+}
+
+func TestNativeCatalogComposesPartialProviderResults(t *testing.T) {
+	t.Parallel()
+	providerFailure := errTestCatalogCommand
+	entries, err := nativeCatalog(t.Context(), []harness.Adapter{
+		newTestCatalogAdapter("one", "one-catalog", []harness.CatalogSession{{SessionID: "current", Current: true, Activity: registry.ActivityRunning}}, nil),
+		newTestCatalogAdapter("two", "two-catalog", []harness.CatalogSession{{SessionID: "saved", Current: false}}, providerFailure),
+		newTestCatalogAdapter("three", "three-catalog", nil, harness.ErrCatalogUnavailable),
+	})
+	if !errors.Is(err, providerFailure) {
+		t.Fatalf("NativeCatalog() error = %v, want provider failure", err)
+	}
+	if len(entries) != 2 || entries[0].Harness != "one" || entries[1].Harness != "two" {
+		t.Fatalf("NativeCatalog() entries = %#v", entries)
+	}
+	if entries[0].Reporter.Integration != "one-catalog" || entries[0].Reporter.Version != 7 || !entries[0].Reporter.MultiSession {
+		t.Fatalf("native reporter = %#v", entries[0].Reporter)
+	}
+}
 
 func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
 	t.Parallel()
@@ -272,6 +316,20 @@ func TestResumeCommandFor(t *testing.T) {
 			sessionPath: "",
 			want:        []string{"qwen", "--resume", testSessionID},
 		},
+		{
+			name:        "prime-agent path",
+			harness:     registry.Harness("prime-agent"),
+			sessionID:   testSessionID,
+			sessionPath: "/tmp/prime-agent-session.jsonl",
+			want:        []string{"prime-agent", "--resume", "/tmp/prime-agent-session.jsonl"},
+		},
+		{
+			name:        "prime-agent id",
+			harness:     registry.Harness("prime-agent"),
+			sessionID:   testSessionID,
+			sessionPath: "",
+			want:        []string{"prime-agent", "--resume", testSessionID},
+		},
 	}
 
 	for _, test := range tests {
@@ -334,6 +392,9 @@ func TestParse(t *testing.T) {
 		{name: "qwen code alias", value: "qwen-code", want: registry.Harness("qwen")},
 		{name: "amp alias hyphen", value: "amp-code", want: registry.Harness("amp")},
 		{name: "amp alias underscore", value: "amp_code", want: registry.Harness("amp")},
+		{name: "prime-agent", value: "prime-agent", want: registry.Harness("prime-agent")},
+		{name: "prime-agent alias short", value: "prime", want: registry.Harness("prime-agent")},
+		{name: "prime-agent alias compact", value: "primeagent", want: registry.Harness("prime-agent")},
 	}
 
 	for _, test := range tests {
@@ -385,6 +446,8 @@ func TestFromCommand(t *testing.T) {
 		{command: "hermes-agent", want: registry.Harness("hermes"), wantOK: true},
 		{command: "amp", want: registry.Harness("amp"), wantOK: true},
 		{command: "qwen", want: registry.Harness("qwen"), wantOK: true},
+		{command: "prime-agent", want: registry.Harness("prime-agent"), wantOK: true},
+		{command: "/usr/local/bin/prime-agent", want: registry.Harness("prime-agent"), wantOK: true},
 		{command: "zsh", want: "", wantOK: false},
 	}
 
@@ -948,7 +1011,7 @@ func isolateLocationEnvironment(t *testing.T) string {
 		"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG",
 		"KILO_CONFIG_DIR", "KILO_CONFIG", "OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH",
 		"OPENCLAW_WORKSPACE_DIR", "HERMES_HOME", "XDG_DATA_HOME", "APPDATA", "DROID_SESSIONS_DIR", "KILO_DB",
-		"CODEX_SQLITE_HOME", "CLINE_SESSION_DATA_DIR",
+		"CODEX_SQLITE_HOME", "CLINE_SESSION_DATA_DIR", "PRIME_AGENT_CODING_AGENT_DIR", "PRIME_AGENT_SESSION_DIR",
 	} {
 		t.Setenv(name, "")
 	}

@@ -75,6 +75,16 @@ func installableHarnesses() []registry.Harness {
 	return harnesses
 }
 
+func noInstallRequiredHarness(harnessID registry.Harness) bool {
+	adapter, ok := catalog.Find(harnessID)
+	if !ok {
+		return false
+	}
+	_, ok = adapter.(harnesspkg.NoInstallRequired)
+
+	return ok
+}
+
 func fileNeedsUpdate(path string, content string, force bool) (bool, error) {
 	current, err := os.ReadFile(path)
 	if err != nil {

@@ -36,6 +36,20 @@ func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("install %s: %v", harnessID, err)
 		}
+		if noInstallRequiredHarness(harnessID) {
+			if result.Changed || result.Message != "no setup required" || result.Path == "" {
+				t.Fatalf("install %s no-op result = %+v", harnessID, result)
+			}
+			status, inspectErr := Inspect(t.Context(), harnessID, testInstallBinary)
+			if inspectErr != nil || status.Status != ArtifactCurrent || status.Message != "no setup required" {
+				t.Fatalf("no-setup %s status = %+v, %v", harnessID, status, inspectErr)
+			}
+			removed, removeErr := Remove(t.Context(), Options{Harness: harnessID, Binary: testInstallBinary})
+			if removeErr != nil || removed.Changed || removed.Path != result.Path {
+				t.Fatalf("no-setup %s removal = %+v, %v", harnessID, removed, removeErr)
+			}
+			continue
+		}
 		if !result.Changed {
 			t.Fatalf("install %s did not change artifact", harnessID)
 		}
