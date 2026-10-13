@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -139,8 +138,6 @@ func (a application) detectReleases(ctx context.Context, persist bool) error {
 	return a.output("changed", len(plan.Matrix.Include) > 0)
 }
 
-// releasedHarnesses reports which harnesses the released source at revision
-// contains. Without a revision every harness is checked.
 func (a application) releasedHarnesses(ctx context.Context, revision string) (func(harnessSpec) bool, error) {
 	if revision == "" {
 		return everyHarness, nil
@@ -160,7 +157,7 @@ func releasedAdapters(ctx context.Context, revision string) ([]string, error) {
 	var directories []string
 	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		if line != "" {
-			directories = append(directories, path.Base(line))
+			directories = append(directories, filepath.Base(line))
 		}
 	}
 	if len(directories) == 0 {

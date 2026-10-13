@@ -130,7 +130,7 @@ func (a application) changes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}}
+	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}, Unreleased: nil}
 	client := a.releaseClient()
 	var state *releaseState
 	for _, id := range affectedHosts(paths) {
