@@ -21,9 +21,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-      issues: read
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
+      regressions: ${{ steps.regressions.outputs.matrix }}
+      has-regressions: ${{ steps.regressions.outputs.found }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,6 +53,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           AHT_RELEASE_SHA: ${{ steps.tag.outputs.commit }}
         run: go run ./internal/tools/release require-ci
+
+      - name: List tracked compatibility regressions
+        id: regressions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AHT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: go run ./internal/tools/compatibility regressions
 
   build-release:
     needs:
@@ -151,11 +159,29 @@ jobs:
             artifact-validation.log
           retention-days: 14
 
+  # A tracked regression blocks the release unless this build passes that host.
+  regression-hosts:
+    needs:
+      - verify-tag
+      - build-release
+    if: needs.verify-tag.outputs.has-regressions == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify-tag.outputs.regressions) }}
+    uses: ./.github/workflows/compatibility-host.yml
+    with:
+      harness: ${{ matrix.harness }}
+      version: ${{ matrix.version }}
+      artifact: release-${{ github.sha }}
+      attempts: 2
+
   publish-release:
     needs:
       - verify-tag
       - build-release
       - native-artifact-validation
+      - regression-hosts
+    if: ${{ !cancelled() && needs.native-artifact-validation.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.regression-hosts.result) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

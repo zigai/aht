@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -262,6 +263,51 @@ func TestTrackedIssues(t *testing.T) {
 	slices.SortFunc(got.Resolved, func(a, b issueStatus) int { return strings.Compare(a.Harness, b.Harness) })
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("issues = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestRegressionsListTrackedFailuresForReleaseChecks(t *testing.T) {
+	directory := t.TempDir()
+	grok, kimi, codex := testHarness(t, "grok"), testHarness(t, "kimi-code"), testHarness(t, "codex")
+	state := fmt.Sprintf(`{"schema":2,"harnesses":{
+		"grok":{"source":%q,"version":"1.0.41","outcome":"failure"},
+		"kimi-code":{"source":%q,"version":"2.1.1","outcome":"failure"},
+		"codex":{"source":%q,"version":"0.157.0","outcome":"success"},
+		"claude":{"source":%q,"version":"2.1.0","outcome":"infrastructure"},
+		"droid":{"source":"npm:old-package","version":"1.0.0","outcome":"failure"}
+	},"successful":{}}`, grok.sourceKey(), kimi.sourceKey(), codex.sourceKey(), testHarness(t, "claude").sourceKey())
+	var saved atomic.Pointer[[]byte]
+	archive := stateZip(t, state)
+	saved.Store(&archive)
+	server := compatibilityStateServer(t, &saved)
+	t.Cleanup(server.Close)
+	output := filepath.Join(directory, "output")
+	env := map[string]string{"GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "GITHUB_OUTPUT": output}
+	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: io.Discard, stderr: io.Discard}
+	runTestCommand(t, app, "regressions")
+	assertOutputs(t, output, `matrix={"include":[{"harness":"kimi-code","version":"2.1.1"},{"harness":"grok","version":"1.0.41"}]}`+"\n", "found=true\n")
+
+	saved.Store(nil)
+	if err := os.WriteFile(output, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, app, "regressions")
+	assertOutputs(t, output, `matrix={"include":[]}`+"\n", "found=false\n")
+}
+
+func TestRegressionsRequireReadableState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(server.Close)
+	output := filepath.Join(t.TempDir(), "output")
+	env := map[string]string{"GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "GITHUB_OUTPUT": output}
+	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: io.Discard, stderr: io.Discard}
+	if err := app.run(t.Context(), []string{"regressions"}); err == nil {
+		t.Fatal("unreadable compatibility state produced a regression list")
+	}
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outputs were written despite the failure: %v", err)
 	}
 }
 

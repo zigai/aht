@@ -56,7 +56,7 @@ func runCommandLine() error {
 
 func (a application) run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("%w: usage: compatibility probe|changes|detect|weekly|install|result|finish|issues", errCompatibility)
+		return fmt.Errorf("%w: usage: compatibility probe|changes|detect|weekly|install|result|finish|issues|regressions", errCompatibility)
 	}
 	switch args[0] {
 	case "probe":
@@ -75,6 +75,8 @@ func (a application) run(ctx context.Context, args []string) error {
 		return a.finish(ctx)
 	case "issues":
 		return a.issues(ctx)
+	case "regressions":
+		return a.regressions(ctx)
 	default:
 		return fmt.Errorf("%w: unknown command %q", errCompatibility, args[0])
 	}
@@ -303,6 +305,28 @@ func trackedIssues(state releaseState, unreleased []string) issueReport {
 		}
 	}
 	return report
+}
+
+func (a application) regressions(ctx context.Context) error {
+	state, err := a.restore(ctx)
+	if err != nil {
+		return err
+	}
+	selected := matrix{Include: trackedRegressions(state)}
+	if err := a.output("matrix", selected); err != nil {
+		return err
+	}
+	return a.output("found", len(selected.Include) > 0)
+}
+
+func trackedRegressions(state releaseState) []candidate {
+	regressed := []candidate{}
+	for _, spec := range defaultCatalog {
+		if record := state.Harnesses[spec.ID]; regression(spec, record) {
+			regressed = append(regressed, candidate{Harness: spec.ID, Version: record.Version})
+		}
+	}
+	return regressed
 }
 
 // newRegressions returns harnesses that regressed in this run. A regression

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,13 +19,10 @@ const (
 	ciWorkflowPath = ".github/workflows/" + ciWorkflow
 	releaseBranch  = "master"
 	ciPollInterval = 15 * time.Second
-	issueCreator   = "github-actions[bot]"
 )
 
 // requiredChecks are the CI jobs that must succeed on the tagged commit.
 var requiredChecks = []string{"verify-linux", "verify-darwin", "artifact-validation", "change-compatibility"}
-
-var issueMarkerRE = regexp.MustCompile(`(?m)^<!-- aht-compatibility:([a-z0-9-]+) -->$`)
 
 type workflowRun struct {
 	ID         int64  `json:"id"`
@@ -42,16 +38,6 @@ type workflowRun struct {
 type workflowJob struct {
 	Name       string `json:"name"`
 	Conclusion string `json:"conclusion"`
-}
-
-type regressionIssue struct {
-	Body    string `json:"body"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
-	User    struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	PullRequest *struct{} `json:"pull_request"`
 }
 
 type release struct {
@@ -75,8 +61,8 @@ type releaseDraft struct {
 	Draft bool `json:"draft"`
 }
 
-// requireCI waits for the newest master push run of CI for the exact commit,
-// requires every check to succeed, and rejects open tracked regressions.
+// requireCI waits for the newest master push run of CI for the exact commit
+// and requires every check to succeed.
 func (a application) requireCI(ctx context.Context, t target) error {
 	ticker := time.NewTicker(ciPollInterval)
 	defer ticker.Stop()
@@ -93,9 +79,6 @@ func (a application) requireCI(ctx context.Context, t target) error {
 		if len(matches) != 1 || matches[0].Conclusion != "success" {
 			return fmt.Errorf("%w: CI run %d did not successfully execute required check %s", errRelease, latest.ID, name)
 		}
-	}
-	if err := a.requireNoRegressions(ctx, t); err != nil {
-		return err
 	}
 	a.logf("Verified all required checks for %s: %s", t.sha, latest.HTMLURL)
 	return nil
@@ -128,24 +111,6 @@ func (a application) waitForCI(ctx context.Context, t target, ticks <-chan time.
 		case <-ticks:
 		}
 	}
-}
-
-func (a application) requireNoRegressions(ctx context.Context, t target) error {
-	path := t.repoPath("/issues?state=open&creator=%s&per_page=100", url.QueryEscape(issueCreator))
-	issues, err := githubapi.Paginate[regressionIssue](ctx, a.api, path, "")
-	if err != nil {
-		return fmt.Errorf("list regression issues: %w", err)
-	}
-	var urls []string
-	for _, issue := range issues {
-		if issue.State == "open" && issue.PullRequest == nil && issue.User.Login == issueCreator && issueMarkerRE.MatchString(issue.Body) {
-			urls = append(urls, issue.HTMLURL)
-		}
-	}
-	if len(urls) != 0 {
-		return fmt.Errorf("%w: open tracked compatibility regressions prevent release:\n%s", errRelease, strings.Join(urls, "\n"))
-	}
-	return nil
 }
 
 // prepareDraft creates this run's draft, or reuses it on a retry, and reports
