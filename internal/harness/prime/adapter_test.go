@@ -204,7 +204,8 @@ func TestCatalogUnavailableWithoutDaemon(t *testing.T) {
 
 func listenDaemonSocket(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "daemon.sock")
+	t.Chdir(t.TempDir())
+	path := "daemon.sock"
 	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatal(err)

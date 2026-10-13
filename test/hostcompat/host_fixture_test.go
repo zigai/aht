@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
@@ -108,6 +110,11 @@ func (host *isolatedHost) assertIntegrationCurrent(t *testing.T) {
 	}
 	if len(statuses) != 1 || statuses[0].Status != "current" {
 		t.Fatalf("installed integration is not current:\n%s", output)
+	}
+	if adapter, ok := catalog.Find(host.contract.ID); ok {
+		if _, native := adapter.(harness.NoInstallRequired); native {
+			return
+		}
 	}
 	for _, path := range statuses[0].Paths {
 		if pathReferences(t, path, []byte(host.aht)) {
