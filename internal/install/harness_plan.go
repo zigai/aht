@@ -27,6 +27,11 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if noInstallRequiredHarness(opts.Harness) {
+		if action, ok := nativeCatalogAction(plan); ok {
+			return noInstallRequiredResult(opts.Harness, action.Label), nil
+		}
+	}
 
 	if opts.UseShim && installPlanHasShim(plan) {
 		return installShim(opts, opts.Harness)
@@ -48,6 +53,16 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
 }
 
+func nativeCatalogAction(plan harnesspkg.InstallPlan) (harnesspkg.NativeCatalogAction, bool) {
+	for _, action := range plan.Actions {
+		if native, ok := action.(harnesspkg.NativeCatalogAction); ok {
+			return native, true
+		}
+	}
+
+	return harnesspkg.NativeCatalogAction{Label: "", Command: nil}, false
+}
+
 func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
 	for _, action := range plan.Actions {
 		if _, ok := action.(harnesspkg.ShimAction); ok {
@@ -61,13 +76,7 @@ func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
 func installPlanAction(ctx context.Context, opts Options, harness registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
-		result, err := installJSONCommandHooks(opts, harness, typed.Plan)
-		if err == nil && !opts.DryRun && typed.Plan.Trust != nil {
-			err = typed.Plan.Trust.Install(ctx)
-			if err != nil {
-				err = fmt.Errorf("trusting installed %s hooks: %w; fix the harness CLI and rerun aht manage integrations install %s", harness, err, harness)
-			}
-		}
+		result, err := installTrustedJSONCommandHooks(ctx, opts, harness, typed.Plan)
 
 		return result, true, err
 	case harnesspkg.CursorJSONHooksAction:
@@ -86,6 +95,8 @@ func installPlanAction(ctx context.Context, opts Options, harness registry.Harne
 		result, err := installPluginDirectory(ctx, opts, harness, typed.Plan)
 
 		return result, true, err
+	case harnesspkg.NativeCatalogAction:
+		return noInstallRequiredResult(harness, typed.Label), true, nil
 	case harnesspkg.ShimAction:
 		var result Result
 
@@ -94,6 +105,40 @@ func installPlanAction(ctx context.Context, opts Options, harness registry.Harne
 		var result Result
 
 		return result, false, nil
+	}
+}
+
+func installTrustedJSONCommandHooks(
+	ctx context.Context,
+	opts Options,
+	harness registry.Harness,
+	plan harnesspkg.JSONCommandHookInstallPlan,
+) (Result, error) {
+	result, err := installJSONCommandHooks(opts, harness, plan)
+	if err != nil || opts.DryRun || plan.Trust == nil {
+		return result, err
+	}
+	if err := plan.Trust.Install(ctx); err != nil {
+		return result, fmt.Errorf(
+			"trusting installed %s hooks: %w; fix the harness CLI and rerun aht manage integrations install %s",
+			harness,
+			err,
+			harness,
+		)
+	}
+
+	return result, nil
+}
+
+func noInstallRequiredResult(harness registry.Harness, label string) Result {
+	return Result{
+		Harness:  string(harness),
+		Path:     label,
+		Changed:  false,
+		Message:  "no setup required",
+		NextStep: "",
+		Snippet:  "",
+		Error:    "",
 	}
 }
 

@@ -478,7 +478,7 @@ func sendStopSignal(ctx context.Context, s sessionStopSignaler, t stopTarget) er
 func (app *application) writeManageStopAllResult(r manageStopAllResult) error {
 	const (
 		stopIDWidth       = 16
-		stopAgentWidth    = 10
+		stopAgentWidth    = 12
 		stopPresenceWidth = 8
 		stopActivityWidth = 8
 		stopStatusWidth   = 10

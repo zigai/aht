@@ -200,6 +200,84 @@ func TestInstallPlanFollowsEnvironmentOverrideWithoutHome(t *testing.T) {
 	}
 }
 
+func TestNoInstallRequiredIntegrationManagementIsArtifactFree(t *testing.T) {
+	isolateUpgradeHome(t)
+	stateDir := t.TempDir()
+	t.Setenv(registry.StateDirEnv, stateDir)
+	commandDir := t.TempDir()
+	calledPath := filepath.Join(commandDir, "called")
+	commandPath := filepath.Join(commandDir, "prime-agent")
+	command := "#!/bin/sh\nprintf called > " + calledPath + "\nexit 97\n"
+	if err := writeExecutableTestFile(commandPath, []byte(command)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", commandDir)
+
+	const label = "native session catalog"
+	result, err := Run(t.Context(), Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNoInstallResult(t, result, label)
+
+	status, err := Inspect(t.Context(), registry.Harness("prime-agent"), testInstallBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNoInstallStatus(t, status, label)
+
+	removed, err := Remove(t.Context(), Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNoInstallResult(t, removed, label)
+
+	upgraded, err := Upgrade(t.Context(), testInstallBinary, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireUpgradeExcludesHarness(t, upgraded, "prime-agent")
+	if _, err := os.Stat(calledPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("native catalog command was executed: %v", err)
+	}
+	requireEmptyDirectory(t, stateDir)
+}
+
+func requireNoInstallResult(t *testing.T, result Result, label string) {
+	t.Helper()
+	want := Result{Harness: "prime-agent", Path: label, Changed: false, Message: "no setup required", NextStep: "", Snippet: "", Error: ""}
+	if result != want {
+		t.Fatalf("result = %+v, want %+v", result, want)
+	}
+}
+
+func requireNoInstallStatus(t *testing.T, status IntegrationStatus, label string) {
+	t.Helper()
+	if status.Status != ArtifactCurrent || status.Message != "no setup required" || len(status.Paths) != 1 || status.Paths[0] != label {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func requireUpgradeExcludesHarness(t *testing.T, results []Result, harness string) {
+	t.Helper()
+	for _, result := range results {
+		if result.Harness == harness {
+			t.Fatalf("upgrade included no-artifact integration: %+v", result)
+		}
+	}
+}
+
+func requireEmptyDirectory(t *testing.T, path string) {
+	t.Helper()
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("integration management wrote state artifacts: %v", entries)
+	}
+}
+
 const (
 	testInstallBinary     = "/usr/local/bin/aht"
 	piExtensionName       = "aht-state.ts"

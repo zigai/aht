@@ -119,6 +119,10 @@ func assertChannelPin(t *testing.T, spec harnessSpec, version, work, bin string,
 	if dl.Name != "curl" {
 		t.Errorf("%s download executable = %q, want curl", spec.ID, dl.Name)
 	}
+	if spec.ID == "prime-agent" {
+		assertPrimeChannelPin(t, version, work, bin, commands[1])
+		return
+	}
 	script := filepath.Join(work, "install-grok.sh")
 	run := commands[1]
 	if run.Name != "bash" || !slices.Equal(run.Args, []string{script, version}) {
@@ -126,6 +130,18 @@ func assertChannelPin(t *testing.T, spec harnessSpec, version, work, bin string,
 	}
 	if !slices.Equal(run.Env, []string{"GROK_BIN_DIR=" + bin}) {
 		t.Errorf("%s run env = %#v, want GROK_BIN_DIR=%s", spec.ID, run.Env, bin)
+	}
+}
+
+func assertPrimeChannelPin(t *testing.T, version, work, bin string, run installCommand) {
+	t.Helper()
+	script := filepath.Join(work, "prime-agent-install.sh")
+	if run.Name != "sh" || !slices.Equal(run.Args, []string{script}) {
+		t.Errorf("prime-agent run command = %#v, want sh %s", run, script)
+	}
+	wantEnv := []string{"PRIME_AGENT_VERSION=" + version, "PRIME_AGENT_RUST_PREFIX=" + filepath.Dir(bin)}
+	if !slices.Equal(run.Env, wantEnv) {
+		t.Errorf("prime-agent run env = %#v, want %#v", run.Env, wantEnv)
 	}
 }
 

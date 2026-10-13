@@ -75,6 +75,14 @@ type PluginDirectoryAction struct {
 	Plan PluginDirectoryInstallPlan
 }
 
+// NativeCatalogAction describes the native command that already exposes the
+// integration data. Integration management reports this action but never runs
+// the command or installs an artifact for it.
+type NativeCatalogAction struct {
+	Label   string
+	Command []string
+}
+
 type ShimAction struct{}
 
 type JSONCommandHookInstallPlan struct {
@@ -176,6 +184,8 @@ func (ManagedTextBlockAction) installAction() {}
 func (RenderedFileAction) installAction() {}
 
 func (PluginDirectoryAction) installAction() {}
+
+func (NativeCatalogAction) installAction() {}
 
 func (ShimAction) installAction() {}
 

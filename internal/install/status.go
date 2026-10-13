@@ -38,6 +38,17 @@ func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (In
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
+	if noInstallRequiredHarness(harnessID) {
+		if action, ok := nativeCatalogAction(plan); ok {
+			return IntegrationStatus{
+				Harness:  harnessID,
+				Status:   ArtifactCurrent,
+				Paths:    []string{action.Label},
+				Message:  "no setup required",
+				NextStep: "",
+			}, nil
+		}
+	}
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(harnessID))
 	paths := append(planPaths(plan), shimPath)
 	result := IntegrationStatus{
@@ -169,6 +180,8 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 		return inspectOwnedPath(value.Plan.Path)
 	case harnesspkg.PluginDirectoryAction:
 		return inspectPluginAction(ctx, value.Plan)
+	case harnesspkg.NativeCatalogAction:
+		return []inspectedArtifact{{path: value.Label, status: ArtifactCurrent}}, nil
 	default:
 		return nil, nil
 	}

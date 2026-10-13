@@ -46,14 +46,18 @@ var (
 type ProcessLister func(context.Context) ([]processinfo.Process, error)
 
 type CatalogEntry struct {
-	Harness       registry.Harness `json:"harness"`
-	SessionID     string           `json:"session_id,omitempty"`
-	SessionPath   string           `json:"session_path,omitempty"`
-	ResumeCommand []string         `json:"resume_command,omitempty"`
-	CWD           string           `json:"cwd,omitempty"`
-	ProjectRoot   string           `json:"project_root,omitempty"`
-	ProcessPID    int              `json:"process_pid,omitempty"`
-	Current       bool             `json:"current"`
+	Harness       registry.Harness  `json:"harness"`
+	SessionID     string            `json:"session_id,omitempty"`
+	SessionPath   string            `json:"session_path,omitempty"`
+	ResumeCommand []string          `json:"resume_command,omitempty"`
+	CWD           string            `json:"cwd,omitempty"`
+	ProjectRoot   string            `json:"project_root,omitempty"`
+	ProcessPID    int               `json:"process_pid,omitempty"`
+	Current       bool              `json:"current"`
+	Activity      registry.Activity `json:"activity,omitempty"`
+	Attributes    map[string]string `json:"attributes,omitempty"`
+	Title         string            `json:"title,omitempty"`
+	Reporter      registry.Reporter `json:"-"`
 }
 type CatalogLister func(context.Context) ([]CatalogEntry, error)
 
@@ -320,12 +324,6 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		return o.failCycle(at, "registry", sessionErr, "listing sessions for state detection", result)
 	}
 
-	catalogByPID := make(map[int]CatalogEntry)
-	for _, entry := range catalogEntries {
-		if entry.Current && entry.ProcessPID > 0 {
-			catalogByPID[entry.ProcessPID] = entry
-		}
-	}
 	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalogEntries))
 	current := make(map[processKey]trackedProcess)
 	processByPID := make(map[int]processinfo.Process, len(processes))
@@ -334,6 +332,20 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if process.PID > 0 {
 			processByPID[process.PID] = process
 		}
+	}
+	catalogByPID := make(map[int]CatalogEntry)
+	catalogEntries = slices.Clone(catalogEntries)
+	for index, entry := range catalogEntries {
+		if !entry.Current || entry.ProcessPID <= 0 {
+			continue
+		}
+		if _, ok := catalogListedProcess(entry, processByPID); !ok {
+			// Keep the saved catalog identity and metadata, but not a stale PID claim.
+			catalogEntries[index].Current = false
+			catalogEntries[index].ProcessPID = 0
+			continue
+		}
+		catalogByPID[entry.ProcessPID] = entry
 	}
 	for _, process := range processes {
 		if process.PID <= 0 || process.StartIdentity == "" {
@@ -415,10 +427,17 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if entry.Harness == "" || entry.SessionID == "" {
 			continue
 		}
+		identity := registry.ObservationIdentity{
+			SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD,
+			Attributes: cloneAttributes(entry.Attributes),
+		}
 		metadata := &registry.Listing{ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD, ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current}
-		observations = append(observations, registry.Observation{Harness: entry.Harness, At: at, Subject: registry.ObservationIdentity{
-			SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD, Attributes: nil,
-		}, Evidence: metadata})
+		observations = append(observations, registry.Observation{Harness: entry.Harness, At: at, Subject: identity, Evidence: metadata})
+		if report, ok := catalogActivityReport(entry, processByPID); ok {
+			observations = append(observations, catalog.PrepareObservation(registry.Observation{
+				Harness: entry.Harness, At: at, Subject: identity, Evidence: report,
+			}))
+		}
 	}
 	retiredKeys := make([]processKey, 0)
 	nextTracked := make(map[processKey]trackedProcess, len(current)+len(o.tracked))
@@ -887,6 +906,37 @@ func isDirectAgentProcess(process processinfo.Process) bool {
 		}
 	}
 	return false
+}
+
+func catalogListedProcess(entry CatalogEntry, processes map[int]processinfo.Process) (processinfo.Process, bool) {
+	process, ok := processes[entry.ProcessPID]
+	if !ok || process.PID <= 0 || process.StartIdentity == "" {
+		return process, false
+	}
+	if executableHarness, known := catalog.FromCommand(process.Executable); known && executableHarness != entry.Harness {
+		return process, false
+	}
+	harnessID, ok := resolveHarness(process)
+	return process, ok && harnessID == entry.Harness
+}
+
+func catalogActivityReport(entry CatalogEntry, processes map[int]processinfo.Process) (*registry.Report, bool) {
+	if !entry.Current || entry.Reporter.Integration == "" || !entry.Activity.Valid() {
+		return nil, false
+	}
+	process, ok := catalogListedProcess(entry, processes)
+	if !ok {
+		return nil, false
+	}
+	return &registry.Report{
+		DetailObservedAt: nil, Detail: nil, Reporter: entry.Reporter, Event: "catalog.activity",
+		Lifecycle: nil, Claim: nil, Activity: new(entry.Activity), Process: processIdentity(process),
+		Location: nil, Attributes: cloneAttributes(entry.Attributes), Payload: nil,
+		Listing: &registry.Listing{
+			ResumeCommand: append([]string(nil), entry.ResumeCommand...), CWD: entry.CWD,
+			ProjectRoot: entry.ProjectRoot, ProcessPID: entry.ProcessPID, Current: entry.Current,
+		},
+	}, true
 }
 
 func processIdentity(process processinfo.Process) *registry.ProcessIdentity {

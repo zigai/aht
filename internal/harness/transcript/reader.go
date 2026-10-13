@@ -53,6 +53,7 @@ type (
 		Patterns       []string
 		Sources        func(string) ([]string, error)
 		SkipDirectory  func(string) bool
+		SkipFile       func(string) bool
 		SourceMetadata func(string, bool, func(string, error)) map[string]string
 		Initialize     func(*Decoder)
 		Extra          func(string, map[string]string, func(string) string) string

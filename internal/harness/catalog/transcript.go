@@ -11,5 +11,5 @@ func TranscriptFor(id registry.Harness) transcript.Reader {
 			return reader.Transcript()
 		}
 	}
-	return transcript.Reader{Patterns: nil, Sources: nil, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: nil, LocalTitles: false, Parent: nil}
+	return transcript.Reader{Patterns: nil, Sources: nil, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: nil, LocalTitles: false, Parent: nil}
 }

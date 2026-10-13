@@ -103,6 +103,9 @@ func discoveryScope(id registry.Harness) string {
 	if id == registry.Harness("cursor") {
 		return "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, not an isolated local-provider endpoint"
 	}
+	if id == registry.Harness("prime-agent") {
+		return "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/README.md documents no hook or plugin surface; state comes from the daemon session catalog, so no installed integration or native lifecycle support is asserted"
+	}
 	if id == registry.Harness("crush") {
 		return "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md documents only PreToolUse, so the hook supplies native session identity while start, idle, permission, and end come from the screen manifest; native lifecycle support is not asserted"
 	}

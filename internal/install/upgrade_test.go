@@ -145,7 +145,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)
 	installFakeCodexCLI(t)
-	for _, id := range Harnesses() {
+	for _, id := range artifactHarnesses() {
 		// pi and omp intentionally share the explicit PI_CODING_AGENT_DIR; exercise
 		// one at a time to verify that ownership does not select the other adapter.
 		t.Run(string(id), func(t *testing.T) {
@@ -172,6 +172,16 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func artifactHarnesses() []registry.Harness {
+	var result []registry.Harness
+	for _, id := range Harnesses() {
+		if !noInstallRequiredHarness(id) {
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {

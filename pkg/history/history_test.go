@@ -64,6 +64,7 @@ func TestNativeJSONLReaders(t *testing.T) {
 		file, body string
 	}{
 		{"pi", registry.Harness("pi"), "session.jsonl", treeHistory},
+		{"prime-agent", registry.Harness("prime-agent"), "session.jsonl", treeHistory},
 		{"omp", registry.Harness("omp"), "session.jsonl", strings.ReplaceAll(treeHistory, `{"type":"session_info","name":"Authentication work"}`, `{"type":"title_change","title":"Authentication work"}`)},
 		{"openclaw", registry.Harness("openclaw"), "session.jsonl", treeHistory},
 		{"claude", registry.Harness("claude"), "session.jsonl", `{"type":"user","sessionId":"native-session","cwd":"/work/project","uuid":"u1","message":{"role":"user","content":"Refresh Token"}}

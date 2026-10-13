@@ -3,7 +3,9 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/openclaw"
 	"github.com/zigai/aht/v2/internal/harness/opencode"
 	"github.com/zigai/aht/v2/internal/harness/pi"
+	"github.com/zigai/aht/v2/internal/harness/prime"
 	"github.com/zigai/aht/v2/internal/harness/qwen"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -67,6 +70,7 @@ var adapters = []harness.Adapter{
 	amp.New(),
 	crush.New(),
 	qwen.New(),
+	prime.New(),
 }
 
 var adaptersByID = func() map[registry.Harness]harness.Adapter {
@@ -80,8 +84,25 @@ var adaptersByID = func() map[registry.Harness]harness.Adapter {
 	return byID
 }()
 
+// NativeCatalogEntry associates one native catalog row with the adapter that
+// supplied it. Reporter identity comes from the adapter definition rather than
+// provider output.
+type NativeCatalogEntry struct {
+	Harness  registry.Harness
+	Reporter registry.Reporter
+	Session  harness.CatalogSession
+}
+
 func All() []harness.Adapter {
 	return append([]harness.Adapter(nil), adapters...)
+}
+
+// NativeCatalog lists sessions from every adapter with a native provider.
+// Successful and partial provider results are retained when another provider
+// fails. An unavailable provider is expected on hosts that do not run it and is
+// therefore omitted without degrading the result.
+func NativeCatalog(ctx context.Context) ([]NativeCatalogEntry, error) {
+	return nativeCatalog(ctx, adapters)
 }
 
 func Find(harnessID registry.Harness) (harness.Adapter, bool) {
@@ -354,6 +375,45 @@ func HookTimeoutSecondsFor(id registry.Harness, event string) int {
 		}
 	}
 	return harness.HookTimeoutSeconds
+}
+
+func nativeCatalog(ctx context.Context, sources []harness.Adapter) ([]NativeCatalogEntry, error) {
+	var entries []NativeCatalogEntry
+	var failures []error
+	for _, adapter := range sources {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, fmt.Errorf("list native catalogs: %w", err))
+			break
+		}
+		provider, ok := adapter.(harness.CatalogProvider)
+		if !ok {
+			continue
+		}
+		definition := adapter.Definition()
+		sessions, err := provider.Catalog(ctx)
+		reporter := registry.Reporter{
+			Sequence: nil, Integration: definition.IntegrationSource,
+			Version: definition.IntegrationVersion, MultiSession: !definition.ExclusiveProcess,
+		}
+		for _, session := range sessions {
+			session.ResumeCommand = append([]string(nil), session.ResumeCommand...)
+			session.Attributes = cloneCatalogAttributes(session.Attributes)
+			entries = append(entries, NativeCatalogEntry{Harness: definition.ID, Reporter: reporter, Session: session})
+		}
+		if err != nil && !errors.Is(err, harness.ErrCatalogUnavailable) {
+			failures = append(failures, fmt.Errorf("list %s native catalog: %w", definition.ID, err))
+		}
+	}
+	return entries, errors.Join(failures...)
+}
+
+func cloneCatalogAttributes(attributes map[string]string) map[string]string {
+	if attributes == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(attributes))
+	maps.Copy(cloned, attributes)
+	return cloned
 }
 
 func genericEnvNames(field harness.EnvField) []string {

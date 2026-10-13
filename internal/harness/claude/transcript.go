@@ -85,7 +85,7 @@ func readFastRecord(_ context.Context, _ *transcript.Decoder, data []byte, _ int
 }
 
 func (claudeHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: false, Parent: subagentParent}
+	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: false, Parent: subagentParent}
 }
 
 func transcriptSources(home string) ([]string, error) {

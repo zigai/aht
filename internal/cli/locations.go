@@ -83,7 +83,7 @@ func selectedLocations(args []string, projectDir string) ([]harness.Location, er
 
 func (app *application) writeLocationsTable(locations []harness.Location) error {
 	const (
-		locationHarnessWidth = 10
+		locationHarnessWidth = 12
 		locationKindWidth    = 12
 		locationScopeWidth   = 7
 		locationExistsWidth  = 6

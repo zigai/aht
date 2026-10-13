@@ -101,7 +101,7 @@ func fastResponseItem(ctx context.Context, t *transcript.Decoder, raw, timestamp
 }
 
 func (codexHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
+	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
 }
 
 func transcriptSources(home string) ([]string, error) {

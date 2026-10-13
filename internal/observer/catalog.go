@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,13 +26,25 @@ var (
 	errCatalogTooLarge     = errors.New("catalog exceeds 1 MiB limit")
 )
 
-// DefaultCatalogList reads the optional machine-readable catalog configured by
-// AHT_CATALOG_JSON or AHT_CATALOG_FILE. The payload is
-// either an array of catalog entries or an object with a sessions array.
+// DefaultCatalogList combines the optional AHT_CATALOG_JSON or
+// AHT_CATALOG_FILE payload with every adapter-native catalog. The configured
+// payload is either an array of catalog entries or an object with a sessions
+// array. Successful sources are retained when another source fails.
 func DefaultCatalogList(ctx context.Context) ([]CatalogEntry, error) {
+	return defaultCatalogList(ctx, catalog.NativeCatalog)
+}
+
+func defaultCatalogList(ctx context.Context, listNative func(context.Context) ([]catalog.NativeCatalogEntry, error)) ([]CatalogEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("catalog context: %w", err)
 	}
+	configured, configuredErr := configuredCatalog()
+	native, nativeErr := listNative(ctx)
+	configured = append(configured, nativeCatalogEntries(native)...)
+	return configured, errors.Join(configuredErr, nativeErr)
+}
+
+func configuredCatalog() ([]CatalogEntry, error) {
 	payload, err := catalogPayload()
 	if err != nil {
 		return nil, err
@@ -52,8 +65,33 @@ func DefaultCatalogList(ctx context.Context) ([]CatalogEntry, error) {
 			return nil, fmt.Errorf("catalog entry %d: %w", index, err)
 		}
 		entries[index].Harness = normalized
+		entries[index].ResumeCommand = append([]string(nil), entries[index].ResumeCommand...)
+		entries[index].Attributes = cloneAttributes(entries[index].Attributes)
 	}
 	return entries, nil
+}
+
+func nativeCatalogEntries(entries []catalog.NativeCatalogEntry) []CatalogEntry {
+	result := make([]CatalogEntry, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, CatalogEntry{
+			Harness: entry.Harness, SessionID: entry.Session.SessionID, SessionPath: entry.Session.SessionPath,
+			ResumeCommand: append([]string(nil), entry.Session.ResumeCommand...), CWD: entry.Session.CWD,
+			ProjectRoot: entry.Session.ProjectRoot, ProcessPID: entry.Session.ProcessPID, Current: entry.Session.Current,
+			Activity: entry.Session.Activity, Attributes: cloneAttributes(entry.Session.Attributes), Title: entry.Session.Title,
+			Reporter: entry.Reporter,
+		})
+	}
+	return result
+}
+
+func cloneAttributes(attributes map[string]string) map[string]string {
+	if attributes == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(attributes))
+	maps.Copy(cloned, attributes)
+	return cloned
 }
 
 func catalogPayload() (string, error) {

@@ -288,6 +288,9 @@ func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry)
 	if entry.IsDir() {
 		return skipHistoryDirectory(source.Harness, path), false
 	}
+	if skip := catalog.TranscriptFor(source.Harness).SkipFile; skip != nil && skip(path) {
+		return false, false
+	}
 	return false, entry.Type().IsRegular() && historyName(source.Harness, entry.Name())
 }
 

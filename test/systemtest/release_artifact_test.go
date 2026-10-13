@@ -532,14 +532,18 @@ func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, enviro
 	continuing := make(map[string]int)
 	for id, status := range before {
 		old, installed := oldCatalog[id]
+		preview := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary, "--dry-run")
+		requireReleaseIntegrationResults(t, preview, map[string]int{id: newCatalog[id]}, false)
 		if !installed {
-			if status.Status != "missing" {
-				t.Fatalf("new integration %s before install = %s, want missing", id, status.Status)
+			want := "missing"
+			if !preview[id].Changed {
+				want = "current"
+			}
+			if status.Status != want {
+				t.Fatalf("new integration %s before install = %s, want %s", id, status.Status, want)
 			}
 			continue
 		}
-		preview := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary, "--dry-run")
-		requireReleaseIntegrationResults(t, preview, map[string]int{id: newCatalog[id]}, false)
 		if oldInstall[id].Path != preview[id].Path {
 			if status.Status != "missing" {
 				t.Fatalf("replacement integration %s at %q before install = %s, want missing; previous path=%q",

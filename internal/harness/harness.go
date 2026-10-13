@@ -1,7 +1,9 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"time"
 
@@ -18,6 +20,10 @@ const (
 	EnvPID         EnvField = "pid"
 	EnvEvent       EnvField = "event"
 )
+
+// ErrCatalogUnavailable means a native catalog is not running or installed on
+// this host. Catalog aggregation omits the provider without degrading results.
+var ErrCatalogUnavailable = errors.New("native catalog unavailable")
 
 type (
 	EnvField string
@@ -68,6 +74,27 @@ type Adapter interface {
 	Definition() Definition
 }
 
+// CatalogSession is one session returned by a harness-native catalog. Activity
+// describes the provider's current state; an empty value supplies metadata only.
+type CatalogSession struct {
+	SessionID     string
+	SessionPath   string
+	ResumeCommand []string
+	CWD           string
+	ProjectRoot   string
+	ProcessPID    int
+	Current       bool
+	Activity      registry.Activity
+	Attributes    map[string]string
+	Title         string
+}
+
+// CatalogProvider is an optional adapter capability for native session lists.
+// Providers may return partial results with an error.
+type CatalogProvider interface {
+	Catalog(ctx context.Context) ([]CatalogSession, error)
+}
+
 type ScreenManifestProvider interface {
 	ScreenManifest() string
 }
@@ -78,6 +105,13 @@ type ScreenManifestProvider interface {
 type Installable interface {
 	InstallPlan(binary string) (InstallPlan, error)
 }
+
+// NoInstallRequired marks adapters whose native integration is built into the
+// harness and therefore needs no managed artifact or setup command.
+type NoInstallRequired interface {
+	NoInstallRequired()
+}
+
 type InstallAdvisor interface {
 	InstallNextStep(changed bool, dryRun bool) string
 	StatusNextStep(current bool, stale bool) string

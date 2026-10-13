@@ -27,7 +27,8 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 [`droid`](https://factory.ai),
 [`amp`](https://ampcode.com),
 [`crush`](https://github.com/charmbracelet/crush),
-[`qwen`](https://github.com/QwenLM/qwen-code).
+[`qwen`](https://github.com/QwenLM/qwen-code),
+[`prime-agent`](https://github.com/PrimeIntellect-ai/prime-agent).
 
 ## Installation
 
