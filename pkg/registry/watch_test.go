@@ -155,7 +155,7 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeWatchTestFile(t, targetPath, replacementData)
+	replaceWatchTestFile(t, targetPath, replacementData)
 	awaitWatchSessionID(t, results, replacement.ID)
 
 	added := observeWatchSession(t, target, "after-recreation")
@@ -219,7 +219,7 @@ func TestFileStoreWatchReconcilesMissedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeWatchTestFile(t, targetPath, data)
+	replaceWatchTestFile(t, targetPath, data)
 	result := awaitWatchResult(t, updated)
 	if len(result.Sessions) != 1 || result.Sessions[0].ID != want.ID {
 		t.Fatalf("reconciled result = %#v", result)
