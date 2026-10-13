@@ -18,6 +18,7 @@ const (
 	// issueCreator owns regression issues; issues from anyone else are never edited.
 	issueCreator       = "github-actions[bot]"
 	reasonAboveMaximum = "above supported maximum"
+	reasonUnreleased   = "not in the latest release"
 )
 
 var issueMarkerRE = regexp.MustCompile(`(?m)^<!-- aht-compatibility:([a-z0-9-]+) -->$`)
@@ -154,6 +155,9 @@ func issueBody(item issueStatus) string {
 }
 
 func issueResolution(item issueStatus) string {
+	if item.Reason == reasonUnreleased {
+		return item.Harness + " is not part of the latest published release, so release checks start with the next release."
+	}
 	if item.Reason == reasonAboveMaximum {
 		return fmt.Sprintf("%s %s is above the supported maximum %s, so the adapter's `MaxVersion` now tracks this failure.", item.Harness, item.Version, item.MaxVersion)
 	}

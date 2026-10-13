@@ -116,7 +116,7 @@ func TestParseVersionGitSHASuffix(t *testing.T) {
 }
 
 func TestDetectionIsolatesSourceFailures(t *testing.T) {
-	plan, err := detect(t.Context(), emptyState(), "all", false, func(_ context.Context, spec harnessSpec) (string, error) {
+	plan, err := detect(t.Context(), emptyState(), "all", false, everyHarness, func(_ context.Context, spec harnessSpec) (string, error) {
 		if spec.ID == "claude" {
 			return "", fmt.Errorf("%w: registry unavailable", errCompatibility)
 		}
@@ -149,7 +149,7 @@ func TestTargetedDetectionAndEmptyMatrix(t *testing.T) {
 		return "1.2.3", nil
 	}
 	for _, force := range []bool{false, true} {
-		plan, err := detect(t.Context(), state, "droid", force, latest)
+		plan, err := detect(t.Context(), state, "droid", force, everyHarness, latest)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func TestTargetedDetectionAndEmptyMatrix(t *testing.T) {
 		}
 	}
 	for _, selection := range []string{"cursor", "unknown"} {
-		if _, err := detect(t.Context(), state, selection, false, latest); !errors.Is(err, errCompatibility) {
+		if _, err := detect(t.Context(), state, selection, false, everyHarness, latest); !errors.Is(err, errCompatibility) {
 			t.Fatalf("selection %s: %v", selection, err)
 		}
 	}

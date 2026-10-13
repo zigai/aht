@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -32,10 +33,11 @@ type issueStatus struct {
 }
 
 type application struct {
-	client *releaseClient
-	getenv func(string) string
-	stdout io.Writer
-	stderr io.Writer
+	client   *releaseClient
+	getenv   func(string) string
+	stdout   io.Writer
+	stderr   io.Writer
+	adapters func(context.Context, string) ([]string, error)
 }
 
 func main() {
@@ -48,7 +50,7 @@ func main() {
 func runCommandLine() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	app := application{client: nil, getenv: os.Getenv, stdout: os.Stdout, stderr: os.Stderr}
+	app := application{client: nil, getenv: os.Getenv, stdout: os.Stdout, stderr: os.Stderr, adapters: releasedAdapters}
 	return app.run(ctx, os.Args[1:])
 }
 
@@ -110,7 +112,11 @@ func (a application) detectReleases(ctx context.Context, persist bool) error {
 	if selection == "" {
 		selection = "all"
 	}
-	plan, err := detect(ctx, state, selection, a.getenv("AHT_COMPAT_FORCE") == "true", a.releaseClient().latest)
+	released, err := a.releasedHarnesses(ctx, a.getenv("AHT_COMPAT_REVISION"))
+	if err != nil {
+		return err
+	}
+	plan, err := detect(ctx, state, selection, a.getenv("AHT_COMPAT_FORCE") == "true", released, a.releaseClient().latest)
 	if err != nil {
 		return err
 	}
@@ -130,6 +136,34 @@ func (a application) detectReleases(ctx context.Context, persist bool) error {
 		return err
 	}
 	return a.output("changed", len(plan.Matrix.Include) > 0)
+}
+
+func (a application) releasedHarnesses(ctx context.Context, revision string) (func(harnessSpec) bool, error) {
+	if revision == "" {
+		return everyHarness, nil
+	}
+	directories, err := a.adapters(ctx, revision)
+	if err != nil {
+		return nil, err
+	}
+	return func(spec harnessSpec) bool { return slices.Contains(directories, spec.Directory) }, nil
+}
+
+func releasedAdapters(ctx context.Context, revision string) ([]string, error) {
+	output, err := gitOutput(ctx, "ls-tree", "-d", "--name-only", "--end-of-options", revision, "internal/harness/")
+	if err != nil {
+		return nil, err
+	}
+	var directories []string
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
+		if line != "" {
+			directories = append(directories, filepath.Base(line))
+		}
+	}
+	if len(directories) == 0 {
+		return nil, fmt.Errorf("%w: no harness adapters at release revision %s", errCompatibility, revision)
+	}
+	return directories, nil
 }
 
 func planHasErrors(plan releasePlan) bool {
@@ -213,10 +247,13 @@ func (a application) finish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	for _, id := range plan.Unreleased {
+		delete(next.Harnesses, id)
+	}
 	if err := a.writeJSON("state.json", next); err != nil {
 		return err
 	}
-	if err := a.writeJSON("issues.json", trackedIssues(next)); err != nil {
+	if err := a.writeJSON("issues.json", trackedIssues(next, plan.Unreleased)); err != nil {
 		return err
 	}
 	regressions := newRegressions(state, next)
@@ -239,9 +276,13 @@ func (a application) runURL() string {
 // trackedIssues lists the issue state implied by the latest attempted release
 // of each version-tracked harness. Harnesses without a conclusive current-source
 // result are omitted so their issues are left unchanged.
-func trackedIssues(state releaseState) issueReport {
+func trackedIssues(state releaseState, unreleased []string) issueReport {
 	report := issueReport{Open: []issueStatus{}, Resolved: []issueStatus{}}
 	for _, spec := range defaultCatalog {
+		if slices.Contains(unreleased, spec.ID) {
+			report.Resolved = append(report.Resolved, issueStatus{Harness: spec.ID, Version: "", Successful: "", MaxVersion: "", RunURL: "", Reason: reasonUnreleased})
+			continue
+		}
 		record := state.Harnesses[spec.ID]
 		if spec.Source == "weekly" || record.Source != spec.sourceKey() {
 			continue
@@ -307,6 +348,9 @@ func releaseSummary(plan releasePlan, state releaseState, incomplete, regression
 			if outcome == "failure" && !regression(spec, previous) {
 				outcome = "failure (above supported maximum)"
 			}
+		}
+		if slices.Contains(plan.Unreleased, spec.ID) {
+			outcome = reasonUnreleased
 		}
 		successful := "none"
 		if previous := state.Successful[spec.ID]; previous.Source == spec.sourceKey() {

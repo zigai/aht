@@ -59,6 +59,7 @@ type observation struct {
 type releasePlan struct {
 	Matrix       matrix        `json:"matrix"`
 	Observations []observation `json:"observations"`
+	Unreleased   []string      `json:"unreleased,omitempty"`
 }
 
 type checkedRelease struct {
@@ -161,8 +162,10 @@ func regression(spec harnessSpec, record checkedRelease) bool {
 	return err != nil || !above
 }
 
-func detect(ctx context.Context, state releaseState, selection string, force bool, latest func(context.Context, harnessSpec) (string, error)) (releasePlan, error) {
-	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}}
+func everyHarness(harnessSpec) bool { return true }
+
+func detect(ctx context.Context, state releaseState, selection string, force bool, released func(harnessSpec) bool, latest func(context.Context, harnessSpec) (string, error)) (releasePlan, error) {
+	plan := releasePlan{Matrix: matrix{Include: []candidate{}}, Observations: []observation{}, Unreleased: nil}
 	if selection != "all" {
 		spec, err := findHarness(selection)
 		if err != nil {
@@ -172,12 +175,8 @@ func detect(ctx context.Context, state releaseState, selection string, force boo
 			return plan, fmt.Errorf("%w: %s uses the weekly workflow", errCompatibility, selection)
 		}
 	}
-	var entries []harnessSpec
-	for _, spec := range defaultCatalog {
-		if spec.Source != "weekly" && (selection == "all" || selection == spec.ID) {
-			entries = append(entries, spec)
-		}
-	}
+	entries, unreleased := selectReleased(selection, released)
+	plan.Unreleased = unreleased
 	plan.Observations = make([]observation, len(entries))
 	// Concurrency is bounded by the fixed catalog; every request has a timeout.
 	var group sync.WaitGroup
@@ -194,6 +193,22 @@ func detect(ctx context.Context, state releaseState, selection string, force boo
 		}
 	}
 	return plan, nil
+}
+
+func selectReleased(selection string, released func(harnessSpec) bool) ([]harnessSpec, []string) {
+	var entries []harnessSpec
+	var unreleased []string
+	for _, spec := range defaultCatalog {
+		if spec.Source == "weekly" || (selection != "all" && selection != spec.ID) {
+			continue
+		}
+		if !released(spec) {
+			unreleased = append(unreleased, spec.ID)
+			continue
+		}
+		entries = append(entries, spec)
+	}
+	return entries, unreleased
 }
 
 func observe(ctx context.Context, spec harnessSpec, previous checkedRelease, force bool, latest func(context.Context, harnessSpec) (string, error)) observation {

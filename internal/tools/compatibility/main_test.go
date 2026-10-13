@@ -146,7 +146,7 @@ func TestDetectionRechecksChangedBinaryRevision(t *testing.T) {
 			t.Cleanup(server.Close)
 			env := map[string]string{"AHT_COMPAT_WORK": directory, "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "AHT_COMPAT_SELECTION": "droid", "AHT_COMPAT_REVISION": test.current}
 			var stdout bytes.Buffer
-			app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard}
+			app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: &stdout, stderr: io.Discard, adapters: catalogAdapters}
 			runTestCommand(t, app, "detect")
 			var plan releasePlan
 			if err := readJSON(filepath.Join(directory, "plan.json"), &plan); err != nil {
@@ -160,6 +160,68 @@ func TestDetectionRechecksChangedBinaryRevision(t *testing.T) {
 				t.Fatalf("selected releases = %v, want %v", plan.Matrix.Include, want)
 			}
 		})
+	}
+}
+
+func catalogAdapters(context.Context, string) ([]string, error) {
+	directories := make([]string, 0, len(defaultCatalog))
+	for _, spec := range defaultCatalog {
+		directories = append(directories, spec.Directory)
+	}
+	return directories, nil
+}
+
+func TestReleaseWithoutAdapterIsNotChecked(t *testing.T) {
+	directory := t.TempDir()
+	droid := testHarness(t, "droid")
+	var saved atomic.Pointer[[]byte]
+	archive := stateZip(t, fmt.Sprintf(`{"schema":2,"harnesses":{"droid":{"source":%q,"version":"1.2.3","outcome":"failure","revision":"release"}},"successful":{}}`, droid.sourceKey()))
+	saved.Store(&archive)
+	server := compatibilityStateServer(t, &saved)
+	t.Cleanup(server.Close)
+	output := filepath.Join(directory, "output")
+	env := map[string]string{"AHT_COMPAT_WORK": directory, "GITHUB_REPOSITORY": "owner/repo", "AHT_DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "20", "AHT_COMPAT_SELECTION": "droid", "AHT_COMPAT_REVISION": "release", "GITHUB_OUTPUT": output}
+	withoutDroid := func(ctx context.Context, revision string) ([]string, error) {
+		directories, err := catalogAdapters(ctx, revision)
+		return slices.DeleteFunc(directories, func(name string) bool { return name == droid.Directory }), err
+	}
+	app := application{client: testClient(server), getenv: func(key string) string { return env[key] }, stdout: io.Discard, stderr: io.Discard, adapters: withoutDroid}
+	runTestCommand(t, app, "detect")
+	var plan releasePlan
+	if err := readJSON(filepath.Join(directory, "plan.json"), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(plan.Unreleased, []string{"droid"}) || slices.ContainsFunc(plan.Matrix.Include, func(item candidate) bool { return item.Harness == "droid" }) {
+		t.Fatalf("plan = %+v", plan)
+	}
+	runTestCommand(t, app, "finish")
+	assertOutputs(t, output, "failed=false\n")
+	assertOpenIssues(t, directory, []string{})
+	var report issueReport
+	if err := readJSON(filepath.Join(directory, "issues.json"), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(report.Resolved, func(item issueStatus) bool { return item.Harness == "droid" && item.Reason == reasonUnreleased }) {
+		t.Fatalf("resolved issues = %+v", report.Resolved)
+	}
+	var state releaseState
+	if err := readJSON(filepath.Join(directory, "state.json"), &state); err != nil {
+		t.Fatal(err)
+	}
+	if _, recorded := state.Harnesses["droid"]; recorded {
+		t.Fatalf("unreleased harness kept its result: %+v", state.Harnesses["droid"])
+	}
+
+	archive = stateZip(t, readTestFile(t, filepath.Join(directory, "state.json")))
+	saved.Store(&archive)
+	app.adapters = catalogAdapters
+	runTestCommand(t, app, "detect")
+	var released releasePlan
+	if err := readJSON(filepath.Join(directory, "plan.json"), &released); err != nil {
+		t.Fatal(err)
+	}
+	if len(released.Unreleased) != 0 || !slices.ContainsFunc(released.Matrix.Include, func(item candidate) bool { return item.Harness == "droid" }) {
+		t.Fatalf("released harness was not checked: %+v", released)
 	}
 }
 
@@ -196,7 +258,7 @@ func TestTrackedIssues(t *testing.T) {
 			{Harness: "codex", Version: "0.157.0", RunURL: "codex-run", Reason: "passed"},
 		},
 	}
-	got := trackedIssues(state)
+	got := trackedIssues(state, nil)
 	slices.SortFunc(got.Resolved, func(a, b issueStatus) int { return strings.Compare(a.Harness, b.Harness) })
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("issues = %+v\nwant %+v", got, want)
@@ -292,7 +354,7 @@ func TestWeeklySelectsUnpinnedDistribution(t *testing.T) {
 func TestCanceledDetection(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := detect(ctx, emptyState(), "droid", false, func(context.Context, harnessSpec) (string, error) { return "1.2.3", nil }); err == nil {
+	if _, err := detect(ctx, emptyState(), "droid", false, everyHarness, func(context.Context, harnessSpec) (string, error) { return "1.2.3", nil }); err == nil {
 		t.Fatal("canceled detection succeeded")
 	}
 }
