@@ -24,6 +24,12 @@ func openStoreLock(ctx context.Context, path string, _ ...func()) (*storeLock, e
 	return &storeLock{file: file, path: path}, nil
 }
 
+// The lock file exists only while a writer holds it, so a reader that must
+// not create files reads without one.
+func openExistingStoreLock(context.Context, string) (*storeLock, error) {
+	return &storeLock{file: nil, path: ""}, nil
+}
+
 func (l *storeLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil

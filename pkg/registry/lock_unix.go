@@ -40,6 +40,20 @@ func openStoreLock(ctx context.Context, path string, onContention ...func()) (*s
 	return &storeLock{file: file}, nil
 }
 
+func openExistingStoreLock(ctx context.Context, path string) (*storeLock, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &storeLock{file: nil}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("opening store lock: %w", err)
+	}
+	if err := acquireStoreLock(ctx, file, nil); err != nil {
+		return nil, errors.Join(fmt.Errorf("locking store: %w", err), file.Close())
+	}
+	return &storeLock{file: file}, nil
+}
+
 func acquireStoreLock(ctx context.Context, file *os.File, onContention func()) error {
 	for {
 		if err := ctx.Err(); err != nil {
