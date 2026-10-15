@@ -73,6 +73,7 @@ type refreshJob struct {
 	exists       bool
 	resumeID     int64
 	includeTools bool
+	prefilter    *bytePrefilter
 	metadata     map[string]string
 	done         chan refreshResult
 	rebuilt      bool
@@ -83,6 +84,7 @@ type refreshJob struct {
 type refreshResult struct {
 	stamp     string
 	unchanged bool
+	skipped   bool
 	writer    *indexWriter
 	issues    []Issue
 	omitted   int
@@ -164,9 +166,9 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
 			break
 		}
-		pending := index.pend(s, source, file, jobs)
+		pending := index.pend(s, source, file, jobs, len(file.children) == 0)
 		for _, child := range file.children {
-			pending.children = append(pending.children, index.pend(s, source, child, jobs))
+			pending.children = append(pending.children, index.pend(s, source, child, jobs, false))
 		}
 		queue = append(queue, pending)
 		if len(queue) > 2*workers {
@@ -225,10 +227,15 @@ func (index *historyIndex) newJob(s *search, source Source, file historyFile) *r
 	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
 }
 
-func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
+func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob, prefilter bool) pendingFile {
 	pending := pendingFile{file: file, job: nil, children: nil}
-	if !index.unchanged(s, source, file) {
+	stored := index.files[fileKey(source, file.path)]
+	checkIssues := prefilter && s.prefilter != nil && stored.issues != "" && stored.issues != "[]" && stored.issues != "null"
+	if !index.unchanged(s, source, file) || checkIssues {
 		pending.job = index.newJob(s, source, file)
+		if prefilter {
+			pending.job.prefilter = s.prefilter
+		}
 		jobs <- pending.job
 	}
 	return pending
@@ -281,6 +288,9 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 		return settled, false
 	}
 	status.Files++
+	if result.skipped {
+		return settled, false
+	}
 	if result.failure != nil {
 		s.fileIssue(source, path, result.failure)
 		return settled, false
@@ -504,6 +514,17 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 	}
 	extra := transcriptExtra(job.metadata, source, path)
 	result.stamp = stampFile(info) + "|" + extra
+	if !strings.HasSuffix(path, ".zst") {
+		candidate, err := job.prefilter.matchesFile(ctx, file)
+		if err != nil {
+			result.err = err
+			return result, false
+		}
+		if !candidate {
+			result.skipped = true
+			return result, false
+		}
+	}
 	if job.isCurrent(result.stamp) {
 		result.unchanged = true
 		return result, false

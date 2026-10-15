@@ -275,12 +275,16 @@ func (s *search) scanFileGroup(ctx context.Context, source Source, file historyF
 		return 1
 	}
 	inspected := 0
-	t, ok := s.readTranscriptFile(ctx, source, file, buffer)
+	prefilter := s.prefilter
+	if len(file.children) > 0 {
+		prefilter = nil
+	}
+	t, ok := s.readTranscriptFile(ctx, source, file, buffer, prefilter)
 	if ok {
 		inspected++
 	}
 	for _, child := range file.children {
-		c, ok := s.readTranscriptFile(ctx, source, child, buffer)
+		c, ok := s.readTranscriptFile(ctx, source, child, buffer, nil)
 		if !ok {
 			continue
 		}
@@ -302,17 +306,23 @@ func (s *search) scanFileGroup(ctx context.Context, source Source, file historyF
 	return inspected
 }
 
-func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer) (*transcript, bool) {
+func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer, prefilter *bytePrefilter) (*transcript, bool) {
 	opened, err := file.open()
 	if err != nil {
 		buffer.issue(source, file.path, err)
 		return nil, false
 	}
-	t := s.scanTranscript(ctx, source, file.path, opened, buffer)
+	var parsed *transcript
+	candidate, err := prefilter.matchesFile(ctx, opened)
+	if err != nil {
+		buffer.issue(source, file.path, err)
+	} else if candidate || strings.HasSuffix(file.path, ".zst") {
+		parsed = s.scanTranscript(ctx, source, file.path, opened, buffer)
+	}
 	if err := opened.Close(); err != nil {
 		buffer.issue(source, file.path, err)
 	}
-	return t, true
+	return parsed, true
 }
 
 func (s *search) report(progress Progress) {

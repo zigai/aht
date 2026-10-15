@@ -263,6 +263,42 @@ func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
 	}
 }
 
+func TestPrefilterPreservesPartsAndQueryModes(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	body := `{"type":"session","id":"sample","cwd":"/work"}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"first"},{"type":"text","text":"second"}]}}
+{"type":"message","message":{"role":"toolResult","content":"hidden-token"}}
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	for _, test := range []struct {
+		query Query
+		want int
+	}{
+		{Query{Terms: []string{"firstsecond"}}, 0},
+		{Query{Terms: []string{"first", "second"}}, 1},
+		{Query{Terms: []string{"first"}, Exclude: []string{"second"}}, 0},
+		{Query{Terms: []string{"f.*t"}, Regex: true}, 1},
+		{Query{Terms: []string{"first|second"}, Regex: true}, 1},
+		{Query{Terms: []string{"first"}, Word: true}, 1},
+		{Query{Terms: []string{"irs"}, Word: true}, 0},
+		{Query{Terms: []string{"hidden-token"}, IncludeTools: true}, 1},
+	} {
+		got, err := catalog.Search(t.Context(), test.query)
+		if err != nil || len(got.Matches) != test.want {
+			t.Fatalf("query=%#v matches=%d want=%d err=%v", test.query, len(got.Matches), test.want, err)
+		}
+		compareIndexedSearch(t, catalog, test.query)
+	}
+	listed, err := catalog.listDirect(t.Context(), ListQuery{})
+	if err != nil || len(listed.Matches) != 1 || listed.Matches[0].Conversation.Messages != 1 {
+		t.Fatalf("metadata listing: %#v err=%v", listed, err)
+	}
+}
+
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
@@ -341,6 +377,16 @@ func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Que
 	property.Helper()
 	query.Registry = generatedRegistry(catalog)
 	want, wantErr := catalog.searchDirect(property.Context(), query)
+	unfiltered := &search{mode: modeSearch, query: query}
+	sources, err := catalog.begin(property.Context(), unfiltered)
+	if err != nil {
+		property.Fatal(err)
+	}
+	unfiltered.prefilter = nil
+	_ = unfiltered.runDirect(property.Context(), sources)
+	if diff := cmp.Diff(unfiltered.finalize(property.Context()).Matches, want.Matches); diff != "" {
+		property.Fatalf("prefilter changed matches (-full +prefilter):\n%s", diff)
+	}
 	got, gotErr := catalog.Search(property.Context(), query)
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		property.Fatalf("query=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)

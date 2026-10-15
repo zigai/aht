@@ -246,6 +246,7 @@ type search struct {
 	mode            scanMode
 	query           Query
 	terms           []matcher
+	prefilter       *bytePrefilter
 	exclude         []matcher
 	stream          func(Match) bool
 	stopped         bool
@@ -680,6 +681,9 @@ func (s *search) prepare() error {
 	s.recent.compare = resultOrder(s.query.Sort)
 	s.terms, _ = compileMatchers(s.query.Terms, s.query)
 	s.exclude, _ = compileMatchers(s.query.Exclude, s.query)
+	if s.mode == modeSearch {
+		s.prefilter = newBytePrefilter(s.terms)
+	}
 	return nil
 }
 
