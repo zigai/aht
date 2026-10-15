@@ -1,0 +1,2 @@
+- Doctor race tests pass with test directories under a symlinked path.
+- The built CLI reports an integration installed through a symlinked PATH copy as info without offering a repair.
