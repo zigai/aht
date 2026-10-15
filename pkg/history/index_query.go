@@ -128,7 +128,7 @@ func (index *historyIndex) findParts(ctx context.Context, s *search, fileID int6
 }
 
 func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, fileID int64, visit func(file, conversation, part int64)) (err error) {
-	query, args, err := index.partQuery(ctx, s, m, fileID)
+	query, args, verify, err := index.partQuery(ctx, s, m, fileID)
 	if err != nil {
 		return err
 	}
@@ -139,18 +139,18 @@ func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, f
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var file, conversation, part int64
-		var body, folded string
+		var body string
 		targets := []any{&file, &conversation, &part}
-		if m.verifies() {
-			targets = append(targets, &body, &folded)
+		if verify {
+			targets = append(targets, &body)
 		}
 		if err = rows.Scan(targets...); err != nil {
 			return fmt.Errorf("read indexed candidate: %w", err)
 		}
-		if m.verifies() {
-			normalized := folded
-			if s.query.CaseSensitive {
-				normalized = body
+		if verify {
+			normalized := body
+			if !s.query.CaseSensitive {
+				normalized = fold(body)
 			}
 			if !m.matches(body, normalized) {
 				continue
@@ -164,44 +164,40 @@ func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, f
 	return nil
 }
 
-func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, fileID int64) (string, []any, error) {
+func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, fileID int64) (string, []any, bool, error) {
 	predicate, args := index.candidatePredicate(s, fileID)
 	phrase := trigramPhrase(fold(m.literal))
 	trigrams := phrase != ""
 	if trigrams {
 		literal, err := index.preferLiteral(ctx, predicate, args, phrase, len(s.query.Dirs) > 0 || fileID != 0)
 		if err != nil {
-			return "", nil, err
+			return "", nil, false, err
 		}
 		trigrams = !literal
 	}
+	verify := m.verifies() || (!trigrams && !s.query.CaseSensitive)
 	columns := "c.file_id,c.id,p.id"
-	if m.verifies() {
-		columns += ",p.body,p.folded"
+	if verify {
+		columns += ",p.body"
 	}
 	query := "SELECT " + columns + " FROM conversations c JOIN files f ON f.id=c.file_id " + partJoin(trigrams, s.query.CaseSensitive) + " ON p.conversation_id=c.id WHERE " + predicate
 	if trigrams {
 		query += " AND p.id IN (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ?)"
 		args = append(args, phrase)
 	}
-	column := "p.folded"
-	if s.query.CaseSensitive {
-		column = "p.body"
-	}
-	if m.literal != "" && (!trigrams || s.query.CaseSensitive) {
-		query += " AND instr(" + column + ",?)>0"
+	if m.literal != "" && s.query.CaseSensitive {
+		query += " AND instr(p.body,?)>0"
 		args = append(args, m.literal)
 	}
 	query += " ORDER BY c.id,p.id"
-	return query, args, nil
+	return query, args, verify, nil
 }
 
 // candidatePredicate selects the conversations a part query may read.
-// Normalize with the same Go mapping that stored the folded column, not
-// SQLite's different Unicode folding rules. A quoted trigram phrase matches
-// the exact normalized substring. Case-sensitive, short, and NUL-containing
-// literals additionally use literal matching; regular expressions and word
-// boundaries are checked in Go, which also builds excerpts.
+// A quoted trigram phrase matches the exact Go-normalized substring. Literal
+// scans normalize the stored body in Go, preserving Unicode folding without a
+// second text copy. Case-sensitive literals use the original body; regular
+// expressions and word boundaries are checked in Go, which also builds excerpts.
 func (index *historyIndex) candidatePredicate(s *search, fileID int64) (string, []any) {
 	filter, args := index.selectionSQL(s.query.Filter)
 	predicate, args := rolePredicate(filter, s.query.Role, args)
@@ -284,7 +280,7 @@ func (index *historyIndex) preferLiteral(ctx context.Context, filter string, arg
 		return index.smallSelection(ctx, filter, args)
 	}
 	var pages int64
-	query := "SELECT coalesce(sum(1+length(CAST(p.folded AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
+	query := "SELECT coalesce(sum(1+length(CAST(p.body AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
 	if err := index.conn.queryRow(query, args...).Scan(ctx, &pages); err != nil {
 		return false, index.failure(fmt.Errorf("measure selected parts: %w", err))
 	}

@@ -820,8 +820,8 @@ func TestIndexRebuildDiscardsPersistedToolText(t *testing.T) {
 	}
 	database := openTestIndex(t, catalog.IndexPath)
 	if _, err := database.ExecContext(t.Context(), `ALTER TABLE files ADD COLUMN tools INTEGER NOT NULL DEFAULT 1;
-INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp)
-SELECT id,'tool','stale-tool','stale-tool','old-tool',1,'' FROM conversations;
+INSERT INTO parts(conversation_id,role,body,message_id,line,timestamp)
+SELECT id,'tool','stale-tool','old-tool',1,'' FROM conversations;
 PRAGMA user_version=5;`); err != nil {
 		t.Fatal(err)
 	}

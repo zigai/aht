@@ -32,7 +32,7 @@ const (
 )
 
 const partIndexes = `
-CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(folded AS BLOB)));
+CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(body AS BLOB)));
 CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
@@ -54,14 +54,12 @@ CREATE INDEX conversations_cwd ON conversations(cwd);
 CREATE INDEX conversations_root ON conversations(root);
 CREATE TABLE parts (
  id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
- role TEXT NOT NULL, body TEXT NOT NULL, folded TEXT NOT NULL,
+ role TEXT NOT NULL, body TEXT NOT NULL,
  message_id TEXT NOT NULL, line INTEGER NOT NULL, timestamp TEXT NOT NULL);
 ` + partIndexes + `
-CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='parts', content_rowid='id', tokenize='trigram case_sensitive 1');
-CREATE TRIGGER parts_insert AFTER INSERT ON parts BEGIN
- INSERT INTO parts_fts(rowid,folded) VALUES(new.id,new.folded); END;
+CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='', contentless_delete=1, tokenize='trigram case_sensitive 1');
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
- INSERT INTO parts_fts(parts_fts,rowid,folded) VALUES('delete',old.id,old.folded); END;
+ DELETE FROM parts_fts WHERE rowid=old.id; END;
 PRAGMA application_id=0x41485431;
 PRAGMA user_version=6;
 `

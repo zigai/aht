@@ -788,11 +788,16 @@ func (index *historyIndex) storedFile(ctx context.Context, source Source, path s
 // writeConversations stores the buffered conversations and returns the first
 // conversation row of the history afterwards, or zero.
 func (index *historyIndex) writeConversations(ctx context.Context, fileID, resumeID int64, writer *indexWriter) (int64, error) {
-	insert, err := index.tx.PrepareContext(ctx, "INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp) VALUES(?,?,?,?,?,?,?)")
+	insert, err := index.tx.PrepareContext(ctx, "INSERT INTO parts(conversation_id,role,body,message_id,line,timestamp) VALUES(?,?,?,?,?,?)")
 	if err != nil {
 		return 0, fmt.Errorf("prepare history indexing: %w", err)
 	}
 	defer func() { _ = insert.Close() }()
+	fullText, err := index.tx.PrepareContext(ctx, "INSERT INTO parts_fts(rowid,folded) VALUES(?,?)")
+	if err != nil {
+		return 0, fmt.Errorf("prepare full-text indexing: %w", err)
+	}
+	defer func() { _ = fullText.Close() }()
 	var first int64
 	if writer.resume != nil {
 		first = resumeID
@@ -814,7 +819,7 @@ func (index *historyIndex) writeConversations(ctx context.Context, fileID, resum
 		if first == 0 {
 			first = id
 		}
-		if err := index.insertParts(ctx, insert, id, buffered.parts); err != nil {
+		if err := index.insertParts(ctx, insert, fullText, id, buffered.parts); err != nil {
 			return 0, err
 		}
 	}
@@ -844,10 +849,18 @@ func (index *historyIndex) upsertConversation(ctx context.Context, fileID, resum
 	return id, nil
 }
 
-func (index *historyIndex) insertParts(ctx context.Context, insert *indexStatement, conversationID int64, parts []Excerpt) error {
+func (index *historyIndex) insertParts(ctx context.Context, insert, fullText *indexStatement, conversationID int64, parts []Excerpt) error {
 	for _, part := range parts {
-		if _, err := insert.ExecContext(ctx, conversationID, part.Role, part.Text, fold(part.Text), part.MessageID, part.Line, part.Timestamp.Format(time.RFC3339Nano)); err != nil {
+		inserted, err := insert.ExecContext(ctx, conversationID, part.Role, part.Text, part.MessageID, part.Line, part.Timestamp.Format(time.RFC3339Nano))
+		if err != nil {
 			return index.failure(fmt.Errorf("index message text: %w", err))
+		}
+		id, err := inserted.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("identify indexed message text: %w", err)
+		}
+		if _, err := fullText.ExecContext(ctx, id, fold(part.Text)); err != nil {
+			return index.failure(fmt.Errorf("index full-text message: %w", err))
 		}
 	}
 	return nil

@@ -597,6 +597,112 @@ func TestNativeUserProjectionAcrossAppends(t *testing.T) {
 	}
 }
 
+func TestIndexedLiteralSearchPreservesFoldingAndBytes(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{1, 40} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			body := `{"type":"session","id":"literal","cwd":"/work"}` + "\n" +
+				strings.Repeat(`{"type":"message","message":{"role":"user","content":"ordinary text"}}`+"\n", count) +
+				`{"type":"message","message":{"role":"user","content":"Stra\u00dfe \u0130STANBUL \u039f\u03a3\u039f\u03a3 before\u0000after MixedCase"}}` + "\n"
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			for _, test := range []struct {
+				term      string
+				sensitive bool
+				want      int
+			}{
+				{"STRASSE", false, 1},
+				{"istanbul", false, 1},
+				{"\u03bf\u03c2\u03bf\u03c2", false, 1},
+				{"\u03bf\u03c2", false, 1},
+				{"SS", false, 1},
+				{"\x00AFTER", false, 1},
+				{"\x00after", true, 1},
+				{"\x00AFTER", true, 0},
+				{"MixedCase", true, 1},
+				{"mixedcase", true, 0},
+			} {
+				query := Query{Terms: []string{test.term}, CaseSensitive: test.sensitive}
+				got, err := catalog.Search(t.Context(), query)
+				if err != nil || len(got.Matches) != test.want {
+					t.Fatalf("query=%#v: matches=%d, error=%v, want %d matches", query, len(got.Matches), err, test.want)
+				}
+				compareIndexedSearch(t, catalog, query)
+			}
+		})
+	}
+}
+
+func TestIndexedFullTextTracksAppendRewriteAndRemoval(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	header := `{"type":"session","id":"mutation","cwd":"/work"}` + "\n" +
+		strings.Repeat(`{"type":"message","message":{"role":"user","content":"ordinary text"}}`+"\n", 40)
+	original := `{"type":"message","message":{"role":"user","content":"obsolete-token"}}` + "\n"
+	appended := `{"type":"message","message":{"role":"user","content":"appended-token"}}` + "\n"
+	replacement := `{"type":"message","message":{"role":"user","content":"replacement-token"}}` + "\n"
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	database, err := sql.Open("sqlite", catalog.IndexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, stage := range []struct {
+		name string
+		body string
+		want []int
+	}{
+		{"initial", header + original, []int{1, 0, 0}},
+		{"append", header + original + appended, []int{1, 1, 0}},
+		{"rewrite", header + replacement, []int{0, 0, 1}},
+		{"remove", "", []int{0, 0, 0}},
+	} {
+		t.Run(stage.name, func(t *testing.T) {
+			if stage.body == "" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte(stage.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			checkIndexedFullTextTokens(t, catalog, database, stage.want)
+		})
+	}
+}
+
+func checkIndexedFullTextTokens(t *testing.T, catalog Catalog, database *sql.DB, want []int) {
+	t.Helper()
+	// Text searches leave changed files without the term unparsed, so refresh
+	// before counting full-text rows.
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for position, term := range []string{"obsolete-token", "appended-token", "replacement-token"} {
+		query := Query{Terms: []string{term}}
+		got, err := catalog.Search(t.Context(), query)
+		if err != nil || len(got.Matches) != want[position] {
+			t.Fatalf("term=%q: matches=%d, error=%v, want %d matches", term, len(got.Matches), err, want[position])
+		}
+		compareIndexedSearch(t, catalog, query)
+		var rows int
+		if err := database.QueryRowContext(t.Context(), "SELECT count(*) FROM parts_fts WHERE parts_fts MATCH ?", `"`+term+`"`).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows != want[position] {
+			t.Fatalf("full-text rows for %q=%d, want %d", term, rows, want[position])
+		}
+	}
+}
+
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
@@ -742,7 +848,7 @@ func compareGeneratedHistoryList(property *rapid.T, catalog Catalog, query ListQ
 }
 
 func generatedHistoryQuery(property *rapid.T, count int) Query {
-	terms := []string{"shared-token", "edited-token", "needle", "STRASSE", "\u0130stanbul", "\u754c", "absent-token"}
+	terms := []string{"shared-token", "edited-token", "needle", "STRASSE", "\u0130stanbul", "\u03bf\u03c2", "\x00after", "\u754c", "absent-token"}
 	query := Query{
 		Terms:         rapid.SliceOfN(rapid.SampledFrom(terms), 1, 3).Draw(property, "terms"),
 		Exclude:       rapid.SliceOfN(rapid.SampledFrom(terms), 0, 2).Draw(property, "exclude"),
@@ -790,7 +896,7 @@ func generatedHistory(property *rapid.T, harness registry.Harness, id string) []
 	body = append(body, generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "prompt"), nativeUsers)...)
 	for range rapid.IntRange(1, 6).Draw(property, "message count") {
 		role := rapid.SampledFrom([]string{"user", "assistant", "toolResult"}).Draw(property, "message role")
-		text := rapid.SampledFrom([]string{"needle", "Stra\u00dfe", "\u0130stanbul", "\u754c", "shared-token"}).Draw(property, "message term") + " " + rapid.String().Draw(property, "message text")
+		text := rapid.SampledFrom([]string{"needle", "Stra\u00dfe", "\u0130stanbul", "\u039f\u03a3", "before\x00after", "\u754c", "shared-token"}).Draw(property, "message term") + " " + rapid.String().Draw(property, "message text")
 		if role == "user" {
 			switch rapid.SampledFrom([]string{"plain", "injected", "mixed"}).Draw(property, "user content") {
 			case "injected":
