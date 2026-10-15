@@ -503,6 +503,23 @@ func (app *application) writeSearchDiagnostics(result history.Result, opts searc
 		app.warnf("More matching conversations exist; increase or omit --limit, or narrow the filters.\n")
 	}
 	app.writeSearchUnsupported(result.Sources)
+	if opts.verbose {
+		app.writeSearchRefresh(result)
+	}
+}
+
+func (app *application) writeSearchRefresh(result history.Result) {
+	if result.IndexUnavailable {
+		app.warnf("refresh: index unavailable; scanned native history directly\n")
+	}
+	for _, refresh := range result.Refresh {
+		app.warnf("refresh: %s %s: checked=%d unchanged=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
+			refresh.Source.Harness, sanitizeHumanText(refresh.Source.Path), refresh.Checked, refresh.Unchanged,
+			refresh.Resumed, refresh.Reparsed, refresh.BytesParsed, refresh.ParseTime, refresh.StoreTime)
+	}
+	for _, file := range result.Reparsed {
+		app.warnf("reparsed: %s %s: bytes=%d reason=%s\n", file.Source.Harness, sanitizeHumanText(file.Path), file.Bytes, file.Reason)
+	}
 }
 
 func (app *application) writeSearchIssues(result history.Result, verbose bool) {

@@ -59,6 +59,7 @@ type indexWriter struct {
 	resume        *indexCheckpoint
 	hash          hash.Hash
 	includeTools  bool
+	reason        string
 }
 
 // refreshJob parses one changed history. previous is the file's indexed state
@@ -73,6 +74,7 @@ type refreshJob struct {
 	includeTools bool
 	metadata     map[string]string
 	done         chan refreshResult
+	rebuilt      bool
 }
 
 // refreshResult is a parsed history. openErr means the file could not be opened
@@ -86,6 +88,9 @@ type refreshResult struct {
 	openErr   error
 	failure   error
 	err       error
+	bytes     int64
+	parseTime time.Duration
+	reason    string
 }
 
 // pendingFile keeps walk order: matches and diagnostics are reported in the
@@ -148,7 +153,11 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 	}
 	workers := min(maxScanWorkers, max(minScanWorkers, runtime.GOMAXPROCS(0)))
 	jobs, wg := startRefreshWorkers(ctx, workers)
-	progress := Progress{Source: source, Done: 0, Total: len(files), Refreshed: 0}
+	var stats RefreshStats
+	progress := Progress{Source: source, Done: 0, Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false}
+	defer func() {
+		s.result.Refresh = append(s.result.Refresh, SourceRefresh{Source: source, RefreshStats: progress.Refresh.snapshot()})
+	}()
 	var queue []pendingFile
 	for _, file := range files {
 		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
@@ -212,7 +221,7 @@ func (index *historyIndex) newJob(s *search, source Source, file historyFile) *r
 	if file.database {
 		resumeID = 0
 	}
-	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, metadata: s.sourceMetadata, done: make(chan refreshResult, 1)}
+	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
 }
 
 func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
@@ -253,10 +262,19 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 	path := pending.file.path
 	settled := settledFile{path: path, changed: false}
 	if pending.job == nil {
+		if ctx.Err() != nil {
+			return settled, false
+		}
 		status.Files++
+		progress.Refresh.Checked++
+		progress.Refresh.Unchanged++
 		return settled, true
 	}
 	result := <-pending.job.done
+	if ctx.Err() != nil {
+		return settled, false
+	}
+	progress.Refresh.Checked++
 	if result.openErr != nil {
 		s.issue(source, path, result.openErr)
 		return settled, false
@@ -267,6 +285,7 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 		return settled, false
 	}
 	if result.unchanged {
+		progress.Refresh.Unchanged++
 		return settled, true
 	}
 	if result.err != nil {
@@ -277,21 +296,18 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 		s.indexErr = index.unavailable
 		return settled, false
 	}
-	file, err := index.store(ctx, pending.job, result)
-	if errors.Is(err, errStaleResume) {
-		retry := *pending.job
-		retry.previous, retry.resumeID = file, 0
-		result = parseRefresh(ctx, &retry)
-		if err = errors.Join(result.err, result.failure, result.openErr); err == nil && !result.unchanged {
-			file, err = index.store(ctx, &retry, result)
-		}
-	}
+	file, storeTime, err := index.storeParsed(ctx, pending.job, &result)
 	if err != nil {
 		index.report(s, source, path, err)
 		return settled, false
 	}
 	index.files[fileKey(source, path)] = file
-	progress.Refreshed++
+	if result.unchanged {
+		progress.Refresh.Unchanged++
+	} else {
+		progress.Refreshed++
+		s.refreshed(source, path, result, storeTime, &progress.Refresh)
+	}
 	settled.changed = true
 	return settled, true
 }
@@ -338,6 +354,7 @@ func (index *historyIndex) report(s *search, source Source, path string, err err
 // parseRefresh reads one history into an indexWriter without touching the
 // database, so it can run on any worker.
 func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
+	started := time.Now()
 	includeTools := job.includeTools || (job.exists && job.previous.tools)
 	writer := newIndexWriter(includeTools)
 	reader := new(search)
@@ -361,9 +378,27 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		return result
 	}
 	result.writer = writer
+	result.parseTime = time.Since(started)
+	result.reason = writer.reason
+	if result.reason == "" {
+		result.reason = job.reparseReason()
+	}
 	result.issues = append(reader.result.Issues, result.issues...)
 	result.omitted = reader.result.OmittedIssues
 	return result
+}
+
+func (job *refreshJob) reparseReason() string {
+	switch {
+	case job.rebuilt:
+		return "schema rebuild"
+	case !job.exists:
+		return "new file"
+	case job.includeTools && !job.previous.tools:
+		return "tool-mode mismatch"
+	default:
+		return "changed file"
+	}
 }
 
 func (job *refreshJob) isCurrent(stamp string) bool {
@@ -376,6 +411,9 @@ func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search) 
 	if job.isCurrent(result.stamp) {
 		result.unchanged = true
 		return result, false
+	}
+	if info, err := os.Stat(job.file.path); err == nil {
+		result.bytes = info.Size()
 	}
 	reader.scanDatabase(ctx, job.source, job.file.path)
 	return result, true
@@ -419,6 +457,10 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 			return result, false
 		}
 	}
+	result.bytes = info.Size()
+	if writer.resume != nil {
+		result.bytes -= writer.resume.Size
+	}
 	if t := reader.scanTranscript(ctx, source, path, file); t != nil {
 		reader.add(ctx, t)
 	}
@@ -448,6 +490,27 @@ func (index *historyIndex) store(ctx context.Context, job *refreshJob, result re
 		return indexedFile{}, err
 	}
 	return file, nil
+}
+
+func (index *historyIndex) storeParsed(ctx context.Context, job *refreshJob, result *refreshResult) (indexedFile, time.Duration, error) {
+	started := time.Now()
+	file, err := index.store(ctx, job, *result)
+	elapsed := time.Since(started)
+	if !errors.Is(err, errStaleResume) {
+		return file, elapsed, err
+	}
+	retry := *job
+	retry.previous, retry.resumeID = file, 0
+	*result = parseRefresh(ctx, &retry)
+	if err := errors.Join(result.err, result.failure, result.openErr); err != nil {
+		return file, elapsed, err
+	}
+	if result.unchanged {
+		return file, elapsed, nil
+	}
+	started = time.Now()
+	file, err = index.store(ctx, &retry, *result)
+	return file, elapsed + time.Since(started), err
 }
 
 func (index *historyIndex) writeRefresh(ctx context.Context, job *refreshJob, result refreshResult) (indexedFile, error) {
@@ -636,7 +699,7 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 func newIndexWriter(includeTools bool) *indexWriter {
 	var conversation Conversation
 	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false, Tools: includeTools}
-	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, includeTools: includeTools}
+	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, includeTools: includeTools, reason: ""}
 }
 
 func (writer *indexWriter) current() *bufferedConversation {
@@ -689,6 +752,12 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 	// Resuming keeps the stored rows, so it is only valid for an identical tool
 	// mode: a tools query must not inherit a projection without tool content.
 	if !checkpoint.resumable(writer, info) {
+		switch {
+		case checkpoint.Tools != writer.includeTools:
+			writer.reason = "tool-mode mismatch"
+		case !checkpoint.Complete:
+			writer.reason = "incomplete checkpoint"
+		}
 		return nil
 	}
 	// Verify the entire retained prefix before reusing parsed state. A rewrite
@@ -700,6 +769,7 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 		writer.resume = &checkpoint
 		return nil
 	}
+	writer.reason = "rewritten prefix"
 	writer.hash.Reset()
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("rewind history: %w", err)

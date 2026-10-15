@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -167,7 +168,7 @@ func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Que
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		property.Fatalf("query=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		property.Fatalf("query=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
 	}
 	return got
@@ -349,7 +350,6 @@ func parityFixture(t *testing.T) Catalog {
 	return Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 }
 
-// compareIndexedSearch checks the index against the production direct scan.
 func compareIndexedSearch(t *testing.T, c Catalog, q Query) {
 	t.Helper()
 	want, wantErr := c.searchDirect(t.Context(), q)
@@ -357,7 +357,7 @@ func compareIndexedSearch(t *testing.T, c Catalog, q Query) {
 	if errors.Is(err, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		t.Fatalf("query %#v errors: %v / %v", q, err, wantErr)
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		t.Fatalf("query %#v (-direct +index):\n%s", q, diff)
 	}
 }
@@ -414,6 +414,72 @@ func benchmarkCatalog(b *testing.B) Catalog {
 		b.Fatal(err)
 	}
 	return c
+}
+
+func registryBenchmarkCatalog(b *testing.B) (Catalog, []registry.Session) {
+	b.Helper()
+	root := b.TempDir()
+	linked := filepath.Join(b.TempDir(), "linked")
+	if err := os.Symlink(root, linked); err != nil {
+		b.Fatal(err)
+	}
+	sources := make([]Source, 0, 2)
+	var sessions []registry.Session
+	for _, harness := range []registry.Harness{"pi", "omp"} {
+		dir := filepath.Join(root, string(harness))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			b.Fatal(err)
+		}
+		sources = append(sources, Source{Harness: harness, Path: dir})
+		for number := range 5000 {
+			name := fmt.Sprintf("%04d.jsonl", number)
+			id := fmt.Sprintf("session-%d", number)
+			body := fmt.Sprintf("{\"type\":\"session\",\"id\":%q,\"cwd\":\"/work/project\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"example needle\"}}\n", id)
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+				b.Fatal(err)
+			}
+			if number < 15 {
+				sessions = append(sessions, registry.Session{ID: fmt.Sprintf("%s-%d", harness, number), Harness: harness, SessionID: id, SessionPath: filepath.Join(linked, string(harness), name)})
+			}
+		}
+	}
+	catalog := Catalog{Sources: sources, IndexPath: filepath.Join(b.TempDir(), "index.sqlite")}
+	if _, err := catalog.Refresh(b.Context()); err != nil {
+		b.Fatal(err)
+	}
+	return catalog, sessions
+}
+
+func BenchmarkHistoryRegistrySearch(b *testing.B) {
+	catalog, sessions := registryBenchmarkCatalog(b)
+	for _, mode := range []string{"list", "text"} {
+		for _, withRegistry := range []bool{false, true} {
+			b.Run(fmt.Sprintf("%s/registry=%t", mode, withRegistry), func(b *testing.B) {
+				filter := Filter{MinMessages: 0}
+				if withRegistry {
+					filter.Registry = sessions
+				}
+				benchmarkRegistryQuery(b, catalog, filter, mode)
+			})
+		}
+	}
+}
+
+func benchmarkRegistryQuery(b *testing.B, catalog Catalog, filter Filter, mode string) {
+	b.Helper()
+	b.ReportAllocs()
+	for b.Loop() {
+		var result Result
+		var err error
+		if mode == "list" {
+			result, err = catalog.List(b.Context(), ListQuery{Filter: filter, Limit: 20})
+		} else {
+			result, err = catalog.Search(b.Context(), Query{Filter: filter, Terms: []string{"needle"}, Limit: 20})
+		}
+		if err != nil || len(result.Matches) != 20 {
+			b.Fatalf("matches=%d, %v", len(result.Matches), err)
+		}
+	}
 }
 
 func TestIndexCanceledRefreshRollsBack(t *testing.T) {
@@ -735,7 +801,7 @@ func TestListMatchesDirectScan(t *testing.T) {
 		if err != nil || wantErr != nil {
 			t.Fatalf("list %#v: %v / %v", tt.query, err, wantErr)
 		}
-		if diff := cmp.Diff(want, got); diff != "" {
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 			t.Fatalf("list %#v (-direct +index):\n%s", tt.query, diff)
 		}
 		if diff := cmp.Diff(tt.want, sessionIDs(got)); diff != "" {
@@ -805,6 +871,9 @@ func TestChildHistoriesFoldIntoParentConversation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
+		if tt.name == "child matches report the parent once" && (got.Refresh[0].Checked != 5 || got.Refresh[0].Reparsed != 5 || len(got.Reparsed) != 5) {
+			t.Fatalf("folded file stats = %#v, files=%#v", got.Refresh, got.Reparsed)
+		}
 		if diff := cmp.Diff(tt.want, slices.Sorted(slices.Values(sessionIDs(got)))); diff != "" {
 			t.Errorf("%s (-want +got):\n%s", tt.name, diff)
 		}
@@ -855,7 +924,7 @@ func requireFoldedList(t *testing.T, c Catalog) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff(direct, listed); diff != "" {
+	if diff := cmp.Diff(direct, listed, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		t.Fatalf("list (-direct +index):\n%s", diff)
 	}
 }

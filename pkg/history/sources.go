@@ -222,7 +222,8 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 					return
 				}
 				inspected.Add(int64(s.scanFileDirect(ctx, source, files[i])))
-				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0})
+				var stats RefreshStats
+				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false})
 			}
 		}()
 	}
@@ -281,6 +282,8 @@ func (s *search) report(progress Progress) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	progress.Refresh = progress.Refresh.snapshot()
+	progress.IndexUnavailable = s.result.IndexUnavailable
 	s.progress(progress)
 }
 

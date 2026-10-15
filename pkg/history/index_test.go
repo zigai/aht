@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -81,6 +82,118 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"Removed"}}, 1)
 }
 
+func TestRefreshStatsDescribeCompletedWork(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	var updates []history.Progress
+	catalog.Progress = func(progress history.Progress) { updates = append(updates, progress) }
+	cold := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, cold, history.RefreshStats{Checked: 1, Reparsed: 1, BytesParsed: int64(len(treeHistory)), Reasons: map[string]int{"new file": 1}})
+	if len(cold.Reparsed) != 1 {
+		t.Fatalf("cold files = %#v", cold.Reparsed)
+	}
+	if cold.Refresh[0].ParseTime <= 0 || cold.Refresh[0].StoreTime <= 0 {
+		t.Fatalf("missing refresh timings: %#v", cold.Refresh)
+	}
+	warm := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, warm, history.RefreshStats{Checked: 1, Unchanged: 1})
+	if len(warm.Reparsed) != 0 {
+		t.Fatalf("warm files = %#v", warm.Reparsed)
+	}
+	appended := `{"type":"message","message":{"role":"user","content":"appended token"}}` + "\n"
+	appendHistory(t, path, appended)
+	resumed := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"appended token"}}, 1)
+	requireRefreshStats(t, resumed, history.RefreshStats{Checked: 1, Resumed: 1, BytesParsed: int64(len(appended))})
+	if len(resumed.Reparsed) != 0 {
+		t.Fatalf("append files = %#v", resumed.Reparsed)
+	}
+	if diff := cmp.Diff(resumed.Refresh[0].RefreshStats, updates[len(updates)-1].Refresh); diff != "" {
+		t.Fatalf("final progress differs (-result +progress):\n%s", diff)
+	}
+	if updates[0].Refresh.Reasons["new file"] != 1 || updates[0].Refresh.Resumed != 0 {
+		t.Fatalf("previous progress changed: %#v", updates[0])
+	}
+}
+
+func TestRefreshStatsExplainFullReparses(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"rewritten prefix", "incomplete checkpoint", "tool-mode mismatch", "schema rebuild"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if scenario == "incomplete checkpoint" {
+				if err := os.WriteFile(path, []byte(strings.TrimSuffix(treeHistory, "\n")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+			query := history.Query{Terms: []string{"refresh"}}
+			mutateRefreshHistory(t, catalog, path, scenario)
+			query.IncludeTools = scenario == "tool-mode mismatch"
+			result := requireIndexedMatches(t, catalog, query, 1)
+			if result.Refresh[0].Reparsed != 1 || result.Refresh[0].Resumed != 0 || result.Refresh[0].Reasons[scenario] != 1 || len(result.Reparsed) != 1 || result.Reparsed[0].Reason != scenario {
+				t.Fatalf("%s: stats=%#v files=%#v", scenario, result.Refresh, result.Reparsed)
+			}
+		})
+	}
+}
+
+func requireRefreshStats(t *testing.T, result history.Result, want history.RefreshStats) {
+	t.Helper()
+	if len(result.Refresh) != 1 {
+		t.Fatalf("source refreshes = %#v", result.Refresh)
+	}
+	if diff := cmp.Diff(want, result.Refresh[0].RefreshStats, cmpopts.IgnoreFields(history.RefreshStats{}, "ParseTime", "StoreTime")); diff != "" {
+		t.Fatalf("refresh stats (-want +got):\n%s", diff)
+	}
+}
+
+func mutateRefreshHistory(t *testing.T, catalog history.Catalog, path, scenario string) {
+	t.Helper()
+	switch scenario {
+	case "rewritten prefix":
+		if err := os.WriteFile(path, []byte(strings.Replace(treeHistory, "handler", "service", 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		appendHistory(t, path, "\n")
+	case "incomplete checkpoint":
+		appendHistory(t, path, "\n\n")
+	case "schema rebuild":
+		db := openTestIndex(t, catalog.IndexPath)
+		if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=4"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRefreshStatsMarkUnavailableIndex(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	catalog.IndexPath = t.TempDir()
+	var last history.Progress
+	catalog.Progress = func(progress history.Progress) { last = progress }
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	if !result.IndexUnavailable || !last.IndexUnavailable || len(result.Refresh) != 0 {
+		t.Fatalf("fallback stats = %#v, progress=%#v", result, last)
+	}
+}
+
+func TestRefreshStatsExcludeCanceledWork(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	writeHistory(t, catalog.Sources[0].Path, "z-second.jsonl", strings.ReplaceAll(treeHistory, "native-session", "second"))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	catalog.Progress = func(progress history.Progress) {
+		if progress.Refreshed == 1 {
+			cancel()
+		}
+	}
+	result, err := catalog.Refresh(ctx)
+	if !errors.Is(err, context.Canceled) || len(result.Refresh) != 1 || result.Refresh[0].Reparsed != 1 || result.Refresh[0].Checked != 1 || result.Refresh[0].BytesParsed != int64(len(treeHistory)) {
+		t.Fatalf("canceled refresh = %#v, %v", result.Refresh, err)
+	}
+}
+
 func TestIndexRejectsMiddlePrefixRewriteBeforeAppend(t *testing.T) {
 	t.Parallel()
 	padding := `{"type":"message","message":{"role":"toolResult","content":"` + strings.Repeat("x", 128<<10) + `"}}` + "\n"
@@ -119,7 +232,7 @@ PRAGMA user_version=2;`)
 
 	for range 2 {
 		after := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
-		if diff := cmp.Diff(before, after); diff != "" {
+		if diff := cmp.Diff(before, after, cmpopts.IgnoreFields(history.Result{}, "Refresh", "Reparsed")); diff != "" {
 			t.Fatalf("cache upgrade changed results (-before +after):\n%s", diff)
 		}
 	}

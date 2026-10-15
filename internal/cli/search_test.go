@@ -89,6 +89,20 @@ func TestSearchCLIJSONAndToolOptIn(t *testing.T) {
 	}
 }
 
+func TestSearchCLIVerboseRefreshStats(t *testing.T) {
+	path := searchCLIFixture(t)
+	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh token", "--source", "pi=" + path, "--verbose", "--json=false"}
+	for _, expected := range []string{"checked=1 unchanged=0 resumed=0 reparsed=1", "checked=1 unchanged=1 resumed=0 reparsed=0"} {
+		var stdout, stderr bytes.Buffer
+		if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(stderr.String(), expected) || strings.Contains(stdout.String(), "checked=") {
+			t.Fatalf("stdout=%q stderr=%q, want %q on stderr", stdout.String(), stderr.String(), expected)
+		}
+	}
+}
+
 func TestSearchCLIRendersSafeTextAndPartialJSON(t *testing.T) {
 	path := searchCLIFixture(t)
 	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh token", "--source", "pi=" + path, "--json=false"}

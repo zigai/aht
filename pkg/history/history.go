@@ -146,10 +146,12 @@ type Catalog struct {
 // discovered in Source, Done those inspected so far, and Refreshed those whose
 // index entries were rebuilt because the native history changed.
 type Progress struct {
-	Source    Source `json:"source"`
-	Done      int    `json:"done"`
-	Total     int    `json:"total"`
-	Refreshed int    `json:"refreshed"`
+	Source           Source       `json:"source"`
+	Done             int          `json:"done"`
+	Total            int          `json:"total"`
+	Refreshed        int          `json:"refreshed"`
+	Refresh          RefreshStats `json:"refresh"`
+	IndexUnavailable bool         `json:"index_unavailable,omitempty"`
 }
 
 // Conversation identifies native history, including histories never seen by AHT.
@@ -222,11 +224,14 @@ type Issue struct {
 // Truncated means more conversations matched than Limit allowed. Sources
 // distinguishes skipped, missing, and unsupported histories from searched ones.
 type Result struct {
-	Matches       []Match        `json:"matches"`
-	Sources       []SourceStatus `json:"sources"`
-	Issues        []Issue        `json:"issues"`
-	OmittedIssues int            `json:"omitted_issues"`
-	Truncated     bool           `json:"truncated"`
+	Matches          []Match         `json:"matches"`
+	Sources          []SourceStatus  `json:"sources"`
+	Issues           []Issue         `json:"issues"`
+	OmittedIssues    int             `json:"omitted_issues"`
+	Truncated        bool            `json:"truncated"`
+	Refresh          []SourceRefresh `json:"refresh,omitempty"`
+	Reparsed         []ReparsedFile  `json:"reparsed,omitempty"`
+	IndexUnavailable bool            `json:"index_unavailable,omitempty"`
 }
 
 type scanMode int
@@ -449,7 +454,7 @@ func (c Catalog) List(ctx context.Context, query ListQuery) (Result, error) {
 // matches. Sort and Limit must be zero.
 func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool) (Result, error) {
 	if query.Limit != 0 || query.Sort != "" {
-		return Result{Matches: []Match{}, Sources: []SourceStatus{}, Issues: []Issue{}, OmittedIssues: 0, Truncated: false}, fmt.Errorf("%w: streamed searches report matches in discovery order without sort or limit", ErrInvalidQuery)
+		return Result{Matches: []Match{}, Sources: []SourceStatus{}, Issues: []Issue{}, OmittedIssues: 0, Truncated: false, Refresh: nil, Reparsed: nil, IndexUnavailable: false}, fmt.Errorf("%w: streamed searches report matches in discovery order without sort or limit", ErrInvalidQuery)
 	}
 	var s search
 	s.mode = modeSearch
@@ -469,6 +474,7 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	}
 	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
 	if err != nil {
+		s.result.IndexUnavailable = errors.Is(err, ErrIndexUnavailable)
 		return s.finalize(ctx), err
 	}
 	s.index = index
@@ -531,6 +537,7 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 		if !errors.Is(err, ErrIndexUnavailable) {
 			return err
 		}
+		s.result.IndexUnavailable = true
 		return s.runDirect(ctx, sources)
 	}
 	s.index = index
@@ -538,11 +545,13 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 	closeErr := index.close()
 	s.index = nil
 	if errors.Is(runErr, ErrIndexUnavailable) {
+		s.result.IndexUnavailable = true
 		if s.stream != nil && s.matched > 0 {
 			return runErr
 		}
 		// The index is unusable, so its own close error is irrelevant.
 		s.reset()
+		s.result.IndexUnavailable = true
 		return s.runDirect(ctx, sources)
 	}
 	return errors.Join(runErr, closeErr)
@@ -575,6 +584,9 @@ func (c Catalog) begin(ctx context.Context, s *search) ([]Source, error) {
 
 func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	scanErr := s.forEachSource(ctx, sources)
+	if err := ctx.Err(); err != nil {
+		scanErr = errors.Join(scanErr, fmt.Errorf("search history: %w", err))
+	}
 	var commitErr error
 	if scanErr == nil {
 		commitErr = s.index.commit(ctx)
@@ -723,6 +735,9 @@ func (s *search) reset() {
 	s.result.Issues = []Issue{}
 	s.result.OmittedIssues = 0
 	s.result.Truncated = false
+	s.result.Refresh = nil
+	s.result.Reparsed = nil
+	s.result.IndexUnavailable = false
 }
 
 // selectSource reports whether the source is selected and, when it is not, the

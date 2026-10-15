@@ -105,6 +105,7 @@ type historyIndex struct {
 	seen         map[string]bool
 	sourceFilter string
 	sourceArgs   []any
+	rebuilt      bool
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
@@ -284,6 +285,7 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *sql.Tx) error {
 	case version == indexVersion && appID == indexApplicationID:
 		return nil
 	case appID == indexApplicationID && version >= oldestIndexVersion && version < indexVersion:
+		index.rebuilt = true
 		if _, err := tx.ExecContext(ctx, dropIndexSchema+indexSchema); err != nil {
 			return fmt.Errorf("rebuild history index: %w", err)
 		}
