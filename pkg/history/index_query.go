@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,8 +23,8 @@ const (
 )
 
 type indexQueries struct {
-	conversations *sql.Stmt
-	parts         *sql.Stmt
+	conversations *indexStatement
+	parts         *indexStatement
 }
 
 // indexedMatches plans one conversation's matches: the number of distinct
@@ -85,13 +84,12 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err err
 	}()
 	index.queries.conversations, err = index.conn.PrepareContext(ctx, "SELECT id,metadata FROM conversations WHERE file_id=? ORDER BY id")
 	if err != nil {
-		return index.contention(fmt.Errorf("prepare indexed conversations: %w", err))
+		return index.failure(fmt.Errorf("prepare indexed conversations: %w", err))
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", max(s.query.Excerpts, 1)), ",")
-	//nolint:gosec // G202: the statement only repeats fixed placeholders.
 	index.queries.parts, err = index.conn.PrepareContext(ctx, "SELECT id,role,body,message_id,line,timestamp FROM parts WHERE id IN ("+placeholders+")")
 	if err != nil {
-		return index.contention(fmt.Errorf("prepare indexed text: %w", err))
+		return index.failure(fmt.Errorf("prepare indexed text: %w", err))
 	}
 	return nil
 }
@@ -136,7 +134,7 @@ func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, f
 	}
 	rows, err := index.conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return index.contention(fmt.Errorf("find indexed candidates: %w", err))
+		return index.failure(fmt.Errorf("find indexed candidates: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -277,8 +275,8 @@ func (index *historyIndex) smallSelection(ctx context.Context, filter string, ar
 	var count int
 	query := "SELECT count(*) FROM (SELECT p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + filter + " LIMIT ?)"
 	values := append(append([]any{}, args...), directoryScanThreshold+1)
-	if err := index.conn.QueryRowContext(ctx, query, values...).Scan(&count); err != nil {
-		return false, index.contention(fmt.Errorf("select indexed parts: %w", err))
+	if err := index.conn.queryRow(query, values...).Scan(ctx, &count); err != nil {
+		return false, index.failure(fmt.Errorf("select indexed parts: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
 }
@@ -289,15 +287,15 @@ func (index *historyIndex) preferLiteral(ctx context.Context, filter string, arg
 	}
 	var pages int64
 	query := "SELECT coalesce(sum(1+length(CAST(p.folded AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
-	if err := index.conn.QueryRowContext(ctx, query, args...).Scan(&pages); err != nil {
-		return false, index.contention(fmt.Errorf("measure selected parts: %w", err))
+	if err := index.conn.queryRow(query, args...).Scan(ctx, &pages); err != nil {
+		return false, index.failure(fmt.Errorf("measure selected parts: %w", err))
 	}
 	if pages <= directoryScanThreshold {
 		return true, nil
 	}
 	var candidates int64
-	if err := index.conn.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ? LIMIT ?)", phrase, pages+1).Scan(&candidates); err != nil {
-		return false, index.contention(fmt.Errorf("measure trigram candidates: %w", err))
+	if err := index.conn.queryRow("SELECT count(*) FROM (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ? LIMIT ?)", phrase, pages+1).Scan(ctx, &candidates); err != nil {
+		return false, index.failure(fmt.Errorf("measure trigram candidates: %w", err))
 	}
 	return candidates > pages, nil
 }
@@ -424,7 +422,7 @@ func (index *historyIndex) readConversations(ctx context.Context, fileID int64, 
 func (index *historyIndex) eachConversation(ctx context.Context, fileID int64, visit func(indexedConversation)) (err error) {
 	rows, err := index.queries.conversations.QueryContext(ctx, fileID)
 	if err != nil {
-		return index.contention(fmt.Errorf("query indexed conversations: %w", err))
+		return index.failure(fmt.Errorf("query indexed conversations: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -521,7 +519,7 @@ func (index *historyIndex) eachPartText(ctx context.Context, ids []int64, visit 
 	}
 	rows, err := index.queries.parts.QueryContext(ctx, args...)
 	if err != nil {
-		return index.contention(fmt.Errorf("query indexed text: %w", err))
+		return index.failure(fmt.Errorf("query indexed text: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -544,7 +542,7 @@ func (index *historyIndex) refreshPlans(ctx context.Context, s *search, fileID i
 	// Refresh plans for rewritten/appended conversations before using them.
 	rows, err := index.conn.QueryContext(ctx, "SELECT id FROM conversations WHERE file_id=?", fileID)
 	if err != nil {
-		return index.contention(fmt.Errorf("refresh indexed candidates: %w", err))
+		return index.failure(fmt.Errorf("refresh indexed candidates: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -563,7 +561,7 @@ func (index *historyIndex) refreshPlans(ctx context.Context, s *search, fileID i
 
 func (queries *indexQueries) close() error {
 	var err error
-	for _, stmt := range []*sql.Stmt{queries.conversations, queries.parts} {
+	for _, stmt := range []*indexStatement{queries.conversations, queries.parts} {
 		if stmt != nil {
 			err = errors.Join(err, stmt.Close())
 		}

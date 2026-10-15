@@ -28,7 +28,15 @@ func (s *search) scanTranscript(ctx context.Context, source Source, path string,
 	if parse := catalog.TranscriptFor(source.Harness).Document; parse != nil {
 		return s.scanDocument(ctx, source, path, file, parse, buffer)
 	}
-	return s.scanJSONL(ctx, source, path, file, buffer)
+	return s.scanJSONL(ctx, source, path, file, buffer, false)
+}
+
+func (s *search) checkTranscriptFormat(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer) {
+	if catalog.TranscriptFor(source.Harness).Document != nil {
+		s.scanTranscript(ctx, source, path, file, buffer)
+		return
+	}
+	s.scanJSONL(ctx, source, path, file, buffer, true)
 }
 
 func (s *search) scanDocument(ctx context.Context, source Source, path string, file *os.File, parse func(context.Context, *native.Decoder, []byte) error, buffer *fileIssueBuffer) *transcript {

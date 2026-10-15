@@ -68,7 +68,7 @@ func (t *transcript) qualifies(terms int) bool {
 	return !slices.Contains(t.hits, false)
 }
 
-func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer) *transcript {
+func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer, identifyOnly bool) *transcript {
 	info, err := file.Stat()
 	if err != nil {
 		buffer.issue(source, path, err)
@@ -82,7 +82,7 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		input = io.TeeReader(input, s.writer.hash)
 	}
 	reader := bufio.NewReaderSize(input, scannerInitialBytes)
-	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines, buffer)
+	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines, buffer, identifyOnly)
 	if ctx.Err() == nil && !t.identified() && (records > 0 || start > 0) {
 		buffer.issue(source, path, errUnknownFormat)
 	}
@@ -118,12 +118,12 @@ func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssu
 	return t, 0, 0
 }
 
-func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer) (int, int, bool) {
+func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer, identifyOnly bool) (int, int, bool) {
 	complete := false
 	records := 0
 	readerSpec := catalog.TranscriptFor(source.Harness)
 	decoder := s.decoder(source, t, buffer)
-	for line := lines + 1; ; line++ {
+	for line := lines + 1; !identifyOnly || !t.identified(); line++ {
 		data, readErr := readRecordLine(ctx, reader)
 		if errors.Is(readErr, io.EOF) || ctx.Err() != nil {
 			break
@@ -141,19 +141,25 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 			continue
 		}
 		records++
-		if readerSpec.FastRecord != nil && readerSpec.FastRecord(ctx, decoder, data, line) {
-			continue
-		}
-		var r native.Record
-		if json.Unmarshal(data, &r) != nil {
-			buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
-			continue
-		}
-		if readerSpec.Record != nil {
-			readerSpec.Record(ctx, decoder, r, line)
+		if err := decodeJSONLRecord(ctx, readerSpec, decoder, data, line); err != nil {
+			buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
 		}
 	}
 	return lines, records, complete
+}
+
+func decodeJSONLRecord(ctx context.Context, reader native.Reader, decoder *native.Decoder, data []byte, line int) error {
+	if reader.FastRecord != nil && reader.FastRecord(ctx, decoder, data, line) {
+		return nil
+	}
+	var record native.Record
+	if json.Unmarshal(data, &record) != nil {
+		return errInvalidRecord
+	}
+	if reader.Record != nil {
+		reader.Record(ctx, decoder, record, line)
+	}
+	return nil
 }
 
 func readRecordLine(ctx context.Context, reader *bufio.Reader) ([]byte, error) {

@@ -178,16 +178,18 @@ func TestRefreshStatsMarkUnavailableIndex(t *testing.T) {
 	}
 }
 
-func TestRefreshStatsMarkUnavailableDuringRefresh(t *testing.T) {
+func TestRefreshStatsWhileWaitingForLockClaimNoWork(t *testing.T) {
 	t.Parallel()
 	catalog, path := indexedFixture(t)
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	release := holdIndexWriteLock(t, catalog.IndexPath)
 	defer release()
 	appendHistory(t, path, "\n")
-	result, err := catalog.Refresh(t.Context())
-	if !errors.Is(err, history.ErrIndexUnavailable) || !result.IndexUnavailable {
-		t.Fatalf("unavailable refresh = %#v, %v", result.Refresh, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	result, err := catalog.Refresh(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) || result.IndexUnavailable {
+		t.Fatalf("waiting refresh = %#v, %v", result.Refresh, err)
 	}
 	requireRefreshStats(t, result, history.RefreshStats{Checked: 1})
 }
@@ -335,18 +337,58 @@ func TestIndexSearchesWhileWriteLocked(t *testing.T) {
 	c, path := indexedFixture(t)
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	release := holdIndexWriteLock(t, c.IndexPath)
-	defer release()
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
 	// A warm search reads the last committed snapshot without a write lock: it
-	// must not wait for the five-second busy timeout the lock imposes on writers.
+	// must not wait for another writer to release its lock.
 	start := time.Now()
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	if waited := time.Since(start); waited > 2*time.Second {
 		t.Fatalf("warm search waited %s on the index write lock", waited)
 	}
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"locked append"}}`+"\n")
+	c.Progress = func(progress history.Progress) {
+		if progress.Waiting && !released {
+			release()
+			released = true
+		}
+	}
 	result, err := c.Search(t.Context(), history.Query{Terms: []string{"locked append"}})
-	if err != nil || len(result.Matches) != 1 {
-		t.Fatalf("locked refresh = %#v, %v", result, err)
+	if err != nil || len(result.Matches) != 1 || !released {
+		t.Fatalf("locked refresh = %#v, released=%t, %v", result, released, err)
+	}
+	var stored int
+	if err := openTestIndex(t, c.IndexPath).QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'locked append')>0").Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("waited search did not persist its result: count=%d err=%v", stored, err)
+	}
+}
+
+func TestIndexWaitCanBeCancelled(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	release := holdIndexWriteLock(t, catalog.IndexPath)
+	defer release()
+	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"new append"}}`+"\n")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var canceled time.Time
+	catalog.Progress = func(progress history.Progress) {
+		if progress.Waiting && canceled.IsZero() {
+			canceled = time.Now()
+			cancel()
+		}
+	}
+	_, err := catalog.Search(ctx, history.Query{Terms: []string{"new append"}})
+	if !errors.Is(err, context.Canceled) || canceled.IsZero() {
+		t.Fatalf("canceled wait: canceled=%v err=%v", canceled, err)
+	}
+	if elapsed := time.Since(canceled); elapsed > time.Second {
+		t.Fatalf("cancellation took %s", elapsed)
 	}
 }
 
@@ -473,16 +515,14 @@ func TestIndexRefreshFailureDoesNotReturnStaleMatches(t *testing.T) {
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"appended token"}}, 1)
 }
 
-func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
+func TestIndexScansAroundForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 	t.Parallel()
 	c, _ := indexedFixture(t)
 	db := openTestIndex(t, c.IndexPath)
 	if _, err := db.ExecContext(t.Context(), "CREATE TABLE retained(value); INSERT INTO retained VALUES('keep')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}}); err == nil {
-		t.Fatal("accepted foreign index")
-	}
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	var value string
 	if err := db.QueryRowContext(t.Context(), "SELECT value FROM retained").Scan(&value); err != nil || value != "keep" {
 		t.Fatalf("changed foreign database: %q, %v", value, err)

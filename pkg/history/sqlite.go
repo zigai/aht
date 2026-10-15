@@ -74,7 +74,7 @@ func historySQL(ctx context.Context, db *sql.DB, h registry.Harness) (string, na
 func (s *search) databaseRows(ctx context.Context, source Source, path string, parse native.RowReader, rows *sql.Rows, buffer *fileIssueBuffer) {
 	var t transcript
 	defer func() {
-		buffer.selectConversation(t.match.Conversation, s.accepts(t.match.Conversation))
+		buffer.selectConversation(t.match.Conversation, s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))))
 		s.add(ctx, &t)
 	}()
 	for rows.Next() {
@@ -87,7 +87,7 @@ func (s *search) databaseRows(ctx context.Context, source Source, path string, p
 			return
 		}
 		if row.SessionID != t.match.Conversation.SessionID {
-			buffer.selectConversation(t.match.Conversation, s.accepts(t.match.Conversation))
+			buffer.selectConversation(t.match.Conversation, s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))))
 			s.add(ctx, &t)
 			t = newDatabaseTranscript(Conversation{Harness: source.Harness, SessionID: row.SessionID, Path: path, Title: row.Title, CustomTitle: "", AITitle: "", Prompt: "", CWD: row.CWD, ProjectRoot: "", GitBranch: "", Model: "", Messages: 0, CreatedAt: native.StoredTime(row.Created), UpdatedAt: native.StoredTime(row.Updated)})
 		}

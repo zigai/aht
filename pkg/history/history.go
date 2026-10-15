@@ -144,7 +144,8 @@ type Catalog struct {
 
 // Progress reports scanning of one source. Total counts the history files
 // discovered in Source, Done those inspected so far, and Refreshed those whose
-// index entries were rebuilt because the native history changed.
+// index entries were rebuilt because the native history changed. Waiting reports
+// index lock contention instead of source progress.
 type Progress struct {
 	Source           Source       `json:"source"`
 	Done             int          `json:"done"`
@@ -152,6 +153,7 @@ type Progress struct {
 	Refreshed        int          `json:"refreshed"`
 	Refresh          RefreshStats `json:"refresh"`
 	IndexUnavailable bool         `json:"index_unavailable,omitempty"`
+	Waiting          bool         `json:"waiting,omitempty"`
 }
 
 // Conversation identifies native history, including histories never seen by AHT.
@@ -474,14 +476,14 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	if err != nil || len(sources) == 0 {
 		return s.finalize(ctx), err
 	}
-	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
+	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources), s.waitingForIndex)
 	if err != nil {
 		s.result.IndexUnavailable = errors.Is(err, ErrIndexUnavailable)
 		return s.finalize(ctx), err
 	}
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
-	closeErr := index.close()
+	closeErr := index.close(ctx)
 	s.index = nil
 	s.result.IndexUnavailable = errors.Is(runErr, ErrIndexUnavailable)
 	return s.finalize(ctx), errors.Join(runErr, closeErr)
@@ -535,7 +537,7 @@ func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
 // retract matches it already reported, so it fails instead of falling back
 // once anything was streamed.
 func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source) error {
-	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
+	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources), s.waitingForIndex)
 	if err != nil {
 		if !errors.Is(err, ErrIndexUnavailable) {
 			return err
@@ -545,8 +547,11 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 	}
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
-	closeErr := index.close()
+	closeErr := index.close(ctx)
 	s.index = nil
+	if isIndexContentFailure(runErr) {
+		runErr = indexUnavailable(runErr)
+	}
 	if errors.Is(runErr, ErrIndexUnavailable) {
 		s.result.IndexUnavailable = true
 		if s.stream != nil && s.matched > 0 {
@@ -558,6 +563,12 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 		return s.runDirect(ctx, sources)
 	}
 	return errors.Join(runErr, closeErr)
+}
+
+func (s *search) waitingForIndex() {
+	var progress Progress
+	progress.Waiting = true
+	s.report(progress)
 }
 
 // begin validates the query, resolves the sources to scan, and clears the result
@@ -598,7 +609,7 @@ func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	if s.mode != modeRefresh {
 		excerptErr = s.index.readRetained(ctx, s)
 	}
-	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, s.resultError())
+	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, ctx.Err(), s.resultError())
 }
 
 // indexSources mirrors native discovery's path spelling: directory walks keep
@@ -623,7 +634,7 @@ func (s *search) runDirect(ctx context.Context, sources []Source) error {
 	if err := s.forEachSource(ctx, sources); err != nil {
 		return err
 	}
-	return s.resultError()
+	return errors.Join(ctx.Err(), s.resultError())
 }
 
 // forEachSource scans every selected source in input order. Sources the query
@@ -797,27 +808,55 @@ func retainIssue(issues []Issue, issue Issue) ([]Issue, int) {
 	return issues, 1
 }
 
+func (s *search) reportIssues(path string, issues []Issue, omitted int, selected map[string]bool) {
+	s.reportScopedIssues(&fileIssueBuffer{issues: map[string][]Issue{path: issues}, omitted: map[string]int{path: omitted}, selected: selected, parents: nil})
+}
+
 func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
 	for child, parent := range buffer.parents {
 		buffer.selected[child] = buffer.selected[parent]
 	}
-	omitted := buffer.omitted
-	for _, issues := range buffer.issues {
-		for _, issue := range issues {
-			matches := buffer.selected[issue.Path]
-			if !issue.Record {
-				matches = s.fileIssueSelected(issue.Source, issue.Path)
-			}
-			if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
-				s.recordIssue(issue)
-			} else {
-				omitted++
-			}
-		}
+	omitted := 0
+	for path := range buffer.issues {
+		omitted += s.reportFileIssues(buffer, path)
 	}
 	s.mu.Lock()
 	s.result.OmittedIssues += omitted
 	s.mu.Unlock()
+}
+
+func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
+	issues := buffer.issues[path]
+	selected := buffer.selected[path]
+	omitted := 0
+	if s.mode != modeSearch || selected {
+		omitted = buffer.omitted[path]
+	}
+	for _, issue := range issues {
+		matches := selected
+		if issue.Record && s.mode == modeSearch && !matches {
+			continue
+		}
+		if !issue.Record {
+			matches = s.fileIssueSelected(issue.Source, issue.Path)
+		}
+		if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
+			s.recordIssue(issue)
+		} else {
+			omitted++
+		}
+	}
+	return omitted
+}
+
+func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
+	if !s.accepts(c) {
+		return false
+	}
+	if s.mode != modeSearch {
+		return true
+	}
+	return matches && (s.query.Presence == "" || presence(s.registryStates(c)) == s.query.Presence)
 }
 
 func (s *search) explicitFileSource(source Source) bool {

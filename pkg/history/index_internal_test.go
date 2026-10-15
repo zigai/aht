@@ -60,23 +60,56 @@ func malformedIssueFixture(t *testing.T) Catalog {
 	return Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 }
 
-func TestIssuesFollowMetadataRatherThanTextOrPresence(t *testing.T) {
+func TestIssuesFollowTextMatchesAndMetadata(t *testing.T) {
 	t.Parallel()
 	catalog := malformedIssueFixture(t)
-	for _, query := range []Query{
-		{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{Terms: []string{"absent"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Presence: registry.PresenceLive},
+	for _, test := range []struct {
+		query Query
+		count int
+	}{
+		{Query{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, 1},
+		{Query{Terms: []string{"broken"}}, 0},
+		{Query{Terms: []string{"needle", "broken"}}, 0},
+		{Query{Terms: []string{"needle"}, Exclude: []string{"needle"}}, 0},
+		{Query{Terms: []string{"needle"}, Role: "assistant"}, 0},
+		{Query{Terms: []string{"needle"}, Presence: registry.PresenceLive}, 0},
 	} {
-		result, err := catalog.Search(t.Context(), query)
-		if err != nil || len(result.Issues) != 1 || result.OmittedIssues != 1 || filepath.Base(result.Issues[0].Path) != "recent.jsonl" || !result.Issues[0].Record {
-			t.Fatalf("query=%#v result=%#v err=%v", query, result, err)
+		result, err := catalog.Search(t.Context(), test.query)
+		if err != nil || len(result.Matches) != test.count || len(result.Issues) != test.count || result.OmittedIssues != 0 {
+			t.Fatalf("query=%#v result=%#v err=%v", test.query, result, err)
 		}
-		compareIndexedSearch(t, catalog, query)
+		for _, issue := range result.Issues {
+			if filepath.Base(issue.Path) != "recent.jsonl" || !issue.Record {
+				t.Fatalf("matching issue=%#v", issue)
+			}
+		}
+		compareIndexedSearch(t, catalog, test.query)
 	}
+}
+
+func TestMetadataOnlyIssuesRemainScopedByMetadata(t *testing.T) {
+	t.Parallel()
+	catalog := malformedIssueFixture(t)
+	listing, err := catalog.List(t.Context(), ListQuery{Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil || len(listing.Issues) != 1 || listing.OmittedIssues != 1 || filepath.Base(listing.Issues[0].Path) != "recent.jsonl" {
+		t.Fatalf("listing=%#v err=%v", listing, err)
+	}
+	direct, err := catalog.listDirect(t.Context(), ListQuery{Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(direct, listing, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+		t.Fatalf("listing differs (-direct +indexed):\n%s", diff)
+	}
+}
+
+func TestExplicitFileRecordIssuesRequireTextMatch(t *testing.T) {
+	t.Parallel()
+	catalog := malformedIssueFixture(t)
 	catalog.Sources[0].Path = filepath.Join(catalog.Sources[0].Path, "old.jsonl")
-	query := Query{Terms: []string{"absent"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	query := Query{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	result, err := catalog.Search(t.Context(), query)
-	if err != nil || len(result.Issues) != 1 || result.OmittedIssues != 0 {
+	if err != nil || len(result.Issues) != 0 || result.OmittedIssues != 0 {
 		t.Fatalf("explicit file result=%#v err=%v", result, err)
 	}
 	compareIndexedSearch(t, catalog, query)
@@ -113,19 +146,87 @@ func TestFileFailuresAreScopedByModificationTime(t *testing.T) {
 		t.Run(strconv.FormatBool(unreadable), func(t *testing.T) {
 			t.Parallel()
 			catalog := fileFailureFixture(t, unreadable)
-			query := Query{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+			if _, err := catalog.Refresh(t.Context()); !errors.Is(err, ErrIncomplete) {
+				t.Fatalf("refresh failures: %v", err)
+			}
+			query := Query{Terms: []string{"unknown"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 			result, err := catalog.Search(t.Context(), query)
-			if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.OmittedIssues != 1 || filepath.Base(result.Issues[0].Path) != "recent.jsonl" || result.Issues[0].Record {
+			if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.OmittedIssues != 0 || filepath.Base(result.Issues[0].Path) != "recent.jsonl" || result.Issues[0].Record {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 			compareIndexedSearch(t, catalog, query)
+			query.Terms = []string{"absent"}
+			compareIndexedSearch(t, catalog, query)
 			query.Since = time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 			result, err = catalog.Search(t.Context(), query)
-			if err != nil || len(result.Issues) != 0 || result.OmittedIssues != 2 {
+			if err != nil || len(result.Issues) != 0 || result.OmittedIssues != 0 {
 				t.Fatalf("unselected failures result=%#v err=%v", result, err)
+			}
+			if !unreadable {
+				requireUnchangedRefresh(t, result, 2)
 			}
 			compareIndexedSearch(t, catalog, query)
 		})
+	}
+}
+
+func TestWarmTextSearchDoesNotReadUnchangedFilesWithIssues(t *testing.T) {
+	t.Parallel()
+	catalog := malformedIssueFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, term := range []string{"needle", "broken", "absent"} {
+		t.Run(term, func(t *testing.T) {
+			assertWarmTextSearchWithoutContent(t, catalog, term)
+		})
+	}
+}
+
+func assertWarmTextSearchWithoutContent(t *testing.T, catalog Catalog, term string) {
+	t.Helper()
+	index, err := openHistoryIndex(t.Context(), catalog.IndexPath, catalog.Sources, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := index.close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	s := &search{index: index, mode: modeSearch, query: Query{Terms: []string{term}}}
+	s.reset()
+	if err := s.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	file, ok := s.singleFile(catalog.Sources[0], filepath.Join(catalog.Sources[0].Path, "recent.jsonl"))
+	if !ok {
+		t.Fatal("history was not selected")
+	}
+	opened := 0
+	file.open = func() (*os.File, error) {
+		opened++
+		return nil, os.ErrPermission
+	}
+	var status SourceStatus
+	index.scanFiles(t.Context(), s, catalog.Sources[0], []historyFile{file}, &status)
+	want := 0
+	if term == "needle" {
+		want = 1
+	}
+	if opened != 0 || s.indexErr != nil || len(s.result.Matches) != want || len(s.result.Issues) != want || s.result.OmittedIssues != 0 {
+		t.Fatalf("opens=%d result=%#v index error=%v", opened, s.result, s.indexErr)
+	}
+	requireUnchangedRefresh(t, s.result, 1)
+}
+
+func requireUnchangedRefresh(t *testing.T, result Result, count int) {
+	t.Helper()
+	if len(result.Refresh) != 1 {
+		t.Fatalf("refresh sources=%#v", result.Refresh)
+	}
+	if diff := cmp.Diff(RefreshStats{Checked: count, Unchanged: count}, result.Refresh[0].RefreshStats); diff != "" {
+		t.Fatalf("unchanged refresh accounting (-want +got):\n%s", diff)
 	}
 }
 
@@ -162,9 +263,9 @@ func TestCappedParentIssuesDoNotHideChildDiagnostics(t *testing.T) {
 		t.Run(strconv.FormatBool(unreadable), func(t *testing.T) {
 			t.Parallel()
 			catalog, child := cappedIssueFixture(t, unreadable)
-			query := Query{Terms: []string{"absent"}, Dirs: []string{"/work/z"}}
+			query := Query{Terms: []string{"gremlin"}, Dirs: []string{"/work/z"}}
 			result, err := catalog.Search(t.Context(), query)
-			if errors.Is(err, ErrIncomplete) != unreadable || len(result.Issues) != 1 || result.Issues[0].Path != child || result.OmittedIssues != maxIssues {
+			if errors.Is(err, ErrIncomplete) != unreadable || len(result.Issues) != 1 || result.Issues[0].Path != child || result.OmittedIssues != 0 {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 			compareIndexedSearch(t, catalog, query)
@@ -197,8 +298,8 @@ func TestChildHistoryIssuesFollowParentMetadata(t *testing.T) {
 	for _, test := range []struct {
 		dir               string
 		reported, omitted int
-	}{{"/work/a", 1, 0}, {"/work/b", 0, 1}} {
-		query := Query{Terms: []string{"absent"}, Dirs: []string{test.dir}}
+	}{{"/work/a", 1, 0}, {"/work/b", 0, 0}} {
+		query := Query{Terms: []string{"gremlin"}, Dirs: []string{test.dir}}
 		result, err := catalog.Search(t.Context(), query)
 		if err != nil || len(result.Issues) != test.reported || result.OmittedIssues != test.omitted {
 			t.Fatalf("dir=%s result=%#v err=%v", test.dir, result, err)
@@ -276,7 +377,7 @@ func TestPrefilterPreservesPartsAndQueryModes(t *testing.T) {
 	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
 	for _, test := range []struct {
 		query Query
-		want int
+		want  int
 	}{
 		{Query{Terms: []string{"firstsecond"}}, 0},
 		{Query{Terms: []string{"first", "second"}}, 1},
@@ -356,6 +457,10 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 		for _, mutation := range mutations {
 			index := rapid.IntRange(0, count-1).Draw(property, "transcript")
 			mutateGeneratedHistory(property, root, paths[index], harness, "native-"+strconv.Itoa(index), mutation)
+			modified := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC).Add(time.Duration(rapid.IntRange(0, 86400*2).Draw(property, "modification time")) * time.Second)
+			if err := root.Chtimes(paths[index], modified, modified); err != nil && !errors.Is(err, os.ErrNotExist) {
+				property.Fatal(err)
+			}
 			checkGeneratedHistoryQueries(property, catalog, count)
 		}
 	})
@@ -391,7 +496,7 @@ func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Que
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		property.Fatalf("query=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		property.Fatalf("query=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
 	}
 	return got
@@ -412,7 +517,7 @@ func compareGeneratedHistoryList(property *rapid.T, catalog Catalog, query ListQ
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		property.Fatalf("list=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		property.Fatalf("list=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
 	}
 }
@@ -435,6 +540,7 @@ func generatedHistoryQuery(property *rapid.T, count int) Query {
 		Model:         rapid.SampledFrom([]string{"", "model", "large", "absent"}).Draw(property, "model"),
 		MinMessages:   rapid.IntRange(0, 8).Draw(property, "minimum messages"),
 		Presence:      rapid.SampledFrom([]registry.Presence{"", registry.PresenceLive, registry.PresenceGone}).Draw(property, "presence"),
+		Since:         rapid.SampledFrom([]time.Time{{}, time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)}).Draw(property, "since"),
 	}
 	if query.Regex {
 		for index, term := range query.Terms {
@@ -601,7 +707,7 @@ func compareIndexedSearch(t *testing.T, c Catalog, q Query) {
 	if errors.Is(err, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		t.Fatalf("query %#v errors: %v / %v", q, err, wantErr)
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		t.Fatalf("query %#v (-direct +index):\n%s", q, diff)
 	}
 }
@@ -731,6 +837,148 @@ func benchmarkRegistryQuery(b *testing.B, catalog Catalog, filter Filter, mode s
 	}
 }
 
+func TestSearchLeavesUnneededFilesUnindexed(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		modified int
+		query    Query
+		stored   int
+	}{
+		{"old file", 2, Query{Terms: []string{"token"}, Since: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)}, 0},
+		{"recent file with old activity", 4, Query{Terms: []string{"token"}, Since: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)}, 1},
+		{"absent text", 4, Query{Terms: []string{"absent"}}, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "session.jsonl")
+			body := claudeRecord("user", "sample", "/work", "main", "2026-01-01T00:00:00Z", "token", "")
+			modified := time.Date(2026, 1, test.modified, 0, 0, 0, 0, time.UTC)
+			writeHistoryAt(t, path, []byte(body), modified)
+			catalog := Catalog{Sources: []Source{{Harness: registry.Harness("claude"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			compareIndexedSearch(t, catalog, test.query)
+			result, err := catalog.Search(t.Context(), test.query)
+			if err != nil || len(result.Matches) != 0 {
+				t.Fatalf("filtered result: %#v err=%v", result, err)
+			}
+			requireIndexedFiles(t, catalog.IndexPath, test.stored)
+			if !test.query.Since.IsZero() {
+				listed, err := catalog.List(t.Context(), ListQuery{Filter: test.query.Filter})
+				if err != nil || len(listed.Matches) != 0 {
+					t.Fatalf("bounded listing: %#v err=%v", listed, err)
+				}
+				requireIndexedFiles(t, catalog.IndexPath, test.stored)
+			}
+			listed, err := catalog.List(t.Context(), ListQuery{})
+			if err != nil || len(listed.Matches) != 1 {
+				t.Fatalf("later listing: %#v err=%v", listed, err)
+			}
+			requireIndexedFiles(t, catalog.IndexPath, 1)
+		})
+	}
+}
+
+func writeHistoryAt(t *testing.T, path string, body []byte, modified time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modified, modified); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requireIndexedFiles(t *testing.T, path string, want int) {
+	t.Helper()
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var count int
+	if err := database.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&count); err != nil || count != want {
+		t.Fatalf("stored files=%d want=%d err=%v", count, want, err)
+	}
+}
+
+func TestSkippedRewriteDoesNotReturnStaleMatches(t *testing.T) {
+	t.Parallel()
+	catalog := parityFixture(t)
+	query := Query{Terms: []string{"needle"}, CaseSensitive: true}
+	compareIndexedSearch(t, catalog, query)
+	path := filepath.Join(catalog.Sources[0].Path, "0.jsonl")
+	body := `{"type":"session","id":"s0","cwd":"/work"}` + "\n" + `{"type":"message","message":{"role":"user","content":"replacement"}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compareIndexedSearch(t, catalog, query)
+	result, err := catalog.Search(t.Context(), query)
+	if err != nil || !slices.Equal(sessionIDs(result), []string{"s1"}) {
+		t.Fatalf("stale rewrite: %#v err=%v", result, err)
+	}
+	compareIndexedSearch(t, catalog, Query{Terms: []string{"replacement"}})
+}
+
+func TestFallbackSkipsOldHistories(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"corrupt", "foreign", "unavailable"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			old := filepath.Join(root, "old.jsonl")
+			modified := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			writeHistoryAt(t, old, []byte("invalid history"), modified)
+			indexPath := filepath.Join(t.TempDir(), "index.sqlite")
+			switch kind {
+			case "foreign":
+				createForeignTestDB(t, t.Context(), indexPath)
+			case "corrupt":
+				if err := os.WriteFile(indexPath, []byte("not a database"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "unavailable":
+				if err := os.Mkdir(indexPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: indexPath}
+			query := Query{Terms: []string{"anything"}, Since: modified.Add(time.Hour)}
+			compareIndexedSearch(t, catalog, query)
+			listed, err := catalog.List(t.Context(), ListQuery{Since: query.Since})
+			if err != nil || len(listed.Matches) != 0 || len(listed.Issues) != 0 {
+				t.Fatalf("fallback: %#v err=%v", listed, err)
+			}
+		})
+	}
+}
+
+func TestDatabaseModificationTimeIncludesJournals(t *testing.T) {
+	t.Parallel()
+	for _, suffix := range []string{"-wal", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "history.sqlite")
+			old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			for _, name := range []string{path, path + suffix} {
+				writeHistoryAt(t, name, nil, old)
+			}
+			file := historyFile{path: path, database: true, stat: func() (os.FileInfo, error) { return os.Stat(path) }}
+			filter := Filter{Since: old.Add(time.Hour)}
+			if file.mayMatchTime(filter) {
+				t.Fatal("old database passed the time filter")
+			}
+			if err := os.Chtimes(path+suffix, filter.Since, filter.Since); err != nil {
+				t.Fatal(err)
+			}
+			if !file.mayMatchTime(filter) {
+				t.Fatal("database with a recent journal was skipped")
+			}
+		})
+	}
+}
+
 func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
@@ -739,12 +987,12 @@ func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	index, err := openHistoryIndex(ctx, c.IndexPath, nil)
+	index, err := openHistoryIndex(ctx, c.IndexPath, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := index.close(); err != nil {
+		if err := index.close(ctx); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -761,10 +1009,10 @@ func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	if err := index.endWrite(); !errors.Is(err, context.Canceled) && !errors.Is(err, sql.ErrTxDone) {
+	if err := index.endWrite(ctx); !errors.Is(err, context.Canceled) && !errors.Is(err, sql.ErrTxDone) {
 		t.Fatalf("commit after cancel = %v", err)
 	}
-	if err := index.close(); err != nil {
+	if err := index.close(ctx); err != nil {
 		t.Fatal(err)
 	}
 	requireNoUncommittedConversations(t, c.IndexPath)
@@ -807,8 +1055,8 @@ func TestTwoLoadedIndexesDoNotDuplicateAppend(t *testing.T) {
 	}
 
 	first, second := openTwoTestIndexes(t, ctx, indexPath, sources)
-	defer func() { _ = first.close() }()
-	defer func() { _ = second.close() }()
+	defer func() { _ = first.close(ctx) }()
+	defer func() { _ = second.close(ctx) }()
 
 	appendTranscriptLine(t, path, "append", "review appended token")
 	indexTranscriptFile(t, ctx, first, sources[0], path, "review appended token")
@@ -825,13 +1073,13 @@ func TestTwoLoadedIndexesDoNotDuplicateAppend(t *testing.T) {
 
 func openTwoTestIndexes(t *testing.T, ctx context.Context, indexPath string, sources []Source) (*historyIndex, *historyIndex) {
 	t.Helper()
-	first, err := openHistoryIndex(ctx, indexPath, sources)
+	first, err := openHistoryIndex(ctx, indexPath, sources, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := openHistoryIndex(ctx, indexPath, sources)
+	second, err := openHistoryIndex(ctx, indexPath, sources, nil)
 	if err != nil {
-		_ = first.close()
+		_ = first.close(ctx)
 		t.Fatal(err)
 	}
 	return first, second
@@ -875,9 +1123,9 @@ func TestForeignDatabaseNotAltered(t *testing.T) {
 	beforeHash := createForeignTestDB(t, ctx, foreignPath)
 
 	sources := []Source{{Harness: registry.Harness("pi"), Path: t.TempDir()}}
-	idx, err := openHistoryIndex(ctx, foreignPath, sources)
+	idx, err := openHistoryIndex(ctx, foreignPath, sources, nil)
 	if idx != nil {
-		defer func() { _ = idx.close() }()
+		defer func() { _ = idx.close(ctx) }()
 	}
 	if err == nil {
 		t.Fatal("expected error opening foreign database")
@@ -1069,7 +1317,7 @@ func TestListMatchesDirectScan(t *testing.T) {
 		if err != nil || wantErr != nil {
 			t.Fatalf("list %#v: %v / %v", tt.query, err, wantErr)
 		}
-		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 			t.Fatalf("list %#v (-direct +index):\n%s", tt.query, diff)
 		}
 		if diff := cmp.Diff(tt.want, sessionIDs(got)); diff != "" {
@@ -1112,7 +1360,7 @@ func TestListPrefilterKeepsParentOwnership(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 			t.Fatalf("query=%#v (-direct +indexed):\n%s", scenario.query, diff)
 		}
 	}
@@ -1287,7 +1535,7 @@ func requireFoldedList(t *testing.T, c Catalog) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff(direct, listed, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+	if diff := cmp.Diff(direct, listed, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
 		t.Fatalf("list (-direct +index):\n%s", diff)
 	}
 }
@@ -1411,12 +1659,12 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 	if _, err := c.Search(t.Context(), Query{Terms: []string{"token"}}); err != nil {
 		t.Fatal(err)
 	}
-	index, err := openHistoryIndex(t.Context(), c.IndexPath, c.Sources)
+	index, err := openHistoryIndex(t.Context(), c.IndexPath, c.Sources, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := index.close(); err != nil {
+		if err := index.close(t.Context()); err != nil {
 			t.Error(err)
 		}
 	}()

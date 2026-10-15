@@ -74,6 +74,7 @@ type refreshJob struct {
 	resumeID     int64
 	includeTools bool
 	prefilter    *bytePrefilter
+	filter       Filter
 	metadata     map[string]string
 	done         chan refreshResult
 	rebuilt      bool
@@ -101,6 +102,7 @@ type refreshResult struct {
 // file's child histories, refreshed separately and matched with it.
 type pendingFile struct {
 	file     historyFile
+	filter   Filter
 	job      *refreshJob
 	children []pendingFile
 }
@@ -157,7 +159,7 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 	workers := min(maxScanWorkers, max(minScanWorkers, runtime.GOMAXPROCS(0)))
 	jobs, wg := startRefreshWorkers(ctx, workers)
 	var stats RefreshStats
-	progress := Progress{Source: source, Done: 0, Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false}
+	progress := Progress{Source: source, Done: 0, Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false, Waiting: false}
 	defer func() {
 		s.result.Refresh = append(s.result.Refresh, SourceRefresh{Source: source, RefreshStats: progress.Refresh.snapshot()})
 	}()
@@ -166,10 +168,7 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
 			break
 		}
-		pending := index.pend(s, source, file, jobs, len(file.children) == 0)
-		for _, child := range file.children {
-			pending.children = append(pending.children, index.pend(s, source, child, jobs, false))
-		}
+		pending := index.pendFamily(s, source, file, jobs)
 		queue = append(queue, pending)
 		if len(queue) > 2*workers {
 			index.finish(ctx, s, source, queue[0], status, &progress)
@@ -181,6 +180,18 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		index.finish(ctx, s, source, pending, status, &progress)
 	}
 	wg.Wait()
+}
+
+func (index *historyIndex) pendFamily(s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
+	filter := s.query.Filter
+	if len(file.children) > 0 && file.mayMatchTime(filter) {
+		filter.Since = time.Time{}
+	}
+	pending := index.pend(s, source, file, jobs, len(file.children) == 0, filter)
+	for _, child := range file.children {
+		pending.children = append(pending.children, index.pend(s, source, child, jobs, false, filter))
+	}
+	return pending
 }
 
 func startRefreshWorkers(ctx context.Context, workers int) (chan *refreshJob, *sync.WaitGroup) {
@@ -224,15 +235,14 @@ func (index *historyIndex) newJob(s *search, source Source, file historyFile) *r
 	if file.database {
 		resumeID = 0
 	}
-	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
+	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, prefilter: nil, filter: s.query.Filter, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
 }
 
-func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob, prefilter bool) pendingFile {
-	pending := pendingFile{file: file, job: nil, children: nil}
-	stored := index.files[fileKey(source, file.path)]
-	checkIssues := prefilter && s.prefilter != nil && stored.issues != "" && stored.issues != "[]" && stored.issues != "null"
-	if !index.unchanged(s, source, file) || checkIssues {
+func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob, prefilter bool, filter Filter) pendingFile {
+	pending := pendingFile{file: file, filter: filter, job: nil, children: nil}
+	if !index.unchanged(s, source, file) {
 		pending.job = index.newJob(s, source, file)
+		pending.job.filter = filter
 		if prefilter {
 			pending.job.prefilter = s.prefilter
 		}
@@ -276,7 +286,7 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 		status.Files++
 		progress.Refresh.Checked++
 		progress.Refresh.Unchanged++
-		return settled, true
+		return settled, pending.file.mayMatchTime(pending.filter)
 	}
 	result := <-pending.job.done
 	if ctx.Err() != nil {
@@ -289,25 +299,28 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 	}
 	status.Files++
 	if result.skipped {
+		progress.Refresh.Skipped++
+		s.reportIssues(path, result.issues, result.omitted, nil)
 		return settled, false
 	}
-	if result.failure != nil {
-		s.fileIssue(source, path, result.failure)
+	if err := errors.Join(result.failure, result.err); err != nil {
+		index.report(s, source, path, err)
 		return settled, false
 	}
 	if result.unchanged {
 		progress.Refresh.Unchanged++
 		return settled, true
 	}
-	if result.err != nil {
-		index.report(s, source, path, result.err)
-		return settled, false
-	}
 	if index.unavailable != nil {
 		s.indexErr = index.unavailable
 		return settled, false
 	}
 	file, storeTime, err := index.storeParsed(ctx, pending.job, &result)
+	if result.skipped {
+		progress.Refresh.Skipped++
+		s.reportIssues(path, result.issues, result.omitted, nil)
+		return settled, false
+	}
 	if err != nil {
 		index.report(s, source, path, err)
 		return settled, false
@@ -345,11 +358,11 @@ func (index *historyIndex) visit(ctx context.Context, s *search, source Source, 
 }
 
 func (index *historyIndex) visitGroup(ctx context.Context, s *search, source Source, group []groupFile) {
-	if err := index.reportGroupIssues(ctx, s, source, group); err != nil {
+	if err := index.matches(ctx, s, group); err != nil {
 		index.report(s, source, group[0].file.path, err)
 		return
 	}
-	if err := index.matches(ctx, s, group); err != nil {
+	if err := index.reportGroupIssues(ctx, s, source, group); err != nil {
 		index.report(s, source, group[0].file.path, err)
 	}
 }
@@ -385,12 +398,12 @@ func (index *historyIndex) selectIssueMetadata(ctx context.Context, s *search, g
 		return nil, err
 	}
 	selected := make(map[string]bool)
-	parentMetadata := make(map[string]Conversation, len(parents))
+	parentMetadata := make(map[string]indexedConversation, len(parents))
 	for _, parent := range parents {
 		c := parent.conversation
-		selected[c.Path] = selected[c.Path] || s.accepts(c)
+		selected[c.Path] = selected[c.Path] || s.issueConversationSelected(c, index.plans[parent.id].qualifies() && !index.excluded[parent.id])
 		if _, exists := parentMetadata[c.SessionID]; !exists {
-			parentMetadata[c.SessionID] = c
+			parentMetadata[c.SessionID] = parent
 		}
 	}
 	for _, member := range group[1:] {
@@ -399,11 +412,11 @@ func (index *historyIndex) selectIssueMetadata(ctx context.Context, s *search, g
 			return nil, err
 		}
 		for _, child := range children {
-			c := child.conversation
-			if parent, exists := parentMetadata[c.SessionID]; exists {
-				c = parent
+			owner := child
+			if parent, exists := parentMetadata[child.conversation.SessionID]; exists {
+				owner = parent
 			}
-			selected[child.conversation.Path] = selected[child.conversation.Path] || s.accepts(c)
+			selected[child.conversation.Path] = selected[child.conversation.Path] || s.issueConversationSelected(owner.conversation, index.plans[owner.id].qualifies() && !index.excluded[owner.id])
 		}
 	}
 	return selected, nil
@@ -422,6 +435,11 @@ func (index *historyIndex) report(s *search, source Source, path string, err err
 // parseRefresh reads one history into an indexWriter without touching the
 // database, so it can run on any worker.
 func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
+	if !job.file.mayMatchTime(job.filter) {
+		var result refreshResult
+		result.skipped = true
+		return result
+	}
 	started := time.Now()
 	includeTools := job.includeTools || (job.exists && job.previous.tools)
 	writer := newIndexWriter(includeTools)
@@ -439,7 +457,7 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 	} else {
 		result, parsed = parseTranscriptRefresh(ctx, job, reader, writer, buffer)
 	}
-	if !parsed {
+	if !parsed && !result.skipped {
 		return result
 	}
 	if err := ctx.Err(); err != nil {
@@ -447,14 +465,17 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		return result
 	}
 	reader.reportScopedIssues(buffer)
+	result.issues = append(reader.result.Issues, result.issues...)
+	result.omitted = reader.result.OmittedIssues
+	if result.skipped {
+		return result
+	}
 	result.writer = writer
 	result.parseTime = time.Since(started)
 	result.reason = writer.reason
 	if result.reason == "" {
 		result.reason = job.reparseReason()
 	}
-	result.issues = append(reader.result.Issues, result.issues...)
-	result.omitted = reader.result.OmittedIssues
 	return result
 }
 
@@ -498,10 +519,22 @@ func parseTranscriptRefresh(ctx context.Context, job *refreshJob, reader *search
 		return result, false
 	}
 	result, ok := parseOpenTranscript(ctx, job, reader, writer, file, buffer)
+	if result.skipped {
+		reader.writer = nil
+		reader.checkTranscriptFormat(ctx, source, path, file, buffer)
+	}
 	if err := file.Close(); err != nil {
 		result.issues = append(result.issues, Issue{Source: source, Path: path, Message: err.Error(), Record: false})
 	}
 	return result, ok
+}
+
+func (job *refreshJob) lacksTerms(ctx context.Context, file *os.File) (bool, error) {
+	if strings.HasSuffix(job.file.path, ".zst") {
+		return false, nil
+	}
+	candidate, err := job.prefilter.matchesFile(ctx, file)
+	return err == nil && !candidate, err
 }
 
 func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter, file *os.File, buffer *fileIssueBuffer) (refreshResult, bool) {
@@ -514,16 +547,8 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 	}
 	extra := transcriptExtra(job.metadata, source, path)
 	result.stamp = stampFile(info) + "|" + extra
-	if !strings.HasSuffix(path, ".zst") {
-		candidate, err := job.prefilter.matchesFile(ctx, file)
-		if err != nil {
-			result.err = err
-			return result, false
-		}
-		if !candidate {
-			result.skipped = true
-			return result, false
-		}
+	if result.skipped, result.err = job.lacksTerms(ctx, file); result.skipped || result.err != nil {
+		return result, false
 	}
 	if job.isCurrent(result.stamp) {
 		result.unchanged = true
@@ -565,9 +590,9 @@ func (index *historyIndex) store(ctx context.Context, job *refreshJob, result re
 	}
 	file, err := index.writeRefresh(ctx, job, result)
 	if err != nil {
-		return file, errors.Join(err, index.rollbackWrite())
+		return file, errors.Join(err, index.rollbackWrite(ctx))
 	}
-	if err := index.endWrite(); err != nil {
+	if err := index.endWrite(ctx); err != nil {
 		return indexedFile{}, err
 	}
 	return file, nil
@@ -586,7 +611,7 @@ func (index *historyIndex) storeParsed(ctx context.Context, job *refreshJob, res
 	if err := errors.Join(result.err, result.failure, result.openErr); err != nil {
 		return file, elapsed, err
 	}
-	if result.unchanged {
+	if result.skipped || result.unchanged {
 		return file, elapsed, nil
 	}
 	started = time.Now()
@@ -636,7 +661,7 @@ func (index *historyIndex) addFile(ctx context.Context, source Source, path stri
 	parent := catalog.TranscriptFor(source.Harness).Parent
 	child := parent != nil && parent(path) != ""
 	if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,child,stamp,checkpoint,issues,omitted) VALUES(?,?,?,?,'','','[]',0)", source.Harness, path, includeTools, child); err != nil {
-		return indexedFile{}, index.contention(fmt.Errorf("add indexed history: %w", err))
+		return indexedFile{}, index.failure(fmt.Errorf("add indexed history: %w", err))
 	}
 	current, _, err := index.storedFile(ctx, source, path)
 	if err != nil {
@@ -648,7 +673,7 @@ func (index *historyIndex) addFile(ctx context.Context, source Source, path stri
 // storedFile reads a history's committed entry inside the open transaction.
 func (index *historyIndex) storedFile(ctx context.Context, source Source, path string) (indexedFile, bool, error) {
 	var file indexedFile
-	err := index.tx.QueryRowContext(ctx, "SELECT id,"+firstConversationSQL+",stamp,checkpoint,issues,omitted,tools FROM files f WHERE harness=? AND path=?", source.Harness, path).Scan(
+	err := index.tx.queryRow("SELECT id,"+firstConversationSQL+",stamp,checkpoint,issues,omitted,tools FROM files f WHERE harness=? AND path=?", source.Harness, path).Scan(ctx,
 		&file.id, &file.resumeID, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools,
 	)
 	file.harness, file.path = string(source.Harness), path
@@ -658,7 +683,7 @@ func (index *historyIndex) storedFile(ctx context.Context, source Source, path s
 	case errors.Is(err, sql.ErrNoRows):
 		return file, false, nil
 	default:
-		return file, false, index.contention(fmt.Errorf("identify indexed history: %w", err))
+		return file, false, index.failure(fmt.Errorf("identify indexed history: %w", err))
 	}
 }
 
@@ -716,15 +741,15 @@ func (index *historyIndex) upsertConversation(ctx context.Context, fileID, resum
 		}
 	}
 	if err != nil {
-		return 0, index.contention(fmt.Errorf("index conversation: %w", err))
+		return 0, index.failure(fmt.Errorf("index conversation: %w", err))
 	}
 	return id, nil
 }
 
-func (index *historyIndex) insertParts(ctx context.Context, insert *sql.Stmt, conversationID int64, parts []Excerpt) error {
+func (index *historyIndex) insertParts(ctx context.Context, insert *indexStatement, conversationID int64, parts []Excerpt) error {
 	for _, part := range parts {
 		if _, err := insert.ExecContext(ctx, conversationID, part.Role, part.Text, fold(part.Text), part.MessageID, part.Line, part.Timestamp.Format(time.RFC3339Nano)); err != nil {
-			return index.contention(fmt.Errorf("index message text: %w", err))
+			return index.failure(fmt.Errorf("index message text: %w", err))
 		}
 	}
 	return nil
@@ -772,7 +797,7 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 	}
 	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted, tools: writer.includeTools, needsActivity: false}
 	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=?,tools=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.tools, file.id); err != nil {
-		return file, index.contention(fmt.Errorf("save history checkpoint: %w", err))
+		return file, index.failure(fmt.Errorf("save history checkpoint: %w", err))
 	}
 	return file, nil
 }

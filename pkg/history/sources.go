@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -39,7 +40,7 @@ type historyFile struct {
 
 type fileIssueBuffer struct {
 	issues   map[string][]Issue
-	omitted  int
+	omitted  map[string]int
 	selected map[string]bool
 	parents  map[string]string
 }
@@ -69,13 +70,13 @@ func DefaultSources() ([]Source, error) {
 }
 
 func newFileIssueBuffer() *fileIssueBuffer {
-	return &fileIssueBuffer{issues: make(map[string][]Issue), omitted: 0, selected: make(map[string]bool), parents: make(map[string]string)}
+	return &fileIssueBuffer{issues: make(map[string][]Issue), omitted: make(map[string]int), selected: make(map[string]bool), parents: make(map[string]string)}
 }
 
 func (buffer *fileIssueBuffer) recordIssue(issue Issue) {
 	var omitted int
 	buffer.issues[issue.Path], omitted = retainIssue(buffer.issues[issue.Path], issue)
-	buffer.omitted += omitted
+	buffer.omitted[issue.Path] += omitted
 }
 
 func (buffer *fileIssueBuffer) issue(source Source, path string, err error) {
@@ -252,7 +253,7 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 				}
 				inspected.Add(int64(s.scanFileDirect(ctx, source, files[i])))
 				var stats RefreshStats
-				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false})
+				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false, Waiting: false})
 			}
 		}()
 	}
@@ -263,6 +264,9 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 // scanFileDirect parses one history with its children and returns how many
 // files it inspected.
 func (s *search) scanFileDirect(ctx context.Context, source Source, file historyFile) int {
+	if !file.mayMatchTime(s.query.Filter) {
+		return 1 + len(file.children)
+	}
 	buffer := newFileIssueBuffer()
 	inspected := s.scanFileGroup(ctx, source, file, buffer)
 	s.reportScopedIssues(buffer)
@@ -295,12 +299,12 @@ func (s *search) scanFileGroup(ctx context.Context, source Source, file historyF
 			buffer.parents[child.path] = t.match.Conversation.Path
 			t.absorb(c, s.query.Excerpts)
 		default:
-			buffer.selectConversation(c.match.Conversation, s.accepts(c.match.Conversation))
+			buffer.selectConversation(c.match.Conversation, s.issueConversationSelected(c.match.Conversation, c.qualifies(len(s.terms))))
 			s.add(ctx, c)
 		}
 	}
 	if t != nil {
-		buffer.selectConversation(t.match.Conversation, s.accepts(t.match.Conversation))
+		buffer.selectConversation(t.match.Conversation, s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))))
 		s.add(ctx, t)
 	}
 	return inspected
@@ -314,15 +318,49 @@ func (s *search) readTranscriptFile(ctx context.Context, source Source, file his
 	}
 	var parsed *transcript
 	candidate, err := prefilter.matchesFile(ctx, opened)
-	if err != nil {
+	switch {
+	case err != nil:
 		buffer.issue(source, file.path, err)
-	} else if candidate || strings.HasSuffix(file.path, ".zst") {
+	case candidate || strings.HasSuffix(file.path, ".zst"):
 		parsed = s.scanTranscript(ctx, source, file.path, opened, buffer)
+	default:
+		s.checkTranscriptFormat(ctx, source, file.path, opened, buffer)
 	}
 	if err := opened.Close(); err != nil {
 		buffer.issue(source, file.path, err)
 	}
 	return parsed, true
+}
+
+func (filter Filter) acceptsModificationTime(modified time.Time) bool {
+	return filter.Since.IsZero() || modified.IsZero() || !modified.Before(filter.Since)
+}
+
+func (file historyFile) mayMatchTime(filter Filter) bool {
+	if filter.Since.IsZero() {
+		return true
+	}
+	info, err := file.stat()
+	if err != nil || filter.acceptsModificationTime(info.ModTime()) {
+		return true
+	}
+	if file.database {
+		for _, suffix := range []string{"-wal", "-journal"} {
+			info, err := os.Stat(file.path + suffix)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return true
+			}
+			if err == nil && filter.acceptsModificationTime(info.ModTime()) {
+				return true
+			}
+		}
+	}
+	for _, child := range file.children {
+		if child.mayMatchTime(filter) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *search) report(progress Progress) {

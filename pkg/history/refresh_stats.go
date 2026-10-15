@@ -9,13 +9,15 @@ import (
 
 const maxReparsedFiles = 10
 
-// RefreshStats counts inspected files and completed refreshes. BytesParsed counts
+// RefreshStats counts inspected files and completed refreshes. Skipped counts
+// new or changed files a search left unindexed because its filters exclude them. BytesParsed counts
 // native file bytes consumed by completed parses, excluding verified append prefixes;
 // for SQLite histories it is the database size, not physical database I/O.
 // ParseTime and StoreTime are cumulative worker and transaction time, not wall time.
 type RefreshStats struct {
 	Checked     int            `json:"checked"`
 	Unchanged   int            `json:"unchanged"`
+	Skipped     int            `json:"skipped"`
 	Resumed     int            `json:"resumed"`
 	Reparsed    int            `json:"reparsed"`
 	BytesParsed int64          `json:"bytes_parsed"`

@@ -435,7 +435,9 @@ func (p *searchProgress) update(progress history.Progress) {
 	}
 	p.last = now
 	status := fmt.Sprintf("Scanning %s history %d/%d", progress.Source.Harness, progress.Done, progress.Total)
-	if progress.Refreshed > 0 {
+	if progress.Waiting {
+		status = "Waiting for the history index"
+	} else if progress.Refreshed > 0 {
 		status += fmt.Sprintf(", indexed %d changed", progress.Refreshed)
 	}
 	p.app.warnf("\r\x1b[2K%s", status)
@@ -537,8 +539,8 @@ func (app *application) writeSearchRefresh(result history.Result) {
 		app.warnf("refresh: index unavailable; refresh totals are incomplete\n")
 	}
 	for _, refresh := range result.Refresh {
-		app.warnf("refresh: %s %s: checked=%d unchanged=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
-			refresh.Source.Harness, sanitizeHumanText(refresh.Source.Path), refresh.Checked, refresh.Unchanged,
+		app.warnf("refresh: %s %s: checked=%d unchanged=%d skipped=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
+			refresh.Source.Harness, sanitizeHumanText(refresh.Source.Path), refresh.Checked, refresh.Unchanged, refresh.Skipped,
 			refresh.Resumed, refresh.Reparsed, refresh.BytesParsed, refresh.ParseTime, refresh.StoreTime)
 	}
 	for _, file := range result.Reparsed {

@@ -93,7 +93,7 @@ func TestSearchCLIJSONAndToolOptIn(t *testing.T) {
 func TestSearchCLIVerboseRefreshStats(t *testing.T) {
 	path := searchCLIFixture(t)
 	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh token", "--source", "pi=" + path, "--verbose", "--json=false"}
-	for _, expected := range []string{"checked=1 unchanged=0 resumed=0 reparsed=1", "checked=1 unchanged=1 resumed=0 reparsed=0"} {
+	for _, expected := range []string{"checked=1 unchanged=0 skipped=0 resumed=0 reparsed=1", "checked=1 unchanged=1 skipped=0 resumed=0 reparsed=0"} {
 		var stdout, stderr bytes.Buffer
 		if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
 			t.Fatal(err)
@@ -836,5 +836,14 @@ func TestSearchProgressClearsItsLine(t *testing.T) {
 	progress.clear()
 	if stderr.Len() != shown {
 		t.Fatalf("second clear wrote %q", stderr.String()[shown:])
+	}
+}
+
+func TestSearchProgressReportsIndexWait(t *testing.T) {
+	var stderr bytes.Buffer
+	progress := &searchProgress{app: &application{stderr: &stderr}, enabled: true}
+	progress.update(history.Progress{Waiting: true})
+	if !strings.Contains(stderr.String(), "Waiting for the history index") {
+		t.Fatalf("waiting progress = %q", stderr.String())
 	}
 }

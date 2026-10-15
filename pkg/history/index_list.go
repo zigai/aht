@@ -16,12 +16,11 @@ func (index *historyIndex) prefetchConversations(ctx context.Context, filter Fil
 	if err != nil {
 		return fmt.Errorf("encode indexed parents: %w", err)
 	}
-	//nolint:gosec // G202: selectionSQL emits fixed syntax and placeholders (1 for empty metadata); values and parent IDs are bound; TestListPrefilterKeepsParentOwnership and generated list parity exercise SQLite.
 	query := "SELECT c.id,c.file_id,c.metadata FROM conversations c JOIN files f ON f.id=c.file_id WHERE (" + predicate + ") OR c.file_id IN (SELECT value FROM json_each(?)) ORDER BY c.id"
 	args = append(args, string(parents))
 	rows, err := index.conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return index.contention(fmt.Errorf("prefetch indexed conversations: %w", err))
+		return index.failure(fmt.Errorf("prefetch indexed conversations: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	index.listed = map[int64][]indexedConversation{}
