@@ -93,11 +93,21 @@ func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, sel
 
 func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
 
+func (s *search) forgetMissingDirectories(ctx context.Context, source Source, status SourceStatus) {
+	if s.index == nil || status.Status != "missing" {
+		return
+	}
+	if _, err := s.index.loadDirectories(ctx, source); err != nil {
+		s.index.report(s, source, source.Path, err)
+	}
+}
+
 func (s *search) scanSource(ctx context.Context, source Source) {
 	status := SourceStatus{Source: source, Status: "searched", Files: 0}
 	defer func() { s.result.Sources = append(s.result.Sources, status) }()
 	resolved, info, ok := s.inspectSource(source, &status)
 	if !ok {
+		s.forgetMissingDirectories(ctx, resolved, status)
 		return
 	}
 	source = resolved
@@ -113,7 +123,12 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		}
 		defer s.closeReader(source, path, root)
 		s.loadSourceMetadata(source, path, true)
-		files = groupChildren(source.Harness, s.walkDirectory(ctx, source, root))
+		if s.index == nil {
+			files = s.walkDirectory(ctx, source, root)
+		} else {
+			files = s.index.walkDirectory(ctx, s, source, root)
+		}
+		files = groupChildren(source.Harness, files)
 	} else if file, ok := s.singleFile(source, path); ok {
 		s.loadSourceMetadata(source, file.path, false)
 		files = []historyFile{file}

@@ -629,7 +629,11 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 		count := rapid.IntRange(2, 5).Draw(property, "transcripts")
 		paths := make([]string, count)
 		for index := range paths {
-			paths[index] = "rollout-" + strconv.Itoa(index) + ".jsonl"
+			parent := "bucket-" + strconv.Itoa(index)
+			if err := root.MkdirAll(parent, 0o700); err != nil {
+				property.Fatal(err)
+			}
+			paths[index] = filepath.Join(parent, "rollout-"+strconv.Itoa(index)+".jsonl")
 			body := generatedHistory(property, harness, "native-"+strconv.Itoa(index))
 			if err := root.WriteFile(paths[index], body, 0o600); err != nil {
 				property.Fatal(err)
@@ -641,11 +645,11 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 		if len(initial.Matches) != count {
 			property.Fatalf("generated native transcripts produced %d matches, want %d", len(initial.Matches), count)
 		}
-		mutations := rapid.SliceOfN(rapid.SampledFrom([]string{"append", "rewrite", "replace", "truncate", "remove", "restore", "tail", "same-size"}), 1, 20).Draw(property, "mutations")
+		mutations := rapid.SliceOfN(rapid.SampledFrom([]string{"append", "rewrite", "replace", "truncate", "remove", "restore", "tail", "same-size", "move-tree", "remove-tree"}), 1, 20).Draw(property, "mutations")
 		checkGeneratedHistoryQueries(property, catalog, count)
 		for _, mutation := range mutations {
 			index := rapid.IntRange(0, count-1).Draw(property, "transcript")
-			mutateGeneratedHistory(property, root, paths[index], harness, "native-"+strconv.Itoa(index), mutation)
+			paths[index] = mutateGeneratedHistoryPath(property, root, paths[index], harness, "native-"+strconv.Itoa(index), mutation)
 			modified := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC).Add(time.Duration(rapid.IntRange(0, 86400*2).Draw(property, "modification time")) * time.Second)
 			if err := root.Chtimes(paths[index], modified, modified); err != nil && !errors.Is(err, os.ErrNotExist) {
 				property.Fatal(err)
@@ -831,6 +835,30 @@ func marshalGeneratedHistoryRecord(property *rapid.T, record map[string]any) []b
 		property.Fatal(err)
 	}
 	return append(data, '\n')
+}
+
+func mutateGeneratedHistoryPath(property *rapid.T, root *os.Root, path string, harness registry.Harness, id, mutation string) string {
+	property.Helper()
+	parent := filepath.Dir(path)
+	switch mutation {
+	case "move-tree":
+		destination := parent + "-moved"
+		if err := root.Rename(parent, destination); err == nil {
+			return filepath.Join(destination, filepath.Base(path))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			property.Fatal(err)
+		}
+	case "remove-tree":
+		if err := root.RemoveAll(parent); err != nil {
+			property.Fatal(err)
+		}
+	default:
+		if err := root.MkdirAll(parent, 0o700); err != nil {
+			property.Fatal(err)
+		}
+		mutateGeneratedHistory(property, root, path, harness, id, mutation)
+	}
+	return path
 }
 
 func mutateGeneratedHistory(property *rapid.T, root *os.Root, path string, harness registry.Harness, id, mutation string) {

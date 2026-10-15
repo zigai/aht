@@ -26,7 +26,7 @@ const (
 	// older own versions are rebuilt from native history.
 	oldestIndexVersion      = 2
 	indexApplicationID      = 0x41485431 // ASCII "AHT1".
-	requiredIndexTableCount = 4
+	requiredIndexTableCount = 5
 	// sqlitePrimaryCodeMask isolates a primary SQLite result code from extended codes.
 	sqlitePrimaryCodeMask = 0xff
 )
@@ -37,6 +37,10 @@ CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
 const indexSchema = `
+CREATE TABLE directories (
+ harness TEXT NOT NULL, root TEXT NOT NULL, path TEXT NOT NULL,
+ stamp TEXT NOT NULL, children TEXT NOT NULL,
+ PRIMARY KEY(harness,root,path));
 CREATE TABLE files (
  id INTEGER PRIMARY KEY, harness TEXT NOT NULL, path TEXT NOT NULL, child INTEGER NOT NULL,
  stamp TEXT NOT NULL, checkpoint TEXT NOT NULL, issues TEXT NOT NULL, omitted INTEGER NOT NULL,
@@ -73,6 +77,7 @@ DROP TABLE IF EXISTS parts_fts;
 DROP TABLE IF EXISTS parts;
 DROP TABLE IF EXISTS conversations;
 DROP TABLE IF EXISTS files;
+DROP TABLE IF EXISTS directories;
 `
 
 var (
@@ -103,6 +108,7 @@ type historyIndex struct {
 	sourceArgs   []any
 	rebuilt      bool
 	listed       map[int64][]indexedConversation
+	directories  []*directoryCache
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
@@ -226,7 +232,7 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 		return err
 	}
 	if appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion {
-		if err := index.validateSchemaTables(ctx); err != nil {
+		if err := index.validateSchemaTables(ctx, version); err != nil {
 			return err
 		}
 		if version == indexVersion {
@@ -248,19 +254,23 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 	return nil
 }
 
-func (index *historyIndex) validateSchemaTables(ctx context.Context) error {
+func (index *historyIndex) validateSchemaTables(ctx context.Context, version int) error {
 	var count int
-	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('files','conversations','parts','parts_fts')").Scan(ctx, &count); err != nil {
+	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('files','conversations','parts','parts_fts','directories')").Scan(ctx, &count); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
 		return fmt.Errorf("inspect history index tables: %w", err)
 	}
-	if count < requiredIndexTableCount {
+	required := requiredIndexTableCount
+	if version < indexVersion {
+		required--
+	}
+	if count < required {
 		return errIndexSchema
 	}
 	var foreignCount int
-	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('files','conversations','parts','parts_fts') AND name NOT LIKE 'parts_fts_%'").Scan(ctx, &foreignCount); err != nil {
+	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('files','conversations','parts','parts_fts','directories') AND name NOT LIKE 'parts_fts_%'").Scan(ctx, &foreignCount); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
@@ -426,7 +436,7 @@ func (index *historyIndex) commit(ctx context.Context) error {
 		}
 	}
 	if len(vanished) == 0 {
-		return nil
+		return index.saveDirectories(ctx)
 	}
 	slices.SortFunc(vanished, func(a, b Source) int {
 		if byHarness := cmp.Compare(a.Harness, b.Harness); byHarness != 0 {
@@ -442,7 +452,10 @@ func (index *historyIndex) commit(ctx context.Context) error {
 			return errors.Join(index.failure(fmt.Errorf("remove deleted indexed history: %w", err)), index.rollbackWrite(ctx))
 		}
 	}
-	return index.endWrite(ctx)
+	if err := index.endWrite(ctx); err != nil {
+		return err
+	}
+	return index.saveDirectories(ctx)
 }
 
 func (index *historyIndex) close(ctx context.Context) error {

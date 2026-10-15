@@ -50,6 +50,121 @@ func appendHistory(t *testing.T, path, body string) {
 	}
 }
 
+func TestIndexDiscoversDirectoryChanges(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []registry.Harness{"pi", "omp", "claude"} {
+		t.Run(string(harness), func(t *testing.T) {
+			t.Parallel()
+			checkDirectoryChanges(t, harness)
+		})
+	}
+}
+
+func checkDirectoryChanges(t *testing.T, harness registry.Harness) {
+	t.Helper()
+	root := t.TempDir()
+	catalog := history.Catalog{Sources: []history.Source{{Harness: harness, Path: root}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 0)
+	body := `{"type":"session","id":"session","cwd":"/work"}` + "\n" + `{"type":"message","message":{"role":"user","content":"directory-token"}}` + "\n"
+	if harness == "claude" {
+		body = `{"type":"user","sessionId":"session","cwd":"/work","message":{"role":"user","content":"directory-token"}}` + "\n"
+	}
+	writeHistory(t, root, "session.jsonl", body)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 1)
+	child := filepath.Join(root, "session", "subagents")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeHistory(t, child, "agent-child.jsonl", body)
+	matches := 2
+	if harness == "claude" {
+		matches = 1
+	}
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, matches)
+	if harness == "claude" {
+		if result.Matches[0].MatchingParts != 2 {
+			t.Fatalf("parent and child matching parts = %d, want 2", result.Matches[0].MatchingParts)
+		}
+	}
+	checkDirectoryCacheCleanup(t, catalog, root)
+}
+
+func checkDirectoryCacheCleanup(t *testing.T, catalog history.Catalog, root string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(root, "session")); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 1)
+	db := openTestIndex(t, catalog.IndexPath)
+	var directories, files int
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM directories").Scan(&directories); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil {
+		t.Fatal(err)
+	}
+	if directories != 1 || files != 1 {
+		t.Fatalf("deleted directory retained: directories=%d files=%d", directories, files)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"directory-token"}})
+	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 0 {
+		t.Fatalf("deleted source: matches=%d error=%v", len(result.Matches), err)
+	}
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM directories").Scan(&directories); err != nil || directories != 0 {
+		t.Fatalf("deleted source retained directories=%d err=%v", directories, err)
+	}
+}
+
+func TestIndexDiscoversReplacedDirectoryAndRapidCreates(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	root := catalog.Sources[0].Path
+	parent := filepath.Join(root, "nested")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Unix(1700000000, 123456789)
+	if err := os.Chtimes(parent, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	writeHistory(t, parent, "new.jsonl", treeHistory)
+	if err := os.Chtimes(parent, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 2)
+	replacement := t.TempDir()
+	writeHistory(t, replacement, "other.jsonl", strings.ReplaceAll(treeHistory, "refresh", "changed"))
+	if err := os.Chtimes(replacement, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, parent); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"changed"}}, 1)
+}
+
+func TestIndexRetriesNewUnreadableDirectoryEntry(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}}); !errors.Is(err, history.ErrIncomplete) {
+		t.Fatalf("unreadable history error = %v", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+}
+
 func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 	t.Parallel()
 	c, path := indexedFixture(t)
