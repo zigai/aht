@@ -1,2 +1,5 @@
 - Doctor race tests pass with test directories under a symlinked path.
 - The built CLI reports an integration installed through a symlinked PATH copy as info without offering a repair.
+- The pre-push just check passes lint, unit, race, integration, compatibility helper, formatting, build, and workflow checks.
+- just explore passes extended simulations and all 14 fuzz targets at 30 seconds each.
+- PR CI run 38799267054 passes all required Linux, macOS, artifact, and host compatibility gates.
