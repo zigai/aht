@@ -11,6 +11,11 @@ import (
 
 const MaxRecordBytes = 16 << 20
 
+const (
+	TypedUserRole    = "typed-user"
+	InjectedUserRole = "injected-user"
+)
+
 var (
 	ErrInvalidRecord = errors.New("invalid JSON history record")
 	ErrUnknownFormat = errors.New("unrecognized history format or missing native session identity")
@@ -40,6 +45,7 @@ type Decoder struct {
 	Recognized   *bool
 	Emit         func(context.Context, string, string, string, int, time.Time)
 	Issue        func(string, error)
+	Projection   string
 	Metadata     map[string]string
 	IncludeTools bool
 }

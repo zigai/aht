@@ -27,12 +27,17 @@ const (
 
 var errInvalidRecord = native.ErrInvalidRecord
 
+type transcriptProjector interface {
+	TranscriptProjection(ctx context.Context, file *os.File, size int64) (string, error)
+}
+
 type transcript struct {
 	match       Match
 	recognized  bool
 	hits        []bool
 	excluded    bool
 	lastMessage string
+	projection  string
 }
 
 func newDatabaseTranscript(c Conversation) transcript {
@@ -42,6 +47,7 @@ func newDatabaseTranscript(c Conversation) transcript {
 		hits:        nil,
 		excluded:    false,
 		lastMessage: "",
+		projection:  "",
 	}
 }
 
@@ -75,7 +81,12 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		return nil
 	}
 
-	t, start, lines := s.newJSONLTranscript(source, path, buffer)
+	var t transcript
+	if err := s.prepareProjection(ctx, source, file, info.Size(), &t); err != nil {
+		buffer.issue(source, path, err)
+		return nil
+	}
+	t, start, lines := s.newJSONLTranscript(source, path, buffer, t.projection)
 	// A captured file size makes a finite snapshot even while a harness appends.
 	input := io.LimitReader(file, info.Size()-start)
 	if s.writer != nil {
@@ -87,12 +98,7 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		buffer.issue(source, path, errUnknownFormat)
 	}
 	if s.writer != nil {
-		s.writer.checkpoint.Conversation = t.match.Conversation
-		s.writer.checkpoint.Recognized = t.recognized
-		s.writer.checkpoint.Complete = complete && ctx.Err() == nil
-		s.writer.checkpoint.Lines = lines
-		s.writer.checkpoint.Size = info.Size()
-		s.writer.checkpoint.Digest = hex.EncodeToString(s.writer.hash.Sum(nil))
+		s.writer.finishJSONL(ctx, &t, info, lines, complete)
 	}
 	// Checkpoints retain native times so append resumes can recompute the fallback
 	// and a later native timestamp cannot be masked by an older fallback.
@@ -102,10 +108,11 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 	return &t
 }
 
-func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssueBuffer) (transcript, int64, int) {
+func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssueBuffer, projection string) (transcript, int64, int) {
 	var t transcript
 	t.match.Conversation.Harness = source.Harness
 	t.match.Conversation.Path = path
+	t.projection = projection
 	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
 		initialize(s.decoder(source, &t, buffer))
 	}
@@ -116,6 +123,38 @@ func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssu
 		return t, checkpoint.Size, checkpoint.Lines
 	}
 	return t, 0, 0
+}
+
+func (writer *indexWriter) finishJSONL(ctx context.Context, t *transcript, info os.FileInfo, lines int, complete bool) {
+	writer.checkpoint.Conversation = t.match.Conversation
+	writer.checkpoint.Recognized = t.recognized
+	writer.checkpoint.Complete = complete && ctx.Err() == nil
+	writer.checkpoint.Lines = lines
+	writer.checkpoint.Size = info.Size()
+	writer.checkpoint.Digest = hex.EncodeToString(writer.hash.Sum(nil))
+}
+
+func (s *search) prepareProjection(ctx context.Context, source Source, file *os.File, size int64, t *transcript) error {
+	adapter, _ := catalog.Find(source.Harness)
+	if projector, ok := adapter.(transcriptProjector); ok {
+		projection, err := projector.TranscriptProjection(ctx, file, size)
+		if err != nil {
+			return fmt.Errorf("prepare transcript projection: %w", err)
+		}
+		t.projection = projection
+	}
+	if s.writer != nil {
+		writer := s.writer
+		writer.checkpoint.Projection = t.projection
+		if writer.resume != nil && writer.resume.Projection != t.projection {
+			writer.resume = nil
+			writer.hash.Reset()
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("rewind history projection: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer, identifyOnly bool) (int, int, bool) {
@@ -211,10 +250,30 @@ func (t *transcript) identified() bool { return t.recognized && t.match.Conversa
 func (s *search) capture(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	c := &t.match.Conversation
 	extendTimes(c, timestamp)
+	switch role {
+	case "user":
+		injected, typed := splitInjected(body)
+		if injected != "" {
+			s.capturePart(t, "context", injected, id, line, timestamp)
+		}
+		body = typed
+	case native.TypedUserRole:
+		role = "user"
+	case native.InjectedUserRole:
+		body, _ = splitInjected(body)
+		role = "context"
+	}
+	if body == "" && (role == "user" || role == "context") {
+		return
+	}
 	t.countMessage(role, id, line)
 	if c.Prompt == "" && role == "user" {
-		c.Prompt = clip(cleanPrompt(body), promptRunes)
+		c.Prompt = clip(strings.Join(strings.Fields(body), " "), promptRunes)
 	}
+	s.capturePart(t, role, body, id, line, timestamp)
+}
+
+func (s *search) capturePart(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	if s.writer != nil {
 		s.writer.append(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
 		return
@@ -284,7 +343,10 @@ func (s *search) skipsPart(t *transcript, role string) bool {
 	if role == "tool" && !s.query.IncludeTools {
 		return true
 	}
-	return s.query.Role != "" && s.query.Role != role
+	if role == "context" && s.query.Role == "" {
+		return true
+	}
+	return s.query.Role != "" && s.query.Role != "all" && s.query.Role != role
 }
 
 func (t *transcript) recordHits(terms []matcher, body, normalized string) (int, int, bool) {

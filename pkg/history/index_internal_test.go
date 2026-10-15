@@ -400,6 +400,194 @@ func TestPrefilterPreservesPartsAndQueryModes(t *testing.T) {
 	}
 }
 
+func TestInjectedContextSearchRoles(t *testing.T) {
+	t.Parallel()
+	body := `{"type":"session","id":"s","cwd":"/work"}
+{"type":"message","id":"c","message":{"role":"user","content":"<environment_context>context-only</environment_context>"}}
+{"type":"message","id":"u","message":{"role":"user","content":"<skill>context-prefix</skill>\n  typed needle\nsecond line"}}
+{"type":"message","id":"x","message":{"role":"user","content":"<unfinished>literal needle"}}
+{"type":"message","id":"s","message":{"role":"user","content":"<command-name>/review</command-name><command-args>needle</command-args>"}}
+{"type":"message","id":"a","message":{"role":"assistant","content":"agent needle"}}
+`
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	for _, test := range []struct {
+		name  string
+		query Query
+		parts int
+	}{
+		{"default hides context", Query{Text: "context"}, 0},
+		{"tool opt in still hides context", Query{Text: "context", IncludeTools: true}, 0},
+		{"context role", Query{Text: "context", Role: "context"}, 2},
+		{"all includes context", Query{Text: "context", Role: "all"}, 2},
+		{"user excludes prefix", Query{Text: "context-prefix", Role: "user"}, 0},
+		{"typed excerpts", Query{Text: "needle", Excerpts: 10}, 4},
+		{"context exclusions ignored", Query{Text: "needle", Exclude: []string{"context-prefix"}}, 4},
+		{"context does not meet minimum", Query{Text: "needle", MinMessages: 5}, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			match := requireSearchParts(t, catalog, test.query, test.parts, 4)
+			if match == nil {
+				return
+			}
+			if match.Conversation.Prompt != "typed needle second line" {
+				t.Fatalf("prompt=%q", match.Conversation.Prompt)
+			}
+			if test.name != "typed excerpts" {
+				return
+			}
+			texts := make([]string, 0, len(match.Excerpts))
+			for _, excerpt := range match.Excerpts {
+				texts = append(texts, excerpt.Text)
+			}
+			if diff := cmp.Diff([]string{"typed needle\nsecond line", "<unfinished>literal needle", "/review needle", "agent needle"}, texts); diff != "" {
+				t.Fatal(diff)
+			}
+		})
+	}
+}
+
+func TestNativeContextSearchRoles(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		harness      registry.Harness
+		name, body   string
+		contextParts int
+	}{
+		{"claude", "session.jsonl", `{"type":"user","sessionId":"s","isMeta":true,"message":{"role":"user","content":"context-one"}}
+{"type":"user","sessionId":"s","isCompactSummary":true,"message":{"role":"user","content":"context-two"}}
+{"type":"user","sessionId":"s","isMeta":false,"message":{"role":"user","content":"typed"}}
+`, 2},
+		{"pi", "session.jsonl", `{"type":"session","id":"s"}
+{"type":"custom_message","id":"c","content":[{"type":"text","text":"context-one"}]}
+{"type":"message","id":"m","message":{"role":"custom","content":"context-two"}}
+{"type":"message","id":"u","message":{"role":"user","content":"typed"}}
+`, 2},
+		{"omp", "session.jsonl", `{"type":"session","id":"s"}
+{"type":"custom_message","id":"c","content":"context-one"}
+{"type":"message","id":"m","message":{"role":"custom","content":"context-two"}}
+{"type":"message","id":"u","message":{"role":"user","content":"typed"}}
+`, 2},
+		{"codex", "rollout-s.jsonl", `{"type":"session_meta","payload":{"id":"s"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":"<environment_context>context-one</environment_context>"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":"<literal>typed</literal>"}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u","content":[{"type":"text","text":"<literal>typed</literal>"}]}}}
+{"type":"event_msg","payload":{"type":"user_message","message":"<literal>typed</literal>"}}
+`, 1},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), test.name)
+			if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			catalog := Catalog{Sources: []Source{{Harness: test.harness, Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			for _, selection := range []struct {
+				query Query
+				parts int
+			}{
+				{Query{Text: "context"}, 0},
+				{Query{Text: "context", Role: "context"}, test.contextParts},
+				{Query{Text: "typed", Role: "user"}, 1},
+			} {
+				t.Run(selection.query.Text+selection.query.Role, func(t *testing.T) {
+					requireSearchParts(t, catalog, selection.query, selection.parts, 1)
+				})
+			}
+		})
+	}
+}
+
+func TestNativeUserProjectionDoesNotDuplicateTypedText(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, response string
+		contextParts   int
+	}{
+		{"plain", `"typed needle"`, 0},
+		{"mixed", `"<skill>prefix-marker</skill>\ntyped needle"`, 1},
+		{"empty", `""`, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			body := fmt.Sprintf(`{"type":"session_meta","payload":{"id":"s"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":%s}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":100}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u","content":[{"type":"text","text":"typed needle"}]}}}
+`, test.response)
+			path := filepath.Join(t.TempDir(), "rollout-s.jsonl")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			catalog := Catalog{Sources: []Source{{Harness: registry.Harness("codex"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			requireSearchParts(t, catalog, Query{Text: "needle", Role: "context"}, 0, 1)
+			match := requireSearchParts(t, catalog, Query{Text: "needle", Role: "all", Excerpts: 10}, 1, 1)
+			if len(match.Excerpts) != 1 || match.Excerpts[0].Text != "typed needle" || match.Excerpts[0].Role != "user" {
+				t.Fatalf("excerpts=%#v", match.Excerpts)
+			}
+			requireSearchParts(t, catalog, Query{Text: "prefix-marker", Role: "context"}, test.contextParts, 1)
+		})
+	}
+}
+
+func requireSearchParts(t *testing.T, catalog Catalog, query Query, parts, messages int) *Match {
+	t.Helper()
+	result, err := catalog.searchDirect(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compareIndexedSearch(t, catalog, query)
+	if parts == 0 {
+		if len(result.Matches) != 0 {
+			t.Fatalf("unexpected matches=%#v", result.Matches)
+		}
+		return nil
+	}
+	if len(result.Matches) != 1 {
+		t.Fatalf("matches=%#v", result.Matches)
+	}
+	match := &result.Matches[0]
+	if match.Conversation.Messages != messages || match.MatchingParts != parts {
+		t.Fatalf("match=%#v", match)
+	}
+	return match
+}
+
+func TestNativeUserProjectionAcrossAppends(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "rollout-s.jsonl")
+	body := `{"type":"session_meta","payload":{"id":"s"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":"first typed"}}
+`
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("codex"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	for _, stage := range []struct {
+		addition string
+		messages int
+	}{
+		{"", 1},
+		{`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"first typed"}]}}}` + "\n", 1},
+		{`{"type":"response_item","payload":{"type":"message","role":"user","content":"second typed"}}` + "\n", 1},
+		{`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u2","content":[{"type":"text","text":"second typed"}]}}}` + "\n", 2},
+	} {
+		body += stage.addition
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, role := range []string{"", "user", "context", "all"} {
+			compareIndexedSearch(t, catalog, Query{Text: "typed", Role: role})
+		}
+		requireSearchParts(t, catalog, Query{Text: "typed", Role: "context"}, 0, stage.messages)
+		requireSearchParts(t, catalog, Query{Text: "typed", Role: "all", Excerpts: 10}, stage.messages, stage.messages)
+		result, err := catalog.Search(t.Context(), Query{Text: "typed", Excerpts: 10})
+		if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.Messages != stage.messages || result.Matches[0].MatchingParts != stage.messages {
+			t.Fatalf("messages=%d result=%#v err=%v", stage.messages, result, err)
+		}
+	}
+}
+
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
@@ -529,7 +717,7 @@ func generatedHistoryQuery(property *rapid.T, count int) Query {
 		Exclude:       rapid.SliceOfN(rapid.SampledFrom(terms), 0, 2).Draw(property, "exclude"),
 		Regex:         rapid.Bool().Draw(property, "regex"),
 		Word:          rapid.Bool().Draw(property, "word"),
-		Role:          rapid.SampledFrom([]string{"", "user", "assistant", "tool", "all"}).Draw(property, "role"),
+		Role:          rapid.SampledFrom([]string{"", "user", "assistant", "context", "tool", "all"}).Draw(property, "role"),
 		IncludeTools:  rapid.Bool().Draw(property, "include tools"),
 		CaseSensitive: rapid.Bool().Draw(property, "case sensitive"),
 		Excerpts:      rapid.IntRange(0, 5).Draw(property, "excerpts"),
@@ -567,16 +755,25 @@ func generatedHistory(property *rapid.T, harness registry.Harness, id string) []
 		header = map[string]any{"type": "user", "sessionId": id, "cwd": cwd, "timestamp": timestamp, "message": map[string]any{"role": "user", "content": "shared-token"}}
 	}
 	body := marshalGeneratedHistoryRecord(property, header)
-	body = append(body, generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "prompt"))...)
+	nativeUsers := rapid.Bool().Draw(property, "native users")
+	body = append(body, generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "prompt"), nativeUsers)...)
 	for range rapid.IntRange(1, 6).Draw(property, "message count") {
 		role := rapid.SampledFrom([]string{"user", "assistant", "toolResult"}).Draw(property, "message role")
 		text := rapid.SampledFrom([]string{"needle", "Stra\u00dfe", "\u0130stanbul", "\u754c", "shared-token"}).Draw(property, "message term") + " " + rapid.String().Draw(property, "message text")
-		body = append(body, generatedHistoryMessage(property, harness, id, role, text)...)
+		if role == "user" {
+			switch rapid.SampledFrom([]string{"plain", "injected", "mixed"}).Draw(property, "user content") {
+			case "injected":
+				text = "<skill>" + text + "</skill>"
+			case "mixed":
+				text = "<environment_context>shared-token</environment_context>\n" + text
+			}
+		}
+		body = append(body, generatedHistoryMessage(property, harness, id, role, text, nativeUsers)...)
 	}
 	return body
 }
 
-func generatedHistoryMessage(property *rapid.T, harness registry.Harness, id, role, text string) []byte {
+func generatedHistoryMessage(property *rapid.T, harness registry.Harness, id, role, text string, nativeUsers bool) []byte {
 	timestamp := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC).Add(time.Duration(rapid.IntRange(0, 86400).Draw(property, "message time")) * time.Second).Format(time.RFC3339)
 	message := map[string]any{"role": role, "content": text, "model": "large-model"}
 	var record map[string]any
@@ -592,7 +789,12 @@ func generatedHistoryMessage(property *rapid.T, harness registry.Harness, id, ro
 	case "claude":
 		record = map[string]any{"type": role, "sessionId": id, "timestamp": timestamp, "message": message}
 	}
-	return marshalGeneratedHistoryRecord(property, record)
+	data := marshalGeneratedHistoryRecord(property, record)
+	if nativeUsers && harness == "codex" && role == "user" {
+		event := map[string]any{"type": "event_msg", "timestamp": timestamp, "payload": map[string]any{"type": "item_completed", "item": map[string]any{"type": "UserMessage", "id": id, "content": []map[string]any{{"type": "text", "text": text}}}}}
+		data = append(data, marshalGeneratedHistoryRecord(property, event)...)
+	}
+	return data
 }
 
 func marshalGeneratedHistoryRecord(property *rapid.T, record map[string]any) []byte {
@@ -639,7 +841,7 @@ func mutateGeneratedHistory(property *rapid.T, root *os.Root, path string, harne
 func generatedHistoryMutation(property *rapid.T, harness registry.Harness, id, mutation string, body []byte) []byte {
 	switch mutation {
 	case "append", "tail":
-		record := generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "appended text"))
+		record := generatedHistoryMessage(property, harness, id, "user", "shared-token "+rapid.String().Draw(property, "appended text"), rapid.Bool().Draw(property, "native appended user"))
 		if mutation == "tail" {
 			record = record[:rapid.IntRange(0, len(record)-1).Draw(property, "partial record bytes")]
 		}

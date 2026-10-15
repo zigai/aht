@@ -301,8 +301,11 @@ func (index *historyIndex) preferLiteral(ctx context.Context, filter string, arg
 }
 
 func rolePredicate(filter, role string, includeTools bool, args []any) (string, []any) {
-	if role != "" {
+	if role != "" && role != "all" {
 		return "(" + filter + ") AND p.role = ?", append(args, role)
+	}
+	if role == "" {
+		filter = "(" + filter + ") AND p.role <> 'context'"
 	}
 	if !includeTools {
 		return "(" + filter + ") AND p.role <> 'tool'", args

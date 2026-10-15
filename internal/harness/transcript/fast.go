@@ -28,7 +28,7 @@ func HasRecordHint(data, hint []byte) bool {
 }
 
 func fastIgnoredTreeEntry(data []byte) bool {
-	if !typeHint(data, "compaction", "branch_summary", "context_edit", "custom", "custom_message", "label", "model_change", "thinking_level_change", "usage") {
+	if !typeHint(data, "compaction", "branch_summary", "context_edit", "custom", "label", "model_change", "thinking_level_change", "usage") {
 		return false
 	}
 	var entry struct {
@@ -38,7 +38,7 @@ func fastIgnoredTreeEntry(data []byte) bool {
 		return false
 	}
 	switch entry.Type {
-	case "compaction", "branch_summary", "context_edit", "custom", "custom_message", "label", "model_change", "thinking_level_change", "usage":
+	case "compaction", "branch_summary", "context_edit", "custom", "label", "model_change", "thinking_level_change", "usage":
 		return true
 	}
 	return false

@@ -2,6 +2,9 @@ package codex
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -26,6 +29,44 @@ func readTranscript(t *testing.T, includeTools bool, lines ...string) transcript
 		reader.Record(t.Context(), decoder, record, i+1)
 	}
 	return conversation
+}
+
+func TestTranscriptProjectionAcrossLongRecords(t *testing.T) {
+	t.Parallel()
+	nativeMessage := func(text string) string {
+		return `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"` + text + `"}]}}}` + "\n"
+	}
+	longText := strings.Repeat("x", 12<<10)
+	oversized := strings.Repeat("x", transcript.MaxRecordBytes)
+	for _, test := range []struct {
+		name, body string
+		want       string
+	}{
+		{"long ignored event", `{"type":"event_msg","payload":{"type":"token_count","padding":"` + longText + `"}}` + "\n" + nativeMessage("typed"), typedUserProjection},
+		{"long native event", nativeMessage(longText), typedUserProjection},
+		{"oversized ignored event", `{"type":"event_msg","payload":{"type":"token_count","padding":"` + oversized + `"}}` + "\n" + nativeMessage("typed"), typedUserProjection},
+		{"oversized native event", nativeMessage(oversized), ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rollout.jsonl")
+			if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := file.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			projection, err := (codexHarness{}).TranscriptProjection(t.Context(), file, int64(len(test.body)))
+			if err != nil || projection != test.want {
+				t.Fatalf("projection=%q want=%q err=%v", projection, test.want, err)
+			}
+		})
+	}
 }
 
 func TestTranscriptBranchAndModel(t *testing.T) {

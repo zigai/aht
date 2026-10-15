@@ -31,8 +31,15 @@ func TreeRecord(ctx context.Context, t *Decoder, r Record, line int) {
 		if title := entry.Title; title != "" {
 			t.Conversation.Title = title
 		}
+	case "custom_message":
+		for _, part := range MessageParts(r["content"], "context", false) {
+			t.Capture(ctx, part.Role, part.Text, entry.ID, line, entry.Timestamp)
+		}
 	case "message":
 		message := Obj(r, "message")
+		if Str(message, "role") == "custom" {
+			message["role"] = json.RawMessage(`"context"`)
+		}
 		t.CaptureModel(message)
 		t.Message(ctx, message, entry.ID, line, entry.Timestamp)
 	}

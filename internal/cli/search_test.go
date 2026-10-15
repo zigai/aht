@@ -104,6 +104,39 @@ func TestSearchCLIVerboseRefreshStats(t *testing.T) {
 	}
 }
 
+func TestSearchCLIContextRoles(t *testing.T) {
+	path := searchCLIFixture(t)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := file.WriteString(`{"type":"message","id":"context","message":{"role":"user","content":"<skill>injected-token</skill>"}}` + "\n")
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("write=%v close=%v", writeErr, closeErr)
+	}
+	for _, test := range []struct {
+		role    string
+		matches int
+	}{{"", 0}, {"user", 0}, {"context", 1}, {"all", 1}} {
+		args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "injected-token", "--source", "pi=" + path, "--json", "--role", test.role}
+		var stdout, stderr bytes.Buffer
+		if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		var result history.Result
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Matches) != test.matches {
+			t.Fatalf("role=%q matches=%#v", test.role, result.Matches)
+		}
+		if test.matches == 1 && (result.Matches[0].Excerpts[0].Role != "context" || result.Matches[0].Conversation.Messages != 1) {
+			t.Fatalf("role=%q match=%#v", test.role, result.Matches[0])
+		}
+	}
+}
+
 func TestSearchCLIRendersSafeTextAndPartialJSON(t *testing.T) {
 	path := searchCLIFixture(t)
 	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "state.json"), "search", "refresh token", "--source", "pi=" + path, "--json=false"}

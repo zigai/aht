@@ -32,6 +32,7 @@ type indexCheckpoint struct {
 	Conversation Conversation `json:"conversation"`
 	Identity     string       `json:"identity"`
 	Extra        string       `json:"extra"`
+	Projection   string       `json:"projection"`
 	Digest       string       `json:"digest"`
 	Size         int64        `json:"size"`
 	Lines        int          `json:"lines"`
@@ -804,7 +805,7 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 
 func newIndexWriter(includeTools bool) *indexWriter {
 	var conversation Conversation
-	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false, Tools: includeTools}
+	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Projection: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false, Tools: includeTools}
 	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, includeTools: includeTools, reason: ""}
 }
 

@@ -15,9 +15,15 @@ const (
 // <environment_context> and AGENTS.md instruction headers. A slash command
 // becomes its name and arguments. Boilerplate-only messages return "".
 func cleanPrompt(body string) string {
-	text := strings.TrimSpace(body)
+	_, typed := splitInjected(body)
+	return strings.Join(strings.Fields(typed), " ")
+}
+
+func splitInjected(body string) (string, string) {
+	body = strings.TrimSpace(body)
+	text := body
 	if strings.HasPrefix(text, localCommandCaveat) {
-		return ""
+		return body, ""
 	}
 	if strings.HasPrefix(text, agentsInstructionsHeader) {
 		_, text, _ = strings.Cut(text, "\n")
@@ -37,10 +43,11 @@ func cleanPrompt(body string) string {
 		}
 		text = strings.TrimSpace(rest)
 	}
+	injected := strings.TrimSpace(body[:len(body)-len(text)])
 	if text == "" && command != "" {
 		text = strings.TrimSpace(command + " " + arguments)
 	}
-	return strings.Join(strings.Fields(text), " ")
+	return injected, text
 }
 
 // leadingBlock splits a leading <name ...>content</name> or <name .../> block

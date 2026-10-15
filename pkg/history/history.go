@@ -171,7 +171,7 @@ type Span struct {
 
 // Excerpt is a bounded window around the first match in a message. Matches lists
 // every term match inside Text. Line is a one-based JSONL line, or zero for
-// databases. MessageID is native when available. Role is user, assistant, or tool.
+// databases. MessageID is native when available. Role is user, assistant, context, or tool.
 // Reasoning and system text are excluded.
 type Excerpt struct {
 	Role      string    `json:"role"`
@@ -412,8 +412,8 @@ func validateTermText(terms []string) error {
 }
 
 func validateRole(role string) error {
-	if role != "" && !slices.Contains([]string{"user", "assistant", "agent", "tool", "all"}, role) {
-		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, tool, or all", ErrInvalidQuery, role)
+	if role != "" && !slices.Contains([]string{"user", "assistant", "agent", "context", "tool", "all"}, role) {
+		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, context, tool, or all", ErrInvalidQuery, role)
 	}
 	return nil
 }
@@ -680,8 +680,6 @@ func (s *search) prepare() error {
 	switch s.query.Role {
 	case "agent":
 		s.query.Role = "assistant"
-	case "all":
-		s.query.Role = ""
 	case "tool":
 		s.query.IncludeTools = true
 	}

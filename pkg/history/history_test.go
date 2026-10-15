@@ -759,7 +759,7 @@ func TestConversationPromptAndMessageCount(t *testing.T) {
 	result := searchQuery(t, body, history.Query{Terms: []string{"part"}})
 	requireMatches(t, result, nil, 1)
 	c := result.Matches[0].Conversation
-	if c.Prompt != "Rename the parser" || c.Messages != 3 {
+	if c.Prompt != "Rename the parser" || c.Messages != 2 {
 		t.Fatalf("prompt = %q, messages = %d", c.Prompt, c.Messages)
 	}
 	if got := result.Matches[0].ResumeCommand; len(got) == 0 || got[len(got)-1] != c.Path {

@@ -160,7 +160,7 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.BoolVar(&options.query.Word, "word", false, "match whole words only")
 	flags.BoolVar(&options.query.IncludeTools, "include-tools", false, "also search tool calls and tool output")
 	flags.BoolVar(&options.query.CaseSensitive, "case-sensitive", false, "match text with exact case")
-	flags.StringVar(&options.role, "role", "", "search only messages from this role `<user|agent|tool|all>` (default: user and agent)")
+	flags.StringVar(&options.role, "role", "", "search only messages from this role `<user|agent|context|tool|all>` (default: user and agent)")
 	flags.IntVar(&options.query.Excerpts, "excerpts", 0, "show at most `<count>` excerpts per conversation (default 3)")
 	flags.StringVar(&options.sort, "sort", "", "order by `<updated|created|matches|messages>` (default updated)")
 	flags.IntVar(&options.query.Limit, "limit", 0, "return at most `<count>` conversations in sort order (0 means unlimited)")
@@ -272,16 +272,16 @@ func (options *searchOptions) validateRole() error {
 	}
 	role := strings.ToLower(strings.TrimSpace(options.role))
 	switch role {
-	case "user":
-		options.query.Role = "user"
+	case "user", "context":
+		options.query.Role = role
 	case "agent", "assistant":
 		options.query.Role = "assistant"
 	case "tool":
 		options.query.Role = "tool"
 	case "all":
-		options.query.Role = ""
+		options.query.Role = "all"
 	default:
-		return fmt.Errorf("search: %w %q; choose user, agent, tool, or all", errSearchRole, options.role)
+		return fmt.Errorf("search: %w %q; choose user, agent, context, tool, or all", errSearchRole, options.role)
 	}
 	return nil
 }

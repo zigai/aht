@@ -125,7 +125,7 @@ func NativeTime(text string) time.Time {
 
 func RecognizedRole(role string) (string, bool) {
 	switch role {
-	case "user", "assistant":
+	case "user", "assistant", "context", InjectedUserRole:
 		return role, true
 	case "toolResult", "tool":
 		return "tool", true

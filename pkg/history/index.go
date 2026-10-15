@@ -22,7 +22,7 @@ import (
 
 const (
 	// indexVersion is the schema version written by indexSchema.
-	indexVersion = 5
+	indexVersion = 6
 	// oldestIndexVersion is the oldest schema this build recognizes as its own;
 	// older own versions are rebuilt from native history.
 	oldestIndexVersion      = 2
@@ -63,7 +63,7 @@ CREATE TRIGGER parts_insert AFTER INSERT ON parts BEGIN
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  INSERT INTO parts_fts(parts_fts,rowid,folded) VALUES('delete',old.id,old.folded); END;
 PRAGMA application_id=0x41485431;
-PRAGMA user_version=5;
+PRAGMA user_version=6;
 `
 
 // firstConversationSQL selects the first conversation row of the history f.

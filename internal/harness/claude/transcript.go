@@ -38,10 +38,17 @@ func readTranscriptRecord(ctx context.Context, t *transcript.Decoder, r transcri
 		if branch := transcript.Str(r, "gitBranch"); branch != "" {
 			c.GitBranch = branch
 		}
-		message := transcript.Obj(r, "message")
-		t.CaptureModel(message)
-		t.Message(ctx, message, transcript.Str(r, "uuid"), line, transcript.ParseTime(r["timestamp"]))
+		readMessage(ctx, t, r, line)
 	}
+}
+
+func readMessage(ctx context.Context, t *transcript.Decoder, r transcript.Record, line int) {
+	message := transcript.Obj(r, "message")
+	t.CaptureModel(message)
+	if string(r["isMeta"]) == "true" || string(r["isCompactSummary"]) == "true" {
+		message["role"] = json.RawMessage(`"context"`)
+	}
+	t.Message(ctx, message, transcript.Str(r, "uuid"), line, transcript.ParseTime(r["timestamp"]))
 }
 
 func titleRecord(r transcript.Record) (string, string, bool) {
