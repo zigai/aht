@@ -6,12 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/config"
+	"github.com/zigai/aht/v2/pkg/manage"
 )
 
 func TestCLIConfigPublicationSkipsInvalidCommands(t *testing.T) {
@@ -133,7 +133,7 @@ func TestCLIDoctorDoesNotCreateConfigBeforeDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCLIDoctorInvalidConfigKeepsStructuredFailure(t *testing.T) {
+func TestCLIDoctorInvalidConfigKeepsFullReport(t *testing.T) {
 	path, store := configureFirstRunTest(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -142,20 +142,20 @@ func TestCLIDoctorInvalidConfigKeepsStructuredFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := executeCLI(t.Context(), []string{"--store", store, "manage", "doctor", "--json"}, nil, &stdout, &stderr)
+	code := executeCLI(t.Context(), []string{"--store", store, "doctor", "--json"}, nil, &stdout, &stderr)
 	if code != exitCodeGeneral {
 		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitCodeGeneral, stderr.String())
 	}
-	var result doctorResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+	var report doctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("doctor did not emit structured diagnostics: %v; stdout=%s", err, stdout.String())
 	}
-	if result.OK || len(result.Checks) != 1 {
-		t.Fatalf("unexpected doctor result: %+v", result)
+	statuses := make(map[string]manage.DoctorStatus)
+	for _, check := range report.Checks {
+		statuses[check.ID] = check.Status
 	}
-	check := result.Checks[0]
-	if check.Name != "tracker configuration" || check.Status != doctorError || !strings.Contains(check.Message, config.ErrInvalidSort.Error()) {
-		t.Fatalf("configuration diagnostic = %+v", check)
+	if statuses["config.file"] != manage.DoctorStatusFail || statuses["store.read"] != manage.DoctorStatusOK || statuses["tracker.service"] != manage.DoctorStatusSkip {
+		t.Fatalf("doctor with invalid config = %v, want config.file fail, store.read ok, tracker.service skip", statuses)
 	}
 }
 
