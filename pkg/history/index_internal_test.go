@@ -1836,7 +1836,7 @@ func TestExistingUntimestampedIndexAcquiresActivityFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, updateErr := database.ExecContext(t.Context(), "UPDATE conversations SET metadata=json_remove(metadata,'$.updated_at'),active=?,started=? WHERE metadata LIKE '%undated%'", unknownActive, unknownStarted)
+	_, updateErr := database.ExecContext(t.Context(), "UPDATE conversations SET metadata=json_remove(metadata,'$.updated_at'),active=?,started=? WHERE metadata LIKE '%undated%'; PRAGMA user_version=5", unknownActive, unknownStarted)
 	if err := errors.Join(updateErr, database.Close()); err != nil {
 		t.Fatal(err)
 	}

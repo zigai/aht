@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"modernc.org/sqlite"
@@ -91,7 +90,6 @@ type indexedFile struct {
 	harness, path, stamp, checkpoint, issues string
 	omitted                                  int
 	tools                                    bool
-	needsActivity                            bool
 }
 type historyIndex struct {
 	db           *sql.DB
@@ -344,7 +342,7 @@ func (index *historyIndex) enableWAL(ctx context.Context) error {
 }
 
 func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
-	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted,tools,EXISTS(SELECT 1 FROM conversations c WHERE c.file_id=f.id AND c.active="+strconv.FormatInt(unknownActive, 10)+") FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
+	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
 	if err != nil {
 		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
 			return schemaFailure(err)
@@ -354,10 +352,9 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var file indexedFile
-		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools, &file.needsActivity); err != nil {
+		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools); err != nil {
 			return fmt.Errorf("read indexed file: %w", err)
 		}
-		file.needsActivity = file.needsActivity && !isDatabase(file.path)
 		key := file.harness + "\x00" + file.path
 		index.paths[key] = Source{Harness: registry.Harness(file.harness), Path: file.path}
 		index.files[key] = file
