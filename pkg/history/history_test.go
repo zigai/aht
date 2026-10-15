@@ -102,6 +102,47 @@ func TestNativeJSONLReaders(t *testing.T) {
 	}
 }
 
+func TestRegistryJoinPreservesIdentityPathsAndIncarnations(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(filepath.Dir(path), linked); err != nil {
+		t.Fatal(err)
+	}
+	loop := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	updated := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	sessions := []registry.Session{
+		{ID: "path-only", Harness: registry.Harness("pi"), SessionPath: filepath.Join(linked, filepath.Base(path)), UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "wrong-id", Harness: registry.Harness("pi"), SessionID: "other", SessionPath: path},
+		{ID: "first", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: path, UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "wrong-path", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: loop},
+		{ID: "second", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: filepath.Join(linked, filepath.Base(path)), UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)},
+		{ID: "id-only", Harness: registry.Harness("pi"), SessionID: "native-session", UpdatedAt: updated},
+		{ID: "wrong-harness", Harness: registry.Harness("codex"), SessionID: "native-session", SessionPath: path},
+	}
+	query := history.Query{Terms: []string{"refresh"}, Registry: sessions}
+	result := requireIndexedMatches(t, catalog, query, 1)
+	want := []history.RegistryState{
+		{RegistryID: "path-only", Presence: registry.PresenceGone, UpdatedAt: updated},
+		{RegistryID: "first", Presence: registry.PresenceGone, UpdatedAt: updated},
+		{RegistryID: "second", Presence: registry.PresenceLive, UpdatedAt: updated},
+		{RegistryID: "id-only", Presence: registry.PresenceUnknown, UpdatedAt: updated},
+	}
+	if diff := cmp.Diff(want, result.Matches[0].RegistryStates); diff != "" {
+		t.Fatalf("registry states (-want +got):\n%s", diff)
+	}
+	query.Presence = registry.PresenceLive
+	requireIndexedMatches(t, catalog, query, 1)
+	query.Presence = registry.PresenceGone
+	requireIndexedMatches(t, catalog, query, 0)
+	query.Presence = ""
+	query.Dir = "/unrelated"
+	requireIndexedMatches(t, catalog, query, 0)
+}
+
 func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

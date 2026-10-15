@@ -254,6 +254,7 @@ type search struct {
 	failures        int
 	recent          matchHeap
 	result          Result
+	registry        map[registry.Harness]*registryLookup
 }
 
 type retainedMatch struct {
@@ -674,6 +675,7 @@ func (s *search) prepare() error {
 	if s.query.Excerpts == 0 {
 		s.query.Excerpts = defaultExcerpts
 	}
+	s.prepareRegistry()
 	s.recent.compare = resultOrder(s.query.Sort)
 	s.terms, _ = compileMatchers(s.query.Terms, s.query)
 	s.exclude, _ = compileMatchers(s.query.Exclude, s.query)
@@ -810,7 +812,7 @@ func activeSince(c Conversation) time.Time {
 
 // accepts applies the metadata filter. Index queries prefilter with weaker SQL
 // predicates, so this is the authority for both scan paths.
-func (s *search) accepts(c Conversation, states []RegistryState) bool {
+func (s *search) accepts(c Conversation) bool {
 	f := s.query.Filter
 	if !f.acceptsDirs(c) || !f.acceptsTimes(c) {
 		return false
@@ -823,13 +825,6 @@ func (s *search) accepts(c Conversation, states []RegistryState) bool {
 	}
 	if c.Messages < f.MinMessages {
 		return false
-	}
-	switch f.Presence {
-	case registry.PresenceLive:
-		return presence(states) == registry.PresenceLive
-	case registry.PresenceGone:
-		return presence(states) == registry.PresenceGone
-	case registry.PresenceUnknown:
 	}
 	return true
 }
@@ -897,8 +892,11 @@ func (s *search) keep(ctx context.Context, m Match, indexID int64) {
 	if s.mode == modeRefresh || m.Conversation.SessionID == "" || (s.mode == modeSearch && m.MatchingParts == 0) {
 		return
 	}
-	states := registryStates(m.Conversation, s.query.Registry)
-	if !s.accepts(m.Conversation, states) {
+	if !s.accepts(m.Conversation) {
+		return
+	}
+	states := s.registryStates(m.Conversation)
+	if s.query.Presence != "" && presence(states) != s.query.Presence {
 		return
 	}
 	m.RegistryStates = states
@@ -1025,21 +1023,6 @@ func dedupeSources(sources []Source) []Source {
 		unique = append(unique, source)
 	}
 	return unique
-}
-
-func registryStates(c Conversation, sessions []registry.Session) []RegistryState {
-	result := []RegistryState{}
-	for _, session := range sessions {
-		if session.Harness != c.Harness {
-			continue
-		}
-		sameID := session.SessionID != "" && session.SessionID == c.SessionID
-		samePath := !isDatabase(c.Path) && session.SessionPath != "" && (filepath.Clean(session.SessionPath) == c.Path || registry.PathsEqual(session.SessionPath, c.Path))
-		if (sameID && (session.SessionPath == "" || samePath)) || (samePath && session.SessionID == "") {
-			result = append(result, RegistryState{RegistryID: session.ID, Presence: session.Presence(), UpdatedAt: session.UpdatedAt})
-		}
-	}
-	return result
 }
 
 func (s *search) resultError() error {

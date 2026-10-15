@@ -103,12 +103,20 @@ func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(c.Sources[0].Path, linked); err != nil {
+		t.Fatal(err)
+	}
+	sessions := []registry.Session{
+		{ID: "first", Harness: c.Sources[0].Harness, SessionID: "s0", SessionPath: filepath.Join(linked, "0.jsonl")},
+		{ID: "second", Harness: c.Sources[0].Harness, SessionPath: filepath.Join(linked, "1.jsonl")},
+	}
 	//nolint:gosmopolitan // Exercise literal matching of multi-byte Unicode queries.
 	for _, text := range []string{"needle", "NEEDLE", "istanbul", "你好", "你好世", "%b_", `"quoted"`, "AND OR", "a", "é", "after-token", "\x00after", "not-present"} {
 		for _, dir := range []string{"", "/work/a", "/"} {
 			for _, sensitive := range []bool{false, true} {
 				for _, limit := range []int{0, 1, 2, 3} {
-					q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: limit, Dir: dir}
+					q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: limit, Dir: dir, Registry: sessions}
 					compareIndexedSearch(t, c, q)
 				}
 			}
@@ -163,6 +171,11 @@ func checkGeneratedHistoryQueries(property *rapid.T, catalog Catalog, count int)
 
 func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Query) Result {
 	property.Helper()
+	query.Registry = []registry.Session{
+		{ID: "live", Harness: catalog.Sources[0].Harness, SessionID: "native-0", SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl"), Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)},
+		{ID: "gone", Harness: catalog.Sources[0].Harness, SessionID: "native-1", Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "path-only", Harness: catalog.Sources[0].Harness, SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl")},
+	}
 	want, wantErr := catalog.searchDirect(property.Context(), query)
 	got, gotErr := catalog.Search(property.Context(), query)
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
@@ -191,6 +204,7 @@ func generatedHistoryQuery(property *rapid.T, count int) Query {
 		ExcludeDirs:   rapid.SliceOfN(rapid.SampledFrom([]string{"/work/alpha", "/work/beta"}), 0, 1).Draw(property, "excluded directories"),
 		Model:         rapid.SampledFrom([]string{"", "model", "large", "absent"}).Draw(property, "model"),
 		MinMessages:   rapid.IntRange(0, 8).Draw(property, "minimum messages"),
+		Presence:      rapid.SampledFrom([]registry.Presence{"", registry.PresenceLive, registry.PresenceGone}).Draw(property, "presence"),
 	}
 	if query.Regex {
 		for index, term := range query.Terms {
