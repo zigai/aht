@@ -48,5 +48,13 @@ func (s *search) scanDocument(ctx context.Context, source Source, path string, f
 		buffer.issue(source, path, err)
 		return nil
 	}
+	if c := &t.match.Conversation; c.CreatedAt.IsZero() && c.UpdatedAt.IsZero() {
+		info, err := file.Stat()
+		if err != nil {
+			buffer.issue(source, path, err)
+			return nil
+		}
+		c.UpdatedAt = info.ModTime()
+	}
 	return &t
 }

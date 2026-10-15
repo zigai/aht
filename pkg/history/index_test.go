@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -741,4 +742,183 @@ func TestIndexSearchSymlinkedParentAfterRemoval(t *testing.T) {
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+}
+
+func TestTranscriptActivityFallbackTimes(t *testing.T) {
+	t.Parallel()
+	older := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	recent := older.Add(48 * time.Hour)
+	root := t.TempDir()
+	fixtures := []transcriptActivityFixture{
+		{"old", "", older, time.Time{}, older},
+		{"recent", "", recent, time.Time{}, recent},
+		{"message", `{"type":"message","message":{"role":"user","content":"needle"}}` + "\n", recent.Add(time.Hour), time.Time{}, recent.Add(time.Hour)},
+		{"native-created", "", recent.Add(2 * time.Hour), older, time.Time{}},
+		{"native-message", `{"type":"message","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"needle"}}` + "\n", recent.Add(3 * time.Hour), older, older},
+	}
+	for _, fixture := range fixtures {
+		header := `{"type":"session","id":"` + fixture.id + `"`
+		if fixture.id == "native-created" {
+			header += `,"timestamp":"2026-09-01T00:00:00Z"`
+		}
+		path := writeHistory(t, root, fixture.id+".jsonl", header+"}\n"+fixture.records)
+		if err := os.Chtimes(path, fixture.mtime, fixture.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			for range 2 {
+				requireTranscriptActivityTimes(t, mode.catalog, fixtures)
+				requireTranscriptActivityBounds(t, mode.catalog, older, recent)
+				requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: recent.Add(-time.Hour)}, 1)
+			}
+		})
+	}
+}
+
+type transcriptActivityFixture struct {
+	id      string
+	records string
+	mtime   time.Time
+	created time.Time
+	updated time.Time
+}
+
+func requireTranscriptActivityTimes(t *testing.T, catalog history.Catalog, fixtures []transcriptActivityFixture) {
+	t.Helper()
+	result, err := catalog.List(t.Context(), history.ListQuery{})
+	if err != nil || len(result.Matches) != len(fixtures) {
+		t.Fatalf("list = %#v, %v", result, err)
+	}
+	if result.Matches[0].Conversation.SessionID != "message" || result.Matches[1].Conversation.SessionID != "recent" {
+		t.Fatalf("fallback activity sorting = %#v", result.Matches)
+	}
+	for _, match := range result.Matches {
+		for _, fixture := range fixtures {
+			if c := match.Conversation; c.SessionID == fixture.id && (!c.CreatedAt.Equal(fixture.created) || !c.UpdatedAt.Equal(fixture.updated)) {
+				t.Fatalf("%s times = %s / %s; want %s / %s", fixture.id, c.CreatedAt, c.UpdatedAt, fixture.created, fixture.updated)
+			}
+		}
+	}
+}
+
+func requireTranscriptActivityBounds(t *testing.T, catalog history.Catalog, older, recent time.Time) {
+	t.Helper()
+
+	for _, test := range []struct {
+		filter history.Filter
+		want   []string
+	}{
+		{history.Filter{Since: older.Add(time.Hour)}, []string{"message", "recent"}},
+		{history.Filter{Until: older.Add(time.Hour)}, []string{"native-created", "native-message", "old"}},
+		{history.Filter{Since: recent.Add(-time.Hour), Until: recent.Add(time.Minute)}, []string{"recent"}},
+	} {
+		filtered, filterErr := catalog.List(t.Context(), history.ListQuery{Filter: test.filter})
+		ids := make([]string, 0, len(filtered.Matches))
+		for _, match := range filtered.Matches {
+			ids = append(ids, match.Conversation.SessionID)
+		}
+		slices.Sort(ids)
+		if diff := cmp.Diff(test.want, ids); filterErr != nil || diff != "" {
+			t.Fatalf("filter %#v: %v (-want +got):\n%s", test.filter, filterErr, diff)
+		}
+	}
+}
+
+func TestTranscriptActivityFallbackAppend(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"indexed", "direct"} {
+		t.Run(name, func(t *testing.T) {
+			path := writeHistory(t, t.TempDir(), "session.jsonl", `{"type":"session","id":"session"}`+"\n"+`{"type":"message","message":{"role":"user","content":"needle"}}`+"\n")
+			sources := []history.Source{{Harness: registry.Harness("pi"), Path: path}}
+			catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			if name == "direct" {
+				catalog = directCatalog(t, sources)
+			}
+			fallback := time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)
+			native := fallback.Add(-24 * time.Hour)
+			for _, step := range []struct {
+				record  string
+				mtime   time.Time
+				created time.Time
+				updated time.Time
+			}{
+				{"", fallback, time.Time{}, fallback},
+				{`{"type":"message","message":{"role":"assistant","content":"needle appended"}}`, fallback.Add(time.Hour), time.Time{}, fallback.Add(time.Hour)},
+				{`{"type":"message","timestamp":"2026-09-09T00:00:00Z","message":{"role":"assistant","content":"native"}}`, fallback.Add(2 * time.Hour), native, native},
+				{`{"type":"session_info","name":"metadata-only change"}`, fallback.Add(3 * time.Hour), native, native},
+				{`{"type":"message","timestamp":"2026-09-09T01:00:00Z","message":{"role":"assistant","content":"later native"}}`, fallback.Add(4 * time.Hour), native, native.Add(time.Hour)},
+			} {
+				if step.record != "" {
+					appendHistory(t, path, step.record+"\n")
+				}
+				if err := os.Chtimes(path, step.mtime, step.mtime); err != nil {
+					t.Fatal(err)
+				}
+				requireTranscriptConversationTimes(t, catalog, step.created, step.updated)
+			}
+		})
+	}
+}
+
+func requireTranscriptConversationTimes(t *testing.T, catalog history.Catalog, created, updated time.Time) {
+	t.Helper()
+	for range 2 {
+		result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"needle"}}, 1)
+		c := result.Matches[0].Conversation
+		if !c.CreatedAt.Equal(created) || !c.UpdatedAt.Equal(updated) {
+			t.Fatalf("times = %s / %s; want %s / %s", c.CreatedAt, c.UpdatedAt, created, updated)
+		}
+	}
+}
+
+func TestTranscriptActivityFallbackForDocuments(t *testing.T) {
+	t.Parallel()
+	path := writeHistory(t, t.TempDir(), "session.messages.json", `{"sessionId":"session","messages":[{"role":"user","content":"needle"}]}`)
+	modified := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, modified, modified); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("cline"), Path: path}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			requireTranscriptConversationTimes(t, mode.catalog, time.Time{}, modified)
+			requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: modified.Add(-time.Hour)}, 1)
+		})
+	}
+}
+
+func TestTranscriptActivityFallbackLeavesDatabaseTimesUnchanged(t *testing.T) {
+	t.Parallel()
+	db := databaseFixture(t, "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
+INSERT INTO sessions VALUES('unknown','unknown','',''),('native','native',1,2);
+INSERT INTO messages VALUES(1,'unknown','user','needle',''),(2,'native','user','needle',1);`)
+	path := databasePath(t, db)
+	mtime := time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("hermes"), Path: path}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			for range 2 {
+				requireDatabaseActivityTimes(t, mode.catalog)
+				requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: mtime.Add(-time.Hour)}, 0)
+			}
+		})
+	}
+}
+
+func requireDatabaseActivityTimes(t *testing.T, catalog history.Catalog) {
+	t.Helper()
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"needle"}}, 2)
+	for _, match := range result.Matches {
+		c := match.Conversation
+		if c.SessionID == "unknown" {
+			if !c.CreatedAt.IsZero() || !c.UpdatedAt.IsZero() {
+				t.Fatalf("database inherited file time: %#v", c)
+			}
+		} else if !c.CreatedAt.Equal(time.Unix(1, 0)) || !c.UpdatedAt.Equal(time.Unix(2, 0)) {
+			t.Fatalf("native database times changed: %#v", c)
+		}
+	}
 }

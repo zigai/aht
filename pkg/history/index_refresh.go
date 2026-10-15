@@ -202,7 +202,7 @@ func startRefreshWorkers(ctx context.Context, workers int) (chan *refreshJob, *s
 // A miss is parsed, which rechecks the opened file's identity.
 func (index *historyIndex) unchanged(s *search, source Source, file historyFile) bool {
 	stored, exists := index.files[fileKey(source, file.path)]
-	if !exists || (s.query.IncludeTools && !stored.tools) {
+	if !exists || stored.needsActivity || (s.query.IncludeTools && !stored.tools) {
 		return false
 	}
 	if file.database {
@@ -462,7 +462,7 @@ func (job *refreshJob) reparseReason() string {
 }
 
 func (job *refreshJob) isCurrent(stamp string) bool {
-	return job.exists && stamp == job.previous.stamp && (!job.includeTools || job.previous.tools)
+	return job.exists && !job.previous.needsActivity && stamp == job.previous.stamp && (!job.includeTools || job.previous.tools)
 }
 
 func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search, buffer *fileIssueBuffer) (refreshResult, bool) {
@@ -579,7 +579,7 @@ func (index *historyIndex) writeRefresh(ctx context.Context, job *refreshJob, re
 	if err != nil {
 		return indexedFile{}, err
 	}
-	if exists && writer.accepts(current, result.stamp) {
+	if exists && !job.previous.needsActivity && writer.accepts(current, result.stamp) {
 		return current, nil
 	}
 	if writer.staleResume(job, current, exists) {
@@ -749,7 +749,7 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 	if err != nil {
 		return indexedFile{}, fmt.Errorf("encode index issues: %w", err)
 	}
-	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted, tools: writer.includeTools}
+	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted, tools: writer.includeTools, needsActivity: false}
 	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=?,tools=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.tools, file.id); err != nil {
 		return file, index.contention(fmt.Errorf("save history checkpoint: %w", err))
 	}

@@ -158,7 +158,7 @@ type Progress struct {
 // Path is the transcript or database, not an AHT registry path. Title is the
 // harness's native display name and Prompt the first meaningful user prompt.
 // Messages counts user and assistant message parts. Unknown metadata is omitted;
-// timestamps are native timestamps, never inferred from file mtimes.
+// UpdatedAt falls back to transcript modification time when native times are absent.
 type Conversation = native.Conversation
 
 // Span is a byte range of Excerpt.Text that matched a query term.

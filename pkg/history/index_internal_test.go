@@ -1299,11 +1299,15 @@ func TestPresenceFilterUsesRegistryEvidence(t *testing.T) {
 	}
 }
 
-func TestTimeBoundsRejectUndatedConversations(t *testing.T) {
+func TestTimeBoundsUseUndatedTranscriptModificationTime(t *testing.T) {
 	t.Parallel()
 	c := filterFixture(t)
 	writeIndexFixture(t, c, "undated.jsonl", claudeRecord("user", "undated", "/work/a", "main", "", "an undated token", ""))
 	day := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	modified := day.Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(c.Sources[0].Path, "undated.jsonl"), modified, modified); err != nil {
+		t.Fatal(err)
+	}
 	for _, q := range []Query{
 		{Terms: []string{"token"}},
 		{Terms: []string{"token"}, Since: day},
@@ -1315,10 +1319,37 @@ func TestTimeBoundsRejectUndatedConversations(t *testing.T) {
 			t.Fatal(err)
 		}
 		undated := slices.Contains(sessionIDs(got), "undated")
-		if bounded := !q.Since.IsZero() || !q.Until.IsZero(); undated == bounded {
+		if undated != q.Until.IsZero() {
 			t.Fatalf("query %#v returned %v", q, sessionIDs(got))
 		}
 	}
+}
+
+func TestExistingUntimestampedIndexAcquiresActivityFallback(t *testing.T) {
+	t.Parallel()
+	catalog := filterFixture(t)
+	writeIndexFixture(t, catalog, "undated.jsonl", claudeRecord("user", "undated", "/work/a", "main", "", "an undated token", ""))
+	modified := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(catalog.Sources[0].Path, "undated.jsonl"), modified, modified); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.List(t.Context(), ListQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", catalog.IndexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, updateErr := database.ExecContext(t.Context(), "UPDATE conversations SET metadata=json_remove(metadata,'$.updated_at'),active=?,started=? WHERE metadata LIKE '%undated%'", unknownActive, unknownStarted)
+	if err := errors.Join(updateErr, database.Close()); err != nil {
+		t.Fatal(err)
+	}
+	query := Query{Terms: []string{"token"}, Since: modified.Add(-time.Hour)}
+	result, err := catalog.Search(t.Context(), query)
+	if err != nil || !slices.Equal(sessionIDs(result), []string{"undated"}) {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	compareIndexedSearch(t, catalog, query)
 }
 
 func writeIndexFixture(t *testing.T, c Catalog, name, body string) {

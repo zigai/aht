@@ -94,6 +94,11 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		s.writer.checkpoint.Size = info.Size()
 		s.writer.checkpoint.Digest = hex.EncodeToString(s.writer.hash.Sum(nil))
 	}
+	// Checkpoints retain native times so append resumes can recompute the fallback
+	// and a later native timestamp cannot be masked by an older fallback.
+	if c := &t.match.Conversation; c.CreatedAt.IsZero() && c.UpdatedAt.IsZero() {
+		c.UpdatedAt = info.ModTime()
+	}
 	return &t
 }
 

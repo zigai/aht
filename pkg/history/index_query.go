@@ -16,7 +16,7 @@ import (
 
 const directoryScanThreshold = 32
 
-// Conversations without a native timestamp store sentinels that no time bound
+// Conversations without an activity timestamp store sentinels that no time bound
 // can satisfy.
 const (
 	unknownActive  = math.MinInt64

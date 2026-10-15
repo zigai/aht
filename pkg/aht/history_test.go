@@ -44,6 +44,10 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 	older := writePiHistory(t, "session-older", "needle in the older conversation", time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC))
 	newer := writePiHistory(t, "session-newer", "needle in the newer conversation", time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC))
 	undated := writePiHistory(t, "session-undated", "needle in the undated conversation", time.Time{})
+	modified := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(undated, modified, modified); err != nil {
+		t.Fatal(err)
+	}
 	catalog := aht.HistoryCatalog{
 		Sources: []aht.HistorySource{
 			{Harness: aht.HarnessPi, Path: older},
@@ -58,7 +62,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
-		want := []string{"session-newer", "session-older", "session-undated"}
+		want := []string{"session-undated", "session-newer", "session-older"}
 		if got := sessionIDs(result); !slices.Equal(got, want) {
 			t.Fatalf("Search session order = %v, want %v", got, want)
 		}
@@ -69,7 +73,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
-		want := []string{"session-newer"}
+		want := []string{"session-undated"}
 		if got := sessionIDs(result); !slices.Equal(got, want) {
 			t.Fatalf("Search session order = %v, want %v", got, want)
 		}

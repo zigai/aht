@@ -31,7 +31,8 @@ type Conversation struct {
 	Model       string           `json:"model,omitempty"`
 	Messages    int              `json:"messages"`
 	CreatedAt   time.Time        `json:"created_at,omitzero"`
-	UpdatedAt   time.Time        `json:"updated_at,omitzero"`
+	// UpdatedAt falls back to the transcript's modification time when no record has a timestamp.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 type Decoder struct {

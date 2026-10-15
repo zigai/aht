@@ -747,6 +747,10 @@ func TestSearchCLIGroupsByDayNewestFirst(t *testing.T) {
 	writeSearchFixtureBody(t, filepath.Join(root, "undated.jsonl"), `{"type":"session","id":"undated","cwd":"/work/c"}
 {"type":"message","id":"u1","message":{"role":"user","content":"topic undated refresh"}}
 `)
+	modified := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(root, "undated.jsonl"), modified, modified); err != nil {
+		t.Fatal(err)
+	}
 	var groups []searchGroup
 	if err := json.Unmarshal([]byte(runSearchOutput(t, "--json", "search", "refresh", "--source", "pi="+root, "--group-by", "day")), &groups); err != nil {
 		t.Fatal(err)
@@ -755,7 +759,7 @@ func TestSearchCLIGroupsByDayNewestFirst(t *testing.T) {
 	want := []searchGroup{
 		{Group: day(time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)), Conversations: 2, Messages: 2},
 		{Group: day(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)), Conversations: 1, Messages: 1},
-		{Group: "-", Conversations: 1, Messages: 1},
+		{Group: day(modified), Conversations: 1, Messages: 1},
 	}
 	if diff := cmp.Diff(want, groups); diff != "" {
 		t.Fatalf("day groups (-want +got):\n%s", diff)
