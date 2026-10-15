@@ -177,6 +177,20 @@ func TestRefreshStatsMarkUnavailableIndex(t *testing.T) {
 	}
 }
 
+func TestRefreshStatsMarkUnavailableDuringRefresh(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	release := holdIndexWriteLock(t, catalog.IndexPath)
+	defer release()
+	appendHistory(t, path, "\n")
+	result, err := catalog.Refresh(t.Context())
+	if !errors.Is(err, history.ErrIndexUnavailable) || !result.IndexUnavailable {
+		t.Fatalf("unavailable refresh = %#v, %v", result.Refresh, err)
+	}
+	requireRefreshStats(t, result, history.RefreshStats{Checked: 1})
+}
+
 func TestRefreshStatsExcludeCanceledWork(t *testing.T) {
 	t.Parallel()
 	catalog, _ := indexedFixture(t)

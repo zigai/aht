@@ -510,7 +510,7 @@ func (app *application) writeSearchDiagnostics(result history.Result, opts searc
 
 func (app *application) writeSearchRefresh(result history.Result) {
 	if result.IndexUnavailable {
-		app.warnf("refresh: index unavailable; scanned native history directly\n")
+		app.warnf("refresh: index unavailable; refresh totals are incomplete\n")
 	}
 	for _, refresh := range result.Refresh {
 		app.warnf("refresh: %s %s: checked=%d unchanged=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",

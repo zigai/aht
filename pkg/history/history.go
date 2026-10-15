@@ -482,6 +482,7 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	runErr := s.runIndexed(ctx, sources)
 	closeErr := index.close()
 	s.index = nil
+	s.result.IndexUnavailable = errors.Is(runErr, ErrIndexUnavailable)
 	return s.finalize(ctx), errors.Join(runErr, closeErr)
 }
 
