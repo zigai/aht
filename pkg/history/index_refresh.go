@@ -103,6 +103,7 @@ type pendingFile struct {
 	filter   Filter
 	job      *refreshJob
 	children []pendingFile
+	skipped  bool
 }
 
 // settledFile is a history whose index entry is ready to read; changed means
@@ -166,7 +167,7 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
 			break
 		}
-		pending := index.pendFamily(s, source, file, jobs)
+		pending := index.pendFamily(ctx, s, source, file, jobs)
 		queue = append(queue, pending)
 		if len(queue) > 2*workers {
 			index.finish(ctx, s, source, queue[0], status, &progress)
@@ -180,8 +181,11 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 	wg.Wait()
 }
 
-func (index *historyIndex) pendFamily(s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
+func (index *historyIndex) pendFamily(ctx context.Context, s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
 	filter := s.query.Filter
+	if s.metadataFailures != nil && len(file.children) > 0 && file.mayMatchTime(filter) && !s.matchesFamily(ctx, file) {
+		return pendingFile{file: file, job: nil, children: nil, skipped: true}
+	}
 	if len(file.children) > 0 && file.mayMatchTime(filter) {
 		filter.Since = time.Time{}
 	}
@@ -256,6 +260,13 @@ func (index *historyIndex) finish(ctx context.Context, s *search, source Source,
 		progress.Done++
 		s.report(*progress)
 	}()
+	if pending.skipped {
+		count := 1 + len(pending.file.children)
+		status.Files += count
+		progress.Refresh.Checked += count
+		progress.Refresh.Skipped += count
+		return
+	}
 	parent, ok := index.settle(ctx, s, source, pending, status, progress)
 	var children []settledFile
 	for _, child := range pending.children {

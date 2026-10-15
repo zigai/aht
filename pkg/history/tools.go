@@ -16,6 +16,7 @@ func (s *search) scanToolsFiles(ctx context.Context, source Source, files []hist
 	metadata.registry = s.registry
 	metadata.progress = s.progress
 	metadata.reset()
+	metadata.prefilter = s.prefilter
 	metadata.result.IndexUnavailable = s.result.IndexUnavailable
 	metadata.metadataFailures = make(map[string]bool)
 	if s.index != nil {
@@ -60,10 +61,8 @@ func (s *search) matchesFamily(ctx context.Context, file historyFile) bool {
 		return true
 	}
 	var filters []*bytePrefilter
-	for _, term := range s.terms {
-		if filter := newBytePrefilter([]matcher{term}); filter != nil {
-			filters = append(filters, filter)
-		}
+	for _, pattern := range s.prefilter.patterns {
+		filters = append(filters, &bytePrefilter{patterns: []bytePattern{pattern}, overlap: s.prefilter.overlap})
 	}
 	remaining := len(filters)
 	for _, member := range append([]historyFile{file}, file.children...) {

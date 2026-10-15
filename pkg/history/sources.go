@@ -270,7 +270,7 @@ func (s *search) scanFileDirect(ctx context.Context, source Source, file history
 	if !file.mayMatchTime(s.query.Filter) {
 		return 1 + len(file.children)
 	}
-	if s.toolsFailures != nil && len(file.children) > 0 && !s.matchesFamily(ctx, file) {
+	if (s.toolsFailures != nil || s.metadataFailures != nil) && len(file.children) > 0 && !s.matchesFamily(ctx, file) {
 		return 1 + len(file.children)
 	}
 	buffer := newFileIssueBuffer()
