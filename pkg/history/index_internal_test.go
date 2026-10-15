@@ -263,19 +263,21 @@ func TestCappedParentIssuesDoNotHideChildDiagnostics(t *testing.T) {
 		t.Run(strconv.FormatBool(unreadable), func(t *testing.T) {
 			t.Parallel()
 			catalog, child := cappedIssueFixture(t, unreadable)
-			query := Query{Terms: []string{"gremlin"}, Dirs: []string{"/work/z"}}
-			result, err := catalog.Search(t.Context(), query)
-			if errors.Is(err, ErrIncomplete) != unreadable || len(result.Issues) != 1 || result.Issues[0].Path != child || result.OmittedIssues != 0 {
-				t.Fatalf("result=%#v err=%v", result, err)
-			}
-			compareIndexedSearch(t, catalog, query)
-			if unreadable {
-				query.Dirs = nil
-				result, err = catalog.Search(t.Context(), query)
-				if !errors.Is(err, ErrIncomplete) || len(result.Issues) != maxIssues || result.OmittedIssues != 1 {
-					t.Fatalf("capped selected failures result=%#v err=%v", result, err)
+			for _, tools := range []bool{false, true} {
+				query := Query{Terms: []string{"gremlin"}, Dirs: []string{"/work/z"}, IncludeTools: tools}
+				result, err := catalog.Search(t.Context(), query)
+				if errors.Is(err, ErrIncomplete) != unreadable || len(result.Issues) != 1 || result.Issues[0].Path != child || result.OmittedIssues != 0 {
+					t.Fatalf("result=%#v err=%v", result, err)
 				}
 				compareIndexedSearch(t, catalog, query)
+				if unreadable {
+					query.Dirs = nil
+					result, err = catalog.Search(t.Context(), query)
+					if !errors.Is(err, ErrIncomplete) || len(result.Issues) != maxIssues || result.OmittedIssues != 1 {
+						t.Fatalf("capped selected failures result=%#v err=%v", result, err)
+					}
+					compareIndexedSearch(t, catalog, query)
+				}
 			}
 		})
 	}
@@ -1200,7 +1202,7 @@ func TestIndexCanceledRefreshRollsBack(t *testing.T) {
 	}()
 	source := c.Sources[0]
 	path := filepath.Join(source.Path, "0.jsonl")
-	writer := &indexWriter{includeTools: false}
+	writer := new(indexWriter)
 	writer.append(Excerpt{Role: "user", Text: "canceled token"})
 	writer.finish(Conversation{Harness: source.Harness, Path: path, SessionID: "uncommitted"})
 	job := &refreshJob{source: source, file: historyFile{path: path}, previous: index.files[fileKey(source, path)], exists: true}
@@ -1702,6 +1704,45 @@ func TestChildHistoriesFoldIntoParentConversation(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{"main"}, sessionIDs(appended)); diff != "" {
 		t.Fatalf("appended child (-want +got):\n%s", diff)
+	}
+}
+
+func TestToolsSearchFoldsChildPartsAndReportsIssuesOnce(t *testing.T) {
+	t.Parallel()
+	catalog, root := childFixture(t)
+	appendRecord(t, filepath.Join(root, "main/subagents/agent-1.jsonl"), `{"type":"user","sessionId":"main","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":"child-tool-marker"}]}}`+"\ninvalid record\n")
+	query := Query{Terms: []string{"deploy", "child-tool-marker"}, IncludeTools: true, Dirs: []string{"/work/a"}, Limit: 1}
+	compareIndexedSearch(t, catalog, query)
+	result, err := catalog.Search(t.Context(), query)
+	if err != nil || !slices.Equal(sessionIDs(result), []string{"main"}) || result.Matches[0].MatchingParts != 2 || len(result.Issues) != 1 || !result.Issues[0].Record {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if result.Matches[0].Excerpts[1].Role != "tool" || result.Matches[0].Excerpts[1].Text != "child-tool-marker" {
+		t.Fatalf("excerpts=%#v", result.Matches[0].Excerpts)
+	}
+	query.Exclude = []string{"secret"}
+	compareIndexedSearch(t, catalog, query)
+	result, err = catalog.Search(t.Context(), query)
+	if err != nil || len(result.Matches) != 0 {
+		t.Fatalf("excluded result=%#v err=%v", result, err)
+	}
+	requireUnreadableToolChild(t, catalog, root)
+}
+
+func requireUnreadableToolChild(t *testing.T, catalog Catalog, root string) {
+	t.Helper()
+	path := filepath.Join(root, "main/subagents/agent-unreadable.jsonl")
+	if err := os.WriteFile(path, []byte("unreadable"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(path); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("child is readable: %v", err)
+	}
+	query := Query{Terms: []string{"absent"}, IncludeTools: true, Dirs: []string{"/work/a"}}
+	compareIndexedSearch(t, catalog, query)
+	result, err := catalog.Search(t.Context(), query)
+	if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 2 || len(result.Matches) != 0 {
+		t.Fatalf("unreadable child result=%#v err=%v", result, err)
 	}
 }
 

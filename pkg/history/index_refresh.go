@@ -38,7 +38,6 @@ type indexCheckpoint struct {
 	Lines        int          `json:"lines"`
 	Recognized   bool         `json:"recognized"`
 	Complete     bool         `json:"complete"`
-	Tools        bool         `json:"tools"`
 }
 
 // bufferedConversation is one parsed conversation waiting to be written.
@@ -60,7 +59,6 @@ type indexWriter struct {
 	checkpoint    indexCheckpoint
 	resume        *indexCheckpoint
 	hash          hash.Hash
-	includeTools  bool
 	reason        string
 }
 
@@ -68,17 +66,16 @@ type indexWriter struct {
 // when the job was created, and resumeID its first conversation row, which an
 // append resume extends.
 type refreshJob struct {
-	source       Source
-	file         historyFile
-	previous     indexedFile
-	exists       bool
-	resumeID     int64
-	includeTools bool
-	prefilter    *bytePrefilter
-	filter       Filter
-	metadata     map[string]string
-	done         chan refreshResult
-	rebuilt      bool
+	source    Source
+	file      historyFile
+	previous  indexedFile
+	exists    bool
+	resumeID  int64
+	prefilter *bytePrefilter
+	filter    Filter
+	metadata  map[string]string
+	done      chan refreshResult
+	rebuilt   bool
 }
 
 // refreshResult is a parsed history. openErr means the file could not be opened
@@ -216,7 +213,7 @@ func startRefreshWorkers(ctx context.Context, workers int) (chan *refreshJob, *s
 // A miss is parsed, which rechecks the opened file's identity.
 func (index *historyIndex) unchanged(s *search, source Source, file historyFile) bool {
 	stored, exists := index.files[fileKey(source, file.path)]
-	if !exists || (s.query.IncludeTools && !stored.tools) {
+	if !exists {
 		return false
 	}
 	if file.database {
@@ -236,7 +233,7 @@ func (index *historyIndex) newJob(s *search, source Source, file historyFile) *r
 	if file.database {
 		resumeID = 0
 	}
-	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, includeTools: s.query.IncludeTools, prefilter: nil, filter: s.query.Filter, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
+	return &refreshJob{source: source, file: file, previous: previous, exists: exists, resumeID: resumeID, prefilter: nil, filter: s.query.Filter, metadata: s.sourceMetadata, done: make(chan refreshResult, 1), rebuilt: index.rebuilt}
 }
 
 func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs chan<- *refreshJob, prefilter bool, filter Filter) pendingFile {
@@ -442,11 +439,9 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		return result
 	}
 	started := time.Now()
-	includeTools := job.includeTools || (job.exists && job.previous.tools)
-	writer := newIndexWriter(includeTools)
+	writer := newIndexWriter()
 	reader := new(search)
 	reader.mode = modeRefresh
-	reader.query.IncludeTools = includeTools
 	reader.sourceMetadata = job.metadata
 	reader.writer = writer
 	reader.reset()
@@ -486,15 +481,13 @@ func (job *refreshJob) reparseReason() string {
 		return "schema rebuild"
 	case !job.exists:
 		return "new file"
-	case job.includeTools && !job.previous.tools:
-		return "tool-mode mismatch"
 	default:
 		return "changed file"
 	}
 }
 
 func (job *refreshJob) isCurrent(stamp string) bool {
-	return job.exists && stamp == job.previous.stamp && (!job.includeTools || job.previous.tools)
+	return job.exists && stamp == job.previous.stamp
 }
 
 func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search, buffer *fileIssueBuffer) (refreshResult, bool) {
@@ -571,13 +564,9 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 	if t := reader.scanTranscript(ctx, source, path, file, buffer); t != nil {
 		reader.add(ctx, t)
 	}
-	after, err := file.Stat()
-	if err != nil {
-		result.err = fmt.Errorf("check indexed transcript: %w", err)
+	if err := writer.checkSnapshot(file, info); err != nil {
+		result.err = err
 		return result, false
-	}
-	if stampFile(after) != stampFile(info) {
-		writer.checkpoint.Complete = false
 	}
 	return result, true
 }
@@ -626,14 +615,14 @@ func (index *historyIndex) writeRefresh(ctx context.Context, job *refreshJob, re
 	if err != nil {
 		return indexedFile{}, err
 	}
-	if exists && writer.accepts(current, result.stamp) {
+	if exists && current.stamp == result.stamp {
 		return current, nil
 	}
 	if writer.staleResume(job, current, exists) {
 		return current, errStaleResume
 	}
 	if !exists {
-		if current, err = index.addFile(ctx, source, path, writer.includeTools); err != nil {
+		if current, err = index.addFile(ctx, source, path); err != nil {
 			return indexedFile{}, err
 		}
 	}
@@ -650,18 +639,14 @@ func (index *historyIndex) writeRefresh(ctx context.Context, job *refreshJob, re
 	return index.saveRefresh(ctx, source, path, result, current)
 }
 
-func (writer *indexWriter) accepts(current indexedFile, stamp string) bool {
-	return current.stamp == stamp && (!writer.includeTools || current.tools)
-}
-
 func (writer *indexWriter) staleResume(job *refreshJob, current indexedFile, exists bool) bool {
 	return writer.resume != nil && (!exists || current.checkpoint != job.previous.checkpoint || current.resumeID != job.resumeID)
 }
 
-func (index *historyIndex) addFile(ctx context.Context, source Source, path string, includeTools bool) (indexedFile, error) {
+func (index *historyIndex) addFile(ctx context.Context, source Source, path string) (indexedFile, error) {
 	parent := catalog.TranscriptFor(source.Harness).Parent
 	child := parent != nil && parent(path) != ""
-	if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,tools,child,stamp,checkpoint,issues,omitted) VALUES(?,?,?,?,'','','[]',0)", source.Harness, path, includeTools, child); err != nil {
+	if _, err := index.tx.ExecContext(ctx, "INSERT INTO files(harness,path,child,stamp,checkpoint,issues,omitted) VALUES(?,?,?,'','','[]',0)", source.Harness, path, child); err != nil {
 		return indexedFile{}, index.failure(fmt.Errorf("add indexed history: %w", err))
 	}
 	current, _, err := index.storedFile(ctx, source, path)
@@ -674,8 +659,8 @@ func (index *historyIndex) addFile(ctx context.Context, source Source, path stri
 // storedFile reads a history's committed entry inside the open transaction.
 func (index *historyIndex) storedFile(ctx context.Context, source Source, path string) (indexedFile, bool, error) {
 	var file indexedFile
-	err := index.tx.queryRow("SELECT id,"+firstConversationSQL+",stamp,checkpoint,issues,omitted,tools FROM files f WHERE harness=? AND path=?", source.Harness, path).Scan(ctx,
-		&file.id, &file.resumeID, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools,
+	err := index.tx.queryRow("SELECT id,"+firstConversationSQL+",stamp,checkpoint,issues,omitted FROM files f WHERE harness=? AND path=?", source.Harness, path).Scan(ctx,
+		&file.id, &file.resumeID, &file.stamp, &file.checkpoint, &file.issues, &file.omitted,
 	)
 	file.harness, file.path = string(source.Harness), path
 	switch {
@@ -796,17 +781,28 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 	if err != nil {
 		return indexedFile{}, fmt.Errorf("encode index issues: %w", err)
 	}
-	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted, tools: writer.includeTools}
-	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=?,tools=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.tools, file.id); err != nil {
+	file := indexedFile{id: previous.id, resumeID: previous.resumeID, harness: string(source.Harness), path: path, stamp: result.stamp, checkpoint: string(checkpoint), issues: string(encoded), omitted: omitted}
+	if _, err = index.tx.ExecContext(ctx, "UPDATE files SET stamp=?,checkpoint=?,issues=?,omitted=? WHERE id=?", file.stamp, file.checkpoint, file.issues, file.omitted, file.id); err != nil {
 		return file, index.failure(fmt.Errorf("save history checkpoint: %w", err))
 	}
 	return file, nil
 }
 
-func newIndexWriter(includeTools bool) *indexWriter {
+func newIndexWriter() *indexWriter {
 	var conversation Conversation
-	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Projection: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false, Tools: includeTools}
-	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, includeTools: includeTools, reason: ""}
+	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Projection: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false}
+	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, reason: ""}
+}
+
+func (writer *indexWriter) checkSnapshot(file *os.File, info os.FileInfo) error {
+	after, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("check indexed transcript: %w", err)
+	}
+	if stampFile(after) != stampFile(info) {
+		writer.checkpoint.Complete = false
+	}
+	return nil
 }
 
 func (writer *indexWriter) current() *bufferedConversation {
@@ -820,9 +816,7 @@ func (writer *indexWriter) current() *bufferedConversation {
 }
 
 func (writer *indexWriter) append(part Excerpt) {
-	// Conversation metadata is captured for every recognized message; only tool
-	// content storage is opt-in.
-	if part.Role == "tool" && !writer.includeTools {
+	if part.Role == "tool" {
 		return
 	}
 	buffered := writer.current()
@@ -839,12 +833,9 @@ func (writer *indexWriter) finish(c Conversation) {
 	writer.open = false
 }
 
-// resumable reports whether this checkpoint can be extended in place: the
-// writer must append to the same identity with the same tool mode.
 func (checkpoint indexCheckpoint) resumable(writer *indexWriter, info os.FileInfo) bool {
 	return checkpoint.Complete && checkpoint.Size < info.Size() &&
-		checkpoint.Identity == writer.checkpoint.Identity && checkpoint.Extra == writer.checkpoint.Extra &&
-		checkpoint.Tools == writer.includeTools
+		checkpoint.Identity == writer.checkpoint.Identity && checkpoint.Extra == writer.checkpoint.Extra
 }
 
 func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.File, job *refreshJob, info os.FileInfo) error {
@@ -856,13 +847,8 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 	if err := json.Unmarshal([]byte(job.previous.checkpoint), &checkpoint); err != nil {
 		return fmt.Errorf("decode history checkpoint: %w", err)
 	}
-	// Resuming keeps the stored rows, so it is only valid for an identical tool
-	// mode: a tools query must not inherit a projection without tool content.
 	if !checkpoint.resumable(writer, info) {
-		switch {
-		case checkpoint.Tools != writer.includeTools:
-			writer.reason = "tool-mode mismatch"
-		case !checkpoint.Complete:
+		if !checkpoint.Complete {
 			writer.reason = "incomplete checkpoint"
 		}
 		return nil

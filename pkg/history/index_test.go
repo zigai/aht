@@ -118,7 +118,7 @@ func TestRefreshStatsDescribeCompletedWork(t *testing.T) {
 
 func TestRefreshStatsExplainFullReparses(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"rewritten prefix", "incomplete checkpoint", "tool-mode mismatch", "schema rebuild"} {
+	for _, scenario := range []string{"rewritten prefix", "incomplete checkpoint", "schema rebuild"} {
 		t.Run(scenario, func(t *testing.T) {
 			catalog, path := indexedFixture(t)
 			if scenario == "incomplete checkpoint" {
@@ -129,7 +129,6 @@ func TestRefreshStatsExplainFullReparses(t *testing.T) {
 			requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 			query := history.Query{Terms: []string{"refresh"}}
 			mutateRefreshHistory(t, catalog, path, scenario)
-			query.IncludeTools = scenario == "tool-mode mismatch"
 			result := requireIndexedMatches(t, catalog, query, 1)
 			if result.Refresh[0].Reparsed != 1 || result.Refresh[0].Resumed != 0 || result.Refresh[0].Reasons[scenario] != 1 || len(result.Reparsed) != 1 || result.Reparsed[0].Reason != scenario {
 				t.Fatalf("%s: stats=%#v files=%#v", scenario, result.Refresh, result.Reparsed)
@@ -172,9 +171,18 @@ func TestRefreshStatsMarkUnavailableIndex(t *testing.T) {
 	catalog.IndexPath = t.TempDir()
 	var last history.Progress
 	catalog.Progress = func(progress history.Progress) { last = progress }
-	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
-	if !result.IndexUnavailable || !last.IndexUnavailable || len(result.Refresh) != 0 {
-		t.Fatalf("fallback stats = %#v, progress=%#v", result, last)
+	for _, test := range []struct {
+		query history.Query
+		want  int
+	}{
+		{history.Query{Terms: []string{"refresh"}}, 1},
+		{history.Query{Terms: []string{"refresh"}, IncludeTools: true}, 1},
+		{history.Query{Terms: []string{"refresh"}, IncludeTools: true, Dirs: []string{"/elsewhere"}}, 0},
+	} {
+		result := requireIndexedMatches(t, catalog, test.query, test.want)
+		if !result.IndexUnavailable || !last.IndexUnavailable || len(result.Refresh) != 0 {
+			t.Fatalf("fallback stats = %#v, progress=%#v", result, last)
+		}
 	}
 }
 
@@ -315,21 +323,141 @@ func searchWithRecordIssue(t *testing.T, c history.Catalog, term string) history
 func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
 	t.Parallel()
 	c, _ := indexedFixture(t)
+	if _, err := c.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	db := openTestIndex(t, c.IndexPath)
+	var before, after [2]int64
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*),coalesce(sum(length(body)),0) FROM parts").Scan(&before[0], &before[1]); err != nil {
+		t.Fatal(err)
+	}
 	for _, tools := range []bool{false, true, false, true} {
 		want := 0
 		if tools {
 			want = 1
 		}
-		requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: tools}, want)
+		result := requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: tools}, want)
+		requireRefreshStats(t, result, history.RefreshStats{Checked: 1, Unchanged: 1})
 		for _, text := range []string{"reasoning-only", "system-only"} {
 			requireIndexedMatches(t, c, history.Query{Terms: []string{text}, IncludeTools: tools}, 0)
 		}
 	}
-	db := openTestIndex(t, c.IndexPath)
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*),coalesce(sum(length(body)),0) FROM parts").Scan(&after[0], &after[1]); err != nil || before != after {
+		t.Fatalf("tools searches changed indexed text: before=%v after=%v err=%v", before, after, err)
+	}
 	var forbidden int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'reasoning-only')>0 OR instr(body,'system-only')>0").Scan(&forbidden); err != nil || forbidden != 0 {
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'reasoning-only')>0 OR instr(body,'system-only')>0 OR instr(body,'tool-only')>0").Scan(&forbidden); err != nil || forbidden != 0 {
 		t.Fatalf("excluded text indexed: %d %v", forbidden, err)
 	}
+}
+
+func TestToolsSearchSkipsExcludedUnreadableFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeHistory(t, root, "selected.jsonl", strings.ReplaceAll(treeHistory, "/work/project/sub", "/work/selected"))
+	excluded := writeHistory(t, root, "excluded.jsonl", strings.ReplaceAll(strings.ReplaceAll(treeHistory, "/work/project/sub", "/work/excluded"), "native-session", "excluded"))
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			requireToolsExcludedFileUnread(t, mode.catalog, excluded)
+		})
+	}
+}
+
+func requireToolsExcludedFileUnread(t *testing.T, catalog history.Catalog, excluded string) {
+	t.Helper()
+	blocked := false
+	t.Cleanup(func() {
+		if err := os.Chmod(excluded, 0o600); err != nil {
+			t.Error(err)
+		}
+	})
+	catalog.Progress = func(progress history.Progress) {
+		if !blocked && progress.Total == 2 && progress.Done == 2 {
+			blocked = true
+			if err := os.Chmod(excluded, 0); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, Role: "tool", Dirs: []string{"/work/selected"}})
+	if err != nil || len(result.Matches) != 1 || len(result.Issues) != 0 || !blocked {
+		t.Fatalf("matches=%#v issues=%#v blocked=%t err=%v", result.Matches, result.Issues, blocked, err)
+	}
+	if _, err := os.ReadFile(excluded); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("excluded file is readable: %v", err)
+	}
+}
+
+func TestToolsSearchUsesBothModificationAndActivityTimes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	older := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+	for _, fixture := range []struct {
+		id, day string
+		mtime   time.Time
+	}{
+		{"selected", "2026-09-03", recent},
+		{"old-file", "2026-09-03", older},
+		{"old-activity", "2026-09-01", recent},
+	} {
+		body := strings.ReplaceAll(strings.ReplaceAll(treeHistory, "native-session", fixture.id), "2026-09-01", fixture.day)
+		path := writeHistory(t, root, fixture.id+".jsonl", body)
+		if err := os.Chtimes(path, fixture.mtime, fixture.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			if _, err := mode.catalog.Refresh(t.Context()); err != nil && !errors.Is(err, history.ErrIndexUnavailable) {
+				t.Fatal(err)
+			}
+			result, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, IncludeTools: true, Since: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)})
+			if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "selected" {
+				t.Fatalf("matches=%#v err=%v", result.Matches, err)
+			}
+		})
+	}
+}
+
+func TestToolsStreamCancellationRetainsDeliveredMatch(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, id := range []string{"first", "second", "third"} {
+		writeHistory(t, root, id+".jsonl", strings.ReplaceAll(treeHistory, "native-session", id))
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var delivered []history.Match
+			result, err := mode.catalog.Stream(ctx, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, func(match history.Match) bool {
+				delivered = append(delivered, match)
+				cancel()
+				return false
+			})
+			if !errors.Is(err, context.Canceled) || len(delivered) != 1 || len(result.Matches) != 0 || delivered[0].Excerpts[0].Role != "tool" {
+				t.Fatalf("delivered=%#v result=%#v err=%v", delivered, result, err)
+			}
+		})
+	}
+}
+
+func TestIndexRebuildDiscardsPersistedToolText(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	database := openTestIndex(t, catalog.IndexPath)
+	if _, err := database.ExecContext(t.Context(), `ALTER TABLE files ADD COLUMN tools INTEGER NOT NULL DEFAULT 1;
+INSERT INTO parts(conversation_id,role,body,folded,message_id,line,timestamp)
+SELECT id,'tool','stale-tool','stale-tool','old-tool',1,'' FROM conversations;
+PRAGMA user_version=5;`); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"stale-tool"}}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, 1)
 }
 
 func TestIndexSearchesWhileWriteLocked(t *testing.T) {

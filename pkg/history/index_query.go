@@ -204,9 +204,7 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, 
 // boundaries are checked in Go, which also builds excerpts.
 func (index *historyIndex) candidatePredicate(s *search, fileID int64) (string, []any) {
 	filter, args := index.selectionSQL(s.query.Filter)
-	// Tool parts are stored for opt-in searches only, so a default query must
-	// exclude them from candidate plans in both the trigram and instr branches.
-	predicate, args := rolePredicate(filter, s.query.Role, s.query.IncludeTools, args)
+	predicate, args := rolePredicate(filter, s.query.Role, args)
 	// A selected literal scan avoids enumerating common trigrams across the
 	// whole index. Indexed text lengths account for oversized message bodies;
 	// CROSS JOIN keeps metadata selection ahead of reading those bodies.
@@ -300,15 +298,12 @@ func (index *historyIndex) preferLiteral(ctx context.Context, filter string, arg
 	return candidates > pages, nil
 }
 
-func rolePredicate(filter, role string, includeTools bool, args []any) (string, []any) {
+func rolePredicate(filter, role string, args []any) (string, []any) {
 	if role != "" && role != "all" {
 		return "(" + filter + ") AND p.role = ?", append(args, role)
 	}
 	if role == "" {
 		filter = "(" + filter + ") AND p.role <> 'context'"
-	}
-	if !includeTools {
-		return "(" + filter + ") AND p.role <> 'tool'", args
 	}
 	return filter, args
 }
@@ -470,7 +465,7 @@ func (index *historyIndex) collectMatches(ctx context.Context, s *search, conver
 // readRetained hydrates only the final heap after every selected history has
 // been checked. Failed or canceled reads cannot expose metadata-only matches.
 func (index *historyIndex) readRetained(ctx context.Context, s *search) error {
-	if s.mode != modeSearch {
+	if s.mode != modeSearch || s.query.IncludeTools {
 		return nil
 	}
 	retained := s.recent.items

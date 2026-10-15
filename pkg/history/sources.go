@@ -118,9 +118,12 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		s.loadSourceMetadata(source, file.path, false)
 		files = []historyFile{file}
 	}
-	if s.index != nil {
+	switch {
+	case s.mode == modeSearch && s.query.IncludeTools:
+		s.scanToolsFiles(ctx, source, files, &status)
+	case s.index != nil:
 		s.index.scanFiles(ctx, s, source, files, &status)
-	} else {
+	default:
 		s.scanFilesParallel(ctx, source, files, &status)
 	}
 	if s.failureCount() > before {
@@ -265,6 +268,9 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 // files it inspected.
 func (s *search) scanFileDirect(ctx context.Context, source Source, file historyFile) int {
 	if !file.mayMatchTime(s.query.Filter) {
+		return 1 + len(file.children)
+	}
+	if s.toolsFailures != nil && len(file.children) > 0 && !s.matchesFamily(ctx, file) {
 		return 1 + len(file.children)
 	}
 	buffer := newFileIssueBuffer()

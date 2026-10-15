@@ -239,25 +239,27 @@ type Result struct {
 type scanMode int
 
 type search struct {
-	mu              sync.Mutex
-	index           *historyIndex
-	writer          *indexWriter
-	indexErr        error
-	explicitSources bool
-	sourceMetadata  map[string]string
-	mode            scanMode
-	query           Query
-	terms           []matcher
-	prefilter       *bytePrefilter
-	exclude         []matcher
-	stream          func(Match) bool
-	stopped         bool
-	progress        func(Progress)
-	matched         int
-	failures        int
-	recent          matchHeap
-	result          Result
-	registry        map[registry.Harness]*registryLookup
+	mu               sync.Mutex
+	index            *historyIndex
+	writer           *indexWriter
+	indexErr         error
+	explicitSources  bool
+	sourceMetadata   map[string]string
+	mode             scanMode
+	query            Query
+	terms            []matcher
+	prefilter        *bytePrefilter
+	metadataFailures map[string]bool
+	toolsFailures    map[string]bool
+	exclude          []matcher
+	stream           func(Match) bool
+	stopped          bool
+	progress         func(Progress)
+	matched          int
+	failures         int
+	recent           matchHeap
+	result           Result
+	registry         map[registry.Harness]*registryLookup
 }
 
 type retainedMatch struct {
@@ -430,9 +432,9 @@ func validateSort(sort Sort, search bool) error {
 	return fmt.Errorf("%w: invalid sort %q", ErrInvalidQuery, sort)
 }
 
-// Search refreshes changed histories and searches the local index, falling back
-// to a direct scan when the disposable index cannot be used. Sources and files
-// retain discovery and lexical ordering, with bounded native record I/O. Matches
+// Search refreshes changed histories and searches the local index. Tools queries
+// scan selected native histories without storing tool text. An unusable index
+// falls back to a direct scan. Sources and files retain discovery order. Matches
 // are ordered by Query.Sort. Cancellation returns the partial result and the
 // context error. Each call is independent; simultaneous calls are safe if callers
 // do not mutate input slices.
@@ -758,6 +760,8 @@ func (s *search) reset() {
 	s.result.Refresh = nil
 	s.result.Reparsed = nil
 	s.result.IndexUnavailable = false
+	s.metadataFailures = nil
+	s.toolsFailures = nil
 }
 
 // selectSource reports whether the source is selected and, when it is not, the
@@ -811,6 +815,10 @@ func (s *search) reportIssues(path string, issues []Issue, omitted int, selected
 }
 
 func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
+	if s.toolsFailures != nil {
+		s.reportToolsIssues(buffer)
+		return
+	}
 	for child, parent := range buffer.parents {
 		buffer.selected[child] = buffer.selected[parent]
 	}
@@ -836,6 +844,11 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 			continue
 		}
 		if !issue.Record {
+			if s.metadataFailures != nil {
+				s.mu.Lock()
+				s.metadataFailures[issue.Path] = true
+				s.mu.Unlock()
+			}
 			matches = s.fileIssueSelected(issue.Source, issue.Path)
 		}
 		if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {

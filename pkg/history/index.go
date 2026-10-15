@@ -36,12 +36,9 @@ CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(folded
 CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
-// The tools column records whether the file stores tool parts, not its identity:
-// every history has exactly one row and one copy of each part. child marks a
-// history the reader may fold into a parent history's conversation.
 const indexSchema = `
 CREATE TABLE files (
- id INTEGER PRIMARY KEY, harness TEXT NOT NULL, path TEXT NOT NULL, tools INTEGER NOT NULL, child INTEGER NOT NULL,
+ id INTEGER PRIMARY KEY, harness TEXT NOT NULL, path TEXT NOT NULL, child INTEGER NOT NULL,
  stamp TEXT NOT NULL, checkpoint TEXT NOT NULL, issues TEXT NOT NULL, omitted INTEGER NOT NULL,
  UNIQUE(harness,path));
 CREATE TABLE conversations (
@@ -89,7 +86,6 @@ type indexedFile struct {
 	id, resumeID                             int64
 	harness, path, stamp, checkpoint, issues string
 	omitted                                  int
-	tools                                    bool
 }
 type historyIndex struct {
 	db           *sql.DB
@@ -342,7 +338,7 @@ func (index *historyIndex) enableWAL(ctx context.Context) error {
 }
 
 func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
-	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted,tools FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
+	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
 	if err != nil {
 		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
 			return schemaFailure(err)
@@ -352,7 +348,7 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var file indexedFile
-		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted, &file.tools); err != nil {
+		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted); err != nil {
 			return fmt.Errorf("read indexed file: %w", err)
 		}
 		key := file.harness + "\x00" + file.path
