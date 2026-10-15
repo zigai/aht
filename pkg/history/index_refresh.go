@@ -37,6 +37,7 @@ type indexCheckpoint struct {
 	Extra        string       `json:"extra"`
 	Projection   string       `json:"projection"`
 	Digest       string       `json:"digest"`
+	HeaderSizes  []int64      `json:"header_sizes,omitempty"`
 	Size         int64        `json:"size"`
 	Lines        int          `json:"lines"`
 	Recognized   bool         `json:"recognized"`
@@ -63,6 +64,7 @@ type indexWriter struct {
 	resume        *indexCheckpoint
 	hash          hash.Hash
 	reason        string
+	headers       []transcriptHeader
 }
 
 // refreshJob parses one changed history. previous is the file's indexed state
@@ -915,8 +917,8 @@ func (index *historyIndex) saveRefresh(ctx context.Context, source Source, path 
 
 func newIndexWriter() *indexWriter {
 	var conversation Conversation
-	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Projection: "", Digest: "", Size: 0, Lines: 0, Recognized: false, Complete: false}
-	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, reason: ""}
+	checkpoint := indexCheckpoint{Conversation: conversation, Identity: "", Extra: "", Projection: "", Digest: "", HeaderSizes: nil, Size: 0, Lines: 0, Recognized: false, Complete: false}
+	return &indexWriter{conversations: nil, open: false, checkpoint: checkpoint, resume: nil, hash: nil, headers: nil, reason: ""}
 }
 
 func (writer *indexWriter) checkSnapshot(file *os.File, info os.FileInfo) error {
@@ -958,13 +960,21 @@ func (writer *indexWriter) finish(c Conversation) {
 	writer.open = false
 }
 
+// resumable reports whether this checkpoint can be reused in place: the
+// writer must retain the same identity.
 func (checkpoint indexCheckpoint) resumable(writer *indexWriter, info os.FileInfo) bool {
-	return checkpoint.Complete && checkpoint.Size < info.Size() &&
+	return checkpoint.Complete && checkpoint.Size > 0 && checkpoint.Size <= info.Size() &&
+		(checkpoint.Size < info.Size() || len(checkpoint.HeaderSizes) > 0) &&
+		slices.Equal(checkpoint.HeaderSizes, writer.checkpoint.HeaderSizes) &&
 		checkpoint.Identity == writer.checkpoint.Identity && checkpoint.Extra == writer.checkpoint.Extra
 }
 
 func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.File, job *refreshJob, info os.FileInfo) error {
 	writer.hash = sha256.New()
+	writer.headers = readTranscriptHeaders(ctx, file, info.Size(), catalog.TranscriptFor(job.source.Harness).RewritableHeaders)
+	for _, header := range writer.headers {
+		writer.checkpoint.HeaderSizes = append(writer.checkpoint.HeaderSizes, header.size)
+	}
 	var checkpoint indexCheckpoint
 	if job.previous.checkpoint == "" || job.resumeID == 0 {
 		return nil
@@ -978,14 +988,9 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 		}
 		return nil
 	}
-	// Verify the entire retained prefix before reusing parsed state. A rewrite
-	// followed by an append must not retain stale messages, even with equal edges.
-	if err := hashPrefix(ctx, writer.hash, file, checkpoint.Size); err != nil {
-		return fmt.Errorf("verify history prefix: %w", err)
-	}
-	if hex.EncodeToString(writer.hash.Sum(nil)) == checkpoint.Digest {
-		writer.resume = &checkpoint
-		return nil
+	retained, err := writer.verifyBody(ctx, file, checkpoint)
+	if err != nil || retained {
+		return err
 	}
 	writer.reason = "rewritten prefix"
 	writer.hash.Reset()
@@ -993,6 +998,26 @@ func (writer *indexWriter) prepareAppendResume(ctx context.Context, file *os.Fil
 		return fmt.Errorf("rewind history: %w", err)
 	}
 	return nil
+}
+
+func (writer *indexWriter) verifyBody(ctx context.Context, file *os.File, checkpoint indexCheckpoint) (bool, error) {
+	// Verify the entire retained prefix before reusing parsed state. A rewrite
+	// followed by an append must not retain stale messages, even with equal edges.
+	headerBytes := transcriptHeaderBytes(writer.headers)
+	if headerBytes > checkpoint.Size || len(writer.headers) > checkpoint.Lines {
+		return false, nil
+	}
+	if _, err := file.Seek(headerBytes, io.SeekStart); err != nil {
+		return false, fmt.Errorf("seek history body: %w", err)
+	}
+	if err := hashPrefix(ctx, writer.hash, file, checkpoint.Size-headerBytes); err != nil {
+		return false, fmt.Errorf("verify history prefix: %w", err)
+	}
+	if hex.EncodeToString(writer.hash.Sum(nil)) != checkpoint.Digest {
+		return false, nil
+	}
+	writer.resume = &checkpoint
+	return true, nil
 }
 
 // hashPrefix bounds cancellation latency while verifying retained JSONL bytes.

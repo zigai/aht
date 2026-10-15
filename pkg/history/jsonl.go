@@ -31,6 +31,11 @@ type transcriptProjector interface {
 	TranscriptProjection(ctx context.Context, file *os.File, size int64) (string, error)
 }
 
+type transcriptHeader struct {
+	record native.Record
+	size   int64
+}
+
 type transcript struct {
 	match       Match
 	recognized  bool
@@ -38,6 +43,34 @@ type transcript struct {
 	excluded    bool
 	lastMessage string
 	projection  string
+}
+
+func readTranscriptHeaders(ctx context.Context, file *os.File, size int64, kinds []string) []transcriptHeader {
+	if len(kinds) == 0 {
+		return nil
+	}
+	reader := bufio.NewReaderSize(io.NewSectionReader(file, 0, size), scannerInitialBytes)
+	var headers []transcriptHeader
+	for _, kind := range kinds {
+		data, err := readRecordLine(ctx, reader)
+		if err != nil || len(data) == 0 || data[len(data)-1] != '\n' {
+			break
+		}
+		var record native.Record
+		if json.Unmarshal(data, &record) != nil || native.Str(record, "type") != kind {
+			break
+		}
+		headers = append(headers, transcriptHeader{record: record, size: int64(len(data))})
+	}
+	return headers
+}
+
+func transcriptHeaderBytes(headers []transcriptHeader) int64 {
+	var size int64
+	for _, header := range headers {
+		size += header.size
+	}
+	return size
 }
 
 func newDatabaseTranscript(c Conversation) transcript {
@@ -86,7 +119,12 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		buffer.issue(source, path, err)
 		return nil
 	}
-	t, start, lines := s.newJSONLTranscript(source, path, buffer, t.projection)
+	headers := s.transcriptHeaders(ctx, source, file, info.Size())
+	t, start, lines := s.jsonlState(source, path, headers, buffer, t.projection)
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		buffer.issue(source, path, fmt.Errorf("seek history records: %w", err))
+		return nil
+	}
 	// A captured file size makes a finite snapshot even while a harness appends.
 	input := io.LimitReader(file, info.Size()-start)
 	if s.writer != nil {
@@ -94,6 +132,7 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 	}
 	reader := bufio.NewReaderSize(input, scannerInitialBytes)
 	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines, buffer, identifyOnly)
+	s.replayTranscriptHeaders(ctx, source, &t, headers, buffer)
 	if ctx.Err() == nil && !t.identified() && (records > 0 || start > 0) {
 		buffer.issue(source, path, errUnknownFormat)
 	}
@@ -108,21 +147,37 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 	return &t
 }
 
-func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssueBuffer, projection string) (transcript, int64, int) {
-	var t transcript
-	t.match.Conversation.Harness = source.Harness
-	t.match.Conversation.Path = path
-	t.projection = projection
+func (s *search) transcriptHeaders(ctx context.Context, source Source, file *os.File, size int64) []transcriptHeader {
+	if s.writer != nil {
+		return s.writer.headers
+	}
+	return readTranscriptHeaders(ctx, file, size, catalog.TranscriptFor(source.Harness).RewritableHeaders)
+}
+
+func (s *search) jsonlState(source Source, path string, headers []transcriptHeader, buffer *fileIssueBuffer, projection string) (transcript, int64, int) {
+	var current transcript
+	current.match.Conversation.Harness = source.Harness
+	current.match.Conversation.Path = path
+	current.projection = projection
 	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
-		initialize(s.decoder(source, &t, buffer))
+		initialize(s.decoder(source, &current, buffer))
 	}
 	if s.writer != nil && s.writer.resume != nil {
 		checkpoint := s.writer.resume
-		t.match.Conversation = checkpoint.Conversation
-		t.recognized = checkpoint.Recognized
-		return t, checkpoint.Size, checkpoint.Lines
+		current.match.Conversation = checkpoint.Conversation
+		current.recognized = checkpoint.Recognized
+		return current, checkpoint.Size, checkpoint.Lines
 	}
-	return t, 0, 0
+	return current, transcriptHeaderBytes(headers), len(headers)
+}
+
+func (s *search) replayTranscriptHeaders(ctx context.Context, source Source, current *transcript, headers []transcriptHeader, buffer *fileIssueBuffer) {
+	if record := catalog.TranscriptFor(source.Harness).Record; record != nil {
+		decoder := s.decoder(source, current, buffer)
+		for number, header := range headers {
+			record(ctx, decoder, header.record, number+1)
+		}
+	}
 }
 
 func (writer *indexWriter) finishJSONL(ctx context.Context, t *transcript, info os.FileInfo, lines int, complete bool) {
@@ -158,7 +213,7 @@ func (s *search) prepareProjection(ctx context.Context, source Source, file *os.
 }
 
 func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer, identifyOnly bool) (int, int, bool) {
-	complete := false
+	complete := lines > 0
 	records := 0
 	readerSpec := catalog.TranscriptFor(source.Harness)
 	decoder := s.decoder(source, t, buffer)

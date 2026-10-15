@@ -264,7 +264,7 @@ func readResponseItem(ctx context.Context, decoder *transcript.Decoder, raw, tim
 }
 
 func (codexHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
+	return transcript.Reader{Patterns: []string{"rollout-*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: readTranscriptRecord, FastRecord: readFastRecord, Document: nil, Query: nil, LocalTitles: true, RewritableHeaders: nil, Parent: nil}
 }
 
 func transcriptSources(home string) ([]string, error) {

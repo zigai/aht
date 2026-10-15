@@ -11,7 +11,7 @@ func (primeHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
 		Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: skipPrimeArtifactMetadata,
 		SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord,
-		FastRecord: transcript.FastTreeRecord, Document: nil, Query: nil, LocalTitles: true, Parent: nil,
+		FastRecord: transcript.FastTreeRecord, Document: nil, Query: nil, LocalTitles: true, RewritableHeaders: nil, Parent: nil,
 	}
 }
 

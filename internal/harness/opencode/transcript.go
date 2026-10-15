@@ -7,7 +7,7 @@ import (
 )
 
 func (opencodeHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"opencode*.db"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
+	return transcript.Reader{Patterns: []string{"opencode*.db"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
 }
 
 func transcriptSources(home string) ([]string, error) {

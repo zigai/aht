@@ -70,7 +70,7 @@ func readTranscriptLoopEvent(ctx context.Context, decoder *transcript.Decoder, e
 }
 
 func (kimiCodeHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"wire.jsonl"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: initializeTranscript, Extra: transcriptExtra, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil, LocalTitles: true, Parent: nil}
+	return transcript.Reader{Patterns: []string{"wire.jsonl"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: initializeTranscript, Extra: transcriptExtra, Record: readTranscriptRecord, FastRecord: nil, Document: nil, Query: nil, LocalTitles: true, RewritableHeaders: nil, Parent: nil}
 }
 
 func skipTranscriptDirectory(path string) bool {

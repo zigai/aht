@@ -69,6 +69,10 @@ type (
 		Document       func(context.Context, *Decoder, []byte) error
 		Query          func(context.Context, *sql.DB) (string, RowReader, error)
 		LocalTitles    bool
+		// RewritableHeaders names, in order, leading metadata records whose
+		// byte lengths are fixed. They are replayed after the body so their
+		// current values override older metadata stored in later records.
+		RewritableHeaders []string
 		// Parent maps a history file that belongs to another file's
 		// conversation, such as a subagent transcript, to that file's path.
 		Parent func(string) string

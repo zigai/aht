@@ -703,6 +703,176 @@ func checkIndexedFullTextTokens(t *testing.T, catalog Catalog, database *sql.DB,
 	}
 }
 
+func TestIndexReplaysFixedWidthHeadersWithoutParsingRetainedMessages(t *testing.T) {
+	t.Parallel()
+	for _, appended := range []bool{false, true} {
+		t.Run(strconv.FormatBool(appended), func(t *testing.T) {
+			t.Parallel()
+			checkFixedWidthHeaderResume(t, appended)
+		})
+	}
+}
+
+func checkFixedWidthHeaderResume(t *testing.T, appended bool) {
+	t.Helper()
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	path := filepath.Join(root.Name(), "session.jsonl")
+	body := `{"type":"session","id":"headers","cwd":"/work","title":"stale header title"}` + "\n" +
+		`{"type":"message","id":"seed","message":{"role":"user","content":"retained-token"}}` + "\n" +
+		`{"type":"title_change","title":"old audit title"}` + "\n"
+	if err := root.WriteFile("session.jsonl", []byte(fixedWidthTitle("original")+body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("omp"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	compareIndexedSearch(t, catalog, Query{Terms: []string{"retained-token"}})
+	database, err := sql.Open("sqlite", catalog.IndexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := database.ExecContext(t.Context(), `CREATE TRIGGER reject_retained_reparse BEFORE INSERT ON parts WHEN NEW.message_id='seed' BEGIN SELECT RAISE(ABORT,'retained body was reparsed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"renamed", "", "renamed again"} {
+		if err := root.WriteFile("session.jsonl", []byte(fixedWidthTitle(title)+body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if appended {
+			appendTranscriptLine(t, path, "append-"+title, "appended-token")
+			data, err := root.ReadFile("session.jsonl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = string(data[len(fixedWidthTitle(title)):])
+		}
+		requireRenamedHeader(t, catalog, database, title)
+	}
+}
+
+func requireRenamedHeader(t *testing.T, catalog Catalog, database *sql.DB, title string) {
+	t.Helper()
+	query := Query{Terms: []string{"retained-token"}}
+	got, err := catalog.Search(t.Context(), query)
+	if err != nil || len(got.Matches) != 1 {
+		t.Fatalf("rename: matches=%#v error=%v", got.Matches, err)
+	}
+	if got.Matches[0].Conversation.Title != title {
+		t.Fatalf("title=%q, want %q", got.Matches[0].Conversation.Title, title)
+	}
+	var metadata string
+	if err := database.QueryRowContext(t.Context(), "SELECT metadata FROM conversations").Scan(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	var stored Conversation
+	if err := json.Unmarshal([]byte(metadata), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Title != title {
+		t.Fatalf("stored title=%q, want %q", stored.Title, title)
+	}
+	compareIndexedSearch(t, catalog, query)
+	compareIndexedSearch(t, catalog, Query{Terms: []string{"appended-token"}})
+}
+
+func TestIndexHeaderResumeRejectsChangesOutsideDeclaredSlots(t *testing.T) {
+	t.Parallel()
+	message := `{"type":"message","id":"seed","message":{"role":"user","content":"retained-token"}}` + "\n"
+	body := `{"type":"session","id":"headers","cwd":"/work"}` + "\n" + message
+	for _, test := range []struct {
+		name, harness, initial, changed string
+	}{
+		{"header length", "omp", fixedWidthTitle("before") + body, strings.Replace(fixedWidthTitle("after"), `"pad":"`, `"pad":" `, 1) + body},
+		{"body rewrite and append", "omp", fixedWidthTitle("before") + body, fixedWidthTitle("after") + strings.ReplaceAll(body, "retained-token", "replaced-token") + message},
+		{"same size body rewrite", "omp", fixedWidthTitle("before") + body, fixedWidthTitle("after") + strings.ReplaceAll(body, "retained-token", "replaced-token")},
+		{"undeclared header", "pi", fixedWidthTitle("before") + body, fixedWidthTitle("after") + body},
+		{"malformed header", "omp", fixedWidthTitle("before") + body, strings.Replace(fixedWidthTitle("after"), `"title"`, `!title!`, 1) + body},
+		{"missing header", "omp", fixedWidthTitle("before") + body, body},
+		{"added header", "omp", body, fixedWidthTitle("after") + body},
+		{"incomplete body", "omp", fixedWidthTitle("before") + strings.TrimSuffix(body, "\n"), fixedWidthTitle("after") + body + message},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			source := Source{Harness: registry.Harness(test.harness), Path: path}
+			if err := os.WriteFile(path, []byte(test.initial), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file := historyFile{path: path, open: func() (*os.File, error) { return os.Open(path) }}
+			first := parseRefresh(t.Context(), &refreshJob{source: source, file: file})
+			if first.writer == nil {
+				t.Fatalf("initial parse failed: %#v", first)
+			}
+			catalog := Catalog{Sources: []Source{source}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			compareIndexedSearch(t, catalog, Query{Terms: []string{"retained-token"}})
+			encoded, err := json.Marshal(first.writer.checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.changed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got := parseRefresh(t.Context(), &refreshJob{source: source, file: file, exists: true, resumeID: 1, previous: indexedFile{checkpoint: string(encoded)}})
+			if got.writer == nil || got.writer.resume != nil {
+				t.Fatalf("unsafe refresh resumed or failed: %#v", got)
+			}
+			for _, term := range []string{"retained-token", "replaced-token"} {
+				compareIndexedSearch(t, catalog, Query{Terms: []string{term}})
+			}
+		})
+	}
+}
+
+func TestIndexMatchesRandomHeaderRenamesAndAppends(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(property *rapid.T) {
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		body := `{"type":"session","id":"headers","cwd":"/work","title":"outdated"}` + "\n" +
+			`{"type":"message","id":"seed","message":{"role":"user","content":"shared-token"}}` + "\n"
+		catalog := Catalog{Sources: []Source{{Harness: registry.Harness("omp"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+		title := "original"
+		if err := os.WriteFile(path, []byte(fixedWidthTitle(title)+body), 0o600); err != nil {
+			property.Fatal(err)
+		}
+		compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}})
+		for _, operation := range rapid.SliceOfN(rapid.SampledFrom([]string{"rename", "append", "both"}), 2, 8).Draw(property, "operations") {
+			if operation != "append" {
+				title = rapid.StringMatching(`[a-zA-Z0-9 _-]{0,40}`).Draw(property, "title")
+			}
+			if operation != "rename" {
+				body += string(generatedHistoryMessage(property, registry.Harness("omp"), "headers", "user", "shared-token "+rapid.String().Draw(property, "message"), false))
+			}
+			if err := os.WriteFile(path, []byte(fixedWidthTitle(title)+body), 0o600); err != nil {
+				property.Fatal(err)
+			}
+			got := compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}})
+			if len(got.Matches) != 1 || got.Matches[0].Conversation.Title != title {
+				property.Fatalf("rename or append lost title %q: %#v", title, got.Matches)
+			}
+			compareGeneratedHistorySearch(property, catalog, generatedHistoryQuery(property, 1))
+		}
+	})
+}
+
+func fixedWidthTitle(title string) string {
+	encoded, err := json.Marshal(map[string]string{"type": "title", "title": title, "pad": ""})
+	if err != nil {
+		panic(err)
+	}
+	return strings.Replace(string(encoded), `"pad":""`, `"pad":"`+strings.Repeat(" ", 255-len(encoded))+`"`, 1) + "\n"
+}
+
 func TestIndexMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := parityFixture(t)
