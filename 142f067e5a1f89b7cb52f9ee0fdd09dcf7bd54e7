@@ -1,0 +1,5 @@
+- The merged tree matches PR head cc4f5380f09edbefca1993b58d8a698701b2741a.
+- The pre-push just check passes lint, unit, race, integration, compatibility helper, formatting, build, and workflow checks.
+- just explore passes extended simulations and all 14 fuzz targets at 30 seconds each.
+- Doctor race tests pass with symlinked test directories, and the built CLI reports the symlinked installation as info without a repair.
+- PR CI run 38799267054 passes all required gates before merging.
