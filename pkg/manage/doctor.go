@@ -360,11 +360,13 @@ func (m *Manager) describeStaleIntegration(
 		if executable.resolved == self {
 			continue
 		}
-		other, err := install.Inspect(ctx, status.Harness, executable.resolved)
-		if err == nil && other.Status == install.ArtifactCurrent {
-			check.Status = DoctorStatusInfo
-			check.Message = "Current for " + executable.path + ", which is not this executable"
-			return
+		for _, binary := range slices.Compact([]string{executable.path, executable.resolved}) {
+			other, err := install.Inspect(ctx, status.Harness, binary)
+			if err == nil && other.Status == install.ArtifactCurrent {
+				check.Status = DoctorStatusInfo
+				check.Message = "Current for " + executable.path + ", which is not this executable"
+				return
+			}
 		}
 	}
 	check.Status, check.Message = DoctorStatusWarn, sentence(status.Message)

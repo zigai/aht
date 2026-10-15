@@ -161,23 +161,33 @@ func TestDoctorListsEachExecutableOnPathOnce(t *testing.T) {
 
 func TestDoctorIntegrationInstalledByAnotherExecutable(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
-	installer := writeExecutable(t, filepath.Join(home, "installer", "aht"))
-	current := writeExecutable(t, filepath.Join(home, "current", "aht"))
-	harness := registry.Harness("claude")
-	if _, err := manage.New(manage.Config{Binary: installer}).InstallIntegration(t.Context(), harness, manage.IntegrationOptions{}); err != nil {
+	installed, err := filepath.EvalSymlinks(writeExecutable(t, filepath.Join(home, "installed", "aht")))
+	if err != nil {
 		t.Fatal(err)
 	}
+	installerDir := filepath.Join(home, "installer")
+	if err := os.Symlink(filepath.Dir(installed), installerDir); err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(installerDir, "aht")
+	current := writeExecutable(t, filepath.Join(home, "current", "aht"))
+	harness := registry.Harness("claude")
 	manager := manage.New(manage.Config{Binary: current, StorePath: filepath.Join(home, "state.json")})
 
 	t.Setenv("PATH", filepath.Dir(installer))
-	result := manager.Doctor(t.Context(), manage.DoctorOptions{})
-	assertDoctorInvariants(t, result)
-	if check := findDoctorCheck(t, result, "integrations.claude"); check.Status != manage.DoctorStatusInfo || !strings.Contains(check.Message, installer) {
-		t.Fatalf("integration current for the PATH copy = %+v, want info naming %s", check, installer)
+	for _, binary := range []string{installer, installed} {
+		if _, err := manage.New(manage.Config{Binary: binary}).InstallIntegration(t.Context(), harness, manage.IntegrationOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		result := manager.Doctor(t.Context(), manage.DoctorOptions{})
+		assertDoctorInvariants(t, result)
+		if check := findDoctorCheck(t, result, "integrations.claude"); check.Status != manage.DoctorStatusInfo || !strings.Contains(check.Message, installer) {
+			t.Fatalf("integration installed by %s = %+v, want info naming %s", binary, check, installer)
+		}
 	}
 
 	t.Setenv("PATH", filepath.Dir(current))
-	result = manager.Doctor(t.Context(), manage.DoctorOptions{})
+	result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 	assertDoctorInvariants(t, result)
 	stale := findDoctorCheck(t, result, "integrations.claude")
 	if stale.Status != manage.DoctorStatusWarn || !stale.Fix.Automatic {
