@@ -166,25 +166,46 @@ func checkGeneratedHistoryQueries(property *rapid.T, catalog Catalog, count int)
 	for _, limit := range []int{0, 1, rapid.IntRange(2, count+2).Draw(property, "limit")} {
 		compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}, Limit: limit})
 	}
-	compareGeneratedHistorySearch(property, catalog, generatedHistoryQuery(property, count))
+	query := generatedHistoryQuery(property, count)
+	compareGeneratedHistorySearch(property, catalog, query)
+	query.Registry = generatedRegistry(catalog)
+	query.GitBranch = rapid.SampledFrom([]string{"", "main", "topic"}).Draw(property, "list branch")
+	query.Since = rapid.SampledFrom([]time.Time{{}, time.Date(2026, 1, 2, 0, 0, 0, 1, time.UTC), time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)}).Draw(property, "list since")
+	compareGeneratedHistoryList(property, catalog, ListQuery{Filter: query.Filter, Limit: query.Limit, Sort: SortUpdated})
 }
 
 func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Query) Result {
 	property.Helper()
-	query.Registry = []registry.Session{
-		{ID: "live", Harness: catalog.Sources[0].Harness, SessionID: "native-0", SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl"), Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)},
-		{ID: "gone", Harness: catalog.Sources[0].Harness, SessionID: "native-1", Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
-		{ID: "path-only", Harness: catalog.Sources[0].Harness, SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl")},
-	}
+	query.Registry = generatedRegistry(catalog)
 	want, wantErr := catalog.searchDirect(property.Context(), query)
 	got, gotErr := catalog.Search(property.Context(), query)
 	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		property.Fatalf("query=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
 		property.Fatalf("query=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
 	}
 	return got
+}
+
+func generatedRegistry(catalog Catalog) []registry.Session {
+	return []registry.Session{
+		{ID: "live", Harness: catalog.Sources[0].Harness, SessionID: "native-0", SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl"), Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)},
+		{ID: "gone", Harness: catalog.Sources[0].Harness, SessionID: "native-1", Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "path-only", Harness: catalog.Sources[0].Harness, SessionPath: filepath.Join(catalog.Sources[0].Path, "rollout-0.jsonl")},
+	}
+}
+
+func compareGeneratedHistoryList(property *rapid.T, catalog Catalog, query ListQuery) {
+	property.Helper()
+	want, wantErr := catalog.listDirect(property.Context(), query)
+	got, gotErr := catalog.List(property.Context(), query)
+	if (gotErr == nil) != (wantErr == nil) || errors.Is(gotErr, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
+		property.Fatalf("list=%#v indexed error=%v direct error=%v", query, gotErr, wantErr)
+	}
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+		property.Fatalf("list=%#v indexed result differs (-direct +indexed):\n%s", query, diff)
+	}
 }
 
 func generatedHistoryQuery(property *rapid.T, count int) Query {
@@ -371,7 +392,7 @@ func compareIndexedSearch(t *testing.T, c Catalog, q Query) {
 	if errors.Is(err, ErrIncomplete) != errors.Is(wantErr, ErrIncomplete) {
 		t.Fatalf("query %#v errors: %v / %v", q, err, wantErr)
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
 		t.Fatalf("query %#v (-direct +index):\n%s", q, diff)
 	}
 }
@@ -466,7 +487,7 @@ func registryBenchmarkCatalog(b *testing.B) (Catalog, []registry.Session) {
 
 func BenchmarkHistoryRegistrySearch(b *testing.B) {
 	catalog, sessions := registryBenchmarkCatalog(b)
-	for _, mode := range []string{"list", "text"} {
+	for _, mode := range []string{"list", "text", "recent"} {
 		for _, withRegistry := range []bool{false, true} {
 			b.Run(fmt.Sprintf("%s/registry=%t", mode, withRegistry), func(b *testing.B) {
 				filter := Filter{MinMessages: 0}
@@ -481,16 +502,21 @@ func BenchmarkHistoryRegistrySearch(b *testing.B) {
 
 func benchmarkRegistryQuery(b *testing.B, catalog Catalog, filter Filter, mode string) {
 	b.Helper()
+	want := 20
+	if mode == "recent" {
+		filter.Since = time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+		want = 0
+	}
 	b.ReportAllocs()
 	for b.Loop() {
 		var result Result
 		var err error
-		if mode == "list" {
+		if mode != "text" {
 			result, err = catalog.List(b.Context(), ListQuery{Filter: filter, Limit: 20})
 		} else {
 			result, err = catalog.Search(b.Context(), Query{Filter: filter, Terms: []string{"needle"}, Limit: 20})
 		}
-		if err != nil || len(result.Matches) != 20 {
+		if err != nil || len(result.Matches) != want {
 			b.Fatalf("matches=%d, %v", len(result.Matches), err)
 		}
 	}
@@ -815,7 +841,7 @@ func TestListMatchesDirectScan(t *testing.T) {
 		if err != nil || wantErr != nil {
 			t.Fatalf("list %#v: %v / %v", tt.query, err, wantErr)
 		}
-		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
 			t.Fatalf("list %#v (-direct +index):\n%s", tt.query, diff)
 		}
 		if diff := cmp.Diff(tt.want, sessionIDs(got)); diff != "" {
@@ -826,6 +852,101 @@ func TestListMatchesDirectScan(t *testing.T) {
 				t.Fatalf("list returned search data: %#v", match)
 			}
 		}
+	}
+}
+
+func TestListPrefilterKeepsParentOwnership(t *testing.T) {
+	t.Parallel()
+	catalog, _ := childFixture(t)
+	for _, scenario := range []struct {
+		query     ListQuery
+		want      []string
+		truncated bool
+	}{
+		{ListQuery{Dir: "/work/a"}, []string{"main"}, false},
+		{ListQuery{Dir: "/work/z"}, []string{"lost", "stray"}, false},
+		{ListQuery{GitBranch: "topic"}, []string{"lost", "stray"}, false},
+		{ListQuery{GitBranch: "topic' OR 1=1 --"}, nil, false},
+		{ListQuery{MinMessages: 2}, []string{"main"}, false},
+		{ListQuery{MinMessages: 0, Limit: 1}, []string{"lost"}, true},
+	} {
+		got, err := catalog.List(t.Context(), scenario.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := cmp.Diff(scenario.want, slices.Sorted(slices.Values(sessionIDs(got)))); diff != "" {
+			t.Fatalf("query=%#v (-want +got):\n%s", scenario.query, diff)
+		}
+		if got.Truncated != scenario.truncated {
+			t.Fatalf("query=%#v truncated=%t", scenario.query, got.Truncated)
+		}
+		want, err := catalog.listDirect(t.Context(), scenario.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
+			t.Fatalf("query=%#v (-direct +indexed):\n%s", scenario.query, diff)
+		}
+	}
+}
+
+func TestListReadsRefreshedMetadataAfterPrefetch(t *testing.T) {
+	t.Parallel()
+	firstRoot, secondRoot := t.TempDir(), t.TempDir()
+	firstPath, secondPath := filepath.Join(firstRoot, "first.jsonl"), filepath.Join(secondRoot, "second.jsonl")
+	for _, path := range []string{firstPath, secondPath} {
+		body := "{\"type\":\"session\",\"id\":\"session\",\"cwd\":\"/work/project\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"earlier text\"}}\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: firstRoot}, {Harness: registry.Harness("pi"), Path: secondRoot}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	catalog.Progress = func(progress Progress) {
+		if progress.Source.Path == firstRoot {
+			appendRecord(t, secondPath, "{\"type\":\"message\",\"timestamp\":\"2026-01-03T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"new activity\"}}\n")
+		}
+	}
+	query := ListQuery{Since: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), MinMessages: 2}
+	got, err := catalog.List(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Matches) != 1 || got.Matches[0].Conversation.Path != secondPath || got.Matches[0].Conversation.Messages != 2 {
+		t.Fatalf("refreshed list=%#v", got.Matches)
+	}
+}
+
+func TestListFoldsNewChildIntoRejectedParent(t *testing.T) {
+	t.Parallel()
+	firstRoot, secondRoot := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstRoot, "first.jsonl"), []byte(claudeRecord("user", "first", "/work/a", "main", "2026-01-01T00:00:00Z", "first prompt", "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondRoot, "main.jsonl"), []byte(claudeRecord("user", "main", "/work/a", "main", "2026-01-01T00:00:00Z", "parent prompt", "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("claude"), Path: firstRoot}, {Harness: registry.Harness("claude"), Path: secondRoot}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	catalog.Progress = func(progress Progress) {
+		if progress.Source.Path != firstRoot {
+			return
+		}
+		dir := filepath.Join(secondRoot, "main", "subagents")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "agent-new.jsonl"), []byte(claudeRecord("user", "main", "/work/z", "topic", "2026-01-03T00:00:00Z", "child prompt", "")), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := catalog.List(t.Context(), ListQuery{Dir: "/work/z"})
+	if err != nil || len(got.Matches) != 0 {
+		t.Fatalf("new child list=%#v, %v", got.Matches, err)
 	}
 }
 
@@ -938,7 +1059,7 @@ func requireFoldedList(t *testing.T, c Catalog) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff(direct, listed, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+	if diff := cmp.Diff(direct, listed, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed")); diff != "" {
 		t.Fatalf("list (-direct +index):\n%s", diff)
 	}
 }

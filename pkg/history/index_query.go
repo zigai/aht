@@ -65,10 +65,16 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err err
 	index.candidates = map[int64]bool{}
 	index.plans = map[int64]*indexedMatches{}
 	index.excluded = map[int64]bool{}
-	if s.mode == modeSearch {
+	switch s.mode {
+	case modeSearch:
 		if err := index.findParts(ctx, s, 0); err != nil {
 			return err
 		}
+	case modeList:
+		if err := index.prefetchConversations(ctx, s.query.Filter); err != nil {
+			return err
+		}
+	case modeRefresh:
 	}
 	index.queries = new(indexQueries)
 	defer func() {
@@ -345,13 +351,14 @@ func (index *historyIndex) groupCandidate(ctx context.Context, s *search, group 
 // that share their session identity folded in, followed by the remaining child
 // conversations.
 func (index *historyIndex) foldGroup(ctx context.Context, group []groupFile) ([]indexedConversation, error) {
-	conversations, err := index.readConversations(ctx, group[0].file.id)
+	fresh := slices.ContainsFunc(group, func(member groupFile) bool { return member.changed })
+	conversations, err := index.readConversations(ctx, group[0].file.id, fresh)
 	if err != nil {
 		return nil, err
 	}
 	parents := len(conversations)
 	for _, member := range group[1:] {
-		children, err := index.readConversations(ctx, member.file.id)
+		children, err := index.readConversations(ctx, member.file.id, fresh)
 		if err != nil {
 			return nil, err
 		}
@@ -405,7 +412,10 @@ func foldPlan(owner, child *indexedMatches) *indexedMatches {
 	return owner
 }
 
-func (index *historyIndex) readConversations(ctx context.Context, fileID int64) ([]indexedConversation, error) {
+func (index *historyIndex) readConversations(ctx context.Context, fileID int64, fresh bool) ([]indexedConversation, error) {
+	if index.listed != nil && !fresh {
+		return index.listed[fileID], nil
+	}
 	var conversations []indexedConversation
 	err := index.eachConversation(ctx, fileID, func(c indexedConversation) { conversations = append(conversations, c) })
 	return conversations, err

@@ -106,6 +106,7 @@ type historyIndex struct {
 	sourceFilter string
 	sourceArgs   []any
 	rebuilt      bool
+	listed       map[int64][]indexedConversation
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
