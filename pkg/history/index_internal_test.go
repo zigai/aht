@@ -74,16 +74,20 @@ func TestIssuesFollowTextMatchesAndMetadata(t *testing.T) {
 		{Query{Terms: []string{"needle"}, Role: "assistant"}, 0},
 		{Query{Terms: []string{"needle"}, Presence: registry.PresenceLive}, 0},
 	} {
-		result, err := catalog.Search(t.Context(), test.query)
-		if err != nil || len(result.Matches) != test.count || len(result.Issues) != test.count || result.OmittedIssues != 0 {
-			t.Fatalf("query=%#v result=%#v err=%v", test.query, result, err)
-		}
-		for _, issue := range result.Issues {
-			if filepath.Base(issue.Path) != "recent.jsonl" || !issue.Record {
-				t.Fatalf("matching issue=%#v", issue)
+		for _, tools := range []bool{false, true} {
+			query := test.query
+			query.IncludeTools = tools
+			result, err := catalog.Search(t.Context(), query)
+			if err != nil || len(result.Matches) != test.count || len(result.Issues) != test.count || result.OmittedIssues != 0 {
+				t.Fatalf("query=%#v result=%#v err=%v", query, result, err)
 			}
+			for _, issue := range result.Issues {
+				if filepath.Base(issue.Path) != "recent.jsonl" || !issue.Record {
+					t.Fatalf("matching issue=%#v", issue)
+				}
+			}
+			compareIndexedSearch(t, catalog, query)
 		}
-		compareIndexedSearch(t, catalog, test.query)
 	}
 }
 
@@ -1723,7 +1727,7 @@ func TestToolsSearchFoldsChildPartsAndReportsIssuesOnce(t *testing.T) {
 	query.Exclude = []string{"secret"}
 	compareIndexedSearch(t, catalog, query)
 	result, err = catalog.Search(t.Context(), query)
-	if err != nil || len(result.Matches) != 0 {
+	if err != nil || len(result.Matches) != 0 || len(result.Issues) != 0 || result.OmittedIssues != 0 {
 		t.Fatalf("excluded result=%#v err=%v", result, err)
 	}
 	requireUnreadableToolChild(t, catalog, root)
@@ -1734,17 +1738,41 @@ func TestToolsPrefilterSkipsDiagnostics(t *testing.T) {
 	for _, family := range []bool{false, true} {
 		t.Run(strconv.FormatBool(family), func(t *testing.T) {
 			catalog := malformedIssueFixture(t)
+			count := 2
 			if family {
 				var root string
 				catalog, root = childFixture(t)
+				count = 5
 				appendRecord(t, filepath.Join(root, "main.jsonl"), "{broken\n")
 			}
-			requireToolsSkippedDiagnostics(t, catalog)
+			requireToolsSkippedDiagnostics(t, catalog, count)
 		})
 	}
 }
 
-func requireToolsSkippedDiagnostics(t *testing.T, catalog Catalog) {
+func TestToolsUnknownFamilyFileReportsFailure(t *testing.T) {
+	t.Parallel()
+	catalog, root := childFixture(t)
+	path := filepath.Join(root, "main/subagents/agent-unknown.jsonl")
+	if err := os.WriteFile(path, []byte("{\"unknown\":true}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, warm := range []bool{false, true} {
+		if warm {
+			if _, err := catalog.Refresh(t.Context()); !errors.Is(err, ErrIncomplete) {
+				t.Fatalf("refresh=%v", err)
+			}
+		}
+		query := Query{Terms: []string{"absent"}, IncludeTools: true}
+		compareIndexedSearch(t, catalog, query)
+		result, err := catalog.Search(t.Context(), query)
+		if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.Issues[0].Record || result.Issues[0].Path != path {
+			t.Fatalf("warm=%t result=%#v err=%v", warm, result, err)
+		}
+	}
+}
+
+func requireToolsSkippedDiagnostics(t *testing.T, catalog Catalog, count int) {
 	t.Helper()
 	for _, warm := range []bool{false, true} {
 		if warm {
@@ -1760,6 +1788,9 @@ func requireToolsSkippedDiagnostics(t *testing.T, catalog Catalog) {
 			result, err := catalog.Search(t.Context(), query)
 			if err != nil || len(result.Issues) != 0 || result.OmittedIssues != 0 || len(result.Reparsed) != 0 {
 				t.Fatalf("warm=%t query=%#v result=%#v err=%v", warm, query, result, err)
+			}
+			if warm {
+				requireUnchangedRefresh(t, result, count)
 			}
 		}
 	}
@@ -1777,7 +1808,7 @@ func requireUnreadableToolChild(t *testing.T, catalog Catalog, root string) {
 	query := Query{Terms: []string{"absent"}, IncludeTools: true, Dirs: []string{"/work/a"}}
 	compareIndexedSearch(t, catalog, query)
 	result, err := catalog.Search(t.Context(), query)
-	if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 2 || len(result.Matches) != 0 {
+	if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || len(result.Matches) != 0 {
 		t.Fatalf("unreadable child result=%#v err=%v", result, err)
 	}
 }
@@ -1966,7 +1997,7 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 
 	var status SourceStatus
 	var progress Progress
-	index.finish(t.Context(), s, source, pendingFile{file: file, job: job, children: nil, skipped: false}, &status, &progress)
+	index.finish(t.Context(), s, source, pendingFile{file: file, filter: s.query.Filter, job: job, children: nil}, &status, &progress)
 	if s.indexErr != nil || len(s.result.Issues) != 0 {
 		t.Fatalf("stale resume: %v %#v", s.indexErr, s.result.Issues)
 	}

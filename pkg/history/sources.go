@@ -270,9 +270,6 @@ func (s *search) scanFileDirect(ctx context.Context, source Source, file history
 	if !file.mayMatchTime(s.query.Filter) {
 		return 1 + len(file.children)
 	}
-	if (s.toolsFailures != nil || s.metadataFailures != nil) && len(file.children) > 0 && !s.matchesFamily(ctx, file) {
-		return 1 + len(file.children)
-	}
 	buffer := newFileIssueBuffer()
 	inspected := s.scanFileGroup(ctx, source, file, buffer)
 	s.reportScopedIssues(buffer)
@@ -286,7 +283,7 @@ func (s *search) scanFileGroup(ctx context.Context, source Source, file historyF
 	}
 	inspected := 0
 	prefilter := s.prefilter
-	if len(file.children) > 0 {
+	if !s.prefilterMembers(ctx, file) {
 		prefilter = nil
 	}
 	t, ok := s.readTranscriptFile(ctx, source, file, buffer, prefilter)
@@ -294,7 +291,7 @@ func (s *search) scanFileGroup(ctx context.Context, source Source, file historyF
 		inspected++
 	}
 	for _, child := range file.children {
-		c, ok := s.readTranscriptFile(ctx, source, child, buffer, nil)
+		c, ok := s.readTranscriptFile(ctx, source, child, buffer, prefilter)
 		if !ok {
 			continue
 		}

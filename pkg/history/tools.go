@@ -56,6 +56,13 @@ func (s *search) scanToolsFiles(ctx context.Context, source Source, files []hist
 	s.scanFilesParallel(ctx, source, candidates, &scanned)
 }
 
+func (s *search) prefilterMembers(ctx context.Context, file historyFile) bool {
+	if len(file.children) == 0 {
+		return true
+	}
+	return (s.metadataFailures != nil || s.toolsFailures != nil) && file.mayMatchTime(s.query.Filter) && !s.matchesFamily(ctx, file)
+}
+
 func (s *search) matchesFamily(ctx context.Context, file historyFile) bool {
 	if s.prefilter == nil {
 		return true
@@ -102,21 +109,4 @@ func (file historyFile) matchCandidateTerms(ctx context.Context, filters []*byte
 		return matched, fmt.Errorf("read tools candidate: %w", err)
 	}
 	return matched, nil
-}
-
-func (s *search) reportToolsIssues(buffer *fileIssueBuffer) {
-	for _, issues := range buffer.issues {
-		for _, issue := range issues {
-			if issue.Record || s.toolsFailures[issue.Path] {
-				continue
-			}
-			if s.explicitFileSource(issue.Source) || s.fileIssueSelected(issue.Source, issue.Path) {
-				s.recordIssue(issue)
-			} else {
-				s.mu.Lock()
-				s.result.OmittedIssues++
-				s.mu.Unlock()
-			}
-		}
-	}
 }

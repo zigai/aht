@@ -815,10 +815,6 @@ func (s *search) reportIssues(path string, issues []Issue, omitted int, selected
 }
 
 func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
-	if s.toolsFailures != nil {
-		s.reportToolsIssues(buffer)
-		return
-	}
 	for child, parent := range buffer.parents {
 		buffer.selected[child] = buffer.selected[parent]
 	}
@@ -835,15 +831,19 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 	issues := buffer.issues[path]
 	selected := buffer.selected[path]
 	omitted := 0
-	if s.mode != modeSearch || selected {
+	recordsSelected := s.recordIssuesSelected(selected)
+	if recordsSelected {
 		omitted = buffer.omitted[path]
 	}
 	for _, issue := range issues {
 		matches := selected
-		if issue.Record && s.mode == modeSearch && !matches {
+		if issue.Record && !recordsSelected {
 			continue
 		}
 		if !issue.Record {
+			if s.toolsFailures[issue.Path] {
+				continue
+			}
 			if s.metadataFailures != nil {
 				s.mu.Lock()
 				s.metadataFailures[issue.Path] = true
@@ -858,6 +858,10 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 		}
 	}
 	return omitted
+}
+
+func (s *search) recordIssuesSelected(selected bool) bool {
+	return s.metadataFailures == nil && (s.mode != modeSearch || selected)
 }
 
 func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
