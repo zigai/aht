@@ -24,34 +24,47 @@ func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) 
 			failures = append(failures, err)
 			break
 		}
-		options := Options{Harness: id, Binary: binary, DryRun: dryRun, TargetBinary: "", Force: false, UseShim: false}
-		native, err := installedNative(id, binary)
-		if err != nil {
-			var result Result
-			results = appendUpgradeResult(results, id, result, err)
-			failures = append(failures, err)
-		} else if native {
-			result, installErr := upgradeNative(ctx, options)
-			results = appendUpgradeResult(results, id, result, installErr)
-			failures = append(failures, installErr)
-		}
-		if err := ctx.Err(); err != nil {
-			failures = append(failures, err)
+		harnessResults, err := UpgradeHarness(ctx, id, binary, dryRun)
+		results = append(results, harnessResults...)
+		failures = append(failures, err)
+		if ctx.Err() != nil {
 			break
 		}
-		target, exists, err := installedShim(id)
-		if err == nil && exists {
-			options.TargetBinary = target
-			// Call the shim installer directly: an existing fallback remains a fallback
-			// even if the current adapter has gained a native integration.
-			result, installErr := installShim(options, id)
-			results = appendUpgradeResult(results, id, result, installErr)
-			failures = append(failures, installErr)
-		} else if err != nil {
-			var result Result
-			results = appendUpgradeResult(results, id, result, err)
-			failures = append(failures, err)
-		}
+	}
+	return results, errors.Join(failures...)
+}
+
+// UpgradeHarness refreshes the existing AHT-owned integrations of one harness
+// the way [Upgrade] does, keeping a shim fallback a fallback.
+func UpgradeHarness(ctx context.Context, id registry.Harness, binary string, dryRun bool) ([]Result, error) {
+	var results []Result
+	var failures []error
+	options := Options{Harness: id, Binary: binary, DryRun: dryRun, TargetBinary: "", Force: false, UseShim: false}
+	native, err := installedNative(id, binary)
+	if err != nil {
+		var result Result
+		results = appendUpgradeResult(results, id, result, err)
+		failures = append(failures, err)
+	} else if native {
+		result, installErr := upgradeNative(ctx, options)
+		results = appendUpgradeResult(results, id, result, installErr)
+		failures = append(failures, installErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return results, errors.Join(append(failures, err)...)
+	}
+	target, exists, err := installedShim(id)
+	if err == nil && exists {
+		options.TargetBinary = target
+		// Call the shim installer directly: an existing fallback remains a fallback
+		// even if the current adapter has gained a native integration.
+		result, installErr := installShim(options, id)
+		results = appendUpgradeResult(results, id, result, installErr)
+		failures = append(failures, installErr)
+	} else if err != nil {
+		var result Result
+		results = appendUpgradeResult(results, id, result, err)
+		failures = append(failures, err)
 	}
 	return results, errors.Join(failures...)
 }
