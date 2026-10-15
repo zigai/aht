@@ -15,6 +15,10 @@ func FuzzMessageParts(f *testing.F) {
 		[]byte(`[{"type":"toolResponse","toolResult":{"status":"error","error":"denied"}}]`),
 		[]byte(`{"content":"wrong shape"}`),
 		[]byte(`[{"type":"text","text":`),
+		[]byte(`[{"type":"text","text":"old","text":null}]`),
+		[]byte(`[{"Type":"text","Text":"case-sensitive"}]`),
+		[]byte(`[{"type":"text","text":""},{"type":"tool_result","content":[{"type":"text","text":"nested"}]}]`),
+		[]byte(`[null,{"type":"text","text":7},{"type":"image","data":"base64"}]`),
 		{'"', 0xff, '"'},
 		{'"', 0x1f, '"'},
 		[]byte(`"a"b"`),
@@ -38,6 +42,15 @@ func checkMessageParts(t *testing.T, data []byte) {
 		}
 	}
 	checkDirectMessageParts(t, data, parts)
+	var direct string
+	if json.Unmarshal(data, &direct) != nil {
+		var blocks []Record
+		if json.Unmarshal(data, &blocks) == nil {
+			if want := MessageBlockParts(blocks, "assistant", true); !slices.Equal(parts, want) {
+				t.Fatalf("seed=%q: message parts = %#v, ordinary reader = %#v", data, parts, want)
+			}
+		}
+	}
 }
 
 func checkDirectMessageParts(t *testing.T, data []byte, parts []TextPart) {
