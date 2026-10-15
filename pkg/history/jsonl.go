@@ -68,35 +68,23 @@ func (t *transcript) qualifies(terms int) bool {
 	return !slices.Contains(t.hits, false)
 }
 
-func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File) *transcript {
+func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer) *transcript {
 	info, err := file.Stat()
 	if err != nil {
-		s.issue(source, path, err)
+		buffer.issue(source, path, err)
 		return nil
 	}
 
-	var t transcript
-	t.match.Conversation.Harness = source.Harness
-	t.match.Conversation.Path = path
-	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
-		initialize(s.decoder(source, &t))
-	}
-	start, lines := int64(0), 0
-	if s.writer != nil && s.writer.resume != nil {
-		checkpoint := s.writer.resume
-		t.match.Conversation = checkpoint.Conversation
-		t.recognized = checkpoint.Recognized
-		start, lines = checkpoint.Size, checkpoint.Lines
-	}
+	t, start, lines := s.newJSONLTranscript(source, path, buffer)
 	// A captured file size makes a finite snapshot even while a harness appends.
 	input := io.LimitReader(file, info.Size()-start)
 	if s.writer != nil {
 		input = io.TeeReader(input, s.writer.hash)
 	}
 	reader := bufio.NewReaderSize(input, scannerInitialBytes)
-	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines)
+	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines, buffer)
 	if ctx.Err() == nil && !t.identified() && (records > 0 || start > 0) {
-		s.issue(source, path, errUnknownFormat)
+		buffer.issue(source, path, errUnknownFormat)
 	}
 	if s.writer != nil {
 		s.writer.checkpoint.Conversation = t.match.Conversation
@@ -109,11 +97,27 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 	return &t
 }
 
-func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int) (int, int, bool) {
+func (s *search) newJSONLTranscript(source Source, path string, buffer *fileIssueBuffer) (transcript, int64, int) {
+	var t transcript
+	t.match.Conversation.Harness = source.Harness
+	t.match.Conversation.Path = path
+	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
+		initialize(s.decoder(source, &t, buffer))
+	}
+	if s.writer != nil && s.writer.resume != nil {
+		checkpoint := s.writer.resume
+		t.match.Conversation = checkpoint.Conversation
+		t.recognized = checkpoint.Recognized
+		return t, checkpoint.Size, checkpoint.Lines
+	}
+	return t, 0, 0
+}
+
+func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer) (int, int, bool) {
 	complete := false
 	records := 0
 	readerSpec := catalog.TranscriptFor(source.Harness)
-	decoder := s.decoder(source, t)
+	decoder := s.decoder(source, t, buffer)
 	for line := lines + 1; ; line++ {
 		data, readErr := readRecordLine(ctx, reader)
 		if errors.Is(readErr, io.EOF) || ctx.Err() != nil {
@@ -121,7 +125,7 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		}
 		if readErr != nil {
 			lines, complete = line, false
-			if s.handleLineReadError(source, path, line, readErr) {
+			if buffer.handleLineReadError(source, path, line, readErr) {
 				continue
 			}
 			break
@@ -137,7 +141,7 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 		}
 		var r native.Record
 		if json.Unmarshal(data, &r) != nil {
-			s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
+			buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
 			continue
 		}
 		if readerSpec.Record != nil {
@@ -328,11 +332,11 @@ func clip(value string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
-func (s *search) handleLineReadError(source Source, path string, line int, err error) bool {
+func (buffer *fileIssueBuffer) handleLineReadError(source Source, path string, line int, err error) bool {
 	if errors.Is(err, errRecordSize) {
-		s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
+		buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
 		return true
 	}
-	s.issue(source, path, fmt.Errorf("line %d: %w", line, err))
+	buffer.issue(source, path, fmt.Errorf("line %d: %w", line, err))
 	return false
 }

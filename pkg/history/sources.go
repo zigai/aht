@@ -37,6 +37,13 @@ type historyFile struct {
 	children []historyFile
 }
 
+type fileIssueBuffer struct {
+	issues   map[string][]Issue
+	omitted  int
+	selected map[string]bool
+	parents  map[string]string
+}
+
 // DefaultSources resolves native environment overrides and standard history
 // locations. Missing directories are normal and do not make search incomplete.
 // Unsupported readers remain visible in Result.Sources instead of appearing empty.
@@ -59,6 +66,28 @@ func DefaultSources() ([]Source, error) {
 		}
 	}
 	return sources, nil
+}
+
+func newFileIssueBuffer() *fileIssueBuffer {
+	return &fileIssueBuffer{issues: make(map[string][]Issue), omitted: 0, selected: make(map[string]bool), parents: make(map[string]string)}
+}
+
+func (buffer *fileIssueBuffer) recordIssue(issue Issue) {
+	var omitted int
+	buffer.issues[issue.Path], omitted = retainIssue(buffer.issues[issue.Path], issue)
+	buffer.omitted += omitted
+}
+
+func (buffer *fileIssueBuffer) issue(source Source, path string, err error) {
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
+}
+
+func (buffer *fileIssueBuffer) recordProblem(source Source, path string, err error) {
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: true})
+}
+
+func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, selected bool) {
+	buffer.selected[conversation.Path] = buffer.selected[conversation.Path] || (conversation.SessionID != "" && selected)
 }
 
 func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
@@ -234,17 +263,24 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 // scanFileDirect parses one history with its children and returns how many
 // files it inspected.
 func (s *search) scanFileDirect(ctx context.Context, source Source, file historyFile) int {
+	buffer := newFileIssueBuffer()
+	inspected := s.scanFileGroup(ctx, source, file, buffer)
+	s.reportScopedIssues(buffer)
+	return inspected
+}
+
+func (s *search) scanFileGroup(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer) int {
 	if file.database {
-		s.scanDatabase(ctx, source, file.path)
+		s.scanDatabase(ctx, source, file.path, buffer)
 		return 1
 	}
 	inspected := 0
-	t, ok := s.readTranscriptFile(ctx, source, file)
+	t, ok := s.readTranscriptFile(ctx, source, file, buffer)
 	if ok {
 		inspected++
 	}
 	for _, child := range file.children {
-		c, ok := s.readTranscriptFile(ctx, source, child)
+		c, ok := s.readTranscriptFile(ctx, source, child, buffer)
 		if !ok {
 			continue
 		}
@@ -252,26 +288,29 @@ func (s *search) scanFileDirect(ctx context.Context, source Source, file history
 		switch {
 		case c == nil:
 		case t != nil && c.match.Conversation.SessionID == t.match.Conversation.SessionID:
+			buffer.parents[child.path] = t.match.Conversation.Path
 			t.absorb(c, s.query.Excerpts)
 		default:
+			buffer.selectConversation(c.match.Conversation, s.accepts(c.match.Conversation))
 			s.add(ctx, c)
 		}
 	}
 	if t != nil {
+		buffer.selectConversation(t.match.Conversation, s.accepts(t.match.Conversation))
 		s.add(ctx, t)
 	}
 	return inspected
 }
 
-func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile) (*transcript, bool) {
+func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer) (*transcript, bool) {
 	opened, err := file.open()
 	if err != nil {
-		s.issue(source, file.path, err)
+		buffer.issue(source, file.path, err)
 		return nil, false
 	}
-	t := s.scanTranscript(ctx, source, file.path, opened)
+	t := s.scanTranscript(ctx, source, file.path, opened, buffer)
 	if err := opened.Close(); err != nil {
-		s.issue(source, file.path, err)
+		buffer.issue(source, file.path, err)
 	}
 	return t, true
 }

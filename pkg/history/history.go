@@ -766,22 +766,76 @@ func (s *search) issue(source Source, path string, err error) {
 	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
 }
 
-// recordProblem reports one skipped record of a history that was otherwise read.
-func (s *search) recordProblem(source Source, path string, err error) {
-	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: true})
-}
-
 func (s *search) recordIssue(issue Issue) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !issue.Record {
 		s.failures++
 	}
-	if len(s.result.Issues) >= maxIssues {
-		s.result.OmittedIssues++
-		return
+	var omitted int
+	s.result.Issues, omitted = retainIssue(s.result.Issues, issue)
+	s.result.OmittedIssues += omitted
+}
+
+func retainIssue(issues []Issue, issue Issue) ([]Issue, int) {
+	if len(issues) < maxIssues {
+		return append(issues, issue), 0
 	}
-	s.result.Issues = append(s.result.Issues, issue)
+	last := 0
+	for position := range issues {
+		if compareIssues(issues[position], issues[last]) > 0 {
+			last = position
+		}
+	}
+	if compareIssues(issue, issues[last]) < 0 {
+		issues[last] = issue
+	}
+	return issues, 1
+}
+
+func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
+	for child, parent := range buffer.parents {
+		buffer.selected[child] = buffer.selected[parent]
+	}
+	omitted := buffer.omitted
+	for _, issues := range buffer.issues {
+		for _, issue := range issues {
+			matches := buffer.selected[issue.Path]
+			if !issue.Record {
+				matches = s.fileIssueSelected(issue.Source, issue.Path)
+			}
+			if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
+				s.recordIssue(issue)
+			} else {
+				omitted++
+			}
+		}
+	}
+	s.mu.Lock()
+	s.result.OmittedIssues += omitted
+	s.mu.Unlock()
+}
+
+func (s *search) explicitFileSource(source Source) bool {
+	if !s.explicitSources {
+		return false
+	}
+	info, err := os.Stat(source.Path)
+	return err == nil && !info.IsDir()
+}
+
+func (s *search) fileIssueSelected(source Source, path string) bool {
+	if s.mode == modeRefresh || s.explicitFileSource(source) || s.query.Since.IsZero() {
+		return true
+	}
+	info, err := os.Stat(path)
+	return err != nil || !info.ModTime().Before(s.query.Since)
+}
+
+func (s *search) fileIssue(source Source, path string, err error) {
+	buffer := newFileIssueBuffer()
+	buffer.issue(source, path, err)
+	s.reportScopedIssues(buffer)
 }
 
 // halted reports whether a streaming caller asked to stop.
@@ -828,10 +882,7 @@ func (s *search) accepts(c Conversation) bool {
 	if f.Model != "" && !strings.Contains(strings.ToLower(c.Model), strings.ToLower(f.Model)) {
 		return false
 	}
-	if c.Messages < f.MinMessages {
-		return false
-	}
-	return true
+	return c.Messages >= f.MinMessages
 }
 
 func (f Filter) acceptsDirs(c Conversation) bool {
@@ -961,20 +1012,16 @@ func (s *search) finalize(ctx context.Context) Result {
 		copy(ordered, s.result.Matches)
 	}
 	slices.SortStableFunc(ordered, resultOrder(s.query.Sort))
-	slices.SortFunc(s.result.Issues, func(a, b Issue) int {
-		if cmpSource := cmp.Compare(a.Source.Harness, b.Source.Harness); cmpSource != 0 {
-			return cmpSource
-		}
-		if cmpPath := cmp.Compare(a.Path, b.Path); cmpPath != 0 {
-			return cmpPath
-		}
-		return cmp.Compare(a.Message, b.Message)
-	})
+	slices.SortFunc(s.result.Issues, compareIssues)
 	if ctx.Err() == nil {
 		enrich(ctx, ordered)
 	}
 	s.result.Matches = ordered
 	return s.result
+}
+
+func compareIssues(first, second Issue) int {
+	return cmp.Or(cmp.Compare(first.Source.Harness, second.Source.Harness), cmp.Compare(first.Path, second.Path), cmp.Compare(first.Message, second.Message))
 }
 
 // resultOrder orders matches by the requested key, then by most recently updated

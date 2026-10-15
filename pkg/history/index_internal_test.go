@@ -44,6 +44,169 @@ func TestDirectScanChecksEscapedTextAndMalformedRecords(t *testing.T) {
 	compareIndexedSearch(t, c, query)
 }
 
+func malformedIssueFixture(t *testing.T) Catalog {
+	t.Helper()
+	root := t.TempDir()
+	for _, name := range []string{"recent", "old"} {
+		timestamp := "2026-09-01T10:00:00Z"
+		if name == "old" {
+			timestamp = "2025-01-01T10:00:00Z"
+		}
+		body := fmt.Sprintf(`{"type":"session","id":%q,"cwd":"/work","timestamp":%q}`+"\n"+`{"type":"message","message":{"role":"user","content":"needle"}}`+"\n{broken\n", name, timestamp)
+		if err := os.WriteFile(filepath.Join(root, name+".jsonl"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+}
+
+func TestIssuesFollowMetadataRatherThanTextOrPresence(t *testing.T) {
+	t.Parallel()
+	catalog := malformedIssueFixture(t)
+	for _, query := range []Query{
+		{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{Terms: []string{"absent"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Presence: registry.PresenceLive},
+	} {
+		result, err := catalog.Search(t.Context(), query)
+		if err != nil || len(result.Issues) != 1 || result.OmittedIssues != 1 || filepath.Base(result.Issues[0].Path) != "recent.jsonl" || !result.Issues[0].Record {
+			t.Fatalf("query=%#v result=%#v err=%v", query, result, err)
+		}
+		compareIndexedSearch(t, catalog, query)
+	}
+	catalog.Sources[0].Path = filepath.Join(catalog.Sources[0].Path, "old.jsonl")
+	query := Query{Terms: []string{"absent"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	result, err := catalog.Search(t.Context(), query)
+	if err != nil || len(result.Issues) != 1 || result.OmittedIssues != 0 {
+		t.Fatalf("explicit file result=%#v err=%v", result, err)
+	}
+	compareIndexedSearch(t, catalog, query)
+}
+
+func fileFailureFixture(t *testing.T, unreadable bool) Catalog {
+	t.Helper()
+	root := t.TempDir()
+	old := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for _, file := range []struct {
+		name string
+		at   time.Time
+	}{{"old.jsonl", old}, {"recent.jsonl", recent}} {
+		path := filepath.Join(root, file.name)
+		if err := os.WriteFile(path, []byte("{\"unknown\":true}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, file.at, file.at); err != nil {
+			t.Fatal(err)
+		}
+		if unreadable {
+			if err := os.Chmod(path, 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+}
+
+func TestFileFailuresAreScopedByModificationTime(t *testing.T) {
+	t.Parallel()
+	for _, unreadable := range []bool{false, true} {
+		t.Run(strconv.FormatBool(unreadable), func(t *testing.T) {
+			t.Parallel()
+			catalog := fileFailureFixture(t, unreadable)
+			query := Query{Terms: []string{"needle"}, Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+			result, err := catalog.Search(t.Context(), query)
+			if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.OmittedIssues != 1 || filepath.Base(result.Issues[0].Path) != "recent.jsonl" || result.Issues[0].Record {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			compareIndexedSearch(t, catalog, query)
+			query.Since = time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+			result, err = catalog.Search(t.Context(), query)
+			if err != nil || len(result.Issues) != 0 || result.OmittedIssues != 2 {
+				t.Fatalf("unselected failures result=%#v err=%v", result, err)
+			}
+			compareIndexedSearch(t, catalog, query)
+		})
+	}
+}
+
+func TestRefreshReportsMalformedRecordsOnFreshAndWarmIndex(t *testing.T) {
+	t.Parallel()
+	catalog := filterFixture(t)
+	appendRecord(t, filepath.Join(catalog.Sources[0].Path, "old.jsonl"), "{broken\n")
+	for range 2 {
+		result, err := catalog.Refresh(t.Context())
+		if err != nil || len(result.Issues) != 1 || !result.Issues[0].Record || result.OmittedIssues != 0 {
+			t.Fatalf("refresh=%#v err=%v", result, err)
+		}
+	}
+}
+
+func cappedIssueFixture(t *testing.T, unreadable bool) (Catalog, string) {
+	t.Helper()
+	catalog, root := childFixture(t)
+	appendRecord(t, filepath.Join(root, "main.jsonl"), strings.Repeat("{broken\n", maxIssues))
+	child := filepath.Join(root, "main/subagents/agent-3.jsonl")
+	if unreadable {
+		if err := os.Chmod(child, 0); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		appendRecord(t, child, "{broken\n")
+	}
+	return catalog, child
+}
+
+func TestCappedParentIssuesDoNotHideChildDiagnostics(t *testing.T) {
+	t.Parallel()
+	for _, unreadable := range []bool{false, true} {
+		t.Run(strconv.FormatBool(unreadable), func(t *testing.T) {
+			t.Parallel()
+			catalog, child := cappedIssueFixture(t, unreadable)
+			query := Query{Terms: []string{"absent"}, Dirs: []string{"/work/z"}}
+			result, err := catalog.Search(t.Context(), query)
+			if errors.Is(err, ErrIncomplete) != unreadable || len(result.Issues) != 1 || result.Issues[0].Path != child || result.OmittedIssues != maxIssues {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			compareIndexedSearch(t, catalog, query)
+			if unreadable {
+				query.Dirs = nil
+				result, err = catalog.Search(t.Context(), query)
+				if !errors.Is(err, ErrIncomplete) || len(result.Issues) != maxIssues || result.OmittedIssues != 1 {
+					t.Fatalf("capped selected failures result=%#v err=%v", result, err)
+				}
+				compareIndexedSearch(t, catalog, query)
+			}
+		})
+	}
+}
+
+func TestChildHistoryIssuesFollowParentMetadata(t *testing.T) {
+	t.Parallel()
+	catalog, root := childFixture(t)
+	child := filepath.Join(root, "main/subagents/agent-1.jsonl")
+	file, err := os.OpenFile(child, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("{broken\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		dir               string
+		reported, omitted int
+	}{{"/work/a", 1, 0}, {"/work/b", 0, 1}} {
+		query := Query{Terms: []string{"absent"}, Dirs: []string{test.dir}}
+		result, err := catalog.Search(t.Context(), query)
+		if err != nil || len(result.Issues) != test.reported || result.OmittedIssues != test.omitted {
+			t.Fatalf("dir=%s result=%#v err=%v", test.dir, result, err)
+		}
+		compareIndexedSearch(t, catalog, query)
+	}
+}
+
 func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

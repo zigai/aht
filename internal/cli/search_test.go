@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -374,6 +375,88 @@ func TestSearchCLIExplicitSourceOverridesIgnoredHarness(t *testing.T) {
 	}
 	if len(selected.Matches) != 1 || searchSourceStatus(t, selected, registry.Harness("pi"), historyPath) != "searched" {
 		t.Fatalf("explicit source did not override the ignore list: %#v", selected)
+	}
+}
+
+func TestSearchDiagnosticsScopeUnsupportedReaders(t *testing.T) {
+	t.Parallel()
+	result := history.Result{Sources: []history.SourceStatus{{Source: history.Source{Harness: registry.Harness("cursor"), Path: "/histories"}, Status: "unsupported"}}, OmittedIssues: 7}
+	for _, test := range []struct {
+		name        string
+		opts        searchOptions
+		unavailable bool
+	}{
+		{name: "default", opts: searchOptions{}, unavailable: false},
+		{name: "verbose", opts: searchOptions{verbose: true}, unavailable: true},
+		{name: "requested harness", opts: searchOptions{query: history.Query{Harnesses: []registry.Harness{"cursor"}}}, unavailable: true},
+		{name: "other harness", opts: searchOptions{query: history.Query{Harnesses: []registry.Harness{"pi"}}}, unavailable: false},
+		{name: "explicit source", opts: searchOptions{sources: []string{"cursor=/histories"}}, unavailable: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			app := &application{stderr: &stderr}
+			app.writeSearchDiagnostics(result, test.opts)
+			if strings.Contains(stderr.String(), "History readers unavailable: cursor.") != test.unavailable || strings.Contains(stderr.String(), "7 history warnings omitted (outside query or diagnostic limit)") != test.opts.verbose {
+				t.Fatalf("stderr=%q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestSearchDiagnosticsReportedIssues(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{0, 1, maxSummarizedIssues, maxSummarizedIssues + 1} {
+		result := history.Result{OmittedIssues: 7}
+		for position := range count {
+			result.Issues = append(result.Issues, history.Issue{
+				Source: history.Source{Harness: registry.Harness("pi"), Path: "/histories"},
+				Path:   "/histories/broken.jsonl", Message: "cannot read history", Record: position > 0,
+			})
+		}
+		for _, verbose := range []bool{false, true} {
+			t.Run(fmt.Sprintf("issues=%d/verbose=%t", count, verbose), func(t *testing.T) {
+				t.Parallel()
+				var stderr bytes.Buffer
+				app := &application{stderr: &stderr}
+				app.writeSearchDiagnostics(result, searchOptions{verbose: verbose})
+				want := strings.Repeat("warning: pi /histories/broken.jsonl: cannot read history\n", count)
+				if !verbose && count > maxSummarizedIssues {
+					want = fmt.Sprintf("warning: 1 histories could not be read (use --verbose to view)\nwarning: skipped %d malformed history records (use --verbose to view)\n", count-1)
+				}
+				if verbose {
+					want += "warning: 7 history warnings omitted (outside query or diagnostic limit)\n"
+				}
+				if got := stderr.String(); got != want {
+					t.Fatalf("stderr = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestSearchJSONKeepsOmittedIssues(t *testing.T) {
+	t.Parallel()
+	result := history.Result{OmittedIssues: 7, Issues: []history.Issue{{Message: "reported warning"}}}
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("verbose=%t", verbose), func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			app := &application{stdout: &stdout, stderr: &stderr, outputJSON: true}
+			if err := app.writeSearchOutput(result, nil, searchOptions{verbose: verbose}); err != nil {
+				t.Fatal(err)
+			}
+			var got history.Result
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(result, got); diff != "" {
+				t.Fatalf("JSON result (-want +got):\n%s", diff)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("JSON diagnostics wrote stderr: %q", stderr.String())
+			}
+		})
 	}
 }
 

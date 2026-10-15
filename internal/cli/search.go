@@ -526,7 +526,7 @@ func (app *application) writeSearchDiagnostics(result history.Result, opts searc
 	if result.Truncated {
 		app.warnf("More matching conversations exist; increase or omit --limit, or narrow the filters.\n")
 	}
-	app.writeSearchUnsupported(result.Sources)
+	app.writeSearchUnsupported(result.Sources, opts)
 	if opts.verbose {
 		app.writeSearchRefresh(result)
 	}
@@ -547,9 +547,6 @@ func (app *application) writeSearchRefresh(result history.Result) {
 }
 
 func (app *application) writeSearchIssues(result history.Result, verbose bool) {
-	if len(result.Issues) == 0 {
-		return
-	}
 	if !verbose && len(result.Issues) > maxSummarizedIssues {
 		records := 0
 		for _, issue := range result.Issues {
@@ -568,15 +565,24 @@ func (app *application) writeSearchIssues(result history.Result, verbose bool) {
 			app.warnf("warning: %s %s: %s\n", issue.Source.Harness, sanitizeHumanText(issue.Path), sanitizeHumanText(issue.Message))
 		}
 	}
-	if result.OmittedIssues > 0 {
-		app.warnf("warning: %d more history warnings omitted\n", result.OmittedIssues)
+	if verbose && result.OmittedIssues > 0 {
+		app.warnf("warning: %d history warnings omitted (outside query or diagnostic limit)\n", result.OmittedIssues)
 	}
 }
 
-func (app *application) writeSearchUnsupported(sources []history.SourceStatus) {
+func (app *application) writeSearchUnsupported(sources []history.SourceStatus, opts searchOptions) {
 	var unsupported []string
 	for _, source := range sources {
 		if source.Status != "unsupported" {
+			continue
+		}
+		requested := opts.verbose || slices.Contains(opts.query.Harnesses, source.Source.Harness)
+		for _, value := range opts.sources {
+			name, _, _ := strings.Cut(value, "=")
+			id, _ := harness.Parse(name)
+			requested = requested || id == source.Source.Harness
+		}
+		if !requested {
 			continue
 		}
 		if name := string(source.Source.Harness); !slices.Contains(unsupported, name) {

@@ -471,17 +471,16 @@ func (index *historyIndex) close() error {
 	return nil
 }
 
-func (index *historyIndex) reportIssues(s *search, source Source, file indexedFile) {
+func (index *historyIndex) reportIssues(s *search, source Source, file indexedFile, selected map[string]bool) {
 	var issues []Issue
 	if err := json.Unmarshal([]byte(file.issues), &issues); err != nil {
 		s.issue(source, file.path, fmt.Errorf("decode history index issues: %w", err))
 		return
 	}
-	for _, issue := range issues {
-		issue.Source = source
-		s.recordIssue(issue)
+	for position := range issues {
+		issues[position].Source = source
 	}
-	s.result.OmittedIssues += file.omitted
+	s.reportScopedIssues(&fileIssueBuffer{issues: map[string][]Issue{file.path: issues}, omitted: file.omitted, selected: selected, parents: nil})
 }
 
 // indexUnavailable reports an unusable index, keeping the underlying cause

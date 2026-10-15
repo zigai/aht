@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -276,12 +277,12 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 	}
 	progress.Refresh.Checked++
 	if result.openErr != nil {
-		s.issue(source, path, result.openErr)
+		s.fileIssue(source, path, result.openErr)
 		return settled, false
 	}
 	status.Files++
 	if result.failure != nil {
-		s.issue(source, path, result.failure)
+		s.fileIssue(source, path, result.failure)
 		return settled, false
 	}
 	if result.unchanged {
@@ -312,8 +313,7 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 	return settled, true
 }
 
-// visit reports the diagnostics of a stored history and its children, then
-// reads their matches from the committed index.
+// visit reads a stored history and its children from the committed index.
 func (index *historyIndex) visit(ctx context.Context, s *search, source Source, parent settledFile, children []settledFile) {
 	var group []groupFile
 	for _, settled := range append([]settledFile{parent}, children...) {
@@ -323,7 +323,6 @@ func (index *historyIndex) visit(ctx context.Context, s *search, source Source, 
 		if !ok {
 			continue
 		}
-		index.reportIssues(s, source, file)
 		group = append(group, groupFile{file: file, changed: settled.changed})
 	}
 	if len(group) == 0 || group[0].file.path != parent.path {
@@ -336,9 +335,68 @@ func (index *historyIndex) visit(ctx context.Context, s *search, source Source, 
 }
 
 func (index *historyIndex) visitGroup(ctx context.Context, s *search, source Source, group []groupFile) {
+	if err := index.reportGroupIssues(ctx, s, source, group); err != nil {
+		index.report(s, source, group[0].file.path, err)
+		return
+	}
 	if err := index.matches(ctx, s, group); err != nil {
 		index.report(s, source, group[0].file.path, err)
 	}
+}
+
+func (index *historyIndex) reportGroupIssues(ctx context.Context, s *search, source Source, group []groupFile) error {
+	if s.mode == modeRefresh {
+		for _, member := range group {
+			index.reportIssues(s, source, member.file, nil)
+		}
+		return nil
+	}
+	pending := false
+	for _, member := range group {
+		pending = pending || (member.file.issues != "[]" && member.file.issues != "") || member.file.omitted > 0
+	}
+	if !pending {
+		return nil
+	}
+	selected, err := index.selectIssueMetadata(ctx, s, group)
+	if err != nil {
+		return err
+	}
+	for _, member := range group {
+		index.reportIssues(s, source, member.file, selected)
+	}
+	return nil
+}
+
+func (index *historyIndex) selectIssueMetadata(ctx context.Context, s *search, group []groupFile) (map[string]bool, error) {
+	fresh := slices.ContainsFunc(group, func(member groupFile) bool { return member.changed })
+	parents, err := index.readConversations(ctx, group[0].file.id, fresh)
+	if err != nil {
+		return nil, err
+	}
+	selected := make(map[string]bool)
+	parentMetadata := make(map[string]Conversation, len(parents))
+	for _, parent := range parents {
+		c := parent.conversation
+		selected[c.Path] = selected[c.Path] || s.accepts(c)
+		if _, exists := parentMetadata[c.SessionID]; !exists {
+			parentMetadata[c.SessionID] = c
+		}
+	}
+	for _, member := range group[1:] {
+		children, err := index.readConversations(ctx, member.file.id, fresh)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			c := child.conversation
+			if parent, exists := parentMetadata[c.SessionID]; exists {
+				c = parent
+			}
+			selected[child.conversation.Path] = selected[child.conversation.Path] || s.accepts(c)
+		}
+	}
+	return selected, nil
 }
 
 // report keeps failures that disable the index, so the search can restart
@@ -348,7 +406,7 @@ func (index *historyIndex) report(s *search, source Source, path string, err err
 		s.indexErr = errors.Join(s.indexErr, err)
 		return
 	}
-	s.issue(source, path, err)
+	s.fileIssue(source, path, err)
 }
 
 // parseRefresh reads one history into an indexWriter without touching the
@@ -363,12 +421,13 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 	reader.sourceMetadata = job.metadata
 	reader.writer = writer
 	reader.reset()
+	buffer := newFileIssueBuffer()
 	var result refreshResult
 	var parsed bool
 	if job.file.database {
-		result, parsed = parseDatabaseRefresh(ctx, job, reader)
+		result, parsed = parseDatabaseRefresh(ctx, job, reader, buffer)
 	} else {
-		result, parsed = parseTranscriptRefresh(ctx, job, reader, writer)
+		result, parsed = parseTranscriptRefresh(ctx, job, reader, writer, buffer)
 	}
 	if !parsed {
 		return result
@@ -377,6 +436,7 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		result.err = fmt.Errorf("refresh history: %w", err)
 		return result
 	}
+	reader.reportScopedIssues(buffer)
 	result.writer = writer
 	result.parseTime = time.Since(started)
 	result.reason = writer.reason
@@ -405,7 +465,7 @@ func (job *refreshJob) isCurrent(stamp string) bool {
 	return job.exists && stamp == job.previous.stamp && (!job.includeTools || job.previous.tools)
 }
 
-func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search) (refreshResult, bool) {
+func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search, buffer *fileIssueBuffer) (refreshResult, bool) {
 	var result refreshResult
 	result.stamp = databaseStamp(job.file.path)
 	if job.isCurrent(result.stamp) {
@@ -415,11 +475,11 @@ func parseDatabaseRefresh(ctx context.Context, job *refreshJob, reader *search) 
 	if info, err := os.Stat(job.file.path); err == nil {
 		result.bytes = info.Size()
 	}
-	reader.scanDatabase(ctx, job.source, job.file.path)
+	reader.scanDatabase(ctx, job.source, job.file.path, buffer)
 	return result, true
 }
 
-func parseTranscriptRefresh(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter) (refreshResult, bool) {
+func parseTranscriptRefresh(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter, buffer *fileIssueBuffer) (refreshResult, bool) {
 	var result refreshResult
 	source, path := job.source, job.file.path
 	file, err := job.file.open()
@@ -427,14 +487,14 @@ func parseTranscriptRefresh(ctx context.Context, job *refreshJob, reader *search
 		result.openErr = err
 		return result, false
 	}
-	result, ok := parseOpenTranscript(ctx, job, reader, writer, file)
+	result, ok := parseOpenTranscript(ctx, job, reader, writer, file, buffer)
 	if err := file.Close(); err != nil {
 		result.issues = append(result.issues, Issue{Source: source, Path: path, Message: err.Error(), Record: false})
 	}
 	return result, ok
 }
 
-func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter, file *os.File) (refreshResult, bool) {
+func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, writer *indexWriter, file *os.File, buffer *fileIssueBuffer) (refreshResult, bool) {
 	var result refreshResult
 	source, path := job.source, job.file.path
 	info, err := file.Stat()
@@ -461,7 +521,7 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 	if writer.resume != nil {
 		result.bytes -= writer.resume.Size
 	}
-	if t := reader.scanTranscript(ctx, source, path, file); t != nil {
+	if t := reader.scanTranscript(ctx, source, path, file, buffer); t != nil {
 		reader.add(ctx, t)
 	}
 	after, err := file.Stat()

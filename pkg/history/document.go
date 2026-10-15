@@ -20,32 +20,32 @@ var errCompressedArchive = errors.New("compressed history archive is not support
 
 // scanTranscript parses one transcript file and returns its conversation, or
 // nil when the file could not be read.
-func (s *search) scanTranscript(ctx context.Context, source Source, path string, file *os.File) *transcript {
+func (s *search) scanTranscript(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer) *transcript {
 	if strings.HasSuffix(path, ".zst") {
-		s.issue(source, path, errCompressedArchive)
+		buffer.issue(source, path, errCompressedArchive)
 		return nil
 	}
 	if parse := catalog.TranscriptFor(source.Harness).Document; parse != nil {
-		return s.scanDocument(ctx, source, path, file, parse)
+		return s.scanDocument(ctx, source, path, file, parse, buffer)
 	}
-	return s.scanJSONL(ctx, source, path, file)
+	return s.scanJSONL(ctx, source, path, file, buffer)
 }
 
-func (s *search) scanDocument(ctx context.Context, source Source, path string, file *os.File, parse func(context.Context, *native.Decoder, []byte) error) *transcript {
+func (s *search) scanDocument(ctx context.Context, source Source, path string, file *os.File, parse func(context.Context, *native.Decoder, []byte) error, buffer *fileIssueBuffer) *transcript {
 	data, err := io.ReadAll(io.LimitReader(file, maxDocumentBytes+1))
 	if err != nil {
-		s.issue(source, path, fmt.Errorf("read document: %w", err))
+		buffer.issue(source, path, fmt.Errorf("read document: %w", err))
 		return nil
 	}
 	if len(data) > maxDocumentBytes {
-		s.issue(source, path, errDocumentSize)
+		buffer.issue(source, path, errDocumentSize)
 		return nil
 	}
 	var t transcript
 	t.match.Conversation.Harness = source.Harness
 	t.match.Conversation.Path = path
-	if err := parse(ctx, s.decoder(source, &t), data); err != nil {
-		s.issue(source, path, err)
+	if err := parse(ctx, s.decoder(source, &t, buffer), data); err != nil {
+		buffer.issue(source, path, err)
 		return nil
 	}
 	return &t
