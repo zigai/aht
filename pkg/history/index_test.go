@@ -3,10 +3,13 @@ package history_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +84,257 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"Removed"}}, 1)
+}
+
+func TestRefreshStatusRoundTripsCompletedCounts(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	for _, want := range []history.RefreshStats{
+		{Checked: 1, Reparsed: 1, BytesParsed: int64(len(treeHistory)), Reasons: map[string]int{"new file": 1}},
+		{Checked: 1, Unchanged: 1},
+	} {
+		started := time.Now()
+		result, err := catalog.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireRefreshStats(t, result, want)
+		fresh := history.Catalog{IndexPath: catalog.IndexPath}
+		status, err := fresh.RefreshStatus(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireCompletedRefreshStatus(t, status, result.Refresh, started)
+		requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+		afterSearch, err := fresh.RefreshStatus(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := cmp.Diff(status, afterSearch); diff != "" {
+			t.Fatalf("warm search changed last explicit refresh (-before +after):\n%s", diff)
+		}
+	}
+	info, err := os.Stat(catalog.IndexPath + ".refresh.json")
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("status permissions = %v, %v", info, err)
+	}
+}
+
+func requireCompletedRefreshStatus(t *testing.T, status history.RefreshStatus, want []history.SourceRefresh, started time.Time) {
+	t.Helper()
+	if status.CompletedAt.Before(started) || status.CompletedAt.After(time.Now()) || status.Incomplete || status.IssueCount != 0 {
+		t.Fatalf("completed status = %#v", status)
+	}
+	if diff := cmp.Diff(want, status.Refresh); diff != "" {
+		t.Fatalf("persisted counts (-result +status):\n%s", diff)
+	}
+}
+
+func TestRefreshStatusSurvivesSearchIndexUpdates(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"append", "rewrite"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if _, err := catalog.Refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			before, err := catalog.RefreshStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			updateRefreshStatusTranscript(t, path, scenario)
+			result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"updated token"}}, 1)
+			if len(result.Refresh) != 1 || result.Refresh[0].Resumed+result.Refresh[0].Reparsed != 1 {
+				t.Fatalf("search did not update index: %#v", result.Refresh)
+			}
+			after, err := catalog.RefreshStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(before, after); diff != "" {
+				t.Fatalf("search changed last explicit refresh (-before +after):\n%s", diff)
+			}
+		})
+	}
+}
+
+func updateRefreshStatusTranscript(t *testing.T, path, scenario string) {
+	t.Helper()
+	if scenario == "append" {
+		appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"updated token"}}`+"\n")
+		return
+	}
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(treeHistory, "refresh", "updated token")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshStatusRecordsPartialRefresh(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	missing := filepath.Join(t.TempDir(), "missing")
+	for position := range 105 {
+		catalog.Sources = append(catalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: filepath.Join(missing, strconv.Itoa(position))})
+	}
+	result, err := catalog.Refresh(t.Context())
+	if !errors.Is(err, history.ErrIncomplete) || result.IndexUnavailable || result.OmittedIssues != 5 {
+		t.Fatalf("partial refresh = %#v, %v", result, err)
+	}
+	status, err := catalog.RefreshStatus(t.Context())
+	if err != nil || !status.Incomplete || status.IssueCount != 105 {
+		t.Fatalf("partial status = %#v, %v", status, err)
+	}
+	if diff := cmp.Diff(result.Refresh, status.Refresh); diff != "" {
+		t.Fatalf("partial counts (-result +status):\n%s", diff)
+	}
+}
+
+func TestRefreshStatusPreservesPriorOnInterruptedRefresh(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"canceled", "unavailable"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if _, err := catalog.Refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			statusPath := catalog.IndexPath + ".refresh.json"
+			before, err := os.ReadFile(statusPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantErr := history.ErrIndexUnavailable
+			if scenario == "canceled" {
+				wantErr = context.Canceled
+			}
+			if err = refreshWithInterruption(t, catalog, path, scenario); !errors.Is(err, wantErr) {
+				t.Fatalf("%s refresh = %v, want %v", scenario, err, wantErr)
+			}
+			after, err := os.ReadFile(statusPath)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("%s replaced prior status: %v", scenario, err)
+			}
+		})
+	}
+}
+
+func refreshWithInterruption(t *testing.T, catalog history.Catalog, path, scenario string) error {
+	t.Helper()
+	ctx := t.Context()
+	if scenario == "canceled" {
+		appendHistory(t, path, "\n")
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		catalog.Progress = func(progress history.Progress) { cancel() }
+	} else {
+		if err := os.Rename(catalog.IndexPath, catalog.IndexPath+".previous"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(catalog.IndexPath, []byte("not a database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := catalog.Refresh(ctx); err != nil {
+		return fmt.Errorf("refresh interrupted index: %w", err)
+	}
+	return nil
+}
+
+func TestRefreshStatusRejectsMissingCorruptAndStaleWithoutWrites(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"missing", "corrupt", "replaced", "version"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, _ := indexedFixture(t)
+			if scenario != "missing" {
+				if _, err := catalog.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			invalidateRefreshStatusFixture(t, catalog, scenario)
+			before, readErr := os.ReadFile(catalog.IndexPath)
+			entries, err := os.ReadDir(filepath.Dir(catalog.IndexPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, statusErr := catalog.RefreshStatus(t.Context()); statusErr == nil || !status.CompletedAt.IsZero() {
+				t.Fatalf("%s returned status %#v, %v", scenario, status, statusErr)
+			}
+			after, afterErr := os.ReadFile(catalog.IndexPath)
+			afterEntries, err := os.ReadDir(filepath.Dir(catalog.IndexPath))
+			if err != nil || len(entries) != len(afterEntries) || string(before) != string(after) || errors.Is(readErr, os.ErrNotExist) != errors.Is(afterErr, os.ErrNotExist) {
+				t.Fatalf("status read changed %s index: %v", scenario, err)
+			}
+		})
+	}
+}
+
+func invalidateRefreshStatusFixture(t *testing.T, catalog history.Catalog, scenario string) {
+	t.Helper()
+	switch scenario {
+	case "corrupt":
+		if err := os.WriteFile(catalog.IndexPath+".refresh.json", []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "replaced":
+		if err := os.Rename(catalog.IndexPath, catalog.IndexPath+".previous"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(catalog.IndexPath, []byte("foreign database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "version":
+		path := catalog.IndexPath + ".refresh.json"
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope map[string]json.RawMessage
+		if err = json.Unmarshal(data, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		envelope["index_version"] = json.RawMessage("0")
+		data, err = json.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRefreshStatusExplicitPathDoesNotTouchDefaultCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	catalog, _ := indexedFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.RefreshStatus(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var defaults history.Catalog
+	if _, err := defaults.RefreshStatus(t.Context()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default cache status = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "cache")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("explicit path created default cache: %v", err)
+	}
+}
+
+func TestRefreshStatusWriteFailureKeepsCommittedIndex(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	if err := os.Mkdir(catalog.IndexPath+".refresh.json", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := catalog.Refresh(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "save history refresh status") || result.IndexUnavailable {
+		t.Fatalf("status write failure = %#v, %v", result, err)
+	}
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, result, history.RefreshStats{Checked: 1, Unchanged: 1})
 }
 
 func TestRefreshStatsDescribeCompletedWork(t *testing.T) {

@@ -335,6 +335,7 @@ func (app *application) runSearch(ctx context.Context, opts searchOptions, sourc
 	} else {
 		result, searchErr = catalog.Search(ctx, opts.query)
 	}
+	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
 	progress.clear()
 	if err := app.writeSearchOutput(result, searchErr, opts); err != nil {
 		return err
@@ -392,6 +393,7 @@ func (app *application) runSearchStream(ctx context.Context, catalog history.Cat
 	} else {
 		result, searchErr = catalog.Stream(ctx, opts.query, yield)
 	}
+	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
 	progress.clear()
 	if writeErr != nil {
 		return writeErr

@@ -471,6 +471,8 @@ func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool
 
 // Refresh brings the disposable index up to date with the catalog's sources
 // without searching. It returns ErrIndexUnavailable when the index cannot be used.
+// Completed and partial refreshes publish RefreshStatus. A status write failure
+// is returned without undoing committed index changes.
 func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	var s search
 	s.mode = modeRefresh
@@ -488,7 +490,12 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	closeErr := index.close(ctx)
 	s.index = nil
 	s.result.IndexUnavailable = errors.Is(runErr, ErrIndexUnavailable)
-	return s.finalize(ctx), errors.Join(runErr, closeErr)
+	result := s.finalize(ctx)
+	var statusErr error
+	if ctx.Err() == nil && closeErr == nil && s.indexErr == nil && index.unavailable == nil && !result.IndexUnavailable && (runErr == nil || errors.Is(runErr, ErrIncomplete)) {
+		statusErr = c.saveRefreshStatus(ctx, result, errors.Is(runErr, ErrIncomplete))
+	}
+	return result, errors.Join(runErr, closeErr, statusErr)
 }
 
 func (c Catalog) run(ctx context.Context, s *search) (Result, error) {

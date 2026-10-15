@@ -31,6 +31,157 @@ func searchCLIHome(t *testing.T) string {
 	return home
 }
 
+func TestSearchCLIWarmsSkippedHistories(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "aht")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
+	build.Dir = filepath.Join("..", "..")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build search executable: %v: %s", err, output)
+	}
+	for _, mode := range []string{"text", "stream", "list", "stream list"} {
+		t.Run(mode, func(t *testing.T) {
+			root := warmSearchFixture(t)
+			output := runColdSearchCLI(t, binary, mode, root)
+			checkWarmSearchOutput(t, mode, output)
+			waitForSearchRefresh(t)
+			warmArgs := []string{"--no-config", "--json", "search", "other", "--source", "pi=" + root, "--excerpts", "0"}
+			warm := exec.CommandContext(t.Context(), binary, warmArgs...)
+			output, err := warm.Output()
+			if err != nil {
+				t.Fatalf("warm search: %v", err)
+			}
+			var result history.Result
+			if err = json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "other" || result.IndexUnavailable || len(result.Refresh) != 1 || result.Refresh[0].Skipped != 0 || result.Refresh[0].Reparsed != 0 || result.Refresh[0].Unchanged != 2 {
+				t.Fatalf("warm search=%+v", result)
+			}
+		})
+	}
+}
+
+func warmSearchFixture(t *testing.T) string {
+	t.Helper()
+	searchCLIHome(t)
+	root := t.TempDir()
+	old := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"selected", "other"} {
+		path := filepath.Join(root, id+".jsonl")
+		writeSearchFixtureBody(t, path, piSession(id, "/work", old.Format(time.RFC3339)))
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func runColdSearchCLI(t *testing.T, binary, mode, root string) []byte {
+	t.Helper()
+	args := []string{"--no-config", "--json", "search", "--source", "pi=" + root, "--excerpts", "0"}
+	if strings.Contains(mode, "list") {
+		args = append(args, "--since", "2026-09-02")
+	} else {
+		args = append(args, "selected")
+	}
+	if strings.Contains(mode, "stream") {
+		args = append(args, "--stream")
+	}
+	var stdout, stderr bytes.Buffer
+	command := exec.CommandContext(t.Context(), binary, args...)
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if err := command.Run(); err != nil || stderr.Len() != 0 {
+		t.Fatalf("search error=%v stderr=%q", err, &stderr)
+	}
+	return stdout.Bytes()
+}
+
+func checkWarmSearchOutput(t *testing.T, mode string, output []byte) {
+	t.Helper()
+	if mode == "stream list" {
+		if len(output) != 0 {
+			t.Fatalf("empty streamed listing=%s", output)
+		}
+		return
+	}
+	if mode == "stream" {
+		var match history.Match
+		if err := json.Unmarshal(output, &match); err != nil || match.Conversation.SessionID != "selected" {
+			t.Fatalf("streamed match=%+v err=%v output=%s", match, err, output)
+		}
+		return
+	}
+	checkColdSearchResult(t, mode, output)
+}
+
+func checkColdSearchResult(t *testing.T, mode string, output []byte) {
+	t.Helper()
+	var result history.Result
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.IndexUnavailable || len(result.Refresh) != 1 || result.Refresh[0].Skipped == 0 {
+		t.Fatalf("cold search=%+v", result)
+	}
+	if mode == "list" {
+		if len(result.Matches) != 0 {
+			t.Fatalf("filtered listing=%+v", result.Matches)
+		}
+		return
+	}
+	if len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "selected" {
+		t.Fatalf("text matches=%+v", result.Matches)
+	}
+}
+
+func waitForSearchRefresh(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	var catalog history.Catalog
+	for {
+		status, err := catalog.RefreshStatus(ctx)
+		if err == nil {
+			if status.Incomplete || status.IssueCount != 0 || len(status.Refresh) != 1 || status.Refresh[0].Checked != 2 {
+				t.Fatalf("background refresh=%+v", status)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("background refresh did not finish: %v", err)
+		case <-poll.C:
+		}
+	}
+}
+
+func TestSkippedHistoryRefreshStartsOnceWithoutChangingSearch(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		result history.Result
+		want   int
+	}{
+		{name: "multiple skipped sources", result: history.Result{Refresh: []history.SourceRefresh{{Skipped: 3}, {Skipped: 2}}}, want: 1},
+		{name: "nothing skipped", result: history.Result{Refresh: []history.SourceRefresh{{Unchanged: 4}}}},
+		{name: "index unavailable", result: history.Result{IndexUnavailable: true, Refresh: []history.SourceRefresh{{Skipped: 3}}}},
+		{name: "direct fallback", result: history.Result{IndexUnavailable: true}},
+		{name: "no indexed work"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			started := 0
+			refreshSkippedHistory(test.result, func() error {
+				started++
+				return os.ErrPermission
+			})
+			if started != test.want {
+				t.Fatalf("started %d refreshes, want %d", started, test.want)
+			}
+		})
+	}
+}
+
 func writeSearchFixture(t *testing.T, path string) {
 	t.Helper()
 	const body = `{"type":"session","id":"native-id","cwd":"/work/project","title":"Search example"}

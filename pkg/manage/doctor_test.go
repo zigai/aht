@@ -1,17 +1,130 @@
 package manage_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestManagerDoctorReportsHistoryRefreshWithoutCreatingIndex(t *testing.T) {
+	for _, scenario := range []string{"missing", "complete", "partial", "corrupt", "stale"} {
+		t.Run(scenario, func(t *testing.T) {
+			manager, opts, catalog, indexPath := prepareHistoryDoctor(t, scenario)
+			result := manager.Doctor(t.Context(), opts)
+			assertDoctorInvariants(t, result)
+			found := historyDoctorCheck(t, result)
+			want := manage.DoctorStatusWarn
+			if scenario == "complete" {
+				want = manage.DoctorStatusOK
+			}
+			if found.Status != want {
+				t.Fatalf("%s status = %s, want %s", scenario, found.Status, want)
+			}
+			if scenario == "complete" || scenario == "partial" {
+				requireHistoryRefreshMessage(t, catalog, strings.Join(append([]string{found.Message}, found.Details...), "; "), scenario == "partial")
+			}
+			requireHistoryDoctorJSON(t, result, found.Message)
+			if scenario == "missing" || scenario == "stale" {
+				if _, err := os.Stat(indexPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("doctor created or repaired index: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func requireHistoryDoctorJSON(t *testing.T, result manage.DoctorResult, wantMessage string) {
+	t.Helper()
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded manage.DoctorResult
+	if err = json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if historyDoctorCheck(t, decoded).Message != wantMessage {
+		t.Fatalf("JSON lost history diagnostic: %s", encoded)
+	}
+}
+
+func prepareHistoryDoctor(t *testing.T, scenario string) (*manage.Manager, manage.DoctorOptions, history.Catalog, string) {
+	t.Helper()
+	home := isolateDoctorEnvironment(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	manager := manage.New(manage.Config{Binary: "aht", StorePath: filepath.Join(home, "sessions.json")})
+	opts := manage.DoctorOptions{ConfigPath: filepath.Join(home, "config.toml")}
+	indexPath := filepath.Join(home, "cache", "aht", "history-v1.sqlite")
+	historyCatalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Join(home, "transcripts")}}}
+	if scenario == "missing" {
+		return manager, opts, historyCatalog, indexPath
+	}
+	if err := os.MkdirAll(historyCatalog.Sources[0].Path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"type\":\"session\",\"id\":\"sample\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"sample text\"}}\n"
+	if err := os.WriteFile(filepath.Join(historyCatalog.Sources[0].Path, "session.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var wantErr error
+	if scenario == "partial" {
+		historyCatalog.Sources = append(historyCatalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: filepath.Join(home, "missing")})
+		wantErr = history.ErrIncomplete
+	}
+	if _, err := historyCatalog.Refresh(t.Context()); !errors.Is(err, wantErr) {
+		t.Fatalf("%s refresh = %v, want %v", scenario, err, wantErr)
+	}
+	switch scenario {
+	case "corrupt":
+		if err := os.WriteFile(indexPath+".refresh.json", []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "stale":
+		if err := os.Rename(indexPath, indexPath+".previous"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return manager, opts, historyCatalog, indexPath
+}
+
+func historyDoctorCheck(t *testing.T, result manage.DoctorResult) manage.DoctorCheck {
+	t.Helper()
+	for _, check := range result.Checks {
+		if check.ID == "history.refresh" {
+			return check
+		}
+	}
+	t.Fatal("history.refresh check was not run")
+	return manage.DoctorCheck{}
+}
+
+func requireHistoryRefreshMessage(t *testing.T, historyCatalog history.Catalog, message string, partial bool) {
+	t.Helper()
+	status, err := historyCatalog.RefreshStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, detail := range []string{status.CompletedAt.Format(time.RFC3339Nano), "checked=1", "reparsed=", "resumed=", "unchanged=", "bytes_parsed=", "parse_time=", "store_time=", "issues="} {
+		if !strings.Contains(message, detail) {
+			t.Fatalf("human diagnostic missing %q: %s", detail, message)
+		}
+	}
+	if partial && (!strings.Contains(message, "partial") || !strings.Contains(message, "issues=1")) {
+		t.Fatalf("partial refresh obscured: %s", message)
+	}
+}
 
 func TestDoctorReportsEveryCheckWhenConfigIsInvalid(t *testing.T) {
 	home := isolateDoctorEnvironment(t)

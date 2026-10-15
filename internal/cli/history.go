@@ -32,37 +32,41 @@ func (app *application) newHistoryCommand() *cobra.Command {
 
 func (app *application) newHistoryRefreshCommand() *cobra.Command {
 	var harnesses []string
+	var sourceOptions searchOptions
 	command := &cobra.Command{
 		Use:           "refresh",
 		Short:         "Index changed conversation histories so searches start warm",
-		Long:          "Parse every changed native history into the disposable search index without searching.\nThe tracker also refreshes sessions as they go idle or end.",
+		Long:          "Parse every changed native history into the disposable search index without searching.\nThe tracker refreshes all histories at startup and after sessions go idle or end.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return app.runHistoryRefresh(cmd.Context(), harnesses)
+			sources, err := sourceOptions.validateSources()
+			if err != nil {
+				return exitCode(err, exitCodeUsage)
+			}
+			return app.runHistoryRefresh(cmd.Context(), harnesses, sources)
 		},
 	}
 	command.Flags().StringSliceVar(&harnesses, "harness", nil, "refresh only harness `<name,...>` histories")
+	command.Flags().StringArrayVar(&sourceOptions.sources, "source", nil, "refresh only this native history `<agent=path>`")
+	_ = command.Flags().MarkHidden("source")
 	return command
 }
 
-func (app *application) runHistoryRefresh(ctx context.Context, names []string) error {
-	var selected []registry.Harness
-	for _, name := range names {
-		id, err := harness.Parse(strings.TrimSpace(name))
-		if err != nil {
-			return exitCode(fmt.Errorf("history refresh: %w", err), exitCodeUsage)
-		}
-		selected = append(selected, id)
+func (app *application) runHistoryRefresh(ctx context.Context, names []string, sources []history.Source) error {
+	sources, err := historyRefreshSources(names, sources)
+	if err != nil {
+		return err
 	}
-	sources, err := history.DefaultSources()
+	guard, err := lockHistoryRefresh()
+	if errors.Is(err, errHistoryRefreshRunning) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("history refresh: %w", err)
 	}
-	if len(selected) > 0 {
-		sources = slices.DeleteFunc(sources, func(source history.Source) bool { return !slices.Contains(selected, source.Harness) })
-	}
+	defer func() { _ = guard.Close() }()
 	progress := app.newSearchProgress()
 	refreshed := map[history.Source]int{}
 	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: func(p history.Progress) {
@@ -94,73 +98,24 @@ func (app *application) runHistoryRefresh(ctx context.Context, names []string) e
 	return searchFailure(refreshErr)
 }
 
-// runHistoryIndexer keeps the search index warm from the tracker: whenever a
-// session with a native history path goes idle or ends, its history is
-// refreshed. Index contention with a concurrent search is skipped; the next
-// change or search refreshes it.
-func (app *application) runHistoryIndexer(ctx context.Context, store *registry.MemoryStore, quiet bool) error {
-	indexed := map[string]string{}
-	var revision uint64
-	for {
-		state, err := store.WaitForRevision(ctx, revision, registry.Filter{})
+func historyRefreshSources(names []string, sources []history.Source) ([]history.Source, error) {
+	var selected []registry.Harness
+	for _, name := range names {
+		id, err := harness.Parse(strings.TrimSpace(name))
 		if err != nil {
-			return historyWatchError(ctx, err)
+			return nil, exitCode(fmt.Errorf("history refresh: %w", err), exitCodeUsage)
 		}
-		revision = state.Revision
-		var sources []history.Source
-		sources, indexed = unindexedHistorySources(app.cfg.Filter.IgnoreHarnesses, state.Sessions, indexed)
-		if len(sources) > 0 {
-			app.refreshHistorySources(ctx, sources, quiet)
-		}
+		selected = append(selected, id)
 	}
-}
-
-func historyWatchError(ctx context.Context, err error) error {
-	select {
-	case <-ctx.Done():
-		return nil
-	default:
-		return fmt.Errorf("watch sessions for history indexing: %w", err)
-	}
-}
-
-func unindexedHistorySources(ignored []string, sessions []registry.Session, indexed map[string]string) ([]history.Source, map[string]string) {
-	var sources []history.Source
-	current := make(map[string]string, len(sessions))
-	for _, session := range sessions {
-		if !historySettled(session) || slices.Contains(ignored, string(session.Harness)) {
-			continue
-		}
-		stamp := session.UpdatedAt.String()
-		current[session.ID] = stamp
-		if indexed[session.ID] == stamp {
-			continue
-		}
-		source := history.Source{Harness: session.Harness, Path: session.SessionPath}
-		if !slices.Contains(sources, source) {
-			sources = append(sources, source)
+	if sources == nil {
+		var err error
+		sources, err = history.DefaultSources()
+		if err != nil {
+			return nil, fmt.Errorf("history refresh: %w", err)
 		}
 	}
-	return sources, current
-}
-
-func (app *application) refreshHistorySources(ctx context.Context, sources []history.Source, quiet bool) {
-	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: nil}
-	_, err := catalog.Refresh(ctx)
-	if err != nil && ctx.Err() == nil && !quiet && !errors.Is(err, history.ErrIndexUnavailable) && !errors.Is(err, history.ErrIncomplete) {
-		app.warnf("warning: history indexing: %s\n", sanitizeHumanText(err.Error()))
+	if len(selected) > 0 {
+		sources = slices.DeleteFunc(sources, func(source history.Source) bool { return !slices.Contains(selected, source.Harness) })
 	}
-}
-
-// historySettled reports a session whose native history stopped changing for
-// now: its turn finished or the session ended.
-func historySettled(session registry.Session) bool {
-	if session.SessionPath == "" {
-		return false
-	}
-	if session.Presence() == registry.PresenceGone {
-		return true
-	}
-	activity := session.Activity()
-	return activity != nil && *activity == registry.ActivityIdle
+	return sources, nil
 }
