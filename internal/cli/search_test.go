@@ -146,6 +146,34 @@ func appendMalformedRecord(t *testing.T, path string) {
 	}
 }
 
+func TestSearchCLIRejectsRepeatedValueFlagsBeforeConfig(t *testing.T) {
+	for _, flag := range []string{"since", "until", "presence", "branch", "model", "role", "sort", "group-by", "format", "min-messages", "excerpts", "limit"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := []string{"--config", filepath.Join(t.TempDir(), "missing.toml"), "search", "--" + flag, "", "--" + flag, ""}
+			if flag == "min-messages" || flag == "excerpts" || flag == "limit" {
+				args[len(args)-3], args[len(args)-1] = "1", "2"
+			}
+			code := executeCLI(t.Context(), args, strings.NewReader(""), &stdout, &stderr)
+			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "flag --"+flag+" given more than once") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestSearchCLIRepeatableDirectories(t *testing.T) {
+	path := searchCLIFixture(t)
+	var stdout, stderr bytes.Buffer
+	args := []string{"--no-config", "--store", filepath.Join(t.TempDir(), "missing.json"), "search", "--source", "pi=" + path, "--dir", "/work", "--dir", "/elsewhere", "--format", "id"}
+	if err := runTestCLI(t.Context(), args, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "native-id\n" {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestSearchCLIRejectsInvalidOptionsBeforeConfig(t *testing.T) {
 	for _, args := range [][]string{
 		{"search", ""},

@@ -386,12 +386,12 @@ func TestIndexRefreshesSidecarMetadata(t *testing.T) {
 	writeHistory(t, root, "session.messages.json", `{"sessionId":"s","messages":[{"role":"user","content":"needle"}]}`)
 	manifest := writeHistory(t, root, "session.json", `{"session_id":"s","cwd":"/old","metadata":{"title":"old"}}`)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/old"}}, 1)
 	if err := os.WriteFile(manifest, []byte(`{"session_id":"s","cwd":"/new","metadata":{"title":"new"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 0)
-	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/new"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/old"}}, 0)
+	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/new"}}, 1)
 	if result.Matches[0].Conversation.Title != "new" {
 		t.Fatal("stale title")
 	}
@@ -509,11 +509,11 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	manifest := writeHistory(t, root, session+"state.json", `{"id":"native-session","title":"First title","cwd":"/work/example-project"}`)
 	path := writeHistory(t, root, session+"agents/main/wire.jsonl", kimiMirroredWireHistory)
 	catalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 1)
 	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
 		t.Fatalf("indexed mirrored history = %#v", result)
 	}
-	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 1)
 	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
 		t.Fatalf("cached mirrored history = %#v", result)
 	}
@@ -523,15 +523,15 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	if err := os.WriteFile(manifest, []byte(`{"id":"native-session","title":"Updated title","cwd":"/work/other-project"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 0)
-	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 0)
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/other-project"}}, 1)
 	if result.Matches[0].Conversation.Title != "Updated title" {
 		t.Fatalf("updated title = %q", result.Matches[0].Conversation.Title)
 	}
 	if err := os.Remove(manifest); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/other-project"}}, 0)
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	catalog.Sources = []history.Source{}
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 0)

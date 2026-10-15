@@ -118,7 +118,7 @@ func TestListHistoryReadsDefaultSourcesWithoutText(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := aht.ListHistory(t.Context(), aht.HistoryListQuery{Harnesses: []aht.Harness{aht.HarnessPi}, Dir: "/work/app"})
+	result, err := aht.ListHistory(t.Context(), aht.HistoryListQuery{Harnesses: []aht.Harness{aht.HarnessPi}, Dirs: []string{"/work/app"}})
 	if err != nil {
 		t.Fatalf("ListHistory error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestHistoryQueryKeepsTextAndHarnessFields(t *testing.T) {
 		query aht.HistoryQuery
 		want  int
 	}{
-		{"text alone", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessPi, Dir: "/work/app", Registry: nil, IgnoreHarnesses: nil, IgnorePaths: nil}, 1},
+		{"text alone", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessPi, Dirs: []string{"/work/app"}, Registry: nil, IgnoreHarnesses: nil, IgnorePaths: nil}, 1},
 		{"text and terms must all match", aht.HistoryQuery{Text: "needle", Terms: []string{"absent"}}, 0},
 		{"harness narrows sources", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessCodex}, 0},
 	} {

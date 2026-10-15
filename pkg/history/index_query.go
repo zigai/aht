@@ -171,7 +171,7 @@ func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, 
 	phrase := trigramPhrase(fold(m.literal))
 	trigrams := phrase != ""
 	if trigrams {
-		literal, err := index.preferLiteral(ctx, predicate, args, phrase, s.query.Dir != "" || fileID != 0)
+		literal, err := index.preferLiteral(ctx, predicate, args, phrase, len(s.query.Dirs) > 0 || fileID != 0)
 		if err != nil {
 			return "", nil, err
 		}
@@ -234,7 +234,7 @@ func partJoin(trigrams, caseSensitive bool) string {
 // accepts remains the authority for every filter. Child histories are judged
 // by their parent's metadata, so only the source and harness narrow them.
 func (index *historyIndex) selectionSQL(f Filter) (string, []any) {
-	metadata, metadataArgs := directorySQL(f.Dir)
+	metadata, metadataArgs := directorySQL(f.Dirs)
 	if !f.Since.IsZero() {
 		metadata += " AND c.active>=?"
 		metadataArgs = append(metadataArgs, f.Since.Unix())

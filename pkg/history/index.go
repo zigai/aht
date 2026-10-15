@@ -559,14 +559,20 @@ func cleanIndexDir(path string) string {
 	return filepath.Clean(path)
 }
 
-func directorySQL(dir string) (string, []any) {
-	if dir == "" {
+func directorySQL(dirs []string) (string, []any) {
+	if len(dirs) == 0 {
 		return "1", nil
 	}
-	dir = filepath.Clean(dir)
-	prefix := strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator)
-	upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
-	return "(c.cwd=? OR (c.cwd>=? AND c.cwd<?) OR c.root=? OR (c.root>=? AND c.root<?))", []any{dir, prefix, upper, dir, prefix, upper}
+	predicates := make([]string, 0, len(dirs))
+	var args []any
+	for _, dir := range dirs {
+		dir = filepath.Clean(dir)
+		prefix := strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator)
+		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
+		predicates = append(predicates, "(c.cwd=? OR (c.cwd>=? AND c.cwd<?) OR c.root=? OR (c.root>=? AND c.root<?))")
+		args = append(args, dir, prefix, upper, dir, prefix, upper)
+	}
+	return "(" + strings.Join(predicates, " OR ") + ")", args
 }
 
 // sourceSQL restricts both cached file metadata and candidate conversations to

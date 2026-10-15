@@ -113,10 +113,10 @@ func TestIndexMatchesDirectScan(t *testing.T) {
 	}
 	//nolint:gosmopolitan // Exercise literal matching of multi-byte Unicode queries.
 	for _, text := range []string{"needle", "NEEDLE", "istanbul", "你好", "你好世", "%b_", `"quoted"`, "AND OR", "a", "é", "after-token", "\x00after", "not-present"} {
-		for _, dir := range []string{"", "/work/a", "/"} {
+		for _, dirs := range [][]string{nil, {"/work/a"}, {"/"}, {"/work/a", "/work/b"}, {"/work", "/work/a"}} {
 			for _, sensitive := range []bool{false, true} {
 				for _, limit := range []int{0, 1, 2, 3} {
-					q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: limit, Dir: dir, Registry: sessions}
+					q := Query{Terms: []string{text}, CaseSensitive: sensitive, Limit: limit, Dirs: dirs, Registry: sessions}
 					compareIndexedSearch(t, c, q)
 				}
 			}
@@ -221,7 +221,7 @@ func generatedHistoryQuery(property *rapid.T, count int) Query {
 		Excerpts:      rapid.IntRange(0, 5).Draw(property, "excerpts"),
 		Sort:          rapid.SampledFrom([]Sort{SortUpdated, SortCreated, SortMatches, SortMessages}).Draw(property, "sort"),
 		Limit:         rapid.IntRange(0, count+2).Draw(property, "query limit"),
-		Dir:           rapid.SampledFrom([]string{"", "/work", "/work/alpha", "/work/beta", "/other"}).Draw(property, "directory"),
+		Dirs:          rapid.SliceOfN(rapid.SampledFrom([]string{"/work", "/work/alpha", "/work/beta", "/other"}), 0, 4).Draw(property, "directories"),
 		ExcludeDirs:   rapid.SliceOfN(rapid.SampledFrom([]string{"/work/alpha", "/work/beta"}), 0, 1).Draw(property, "excluded directories"),
 		Model:         rapid.SampledFrom([]string{"", "model", "large", "absent"}).Draw(property, "model"),
 		MinMessages:   rapid.IntRange(0, 8).Draw(property, "minimum messages"),
@@ -406,8 +406,8 @@ func BenchmarkHistorySearch(b *testing.B) {
 	}{
 		{"all", Query{Terms: []string{"needle"}}, 1000},
 		{"limited", Query{Terms: []string{"needle"}, Limit: 10}, 10},
-		{"directory", Query{Terms: []string{"needle"}, Dir: "/work/selected"}, 10},
-		{"missing", Query{Terms: []string{"absent-token"}, Dir: "/work/selected"}, 0},
+		{"directory", Query{Terms: []string{"needle"}, Dirs: []string{"/work/selected"}}, 10},
+		{"missing", Query{Terms: []string{"absent-token"}, Dirs: []string{"/work/selected"}}, 0},
 	}
 	for _, query := range queries {
 		for name, run := range map[string]func(context.Context, Query) (Result, error){
@@ -798,7 +798,10 @@ func TestQueriesAndFiltersMatchDirectScan(t *testing.T) {
 		{"model substring", Query{Terms: []string{"token"}, Model: "OPUS"}, []string{"old"}},
 		{"minimum messages", Query{Terms: []string{"t"}, MinMessages: 3}, []string{"new"}},
 		{"excluded directory subtree", Query{Terms: []string{"o"}, ExcludeDirs: []string{"/work/a"}}, []string{"new"}},
-		{"directory subtree", Query{Terms: []string{"o"}, Dir: "/work/a"}, []string{"mid", "old"}},
+		{"directory subtree", Query{Terms: []string{"o"}, Dirs: []string{"/work/a"}}, []string{"mid", "old"}},
+		{"directory union", Query{Terms: []string{"o"}, Dirs: []string{"/work/a", "/work/b"}}, []string{"new", "mid", "old"}},
+		{"nested directories do not duplicate", Query{Terms: []string{"o"}, Dirs: []string{"/work/a", "/work/a/sub"}}, []string{"mid", "old"}},
+		{"directory exclusions still apply", Query{Terms: []string{"o"}, Dirs: []string{"/work", "/work/a"}, ExcludeDirs: []string{"/work/a"}}, []string{"new"}},
 		{"other harness", Query{Terms: []string{"token"}, Harnesses: []registry.Harness{"codex"}}, []string{}},
 		{"sort by matching parts", Query{Terms: []string{"token"}, Sort: SortMatches}, []string{"new", "old"}},
 		{"sort by creation keeps limit order", Query{Terms: []string{"e"}, Sort: SortCreated, Limit: 2}, []string{"new", "mid"}},
@@ -824,6 +827,22 @@ func TestQueriesAndFiltersMatchDirectScan(t *testing.T) {
 	}
 }
 
+func TestRelativeDirectorySpellingsDoNotDuplicateConversations(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	body := fmt.Sprintf(`{"type":"session","id":"session","cwd":%q}`+"\n"+`{"type":"message","message":{"role":"user","content":"needle"}}`+"\n", root)
+	if err := os.WriteFile("session.jsonl", []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	query := Query{Terms: []string{"needle"}, Dirs: []string{".", root, "./"}}
+	result, err := catalog.Search(t.Context(), query)
+	if err != nil || !slices.Equal(sessionIDs(result), []string{"session"}) {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	compareIndexedSearch(t, catalog, query)
+}
+
 func TestListMatchesDirectScan(t *testing.T) {
 	t.Parallel()
 	c := filterFixture(t)
@@ -832,7 +851,7 @@ func TestListMatchesDirectScan(t *testing.T) {
 		want  []string
 	}{
 		{ListQuery{}, []string{"new", "mid", "old"}},
-		{ListQuery{Dir: "/work/a"}, []string{"mid", "old"}},
+		{ListQuery{Dirs: []string{"/work/a"}}, []string{"mid", "old"}},
 		{ListQuery{Sort: SortMessages, Limit: 1}, []string{"new"}},
 		{ListQuery{MinMessages: 3}, []string{"new"}},
 	} {
@@ -863,8 +882,8 @@ func TestListPrefilterKeepsParentOwnership(t *testing.T) {
 		want      []string
 		truncated bool
 	}{
-		{ListQuery{Dir: "/work/a"}, []string{"main"}, false},
-		{ListQuery{Dir: "/work/z"}, []string{"lost", "stray"}, false},
+		{ListQuery{Dirs: []string{"/work/a"}}, []string{"main"}, false},
+		{ListQuery{Dirs: []string{"/work/z"}}, []string{"lost", "stray"}, false},
 		{ListQuery{GitBranch: "topic"}, []string{"lost", "stray"}, false},
 		{ListQuery{GitBranch: "topic' OR 1=1 --"}, nil, false},
 		{ListQuery{MinMessages: 2}, []string{"main"}, false},
@@ -944,7 +963,7 @@ func TestListFoldsNewChildIntoRejectedParent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := catalog.List(t.Context(), ListQuery{Dir: "/work/z"})
+	got, err := catalog.List(t.Context(), ListQuery{Dirs: []string{"/work/z"}})
 	if err != nil || len(got.Matches) != 0 {
 		t.Fatalf("new child list=%#v, %v", got.Matches, err)
 	}
@@ -995,11 +1014,11 @@ func TestChildHistoriesFoldIntoParentConversation(t *testing.T) {
 		{"child matches report the parent once", Query{Terms: []string{"gremlin"}}, []string{"lost", "main", "stray"}},
 		{"terms may match parent and child", Query{Terms: []string{"deploy", "helper"}}, []string{"main"}},
 		{"child exclusion drops the session", Query{Terms: []string{"gremlin"}, Exclude: []string{"secret"}}, []string{"lost", "stray"}},
-		{"directory uses the parent", Query{Terms: []string{"gremlin"}, Dir: "/work/a"}, []string{"main"}},
+		{"directory uses the parent", Query{Terms: []string{"gremlin"}, Dirs: []string{"/work/a"}}, []string{"main"}},
 		{"branch uses the parent", Query{Terms: []string{"gremlin"}, GitBranch: "trunk"}, []string{"main"}},
 		{"since uses the parent", Query{Terms: []string{"gremlin"}, Since: day("2026-06-01")}, []string{"lost", "stray"}},
 		{"minimum messages uses the parent", Query{Terms: []string{"gremlin"}, MinMessages: 2}, []string{"main"}},
-		{"limited search folds children", Query{Terms: []string{"gremlin"}, Limit: 1, Dir: "/work/a"}, []string{"main"}},
+		{"limited search folds children", Query{Terms: []string{"gremlin"}, Limit: 1, Dirs: []string{"/work/a"}}, []string{"main"}},
 	}
 	for _, tt := range tests {
 		got, err := c.Search(t.Context(), tt.query)
@@ -1029,7 +1048,7 @@ func TestChildHistoriesFoldIntoParentConversation(t *testing.T) {
 
 func requireFoldedExcerpts(t *testing.T, c Catalog, root string) {
 	t.Helper()
-	got, err := c.Search(t.Context(), Query{Terms: []string{"the"}, Dir: "/work/a"})
+	got, err := c.Search(t.Context(), Query{Terms: []string{"the"}, Dirs: []string{"/work/a"}})
 	if err != nil || len(got.Matches) != 1 {
 		t.Fatalf("search = %#v, %v", got, err)
 	}

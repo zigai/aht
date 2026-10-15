@@ -81,7 +81,7 @@ type Sort string
 // enrichment; its absence means unknown.
 type Filter struct {
 	Harnesses       []registry.Harness `json:"harnesses,omitempty"`
-	Dir             string             `json:"dir,omitempty"`
+	Dirs            []string           `json:"dirs,omitempty"`
 	ExcludeDirs     []string           `json:"exclude_dirs,omitempty"`
 	Since           time.Time          `json:"since,omitzero"`
 	Until           time.Time          `json:"until,omitzero"`
@@ -706,13 +706,17 @@ func uniqueHarnesses(ids []registry.Harness) []registry.Harness {
 }
 
 func (s *search) absolutePaths() error {
-	if s.query.Dir != "" {
-		path, err := filepath.Abs(s.query.Dir)
+	directories := make([]string, 0, len(s.query.Dirs))
+	for _, dir := range s.query.Dirs {
+		path, err := filepath.Abs(dir)
 		if err != nil {
 			return fmt.Errorf("search directory: %w", err)
 		}
-		s.query.Dir = path
+		if !slices.Contains(directories, path) {
+			directories = append(directories, path)
+		}
 	}
+	s.query.Dirs = directories
 	excluded := make([]string, 0, len(s.query.ExcludeDirs))
 	for _, dir := range s.query.ExcludeDirs {
 		path, err := filepath.Abs(dir)
@@ -831,8 +835,17 @@ func (s *search) accepts(c Conversation) bool {
 }
 
 func (f Filter) acceptsDirs(c Conversation) bool {
-	if f.Dir != "" && !within(c.CWD, f.Dir) && !within(c.ProjectRoot, f.Dir) {
-		return false
+	if len(f.Dirs) > 0 {
+		selected := false
+		for _, dir := range f.Dirs {
+			if within(c.CWD, dir) || within(c.ProjectRoot, dir) {
+				selected = true
+				break
+			}
+		}
+		if !selected {
+			return false
+		}
 	}
 	for _, dir := range f.ExcludeDirs {
 		if within(c.CWD, dir) || within(c.ProjectRoot, dir) {

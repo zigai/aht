@@ -16,6 +16,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/zigai/aht/v2/internal/config"
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
@@ -46,8 +47,16 @@ var (
 	errSearchRole          = errors.New("invalid --role")
 	errSearchTime          = errors.New("invalid time")
 	errSearchOption        = errors.New("invalid option")
+	errRepeatedFlag        = errors.New("given more than once")
 	errSearchStream        = errors.New("--stream reports matches as they are found and cannot be combined with --sort, --limit, or --group-by")
 )
+
+type singleFlagValue struct {
+	pflag.Value
+
+	name string
+	set  bool
+}
 
 type searchOptions struct {
 	query       history.Query
@@ -89,6 +98,17 @@ type searchGroup struct {
 	Messages      int    `json:"messages"`
 }
 
+func (value *singleFlagValue) Set(raw string) error {
+	if value.set {
+		return fmt.Errorf("flag --%s %w", value.name, errRepeatedFlag)
+	}
+	if err := value.Value.Set(raw); err != nil {
+		return fmt.Errorf("set flag --%s: %w", value.name, err)
+	}
+	value.set = true
+	return nil
+}
+
 func (app *application) newSearchCommand() *cobra.Command {
 	var options searchOptions
 	var sources []history.Source
@@ -127,7 +147,7 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.StringSliceVar(&options.harnesses, "harness", nil, "filter by harness `<name,...>` (repeatable)")
 	flags.StringSliceVar(&options.harnesses, "agent", nil, "filter by harness `<name,...>` (alias for --harness)")
 	_ = flags.MarkHidden("agent")
-	flags.StringVar(&options.query.Dir, "dir", "", "match recorded working directories or workspace roots under `<path>`")
+	flags.StringArrayVar(&options.query.Dirs, "dir", nil, "match recorded working directories or workspace roots under `<path>` (repeatable)")
 	flags.StringArrayVar(&options.query.ExcludeDirs, "exclude-dir", nil, "skip conversations under `<path>` (repeatable)")
 	flags.StringVar(&options.since, "since", "", "keep conversations active since `<when>`: a duration such as 12h or 7d, a date, or RFC3339")
 	flags.StringVar(&options.until, "until", "", "keep conversations started before `<when>`: a duration, a date, or RFC3339")
@@ -149,6 +169,10 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.StringVar(&options.format, "format", "", "print one `<id|path|resume>` per conversation")
 	flags.BoolVarP(&options.verbose, "verbose", "v", false, "show detailed file paths and all diagnostic warnings")
 	flags.StringArrayVar(&options.sources, "source", nil, "search only this native history `<agent=path>` (repeatable)")
+	for _, name := range []string{"since", "until", "presence", "branch", "model", "role", "sort", "group-by", "format", "min-messages", "excerpts", "limit"} {
+		flag := flags.Lookup(name)
+		flag.Value = &singleFlagValue{Value: flag.Value, name: name, set: false}
+	}
 	return command
 }
 
