@@ -26,16 +26,26 @@ func TestBytePrefilterJSONSpellings(t *testing.T) {
 		{"a/b/c", `{"text":"a/b\/c"}`, true},
 		{"&<>", `{"text":"&<>"}`, true},
 		{"needle", `{"text":"\u006eeedle"}`, true},
+		{"needle", `{"text":"n\u0065edle"}`, true},
+		{"needle", `{"text":"other\u001b"}`, false},
+		{"needle", `{"text":"\ud800\u006eeedle"}`, true},
+		{"needle", `{"text":"\udc00\u006eeedle"}`, true},
+		{"ss", `{"text":"\u00df"}`, true},
+		{"ffi", `{"text":"\ufb03"}`, true},
+		{"istanbul", `{"text":"\u0130STANBUL"}`, true},
+		{"éneedle", `{"text":"\u00e9need\u006ce"}`, true},
+		{"éneedle", `{"text":"other\u00e9"}`, false},
+		{"missing", `{"text":"\u00e9\u2022\ud83d\ude00"}`, false},
 		{"friction log", `{"text":"Friction LOG"}`, true},
-		{"STRASSE", `{"text":"Straße"}`, true},
-		{"ffi", `{"text":"ﬃ"}`, true},
-		{"istanbul", `{"text":"İSTANBUL"}`, true},
-		{"σ", `{"text":"ς"}`, true},
-		{"é", `{"text":"\u00e9"}`, true},
-		{"界", `{"text":"\u754c"}`, true},
-		{"😀", `{"text":"\ud83d\ude00"}`, true},
+		{"STRASSE", "{\"text\":\"Stra\u00dfe\"}", true},
+		{"ffi", "{\"text\":\"\ufb03\"}", true},
+		{"istanbul", "{\"text\":\"\u0130STANBUL\"}", true},
+		{"\u03c3", "{\"text\":\"\u03c2\"}", true},
+		{"\u00e9", `{"text":"\u00e9"}`, true},
+		{"\u754c", `{"text":"\u754c"}`, true},
+		{"\U0001f600", `{"text":"\ud83d\ude00"}`, true},
 		{"missing", `{"text":"ordinary ascii"}`, false},
-		{"missing", `{"text":"Straße"}`, false},
+		{"missing", "{\"text\":\"Stra\u00dfe\"}", false},
 	} {
 		t.Run(test.term+test.raw, func(t *testing.T) {
 			terms, err := compileMatchers([]string{test.term}, Query{})
@@ -71,7 +81,7 @@ func TestBytePrefilterChunkBoundariesAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := filter.matches(ctx, strings.NewReader("first needle")); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled scan: %v", err)
+		t.Fatalf("canceled scan: %v", err)
 	}
 	if _, err := filter.matches(t.Context(), failingPrefilterReader{}); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("failed read: %v", err)
