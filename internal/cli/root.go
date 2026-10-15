@@ -28,6 +28,8 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/pathmatch"
+	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/service"
 
 	"github.com/zigai/aht/v2/pkg/client"
 
@@ -63,7 +65,7 @@ var (
 	errMissingReportHarness      = errors.New("missing harness")
 	errConflictingReportStdin    = errors.New("--raw-stdin and --raw-stdin-defaults-only cannot be used together")
 	errMissingReportIdentity     = errors.New("missing report identity or transition")
-	errDoctorFailed              = errors.New("doctor found errors")
+	errSilentDoctorFailure       = errors.New("")
 	errInvalidObserveInterval    = errors.New("interval must be positive")
 	errInvalidObserveGracePeriod = errors.New("grace period must be nonnegative")
 	errGonePresenceActivity      = errors.New("gone presence cannot include activity")
@@ -242,8 +244,10 @@ func (app *application) newRootCommand() *cobra.Command {
 		app.newHookCommand(),
 		app.newReportCommand(),
 	)
-	root.InitDefaultHelpCmd()
+	// Cobra appends its generated commands; doctor sits between completion and help.
 	root.InitDefaultCompletionCmd()
+	root.AddCommand(app.newDoctorCommand())
+	root.InitDefaultHelpCmd()
 	app.configureCommandTree(root)
 	return root
 }
@@ -266,7 +270,6 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newIntegrationsCommand(),
 		app.newTrackerCommand(),
 		app.newStateCommand(),
-		app.newDoctorCommand(),
 		app.newCapabilitiesCommand(),
 		app.newLocationsCommand(),
 		app.newManageConfigCommand(),
@@ -309,21 +312,46 @@ func (app *application) handleError(err error) int {
 		if errors.Is(err, context.Canceled) || code == exitCodeInterrupted {
 			return exitCodeInterrupted
 		}
-		if err.Error() != "" {
-			_, _ = fmt.Fprintln(app.stderr, err.Error())
-		}
+		app.printError(err)
 		return code
 	}
 	if errors.Is(err, context.Canceled) {
 		return exitCodeInterrupted
 	}
-	if err.Error() != "" {
-		_, _ = fmt.Fprintln(app.stderr, err.Error())
-	}
+	app.printError(err)
 	if isUsageError(err) {
 		return exitCodeUsage
 	}
 	return exitCodeGeneral
+}
+
+func (app *application) printError(err error) {
+	if err.Error() == "" {
+		return
+	}
+	_, _ = fmt.Fprintln(app.stderr, err.Error())
+	if app.environmentError(err) {
+		_, _ = fmt.Fprintln(app.stderr, "Run 'aht doctor' for details.")
+	}
+}
+
+func (app *application) environmentError(err error) bool {
+	if errors.Is(err, config.ErrConfigNotFound) {
+		return false
+	}
+	if app.cfgErr != nil && errors.Is(err, app.cfgErr) {
+		return true
+	}
+	if _, ok := errors.AsType[*registry.UnsupportedSchemaError](err); ok {
+		return true
+	}
+	if _, ok := errors.AsType[*processinfo.UnsupportedError](err); ok {
+		return true
+	}
+	if _, ok := errors.AsType[*processinfo.PermissionError](err); ok {
+		return true
+	}
+	return errors.Is(err, registry.ErrCorruptStore) || errors.Is(err, service.ErrUnsupported)
 }
 
 func isUsageError(err error) bool {

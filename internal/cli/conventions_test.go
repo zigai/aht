@@ -23,7 +23,7 @@ func TestCommandsRejectUnexpectedArgumentsBeforeSideEffects(t *testing.T) {
 	for _, args := range [][]string{
 		{"list"},
 		{"watch"},
-		{"manage", "doctor"},
+		{"doctor"},
 		{"manage", "state", "path"},
 		{"manage", "state", "reset", "--force"},
 		{"manage", "state", "clean", "--all", "--yes"},

@@ -74,9 +74,11 @@ const (
 	HealthStatusMissing  HealthStatus = manage.HealthStatusMissing
 	HealthStatusCorrupt  HealthStatus = manage.HealthStatusCorrupt
 
-	DoctorStatusOK      DoctorStatus = manage.DoctorStatusOK
-	DoctorStatusWarning DoctorStatus = manage.DoctorStatusWarning
-	DoctorStatusError   DoctorStatus = manage.DoctorStatusError
+	DoctorStatusOK   DoctorStatus = manage.DoctorStatusOK
+	DoctorStatusInfo DoctorStatus = manage.DoctorStatusInfo
+	DoctorStatusWarn DoctorStatus = manage.DoctorStatusWarn
+	DoctorStatusFail DoctorStatus = manage.DoctorStatusFail
+	DoctorStatusSkip DoctorStatus = manage.DoctorStatusSkip
 )
 
 var (
@@ -172,6 +174,9 @@ var (
 
 	// ErrUnsupportedTracker means background tracking is unavailable on this platform.
 	ErrUnsupportedTracker = manage.ErrUnsupportedTracker
+
+	// ErrNoRepair means a doctor check has no automatic repair.
+	ErrNoRepair = manage.ErrNoRepair
 )
 
 type (
@@ -279,13 +284,19 @@ type (
 	// HealthStatus indicates the operational state of tracker reconciliation.
 	HealthStatus = manage.HealthStatus
 
-	// DoctorStatus represents the severity level of a doctor diagnostic check.
+	// DoctorStatus is the outcome of one doctor check.
 	DoctorStatus = manage.DoctorStatus
 
-	// DoctorCheck represents one diagnostic check evaluated by Doctor.
+	// DoctorCheck is one diagnostic row evaluated by Doctor.
 	DoctorCheck = manage.DoctorCheck
 
-	// DoctorResult represents the complete diagnostic status of the AHT installation.
+	// DoctorFix says how to resolve a warn or fail doctor check.
+	DoctorFix = manage.DoctorFix
+
+	// DoctorSummary counts doctor checks by status.
+	DoctorSummary = manage.DoctorSummary
+
+	// DoctorResult is the complete diagnostic report, in check order.
 	DoctorResult = manage.DoctorResult
 
 	// DoctorOptions controls what checks and details Doctor evaluates.

@@ -17,6 +17,29 @@ func (s *FileStore) load(ctx context.Context) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
+	return s.loadLocked(ctx, lock)
+}
+
+// Verify reads and validates the snapshot and journal as List does, without
+// creating the state directory or the lock file, and returns the number of
+// stored sessions. It takes the store lock only when the lock file exists;
+// writers create that file before their first write.
+func (s *FileStore) Verify(ctx context.Context) (int, error) {
+	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	lock, err := openExistingStoreLock(ctx, s.path+".lock")
+	if err != nil {
+		return 0, err
+	}
+	snap, err := s.loadLocked(ctx, lock)
+	if err != nil {
+		return 0, err
+	}
+	return len(snap.Sessions), nil
+}
+
+func (s *FileStore) loadLocked(ctx context.Context, lock *storeLock) (snapshot, error) {
 	snap, err := s.loadSnapshot()
 	if err != nil {
 		return snapshot{}, closeStoreLock(lock, err)

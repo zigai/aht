@@ -15,6 +15,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -288,16 +289,16 @@ interval = "5s"
 		t.Fatalf("expected toml output to contain sort = created: %q", stdout.String())
 	}
 
-	// 5. aht manage doctor with valid config
+	// 5. aht doctor with valid config
 	stdout.Reset()
-	_ = runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "manage", "doctor"}, &stdout, &bytes.Buffer{})
-	var docRes doctorResult
+	_ = runTestCLI(ctx, []string{"--config", configPath, "--store", storePath, "--json", "doctor"}, &stdout, &bytes.Buffer{})
+	var docRes doctorReport
 	if err := json.Unmarshal(stdout.Bytes(), &docRes); err != nil {
 		t.Fatalf("unmarshal doctor result: %v", err)
 	}
-	var configCheck *doctorCheck
+	var configCheck *manage.DoctorCheck
 	for i := range docRes.Checks {
-		if docRes.Checks[i].Name == "config.file" {
+		if docRes.Checks[i].ID == "config.file" {
 			configCheck = &docRes.Checks[i]
 			break
 		}
@@ -305,11 +306,11 @@ interval = "5s"
 	if configCheck == nil {
 		t.Fatal("doctor result missing config.file check")
 	}
-	if configCheck.Status != doctorOK {
+	if configCheck.Status != manage.DoctorStatusOK {
 		t.Fatalf("config.file status = %s, want ok; message: %s", configCheck.Status, configCheck.Message)
 	}
-	if !strings.Contains(configCheck.Message, "config file is valid") {
-		t.Fatalf("config.file message = %q, want 'config file is valid'", configCheck.Message)
+	if !strings.HasSuffix(configCheck.Message, " is valid") {
+		t.Fatalf("config.file message = %q, want '<path> is valid'", configCheck.Message)
 	}
 }
 
@@ -329,15 +330,15 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 	t.Setenv(config.ConfigEnv, filepath.Join(readOnlyDir, "does-not-exist.toml"))
 
 	var stdout bytes.Buffer
-	_ = runTestCLI(context.Background(), []string{"--store", storePath, "--json", "manage", "doctor"}, &stdout, &bytes.Buffer{})
+	_ = runTestCLI(context.Background(), []string{"--store", storePath, "--json", "doctor"}, &stdout, &bytes.Buffer{})
 
-	var docRes doctorResult
+	var docRes doctorReport
 	if err := json.Unmarshal(stdout.Bytes(), &docRes); err != nil {
 		t.Fatalf("unmarshal doctor result: %v", err)
 	}
-	var configCheck *doctorCheck
+	var configCheck *manage.DoctorCheck
 	for i := range docRes.Checks {
-		if docRes.Checks[i].Name == "config.file" {
+		if docRes.Checks[i].ID == "config.file" {
 			configCheck = &docRes.Checks[i]
 			break
 		}
@@ -345,11 +346,11 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 	if configCheck == nil {
 		t.Fatal("doctor result missing config.file check")
 	}
-	if configCheck.Status != doctorOK {
+	if configCheck.Status != manage.DoctorStatusOK {
 		t.Fatalf("config.file status = %s, want ok", configCheck.Status)
 	}
-	if !strings.Contains(configCheck.Message, "no config file present") {
-		t.Fatalf("config.file message = %q, want no config file present", configCheck.Message)
+	if !strings.Contains(configCheck.Message, "No config file") {
+		t.Fatalf("config.file message = %q, want No config file", configCheck.Message)
 	}
 }
 

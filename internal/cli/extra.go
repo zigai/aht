@@ -19,6 +19,7 @@ import (
 
 const (
 	observeDefaultInterval = 300 * time.Millisecond
+	serviceDefaultInterval = 300 * time.Millisecond
 	realtimeComponentCount = 4
 )
 

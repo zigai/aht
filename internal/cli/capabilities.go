@@ -114,3 +114,10 @@ func (app *application) writeSingleHarnessCapabilities(c harness.Capabilities) e
 		{label: "Screen fallback", value: yesNo(c.ScreenFallback)},
 	})
 }
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}

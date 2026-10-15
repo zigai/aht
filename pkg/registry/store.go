@@ -179,14 +179,14 @@ func (s *FileStore) loadSnapshot() (snapshot, error) {
 		SchemaVersion int `json:"schema_version"`
 	}
 	if err := json.Unmarshal(data, &header); err != nil {
-		return snapshot{}, fmt.Errorf("decoding snapshot version: %w", err)
+		return snapshot{}, fmt.Errorf("%w: decoding snapshot version: %w", ErrCorruptStore, err)
 	}
 	if header.SchemaVersion != storeSchemaVersion {
 		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: header.SchemaVersion}
 	}
 	var snap snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
-		return snapshot{}, fmt.Errorf("parsing store %s: %w", s.path, err)
+		return snapshot{}, fmt.Errorf("%w: parsing store %s: %w", ErrCorruptStore, s.path, err)
 	}
 	if snap.SchemaVersion != storeSchemaVersion {
 		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: snap.SchemaVersion}

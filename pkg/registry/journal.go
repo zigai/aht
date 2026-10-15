@@ -192,7 +192,7 @@ func readJournal(path string) ([]journalEntry, error) {
 		}
 		var entry journalEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
-			return nil, fmt.Errorf("decoding journal: %w", err)
+			return nil, fmt.Errorf("%w: decoding journal: %w", ErrCorruptStore, err)
 		}
 		entries = append(entries, entry)
 	}

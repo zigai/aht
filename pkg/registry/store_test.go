@@ -364,6 +364,55 @@ func TestStoreRejectsCorruptPersistedSessionState(t *testing.T) {
 	}
 }
 
+func TestStoreVerifyCreatesNoFiles(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	missing := NewJournal(filepath.Join(root, "missing", "sessions.json"), fixtureRules{})
+	if sessions, err := missing.Verify(t.Context()); err != nil || sessions != 0 {
+		t.Fatalf("Verify() on a missing directory = %d, %v", sessions, err)
+	}
+	empty := NewJournal(filepath.Join(root, "sessions.json"), fixtureRules{})
+	if sessions, err := empty.Verify(t.Context()); err != nil || sessions != 0 {
+		t.Fatalf("Verify() on an empty directory = %d, %v", sessions, err)
+	}
+	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+		t.Fatalf("Verify() created %v (%v)", entries, err)
+	}
+}
+
+func TestStoreVerifyCountsListedSessions(t *testing.T) {
+	t.Parallel()
+
+	store := NewJournal(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
+	for _, id := range []string{"one", "two"} {
+		if _, err := store.Observe(t.Context(), Observation{Harness: HarnessCodex, At: time.Now().UTC(), Subject: ObservationIdentity{SessionID: id}, Evidence: &Report{Event: "start"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := store.List(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessions, err := store.Verify(t.Context()); err != nil || sessions != len(listed) {
+		t.Fatalf("Verify() = %d, %v; List() returned %d sessions", sessions, err, len(listed))
+	}
+}
+
+func TestStoreVerifyRejectsCorruptFiles(t *testing.T) {
+	t.Parallel()
+
+	for name, content := range map[string]string{"sessions.json": "garbage", "sessions.json.journal.jsonl": "garbage\n"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewJournal(filepath.Join(dir, "sessions.json"), fixtureRules{}).Verify(t.Context()); !errors.Is(err, ErrCorruptStore) {
+			t.Fatalf("Verify() with corrupt %s error = %v, want %v", name, err, ErrCorruptStore)
+		}
+	}
+}
+
 func TestStoreRejectsInvalidMutationBeforePersisting(t *testing.T) {
 	t.Parallel()
 
