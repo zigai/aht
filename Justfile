@@ -3,6 +3,8 @@ golangci_lint := env("AHT_GOLANGCI_LINT", "go run github.com/golangci/golangci-l
 actionlint_version := "v1.7.12"
 actionlint := "go run github.com/rhysd/actionlint/cmd/actionlint@" + actionlint_version
 goreleaser_version := "v2.18.2"
+apidiff_version := "v0.0.0-20260908205506-85c1c2202aba"
+apidiff := "go run golang.org/x/exp/cmd/apidiff@" + apidiff_version
 
 _:
     @just help
@@ -78,6 +80,18 @@ format:
 # Check code for lint issues
 lint:
     {{ golangci_lint }} run
+
+# Print incompatible public API changes from a base revision to the working tree
+apidiff base="origin/master":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch=$(mktemp -d "${TMPDIR:-$HOME/.cache}/aht-apidiff.XXXXXX")
+    trap 'rm -rf "$scratch"' EXIT
+    mkdir "$scratch/base"
+    git archive '{{ base }}' | tar -x -C "$scratch/base"
+    (cd "$scratch/base" && {{ apidiff }} -m -w "$scratch/base.api" "$(go list -m)")
+    {{ apidiff }} -m -w "$scratch/current.api" "$(go list -m)"
+    {{ apidiff }} -m -incompatible "$scratch/base.api" "$scratch/current.api"
 
 # Scan reachable dependencies for known vulnerabilities
 vuln:
