@@ -2,4 +2,5 @@
 /aht.exe
 dist/
 coverage.out
+.cache/
 .DS_Store
