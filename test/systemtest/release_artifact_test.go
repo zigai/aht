@@ -82,6 +82,7 @@ type releaseIntegrationResult struct {
 	Harness string `json:"harness"`
 	Path    string `json:"path"`
 	Changed bool   `json:"changed"`
+	Message string `json:"message"`
 	Error   string `json:"error"`
 }
 
@@ -534,34 +535,31 @@ func requireReleaseIntegrationsBeforeUpgrade(t *testing.T, binary string, enviro
 		old, installed := oldCatalog[id]
 		preview := releaseIntegrationResults(t, binary, environment, "install", id, "--binary", binary, "--dry-run")
 		requireReleaseIntegrationResults(t, preview, map[string]int{id: newCatalog[id]}, false)
-		if !installed {
-			want := "missing"
-			if !preview[id].Changed {
-				want = "current"
-			}
-			if status.Status != want {
-				t.Fatalf("new integration %s before install = %s, want %s", id, status.Status, want)
-			}
-			continue
-		}
-		if oldInstall[id].Path != preview[id].Path {
-			if status.Status != "missing" {
-				t.Fatalf("replacement integration %s at %q before install = %s, want missing; previous path=%q",
-					id, preview[id].Path, status.Status, oldInstall[id].Path)
-			}
-			continue
-		}
-		continuing[id] = newCatalog[id]
-		want := "current"
-		if preview[id].Changed || old != newCatalog[id] {
-			want = "stale"
-		}
+		want, upgrades := releaseStatusBeforeUpgrade(preview[id], installed, oldInstall[id].Path, old, newCatalog[id])
 		if status.Status != want {
-			t.Fatalf("installed integration %s before upgrade = %s, want %s (versions %d -> %d, artifact changes=%t)",
-				id, status.Status, want, old, newCatalog[id], preview[id].Changed)
+			t.Fatalf("integration %s before upgrade = %s, want %s (installed=%t, path %q -> %q, versions %d -> %d, artifact changes=%t)",
+				id, status.Status, want, installed, oldInstall[id].Path, preview[id].Path, old, newCatalog[id], preview[id].Changed)
+		}
+		if upgrades {
+			continuing[id] = newCatalog[id]
 		}
 	}
 	return continuing
+}
+
+func releaseStatusBeforeUpgrade(preview releaseIntegrationResult, installed bool, oldPath string, oldVersion int, newVersion int) (string, bool) {
+	switch {
+	case !installed && preview.Changed:
+		return "missing", false
+	case !installed, preview.Message == "no setup required":
+		return "current", false
+	case oldPath != preview.Path:
+		return "missing", false
+	case preview.Changed || oldVersion != newVersion:
+		return "stale", true
+	default:
+		return "current", true
+	}
 }
 
 func requireRetiredReleaseIntegrationsCurrent(t *testing.T, previous string, binary string, environment []string, oldCatalog map[string]int, continuing map[string]int) {
