@@ -6,4 +6,4 @@ lefthook: go run github.com/evilmartians/lefthook/v2@v2.1.14
 pre-push:
   jobs:
     - name: check
-      run: just check
+      run: env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY just check
