@@ -97,7 +97,6 @@ func TestLoadExplicitMissingFile(t *testing.T) {
 	}
 }
 
-//nolint:cyclop,gocognit // test verifies all fields of full configuration
 func TestLoadValidFullTOML(t *testing.T) {
 	isolateConfigEnv(t)
 	content := `
@@ -382,7 +381,6 @@ func TestDefaultConfigTemplateMatchesDefaults(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // integration test verifying EnsureConfigFile lifecycle steps
 func TestEnsureConfigFile(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "subdir", "config.toml")

@@ -287,6 +287,9 @@ linters:
         text: "string `Stop` has .* occurrences"
 
       - path: "_test\\.go"
+        linters: [cyclop, gocognit]
+
+      - path: "_test\\.go"
         linters: [goconst]
 
       - path: "_test\\.go"

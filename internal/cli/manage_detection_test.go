@@ -65,7 +65,6 @@ func TestManageDetectionTestHumanOutput(t *testing.T) {
 	})
 }
 
-//nolint:cyclop,gocognit // test scenarios cover JSON inspection shape and screen separation
 func TestManageDetectionTestJSONOutput(t *testing.T) {
 	t.Parallel()
 
@@ -249,7 +248,6 @@ func TestManageDetectionTestValidationErrors(t *testing.T) {
 	}
 }
 
-//nolint:cyclop,gocognit // test scenarios verify each explicit vs ambient error case
 func TestManageDetectionTestExplicitVsAmbientErrors(t *testing.T) {
 	t.Parallel()
 

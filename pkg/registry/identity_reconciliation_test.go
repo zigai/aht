@@ -26,7 +26,6 @@ func TestIdentityReconciliationPrefersSessionPath(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // reconciliation assertions cover identity, process, location, and row compaction
 func TestNativeProcessIdentityReconcilesWithLiveTmuxSession(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})

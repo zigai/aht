@@ -15,7 +15,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:cyclop // Definition contract checks each native capability.
 func TestDefinition(t *testing.T) {
 	definition := New().Definition()
 	if definition.ID != registry.Harness("prime-agent") ||
@@ -109,7 +108,6 @@ func TestObservableProcessRequiresPrimeWorkerExecutable(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // Catalog fixture checks the complete identity and metadata mapping.
 func TestParseCatalog(t *testing.T) {
 	data := []byte(`{"sessions":[
 		{"id":"active-route","activeSessionId":"active-route","sessionId":"durable","sessionFile":"/sessions/durable.jsonl","sessionName":"Native name","firstMessage":"First prompt","cwd":"/work/project","activity":"working","lifecycle":"live","runtimeKind":"subagent","workerPid":42,"rlmDepth":1,"parentSessionId":"parent","rlmChildId":"child"},

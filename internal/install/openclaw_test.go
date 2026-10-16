@@ -107,7 +107,7 @@ func TestOpenClawInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t *testing.T) { //nolint:cyclop // One shape test validates the complete generated native plugin contract.
+func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 	adapter, ok := catalog.Find(registry.Harness("openclaw"))
 	if !ok {

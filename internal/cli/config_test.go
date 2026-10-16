@@ -19,7 +19,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:cyclop // integration test verifying full flag precedence matrix
 func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
@@ -104,7 +103,6 @@ sort_desc = true
 	}
 }
 
-//nolint:cyclop // integration test verifying session filtering and unhiding
 func TestCLIConfigFiltering(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
@@ -228,7 +226,6 @@ tombstone_ttl = "24h"
 	}
 }
 
-//nolint:cyclop // integration test verifying doctor checks and config commands
 func TestCLIConfigDoctorAndManageConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
@@ -445,7 +442,6 @@ func TestCLIExplicitConfigNonCreation(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // integration test verifying manage config init lifecycle
 func TestCLIManageConfigInit(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "init_test", "config.toml")
@@ -531,7 +527,6 @@ func TestTrackerConfigAppliesTombstoneTTL(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // integration test verifying manage config set lifecycle
 func TestCLIManageConfigSet(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "config.toml")
@@ -677,7 +672,6 @@ func TestCLIManageConfigShowProvenance(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // integration test verifying manage config get lifecycle
 func TestCLIManageConfigGet(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.toml")

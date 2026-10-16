@@ -431,7 +431,6 @@ func TestDecisionJSONNeverContainsScreenContents(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // assertions cover each integration validity and freshness reason
 func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
@@ -511,7 +510,6 @@ func ompSession(observedAt time.Time) registry.Session {
 	}
 }
 
-//nolint:cyclop,gocognit // comprehensive scenario boundaries for inspection
 func TestInspectDetection(t *testing.T) {
 	t.Parallel()
 
@@ -697,7 +695,6 @@ any=["HEADER_MARKER"]
 	})
 }
 
-//nolint:cyclop,gocognit // subtest table cases verify each input boundary
 func TestReadScreenInputBounds(t *testing.T) {
 	t.Parallel()
 
@@ -777,7 +774,6 @@ func TestReadScreenInputBounds(t *testing.T) {
 	})
 }
 
-//nolint:cyclop,gocognit // subtest scenarios verify each explicit vs ambient error case
 func TestLoadExplicitManifest(t *testing.T) {
 	t.Parallel()
 

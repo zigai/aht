@@ -15,7 +15,6 @@ import (
 
 var errTestManifestWrite = errors.New("manifest write failed")
 
-//nolint:gocognit,cyclop // one uniform round trip verifies every managed artifact shape
 func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 	installFakeOpenClawCLI(t)
 	installFakeHermesCLI(t)

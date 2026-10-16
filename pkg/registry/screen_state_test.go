@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-//nolint:cyclop // assertions cover independent hook and screen authority invariants
 func TestScreenStateIsAuthoritativeUnderScreenPolicy(t *testing.T) {
 	t.Parallel()
 	for _, harness := range []Harness{HarnessCodex, HarnessClaude} {
@@ -99,7 +98,6 @@ func TestDelayedNativeActivityCannotOverwriteNewerScreenDecision(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // regression verifies replacement and stale cross-source race invariants
 func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 	t.Parallel()
 	store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})

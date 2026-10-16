@@ -105,7 +105,6 @@ func TestHermesInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // assertions cover each documented hook and privacy boundary independently
 func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.T) {
 	t.Setenv("HERMES_HOME", t.TempDir())
 	adapter, ok := catalog.Find(registry.Harness("hermes"))

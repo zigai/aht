@@ -29,7 +29,6 @@ func TestIntegrationsInstallRejectsTargetBinaryWithoutShim(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // the round trip intentionally verifies each observable state in order
 func TestIntegrationsInstallStatusRemoveRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

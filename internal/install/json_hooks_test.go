@@ -295,7 +295,6 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // one install assertion verifies every required Codex hook shape
 func TestInstallCodexMergesHooks(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	installFakeCodexCLI(t)

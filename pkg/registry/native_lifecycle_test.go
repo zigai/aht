@@ -10,7 +10,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:cyclop // switch assertions cover both historical rows and subsequent process matching
 func TestNativeSessionSwitchOnSameProcessPreservesEndedHistory(t *testing.T) {
 	t.Parallel()
 
@@ -181,7 +180,6 @@ func TestDelayedProcessPresenceDoesNotReviveNewerNativeGoneState(t *testing.T) {
 	}
 }
 
-//nolint:gocognit,cyclop // multi-step incarnation lifecycle validates sequence, timing, and boundary transitions
 func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testing.T) {
 	t.Parallel()
 	for _, observerFirst := range []bool{false, true} {
@@ -247,7 +245,6 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 	}
 }
 
-//nolint:gocognit,cyclop // retirement regression validates process termination, timeline, and resurrection rejection
 func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"same_process", "missing_process", "incomplete_process", "pre_end", "terminal"} {
@@ -298,7 +295,6 @@ func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // generation test covers terminal, ignored, resume, and process transitions
 func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})

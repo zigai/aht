@@ -222,7 +222,6 @@ func TestActivityDecisionFollowsActivityAuthority(t *testing.T) {
 	}
 }
 
-//nolint:cyclop,gocognit // The regression checks both sighting identities and native resume from one tombstone.
 func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)

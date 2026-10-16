@@ -313,7 +313,6 @@ func assertCatalogActivityReport(t *testing.T, report *registry.Report, ok bool)
 	}
 }
 
-//nolint:cyclop // regression verifies activity, association, and metadata across consecutive catalog snapshots
 func TestObserverAppliesNativeCatalogActivityEachCycle(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})

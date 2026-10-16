@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-//nolint:cyclop // One state-transition scenario verifies every revision invariant.
 func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	t.Parallel()
 

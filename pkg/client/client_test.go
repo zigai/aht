@@ -98,7 +98,6 @@ func TestClientDurableOnlyBypassesBroker(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // Verifies broker startup, streaming updates, and cancellation in one test.
 func TestClientWatchYieldsRealtimeRevisions(t *testing.T) {
 	t.Parallel()
 

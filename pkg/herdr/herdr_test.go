@@ -28,7 +28,6 @@ func TestCurrentWithEnvUsesManagedPaneIdentity(t *testing.T) {
 	}
 }
 
-//nolint:cyclop // fixture runner validates the exact native command sequence and response mapping
 func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 	t.Parallel()
 	type call struct {

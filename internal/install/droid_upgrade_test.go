@@ -46,7 +46,7 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 	}
 }
 
-//nolint:gocognit,cyclop,errcheck,forcetypeassert // test validates notification group map structure
+//nolint:errcheck,forcetypeassert // test validates notification group map structure
 func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	options := Options{Harness: registry.Harness("droid"), Binary: testInstallBinary}

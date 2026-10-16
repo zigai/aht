@@ -492,7 +492,6 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 	}
 }
 
-//nolint:gocognit,cyclop // A parity step intentionally checks every store operation and its resulting state.
 func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *core.Coverage) {
 	t.Helper()
 
@@ -593,7 +592,6 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 	}
 }
 
-//nolint:gocognit,cyclop // The fixture checks both stores and both replacement sighting outcomes after every observation.
 func exerciseReplacedSightingPair(t *testing.T, fileStore, memoryStore Store, base time.Time, seed uint64, step int, coverage *core.Coverage) {
 	t.Helper()
 	pid := 10000 + step
@@ -704,7 +702,6 @@ func assertReopenedFileStore(t *testing.T, filePath string, clock time.Time, ste
 	assertEquivalent(t, fmt.Sprintf("step %d reopened sessions", step), reopenedSessions, memorySessions)
 }
 
-//nolint:cyclop // property generator exercises diverse observation variants
 func generatedObservation(generator *rand.Rand, sequences map[string]uint64, base time.Time, step int) Observation {
 	sessionID := fmt.Sprintf("session-%d", generator.IntN(8))
 	activity := []Activity{ActivityIdle, ActivityRunning, ActivityWaiting}[generator.IntN(3)]

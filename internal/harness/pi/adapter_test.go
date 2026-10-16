@@ -14,7 +14,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:gocognit,cyclop // test drives multi-event sequence ordering and timeline reconciliation
 func TestShutdownSurvivesEqualObservationTimestamps(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

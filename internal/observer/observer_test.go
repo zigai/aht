@@ -155,7 +155,6 @@ func assertPartialSuccessCounters(t *testing.T, result Result, wantPresent int) 
 	}
 }
 
-//nolint:cyclop // lifecycle test covers the two-snapshot disappearance contract
 func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")

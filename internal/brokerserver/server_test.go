@@ -95,7 +95,6 @@ func (p *testPipeListener) Addr() net.Addr {
 	return &net.UnixAddr{Name: "pipe", Net: "unix"}
 }
 
-//nolint:cyclop // One end-to-end scenario verifies transport, permissions, and streaming.
 func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 	t.Parallel()
 
