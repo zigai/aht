@@ -1,3 +1,5 @@
 - Resolve github.com/zigai/strata to v0.5.0 without a local replacement.
 - Verify all downloaded module checksums with go mod verify.
 - Confirm go mod tidy -diff reports no dependency changes.
+
+- Pass the installed pre-push just check workflow, covering lint, unit tests, race tests, disposable integration tests, compatibility checks, formatting, tidy, builds, and workflow validation.
