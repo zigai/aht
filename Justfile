@@ -36,7 +36,7 @@ integration:
         echo "Error: tmux is required to run integration tests. Install tmux and retry." >&2
         exit 1
     fi
-    go test -count=1 -v -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
+    go test -count=1 -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
 
 # Test CI tooling, release detection, state transitions, and workflow wiring
 compatibility-tests:
