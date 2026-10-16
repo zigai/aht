@@ -1,0 +1,2 @@
+- The release integration-upgrade check, run locally against the published v2.9.0 binary and a goreleaser 2.18.2 snapshot build, passes; without this change it fails with missing=[prime-agent] as in CI
+- just lint passes
