@@ -20,6 +20,7 @@ extension, hook, or plugin documentation. Before adding or changing a harness:
   instead of duplicating it.
 - Add tests for the installed hook/plugin shape and for the state transitions
   expected from the documented lifecycle events.
+- Reproduce harness behavior only in a scratch home: HOME plus the adapter's config `Env` keys pointed under `~/.cache`. When the harness must take a model turn, use `fakeprovider start <harness>`, which creates that root. Never run a harness, its hooks, or `aht manage integrations` against the real home.
 - Do not edit the "Hook Installation" section in the readme when adding new harnesses.
 
 ## Adding a Harness
