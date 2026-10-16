@@ -22,7 +22,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const hashChunkBytes = 64 << 10
+const (
+	hashChunkBytes    = 64 << 10
+	refreshBatchBytes = 256 << 10
+)
 
 // errStaleResume reports that another process rewrote a history's index entry
 // after this search parsed an append against the older checkpoint.
@@ -112,6 +115,16 @@ type settledFile struct {
 	changed bool
 }
 
+type refreshEntry struct {
+	job    *refreshJob
+	result refreshResult
+}
+
+type refreshBatch struct {
+	entries []refreshEntry
+	bytes   int
+}
+
 func stampFile(info os.FileInfo) string {
 	id, changed := fileIdentity(info)
 	return fmt.Sprintf("%s:%s:%d:%d:%d", id, changed, info.Size(), info.ModTime().UnixNano(), info.Mode())
@@ -142,7 +155,8 @@ func fileKey(source Source, path string) string { return string(source.Harness) 
 
 // scanFiles refreshes and searches one source's histories. Unchanged files are
 // answered from the index; changed files are parsed by workers and written by
-// this goroutine in discovery order, each in its own short transaction.
+// this goroutine in discovery order. Refreshes batch writes; searches commit
+// each file before reading its matches.
 func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Source, files []historyFile, status *SourceStatus) {
 	if index.unavailable != nil {
 		s.indexErr = index.unavailable
@@ -162,6 +176,7 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		s.result.Refresh = append(s.result.Refresh, SourceRefresh{Source: source, RefreshStats: progress.Refresh.snapshot()})
 	}()
 	var queue []pendingFile
+	batch := new(refreshBatch)
 	for _, file := range files {
 		if ctx.Err() != nil || index.unavailable != nil || s.halted() {
 			break
@@ -169,15 +184,16 @@ func (index *historyIndex) scanFiles(ctx context.Context, s *search, source Sour
 		pending := index.pendFamily(ctx, s, source, file, jobs)
 		queue = append(queue, pending)
 		if len(queue) > 2*workers {
-			index.finish(ctx, s, source, queue[0], status, &progress)
+			index.finish(ctx, s, source, queue[0], status, &progress, batch)
 			queue = queue[1:]
 		}
 	}
 	close(jobs)
 	for _, pending := range queue {
-		index.finish(ctx, s, source, pending, status, &progress)
+		index.finish(ctx, s, source, pending, status, &progress, batch)
 	}
 	wg.Wait()
+	index.flushRefresh(ctx, s, batch, &progress)
 }
 
 func (index *historyIndex) pendFamily(ctx context.Context, s *search, source Source, file historyFile, jobs chan<- *refreshJob) pendingFile {
@@ -250,17 +266,17 @@ func (index *historyIndex) pend(s *search, source Source, file historyFile, jobs
 	return pending
 }
 
-// finish handles one history and its children in discovery order, storing
-// each changed file before reading matches.
-func (index *historyIndex) finish(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress) {
+// finish handles one history and its children in discovery order, settling
+// each file before reading its committed matches.
+func (index *historyIndex) finish(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress, batch *refreshBatch) {
 	defer func() {
 		progress.Done++
 		s.report(*progress)
 	}()
-	parent, ok := index.settle(ctx, s, source, pending, status, progress)
+	parent, ok := index.settle(ctx, s, source, pending, status, progress, batch)
 	var children []settledFile
 	for _, child := range pending.children {
-		if settled, ok := index.settle(ctx, s, source, child, status, progress); ok {
+		if settled, ok := index.settle(ctx, s, source, child, status, progress, batch); ok {
 			children = append(children, settled)
 		}
 	}
@@ -273,9 +289,9 @@ func (index *historyIndex) finish(ctx context.Context, s *search, source Source,
 	index.visit(ctx, s, source, parent, children)
 }
 
-// settle stores one changed history and reports whether its index entry can be
-// read.
-func (index *historyIndex) settle(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress) (settledFile, bool) {
+// settle refreshes or queues one history and reports whether its committed
+// index entry can be read.
+func (index *historyIndex) settle(ctx context.Context, s *search, source Source, pending pendingFile, status *SourceStatus, progress *Progress, batch *refreshBatch) (settledFile, bool) {
 	path := pending.file.path
 	settled := settledFile{path: path, changed: false}
 	if pending.job == nil {
@@ -314,7 +330,25 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 		s.indexErr = index.unavailable
 		return settled, false
 	}
-	file, storeTime, err := index.storeParsed(ctx, pending.job, &result)
+	if s.mode == modeRefresh {
+		bytes := result.writer.textBytes()
+		if batch.bytes+bytes > refreshBatchBytes {
+			index.flushRefresh(ctx, s, batch, progress)
+		}
+		batch.entries = append(batch.entries, refreshEntry{job: pending.job, result: result})
+		batch.bytes += bytes
+		if batch.bytes >= refreshBatchBytes {
+			index.flushRefresh(ctx, s, batch, progress)
+		}
+		return settled, false
+	}
+	return index.settleParsed(ctx, s, pending.job, result, progress)
+}
+
+func (index *historyIndex) settleParsed(ctx context.Context, s *search, job *refreshJob, result refreshResult, progress *Progress) (settledFile, bool) {
+	source, path := job.source, job.file.path
+	settled := settledFile{path: path, changed: false}
+	file, storeTime, err := index.storeParsed(ctx, job, &result)
 	if result.skipped {
 		progress.Refresh.Skipped++
 		s.reportIssues(path, result.issues, result.omitted, nil)
@@ -333,6 +367,78 @@ func (index *historyIndex) settle(ctx context.Context, s *search, source Source,
 	}
 	settled.changed = true
 	return settled, true
+}
+
+func (writer *indexWriter) textBytes() int {
+	var bytes int
+	for _, conversation := range writer.conversations {
+		if conversation.dropped {
+			continue
+		}
+		for _, part := range conversation.parts {
+			bytes += len(part.Text)
+		}
+	}
+	return bytes
+}
+
+func (index *historyIndex) storeBatch(ctx context.Context, entries []refreshEntry) ([]indexedFile, error) {
+	if err := index.beginWrite(ctx); err != nil {
+		return nil, err
+	}
+	files := make([]indexedFile, 0, len(entries))
+	for _, entry := range entries {
+		file, err := index.writeRefresh(ctx, entry.job, entry.result)
+		if err != nil {
+			return nil, errors.Join(err, index.rollbackWrite(ctx))
+		}
+		files = append(files, file)
+	}
+	if err := index.endWrite(ctx); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func (index *historyIndex) flushRefresh(ctx context.Context, s *search, batch *refreshBatch, progress *Progress) {
+	if len(batch.entries) == 0 {
+		return
+	}
+	started := time.Now()
+	files, err := index.storeBatch(ctx, batch.entries)
+	if err == nil {
+		progress.Refresh.StoreTime += time.Since(started)
+	}
+	for position, entry := range batch.entries {
+		result := entry.result
+		var file indexedFile
+		var storeTime time.Duration
+		if err == nil {
+			file = files[position]
+		} else {
+			var retryErr error
+			file, storeTime, retryErr = index.storeParsed(ctx, entry.job, &result)
+			if retryErr != nil {
+				index.report(s, entry.job.source, entry.job.file.path, retryErr)
+				continue
+			}
+		}
+		if result.skipped {
+			progress.Refresh.Skipped++
+			continue
+		}
+		key := fileKey(entry.job.source, entry.job.file.path)
+		index.files[key], index.seen[key] = file, true
+		index.reportIssues(s, entry.job.source, file, nil)
+		if result.unchanged {
+			progress.Refresh.Unchanged++
+		} else {
+			progress.Refreshed++
+			s.refreshed(entry.job.source, entry.job.file.path, result, storeTime, &progress.Refresh)
+		}
+	}
+	batch.entries, batch.bytes = nil, 0
+	s.report(*progress)
 }
 
 // visit reads a stored history and its children from the committed index.
@@ -549,14 +655,9 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 		result.unchanged = true
 		return result, false
 	}
-	writer.checkpoint.Identity, _ = fileIdentity(info)
-	writer.checkpoint.Extra = extra
-	writer.checkpoint.Size = info.Size()
-	if catalog.TranscriptFor(source.Harness).Document == nil && !strings.HasSuffix(path, ".zst") {
-		if err := writer.prepareAppendResume(ctx, file, job, info); err != nil {
-			result.err = err
-			return result, false
-		}
+	if err := writer.prepareTranscript(ctx, job, file, info, extra); err != nil {
+		result.err = err
+		return result, false
 	}
 	result.bytes = info.Size()
 	if writer.resume != nil {
@@ -570,6 +671,16 @@ func parseOpenTranscript(ctx context.Context, job *refreshJob, reader *search, w
 		return result, false
 	}
 	return result, true
+}
+
+func (writer *indexWriter) prepareTranscript(ctx context.Context, job *refreshJob, file *os.File, info os.FileInfo, extra string) error {
+	writer.checkpoint.Identity, _ = fileIdentity(info)
+	writer.checkpoint.Extra = extra
+	writer.checkpoint.Size = info.Size()
+	if catalog.TranscriptFor(job.source.Harness).Document != nil || strings.HasSuffix(job.file.path, ".zst") {
+		return nil
+	}
+	return writer.prepareAppendResume(ctx, file, job, info)
 }
 
 // store replaces one changed history inside its own transaction, so concurrent

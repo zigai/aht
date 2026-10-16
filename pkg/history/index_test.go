@@ -209,12 +209,12 @@ func TestRefreshStatsExcludeCanceledWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	catalog.Progress = func(progress history.Progress) {
-		if progress.Refreshed == 1 {
+		if progress.Done == 1 {
 			cancel()
 		}
 	}
 	result, err := catalog.Refresh(ctx)
-	if !errors.Is(err, context.Canceled) || len(result.Refresh) != 1 || result.Refresh[0].Reparsed != 1 || result.Refresh[0].Checked != 1 || result.Refresh[0].BytesParsed != int64(len(treeHistory)) {
+	if !errors.Is(err, context.Canceled) || len(result.Refresh) != 1 || result.Refresh[0].Reparsed != 0 || result.Refresh[0].Checked != 1 || result.Refresh[0].BytesParsed != 0 {
 		t.Fatalf("canceled refresh = %#v, %v", result.Refresh, err)
 	}
 }

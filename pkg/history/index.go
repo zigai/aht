@@ -112,16 +112,9 @@ type historyIndex struct {
 // history; lock contention waits until the context is canceled.
 func openHistoryIndex(ctx context.Context, path string, sources []Source, waiting func()) (*historyIndex, error) {
 	cached := path == ""
-	if cached {
-		root, err := os.UserCacheDir()
-		if err != nil {
-			return nil, indexUnavailable(fmt.Errorf("locate history index: %w", err))
-		}
-		path = filepath.Join(root, "aht", "history-v1.sqlite")
-	}
-	path, err := filepath.Abs(path)
+	path, err := historyIndexPath(path)
 	if err != nil {
-		return nil, indexUnavailable(fmt.Errorf("resolve history index: %w", err))
+		return nil, indexUnavailable(err)
 	}
 	index, err := openIndexDatabase(ctx, path, sources, waiting)
 	if err == nil {
@@ -142,6 +135,21 @@ func openHistoryIndex(ctx context.Context, path string, sources []Source, waitin
 		return nil, indexUnavailable(fmt.Errorf("rebuild history index: %w", err))
 	}
 	return index, nil
+}
+
+func historyIndexPath(path string) (string, error) {
+	if path == "" {
+		root, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("locate history index: %w", err)
+		}
+		path = filepath.Join(root, "aht", "history-v1.sqlite")
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve history index: %w", err)
+	}
+	return path, nil
 }
 
 // openIndexDatabase opens an existing index database, creating an empty one when
@@ -361,8 +369,6 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 	return nil
 }
 
-// beginWrite starts the short transaction that refreshes one changed history.
-// Read paths never open a transaction, so a warm search takes no write lock.
 func (index *historyIndex) beginWrite(ctx context.Context) error {
 	tx, err := index.conn.begin(ctx)
 	if err != nil {

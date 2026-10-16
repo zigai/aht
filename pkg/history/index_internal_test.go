@@ -14,11 +14,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -621,16 +624,7 @@ func TestIndexMatchesDirectScan(t *testing.T) {
 func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(property *rapid.T) {
-		rootDir := t.TempDir()
-		root, err := os.OpenRoot(rootDir)
-		if err != nil {
-			property.Fatal(err)
-		}
-		property.Cleanup(func() {
-			if err := root.Close(); err != nil {
-				t.Error(err)
-			}
-		})
+		root, rootDir := openGeneratedHistoryRoot(t, property)
 		harness := rapid.SampledFrom([]registry.Harness{"pi", "omp", "codex", "claude"}).Draw(property, "harness")
 		count := rapid.IntRange(2, 5).Draw(property, "transcripts")
 		paths := make([]string, count)
@@ -642,6 +636,7 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 			}
 		}
 		catalog := Catalog{Sources: []Source{{Harness: harness, Path: rootDir}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
+		refreshGeneratedHistory(property, catalog)
 		initial := compareGeneratedHistorySearch(property, catalog, Query{Terms: []string{"shared-token"}})
 		if len(initial.Matches) != count {
 			property.Fatalf("generated native transcripts produced %d matches, want %d", len(initial.Matches), count)
@@ -655,9 +650,35 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 			if err := root.Chtimes(paths[index], modified, modified); err != nil && !errors.Is(err, os.ErrNotExist) {
 				property.Fatal(err)
 			}
+			if rapid.Bool().Draw(property, "refresh before search") {
+				refreshGeneratedHistory(property, catalog)
+			}
 			checkGeneratedHistoryQueries(property, catalog, count)
 		}
 	})
+}
+
+func openGeneratedHistoryRoot(t *testing.T, property *rapid.T) (*os.Root, string) {
+	t.Helper()
+	property.Helper()
+	rootDir := t.TempDir()
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		property.Fatal(err)
+	}
+	property.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return root, rootDir
+}
+
+func refreshGeneratedHistory(property *rapid.T, catalog Catalog) {
+	property.Helper()
+	if _, err := catalog.Refresh(property.Context()); err != nil && !errors.Is(err, ErrIncomplete) {
+		property.Fatal(err)
+	}
 }
 
 func checkGeneratedHistoryQueries(property *rapid.T, catalog Catalog, count int) {
@@ -1184,6 +1205,195 @@ func TestDatabaseModificationTimeIncludesJournals(t *testing.T) {
 				t.Fatal("database with a recent journal was skipped")
 			}
 		})
+	}
+}
+
+func TestRefreshRetriesFailedBatchFilesIndividually(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	source := Source{Harness: registry.Harness("pi"), Path: root}
+	catalog := Catalog{Sources: []Source{source}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+	for _, name := range []string{"first", "bad", "last"} {
+		body := fmt.Sprintf("{\"type\":\"session\",\"id\":%q}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":%q}}\n", name, name)
+		if err := os.WriteFile(filepath.Join(root, name+".jsonl"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index := openTestHistoryIndex(t, catalog)
+	if _, err := index.conn.ExecContext(t.Context(), "CREATE TRIGGER reject_part BEFORE INSERT ON parts WHEN new.body='bad' BEGIN SELECT RAISE(FAIL,'rejected history'); END"); err != nil {
+		t.Fatal(err)
+	}
+	var progress Progress
+	catalog.Progress = func(current Progress) { progress = current }
+	result, err := catalog.Refresh(t.Context())
+	if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.Issues[0].Path != filepath.Join(root, "bad.jsonl") || progress.Refreshed != 2 || progress.Done != 3 {
+		t.Fatalf("refresh: progress=%#v result=%#v err=%v", progress, result, err)
+	}
+	var bodies string
+	var files int
+	if err := index.conn.QueryRowContext(t.Context(), "SELECT group_concat(body,','),(SELECT count(*) FROM files) FROM (SELECT body FROM parts ORDER BY body)").Scan(&bodies, &files); err != nil || bodies != "first,last" || files != 2 {
+		t.Fatalf("stored text=%q files=%d err=%v", bodies, files, err)
+	}
+}
+
+func TestRefreshCancellationDiscardsPendingBatch(t *testing.T) {
+	t.Parallel()
+	catalog := parityFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	path := filepath.Join(catalog.Sources[0].Path, "0.jsonl")
+	appendTranscriptLine(t, path, "pending", "pending token")
+	catalog.Progress = func(progress Progress) {
+		if progress.Done == 1 {
+			cancel()
+		}
+	}
+	if _, err := catalog.Refresh(ctx); !errors.Is(err, ErrIncomplete) {
+		t.Fatalf("refresh error=%v, want cancellation", err)
+	}
+	index, err := openHistoryIndex(t.Context(), catalog.IndexPath, catalog.Sources, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := index.close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	var count int
+	if err := index.conn.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE message_id='pending'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("uncommitted parts=%d err=%v", count, err)
+	}
+}
+
+func TestBatchCancellationPreservesEarlierCommit(t *testing.T) {
+	t.Parallel()
+	catalog := parityFixture(t)
+	writeIndexFixture(t, catalog, "2.jsonl", "{\"type\":\"session\",\"id\":\"third\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"third token\"}}\n")
+	index := openTestHistoryIndex(t, catalog)
+	entries := fixtureRefreshEntries(t, catalog, "0.jsonl", "1.jsonl", "2.jsonl")
+	if _, err := index.storeBatch(t.Context(), entries[:1]); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	insertions := 0
+	setIndexHooks(t, index, func(hooks sqlite.HookRegisterer) {
+		hooks.RegisterPreUpdateHook(func(update sqlite.SQLitePreUpdateData) {
+			if update.TableName == "files" && update.Op == sqlite3.SQLITE_INSERT {
+				insertions++
+				if insertions == 2 {
+					cancel()
+				}
+			}
+		})
+	})
+	if _, err := index.storeBatch(ctx, entries[1:]); !errors.Is(err, context.Canceled) {
+		t.Fatalf("store batch error=%v, want cancellation", err)
+	}
+	var files, conversations int
+	if err := index.conn.QueryRowContext(t.Context(), "SELECT (SELECT count(*) FROM files),(SELECT count(*) FROM conversations)").Scan(&files, &conversations); err != nil || files != 1 || conversations != 1 {
+		t.Fatalf("after cancellation: files=%d conversations=%d err=%v", files, conversations, err)
+	}
+}
+
+func TestSearchDuringBatchCommitMatchesDirect(t *testing.T) {
+	t.Parallel()
+	catalog := parityFixture(t)
+	index, err := openHistoryIndex(t.Context(), catalog.IndexPath, catalog.Sources, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := index.close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	entries := fixtureRefreshEntries(t, catalog, "0.jsonl", "1.jsonl")
+	committing, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	setIndexHooks(t, index, func(hooks sqlite.HookRegisterer) {
+		hooks.RegisterCommitHook(func() int32 {
+			once.Do(func() {
+				close(committing)
+				<-release
+			})
+			return 0
+		})
+	})
+	stored := make(chan error, 1)
+	go func() {
+		_, err := index.storeBatch(t.Context(), entries)
+		stored <- err
+	}()
+	<-committing
+	searched := make(chan struct{})
+	var got Result
+	var searchErr error
+	go func() {
+		got, searchErr = catalog.Search(t.Context(), Query{Terms: []string{"needle"}})
+		close(searched)
+	}()
+	close(release)
+	if err := <-stored; err != nil {
+		t.Fatal(err)
+	}
+	<-searched
+	want, err := catalog.searchDirect(t.Context(), Query{Terms: []string{"needle"}})
+	if err != nil || searchErr != nil {
+		t.Fatalf("direct error=%v search error=%v", err, searchErr)
+	}
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Result{}, "Refresh", "Reparsed", "IndexUnavailable")); diff != "" {
+		t.Fatalf("concurrent search differs (-direct +indexed):\n%s", diff)
+	}
+}
+
+func openTestHistoryIndex(t *testing.T, catalog Catalog) *historyIndex {
+	t.Helper()
+	index, err := openHistoryIndex(t.Context(), catalog.IndexPath, catalog.Sources, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := index.close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	})
+	return index
+}
+
+func fixtureRefreshEntries(t *testing.T, catalog Catalog, names ...string) []refreshEntry {
+	t.Helper()
+	entries := make([]refreshEntry, 0, len(names))
+	for _, name := range names {
+		file, ok := new(search).singleFile(catalog.Sources[0], filepath.Join(catalog.Sources[0].Path, name))
+		if !ok {
+			t.Fatal("history file was not selected")
+		}
+		job := &refreshJob{source: catalog.Sources[0], file: file}
+		result := parseRefresh(t.Context(), job)
+		if err := errors.Join(result.err, result.failure, result.openErr); err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, refreshEntry{job: job, result: result})
+	}
+	return entries
+}
+
+func setIndexHooks(t *testing.T, index *historyIndex, register func(sqlite.HookRegisterer)) {
+	t.Helper()
+	if err := index.conn.Raw(func(connection any) error {
+		hooks, ok := connection.(sqlite.HookRegisterer)
+		if !ok {
+			t.Fatalf("SQLite connection %T does not support hooks", connection)
+		}
+		register(hooks)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1997,7 +2207,9 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 
 	var status SourceStatus
 	var progress Progress
-	index.finish(t.Context(), s, source, pendingFile{file: file, filter: s.query.Filter, job: job, children: nil}, &status, &progress)
+	batch := new(refreshBatch)
+	index.finish(t.Context(), s, source, pendingFile{file: file, filter: s.query.Filter, job: job, children: nil}, &status, &progress, batch)
+	index.flushRefresh(t.Context(), s, batch, &progress)
 	if s.indexErr != nil || len(s.result.Issues) != 0 {
 		t.Fatalf("stale resume: %v %#v", s.indexErr, s.result.Issues)
 	}
