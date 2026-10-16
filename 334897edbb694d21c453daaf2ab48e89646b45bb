@@ -1,0 +1,2 @@
+- With 840 stale tmux socket files present, one observer cycle takes 126 ms instead of 1,780 ms
+- just check passes
