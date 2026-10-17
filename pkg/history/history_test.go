@@ -881,3 +881,74 @@ func TestDefaultSourcesAreAbsoluteWithPaddedHome(t *testing.T) {
 		}
 	}
 }
+
+const reportHistory = `{"type":"session","id":"report-session","cwd":"/work"}
+{"type":"message","id":"u1","message":{"role":"user","content":"Fix the login page"}}
+{"type":"message","id":"a1","message":{"role":"assistant","content":"Looking at the login page first."}}
+{"type":"message","id":"u2","message":{"role":"user","content":"Go on"}}
+{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"},{"type":"text","text":"Fixed the redirect."},{"type":"toolCall","name":"read","arguments":{"file":"tool-only"}},{"type":"text","text":"**Evidence**\n- shot.png"}]}}
+{"type":"message","id":"t1","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only output"}]}}
+`
+
+func lastMessageCatalog(t *testing.T, body string) (history.Catalog, string) {
+	t.Helper()
+	path := writeHistory(t, t.TempDir(), "session.jsonl", body)
+	return history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: path}}}, path
+}
+
+func TestLastMessageJoinsTheTextOfTheLatestMessageOfTheRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, reportHistory)
+
+	assistant, found, err := c.LastMessage(t.Context(), "report-session", "assistant")
+	if err != nil || !found || assistant.Text != "Fixed the redirect.\n**Evidence**\n- shot.png" {
+		t.Fatalf("assistant message = %q, %v, %v", assistant.Text, found, err)
+	}
+
+	user, found, err := c.LastMessage(t.Context(), "report-session", "user")
+	if err != nil || !found || user.Text != "Go on" {
+		t.Fatalf("user message = %q, %v, %v", user.Text, found, err)
+	}
+}
+
+func TestLastMessageReadsTheHistoryAsItIsNow(t *testing.T) {
+	t.Parallel()
+	c, path := lastMessageCatalog(t, reportHistory)
+	if _, err := c.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	appended := reportHistory + `{"type":"message","id":"a3","message":{"role":"assistant","content":"Pushed the branch."}}` + "\n"
+	if err := os.WriteFile(path, []byte(appended), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	message, found, err := c.LastMessage(t.Context(), "report-session", "assistant")
+	if err != nil || !found || message.Text != "Pushed the branch." {
+		t.Fatalf("message after append = %q, %v, %v", message.Text, found, err)
+	}
+}
+
+func TestLastMessageIsNotFoundForAnotherSessionOrAMissingRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, `{"type":"session","id":"quiet-session","cwd":"/work"}
+{"type":"message","id":"u1","message":{"role":"user","content":"Hello"}}
+`)
+
+	for _, session := range []string{"quiet-session", "other-session"} {
+		if message, found, err := c.LastMessage(t.Context(), session, "assistant"); err != nil || found {
+			t.Fatalf("%s assistant message = %q, %v, %v; want not found", session, message.Text, found, err)
+		}
+	}
+}
+
+func TestLastMessageRejectsAMissingSessionOrAnUnknownRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, reportHistory)
+
+	for _, query := range [][2]string{{"", "assistant"}, {"report-session", "tool"}} {
+		if _, _, err := c.LastMessage(t.Context(), query[0], query[1]); !errors.Is(err, history.ErrInvalidQuery) {
+			t.Fatalf("LastMessage(%q, %q) error = %v, want ErrInvalidQuery", query[0], query[1], err)
+		}
+	}
+}

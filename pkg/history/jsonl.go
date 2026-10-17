@@ -43,6 +43,8 @@ type transcript struct {
 	excluded    bool
 	lastMessage string
 	projection  string
+	last        Excerpt
+	hasLast     bool
 }
 
 func readTranscriptHeaders(ctx context.Context, file *os.File, size int64, kinds []string) []transcriptHeader {
@@ -81,6 +83,8 @@ func newDatabaseTranscript(c Conversation) transcript {
 		excluded:    false,
 		lastMessage: "",
 		projection:  "",
+		last:        Excerpt{Role: "", Text: "", Spans: nil, MessageID: "", Line: 0, Timestamp: time.Time{}},
+		hasLast:     false,
 	}
 }
 
@@ -333,7 +337,23 @@ func (s *search) capturePart(t *transcript, role, body, id string, line int, tim
 		s.writer.append(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
 		return
 	}
+	if s.last != nil {
+		if role == s.last.role {
+			t.keepLast(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
+		}
+		return
+	}
 	s.matchText(t, role, body, id, line, timestamp)
+}
+
+// keepLast keeps part as the conversation's last message, or adds it to that message when both
+// are parts of one native message.
+func (t *transcript) keepLast(part Excerpt) {
+	if t.hasLast && part.MessageID != "" && part.MessageID == t.last.MessageID {
+		t.last.Text += "\n" + part.Text
+		return
+	}
+	t.last, t.hasLast = part, true
 }
 
 func extendTimes(c *Conversation, timestamp time.Time) {

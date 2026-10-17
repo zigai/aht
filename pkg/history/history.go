@@ -260,6 +260,15 @@ type search struct {
 	recent           matchHeap
 	result           Result
 	registry         map[registry.Harness]*registryLookup
+	last             *lastMessage
+}
+
+// lastMessage collects the last message with role of the conversation session for LastMessage.
+type lastMessage struct {
+	session string
+	role    string
+	message Excerpt
+	found   bool
 }
 
 type retainedMatch struct {
@@ -496,6 +505,25 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 		statusErr = c.saveRefreshStatus(ctx, result, errors.Is(runErr, ErrIncomplete))
 	}
 	return result, errors.Join(runErr, closeErr, statusErr)
+}
+
+// LastMessage returns the last message with role, "user" or "assistant", of the conversation
+// sessionID in the catalog's sources. It reads the sources directly instead of the index, so it
+// sees what the harness wrote last; name the conversation's transcript as the only source to read
+// just that file. Text parts of one native message are joined with newlines. found is false
+// when the conversation has no such message or is not in the sources.
+func (c Catalog) LastMessage(ctx context.Context, sessionID, role string) (Excerpt, bool, error) {
+	var none Excerpt
+	if sessionID == "" || (role != "user" && role != "assistant") {
+		return none, false, fmt.Errorf("%w: a last message needs a session and the role user or assistant", ErrInvalidQuery)
+	}
+	var everything ListQuery
+	var s search
+	s.mode = modeList
+	s.query = everything.searchQuery()
+	s.last = &lastMessage{session: sessionID, role: role, message: none, found: false}
+	_, err := c.runDirect(ctx, &s)
+	return s.last.message, s.last.found, err
 }
 
 func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
@@ -1006,6 +1034,14 @@ func presence(states []RegistryState) registry.Presence {
 func (s *search) add(ctx context.Context, t *transcript) {
 	if s.writer != nil {
 		s.writer.finish(t.match.Conversation)
+		return
+	}
+	if s.last != nil {
+		if t.hasLast && t.match.Conversation.SessionID == s.last.session {
+			s.mu.Lock()
+			s.last.message, s.last.found = t.last, true
+			s.mu.Unlock()
+		}
 		return
 	}
 	if s.mode == modeSearch && !t.qualifies(len(s.terms)) {
