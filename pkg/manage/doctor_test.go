@@ -66,7 +66,11 @@ func prepareHistoryDoctor(t *testing.T, scenario string) (*manage.Manager, manag
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	manager := manage.New(manage.Config{Binary: "aht", StorePath: filepath.Join(home, "sessions.json")})
 	opts := manage.DoctorOptions{ConfigPath: filepath.Join(home, "config.toml")}
-	indexPath := filepath.Join(home, "cache", "aht", "history-v1.sqlite")
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(cacheDir, "aht", "history-v1.sqlite")
 	historyCatalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Join(home, "transcripts")}}}
 	if scenario == "missing" {
 		return manager, opts, historyCatalog, indexPath
