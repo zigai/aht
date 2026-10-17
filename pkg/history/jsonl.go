@@ -27,12 +27,50 @@ const (
 
 var errInvalidRecord = native.ErrInvalidRecord
 
+type transcriptProjector interface {
+	TranscriptProjection(ctx context.Context, file *os.File, size int64) (string, error)
+}
+
+type transcriptHeader struct {
+	record native.Record
+	size   int64
+}
+
 type transcript struct {
 	match       Match
 	recognized  bool
 	hits        []bool
 	excluded    bool
 	lastMessage string
+	projection  string
+}
+
+func readTranscriptHeaders(ctx context.Context, file *os.File, size int64, kinds []string) []transcriptHeader {
+	if len(kinds) == 0 {
+		return nil
+	}
+	reader := bufio.NewReaderSize(io.NewSectionReader(file, 0, size), scannerInitialBytes)
+	var headers []transcriptHeader
+	for _, kind := range kinds {
+		data, err := readRecordLine(ctx, reader)
+		if err != nil || len(data) == 0 || data[len(data)-1] != '\n' {
+			break
+		}
+		var record native.Record
+		if json.Unmarshal(data, &record) != nil || native.Str(record, "type") != kind {
+			break
+		}
+		headers = append(headers, transcriptHeader{record: record, size: int64(len(data))})
+	}
+	return headers
+}
+
+func transcriptHeaderBytes(headers []transcriptHeader) int64 {
+	var size int64
+	for _, header := range headers {
+		size += header.size
+	}
+	return size
 }
 
 func newDatabaseTranscript(c Conversation) transcript {
@@ -42,6 +80,7 @@ func newDatabaseTranscript(c Conversation) transcript {
 		hits:        nil,
 		excluded:    false,
 		lastMessage: "",
+		projection:  "",
 	}
 }
 
@@ -68,25 +107,23 @@ func (t *transcript) qualifies(terms int) bool {
 	return !slices.Contains(t.hits, false)
 }
 
-func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File) *transcript {
+func (s *search) scanJSONL(ctx context.Context, source Source, path string, file *os.File, buffer *fileIssueBuffer, identifyOnly bool) *transcript {
 	info, err := file.Stat()
 	if err != nil {
-		s.issue(source, path, err)
+		buffer.issue(source, path, err)
 		return nil
 	}
 
 	var t transcript
-	t.match.Conversation.Harness = source.Harness
-	t.match.Conversation.Path = path
-	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
-		initialize(s.decoder(source, &t))
+	if err := s.prepareProjection(ctx, source, file, info.Size(), &t); err != nil {
+		buffer.issue(source, path, err)
+		return nil
 	}
-	start, lines := int64(0), 0
-	if s.writer != nil && s.writer.resume != nil {
-		checkpoint := s.writer.resume
-		t.match.Conversation = checkpoint.Conversation
-		t.recognized = checkpoint.Recognized
-		start, lines = checkpoint.Size, checkpoint.Lines
+	headers := s.transcriptHeaders(ctx, source, file, info.Size())
+	t, start, lines := s.jsonlState(source, path, headers, buffer, t.projection)
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		buffer.issue(source, path, fmt.Errorf("seek history records: %w", err))
+		return nil
 	}
 	// A captured file size makes a finite snapshot even while a harness appends.
 	input := io.LimitReader(file, info.Size()-start)
@@ -94,34 +131,100 @@ func (s *search) scanJSONL(ctx context.Context, source Source, path string, file
 		input = io.TeeReader(input, s.writer.hash)
 	}
 	reader := bufio.NewReaderSize(input, scannerInitialBytes)
-	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines)
+	lines, records, complete := s.readJSONLLines(ctx, source, path, reader, &t, lines, buffer, identifyOnly)
+	s.replayTranscriptHeaders(ctx, source, &t, headers, buffer)
 	if ctx.Err() == nil && !t.identified() && (records > 0 || start > 0) {
-		s.issue(source, path, errUnknownFormat)
+		buffer.issue(source, path, errUnknownFormat)
 	}
 	if s.writer != nil {
-		s.writer.checkpoint.Conversation = t.match.Conversation
-		s.writer.checkpoint.Recognized = t.recognized
-		s.writer.checkpoint.Complete = complete && ctx.Err() == nil
-		s.writer.checkpoint.Lines = lines
-		s.writer.checkpoint.Size = info.Size()
-		s.writer.checkpoint.Digest = hex.EncodeToString(s.writer.hash.Sum(nil))
+		s.writer.finishJSONL(ctx, &t, info, lines, complete)
+	}
+	// Checkpoints retain native times so append resumes can recompute the fallback
+	// and a later native timestamp cannot be masked by an older fallback.
+	if c := &t.match.Conversation; c.CreatedAt.IsZero() && c.UpdatedAt.IsZero() {
+		c.UpdatedAt = info.ModTime()
 	}
 	return &t
 }
 
-func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int) (int, int, bool) {
-	complete := false
+func (s *search) transcriptHeaders(ctx context.Context, source Source, file *os.File, size int64) []transcriptHeader {
+	if s.writer != nil {
+		return s.writer.headers
+	}
+	return readTranscriptHeaders(ctx, file, size, catalog.TranscriptFor(source.Harness).RewritableHeaders)
+}
+
+func (s *search) jsonlState(source Source, path string, headers []transcriptHeader, buffer *fileIssueBuffer, projection string) (transcript, int64, int) {
+	var current transcript
+	current.match.Conversation.Harness = source.Harness
+	current.match.Conversation.Path = path
+	current.projection = projection
+	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
+		initialize(s.decoder(source, &current, buffer))
+	}
+	if s.writer != nil && s.writer.resume != nil {
+		checkpoint := s.writer.resume
+		current.match.Conversation = checkpoint.Conversation
+		current.recognized = checkpoint.Recognized
+		return current, checkpoint.Size, checkpoint.Lines
+	}
+	return current, transcriptHeaderBytes(headers), len(headers)
+}
+
+func (s *search) replayTranscriptHeaders(ctx context.Context, source Source, current *transcript, headers []transcriptHeader, buffer *fileIssueBuffer) {
+	if record := catalog.TranscriptFor(source.Harness).Record; record != nil {
+		decoder := s.decoder(source, current, buffer)
+		for number, header := range headers {
+			record(ctx, decoder, header.record, number+1)
+		}
+	}
+}
+
+func (writer *indexWriter) finishJSONL(ctx context.Context, t *transcript, info os.FileInfo, lines int, complete bool) {
+	writer.checkpoint.Conversation = t.match.Conversation
+	writer.checkpoint.Recognized = t.recognized
+	writer.checkpoint.Complete = complete && ctx.Err() == nil
+	writer.checkpoint.Lines = lines
+	writer.checkpoint.Size = info.Size()
+	writer.checkpoint.Digest = hex.EncodeToString(writer.hash.Sum(nil))
+}
+
+func (s *search) prepareProjection(ctx context.Context, source Source, file *os.File, size int64, t *transcript) error {
+	adapter, _ := catalog.Find(source.Harness)
+	if projector, ok := adapter.(transcriptProjector); ok {
+		projection, err := projector.TranscriptProjection(ctx, file, size)
+		if err != nil {
+			return fmt.Errorf("prepare transcript projection: %w", err)
+		}
+		t.projection = projection
+	}
+	if s.writer != nil {
+		writer := s.writer
+		writer.checkpoint.Projection = t.projection
+		if writer.resume != nil && writer.resume.Projection != t.projection {
+			writer.resume = nil
+			writer.hash.Reset()
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("rewind history projection: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *search) readJSONLLines(ctx context.Context, source Source, path string, reader *bufio.Reader, t *transcript, lines int, buffer *fileIssueBuffer, identifyOnly bool) (int, int, bool) {
+	complete := lines > 0
 	records := 0
 	readerSpec := catalog.TranscriptFor(source.Harness)
-	decoder := s.decoder(source, t)
-	for line := lines + 1; ; line++ {
+	decoder := s.decoder(source, t, buffer)
+	for line := lines + 1; !identifyOnly || !t.identified(); line++ {
 		data, readErr := readRecordLine(ctx, reader)
 		if errors.Is(readErr, io.EOF) || ctx.Err() != nil {
 			break
 		}
 		if readErr != nil {
 			lines, complete = line, false
-			if s.handleLineReadError(source, path, line, readErr) {
+			if buffer.handleLineReadError(source, path, line, readErr) {
 				continue
 			}
 			break
@@ -132,19 +235,25 @@ func (s *search) readJSONLLines(ctx context.Context, source Source, path string,
 			continue
 		}
 		records++
-		if readerSpec.FastRecord != nil && readerSpec.FastRecord(ctx, decoder, data, line) {
-			continue
-		}
-		var r native.Record
-		if json.Unmarshal(data, &r) != nil {
-			s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, errInvalidRecord))
-			continue
-		}
-		if readerSpec.Record != nil {
-			readerSpec.Record(ctx, decoder, r, line)
+		if err := decodeJSONLRecord(ctx, readerSpec, decoder, data, line); err != nil {
+			buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
 		}
 	}
 	return lines, records, complete
+}
+
+func decodeJSONLRecord(ctx context.Context, reader native.Reader, decoder *native.Decoder, data []byte, line int) error {
+	if reader.FastRecord != nil && reader.FastRecord(ctx, decoder, data, line) {
+		return nil
+	}
+	var record native.Record
+	if json.Unmarshal(data, &record) != nil {
+		return errInvalidRecord
+	}
+	if reader.Record != nil {
+		reader.Record(ctx, decoder, record, line)
+	}
+	return nil
 }
 
 func readRecordLine(ctx context.Context, reader *bufio.Reader) ([]byte, error) {
@@ -196,10 +305,30 @@ func (t *transcript) identified() bool { return t.recognized && t.match.Conversa
 func (s *search) capture(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	c := &t.match.Conversation
 	extendTimes(c, timestamp)
+	switch role {
+	case "user":
+		injected, typed := splitInjected(body)
+		if injected != "" {
+			s.capturePart(t, "context", injected, id, line, timestamp)
+		}
+		body = typed
+	case native.TypedUserRole:
+		role = "user"
+	case native.InjectedUserRole:
+		body, _ = splitInjected(body)
+		role = "context"
+	}
+	if body == "" && (role == "user" || role == "context") {
+		return
+	}
 	t.countMessage(role, id, line)
 	if c.Prompt == "" && role == "user" {
-		c.Prompt = clip(cleanPrompt(body), promptRunes)
+		c.Prompt = clip(strings.Join(strings.Fields(body), " "), promptRunes)
 	}
+	s.capturePart(t, role, body, id, line, timestamp)
+}
+
+func (s *search) capturePart(t *transcript, role, body, id string, line int, timestamp time.Time) {
 	if s.writer != nil {
 		s.writer.append(Excerpt{Role: role, Text: body, Spans: nil, MessageID: id, Line: line, Timestamp: timestamp})
 		return
@@ -269,7 +398,10 @@ func (s *search) skipsPart(t *transcript, role string) bool {
 	if role == "tool" && !s.query.IncludeTools {
 		return true
 	}
-	return s.query.Role != "" && s.query.Role != role
+	if role == "context" && s.query.Role == "" {
+		return true
+	}
+	return s.query.Role != "" && s.query.Role != "all" && s.query.Role != role
 }
 
 func (t *transcript) recordHits(terms []matcher, body, normalized string) (int, int, bool) {
@@ -328,11 +460,11 @@ func clip(value string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
-func (s *search) handleLineReadError(source Source, path string, line int, err error) bool {
+func (buffer *fileIssueBuffer) handleLineReadError(source Source, path string, line int, err error) bool {
 	if errors.Is(err, errRecordSize) {
-		s.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
+		buffer.recordProblem(source, path, fmt.Errorf("line %d: %w", line, err))
 		return true
 	}
-	s.issue(source, path, fmt.Errorf("line %d: %w", line, err))
+	buffer.issue(source, path, fmt.Errorf("line %d: %w", line, err))
 	return false
 }

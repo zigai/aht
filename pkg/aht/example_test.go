@@ -130,7 +130,7 @@ func ExampleHistoryCatalog_Search() {
 		},
 		IndexPath: "/archive/aht-history.sqlite",
 	}
-	result, err := catalog.Search(context.Background(), aht.HistoryQuery{Terms: []string{"migration"}, Dir: "/work/app"})
+	result, err := catalog.Search(context.Background(), aht.HistoryQuery{Terms: []string{"migration"}, Dirs: []string{"/work/app"}})
 	if err != nil && !errors.Is(err, aht.ErrHistoryIncomplete) {
 		log.Fatal(err)
 	}

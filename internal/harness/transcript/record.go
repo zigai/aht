@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,15 @@ type (
 	TextPart struct{ Role, Text string }
 )
 
+type messageBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Name      string          `json:"name"`
+	Content   json.RawMessage `json:"content"`
+	Input     json.RawMessage `json:"input"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
 func MessageParts(raw json.RawMessage, role string, tools bool) []TextPart {
 	if text, ok := plainQuotedString(raw); ok {
 		return []TextPart{{Role: role, Text: text}}
@@ -21,11 +31,31 @@ func MessageParts(raw json.RawMessage, role string, tools bool) []TextPart {
 	if json.Unmarshal(raw, &body) == nil {
 		return []TextPart{{Role: role, Text: body}}
 	}
+	if parts, ok := typedMessageParts(raw, role, tools); ok {
+		return parts
+	}
 	var blocks []Record
 	if json.Unmarshal(raw, &blocks) != nil {
 		return nil
 	}
 	return MessageBlockParts(blocks, role, tools)
+}
+
+func (block messageBlock) toolText(tools bool) (string, bool) {
+	switch block.Type {
+	case "tool_result":
+		if tools {
+			return ContentText(block.Content), true
+		}
+	case "tool_use", "toolCall":
+		if tools {
+			return block.Name + " " + string(block.Input) + string(block.Arguments), true
+		}
+	case "image", "thinking", "reasoning":
+	default:
+		return "", false
+	}
+	return "", true
 }
 
 func MessageBlockParts(blocks []Record, role string, tools bool) []TextPart {
@@ -125,7 +155,7 @@ func NativeTime(text string) time.Time {
 
 func RecognizedRole(role string) (string, bool) {
 	switch role {
-	case "user", "assistant":
+	case "user", "assistant", "context", InjectedUserRole:
 		return role, true
 	case "toolResult", "tool":
 		return "tool", true
@@ -170,6 +200,38 @@ func StoredTime(value string) time.Time {
 func ToolBlockText(r Record) string {
 	state := Obj(r, "state")
 	return FirstString(r, "tool", "name") + " " + string(state["input"]) + " " + Str(state, "output") + " " + ContentText(state["content"]) + " " + Str(state, "error") + " " + Str(Obj(state, "error"), "message")
+}
+
+func typedMessageParts(raw json.RawMessage, role string, tools bool) ([]TextPart, bool) {
+	var blocks []messageBlock
+	if jsonv2.Unmarshal(raw, &blocks) != nil {
+		return nil, false
+	}
+	var text strings.Builder
+	var toolText strings.Builder
+	for _, block := range blocks {
+		if block.Type == "text" || block.Type == "input_text" || block.Type == "output_text" {
+			text.WriteString(block.Text)
+			text.WriteByte('\n')
+			continue
+		}
+		body, supported := block.toolText(tools)
+		if !supported {
+			return nil, false
+		}
+		if body != "" {
+			toolText.WriteString(body)
+			toolText.WriteByte('\n')
+		}
+	}
+	var parts []TextPart
+	if text.Len() > 0 {
+		parts = append(parts, TextPart{Role: role, Text: strings.TrimSuffix(text.String(), "\n")})
+	}
+	if toolText.Len() > 0 {
+		parts = append(parts, TextPart{Role: "tool", Text: strings.TrimSuffix(toolText.String(), "\n")})
+	}
+	return parts, true
 }
 
 func plainQuotedString(raw []byte) (string, bool) {

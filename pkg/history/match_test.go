@@ -1,6 +1,10 @@
 package history
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -8,6 +12,113 @@ import (
 
 	"pgregory.net/rapid"
 )
+
+func TestBytePrefilterJSONSpellings(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		term, raw string
+		candidate bool
+	}{
+		{`"`, `{"text":"say \"hello\""}`, true},
+		{`\`, `{"text":"a\\b"}`, true},
+		{"\n\t", `{"text":"a\n\tb"}`, true},
+		{"a/b/c", `{"text":"a\/b/c"}`, true},
+		{"a/b/c", `{"text":"a/b\/c"}`, true},
+		{"&<>", `{"text":"&<>"}`, true},
+		{"needle", `{"text":"\u006eeedle"}`, true},
+		{"needle", `{"text":"n\u0065edle"}`, true},
+		{"needle", `{"text":"other\u001b"}`, false},
+		{"needle", `{"text":"\ud800\u006eeedle"}`, true},
+		{"needle", `{"text":"\udc00\u006eeedle"}`, true},
+		{"ss", `{"text":"\u00df"}`, true},
+		{"ffi", `{"text":"\ufb03"}`, true},
+		{"istanbul", `{"text":"\u0130STANBUL"}`, true},
+		{"éneedle", `{"text":"\u00e9need\u006ce"}`, true},
+		{"éneedle", `{"text":"other\u00e9"}`, false},
+		{"missing", `{"text":"\u00e9\u2022\ud83d\ude00"}`, false},
+		{"friction log", `{"text":"Friction LOG"}`, true},
+		{"STRASSE", "{\"text\":\"Stra\u00dfe\"}", true},
+		{"ffi", "{\"text\":\"\ufb03\"}", true},
+		{"istanbul", "{\"text\":\"\u0130STANBUL\"}", true},
+		{"\u03c3", "{\"text\":\"\u03c2\"}", true},
+		{"\u00e9", `{"text":"\u00e9"}`, true},
+		{"\u754c", `{"text":"\u754c"}`, true},
+		{"\U0001f600", `{"text":"\ud83d\ude00"}`, true},
+		{"missing", `{"text":"ordinary ascii"}`, false},
+		{"missing", "{\"text\":\"Stra\u00dfe\"}", false},
+	} {
+		t.Run(test.term+test.raw, func(t *testing.T) {
+			terms, err := compileMatchers([]string{test.term}, Query{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate, err := newBytePrefilter(terms).matches(t.Context(), strings.NewReader(test.raw))
+			if err != nil || candidate != test.candidate {
+				t.Fatalf("candidate=%t want=%t err=%v", candidate, test.candidate, err)
+			}
+		})
+	}
+}
+
+func TestBytePrefilterChunkBoundariesAndCancellation(t *testing.T) {
+	t.Parallel()
+	terms, err := compileMatchers([]string{"first", "needle"}, Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := newBytePrefilter(terms)
+	for split := 1; split < len("needle"); split++ {
+		body := "first" + strings.Repeat(" ", hashChunkBytes+filter.overlap-len("first")-split) + "needle"
+		candidate, err := filter.matches(t.Context(), strings.NewReader(body))
+		if err != nil || !candidate {
+			t.Fatalf("split=%d candidate=%t err=%v", split, candidate, err)
+		}
+	}
+	candidate, err := filter.matches(t.Context(), strings.NewReader("first only"))
+	if err != nil || candidate {
+		t.Fatalf("missing second term: candidate=%t err=%v", candidate, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := filter.matches(ctx, strings.NewReader("first needle")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled scan: %v", err)
+	}
+	if _, err := filter.matches(t.Context(), failingPrefilterReader{}); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("failed read: %v", err)
+	}
+}
+
+type failingPrefilterReader struct{}
+
+func (failingPrefilterReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestBytePrefilterContainsEveryTextMatch(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(t *rapid.T) {
+		text := rapid.String().Draw(t, "text")
+		query := Query{CaseSensitive: rapid.Bool().Draw(t, "case sensitive"), Word: rapid.Bool().Draw(t, "word")}
+		term := rapid.SampledFrom([]string{text, fold(text), "absent"}).Draw(t, "term")
+		terms, err := compileMatchers([]string{term}, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate, err := newBytePrefilter(terms).matches(t.Context(), strings.NewReader(string(data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		normalized := text
+		if !query.CaseSensitive {
+			normalized = fold(text)
+		}
+		if terms[0].matches(text, normalized) && !candidate {
+			t.Fatalf("prefilter rejected text=%q term=%q", text, term)
+		}
+	})
+}
 
 func TestRegexLiteralAppearsInEveryMatch(t *testing.T) {
 	t.Parallel()

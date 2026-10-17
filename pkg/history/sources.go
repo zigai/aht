@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -35,6 +36,13 @@ type historyFile struct {
 	open     func() (*os.File, error)
 	stat     func() (os.FileInfo, error)
 	children []historyFile
+}
+
+type fileIssueBuffer struct {
+	issues   map[string][]Issue
+	omitted  map[string]int
+	selected map[string]bool
+	parents  map[string]string
 }
 
 // DefaultSources resolves native environment overrides and standard history
@@ -61,13 +69,45 @@ func DefaultSources() ([]Source, error) {
 	return sources, nil
 }
 
+func newFileIssueBuffer() *fileIssueBuffer {
+	return &fileIssueBuffer{issues: make(map[string][]Issue), omitted: make(map[string]int), selected: make(map[string]bool), parents: make(map[string]string)}
+}
+
+func (buffer *fileIssueBuffer) recordIssue(issue Issue) {
+	var omitted int
+	buffer.issues[issue.Path], omitted = retainIssue(buffer.issues[issue.Path], issue)
+	buffer.omitted[issue.Path] += omitted
+}
+
+func (buffer *fileIssueBuffer) issue(source Source, path string, err error) {
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
+}
+
+func (buffer *fileIssueBuffer) recordProblem(source Source, path string, err error) {
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: true})
+}
+
+func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, selected bool) {
+	buffer.selected[conversation.Path] = buffer.selected[conversation.Path] || (conversation.SessionID != "" && selected)
+}
+
 func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
+
+func (s *search) forgetMissingDirectories(ctx context.Context, source Source, status SourceStatus) {
+	if s.index == nil || status.Status != "missing" {
+		return
+	}
+	if _, err := s.index.loadDirectories(ctx, source); err != nil {
+		s.index.report(s, source, source.Path, err)
+	}
+}
 
 func (s *search) scanSource(ctx context.Context, source Source) {
 	status := SourceStatus{Source: source, Status: "searched", Files: 0}
 	defer func() { s.result.Sources = append(s.result.Sources, status) }()
 	resolved, info, ok := s.inspectSource(source, &status)
 	if !ok {
+		s.forgetMissingDirectories(ctx, resolved, status)
 		return
 	}
 	source = resolved
@@ -83,14 +123,22 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		}
 		defer s.closeReader(source, path, root)
 		s.loadSourceMetadata(source, path, true)
-		files = groupChildren(source.Harness, s.walkDirectory(ctx, source, root))
+		if s.index == nil {
+			files = s.walkDirectory(ctx, source, root)
+		} else {
+			files = s.index.walkDirectory(ctx, s, source, root)
+		}
+		files = groupChildren(source.Harness, files)
 	} else if file, ok := s.singleFile(source, path); ok {
 		s.loadSourceMetadata(source, file.path, false)
 		files = []historyFile{file}
 	}
-	if s.index != nil {
+	switch {
+	case s.mode == modeSearch && s.query.IncludeTools:
+		s.scanToolsFiles(ctx, source, files, &status)
+	case s.index != nil:
 		s.index.scanFiles(ctx, s, source, files, &status)
-	} else {
+	default:
 		s.scanFilesParallel(ctx, source, files, &status)
 	}
 	if s.failureCount() > before {
@@ -222,7 +270,8 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 					return
 				}
 				inspected.Add(int64(s.scanFileDirect(ctx, source, files[i])))
-				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0})
+				var stats RefreshStats
+				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false, Waiting: false})
 			}
 		}()
 	}
@@ -233,17 +282,31 @@ func (s *search) scanFilesParallel(ctx context.Context, source Source, files []h
 // scanFileDirect parses one history with its children and returns how many
 // files it inspected.
 func (s *search) scanFileDirect(ctx context.Context, source Source, file historyFile) int {
+	if !file.mayMatchTime(s.query.Filter) {
+		return 1 + len(file.children)
+	}
+	buffer := newFileIssueBuffer()
+	inspected := s.scanFileGroup(ctx, source, file, buffer)
+	s.reportScopedIssues(buffer)
+	return inspected
+}
+
+func (s *search) scanFileGroup(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer) int {
 	if file.database {
-		s.scanDatabase(ctx, source, file.path)
+		s.scanDatabase(ctx, source, file.path, buffer)
 		return 1
 	}
 	inspected := 0
-	t, ok := s.readTranscriptFile(ctx, source, file)
+	prefilter := s.prefilter
+	if !s.prefilterMembers(ctx, file) {
+		prefilter = nil
+	}
+	t, ok := s.readTranscriptFile(ctx, source, file, buffer, prefilter)
 	if ok {
 		inspected++
 	}
 	for _, child := range file.children {
-		c, ok := s.readTranscriptFile(ctx, source, child)
+		c, ok := s.readTranscriptFile(ctx, source, child, buffer, prefilter)
 		if !ok {
 			continue
 		}
@@ -251,28 +314,71 @@ func (s *search) scanFileDirect(ctx context.Context, source Source, file history
 		switch {
 		case c == nil:
 		case t != nil && c.match.Conversation.SessionID == t.match.Conversation.SessionID:
+			buffer.parents[child.path] = t.match.Conversation.Path
 			t.absorb(c, s.query.Excerpts)
 		default:
+			buffer.selectConversation(c.match.Conversation, s.issueConversationSelected(c.match.Conversation, c.qualifies(len(s.terms))))
 			s.add(ctx, c)
 		}
 	}
 	if t != nil {
+		buffer.selectConversation(t.match.Conversation, s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))))
 		s.add(ctx, t)
 	}
 	return inspected
 }
 
-func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile) (*transcript, bool) {
+func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer, prefilter *bytePrefilter) (*transcript, bool) {
 	opened, err := file.open()
 	if err != nil {
-		s.issue(source, file.path, err)
+		buffer.issue(source, file.path, err)
 		return nil, false
 	}
-	t := s.scanTranscript(ctx, source, file.path, opened)
-	if err := opened.Close(); err != nil {
-		s.issue(source, file.path, err)
+	var parsed *transcript
+	candidate, err := prefilter.matchesFile(ctx, opened)
+	switch {
+	case err != nil:
+		buffer.issue(source, file.path, err)
+	case candidate || strings.HasSuffix(file.path, ".zst"):
+		parsed = s.scanTranscript(ctx, source, file.path, opened, buffer)
+	default:
+		s.checkTranscriptFormat(ctx, source, file.path, opened, buffer)
 	}
-	return t, true
+	if err := opened.Close(); err != nil {
+		buffer.issue(source, file.path, err)
+	}
+	return parsed, true
+}
+
+func (filter Filter) acceptsModificationTime(modified time.Time) bool {
+	return filter.Since.IsZero() || modified.IsZero() || !modified.Before(filter.Since)
+}
+
+func (file historyFile) mayMatchTime(filter Filter) bool {
+	if filter.Since.IsZero() {
+		return true
+	}
+	info, err := file.stat()
+	if err != nil || filter.acceptsModificationTime(info.ModTime()) {
+		return true
+	}
+	if file.database {
+		for _, suffix := range []string{"-wal", "-journal"} {
+			info, err := os.Stat(file.path + suffix)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return true
+			}
+			if err == nil && filter.acceptsModificationTime(info.ModTime()) {
+				return true
+			}
+		}
+	}
+	for _, child := range file.children {
+		if child.mayMatchTime(filter) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *search) report(progress Progress) {
@@ -281,6 +387,8 @@ func (s *search) report(progress Progress) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	progress.Refresh = progress.Refresh.snapshot()
+	progress.IndexUnavailable = s.result.IndexUnavailable
 	s.progress(progress)
 }
 

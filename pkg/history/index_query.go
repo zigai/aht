@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,7 @@ import (
 
 const directoryScanThreshold = 32
 
-// Conversations without a native timestamp store sentinels that no time bound
+// Conversations without an activity timestamp store sentinels that no time bound
 // can satisfy.
 const (
 	unknownActive  = math.MinInt64
@@ -24,8 +23,8 @@ const (
 )
 
 type indexQueries struct {
-	conversations *sql.Stmt
-	parts         *sql.Stmt
+	conversations *indexStatement
+	parts         *indexStatement
 }
 
 // indexedMatches plans one conversation's matches: the number of distinct
@@ -65,10 +64,16 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err err
 	index.candidates = map[int64]bool{}
 	index.plans = map[int64]*indexedMatches{}
 	index.excluded = map[int64]bool{}
-	if s.mode == modeSearch {
+	switch s.mode {
+	case modeSearch:
 		if err := index.findParts(ctx, s, 0); err != nil {
 			return err
 		}
+	case modeList:
+		if err := index.prefetchConversations(ctx, s.query.Filter); err != nil {
+			return err
+		}
+	case modeRefresh:
 	}
 	index.queries = new(indexQueries)
 	defer func() {
@@ -79,13 +84,12 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err err
 	}()
 	index.queries.conversations, err = index.conn.PrepareContext(ctx, "SELECT id,metadata FROM conversations WHERE file_id=? ORDER BY id")
 	if err != nil {
-		return index.contention(fmt.Errorf("prepare indexed conversations: %w", err))
+		return index.failure(fmt.Errorf("prepare indexed conversations: %w", err))
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", max(s.query.Excerpts, 1)), ",")
-	//nolint:gosec // G202: the statement only repeats fixed placeholders.
 	index.queries.parts, err = index.conn.PrepareContext(ctx, "SELECT id,role,body,message_id,line,timestamp FROM parts WHERE id IN ("+placeholders+")")
 	if err != nil {
-		return index.contention(fmt.Errorf("prepare indexed text: %w", err))
+		return index.failure(fmt.Errorf("prepare indexed text: %w", err))
 	}
 	return nil
 }
@@ -124,29 +128,29 @@ func (index *historyIndex) findParts(ctx context.Context, s *search, fileID int6
 }
 
 func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, fileID int64, visit func(file, conversation, part int64)) (err error) {
-	query, args, err := index.partQuery(ctx, s, m, fileID)
+	query, args, verify, err := index.partQuery(ctx, s, m, fileID)
 	if err != nil {
 		return err
 	}
 	rows, err := index.conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return index.contention(fmt.Errorf("find indexed candidates: %w", err))
+		return index.failure(fmt.Errorf("find indexed candidates: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var file, conversation, part int64
-		var body, folded string
+		var body string
 		targets := []any{&file, &conversation, &part}
-		if m.verifies() {
-			targets = append(targets, &body, &folded)
+		if verify {
+			targets = append(targets, &body)
 		}
 		if err = rows.Scan(targets...); err != nil {
 			return fmt.Errorf("read indexed candidate: %w", err)
 		}
-		if m.verifies() {
-			normalized := folded
-			if s.query.CaseSensitive {
-				normalized = body
+		if verify {
+			normalized := body
+			if !s.query.CaseSensitive {
+				normalized = fold(body)
 			}
 			if !m.matches(body, normalized) {
 				continue
@@ -160,49 +164,43 @@ func (index *historyIndex) eachPart(ctx context.Context, s *search, m matcher, f
 	return nil
 }
 
-func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, fileID int64) (string, []any, error) {
+func (index *historyIndex) partQuery(ctx context.Context, s *search, m matcher, fileID int64) (string, []any, bool, error) {
 	predicate, args := index.candidatePredicate(s, fileID)
 	phrase := trigramPhrase(fold(m.literal))
 	trigrams := phrase != ""
 	if trigrams {
-		literal, err := index.preferLiteral(ctx, predicate, args, phrase, s.query.Dir != "" || fileID != 0)
+		literal, err := index.preferLiteral(ctx, predicate, args, phrase, len(s.query.Dirs) > 0 || fileID != 0)
 		if err != nil {
-			return "", nil, err
+			return "", nil, false, err
 		}
 		trigrams = !literal
 	}
+	verify := m.verifies() || (!trigrams && !s.query.CaseSensitive)
 	columns := "c.file_id,c.id,p.id"
-	if m.verifies() {
-		columns += ",p.body,p.folded"
+	if verify {
+		columns += ",p.body"
 	}
 	query := "SELECT " + columns + " FROM conversations c JOIN files f ON f.id=c.file_id " + partJoin(trigrams, s.query.CaseSensitive) + " ON p.conversation_id=c.id WHERE " + predicate
 	if trigrams {
 		query += " AND p.id IN (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ?)"
 		args = append(args, phrase)
 	}
-	column := "p.folded"
-	if s.query.CaseSensitive {
-		column = "p.body"
-	}
-	if m.literal != "" && (!trigrams || s.query.CaseSensitive) {
-		query += " AND instr(" + column + ",?)>0"
+	if m.literal != "" && s.query.CaseSensitive {
+		query += " AND instr(p.body,?)>0"
 		args = append(args, m.literal)
 	}
 	query += " ORDER BY c.id,p.id"
-	return query, args, nil
+	return query, args, verify, nil
 }
 
 // candidatePredicate selects the conversations a part query may read.
-// Normalize with the same Go mapping that stored the folded column, not
-// SQLite's different Unicode folding rules. A quoted trigram phrase matches
-// the exact normalized substring. Case-sensitive, short, and NUL-containing
-// literals additionally use literal matching; regular expressions and word
-// boundaries are checked in Go, which also builds excerpts.
+// A quoted trigram phrase matches the exact Go-normalized substring. Literal
+// scans normalize the stored body in Go, preserving Unicode folding without a
+// second text copy. Case-sensitive literals use the original body; regular
+// expressions and word boundaries are checked in Go, which also builds excerpts.
 func (index *historyIndex) candidatePredicate(s *search, fileID int64) (string, []any) {
 	filter, args := index.selectionSQL(s.query.Filter)
-	// Tool parts are stored for opt-in searches only, so a default query must
-	// exclude them from candidate plans in both the trigram and instr branches.
-	predicate, args := rolePredicate(filter, s.query.Role, s.query.IncludeTools, args)
+	predicate, args := rolePredicate(filter, s.query.Role, args)
 	// A selected literal scan avoids enumerating common trigrams across the
 	// whole index. Indexed text lengths account for oversized message bodies;
 	// CROSS JOIN keeps metadata selection ahead of reading those bodies.
@@ -228,7 +226,7 @@ func partJoin(trigrams, caseSensitive bool) string {
 // accepts remains the authority for every filter. Child histories are judged
 // by their parent's metadata, so only the source and harness narrow them.
 func (index *historyIndex) selectionSQL(f Filter) (string, []any) {
-	metadata, metadataArgs := directorySQL(f.Dir)
+	metadata, metadataArgs := directorySQL(f.Dirs)
 	if !f.Since.IsZero() {
 		metadata += " AND c.active>=?"
 		metadataArgs = append(metadataArgs, f.Since.Unix())
@@ -271,8 +269,8 @@ func (index *historyIndex) smallSelection(ctx context.Context, filter string, ar
 	var count int
 	query := "SELECT count(*) FROM (SELECT p.id FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p ON p.conversation_id=c.id WHERE " + filter + " LIMIT ?)"
 	values := append(append([]any{}, args...), directoryScanThreshold+1)
-	if err := index.conn.QueryRowContext(ctx, query, values...).Scan(&count); err != nil {
-		return false, index.contention(fmt.Errorf("select indexed parts: %w", err))
+	if err := index.conn.queryRow(query, values...).Scan(ctx, &count); err != nil {
+		return false, index.failure(fmt.Errorf("select indexed parts: %w", err))
 	}
 	return count <= directoryScanThreshold, nil
 }
@@ -282,26 +280,26 @@ func (index *historyIndex) preferLiteral(ctx context.Context, filter string, arg
 		return index.smallSelection(ctx, filter, args)
 	}
 	var pages int64
-	query := "SELECT coalesce(sum(1+length(CAST(p.folded AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
-	if err := index.conn.QueryRowContext(ctx, query, args...).Scan(&pages); err != nil {
-		return false, index.contention(fmt.Errorf("measure selected parts: %w", err))
+	query := "SELECT coalesce(sum(1+length(CAST(p.body AS BLOB))/(SELECT page_size FROM pragma_page_size)),0) FROM conversations c JOIN files f ON f.id=c.file_id CROSS JOIN parts p INDEXED BY parts_conversation ON p.conversation_id=c.id WHERE " + filter
+	if err := index.conn.queryRow(query, args...).Scan(ctx, &pages); err != nil {
+		return false, index.failure(fmt.Errorf("measure selected parts: %w", err))
 	}
 	if pages <= directoryScanThreshold {
 		return true, nil
 	}
 	var candidates int64
-	if err := index.conn.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ? LIMIT ?)", phrase, pages+1).Scan(&candidates); err != nil {
-		return false, index.contention(fmt.Errorf("measure trigram candidates: %w", err))
+	if err := index.conn.queryRow("SELECT count(*) FROM (SELECT rowid FROM parts_fts WHERE parts_fts MATCH ? LIMIT ?)", phrase, pages+1).Scan(ctx, &candidates); err != nil {
+		return false, index.failure(fmt.Errorf("measure trigram candidates: %w", err))
 	}
 	return candidates > pages, nil
 }
 
-func rolePredicate(filter, role string, includeTools bool, args []any) (string, []any) {
-	if role != "" {
+func rolePredicate(filter, role string, args []any) (string, []any) {
+	if role != "" && role != "all" {
 		return "(" + filter + ") AND p.role = ?", append(args, role)
 	}
-	if !includeTools {
-		return "(" + filter + ") AND p.role <> 'tool'", args
+	if role == "" {
+		filter = "(" + filter + ") AND p.role <> 'context'"
 	}
 	return filter, args
 }
@@ -345,13 +343,14 @@ func (index *historyIndex) groupCandidate(ctx context.Context, s *search, group 
 // that share their session identity folded in, followed by the remaining child
 // conversations.
 func (index *historyIndex) foldGroup(ctx context.Context, group []groupFile) ([]indexedConversation, error) {
-	conversations, err := index.readConversations(ctx, group[0].file.id)
+	fresh := slices.ContainsFunc(group, func(member groupFile) bool { return member.changed })
+	conversations, err := index.readConversations(ctx, group[0].file.id, fresh)
 	if err != nil {
 		return nil, err
 	}
 	parents := len(conversations)
 	for _, member := range group[1:] {
-		children, err := index.readConversations(ctx, member.file.id)
+		children, err := index.readConversations(ctx, member.file.id, fresh)
 		if err != nil {
 			return nil, err
 		}
@@ -405,7 +404,10 @@ func foldPlan(owner, child *indexedMatches) *indexedMatches {
 	return owner
 }
 
-func (index *historyIndex) readConversations(ctx context.Context, fileID int64) ([]indexedConversation, error) {
+func (index *historyIndex) readConversations(ctx context.Context, fileID int64, fresh bool) ([]indexedConversation, error) {
+	if index.listed != nil && !fresh {
+		return index.listed[fileID], nil
+	}
 	var conversations []indexedConversation
 	err := index.eachConversation(ctx, fileID, func(c indexedConversation) { conversations = append(conversations, c) })
 	return conversations, err
@@ -414,7 +416,7 @@ func (index *historyIndex) readConversations(ctx context.Context, fileID int64) 
 func (index *historyIndex) eachConversation(ctx context.Context, fileID int64, visit func(indexedConversation)) (err error) {
 	rows, err := index.queries.conversations.QueryContext(ctx, fileID)
 	if err != nil {
-		return index.contention(fmt.Errorf("query indexed conversations: %w", err))
+		return index.failure(fmt.Errorf("query indexed conversations: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -459,7 +461,7 @@ func (index *historyIndex) collectMatches(ctx context.Context, s *search, conver
 // readRetained hydrates only the final heap after every selected history has
 // been checked. Failed or canceled reads cannot expose metadata-only matches.
 func (index *historyIndex) readRetained(ctx context.Context, s *search) error {
-	if s.mode != modeSearch {
+	if s.mode != modeSearch || s.query.IncludeTools {
 		return nil
 	}
 	retained := s.recent.items
@@ -511,7 +513,7 @@ func (index *historyIndex) eachPartText(ctx context.Context, ids []int64, visit 
 	}
 	rows, err := index.queries.parts.QueryContext(ctx, args...)
 	if err != nil {
-		return index.contention(fmt.Errorf("query indexed text: %w", err))
+		return index.failure(fmt.Errorf("query indexed text: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -534,7 +536,7 @@ func (index *historyIndex) refreshPlans(ctx context.Context, s *search, fileID i
 	// Refresh plans for rewritten/appended conversations before using them.
 	rows, err := index.conn.QueryContext(ctx, "SELECT id FROM conversations WHERE file_id=?", fileID)
 	if err != nil {
-		return index.contention(fmt.Errorf("refresh indexed candidates: %w", err))
+		return index.failure(fmt.Errorf("refresh indexed candidates: %w", err))
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
@@ -553,7 +555,7 @@ func (index *historyIndex) refreshPlans(ctx context.Context, s *search, fileID i
 
 func (queries *indexQueries) close() error {
 	var err error
-	for _, stmt := range []*sql.Stmt{queries.conversations, queries.parts} {
+	for _, stmt := range []*indexStatement{queries.conversations, queries.parts} {
 		if stmt != nil {
 			err = errors.Join(err, stmt.Close())
 		}

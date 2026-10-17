@@ -1,13 +1,27 @@
 package claude
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
+
+type transcriptCapture struct {
+	Role, Body, ID string
+	Line           int
+	At             time.Time
+}
+
+type transcriptReadState struct {
+	Conversation transcript.Conversation
+	Recognized   bool
+	Captures     []transcriptCapture
+}
 
 func readTranscript(t *testing.T, conversation *transcript.Conversation, includeTools bool, lines ...string) bool {
 	t.Helper()
@@ -148,6 +162,70 @@ func TestTranscriptBranchAndModel(t *testing.T) {
 	}
 }
 
+func TestFastTranscriptPreservesConversationAndCaptures(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"mode","sessionId":"native"}`,
+		`{"type":"permission-mode","sessionId":"native"}`,
+		`{"type":"user","sessionId":"native","cwd":"/work","gitBranch":"main","uuid":"u","timestamp":"2026-09-01T10:00:00Z","message":{"role":"user","content":"hello"}}`,
+		`{"type":"assistant","uuid":"a","timestamp":1788256860000,"message":{"role":"assistant","model":"model-a","content":[{"type":"text","text":"answer"},{"type":"tool_use","name":"Read","input":{"path":"file"}}]}}`,
+		`{"type":"user","cwd":"/new","gitBranch":"feature","uuid":"t","timestamp":"2026-09-01T10:02:00Z","message":{"role":"user","content":[{"type":"tool_result","content":"output"}]}}`,
+		`{"type":"user","uuid":"empty","timestamp":"2026-09-01T10:03:00Z","message":{"role":"user","content":[{"type":"tool_result","content":""}]}}`,
+		`{"type":"user","uuid":"mixed","message":{"role":"user","content":[{"type":"tool_result","content":"output"},{"type":"text","text":"followup"}]}}`,
+		`{"type":"user","uuid":"future","message":{"role":"user","content":[{"type":"future","text":"not known"},{"type":"tool_result","content":[{"type":"text","text":"nested"}]}]}}`,
+		`{"type":"ai-title","aiTitle":"Generated"}`,
+		`{"type":"custom-title","customTitle":"Manual"}`,
+		`{"type":"custom-title","customTitle":null}`,
+		`{"type":"attachment","cwd":"/ignored","gitBranch":"ignored","timestamp":"2026-09-02T10:00:00Z"}`,
+		`{"type":"assistant","sessionId":7,"message":{"role":"assistant","model":"model-b","content":"wrong identity shape"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"old"},"message":{"role":"user","content":"last duplicate"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"old","text":null}]}}`,
+		`{"type":"assistant","message":{"Role":"assistant","content":"case-sensitive role"}}`,
+		`{"type":"assistant","message":{"role":"assistant","MODEL":"ignored","content":"case-sensitive model"}}`,
+		`{"type":"assistant","uuid":"summary","isCompactSummary":true,"timestamp":"2026-09-01T10:04:00Z","message":{"role":"assistant","model":"summary-model","content":[{"type":"text","text":"compact context"},{"type":"tool_use","name":"Read","input":{}}]}}`,
+		`{"type":"user","uuid":"meta","isMeta":true,"timestamp":"2026-09-01T10:05:00Z","message":{"role":"user","model":"ignored","content":[{"type":"text","text":"injected context"},{"type":"tool_result","content":"result"}]}}`,
+		`{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"tool_result","content":"meta tool result"}]}}`,
+		`{"type":"user","isMeta":true,"message":{"role":"future","content":"context overrides unknown role"}}`,
+		`{"type":"user","isMeta":false,"isCompactSummary":false,"message":{"role":"user","content":"still user"}}`,
+		`{"type":"user","isMeta":"true","message":{"role":"user","content":"not a boolean"}}`,
+		`{"type":"user","isMeta":true,"isMeta":false,"message":{"role":"user","content":"last flag wins"}}`,
+		`{"type":"user","isMeta":true,"message":null}`,
+	}
+	for _, includeTools := range []bool{false, true} {
+		want := replayTranscript(t, false, includeTools, lines)
+		got := replayTranscript(t, true, includeTools, lines)
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("includeTools=%t (-ordinary +fast):\n%s", includeTools, diff)
+		}
+	}
+}
+
+func TestFastTranscriptRejectsMalformedAndUnrecognizedShapes(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{
+		`{"type":"attachment","attachment":`,
+		`{"type":"atis-latch"} trailing`,
+		`{"type":"last-prompt","message":{"role":"user","content":"future text"}}`,
+		`{"type":"file-history-delta","text":"future text"}`,
+		`{"type":"cost-state","content":"future text"}`,
+		`{"type":"pr-link","type":"unknown"}`,
+		`{"type":"user","cwd":"/partial","isMeta":"true","message":{"role":"user","content":"fallback"}}`,
+		`{"type":"assistant","isCompactSummary":{},"message":{"role":"assistant","model":"ignored","content":"fallback"}}`,
+		`{"type":"user","isMeta":true,"message":{"role":7,"content":"fallback"}}`,
+		`{"type":"user","cwd":"/partial","message":{"role":"user","content":[{"type":"tool_result","content":"broken"}]}`,
+	} {
+		var conversation transcript.Conversation
+		var recognized bool
+		decoder := &transcript.Decoder{Conversation: &conversation, Recognized: &recognized}
+		if readFastRecord(t.Context(), decoder, []byte(line), 1) {
+			t.Fatalf("handled malformed or unrecognized record: %s", line)
+		}
+		if recognized || conversation != (transcript.Conversation{}) {
+			t.Fatalf("rejected record changed state: recognized=%t conversation=%+v", recognized, conversation)
+		}
+	}
+}
+
 func TestTranscriptModelIgnoresSyntheticOnly(t *testing.T) {
 	t.Parallel()
 	var conversation transcript.Conversation
@@ -155,4 +233,51 @@ func TestTranscriptModelIgnoresSyntheticOnly(t *testing.T) {
 	if conversation.Model != "" {
 		t.Fatalf("model = %q, want empty", conversation.Model)
 	}
+}
+
+func TestTranscriptContextProjectionPreservesMetadata(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"user","sessionId":"native","cwd":"/work","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"injected"}}`,
+		`{"type":"assistant","isCompactSummary":true,"message":{"role":"assistant","model":"summary-model","content":"summary"}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"output"}]}}`,
+	}
+	for _, fast := range []bool{false, true} {
+		for _, includeTools := range []bool{false, true} {
+			state := replayTranscript(t, fast, includeTools, lines)
+			want := []transcriptCapture{{Role: "context", Body: "injected", Line: 1}, {Role: "context", Body: "summary", Line: 2}, {Role: "tool", Line: 3}}
+			if includeTools {
+				want[2].Body = "output"
+			}
+			if diff := cmp.Diff(want, state.Captures); diff != "" {
+				t.Fatalf("fast=%t includeTools=%t captures (-want +got):\n%s", fast, includeTools, diff)
+			}
+			wantConversation := transcript.Conversation{SessionID: "native", CWD: "/work", GitBranch: "main", Model: "summary-model"}
+			if diff := cmp.Diff(wantConversation, state.Conversation); diff != "" || !state.Recognized {
+				t.Fatalf("fast=%t includeTools=%t recognized=%t conversation (-want +got):\n%s", fast, includeTools, state.Recognized, diff)
+			}
+		}
+	}
+}
+
+func replayTranscript(t *testing.T, fast, includeTools bool, lines []string) transcriptReadState {
+	t.Helper()
+	var state transcriptReadState
+	decoder := &transcript.Decoder{Conversation: &state.Conversation, Recognized: &state.Recognized, IncludeTools: includeTools, Emit: func(_ context.Context, role, body, id string, line int, at time.Time) {
+		if role == "tool" && !includeTools {
+			body = ""
+		}
+		state.Captures = append(state.Captures, transcriptCapture{role, body, id, line, at})
+	}}
+	for index, line := range lines {
+		if fast && readFastRecord(t.Context(), decoder, []byte(line), index+1) {
+			continue
+		}
+		var record transcript.Record
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+		readTranscriptRecord(t.Context(), decoder, record, index+1)
+	}
+	return state
 }

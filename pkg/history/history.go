@@ -81,7 +81,7 @@ type Sort string
 // enrichment; its absence means unknown.
 type Filter struct {
 	Harnesses       []registry.Harness `json:"harnesses,omitempty"`
-	Dir             string             `json:"dir,omitempty"`
+	Dirs            []string           `json:"dirs,omitempty"`
 	ExcludeDirs     []string           `json:"exclude_dirs,omitempty"`
 	Since           time.Time          `json:"since,omitzero"`
 	Until           time.Time          `json:"until,omitzero"`
@@ -144,19 +144,23 @@ type Catalog struct {
 
 // Progress reports scanning of one source. Total counts the history files
 // discovered in Source, Done those inspected so far, and Refreshed those whose
-// index entries were rebuilt because the native history changed.
+// index entries were rebuilt because the native history changed. Waiting reports
+// index lock contention instead of source progress.
 type Progress struct {
-	Source    Source `json:"source"`
-	Done      int    `json:"done"`
-	Total     int    `json:"total"`
-	Refreshed int    `json:"refreshed"`
+	Source           Source       `json:"source"`
+	Done             int          `json:"done"`
+	Total            int          `json:"total"`
+	Refreshed        int          `json:"refreshed"`
+	Refresh          RefreshStats `json:"refresh"`
+	IndexUnavailable bool         `json:"index_unavailable,omitempty"`
+	Waiting          bool         `json:"waiting,omitempty"`
 }
 
 // Conversation identifies native history, including histories never seen by AHT.
 // Path is the transcript or database, not an AHT registry path. Title is the
 // harness's native display name and Prompt the first meaningful user prompt.
 // Messages counts user and assistant message parts. Unknown metadata is omitted;
-// timestamps are native timestamps, never inferred from file mtimes.
+// UpdatedAt falls back to transcript modification time when native times are absent.
 type Conversation = native.Conversation
 
 // Span is a byte range of Excerpt.Text that matched a query term.
@@ -167,7 +171,7 @@ type Span struct {
 
 // Excerpt is a bounded window around the first match in a message. Matches lists
 // every term match inside Text. Line is a one-based JSONL line, or zero for
-// databases. MessageID is native when available. Role is user, assistant, or tool.
+// databases. MessageID is native when available. Role is user, assistant, context, or tool.
 // Reasoning and system text are excluded.
 type Excerpt struct {
 	Role      string    `json:"role"`
@@ -222,33 +226,40 @@ type Issue struct {
 // Truncated means more conversations matched than Limit allowed. Sources
 // distinguishes skipped, missing, and unsupported histories from searched ones.
 type Result struct {
-	Matches       []Match        `json:"matches"`
-	Sources       []SourceStatus `json:"sources"`
-	Issues        []Issue        `json:"issues"`
-	OmittedIssues int            `json:"omitted_issues"`
-	Truncated     bool           `json:"truncated"`
+	Matches          []Match         `json:"matches"`
+	Sources          []SourceStatus  `json:"sources"`
+	Issues           []Issue         `json:"issues"`
+	OmittedIssues    int             `json:"omitted_issues"`
+	Truncated        bool            `json:"truncated"`
+	Refresh          []SourceRefresh `json:"refresh,omitempty"`
+	Reparsed         []ReparsedFile  `json:"reparsed,omitempty"`
+	IndexUnavailable bool            `json:"index_unavailable,omitempty"`
 }
 
 type scanMode int
 
 type search struct {
-	mu              sync.Mutex
-	index           *historyIndex
-	writer          *indexWriter
-	indexErr        error
-	explicitSources bool
-	sourceMetadata  map[string]string
-	mode            scanMode
-	query           Query
-	terms           []matcher
-	exclude         []matcher
-	stream          func(Match) bool
-	stopped         bool
-	progress        func(Progress)
-	matched         int
-	failures        int
-	recent          matchHeap
-	result          Result
+	mu               sync.Mutex
+	index            *historyIndex
+	writer           *indexWriter
+	indexErr         error
+	explicitSources  bool
+	sourceMetadata   map[string]string
+	mode             scanMode
+	query            Query
+	terms            []matcher
+	prefilter        *bytePrefilter
+	metadataFailures map[string]bool
+	toolsFailures    map[string]bool
+	exclude          []matcher
+	stream           func(Match) bool
+	stopped          bool
+	progress         func(Progress)
+	matched          int
+	failures         int
+	recent           matchHeap
+	result           Result
+	registry         map[registry.Harness]*registryLookup
 }
 
 type retainedMatch struct {
@@ -403,8 +414,8 @@ func validateTermText(terms []string) error {
 }
 
 func validateRole(role string) error {
-	if role != "" && !slices.Contains([]string{"user", "assistant", "agent", "tool", "all"}, role) {
-		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, tool, or all", ErrInvalidQuery, role)
+	if role != "" && !slices.Contains([]string{"user", "assistant", "agent", "context", "tool", "all"}, role) {
+		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, context, tool, or all", ErrInvalidQuery, role)
 	}
 	return nil
 }
@@ -421,9 +432,9 @@ func validateSort(sort Sort, search bool) error {
 	return fmt.Errorf("%w: invalid sort %q", ErrInvalidQuery, sort)
 }
 
-// Search refreshes changed histories and searches the local index, falling back
-// to a direct scan when the disposable index cannot be used. Sources and files
-// retain discovery and lexical ordering, with bounded native record I/O. Matches
+// Search refreshes changed histories and searches the local index. Tools queries
+// scan selected native histories without storing tool text. An unusable index
+// falls back to a direct scan. Sources and files retain discovery order. Matches
 // are ordered by Query.Sort. Cancellation returns the partial result and the
 // context error. Each call is independent; simultaneous calls are safe if callers
 // do not mutate input slices.
@@ -449,7 +460,7 @@ func (c Catalog) List(ctx context.Context, query ListQuery) (Result, error) {
 // matches. Sort and Limit must be zero.
 func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool) (Result, error) {
 	if query.Limit != 0 || query.Sort != "" {
-		return Result{Matches: []Match{}, Sources: []SourceStatus{}, Issues: []Issue{}, OmittedIssues: 0, Truncated: false}, fmt.Errorf("%w: streamed searches report matches in discovery order without sort or limit", ErrInvalidQuery)
+		return Result{Matches: []Match{}, Sources: []SourceStatus{}, Issues: []Issue{}, OmittedIssues: 0, Truncated: false, Refresh: nil, Reparsed: nil, IndexUnavailable: false}, fmt.Errorf("%w: streamed searches report matches in discovery order without sort or limit", ErrInvalidQuery)
 	}
 	var s search
 	s.mode = modeSearch
@@ -460,6 +471,8 @@ func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool
 
 // Refresh brings the disposable index up to date with the catalog's sources
 // without searching. It returns ErrIndexUnavailable when the index cannot be used.
+// Completed and partial refreshes publish RefreshStatus. A status write failure
+// is returned without undoing committed index changes.
 func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	var s search
 	s.mode = modeRefresh
@@ -467,15 +480,22 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	if err != nil || len(sources) == 0 {
 		return s.finalize(ctx), err
 	}
-	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
+	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources), s.waitingForIndex)
 	if err != nil {
+		s.result.IndexUnavailable = errors.Is(err, ErrIndexUnavailable)
 		return s.finalize(ctx), err
 	}
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
-	closeErr := index.close()
+	closeErr := index.close(ctx)
 	s.index = nil
-	return s.finalize(ctx), errors.Join(runErr, closeErr)
+	s.result.IndexUnavailable = errors.Is(runErr, ErrIndexUnavailable)
+	result := s.finalize(ctx)
+	var statusErr error
+	if ctx.Err() == nil && closeErr == nil && s.indexErr == nil && index.unavailable == nil && !result.IndexUnavailable && (runErr == nil || errors.Is(runErr, ErrIncomplete)) {
+		statusErr = c.saveRefreshStatus(ctx, result, errors.Is(runErr, ErrIncomplete))
+	}
+	return result, errors.Join(runErr, closeErr, statusErr)
 }
 
 func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
@@ -526,26 +546,38 @@ func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
 // retract matches it already reported, so it fails instead of falling back
 // once anything was streamed.
 func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source) error {
-	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources))
+	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources), s.waitingForIndex)
 	if err != nil {
 		if !errors.Is(err, ErrIndexUnavailable) {
 			return err
 		}
+		s.result.IndexUnavailable = true
 		return s.runDirect(ctx, sources)
 	}
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
-	closeErr := index.close()
+	closeErr := index.close(ctx)
 	s.index = nil
+	if isIndexContentFailure(runErr) {
+		runErr = indexUnavailable(runErr)
+	}
 	if errors.Is(runErr, ErrIndexUnavailable) {
+		s.result.IndexUnavailable = true
 		if s.stream != nil && s.matched > 0 {
 			return runErr
 		}
 		// The index is unusable, so its own close error is irrelevant.
 		s.reset()
+		s.result.IndexUnavailable = true
 		return s.runDirect(ctx, sources)
 	}
 	return errors.Join(runErr, closeErr)
+}
+
+func (s *search) waitingForIndex() {
+	var progress Progress
+	progress.Waiting = true
+	s.report(progress)
 }
 
 // begin validates the query, resolves the sources to scan, and clears the result
@@ -575,6 +607,9 @@ func (c Catalog) begin(ctx context.Context, s *search) ([]Source, error) {
 
 func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	scanErr := s.forEachSource(ctx, sources)
+	if err := ctx.Err(); err != nil {
+		scanErr = errors.Join(scanErr, fmt.Errorf("search history: %w", err))
+	}
 	var commitErr error
 	if scanErr == nil {
 		commitErr = s.index.commit(ctx)
@@ -583,7 +618,7 @@ func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	if s.mode != modeRefresh {
 		excerptErr = s.index.readRetained(ctx, s)
 	}
-	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, s.resultError())
+	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, ctx.Err(), s.resultError())
 }
 
 // indexSources mirrors native discovery's path spelling: directory walks keep
@@ -608,7 +643,7 @@ func (s *search) runDirect(ctx context.Context, sources []Source) error {
 	if err := s.forEachSource(ctx, sources); err != nil {
 		return err
 	}
-	return s.resultError()
+	return errors.Join(ctx.Err(), s.resultError())
 }
 
 // forEachSource scans every selected source in input order. Sources the query
@@ -654,17 +689,19 @@ func (s *search) prepare() error {
 	switch s.query.Role {
 	case "agent":
 		s.query.Role = "assistant"
-	case "all":
-		s.query.Role = ""
 	case "tool":
 		s.query.IncludeTools = true
 	}
 	if s.query.Excerpts == 0 {
 		s.query.Excerpts = defaultExcerpts
 	}
+	s.prepareRegistry()
 	s.recent.compare = resultOrder(s.query.Sort)
 	s.terms, _ = compileMatchers(s.query.Terms, s.query)
 	s.exclude, _ = compileMatchers(s.query.Exclude, s.query)
+	if s.mode == modeSearch {
+		s.prefilter = newBytePrefilter(s.terms)
+	}
 	return nil
 }
 
@@ -691,13 +728,17 @@ func uniqueHarnesses(ids []registry.Harness) []registry.Harness {
 }
 
 func (s *search) absolutePaths() error {
-	if s.query.Dir != "" {
-		path, err := filepath.Abs(s.query.Dir)
+	directories := make([]string, 0, len(s.query.Dirs))
+	for _, dir := range s.query.Dirs {
+		path, err := filepath.Abs(dir)
 		if err != nil {
 			return fmt.Errorf("search directory: %w", err)
 		}
-		s.query.Dir = path
+		if !slices.Contains(directories, path) {
+			directories = append(directories, path)
+		}
 	}
+	s.query.Dirs = directories
 	excluded := make([]string, 0, len(s.query.ExcludeDirs))
 	for _, dir := range s.query.ExcludeDirs {
 		path, err := filepath.Abs(dir)
@@ -723,6 +764,11 @@ func (s *search) reset() {
 	s.result.Issues = []Issue{}
 	s.result.OmittedIssues = 0
 	s.result.Truncated = false
+	s.result.Refresh = nil
+	s.result.Reparsed = nil
+	s.result.IndexUnavailable = false
+	s.metadataFailures = nil
+	s.toolsFailures = nil
 }
 
 // selectSource reports whether the source is selected and, when it is not, the
@@ -744,22 +790,117 @@ func (s *search) issue(source Source, path string, err error) {
 	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
 }
 
-// recordProblem reports one skipped record of a history that was otherwise read.
-func (s *search) recordProblem(source Source, path string, err error) {
-	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: true})
-}
-
 func (s *search) recordIssue(issue Issue) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !issue.Record {
 		s.failures++
 	}
-	if len(s.result.Issues) >= maxIssues {
-		s.result.OmittedIssues++
-		return
+	var omitted int
+	s.result.Issues, omitted = retainIssue(s.result.Issues, issue)
+	s.result.OmittedIssues += omitted
+}
+
+func retainIssue(issues []Issue, issue Issue) ([]Issue, int) {
+	if len(issues) < maxIssues {
+		return append(issues, issue), 0
 	}
-	s.result.Issues = append(s.result.Issues, issue)
+	last := 0
+	for position := range issues {
+		if compareIssues(issues[position], issues[last]) > 0 {
+			last = position
+		}
+	}
+	if compareIssues(issue, issues[last]) < 0 {
+		issues[last] = issue
+	}
+	return issues, 1
+}
+
+func (s *search) reportIssues(path string, issues []Issue, omitted int, selected map[string]bool) {
+	s.reportScopedIssues(&fileIssueBuffer{issues: map[string][]Issue{path: issues}, omitted: map[string]int{path: omitted}, selected: selected, parents: nil})
+}
+
+func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
+	for child, parent := range buffer.parents {
+		buffer.selected[child] = buffer.selected[parent]
+	}
+	omitted := 0
+	for path := range buffer.issues {
+		omitted += s.reportFileIssues(buffer, path)
+	}
+	s.mu.Lock()
+	s.result.OmittedIssues += omitted
+	s.mu.Unlock()
+}
+
+func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
+	issues := buffer.issues[path]
+	selected := buffer.selected[path]
+	omitted := 0
+	recordsSelected := s.recordIssuesSelected(selected)
+	if recordsSelected {
+		omitted = buffer.omitted[path]
+	}
+	for _, issue := range issues {
+		matches := selected
+		if issue.Record && !recordsSelected {
+			continue
+		}
+		if !issue.Record {
+			if s.toolsFailures[issue.Path] {
+				continue
+			}
+			if s.metadataFailures != nil {
+				s.mu.Lock()
+				s.metadataFailures[issue.Path] = true
+				s.mu.Unlock()
+			}
+			matches = s.fileIssueSelected(issue.Source, issue.Path)
+		}
+		if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
+			s.recordIssue(issue)
+		} else {
+			omitted++
+		}
+	}
+	return omitted
+}
+
+func (s *search) recordIssuesSelected(selected bool) bool {
+	return s.metadataFailures == nil && (s.mode != modeSearch || selected)
+}
+
+func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
+	if !s.accepts(c) {
+		return false
+	}
+	if s.mode != modeSearch {
+		return true
+	}
+	return matches && (s.query.Presence == "" || presence(s.registryStates(c)) == s.query.Presence)
+}
+
+func (s *search) explicitFileSource(source Source) bool {
+	if !s.explicitSources {
+		return false
+	}
+	info, err := os.Stat(source.Path)
+	return err == nil && !info.IsDir()
+}
+
+func (s *search) fileIssueSelected(source Source, path string) bool {
+	if s.mode == modeRefresh || s.explicitFileSource(source) || s.query.Since.IsZero() {
+		return true
+	}
+	info, err := os.Stat(path)
+	return err != nil || !info.ModTime().Before(s.query.Since)
+}
+
+func (s *search) fileIssue(source Source, path string, err error) {
+	buffer := newFileIssueBuffer()
+	buffer.issue(source, path, err)
+	s.reportScopedIssues(buffer)
 }
 
 // halted reports whether a streaming caller asked to stop.
@@ -795,7 +936,7 @@ func activeSince(c Conversation) time.Time {
 
 // accepts applies the metadata filter. Index queries prefilter with weaker SQL
 // predicates, so this is the authority for both scan paths.
-func (s *search) accepts(c Conversation, states []RegistryState) bool {
+func (s *search) accepts(c Conversation) bool {
 	f := s.query.Filter
 	if !f.acceptsDirs(c) || !f.acceptsTimes(c) {
 		return false
@@ -806,22 +947,21 @@ func (s *search) accepts(c Conversation, states []RegistryState) bool {
 	if f.Model != "" && !strings.Contains(strings.ToLower(c.Model), strings.ToLower(f.Model)) {
 		return false
 	}
-	if c.Messages < f.MinMessages {
-		return false
-	}
-	switch f.Presence {
-	case registry.PresenceLive:
-		return presence(states) == registry.PresenceLive
-	case registry.PresenceGone:
-		return presence(states) == registry.PresenceGone
-	case registry.PresenceUnknown:
-	}
-	return true
+	return c.Messages >= f.MinMessages
 }
 
 func (f Filter) acceptsDirs(c Conversation) bool {
-	if f.Dir != "" && !within(c.CWD, f.Dir) && !within(c.ProjectRoot, f.Dir) {
-		return false
+	if len(f.Dirs) > 0 {
+		selected := false
+		for _, dir := range f.Dirs {
+			if within(c.CWD, dir) || within(c.ProjectRoot, dir) {
+				selected = true
+				break
+			}
+		}
+		if !selected {
+			return false
+		}
 	}
 	for _, dir := range f.ExcludeDirs {
 		if within(c.CWD, dir) || within(c.ProjectRoot, dir) {
@@ -882,8 +1022,11 @@ func (s *search) keep(ctx context.Context, m Match, indexID int64) {
 	if s.mode == modeRefresh || m.Conversation.SessionID == "" || (s.mode == modeSearch && m.MatchingParts == 0) {
 		return
 	}
-	states := registryStates(m.Conversation, s.query.Registry)
-	if !s.accepts(m.Conversation, states) {
+	if !s.accepts(m.Conversation) {
+		return
+	}
+	states := s.registryStates(m.Conversation)
+	if s.query.Presence != "" && presence(states) != s.query.Presence {
 		return
 	}
 	m.RegistryStates = states
@@ -934,20 +1077,16 @@ func (s *search) finalize(ctx context.Context) Result {
 		copy(ordered, s.result.Matches)
 	}
 	slices.SortStableFunc(ordered, resultOrder(s.query.Sort))
-	slices.SortFunc(s.result.Issues, func(a, b Issue) int {
-		if cmpSource := cmp.Compare(a.Source.Harness, b.Source.Harness); cmpSource != 0 {
-			return cmpSource
-		}
-		if cmpPath := cmp.Compare(a.Path, b.Path); cmpPath != 0 {
-			return cmpPath
-		}
-		return cmp.Compare(a.Message, b.Message)
-	})
+	slices.SortFunc(s.result.Issues, compareIssues)
 	if ctx.Err() == nil {
 		enrich(ctx, ordered)
 	}
 	s.result.Matches = ordered
 	return s.result
+}
+
+func compareIssues(first, second Issue) int {
+	return cmp.Or(cmp.Compare(first.Source.Harness, second.Source.Harness), cmp.Compare(first.Path, second.Path), cmp.Compare(first.Message, second.Message))
 }
 
 // resultOrder orders matches by the requested key, then by most recently updated
@@ -1010,21 +1149,6 @@ func dedupeSources(sources []Source) []Source {
 		unique = append(unique, source)
 	}
 	return unique
-}
-
-func registryStates(c Conversation, sessions []registry.Session) []RegistryState {
-	result := []RegistryState{}
-	for _, session := range sessions {
-		if session.Harness != c.Harness {
-			continue
-		}
-		sameID := session.SessionID != "" && session.SessionID == c.SessionID
-		samePath := !isDatabase(c.Path) && session.SessionPath != "" && (filepath.Clean(session.SessionPath) == c.Path || registry.PathsEqual(session.SessionPath, c.Path))
-		if (sameID && (session.SessionPath == "" || samePath)) || (samePath && session.SessionID == "") {
-			result = append(result, RegistryState{RegistryID: session.ID, Presence: session.Presence(), UpdatedAt: session.UpdatedAt})
-		}
-	}
-	return result
 }
 
 func (s *search) resultError() error {

@@ -23,6 +23,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -48,13 +49,14 @@ const (
 	doctorGroupDetection    = "Detection"
 	doctorGroupStore        = "Store"
 	doctorGroupTracker      = "Tracker"
+	doctorGroupHistory      = "History"
 	doctorGroupIntegrations = "Integrations"
 
 	doctorCheckConfig   = "config.file"
 	doctorCheckPlatform = "observer.platform"
 	doctorCheckService  = "tracker.service"
 
-	doctorCoreCheckCount = 8
+	doctorCoreCheckCount = 9
 	executableName       = "aht"
 	trackerEnableCommand = "aht manage tracker enable"
 	trackerStatusCommand = "aht manage tracker status"
@@ -136,7 +138,7 @@ type (
 )
 
 // Doctor diagnoses the installation, configuration, observer, detection
-// manifests, session store, background tracker, and harness integrations.
+// manifests, session store, history index, tracker, and harness integrations.
 // It changes nothing on disk; checks that cannot run are reported as skipped.
 func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	copies := executableCopies()
@@ -153,6 +155,7 @@ func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 		m.checkStore(ctx),
 		serviceCheck,
 		m.checkHealth(opts.MaxHealthAge, serviceCheck),
+		checkHistoryRefresh(ctx),
 	)
 	checks = append(checks, m.checkIntegrations(ctx, opts.IncludeAll, copies)...)
 	return DoctorResult{Checks: checks, Summary: summarizeDoctorChecks(checks)}
@@ -175,6 +178,30 @@ func (c DoctorCheck) Repair(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrNoRepair, c.ID)
 	}
 	return c.repair(ctx)
+}
+
+func checkHistoryRefresh(ctx context.Context) DoctorCheck {
+	check := newDoctorCheck(doctorGroupHistory, "refresh")
+	var historyCatalog history.Catalog
+	status, err := historyCatalog.RefreshStatus(ctx)
+	if err != nil {
+		check.Status, check.Message = DoctorStatusWarn, sentence(err.Error())
+	} else {
+		coverage := "complete"
+		if status.Incomplete {
+			check.Status = DoctorStatusWarn
+			coverage = "partial"
+		}
+		check.Message = fmt.Sprintf("Last refresh %s (%s; issues=%d)", status.CompletedAt.Format(time.RFC3339Nano), coverage, status.IssueCount)
+		for _, source := range status.Refresh {
+			check.Details = append(check.Details, fmt.Sprintf("%s %s: checked=%d unchanged=%d skipped=%d resumed=%d reparsed=%d bytes_parsed=%d parse_time=%s store_time=%s reasons=%v", source.Source.Harness, source.Source.Path, source.Checked, source.Unchanged, source.Skipped, source.Resumed, source.Reparsed, source.BytesParsed, source.ParseTime, source.StoreTime, source.Reasons))
+		}
+	}
+	if check.Status == DoctorStatusWarn {
+		command := "aht manage history refresh"
+		check.Fix = &DoctorFix{Command: command, Manual: "Refresh the history index: " + command, Automatic: false}
+	}
+	return check
 }
 
 func (m *Manager) checkInstallPath(copies []executableCopy) DoctorCheck {

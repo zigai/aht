@@ -11,6 +11,11 @@ import (
 
 const MaxRecordBytes = 16 << 20
 
+const (
+	TypedUserRole    = "typed-user"
+	InjectedUserRole = "injected-user"
+)
+
 var (
 	ErrInvalidRecord = errors.New("invalid JSON history record")
 	ErrUnknownFormat = errors.New("unrecognized history format or missing native session identity")
@@ -31,7 +36,8 @@ type Conversation struct {
 	Model       string           `json:"model,omitempty"`
 	Messages    int              `json:"messages"`
 	CreatedAt   time.Time        `json:"created_at,omitzero"`
-	UpdatedAt   time.Time        `json:"updated_at,omitzero"`
+	// UpdatedAt falls back to the transcript's modification time when no record has a timestamp.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 type Decoder struct {
@@ -39,6 +45,7 @@ type Decoder struct {
 	Recognized   *bool
 	Emit         func(context.Context, string, string, string, int, time.Time)
 	Issue        func(string, error)
+	Projection   string
 	Metadata     map[string]string
 	IncludeTools bool
 }
@@ -62,6 +69,10 @@ type (
 		Document       func(context.Context, *Decoder, []byte) error
 		Query          func(context.Context, *sql.DB) (string, RowReader, error)
 		LocalTitles    bool
+		// RewritableHeaders names, in order, leading metadata records whose
+		// byte lengths are fixed. They are replayed after the body so their
+		// current values override older metadata stored in later records.
+		RewritableHeaders []string
 		// Parent maps a history file that belongs to another file's
 		// conversation, such as a subagent transcript, to that file's path.
 		Parent func(string) string

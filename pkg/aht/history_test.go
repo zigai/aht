@@ -44,6 +44,10 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 	older := writePiHistory(t, "session-older", "needle in the older conversation", time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC))
 	newer := writePiHistory(t, "session-newer", "needle in the newer conversation", time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC))
 	undated := writePiHistory(t, "session-undated", "needle in the undated conversation", time.Time{})
+	modified := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(undated, modified, modified); err != nil {
+		t.Fatal(err)
+	}
 	catalog := aht.HistoryCatalog{
 		Sources: []aht.HistorySource{
 			{Harness: aht.HarnessPi, Path: older},
@@ -58,7 +62,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
-		want := []string{"session-newer", "session-older", "session-undated"}
+		want := []string{"session-undated", "session-newer", "session-older"}
 		if got := sessionIDs(result); !slices.Equal(got, want) {
 			t.Fatalf("Search session order = %v, want %v", got, want)
 		}
@@ -69,7 +73,7 @@ func TestHistoryCatalogOrdersMatches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Search error = %v, want nil", err)
 		}
-		want := []string{"session-newer"}
+		want := []string{"session-undated"}
 		if got := sessionIDs(result); !slices.Equal(got, want) {
 			t.Fatalf("Search session order = %v, want %v", got, want)
 		}
@@ -118,7 +122,7 @@ func TestListHistoryReadsDefaultSourcesWithoutText(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := aht.ListHistory(t.Context(), aht.HistoryListQuery{Harnesses: []aht.Harness{aht.HarnessPi}, Dir: "/work/app"})
+	result, err := aht.ListHistory(t.Context(), aht.HistoryListQuery{Harnesses: []aht.Harness{aht.HarnessPi}, Dirs: []string{"/work/app"}})
 	if err != nil {
 		t.Fatalf("ListHistory error = %v", err)
 	}
@@ -138,7 +142,7 @@ func TestHistoryQueryKeepsTextAndHarnessFields(t *testing.T) {
 		query aht.HistoryQuery
 		want  int
 	}{
-		{"text alone", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessPi, Dir: "/work/app", Registry: nil, IgnoreHarnesses: nil, IgnorePaths: nil}, 1},
+		{"text alone", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessPi, Dirs: []string{"/work/app"}, Registry: nil, IgnoreHarnesses: nil, IgnorePaths: nil}, 1},
 		{"text and terms must all match", aht.HistoryQuery{Text: "needle", Terms: []string{"absent"}}, 0},
 		{"harness narrows sources", aht.HistoryQuery{Text: "needle", Harness: aht.HarnessCodex}, 0},
 	} {

@@ -8,7 +8,7 @@ import (
 )
 
 func (openclawHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"openclaw-agent.sqlite", "*.jsonl", "*.jsonl.deleted.*", "*.jsonl.reset.*"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, Parent: nil}
+	return transcript.Reader{Patterns: []string{"openclaw-agent.sqlite", "*.jsonl", "*.jsonl.deleted.*", "*.jsonl.reset.*"}, Sources: transcriptSources, SkipDirectory: skipTranscriptDirectory, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
 }
 
 func transcriptSources(home string) ([]string, error) {

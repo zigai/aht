@@ -3,14 +3,13 @@ package cli
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -163,60 +162,146 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 	}
 }
 
-func TestHistoryIndexerRefreshesSettledSessions(t *testing.T) {
-	searchCLIHome(t)
-	settled := filepath.Join(t.TempDir(), "settled.jsonl")
-	running := filepath.Join(t.TempDir(), "running.jsonl")
-	writeSearchFixture(t, settled)
-	writeSearchFixture(t, running)
+func TestHistoryRefreshCoalescesTransitionsWithoutBlockingObserver(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := historyRefreshStore(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		started := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- watchHistoryRefresh(ctx, store, func(ctx context.Context) {
+				started <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+			})
+		}()
+		requireHistoryRefresh(t, started, "tracker startup did not start a refresh")
+		for index, activity := range []registry.Activity{registry.ActivityIdle, registry.ActivityRunning, registry.ActivityIdle} {
+			observation := registry.Observation{Harness: registry.Harness("pi"), At: time.Now().Add(time.Duration(index) * time.Second), Subject: registry.ObservationIdentity{SessionID: "sample"}, Evidence: &registry.Report{Event: "turn", Claim: new(registry.PresenceLive), Activity: &activity}}
+			if _, err := store.Observe(t.Context(), observation); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+		}
+		watcher := observer.New(observer.Options{
+			Store:       store,
+			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
+			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+			CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
+		})
+		for range 3 {
+			if _, err := watcher.RunOnce(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		synctest.Wait()
+		release <- struct{}{}
+		requireHistoryRefresh(t, started, "idle transition during refresh did not start a follow-up")
+		release <- struct{}{}
+		synctest.Wait()
+		select {
+		case <-started:
+			t.Fatal("transition burst started more than one follow-up refresh")
+		default:
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatalf("indexer shutdown: %v", err)
+		}
+	})
+}
+
+func TestHistoryRefreshCancellationJoinsActiveWork(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := historyRefreshStore(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		started, stopping, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- watchHistoryRefresh(ctx, store, func(ctx context.Context) {
+				close(started)
+				<-ctx.Done()
+				close(stopping)
+				<-release
+				close(stopped)
+			})
+		}()
+		requireHistoryRefresh(t, started, "tracker startup did not start a refresh")
+		cancel()
+		<-stopping
+		synctest.Wait()
+		select {
+		case <-done:
+			close(release)
+			t.Fatal("indexer returned before active work stopped")
+		default:
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("indexer returned before active work stopped")
+		}
+	})
+}
+
+func historyRefreshStore(t *testing.T) *registry.MemoryStore {
+	t.Helper()
 	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = store.Close() }()
-	now := time.Now().UTC()
-	for _, session := range []struct {
-		id, path string
-		activity registry.Activity
-	}{{"settled", settled, registry.ActivityIdle}, {"running", running, registry.ActivityRunning}} {
-		observation := registry.Observation{Harness: registry.Harness("pi"), At: now, Subject: registry.ObservationIdentity{SessionID: session.id, SessionPath: session.path}, Evidence: &registry.Report{Event: "agent_end", Claim: new(registry.PresenceLive), Activity: new(session.activity)}}
-		if _, err := store.Observe(t.Context(), observation); err != nil {
-			t.Fatal(err)
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
 		}
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	var stderr bytes.Buffer
-	app := &application{stderr: &stderr}
-	done := make(chan error, 1)
-	go func() { done <- app.runHistoryIndexer(ctx, store, false) }()
-	indexed := func(path string) bool { return historyIndexed(t, path) }
-	deadline := time.Now().Add(10 * time.Second)
-	for !indexed(settled) && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("indexer: %v", err)
-	}
-	if !indexed(settled) || indexed(running) || stderr.Len() != 0 {
-		t.Fatalf("settled indexed=%t running indexed=%t stderr=%q", indexed(settled), indexed(running), stderr.String())
+	})
+	return store
+}
+
+func requireHistoryRefresh(t *testing.T, started <-chan struct{}, failure string) {
+	t.Helper()
+	synctest.Wait()
+	select {
+	case <-started:
+	default:
+		t.Fatal(failure)
 	}
 }
 
-// historyIndexed reports whether the default history index holds path. The
-// default index lives under [os.UserCacheDir], which is not XDG_CACHE_HOME on
-// every platform.
-func historyIndexed(t *testing.T, path string) bool {
-	t.Helper()
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		t.Fatal(err)
+func TestHistoryRefreshSignalsOnlyIdleAndGoneTransitions(t *testing.T) {
+	t.Parallel()
+	var previous map[string]historySessionState
+	for _, step := range []struct {
+		presence registry.Presence
+		activity registry.Activity
+		want     bool
+	}{
+		{registry.PresenceLive, registry.ActivityRunning, false},
+		{registry.PresenceLive, registry.ActivityIdle, true},
+		{registry.PresenceLive, registry.ActivityIdle, false},
+		{registry.PresenceLive, registry.ActivityWaiting, false},
+		{registry.PresenceLive, registry.ActivityIdle, true},
+		{registry.PresenceGone, registry.ActivityUnknown, true},
+		{registry.PresenceGone, registry.ActivityUnknown, false},
+		{registry.PresenceLive, registry.ActivityIdle, true},
+	} {
+		sessions := []registry.Session{{ID: "sample", UpdatedAt: time.Now(), Liveness: registry.NewLiveness(step.presence, step.activity, nil)}}
+		changed, current := historyTransitions(sessions, previous)
+		if changed != step.want {
+			t.Fatalf("%s/%s transition signaled=%t, want %t", step.presence, step.activity, changed, step.want)
+		}
+		previous = current
 	}
-	db, err := sql.Open("sqlite", filepath.Join(cache, "aht", "history-v1.sqlite"))
-	if err != nil {
-		return false
-	}
-	defer func() { _ = db.Close() }()
-	var count int
-	return db.QueryRowContext(t.Context(), "SELECT count(*) FROM files WHERE path=?", path).Scan(&count) == nil && count == 1
 }

@@ -3,15 +3,20 @@ package history_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -43,6 +48,121 @@ func appendHistory(t *testing.T, path, body string) {
 	if err = errors.Join(writeErr, file.Close()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestIndexDiscoversDirectoryChanges(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []registry.Harness{"pi", "omp", "claude"} {
+		t.Run(string(harness), func(t *testing.T) {
+			t.Parallel()
+			checkDirectoryChanges(t, harness)
+		})
+	}
+}
+
+func checkDirectoryChanges(t *testing.T, harness registry.Harness) {
+	t.Helper()
+	root := t.TempDir()
+	catalog := history.Catalog{Sources: []history.Source{{Harness: harness, Path: root}}, IndexPath: filepath.Join(t.TempDir(), "history.sqlite")}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 0)
+	body := `{"type":"session","id":"session","cwd":"/work"}` + "\n" + `{"type":"message","message":{"role":"user","content":"directory-token"}}` + "\n"
+	if harness == "claude" {
+		body = `{"type":"user","sessionId":"session","cwd":"/work","message":{"role":"user","content":"directory-token"}}` + "\n"
+	}
+	writeHistory(t, root, "session.jsonl", body)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 1)
+	child := filepath.Join(root, "session", "subagents")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeHistory(t, child, "agent-child.jsonl", body)
+	matches := 2
+	if harness == "claude" {
+		matches = 1
+	}
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, matches)
+	if harness == "claude" {
+		if result.Matches[0].MatchingParts != 2 {
+			t.Fatalf("parent and child matching parts = %d, want 2", result.Matches[0].MatchingParts)
+		}
+	}
+	checkDirectoryCacheCleanup(t, catalog, root)
+}
+
+func checkDirectoryCacheCleanup(t *testing.T, catalog history.Catalog, root string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(root, "session")); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"directory-token"}}, 1)
+	db := openTestIndex(t, catalog.IndexPath)
+	var directories, files int
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM directories").Scan(&directories); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM files").Scan(&files); err != nil {
+		t.Fatal(err)
+	}
+	if directories != 1 || files != 1 {
+		t.Fatalf("deleted directory retained: directories=%d files=%d", directories, files)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"directory-token"}})
+	if !errors.Is(err, history.ErrIncomplete) || len(result.Matches) != 0 {
+		t.Fatalf("deleted source: matches=%d error=%v", len(result.Matches), err)
+	}
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM directories").Scan(&directories); err != nil || directories != 0 {
+		t.Fatalf("deleted source retained directories=%d err=%v", directories, err)
+	}
+}
+
+func TestIndexDiscoversReplacedDirectoryAndRapidCreates(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	root := catalog.Sources[0].Path
+	parent := filepath.Join(root, "nested")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Unix(1700000000, 123456789)
+	if err := os.Chtimes(parent, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	writeHistory(t, parent, "new.jsonl", treeHistory)
+	if err := os.Chtimes(parent, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 2)
+	replacement := t.TempDir()
+	writeHistory(t, replacement, "other.jsonl", strings.ReplaceAll(treeHistory, "refresh", "changed"))
+	if err := os.Chtimes(replacement, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, parent); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"changed"}}, 1)
+}
+
+func TestIndexRetriesNewUnreadableDirectoryEntry(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}}); !errors.Is(err, history.ErrIncomplete) {
+		t.Fatalf("unreadable history error = %v", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 }
 
 func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
@@ -79,6 +199,393 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"Removed"}}, 1)
+}
+
+func TestRefreshStatusRoundTripsCompletedCounts(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	for _, want := range []history.RefreshStats{
+		{Checked: 1, Reparsed: 1, BytesParsed: int64(len(treeHistory)), Reasons: map[string]int{"new file": 1}},
+		{Checked: 1, Unchanged: 1},
+	} {
+		started := time.Now()
+		result, err := catalog.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireRefreshStats(t, result, want)
+		fresh := history.Catalog{IndexPath: catalog.IndexPath}
+		status, err := fresh.RefreshStatus(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireCompletedRefreshStatus(t, status, result.Refresh, started)
+		requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+		afterSearch, err := fresh.RefreshStatus(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := cmp.Diff(status, afterSearch); diff != "" {
+			t.Fatalf("warm search changed last explicit refresh (-before +after):\n%s", diff)
+		}
+	}
+	info, err := os.Stat(catalog.IndexPath + ".refresh.json")
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("status permissions = %v, %v", info, err)
+	}
+}
+
+func requireCompletedRefreshStatus(t *testing.T, status history.RefreshStatus, want []history.SourceRefresh, started time.Time) {
+	t.Helper()
+	if status.CompletedAt.Before(started) || status.CompletedAt.After(time.Now()) || status.Incomplete || status.IssueCount != 0 {
+		t.Fatalf("completed status = %#v", status)
+	}
+	if diff := cmp.Diff(want, status.Refresh); diff != "" {
+		t.Fatalf("persisted counts (-result +status):\n%s", diff)
+	}
+}
+
+func TestRefreshStatusSurvivesSearchIndexUpdates(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"append", "rewrite"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if _, err := catalog.Refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			before, err := catalog.RefreshStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			updateRefreshStatusTranscript(t, path, scenario)
+			result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"updated token"}}, 1)
+			if len(result.Refresh) != 1 || result.Refresh[0].Resumed+result.Refresh[0].Reparsed != 1 {
+				t.Fatalf("search did not update index: %#v", result.Refresh)
+			}
+			after, err := catalog.RefreshStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(before, after); diff != "" {
+				t.Fatalf("search changed last explicit refresh (-before +after):\n%s", diff)
+			}
+		})
+	}
+}
+
+func updateRefreshStatusTranscript(t *testing.T, path, scenario string) {
+	t.Helper()
+	if scenario == "append" {
+		appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"updated token"}}`+"\n")
+		return
+	}
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(treeHistory, "refresh", "updated token")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshStatusRecordsPartialRefresh(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	missing := filepath.Join(t.TempDir(), "missing")
+	for position := range 105 {
+		catalog.Sources = append(catalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: filepath.Join(missing, strconv.Itoa(position))})
+	}
+	result, err := catalog.Refresh(t.Context())
+	if !errors.Is(err, history.ErrIncomplete) || result.IndexUnavailable || result.OmittedIssues != 5 {
+		t.Fatalf("partial refresh = %#v, %v", result, err)
+	}
+	status, err := catalog.RefreshStatus(t.Context())
+	if err != nil || !status.Incomplete || status.IssueCount != 105 {
+		t.Fatalf("partial status = %#v, %v", status, err)
+	}
+	if diff := cmp.Diff(result.Refresh, status.Refresh); diff != "" {
+		t.Fatalf("partial counts (-result +status):\n%s", diff)
+	}
+}
+
+func TestRefreshStatusPreservesPriorOnInterruptedRefresh(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"canceled", "unavailable"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if _, err := catalog.Refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			statusPath := catalog.IndexPath + ".refresh.json"
+			before, err := os.ReadFile(statusPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantErr := history.ErrIndexUnavailable
+			if scenario == "canceled" {
+				wantErr = context.Canceled
+			}
+			if err = refreshWithInterruption(t, catalog, path, scenario); !errors.Is(err, wantErr) {
+				t.Fatalf("%s refresh = %v, want %v", scenario, err, wantErr)
+			}
+			after, err := os.ReadFile(statusPath)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("%s replaced prior status: %v", scenario, err)
+			}
+		})
+	}
+}
+
+func refreshWithInterruption(t *testing.T, catalog history.Catalog, path, scenario string) error {
+	t.Helper()
+	ctx := t.Context()
+	if scenario == "canceled" {
+		appendHistory(t, path, "\n")
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		catalog.Progress = func(progress history.Progress) { cancel() }
+	} else {
+		if err := os.Rename(catalog.IndexPath, catalog.IndexPath+".previous"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(catalog.IndexPath, []byte("not a database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := catalog.Refresh(ctx); err != nil {
+		return fmt.Errorf("refresh interrupted index: %w", err)
+	}
+	return nil
+}
+
+func TestRefreshStatusRejectsMissingCorruptAndStaleWithoutWrites(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"missing", "corrupt", "replaced", "version"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, _ := indexedFixture(t)
+			if scenario != "missing" {
+				if _, err := catalog.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			invalidateRefreshStatusFixture(t, catalog, scenario)
+			before, readErr := os.ReadFile(catalog.IndexPath)
+			entries, err := os.ReadDir(filepath.Dir(catalog.IndexPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, statusErr := catalog.RefreshStatus(t.Context()); statusErr == nil || !status.CompletedAt.IsZero() {
+				t.Fatalf("%s returned status %#v, %v", scenario, status, statusErr)
+			}
+			after, afterErr := os.ReadFile(catalog.IndexPath)
+			afterEntries, err := os.ReadDir(filepath.Dir(catalog.IndexPath))
+			if err != nil || len(entries) != len(afterEntries) || string(before) != string(after) || errors.Is(readErr, os.ErrNotExist) != errors.Is(afterErr, os.ErrNotExist) {
+				t.Fatalf("status read changed %s index: %v", scenario, err)
+			}
+		})
+	}
+}
+
+func invalidateRefreshStatusFixture(t *testing.T, catalog history.Catalog, scenario string) {
+	t.Helper()
+	switch scenario {
+	case "corrupt":
+		if err := os.WriteFile(catalog.IndexPath+".refresh.json", []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "replaced":
+		if err := os.Rename(catalog.IndexPath, catalog.IndexPath+".previous"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(catalog.IndexPath, []byte("foreign database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "version":
+		path := catalog.IndexPath + ".refresh.json"
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope map[string]json.RawMessage
+		if err = json.Unmarshal(data, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		envelope["index_version"] = json.RawMessage("0")
+		data, err = json.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRefreshStatusExplicitPathDoesNotTouchDefaultCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	catalog, _ := indexedFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.RefreshStatus(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var defaults history.Catalog
+	if _, err := defaults.RefreshStatus(t.Context()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default cache status = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "cache")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("explicit path created default cache: %v", err)
+	}
+}
+
+func TestRefreshStatusWriteFailureKeepsCommittedIndex(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	if err := os.Mkdir(catalog.IndexPath+".refresh.json", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := catalog.Refresh(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "save history refresh status") || result.IndexUnavailable {
+		t.Fatalf("status write failure = %#v, %v", result, err)
+	}
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, result, history.RefreshStats{Checked: 1, Unchanged: 1})
+}
+
+func TestRefreshStatsDescribeCompletedWork(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	var updates []history.Progress
+	catalog.Progress = func(progress history.Progress) { updates = append(updates, progress) }
+	cold := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, cold, history.RefreshStats{Checked: 1, Reparsed: 1, BytesParsed: int64(len(treeHistory)), Reasons: map[string]int{"new file": 1}})
+	if len(cold.Reparsed) != 1 {
+		t.Fatalf("cold files = %#v", cold.Reparsed)
+	}
+	if cold.Refresh[0].ParseTime <= 0 || cold.Refresh[0].StoreTime <= 0 {
+		t.Fatalf("missing refresh timings: %#v", cold.Refresh)
+	}
+	warm := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	requireRefreshStats(t, warm, history.RefreshStats{Checked: 1, Unchanged: 1})
+	if len(warm.Reparsed) != 0 {
+		t.Fatalf("warm files = %#v", warm.Reparsed)
+	}
+	appended := `{"type":"message","message":{"role":"user","content":"appended token"}}` + "\n"
+	appendHistory(t, path, appended)
+	resumed := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"appended token"}}, 1)
+	requireRefreshStats(t, resumed, history.RefreshStats{Checked: 1, Resumed: 1, BytesParsed: int64(len(appended))})
+	if len(resumed.Reparsed) != 0 {
+		t.Fatalf("append files = %#v", resumed.Reparsed)
+	}
+	if diff := cmp.Diff(resumed.Refresh[0].RefreshStats, updates[len(updates)-1].Refresh); diff != "" {
+		t.Fatalf("final progress differs (-result +progress):\n%s", diff)
+	}
+	if updates[0].Refresh.Reasons["new file"] != 1 || updates[0].Refresh.Resumed != 0 {
+		t.Fatalf("previous progress changed: %#v", updates[0])
+	}
+}
+
+func TestRefreshStatsExplainFullReparses(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"rewritten prefix", "incomplete checkpoint", "schema rebuild"} {
+		t.Run(scenario, func(t *testing.T) {
+			catalog, path := indexedFixture(t)
+			if scenario == "incomplete checkpoint" {
+				if err := os.WriteFile(path, []byte(strings.TrimSuffix(treeHistory, "\n")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+			query := history.Query{Terms: []string{"refresh"}}
+			mutateRefreshHistory(t, catalog, path, scenario)
+			result := requireIndexedMatches(t, catalog, query, 1)
+			if result.Refresh[0].Reparsed != 1 || result.Refresh[0].Resumed != 0 || result.Refresh[0].Reasons[scenario] != 1 || len(result.Reparsed) != 1 || result.Reparsed[0].Reason != scenario {
+				t.Fatalf("%s: stats=%#v files=%#v", scenario, result.Refresh, result.Reparsed)
+			}
+		})
+	}
+}
+
+func requireRefreshStats(t *testing.T, result history.Result, want history.RefreshStats) {
+	t.Helper()
+	if len(result.Refresh) != 1 {
+		t.Fatalf("source refreshes = %#v", result.Refresh)
+	}
+	if diff := cmp.Diff(want, result.Refresh[0].RefreshStats, cmpopts.IgnoreFields(history.RefreshStats{}, "ParseTime", "StoreTime")); diff != "" {
+		t.Fatalf("refresh stats (-want +got):\n%s", diff)
+	}
+}
+
+func mutateRefreshHistory(t *testing.T, catalog history.Catalog, path, scenario string) {
+	t.Helper()
+	switch scenario {
+	case "rewritten prefix":
+		if err := os.WriteFile(path, []byte(strings.Replace(treeHistory, "handler", "service", 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		appendHistory(t, path, "\n")
+	case "incomplete checkpoint":
+		appendHistory(t, path, "\n\n")
+	case "schema rebuild":
+		db := openTestIndex(t, catalog.IndexPath)
+		if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=4"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRefreshStatsMarkUnavailableIndex(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	catalog.IndexPath = t.TempDir()
+	var last history.Progress
+	catalog.Progress = func(progress history.Progress) { last = progress }
+	for _, test := range []struct {
+		query history.Query
+		want  int
+	}{
+		{history.Query{Terms: []string{"refresh"}}, 1},
+		{history.Query{Terms: []string{"refresh"}, IncludeTools: true}, 1},
+		{history.Query{Terms: []string{"refresh"}, IncludeTools: true, Dirs: []string{"/elsewhere"}}, 0},
+	} {
+		result := requireIndexedMatches(t, catalog, test.query, test.want)
+		if !result.IndexUnavailable || !last.IndexUnavailable || len(result.Refresh) != 0 {
+			t.Fatalf("fallback stats = %#v, progress=%#v", result, last)
+		}
+	}
+}
+
+func TestRefreshStatsWhileWaitingForLockClaimNoWork(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	release := holdIndexWriteLock(t, catalog.IndexPath)
+	defer release()
+	appendHistory(t, path, "\n")
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	result, err := catalog.Refresh(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) || result.IndexUnavailable {
+		t.Fatalf("waiting refresh = %#v, %v", result.Refresh, err)
+	}
+	requireRefreshStats(t, result, history.RefreshStats{Checked: 1})
+}
+
+func TestRefreshStatsExcludeCanceledWork(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	writeHistory(t, catalog.Sources[0].Path, "z-second.jsonl", strings.ReplaceAll(treeHistory, "native-session", "second"))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	catalog.Progress = func(progress history.Progress) {
+		if progress.Done == 1 {
+			cancel()
+		}
+	}
+	result, err := catalog.Refresh(ctx)
+	if !errors.Is(err, context.Canceled) || len(result.Refresh) != 1 || result.Refresh[0].Reparsed != 0 || result.Refresh[0].Checked != 1 || result.Refresh[0].BytesParsed != 0 {
+		t.Fatalf("canceled refresh = %#v, %v", result.Refresh, err)
+	}
 }
 
 func TestIndexRejectsMiddlePrefixRewriteBeforeAppend(t *testing.T) {
@@ -119,7 +626,7 @@ PRAGMA user_version=2;`)
 
 	for range 2 {
 		after := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
-		if diff := cmp.Diff(before, after); diff != "" {
+		if diff := cmp.Diff(before, after, cmpopts.IgnoreFields(history.Result{}, "Refresh", "Reparsed")); diff != "" {
 			t.Fatalf("cache upgrade changed results (-before +after):\n%s", diff)
 		}
 	}
@@ -185,21 +692,141 @@ func searchWithRecordIssue(t *testing.T, c history.Catalog, term string) history
 func TestIndexToolProjectionExcludesReasoningAndSystemContent(t *testing.T) {
 	t.Parallel()
 	c, _ := indexedFixture(t)
+	if _, err := c.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	db := openTestIndex(t, c.IndexPath)
+	var before, after [2]int64
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*),coalesce(sum(length(body)),0) FROM parts").Scan(&before[0], &before[1]); err != nil {
+		t.Fatal(err)
+	}
 	for _, tools := range []bool{false, true, false, true} {
 		want := 0
 		if tools {
 			want = 1
 		}
-		requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: tools}, want)
+		result := requireIndexedMatches(t, c, history.Query{Terms: []string{"tool-only"}, IncludeTools: tools}, want)
+		requireRefreshStats(t, result, history.RefreshStats{Checked: 1, Unchanged: 1})
 		for _, text := range []string{"reasoning-only", "system-only"} {
 			requireIndexedMatches(t, c, history.Query{Terms: []string{text}, IncludeTools: tools}, 0)
 		}
 	}
-	db := openTestIndex(t, c.IndexPath)
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*),coalesce(sum(length(body)),0) FROM parts").Scan(&after[0], &after[1]); err != nil || before != after {
+		t.Fatalf("tools searches changed indexed text: before=%v after=%v err=%v", before, after, err)
+	}
 	var forbidden int
-	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'reasoning-only')>0 OR instr(body,'system-only')>0").Scan(&forbidden); err != nil || forbidden != 0 {
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'reasoning-only')>0 OR instr(body,'system-only')>0 OR instr(body,'tool-only')>0").Scan(&forbidden); err != nil || forbidden != 0 {
 		t.Fatalf("excluded text indexed: %d %v", forbidden, err)
 	}
+}
+
+func TestToolsSearchSkipsExcludedUnreadableFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeHistory(t, root, "selected.jsonl", strings.ReplaceAll(treeHistory, "/work/project/sub", "/work/selected"))
+	excluded := writeHistory(t, root, "excluded.jsonl", strings.ReplaceAll(strings.ReplaceAll(treeHistory, "/work/project/sub", "/work/excluded"), "native-session", "excluded"))
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			requireToolsExcludedFileUnread(t, mode.catalog, excluded)
+		})
+	}
+}
+
+func requireToolsExcludedFileUnread(t *testing.T, catalog history.Catalog, excluded string) {
+	t.Helper()
+	blocked := false
+	t.Cleanup(func() {
+		if err := os.Chmod(excluded, 0o600); err != nil {
+			t.Error(err)
+		}
+	})
+	catalog.Progress = func(progress history.Progress) {
+		if !blocked && progress.Total == 2 && progress.Done == 2 {
+			blocked = true
+			if err := os.Chmod(excluded, 0); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, Role: "tool", Dirs: []string{"/work/selected"}})
+	if err != nil || len(result.Matches) != 1 || len(result.Issues) != 0 || !blocked {
+		t.Fatalf("matches=%#v issues=%#v blocked=%t err=%v", result.Matches, result.Issues, blocked, err)
+	}
+	if _, err := os.ReadFile(excluded); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("excluded file is readable: %v", err)
+	}
+}
+
+func TestToolsSearchUsesBothModificationAndActivityTimes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	older := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+	for _, fixture := range []struct {
+		id, day string
+		mtime   time.Time
+	}{
+		{"selected", "2026-09-03", recent},
+		{"old-file", "2026-09-03", older},
+		{"old-activity", "2026-09-01", recent},
+	} {
+		body := strings.ReplaceAll(strings.ReplaceAll(treeHistory, "native-session", fixture.id), "2026-09-01", fixture.day)
+		path := writeHistory(t, root, fixture.id+".jsonl", body)
+		if err := os.Chtimes(path, fixture.mtime, fixture.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			if _, err := mode.catalog.Refresh(t.Context()); err != nil && !errors.Is(err, history.ErrIndexUnavailable) {
+				t.Fatal(err)
+			}
+			result, err := mode.catalog.Search(t.Context(), history.Query{Terms: []string{"tool-only"}, IncludeTools: true, Since: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)})
+			if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.SessionID != "selected" {
+				t.Fatalf("matches=%#v err=%v", result.Matches, err)
+			}
+		})
+	}
+}
+
+func TestToolsStreamCancellationRetainsDeliveredMatch(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, id := range []string{"first", "second", "third"} {
+		writeHistory(t, root, id+".jsonl", strings.ReplaceAll(treeHistory, "native-session", id))
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var delivered []history.Match
+			result, err := mode.catalog.Stream(ctx, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, func(match history.Match) bool {
+				delivered = append(delivered, match)
+				cancel()
+				return false
+			})
+			if !errors.Is(err, context.Canceled) || len(delivered) != 1 || len(result.Matches) != 0 || delivered[0].Excerpts[0].Role != "tool" {
+				t.Fatalf("delivered=%#v result=%#v err=%v", delivered, result, err)
+			}
+		})
+	}
+}
+
+func TestIndexRebuildDiscardsPersistedToolText(t *testing.T) {
+	t.Parallel()
+	catalog, _ := indexedFixture(t)
+	if _, err := catalog.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	database := openTestIndex(t, catalog.IndexPath)
+	if _, err := database.ExecContext(t.Context(), `ALTER TABLE files ADD COLUMN tools INTEGER NOT NULL DEFAULT 1;
+INSERT INTO parts(conversation_id,role,body,message_id,line,timestamp)
+SELECT id,'tool','stale-tool','old-tool',1,'' FROM conversations;
+PRAGMA user_version=5;`); err != nil {
+		t.Fatal(err)
+	}
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"stale-tool"}}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"tool-only"}, IncludeTools: true}, 1)
 }
 
 func TestIndexSearchesWhileWriteLocked(t *testing.T) {
@@ -207,18 +834,58 @@ func TestIndexSearchesWhileWriteLocked(t *testing.T) {
 	c, path := indexedFixture(t)
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	release := holdIndexWriteLock(t, c.IndexPath)
-	defer release()
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
 	// A warm search reads the last committed snapshot without a write lock: it
-	// must not wait for the five-second busy timeout the lock imposes on writers.
+	// must not wait for another writer to release its lock.
 	start := time.Now()
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	if waited := time.Since(start); waited > 2*time.Second {
 		t.Fatalf("warm search waited %s on the index write lock", waited)
 	}
 	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"locked append"}}`+"\n")
+	c.Progress = func(progress history.Progress) {
+		if progress.Waiting && !released {
+			release()
+			released = true
+		}
+	}
 	result, err := c.Search(t.Context(), history.Query{Terms: []string{"locked append"}})
-	if err != nil || len(result.Matches) != 1 {
-		t.Fatalf("locked refresh = %#v, %v", result, err)
+	if err != nil || len(result.Matches) != 1 || !released {
+		t.Fatalf("locked refresh = %#v, released=%t, %v", result, released, err)
+	}
+	var stored int
+	if err := openTestIndex(t, c.IndexPath).QueryRowContext(t.Context(), "SELECT count(*) FROM parts WHERE instr(body,'locked append')>0").Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("waited search did not persist its result: count=%d err=%v", stored, err)
+	}
+}
+
+func TestIndexWaitCanBeCancelled(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+	release := holdIndexWriteLock(t, catalog.IndexPath)
+	defer release()
+	appendHistory(t, path, `{"type":"message","message":{"role":"user","content":"new append"}}`+"\n")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var canceled time.Time
+	catalog.Progress = func(progress history.Progress) {
+		if progress.Waiting && canceled.IsZero() {
+			canceled = time.Now()
+			cancel()
+		}
+	}
+	_, err := catalog.Search(ctx, history.Query{Terms: []string{"new append"}})
+	if !errors.Is(err, context.Canceled) || canceled.IsZero() {
+		t.Fatalf("canceled wait: canceled=%v err=%v", canceled, err)
+	}
+	if elapsed := time.Since(canceled); elapsed > time.Second {
+		t.Fatalf("cancellation took %s", elapsed)
 	}
 }
 
@@ -259,12 +926,12 @@ func TestIndexRefreshesSidecarMetadata(t *testing.T) {
 	writeHistory(t, root, "session.messages.json", `{"sessionId":"s","messages":[{"role":"user","content":"needle"}]}`)
 	manifest := writeHistory(t, root, "session.json", `{"session_id":"s","cwd":"/old","metadata":{"title":"old"}}`)
 	c := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/old"}}, 1)
 	if err := os.WriteFile(manifest, []byte(`{"session_id":"s","cwd":"/new","metadata":{"title":"new"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/old"}, 0)
-	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dir: "/new"}, 1)
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/old"}}, 0)
+	result := requireIndexedMatches(t, c, history.Query{Terms: []string{"needle"}, Dirs: []string{"/new"}}, 1)
 	if result.Matches[0].Conversation.Title != "new" {
 		t.Fatal("stale title")
 	}
@@ -345,16 +1012,14 @@ func TestIndexRefreshFailureDoesNotReturnStaleMatches(t *testing.T) {
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"appended token"}}, 1)
 }
 
-func TestIndexRejectsForeignDatabaseAndCanBeRebuilt(t *testing.T) {
+func TestIndexScansAroundForeignDatabaseAndCanBeRebuilt(t *testing.T) {
 	t.Parallel()
 	c, _ := indexedFixture(t)
 	db := openTestIndex(t, c.IndexPath)
 	if _, err := db.ExecContext(t.Context(), "CREATE TABLE retained(value); INSERT INTO retained VALUES('keep')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}}); err == nil {
-		t.Fatal("accepted foreign index")
-	}
+	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 	var value string
 	if err := db.QueryRowContext(t.Context(), "SELECT value FROM retained").Scan(&value); err != nil || value != "keep" {
 		t.Fatalf("changed foreign database: %q, %v", value, err)
@@ -382,11 +1047,11 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	manifest := writeHistory(t, root, session+"state.json", `{"id":"native-session","title":"First title","cwd":"/work/example-project"}`)
 	path := writeHistory(t, root, session+"agents/main/wire.jsonl", kimiMirroredWireHistory)
 	catalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: path}}, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
-	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 1)
 	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
 		t.Fatalf("indexed mirrored history = %#v", result)
 	}
-	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 1)
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 1)
 	if result.Matches[0].Conversation.Messages != 2 || result.Matches[0].MatchingParts != 2 {
 		t.Fatalf("cached mirrored history = %#v", result)
 	}
@@ -396,15 +1061,15 @@ func TestIndexRechecksKimiMetadataAndSourceSelection(t *testing.T) {
 	if err := os.WriteFile(manifest, []byte(`{"id":"native-session","title":"Updated title","cwd":"/work/other-project"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"}, 0)
-	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 1)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}}, 0)
+	result = requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/other-project"}}, 1)
 	if result.Matches[0].Conversation.Title != "Updated title" {
 		t.Fatalf("updated title = %q", result.Matches[0].Conversation.Title)
 	}
 	if err := os.Remove(manifest); err != nil {
 		t.Fatal(err)
 	}
-	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dir: "/work/other-project"}, 0)
+	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/other-project"}}, 0)
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
 	catalog.Sources = []history.Source{}
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 0)
@@ -614,4 +1279,183 @@ func TestIndexSearchSymlinkedParentAfterRemoval(t *testing.T) {
 	}
 	catalog.Sources = []history.Source{{Harness: registry.Harness("pi"), Path: first}}
 	requireIndexedMatches(t, catalog, history.Query{Terms: []string{"refresh"}}, 1)
+}
+
+func TestTranscriptActivityFallbackTimes(t *testing.T) {
+	t.Parallel()
+	older := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	recent := older.Add(48 * time.Hour)
+	root := t.TempDir()
+	fixtures := []transcriptActivityFixture{
+		{"old", "", older, time.Time{}, older},
+		{"recent", "", recent, time.Time{}, recent},
+		{"message", `{"type":"message","message":{"role":"user","content":"needle"}}` + "\n", recent.Add(time.Hour), time.Time{}, recent.Add(time.Hour)},
+		{"native-created", "", recent.Add(2 * time.Hour), older, time.Time{}},
+		{"native-message", `{"type":"message","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"needle"}}` + "\n", recent.Add(3 * time.Hour), older, older},
+	}
+	for _, fixture := range fixtures {
+		header := `{"type":"session","id":"` + fixture.id + `"`
+		if fixture.id == "native-created" {
+			header += `,"timestamp":"2026-09-01T00:00:00Z"`
+		}
+		path := writeHistory(t, root, fixture.id+".jsonl", header+"}\n"+fixture.records)
+		if err := os.Chtimes(path, fixture.mtime, fixture.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("pi"), Path: root}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			for range 2 {
+				requireTranscriptActivityTimes(t, mode.catalog, fixtures)
+				requireTranscriptActivityBounds(t, mode.catalog, older, recent)
+				requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: recent.Add(-time.Hour)}, 1)
+			}
+		})
+	}
+}
+
+type transcriptActivityFixture struct {
+	id      string
+	records string
+	mtime   time.Time
+	created time.Time
+	updated time.Time
+}
+
+func requireTranscriptActivityTimes(t *testing.T, catalog history.Catalog, fixtures []transcriptActivityFixture) {
+	t.Helper()
+	result, err := catalog.List(t.Context(), history.ListQuery{})
+	if err != nil || len(result.Matches) != len(fixtures) {
+		t.Fatalf("list = %#v, %v", result, err)
+	}
+	if result.Matches[0].Conversation.SessionID != "message" || result.Matches[1].Conversation.SessionID != "recent" {
+		t.Fatalf("fallback activity sorting = %#v", result.Matches)
+	}
+	for _, match := range result.Matches {
+		for _, fixture := range fixtures {
+			if c := match.Conversation; c.SessionID == fixture.id && (!c.CreatedAt.Equal(fixture.created) || !c.UpdatedAt.Equal(fixture.updated)) {
+				t.Fatalf("%s times = %s / %s; want %s / %s", fixture.id, c.CreatedAt, c.UpdatedAt, fixture.created, fixture.updated)
+			}
+		}
+	}
+}
+
+func requireTranscriptActivityBounds(t *testing.T, catalog history.Catalog, older, recent time.Time) {
+	t.Helper()
+
+	for _, test := range []struct {
+		filter history.Filter
+		want   []string
+	}{
+		{history.Filter{Since: older.Add(time.Hour)}, []string{"message", "recent"}},
+		{history.Filter{Until: older.Add(time.Hour)}, []string{"native-created", "native-message", "old"}},
+		{history.Filter{Since: recent.Add(-time.Hour), Until: recent.Add(time.Minute)}, []string{"recent"}},
+	} {
+		filtered, filterErr := catalog.List(t.Context(), history.ListQuery{Filter: test.filter})
+		ids := make([]string, 0, len(filtered.Matches))
+		for _, match := range filtered.Matches {
+			ids = append(ids, match.Conversation.SessionID)
+		}
+		slices.Sort(ids)
+		if diff := cmp.Diff(test.want, ids); filterErr != nil || diff != "" {
+			t.Fatalf("filter %#v: %v (-want +got):\n%s", test.filter, filterErr, diff)
+		}
+	}
+}
+
+func TestTranscriptActivityFallbackAppend(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"indexed", "direct"} {
+		t.Run(name, func(t *testing.T) {
+			path := writeHistory(t, t.TempDir(), "session.jsonl", `{"type":"session","id":"session"}`+"\n"+`{"type":"message","message":{"role":"user","content":"needle"}}`+"\n")
+			sources := []history.Source{{Harness: registry.Harness("pi"), Path: path}}
+			catalog := history.Catalog{Sources: sources, IndexPath: filepath.Join(t.TempDir(), "index.sqlite")}
+			if name == "direct" {
+				catalog = directCatalog(t, sources)
+			}
+			fallback := time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)
+			native := fallback.Add(-24 * time.Hour)
+			for _, step := range []struct {
+				record  string
+				mtime   time.Time
+				created time.Time
+				updated time.Time
+			}{
+				{"", fallback, time.Time{}, fallback},
+				{`{"type":"message","message":{"role":"assistant","content":"needle appended"}}`, fallback.Add(time.Hour), time.Time{}, fallback.Add(time.Hour)},
+				{`{"type":"message","timestamp":"2026-09-09T00:00:00Z","message":{"role":"assistant","content":"native"}}`, fallback.Add(2 * time.Hour), native, native},
+				{`{"type":"session_info","name":"metadata-only change"}`, fallback.Add(3 * time.Hour), native, native},
+				{`{"type":"message","timestamp":"2026-09-09T01:00:00Z","message":{"role":"assistant","content":"later native"}}`, fallback.Add(4 * time.Hour), native, native.Add(time.Hour)},
+			} {
+				if step.record != "" {
+					appendHistory(t, path, step.record+"\n")
+				}
+				if err := os.Chtimes(path, step.mtime, step.mtime); err != nil {
+					t.Fatal(err)
+				}
+				requireTranscriptConversationTimes(t, catalog, step.created, step.updated)
+			}
+		})
+	}
+}
+
+func requireTranscriptConversationTimes(t *testing.T, catalog history.Catalog, created, updated time.Time) {
+	t.Helper()
+	for range 2 {
+		result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"needle"}}, 1)
+		c := result.Matches[0].Conversation
+		if !c.CreatedAt.Equal(created) || !c.UpdatedAt.Equal(updated) {
+			t.Fatalf("times = %s / %s; want %s / %s", c.CreatedAt, c.UpdatedAt, created, updated)
+		}
+	}
+}
+
+func TestTranscriptActivityFallbackForDocuments(t *testing.T) {
+	t.Parallel()
+	path := writeHistory(t, t.TempDir(), "session.messages.json", `{"sessionId":"session","messages":[{"role":"user","content":"needle"}]}`)
+	modified := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, modified, modified); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("cline"), Path: path}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			requireTranscriptConversationTimes(t, mode.catalog, time.Time{}, modified)
+			requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: modified.Add(-time.Hour)}, 1)
+		})
+	}
+}
+
+func TestTranscriptActivityFallbackLeavesDatabaseTimesUnchanged(t *testing.T) {
+	t.Parallel()
+	db := databaseFixture(t, "state.db", `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
+INSERT INTO sessions VALUES('unknown','unknown','',''),('native','native',1,2);
+INSERT INTO messages VALUES(1,'unknown','user','needle',''),(2,'native','user','needle',1);`)
+	path := databasePath(t, db)
+	mtime := time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range searchModes(t, []history.Source{{Harness: registry.Harness("hermes"), Path: path}}) {
+		t.Run(mode.name, func(t *testing.T) {
+			for range 2 {
+				requireDatabaseActivityTimes(t, mode.catalog)
+				requireIndexedMatches(t, mode.catalog, history.Query{Terms: []string{"needle"}, Since: mtime.Add(-time.Hour)}, 0)
+			}
+		})
+	}
+}
+
+func requireDatabaseActivityTimes(t *testing.T, catalog history.Catalog) {
+	t.Helper()
+	result := requireIndexedMatches(t, catalog, history.Query{Terms: []string{"needle"}}, 2)
+	for _, match := range result.Matches {
+		c := match.Conversation
+		if c.SessionID == "unknown" {
+			if !c.CreatedAt.IsZero() || !c.UpdatedAt.IsZero() {
+				t.Fatalf("database inherited file time: %#v", c)
+			}
+		} else if !c.CreatedAt.Equal(time.Unix(1, 0)) || !c.UpdatedAt.Equal(time.Unix(2, 0)) {
+			t.Fatalf("native database times changed: %#v", c)
+		}
+	}
 }

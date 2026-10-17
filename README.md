@@ -56,7 +56,7 @@ aht watch
 Search retained conversations, including sessions created before AHT was installed:
 
 ```sh
-aht search "refresh token" --dir /work/app
+aht search "refresh token" --dir /work/app --dir /work/worktrees/app
 ```
 
 ## Configuration

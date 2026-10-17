@@ -44,7 +44,12 @@ type (
 	// HistorySource identifies a native history directory or SQLite database.
 	HistorySource = history.Source
 	// HistoryProgress reports scanning of one history source.
-	HistoryProgress = history.Progress
+	HistoryProgress     = history.Progress
+	HistoryRefreshStats = history.RefreshStats
+	// HistoryRefreshStatus describes the last completed or partial index refresh.
+	HistoryRefreshStatus = history.RefreshStatus
+	HistorySourceRefresh = history.SourceRefresh
+	HistoryReparsedFile  = history.ReparsedFile
 )
 
 // SearchHistory searches retained local histories independently of the tracker.

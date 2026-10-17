@@ -16,6 +16,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/zigai/aht/v2/internal/config"
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
@@ -46,8 +47,16 @@ var (
 	errSearchRole          = errors.New("invalid --role")
 	errSearchTime          = errors.New("invalid time")
 	errSearchOption        = errors.New("invalid option")
+	errRepeatedFlag        = errors.New("given more than once")
 	errSearchStream        = errors.New("--stream reports matches as they are found and cannot be combined with --sort, --limit, or --group-by")
 )
+
+type singleFlagValue struct {
+	pflag.Value
+
+	name string
+	set  bool
+}
 
 type searchOptions struct {
 	query       history.Query
@@ -89,6 +98,17 @@ type searchGroup struct {
 	Messages      int    `json:"messages"`
 }
 
+func (value *singleFlagValue) Set(raw string) error {
+	if value.set {
+		return fmt.Errorf("flag --%s %w", value.name, errRepeatedFlag)
+	}
+	if err := value.Value.Set(raw); err != nil {
+		return fmt.Errorf("set flag --%s: %w", value.name, err)
+	}
+	value.set = true
+	return nil
+}
+
 func (app *application) newSearchCommand() *cobra.Command {
 	var options searchOptions
 	var sources []history.Source
@@ -127,7 +147,7 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.StringSliceVar(&options.harnesses, "harness", nil, "filter by harness `<name,...>` (repeatable)")
 	flags.StringSliceVar(&options.harnesses, "agent", nil, "filter by harness `<name,...>` (alias for --harness)")
 	_ = flags.MarkHidden("agent")
-	flags.StringVar(&options.query.Dir, "dir", "", "match recorded working directories or workspace roots under `<path>`")
+	flags.StringArrayVar(&options.query.Dirs, "dir", nil, "match recorded working directories or workspace roots under `<path>` (repeatable)")
 	flags.StringArrayVar(&options.query.ExcludeDirs, "exclude-dir", nil, "skip conversations under `<path>` (repeatable)")
 	flags.StringVar(&options.since, "since", "", "keep conversations active since `<when>`: a duration such as 12h or 7d, a date, or RFC3339")
 	flags.StringVar(&options.until, "until", "", "keep conversations started before `<when>`: a duration, a date, or RFC3339")
@@ -140,7 +160,7 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.BoolVar(&options.query.Word, "word", false, "match whole words only")
 	flags.BoolVar(&options.query.IncludeTools, "include-tools", false, "also search tool calls and tool output")
 	flags.BoolVar(&options.query.CaseSensitive, "case-sensitive", false, "match text with exact case")
-	flags.StringVar(&options.role, "role", "", "search only messages from this role `<user|agent|tool|all>` (default: user and agent)")
+	flags.StringVar(&options.role, "role", "", "search only messages from this role `<user|agent|context|tool|all>` (default: user and agent)")
 	flags.IntVar(&options.query.Excerpts, "excerpts", 0, "show at most `<count>` excerpts per conversation (default 3)")
 	flags.StringVar(&options.sort, "sort", "", "order by `<updated|created|matches|messages>` (default updated)")
 	flags.IntVar(&options.query.Limit, "limit", 0, "return at most `<count>` conversations in sort order (0 means unlimited)")
@@ -149,6 +169,10 @@ func (app *application) newSearchCommand() *cobra.Command {
 	flags.StringVar(&options.format, "format", "", "print one `<id|path|resume>` per conversation")
 	flags.BoolVarP(&options.verbose, "verbose", "v", false, "show detailed file paths and all diagnostic warnings")
 	flags.StringArrayVar(&options.sources, "source", nil, "search only this native history `<agent=path>` (repeatable)")
+	for _, name := range []string{"since", "until", "presence", "branch", "model", "role", "sort", "group-by", "format", "min-messages", "excerpts", "limit"} {
+		flag := flags.Lookup(name)
+		flag.Value = &singleFlagValue{Value: flag.Value, name: name, set: false}
+	}
 	return command
 }
 
@@ -248,16 +272,16 @@ func (options *searchOptions) validateRole() error {
 	}
 	role := strings.ToLower(strings.TrimSpace(options.role))
 	switch role {
-	case "user":
-		options.query.Role = "user"
+	case "user", "context":
+		options.query.Role = role
 	case "agent", "assistant":
 		options.query.Role = "assistant"
 	case "tool":
 		options.query.Role = "tool"
 	case "all":
-		options.query.Role = ""
+		options.query.Role = "all"
 	default:
-		return fmt.Errorf("search: %w %q; choose user, agent, tool, or all", errSearchRole, options.role)
+		return fmt.Errorf("search: %w %q; choose user, agent, context, tool, or all", errSearchRole, options.role)
 	}
 	return nil
 }
@@ -311,6 +335,7 @@ func (app *application) runSearch(ctx context.Context, opts searchOptions, sourc
 	} else {
 		result, searchErr = catalog.Search(ctx, opts.query)
 	}
+	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
 	progress.clear()
 	if err := app.writeSearchOutput(result, searchErr, opts); err != nil {
 		return err
@@ -368,6 +393,7 @@ func (app *application) runSearchStream(ctx context.Context, catalog history.Cat
 	} else {
 		result, searchErr = catalog.Stream(ctx, opts.query, yield)
 	}
+	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
 	progress.clear()
 	if writeErr != nil {
 		return writeErr
@@ -411,7 +437,9 @@ func (p *searchProgress) update(progress history.Progress) {
 	}
 	p.last = now
 	status := fmt.Sprintf("Scanning %s history %d/%d", progress.Source.Harness, progress.Done, progress.Total)
-	if progress.Refreshed > 0 {
+	if progress.Waiting {
+		status = "Waiting for the history index"
+	} else if progress.Refreshed > 0 {
 		status += fmt.Sprintf(", indexed %d changed", progress.Refreshed)
 	}
 	p.app.warnf("\r\x1b[2K%s", status)
@@ -502,13 +530,27 @@ func (app *application) writeSearchDiagnostics(result history.Result, opts searc
 	if result.Truncated {
 		app.warnf("More matching conversations exist; increase or omit --limit, or narrow the filters.\n")
 	}
-	app.writeSearchUnsupported(result.Sources)
+	app.writeSearchUnsupported(result.Sources, opts)
+	if opts.verbose {
+		app.writeSearchRefresh(result)
+	}
+}
+
+func (app *application) writeSearchRefresh(result history.Result) {
+	if result.IndexUnavailable {
+		app.warnf("refresh: index unavailable; refresh totals are incomplete\n")
+	}
+	for _, refresh := range result.Refresh {
+		app.warnf("refresh: %s %s: checked=%d unchanged=%d skipped=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
+			refresh.Source.Harness, sanitizeHumanText(refresh.Source.Path), refresh.Checked, refresh.Unchanged, refresh.Skipped,
+			refresh.Resumed, refresh.Reparsed, refresh.BytesParsed, refresh.ParseTime, refresh.StoreTime)
+	}
+	for _, file := range result.Reparsed {
+		app.warnf("reparsed: %s %s: bytes=%d reason=%s\n", file.Source.Harness, sanitizeHumanText(file.Path), file.Bytes, file.Reason)
+	}
 }
 
 func (app *application) writeSearchIssues(result history.Result, verbose bool) {
-	if len(result.Issues) == 0 {
-		return
-	}
 	if !verbose && len(result.Issues) > maxSummarizedIssues {
 		records := 0
 		for _, issue := range result.Issues {
@@ -527,15 +569,24 @@ func (app *application) writeSearchIssues(result history.Result, verbose bool) {
 			app.warnf("warning: %s %s: %s\n", issue.Source.Harness, sanitizeHumanText(issue.Path), sanitizeHumanText(issue.Message))
 		}
 	}
-	if result.OmittedIssues > 0 {
-		app.warnf("warning: %d more history warnings omitted\n", result.OmittedIssues)
+	if verbose && result.OmittedIssues > 0 {
+		app.warnf("warning: %d history warnings omitted (outside query or diagnostic limit)\n", result.OmittedIssues)
 	}
 }
 
-func (app *application) writeSearchUnsupported(sources []history.SourceStatus) {
+func (app *application) writeSearchUnsupported(sources []history.SourceStatus, opts searchOptions) {
 	var unsupported []string
 	for _, source := range sources {
 		if source.Status != "unsupported" {
+			continue
+		}
+		requested := opts.verbose || slices.Contains(opts.query.Harnesses, source.Source.Harness)
+		for _, value := range opts.sources {
+			name, _, _ := strings.Cut(value, "=")
+			id, _ := harness.Parse(name)
+			requested = requested || id == source.Source.Harness
+		}
+		if !requested {
 			continue
 		}
 		if name := string(source.Source.Harness); !slices.Contains(unsupported, name) {

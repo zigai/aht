@@ -102,12 +102,53 @@ func TestNativeJSONLReaders(t *testing.T) {
 	}
 }
 
+func TestRegistryJoinPreservesIdentityPathsAndIncarnations(t *testing.T) {
+	t.Parallel()
+	catalog, path := indexedFixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(filepath.Dir(path), linked); err != nil {
+		t.Fatal(err)
+	}
+	loop := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	updated := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	sessions := []registry.Session{
+		{ID: "path-only", Harness: registry.Harness("pi"), SessionPath: filepath.Join(linked, filepath.Base(path)), UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "wrong-id", Harness: registry.Harness("pi"), SessionID: "other", SessionPath: path},
+		{ID: "first", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: path, UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil)},
+		{ID: "wrong-path", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: loop},
+		{ID: "second", Harness: registry.Harness("pi"), SessionID: "native-session", SessionPath: filepath.Join(linked, filepath.Base(path)), UpdatedAt: updated, Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil)},
+		{ID: "id-only", Harness: registry.Harness("pi"), SessionID: "native-session", UpdatedAt: updated},
+		{ID: "wrong-harness", Harness: registry.Harness("codex"), SessionID: "native-session", SessionPath: path},
+	}
+	query := history.Query{Terms: []string{"refresh"}, Registry: sessions}
+	result := requireIndexedMatches(t, catalog, query, 1)
+	want := []history.RegistryState{
+		{RegistryID: "path-only", Presence: registry.PresenceGone, UpdatedAt: updated},
+		{RegistryID: "first", Presence: registry.PresenceGone, UpdatedAt: updated},
+		{RegistryID: "second", Presence: registry.PresenceLive, UpdatedAt: updated},
+		{RegistryID: "id-only", Presence: registry.PresenceUnknown, UpdatedAt: updated},
+	}
+	if diff := cmp.Diff(want, result.Matches[0].RegistryStates); diff != "" {
+		t.Fatalf("registry states (-want +got):\n%s", diff)
+	}
+	query.Presence = registry.PresenceLive
+	requireIndexedMatches(t, catalog, query, 1)
+	query.Presence = registry.PresenceGone
+	requireIndexedMatches(t, catalog, query, 0)
+	query.Presence = ""
+	query.Dirs = []string{"/unrelated"}
+	requireIndexedMatches(t, catalog, query, 0)
+}
+
 func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	path := writeHistory(t, root, "session.jsonl", treeHistory)
 	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("pi"), Path: root}}}
-	q := history.Query{Terms: []string{"refresh token"}, Dir: "/work/project", Registry: []registry.Session{
+	q := history.Query{Terms: []string{"refresh token"}, Dirs: []string{"/work/project"}, Registry: []registry.Session{
 		{
 			ID:          "live",
 			Harness:     registry.Harness("pi"),
@@ -138,12 +179,12 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 	if m.Conversation.Title != "Authentication work" || m.Conversation.CreatedAt.IsZero() || len(m.RegistryStates) != 1 || m.RegistryStates[0].RegistryID != "live" {
 		t.Fatalf("metadata = %#v", m)
 	}
-	q.Dir = "/work/proj"
+	q.Dirs = []string{"/work/proj"}
 	result, err = c.Search(t.Context(), q)
 	if err != nil || len(result.Matches) != 0 {
 		t.Fatal("directory filter matched a non-directory prefix")
 	}
-	q.Dir = ""
+	q.Dirs = nil
 	q.CaseSensitive = true
 	q.Terms = []string{"REFRESH TOKEN"}
 	result, err = c.Search(t.Context(), q)
@@ -256,7 +297,7 @@ func TestKimiNativeDirectoryMetadata(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			catalog := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("kimi-code"), Path: test.path}}}
-			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dir: "/work/example-project"})
+			result, err := catalog.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work/example-project"}})
 			if err != nil || len(result.Matches) != 1 {
 				t.Fatalf("native history = %#v, %v", result, err)
 			}
@@ -391,7 +432,7 @@ func TestClineManifestAndConfiguredPathFiltering(t *testing.T) {
 	writeHistory(t, root, "native.messages.json", `{"version":1,"sessionId":"native","updated_at":"2026-09-01T00:00:00Z","messages":[{"role":"user","content":"refresh token"}]}`)
 	writeHistory(t, root, "native.json", `{"session_id":"native","cwd":"/work/private/project","workspace_root":"/work/private","metadata":{"title":"Native title"},"messages_path":"/outside/do-not-follow"}`)
 	c := history.Catalog{IndexPath: filepath.Join(t.TempDir(), "index.sqlite"), Sources: []history.Source{{Harness: registry.Harness("cline"), Path: root}}}
-	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dir: "/work"})
+	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Dirs: []string{"/work"}})
 	if err != nil || len(result.Matches) != 1 || result.Matches[0].Conversation.Title != "Native title" {
 		t.Fatalf("manifest = %#v, %v", result, err)
 	}
@@ -718,7 +759,7 @@ func TestConversationPromptAndMessageCount(t *testing.T) {
 	result := searchQuery(t, body, history.Query{Terms: []string{"part"}})
 	requireMatches(t, result, nil, 1)
 	c := result.Matches[0].Conversation
-	if c.Prompt != "Rename the parser" || c.Messages != 3 {
+	if c.Prompt != "Rename the parser" || c.Messages != 2 {
 		t.Fatalf("prompt = %q, messages = %d", c.Prompt, c.Messages)
 	}
 	if got := result.Matches[0].ResumeCommand; len(got) == 0 || got[len(got)-1] != c.Path {

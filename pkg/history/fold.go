@@ -25,7 +25,11 @@ var foldCaser = cases.Fold()
 // ligatures such as ﬃ with ffi. Folding can lengthen its input, so callers must
 // translate offsets with foldRuneIndex instead of comparing rune counts.
 func fold(text string) string {
-	return foldCaser.String(strings.ToLower(text))
+	text = strings.ToLower(text)
+	if isASCII([]byte(text)) {
+		return text
+	}
+	return foldCaser.String(text)
 }
 
 // foldRuneIndex maps a rune offset in fold(text) to the smallest rune index i
