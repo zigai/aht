@@ -1,0 +1,2 @@
+- Run go test -count=1 ./pkg/manage -run Doctor on the final tree after Go-aware import-shadowing renames: pass, 0.606 s. Focused golangci-lint JSON contains zero issues; canonical just check passes.
+- Run the final CLI doctor against an isolated HOME/XDG store: missing history-refresh status reports warn with a manual refresh command; after explicit scratch refresh it reports ok with complete status and source details.
