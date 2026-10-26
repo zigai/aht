@@ -1,0 +1,3 @@
+- Runs the fixed tracker against the live process table with a scratch registry: tmux pane pi:1 maps to the real pi (PID 1518715) instead of a sandboxed replay pi; 0 sandboxed replay pis tracked vs 4 before
+- Installs the build and restarts the tracker: the sesh picker lists 'Replay Testing for Pi-Glowup Reliability' under the pi session as live
+- Runs just explore and just check with GOFLAGS=-p=9: both pass (global -trimpath breaks architecture and cli tests regardless of this change)
