@@ -1,0 +1,3 @@
+- Runs aht manage config schema from a -trimpath build: prints the schema instead of failing with 'caller source path is not absolute'; output is byte-identical to the schema the old code produced from a build with source paths
+- Edits schema.json by hand: TestSchemaMatchesConfig fails as stale, and -update-schema restores the original bytes
+- Runs just check with GOFLAGS='-p=9 -trimpath': passes, including the architecture and CLI tests that failed before
