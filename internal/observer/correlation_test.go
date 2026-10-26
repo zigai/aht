@@ -123,3 +123,60 @@ func TestObserverSuppressesWrapperWhenDirectAgentChildExists(t *testing.T) {
 		t.Fatalf("wrapper/direct-child observations = result %#v sessions %#v", result, sessions)
 	}
 }
+
+func TestObserverKeepsAgentThatLaunchesNestedAgentThroughNonWrapper(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	processes := []processinfo.Process{
+		{PID: 10, PPID: 1, StartIdentity: "boot:10", Executable: "/bin/zsh", CWD: "/pane", TTY: "/dev/pts/3"},
+		{
+			PID: 11, PPID: 10, ProcessGroupID: 11, Foreground: true, StartIdentity: "boot:11",
+			Executable: "/usr/bin/node", Args: []string{"pi"}, CWD: "/pane", TTY: "/dev/pts/3",
+		},
+		{PID: 12, PPID: 11, StartIdentity: "boot:12", Executable: "/usr/bin/bash", Args: []string{"/bin/bash", "-c", "replay"}},
+		{PID: 13, PPID: 12, StartIdentity: "boot:13", Executable: "/usr/bin/termtrace", Args: []string{"termtrace", "record", "--"}},
+		{PID: 14, PPID: 13, StartIdentity: "boot:14", Executable: "/usr/bin/bwrap", Args: []string{"/usr/bin/bwrap", "--", "/usr/bin/node", "cli.js"}, TTY: "/dev/pts/8"},
+		{
+			PID: 15, PPID: 14, ProcessGroupID: 14, Foreground: true, StartIdentity: "boot:15",
+			Executable: "/usr/bin/node", Args: []string{"pi"}, CWD: "/sandbox",
+		},
+	}
+	pane := mux.Pane{
+		Location: registry.Location{
+			Kind: registry.MultiplexerTmux, ServerID: "default", SessionName: "work",
+			PaneID: "%7", PanePID: 10, PaneCurrentPath: "/pane", PaneTTY: "/dev/pts/3",
+		},
+		ProcessTTY: "/dev/pts/3",
+		Processes:  []mux.ProcessRef{{PID: 10}},
+	}
+	watcher := New(Options{
+		Store: store,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return processes, nil
+		},
+		PaneList: func(context.Context) ([]mux.Pane, error) {
+			return []mux.Pane{pane}, nil
+		},
+		ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+			return mux.ScreenSnapshot{Text: ""}, nil
+		},
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+	if _, err := watcher.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	placed := make(map[int]string, len(sessions))
+	for _, session := range sessions {
+		if session.Process != nil {
+			placed[session.Process.PID] = session.Location.PaneID
+		}
+	}
+	if len(placed) != 1 || placed[11] != "%7" {
+		t.Fatalf("nested agent placements by PID = %v, want only PID 11 in pane %%7", placed)
+	}
+}
