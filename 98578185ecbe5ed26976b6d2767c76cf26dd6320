@@ -1,0 +1,1 @@
+- Runs go test ./internal/architecture with GOFLAGS='-p=9 -trimpath': passes; it failed with 'open github.com/zigai/aht/v2: no such file or directory' before
