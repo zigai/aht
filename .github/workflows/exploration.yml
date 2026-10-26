@@ -122,4 +122,4 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Scan reachable vulnerabilities
-        run: just vuln
+        run: just audit

@@ -94,7 +94,7 @@ apidiff base="origin/master":
     {{ apidiff }} -m -incompatible "$scratch/base.api" "$scratch/current.api"
 
 # Scan reachable dependencies for known vulnerabilities
-vuln:
+audit:
     go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # Run all required non-mutating verification
 check: lint test race integration compatibility-tests source-checks
@@ -108,37 +108,28 @@ source-checks:
     just --fmt --check
     {{ actionlint }} .github/workflows/*.yml
 
-# Build the project
+# Build the project with version info
 build:
-    go build -o aht .
+    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=dev -X github.com/zigai/aht/v2/internal/cli.commit=$(git rev-parse --short HEAD) -X github.com/zigai/aht/v2/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o aht .
 
 # Install the binary and refresh existing integrations and background tracking
 install:
     #!/usr/bin/env sh
     set -eu
-    go install .
-    aht_install_dir=$(go env GOBIN)
-    if [ -z "$aht_install_dir" ]; then
-        aht_go_path=$(go env GOPATH)
-        aht_install_dir="${aht_go_path%%:*}/bin"
-    fi
-    "$aht_install_dir/aht" manage upgrade
+    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags='-s -w' .
+    "$HOME/.local/bin/aht" manage upgrade
 
 # Install only the executable
 install-binary:
-    go install .
+    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags='-s -w' .
 
 # Install the fake model provider command
 install-fakeprovider:
-    go install ./cmd/fakeprovider
+    GOBIN="$HOME/.local/bin" go install ./cmd/fakeprovider
 
 # Remove build artifacts
 clean:
     rm -rf aht aht.exe dist/
-
-# Build with local development version metadata
-build-dev:
-    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=dev -X github.com/zigai/aht/v2/internal/cli.commit=$(git rev-parse --short HEAD) -X github.com/zigai/aht/v2/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o aht .
 
 _goreleaser-version-check:
     #!/usr/bin/env sh
@@ -152,7 +143,7 @@ _goreleaser-version-check:
     fi
 
 # Build a release snapshot without publishing
-snapshot: _goreleaser-version-check
+release-dry-run: _goreleaser-version-check
     goreleaser release --snapshot --clean
 
 # Build tagged release artifacts for native validation before draft creation
@@ -225,8 +216,6 @@ release-major: _release-check _goreleaser-version-check
     git tag "$new"
     # Release verification waits for this commit's CI before publishing.
     git push --no-verify origin "$new"
-
-alias release := release-patch
 
 alias cov := coverage
 alias fmt := format

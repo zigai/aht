@@ -191,7 +191,7 @@ jobs:
           install-only: true
 
       - name: Build snapshot
-        run: just snapshot
+        run: just release-dry-run
 
       - name: Upload snapshot
         uses: actions/upload-artifact@v7
