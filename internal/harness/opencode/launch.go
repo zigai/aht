@@ -49,6 +49,12 @@ func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
 	config := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
 		"model":   harness.LaunchProviderName + "/" + model.Model,
+		// Native V2 agents.<id>.disabled removes the auxiliary title agent:
+		// https://opencode.ai/v2/docs/agents#disabled
+		// Its background model call would consume the deterministic tool script
+		// before the primary turn. This config is only for isolated fakeprovider
+		// launches; normal installations keep native title generation enabled.
+		"agents": map[string]any{"title": map[string]any{"disabled": true}},
 		"provider": map[string]any{
 			harness.LaunchProviderName: map[string]any{
 				"npm":     "@ai-sdk/openai-compatible",

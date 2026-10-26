@@ -109,7 +109,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          # Current OpenClaw requires at least 24.22.1; runner caches may lag.
+          node-version: '>=24.22.1 <25'
+          check-latest: true
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
