@@ -362,7 +362,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		if !ok || !IsAgentWrapper(process) {
 			continue
 		}
-		if _, descendantHarness, found := descendantHarnessProcess(process.PID, processes, processByPID, harnessByPID); found && descendantHarness == harnessID {
+		if launchesHarnessThroughWrappers(process.PID, harnessID, processes, processByPID, harnessByPID) {
 			delete(harnessByPID, process.PID)
 		}
 	}
@@ -519,6 +519,30 @@ func IsAgentWrapper(process processinfo.Process) bool {
 	default:
 		return false
 	}
+}
+
+// An agent can itself look like a wrapper (pi runs as node), so only a chain of
+// wrappers counts as launching the descendant; agents nested behind other tools
+// belong to the outer agent.
+func launchesHarnessThroughWrappers(wrapperPID int, harnessID registry.Harness, processes []processinfo.Process, processByPID map[int]processinfo.Process, harnessByPID map[int]registry.Harness) bool {
+	for _, process := range processes {
+		if process.PID == wrapperPID || harnessByPID[process.PID] != harnessID {
+			continue
+		}
+		visited := map[int]bool{process.PID: true}
+		for ppid := process.PPID; ppid > 0 && !visited[ppid]; {
+			if ppid == wrapperPID {
+				return true
+			}
+			visited[ppid] = true
+			parent, ok := processByPID[ppid]
+			if !ok || !IsAgentWrapper(parent) {
+				break
+			}
+			ppid = parent.PPID
+		}
+	}
+	return false
 }
 
 func joinObserverHealthError(primary, healthErr error) error {
