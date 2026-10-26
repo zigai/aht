@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -137,12 +136,7 @@ func isStringLiteral(expr ast.Expr, want string) bool {
 
 func visitProductionGo(t *testing.T, visit func(string, []byte)) {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate repository")
-	}
-	root := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-	rootFS, err := os.OpenRoot(root)
+	rootFS, err := os.OpenRoot(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
