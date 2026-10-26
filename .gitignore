@@ -3,4 +3,6 @@
 dist/
 coverage.out
 .cache/
+.agents/
+.claude/
 .DS_Store
