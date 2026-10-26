@@ -155,6 +155,7 @@ type (
 	Report              = registry.Report
 	Reporter            = registry.Reporter
 	Sighting            = registry.Sighting
+	Verification        = registry.Verification
 	Placement           = registry.Placement
 	Listing             = registry.Listing
 	Reading             = registry.Reading

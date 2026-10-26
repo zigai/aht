@@ -45,6 +45,8 @@ func (o *Observation) UnmarshalJSON(data []byte) error {
 		evidence = new(Listing)
 	case "reading":
 		evidence = new(Reading)
+	case "verification":
+		evidence = new(Verification)
 	default:
 		return fmt.Errorf("%w: unknown evidence kind %q", ErrInvalidObservation, wire.Kind)
 	}

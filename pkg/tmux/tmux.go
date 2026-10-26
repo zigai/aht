@@ -129,6 +129,25 @@ func ListPanes(ctx context.Context) ([]Pane, error) {
 	})
 }
 
+func PanePresence(ctx context.Context, location registry.Location) (registry.Presence, error) {
+	if location.ServerID == "" || location.PaneID == "" {
+		return registry.PresenceUnknown, nil
+	}
+	panes, err := queryServerPanesGotmux(ctx, serverSpec{Identity: location.ServerID})
+	if errors.Is(err, gotmux.ErrNoServer) {
+		return registry.PresenceGone, nil
+	}
+	if err != nil {
+		return registry.PresenceUnknown, err
+	}
+	for _, pane := range panes {
+		if pane.Location.PaneID == location.PaneID {
+			return registry.PresenceLive, nil
+		}
+	}
+	return registry.PresenceGone, nil
+}
+
 func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error) {
 	env := opts.Env
 	currentServerSocket := tmuxServerSocket(env.TMUX)

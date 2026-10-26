@@ -55,6 +55,13 @@ func (s *Sighting) validate() error {
 	return nil
 }
 
+func (v *Verification) validate() error {
+	if v == nil || (v.Presence != PresenceGone && v.Presence != PresenceUnknown) || v.Reason == "" {
+		return fmt.Errorf("%w: invalid verification", ErrInvalidObservation)
+	}
+	return nil
+}
+
 func (p *Placement) validate() error {
 	if p == nil || !p.Process.Complete() {
 		return fmt.Errorf("%w: incomplete placement", ErrInvalidObservation)

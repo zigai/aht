@@ -49,6 +49,9 @@ func (r Reducer) reduceOne(sessions map[string]Session, observation Observation,
 	at := observationTime(observation.At, receivedAt)
 	r.retireConflictingProcessSessions(sessions, observation, at, receivedAt)
 	id := findAndReconcileMatchingSession(sessions, observation, at)
+	if id == "" && observation.Kind() == "verification" {
+		return empty, false, nil
+	}
 	if id == "" && observation.Kind() == "listing" && (!r.rules.Policy(observation.Harness).CatalogCreates || !observation.Listing().Current) {
 		return empty, false, nil
 	}

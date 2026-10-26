@@ -18,14 +18,42 @@ type lifecycleMachine struct {
 }
 
 func (m lifecycleMachine) apply(observation Observation, policy Policy, at time.Time) {
-	switch observation.Evidence.(type) {
+	switch evidence := observation.Evidence.(type) {
 	case *Report:
 		m.report(policy, at)
 	case *Sighting:
 		m.sighting(at)
 	case *Reading:
 		m.reading(policy, at)
+	case *Verification:
+		m.verify(*evidence, at)
 	case *Placement, *Listing, nil:
+	}
+}
+
+func (m lifecycleMachine) verify(verification Verification, at time.Time) {
+	if m.session.Presence() == PresenceGone || m.session.Process != nil && m.session.Process.Complete() {
+		return
+	}
+	latest := maxTime(m.session.PresenceChangedAt, m.session.Incarnation.ObservedAt)
+	if native := m.session.Observations.Native; native != nil {
+		latest = maxTime(latest, native.ObservedAt)
+	}
+	if decision := m.session.Decision(); decision != nil {
+		latest = maxTime(latest, decision.ObservedAt)
+	}
+	if at.Before(latest) {
+		return
+	}
+	var process ProcessIdentity
+	decision := &ActivityDecision{
+		Authority: AuthorityProcess, Reason: verification.Reason, ObservedAt: at,
+		RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "", Process: process,
+	}
+	if verification.Presence == PresenceGone {
+		m.session.Liveness = Gone{At: at, Reason: verification.Reason, Decision: decision}
+	} else {
+		m.session.Liveness = Unknown{Activity: ActivityUnknown, Decision: decision}
 	}
 }
 

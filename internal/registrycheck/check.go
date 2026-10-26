@@ -31,3 +31,10 @@ func Sessions(sessions []registry.Session) error {
 }
 
 func NewCoverage() *Coverage { return core.NewCoverage() }
+
+func Verification(before, after registry.Session) error {
+	if err := core.Verification(string(before.Presence()), string(after.Presence()), before.Process != nil && before.Process.Complete()); err != nil {
+		return fmt.Errorf("registry verification: %w", err)
+	}
+	return nil
+}

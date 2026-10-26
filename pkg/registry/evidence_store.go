@@ -37,6 +37,7 @@ func sourceSlotTime(session Session, observation Observation) time.Time {
 		if session.Observations.Screen != nil {
 			return session.Observations.Screen.ObservedAt
 		}
+	case *Verification, nil:
 	}
 	return time.Time{}
 }
@@ -53,7 +54,7 @@ func existingSlot(session Session, observation Observation) any {
 		return session.Observations.Catalog
 	case *Reading:
 		return session.Observations.Screen
-	case nil:
+	case *Verification, nil:
 		return nil
 	}
 	return nil
@@ -132,6 +133,7 @@ func storeObservation(session *Session, observation Observation, at time.Time) {
 		storeCatalogObservation(session, observation, at)
 	case *Reading:
 		storeScreenObservation(session, observation, at)
+	case *Verification, nil:
 	}
 }
 

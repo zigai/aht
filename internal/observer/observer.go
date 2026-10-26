@@ -69,15 +69,16 @@ type Store interface {
 }
 
 type Options struct {
-	Store         Store
-	StorePath     string
-	Interval      time.Duration
-	GracePeriod   time.Duration
-	HealthPath    string
-	ProcessList   ProcessLister
-	PaneList      mux.PaneLister
-	CatalogList   CatalogLister
-	ScreenCapture mux.ScreenCapturer
+	Store            Store
+	StorePath        string
+	Interval         time.Duration
+	GracePeriod      time.Duration
+	HealthPath       string
+	ProcessList      ProcessLister
+	PaneList         mux.PaneLister
+	LocationPresence func(context.Context, registry.Location) (registry.Presence, error)
+	CatalogList      CatalogLister
+	ScreenCapture    mux.ScreenCapturer
 	// DisableScreenInspection disables terminal capture and screen-derived state.
 	// Native multiplexer activity remains available without reading screen text.
 	DisableScreenInspection bool
@@ -146,6 +147,7 @@ type Observer struct {
 	healthPath              string
 	processList             ProcessLister
 	paneList                mux.PaneLister
+	locationPresence        func(context.Context, registry.Location) (registry.Presence, error)
 	catalogList             CatalogLister
 	screenCapture           mux.ScreenCapturer
 	disableScreenInspection bool
@@ -190,6 +192,10 @@ func New(opts Options) *Observer {
 	if paneList == nil {
 		paneList = listMultiplexerPanes
 	}
+	checkLocation := opts.LocationPresence
+	if checkLocation == nil {
+		checkLocation = locationPresence
+	}
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -224,7 +230,7 @@ func New(opts Options) *Observer {
 	}
 	return &Observer{
 		store: store, interval: interval, grace: opts.GracePeriod,
-		healthPath: healthPath, processList: processList, paneList: paneList, catalogList: catalogList,
+		healthPath: healthPath, processList: processList, paneList: paneList, locationPresence: checkLocation, catalogList: catalogList,
 		screenCapture: screenCapture, manifestLoader: agentstate.Loader{ConfigDir: opts.DetectionConfigDir},
 		disableScreenInspection: opts.DisableScreenInspection,
 		now:                     now, errorWriter: errorWriter, quiet: opts.Quiet, confirmAfter: confirmAfter,
@@ -464,9 +470,17 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		}
 		nextTracked[key] = old
 	}
-	absences := o.absenceObservationsForUnobservedSessions(knownSessions, processByPID, at)
-	observations = append(observations, absences...)
-	result.Gone += len(absences)
+	reconciled, reconcileErr := o.reconcileUnobservedSessions(ctx, knownSessions, processByPID, at)
+	observations = append(observations, reconciled...)
+	for _, observation := range reconciled {
+		if verification, ok := observation.Evidence.(*registry.Verification); !ok || verification.Presence == registry.PresenceGone {
+			result.Gone++
+		}
+	}
+	if reconcileErr != nil {
+		result.Degraded = true
+		result.Error = reconcileErr.Error()
+	}
 	o.prunePendingScreenDecisions(current)
 	result.Observations = len(observations)
 	if len(observations) > 0 {
@@ -728,9 +742,6 @@ func unobservedSessionAbsence(session registry.Session, processByPID map[int]pro
 	}
 
 	panePID := session.Location.PanePID
-	if panePID == 0 {
-		panePID = session.Location.PanePID
-	}
 	if session.Process == nil && panePID > 0 {
 		if _, ok := processByPID[panePID]; ok {
 			return empty, false
@@ -1129,11 +1140,12 @@ func (o *Observer) isProcessTracked(session registry.Session) bool {
 	return false
 }
 
-// absenceObservationsForUnobservedSessions retires nonterminal registry sessions whose
-// recorded process identity no longer exists and is not covered by the tracked-process
-// sweep, including sessions revived by lifecycle hooks after a process absence.
-func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) []registry.Observation {
+// reconcileUnobservedSessions retires sessions whose recorded owners no longer
+// exist and are not covered by the tracked-process sweep. Sessions without a
+// verifiable process or location become unknown while retaining native evidence.
+func (o *Observer) reconcileUnobservedSessions(ctx context.Context, sessions []registry.Session, processByPID map[int]processinfo.Process, at time.Time) ([]registry.Observation, error) {
 	observations := make([]registry.Observation, 0)
+	var checkErrors []error
 	for _, session := range sessions {
 		if session.Presence() == registry.PresenceGone {
 			continue
@@ -1144,10 +1156,33 @@ func (o *Observer) absenceObservationsForUnobservedSessions(sessions []registry.
 
 		if observation, ok := unobservedSessionAbsence(session, processByPID, at); ok {
 			observations = append(observations, observation)
+			continue
 		}
+		if session.Process != nil && session.Process.Complete() {
+			continue
+		}
+		presence, err := o.locationPresence(ctx, session.Location)
+		if err != nil {
+			checkErrors = append(checkErrors, fmt.Errorf("check session %s location: %w", session.ID, err))
+			presence = registry.PresenceUnknown
+		}
+		reason := "owner_unverified"
+		if presence == registry.PresenceGone {
+			reason = "location_gone"
+		} else {
+			presence = registry.PresenceUnknown
+		}
+		if session.Presence() == presence && session.Decision() != nil && session.Decision().Reason == reason {
+			continue
+		}
+		observations = append(observations, registry.Observation{
+			Harness: session.Harness, At: at,
+			Subject:  registry.ObservationIdentity{SessionID: session.SessionID, SessionPath: session.SessionPath, CWD: "", Attributes: nil},
+			Evidence: &registry.Verification{Presence: presence, Reason: reason},
+		})
 	}
 
-	return observations
+	return observations, errors.Join(checkErrors...)
 }
 
 func (o *Observer) captureScreenState(ctx context.Context, session registry.Session, harnessID registry.Harness, identity *registry.ProcessIdentity, pane mux.Pane, at time.Time) (registry.Observation, bool, error) {

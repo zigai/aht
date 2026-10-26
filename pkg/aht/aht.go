@@ -345,6 +345,7 @@ type (
 // New returns a client for the configured local AHT instance.
 type (
 	Evidence        = registry.Evidence
+	Verification    = registry.Verification
 	Report          = registry.Report
 	Reporter        = registry.Reporter
 	Sighting        = registry.Sighting

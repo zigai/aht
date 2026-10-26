@@ -15,6 +15,59 @@ import (
 
 var errExclusiveProcess = errors.New("exclusive process conflict")
 
+func TestPresenceVerificationInvariants(t *testing.T) {
+	t.Parallel()
+	coverage := core.NewCoverage()
+	for _, test := range []struct {
+		name    string
+		before  Presence
+		check   Presence
+		process *ProcessIdentity
+		delayed bool
+		want    Presence
+	}{
+		{name: "unverified owner", before: PresenceLive, check: PresenceUnknown, want: PresenceUnknown},
+		{name: "gone location", before: PresenceLive, check: PresenceGone, want: PresenceGone},
+		{name: "running owner", before: PresenceLive, check: PresenceGone, process: &ProcessIdentity{PID: 91, StartIdentity: "boot:91"}, want: PresenceLive},
+		{name: "ended session", before: PresenceGone, check: PresenceUnknown, want: PresenceGone},
+		{name: "delayed verification", before: PresenceLive, check: PresenceGone, delayed: true, want: PresenceLive},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := NewJournal(filepath.Join(t.TempDir(), "sessions.json"), fixtureRules{})
+			at := time.Now().UTC().Add(-time.Minute)
+			before, err := store.Observe(t.Context(), Observation{Harness: HarnessPi, At: at, Subject: ObservationIdentity{SessionID: "native-session"}, Evidence: &Report{Event: "native.status", Claim: &test.before, Process: test.process}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkAt := at.Add(time.Second)
+			if test.delayed {
+				checkAt = at.Add(-time.Second)
+			}
+			_, err = store.Observe(t.Context(), Observation{Harness: HarnessPi, At: checkAt, Subject: ObservationIdentity{SessionID: "native-session"}, Evidence: &Verification{Presence: test.check, Reason: "owner_check"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := store.Get(t.Context(), before.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Presence() != test.want {
+				t.Fatalf("presence = %s, want %s", after.Presence(), test.want)
+			}
+			if err := core.Verification(string(before.Presence()), string(after.Presence()), before.Process != nil && before.Process.Complete()); err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(before.Observations.Native, after.Observations.Native, cmp.Comparer(func(x, y ProcessIdentity) bool { return x == y })); diff != "" {
+				t.Fatalf("verification changes native report (-before +after):\n%s", diff)
+			}
+			coverage.Hit(test.name)
+		})
+	}
+	if missing := coverage.Missing("unverified owner", "gone location", "running owner", "ended session", "delayed verification"); len(missing) > 0 {
+		t.Fatalf("verification situations not covered: %v", missing)
+	}
+}
+
 func checkInvariantSessions(sessions []Session) error {
 	projected := make([]core.Session, len(sessions))
 	for index, session := range sessions {

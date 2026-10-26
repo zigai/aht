@@ -279,7 +279,7 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Loca
 func WithResumeCommand(observation registry.Observation) registry.Observation {
 	switch observation.Evidence.(type) {
 	case *registry.Report, *registry.Listing:
-	case *registry.Sighting, *registry.Placement, *registry.Reading, nil:
+	case *registry.Sighting, *registry.Placement, *registry.Reading, *registry.Verification, nil:
 		return observation
 	}
 	if observation.Listing() != nil && len(observation.Listing().ResumeCommand) > 0 {

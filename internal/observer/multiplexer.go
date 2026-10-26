@@ -46,6 +46,17 @@ func listMultiplexerPanes(ctx context.Context) ([]mux.Pane, error) {
 	return panes, errors.Join(listErrors...)
 }
 
+func locationPresence(ctx context.Context, location registry.Location) (registry.Presence, error) {
+	if location.Kind == registry.MultiplexerTmux {
+		presence, err := tmux.PanePresence(ctx, location)
+		if err != nil {
+			return registry.PresenceUnknown, fmt.Errorf("check tmux pane: %w", err)
+		}
+		return presence, nil
+	}
+	return registry.PresenceUnknown, nil
+}
+
 func multiplexerPanesFromTmux(panes []tmux.Pane) []mux.Pane {
 	result := make([]mux.Pane, 0, len(panes))
 	for _, pane := range panes {

@@ -12,6 +12,7 @@ var (
 	ErrTime         = errors.New("session timestamps")
 	ErrLiveness     = errors.New("session liveness")
 	ErrNativeEnd    = errors.New("native end is terminal")
+	ErrVerification = errors.New("presence verification")
 	errGoneActivity = errors.New("gone session has no activity")
 )
 
@@ -65,6 +66,16 @@ func Sessions(sessions []Session) error {
 }
 
 func NewCoverage() *Coverage { return &Coverage{mu: sync.Mutex{}, hits: make(map[string]struct{})} }
+
+func Verification(before, after string, processComplete bool) error {
+	if (before == "gone" || processComplete) && after != before {
+		return fmt.Errorf("%w: changes protected presence from %s to %s", ErrVerification, before, after)
+	}
+	if before != "live" && after == "live" {
+		return fmt.Errorf("%w: establishes live presence without a process sighting", ErrVerification)
+	}
+	return nil
+}
 
 func (c *Coverage) Hit(name string) {
 	c.mu.Lock()

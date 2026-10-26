@@ -3,6 +3,9 @@
 package tmux
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +16,38 @@ import (
 	"github.com/zigai/aht/v2/internal/testtmux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestPanePresenceQueriesSavedServer(t *testing.T) {
+	server := testtmux.New(t, gotmux.NewSessionOptions{Name: "presence", Program: gotmux.Exec("sleep", "60")})
+	panes, err := server.Tmux.Panes(t.Context())
+	if err != nil || len(panes) != 1 {
+		t.Fatalf("server panes = %v, %v", panes, err)
+	}
+	for _, test := range []struct {
+		name   string
+		server string
+		pane   string
+		want   registry.Presence
+	}{
+		{name: "existing pane", server: server.Socket, pane: string(panes[0].ID), want: registry.PresenceLive},
+		{name: "missing pane", server: server.Socket, pane: "%99999", want: registry.PresenceGone},
+		{name: "missing server with same pane id", server: filepath.Join(t.TempDir(), "missing.sock"), pane: string(panes[0].ID), want: registry.PresenceGone},
+		{name: "unknown server", pane: string(panes[0].ID), want: registry.PresenceUnknown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := PanePresence(t.Context(), registry.Location{ServerID: test.server, PaneID: test.pane})
+			if err != nil || got != test.want {
+				t.Fatalf("pane presence = %s, %v; want %s", got, err, test.want)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	got, err := PanePresence(ctx, registry.Location{ServerID: server.Socket, PaneID: string(panes[0].ID)})
+	if got != registry.PresenceUnknown || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled pane check = %s, %v", got, err)
+	}
+}
 
 func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 	server := testtmux.New(t, gotmux.NewSessionOptions{Name: "gotmux-test", Program: gotmux.Exec("sh", "-c", "echo 'hello gotmux'; sleep 60")})

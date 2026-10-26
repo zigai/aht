@@ -39,6 +39,13 @@ type Sighting struct {
 	Present bool            `json:"present"`
 }
 
+// Verification reconciles an existing session when its owning process is unknown.
+// Presence must be gone or unknown; a live process requires a Sighting.
+type Verification struct {
+	Presence Presence `json:"presence"`
+	Reason   string   `json:"reason"`
+}
+
 type Placement struct {
 	Process  ProcessIdentity `json:"process"`
 	Location Location        `json:"location"`
@@ -46,11 +53,12 @@ type Placement struct {
 
 type Reading ScreenObservation
 
-func (*Report) evidence()    {}
-func (*Sighting) evidence()  {}
-func (*Placement) evidence() {}
-func (*Listing) evidence()   {}
-func (*Reading) evidence()   {}
+func (*Report) evidence()       {}
+func (*Sighting) evidence()     {}
+func (*Placement) evidence()    {}
+func (*Listing) evidence()      {}
+func (*Reading) evidence()      {}
+func (*Verification) evidence() {}
 
 func (o Observation) Kind() string {
 	switch o.Evidence.(type) {
@@ -64,6 +72,8 @@ func (o Observation) Kind() string {
 		return "listing"
 	case *Reading:
 		return "reading"
+	case *Verification:
+		return "verification"
 	case nil:
 		return ""
 	}
@@ -91,7 +101,7 @@ func (o Observation) ProcessIdentity() *ProcessIdentity {
 		return &evidence.Process
 	case *Reading:
 		return &evidence.Process
-	case *Listing, nil:
+	case *Listing, *Verification, nil:
 		return nil
 	}
 	return nil
@@ -110,7 +120,7 @@ func (o Observation) ActivityClaim() *Activity {
 		return evidence.Activity
 	case *Reading:
 		return &evidence.Activity
-	case *Sighting, *Placement, *Listing, nil:
+	case *Sighting, *Placement, *Listing, *Verification, nil:
 		return nil
 	}
 	return nil
@@ -122,7 +132,7 @@ func (o Observation) Location() *Location {
 		return evidence.Location
 	case *Placement:
 		return &evidence.Location
-	case *Sighting, *Reading, *Listing, nil:
+	case *Sighting, *Reading, *Listing, *Verification, nil:
 		return nil
 	}
 	return nil
@@ -134,7 +144,7 @@ func (o Observation) Listing() *Listing {
 		return evidence.Listing
 	case *Listing:
 		return evidence
-	case *Sighting, *Placement, *Reading, nil:
+	case *Sighting, *Placement, *Reading, *Verification, nil:
 		return nil
 	}
 	return nil
@@ -166,7 +176,7 @@ func (o *Observation) SetProcess(process *ProcessIdentity) {
 		if process != nil {
 			evidence.Process = *process
 		}
-	case *Listing, nil:
+	case *Listing, *Verification, nil:
 	}
 }
 
@@ -184,7 +194,7 @@ func (o *Observation) SetActivity(activity *Activity) {
 		if activity != nil {
 			evidence.Activity = *activity
 		}
-	case *Sighting, *Placement, *Listing, nil:
+	case *Sighting, *Placement, *Listing, *Verification, nil:
 	}
 }
 
@@ -196,7 +206,7 @@ func (o *Observation) SetLocation(location *Location) {
 		if location != nil {
 			evidence.Location = *location
 		}
-	case *Sighting, *Reading, *Listing, nil:
+	case *Sighting, *Reading, *Listing, *Verification, nil:
 	}
 }
 
@@ -206,7 +216,7 @@ func (o *Observation) SetListing(listing *Listing) {
 		evidence.Listing = listing
 	case *Listing:
 		o.Evidence = listing
-	case *Sighting, *Placement, *Reading, nil:
+	case *Sighting, *Placement, *Reading, *Verification, nil:
 	}
 }
 
