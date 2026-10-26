@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,29 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/zigai/strata"
 )
+
+var updateSchema = flag.Bool("update-schema", false, "rewrite schema.json from Config")
+
+func TestSchemaMatchesConfig(t *testing.T) {
+	generated, err := strata.Schema[Config](
+		strata.WithSchemaID("https://aht.dev/schema/config.json"),
+		strata.WithSchemaTitle("AHT Configuration"),
+		strata.WithSchemaComments("github.com/zigai/aht/v2/internal/config", "."),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated = append(generated, '\n')
+	if *updateSchema {
+		if err := os.WriteFile("schema.json", generated, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if !bytes.Equal(generated, Schema) {
+		t.Fatal("schema.json is stale; run go test ./internal/config -run TestSchemaMatchesConfig -update-schema")
+	}
+}
 
 func TestParseDuration(t *testing.T) {
 	tests := []struct {

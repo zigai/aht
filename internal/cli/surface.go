@@ -807,14 +807,7 @@ func (app *application) newConfigSchemaCommand() *cobra.Command {
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			schemaBytes, err := strata.Schema[config.Config](
-				strata.WithSchemaID("https://aht.dev/schema/config.json"),
-				strata.WithSchemaTitle("AHT Configuration"),
-			)
-			if err != nil {
-				return fmt.Errorf("generate schema: %w", err)
-			}
-			return app.writef("%s\n", string(schemaBytes))
+			return app.writef("%s", config.Schema)
 		},
 	}
 }

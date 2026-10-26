@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aht.dev/schema/config.json",
+  "$defs": {
+    "DetectionConfig": {
+      "properties": {
+        "manifests_dir": {
+          "type": "string"
+        },
+        "screen_inspection": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DetectionConfig controls agent and screen inspection defaults."
+    },
+    "FilterConfig": {
+      "properties": {
+        "ignore_harnesses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ignore_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "FilterConfig controls default session visibility exclusions."
+    },
+    "RetentionConfig": {
+      "properties": {
+        "tombstone_ttl": {
+          "type": "string",
+          "description": "TombstoneTTL is how long an identified gone session stays in the registry\nso late native reports from its ended process are rejected. Gone sessions\nwith only process identity are removed immediately."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "RetentionConfig controls how long the tracker keeps gone-session tombstones."
+    },
+    "TrackerConfig": {
+      "properties": {
+        "interval": {
+          "type": "string"
+        },
+        "grace_period": {
+          "type": "string"
+        },
+        "quiet": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "TrackerConfig controls background observer behavior."
+    },
+    "UIConfig": {
+      "properties": {
+        "default_presence": {
+          "type": "string"
+        },
+        "sort": {
+          "type": "string"
+        },
+        "sort_desc": {
+          "type": "boolean"
+        },
+        "absolute_time": {
+          "type": "boolean"
+        },
+        "time_format": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "UIConfig controls terminal and table display defaults."
+    }
+  },
+  "properties": {
+    "ui": {
+      "$ref": "#/$defs/UIConfig"
+    },
+    "retention": {
+      "$ref": "#/$defs/RetentionConfig"
+    },
+    "filter": {
+      "$ref": "#/$defs/FilterConfig"
+    },
+    "tracker": {
+      "$ref": "#/$defs/TrackerConfig"
+    },
+    "detection": {
+      "$ref": "#/$defs/DetectionConfig"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "AHT Configuration"
+}
