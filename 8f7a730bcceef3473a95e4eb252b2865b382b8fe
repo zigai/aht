@@ -1,0 +1,3 @@
+- just check passes lint, unit tests, race tests, integration tests, compatibility tests, formatting, dependency, build, and workflow checks.
+- The rebuilt aht manage tracker run --once against .cache/evidence/session-reconciliation/state/verified.json marks the three September 26 OpenCode sessions gone and the September 25 OpenClaw session unknown, with degraded=false.
+- The rebuilt aht manage state clean --older-than 0s against the scratch after.json removes the stale OpenCode records and retains the running OpenCode process.
