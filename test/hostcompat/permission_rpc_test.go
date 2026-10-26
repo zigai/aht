@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -160,18 +159,12 @@ func runOmpPermission(t *testing.T, host *isolatedHost, allow bool) {
 	process := startPermissionProcess(t, host, cmd)
 	sendPermissionJSON(t, input, map[string]any{"id": "permission-prompt", "type": "prompt", "message": compatibilityPrompt})
 	request := awaitRPCApprovalRequest(t, next, "OMP", "select")
-	title, _ := request["title"].(string)
-	options, _ := request["options"].([]any)
-	id, _ := request["id"].(string)
-	if id == "" || !strings.Contains(title, "Allow tool: bash") || len(options) != 2 || options[0] != "Approve" || options[1] != "Deny" {
-		t.Fatalf("unexpected OMP native approval request: %v", request)
+	response, err := ompPermissionResponse(request, allow)
+	if err != nil {
+		t.Fatalf("%v: %v", err, request)
 	}
 	waiting := assertPermissionWaiting(t, host)
-	choice := "Deny"
-	if allow {
-		choice = "Approve"
-	}
-	sendPermissionJSON(t, input, map[string]any{"type": "extension_ui_response", "id": id, "value": choice})
+	sendPermissionJSON(t, input, response)
 	awaitRPCRunEnd(t, next, "OMP", "select", func(frame map[string]any) bool { return frame["isTerminal"] != false })
 	assertPermissionOutcome(t, host, waiting, allow)
 	// OMP documents stdin EOF as a graceful session-disposal boundary.
