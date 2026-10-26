@@ -125,7 +125,8 @@ jobs:
 
   verify-darwin:
     runs-on: macos-15
-    timeout-minutes: 10
+    # Cold SDK builds plus race/integration tests need more than ten minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
