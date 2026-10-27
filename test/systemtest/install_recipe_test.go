@@ -20,34 +20,25 @@ func TestInstallRecipeUsesInstalledBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, recipe                       string
-		useGOBIN, failInstall, failUpgrade bool
+		name, recipe             string
+		failInstall, failUpgrade bool
 	}{
-		{name: "explicit GOBIN", recipe: "install", useGOBIN: true},
-		{name: "first GOPATH entry", recipe: "install"},
-		{name: "binary only", recipe: "install-binary", useGOBIN: true},
-		{name: "install failure", recipe: "install", useGOBIN: true, failInstall: true},
-		{name: "upgrade failure", recipe: "install", useGOBIN: true, failUpgrade: true},
+		{name: "install", recipe: "install"},
+		{name: "binary only", recipe: "install-binary"},
+		{name: "install failure", recipe: "install", failInstall: true},
+		{name: "upgrade failure", recipe: "install", failUpgrade: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "tools")
-			installed := filepath.Join(dir, "installed binary")
-			gobin := installed
-			if !test.useGOBIN {
-				gobin = ""
-				installed = filepath.Join(dir, "first go path", "bin")
-			}
 			writeRecipeExecutable(t, filepath.Join(bin, "go"), `#!/bin/sh
 set -eu
-case "$*" in
- "install .")
+case "$1" in
+ install)
   if [ "$AHT_TEST_FAIL_INSTALL" = yes ]; then exit 7; fi
-  mkdir -p "$AHT_TEST_INSTALL_DIR"
-  cp "$AHT_TEST_NEW_BINARY" "$AHT_TEST_INSTALL_DIR/aht"
+  mkdir -p "$GOBIN"
+  cp "$AHT_TEST_NEW_BINARY" "$GOBIN/aht"
   ;;
- "env GOBIN") printf '%s\n' "$AHT_TEST_GOBIN" ;;
- "env GOPATH") printf '%s\n' "$AHT_TEST_GOPATH" ;;
  *) exit 9 ;;
 esac
 `)
@@ -61,11 +52,10 @@ if [ "$AHT_TEST_FAIL_UPGRADE" = yes ]; then exit 8; fi
 			calls := filepath.Join(dir, "calls")
 			command := exec.CommandContext(t.Context(), just, "--justfile", filepath.Join(root, "Justfile"), test.recipe)
 			command.Env = append(os.Environ(),
+				"HOME="+filepath.Join(dir, "home with space"),
+				"GOBIN=",
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"AHT_TEST_INSTALL_DIR="+installed,
 				"AHT_TEST_NEW_BINARY="+template,
-				"AHT_TEST_GOBIN="+gobin,
-				"AHT_TEST_GOPATH="+filepath.Join(dir, "first go path")+string(os.PathListSeparator)+filepath.Join(dir, "second"),
 				"AHT_TEST_UPGRADE_CALLS="+calls,
 				"AHT_TEST_FAIL_INSTALL="+recipeBool(test.failInstall),
 				"AHT_TEST_FAIL_UPGRADE="+recipeBool(test.failUpgrade),
