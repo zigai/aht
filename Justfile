@@ -75,6 +75,7 @@ fix:
 
 # Format Go source files
 format:
+    {{ golangci_lint }} run --fix --enable-only whitespace --issues-exit-code=0
     {{ golangci_lint }} fmt
 
 # Check code for lint issues
