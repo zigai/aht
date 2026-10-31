@@ -50,6 +50,7 @@ var (
 	errInvalidWatchFormat         = errors.New("invalid watch format")
 )
 
+//exhaustruct:optional
 type watchOptions struct {
 	filter     registry.Filter
 	harness    string
@@ -61,20 +62,32 @@ type watchOptions struct {
 	ready      chan struct{}
 }
 type watchEvent struct {
-	Time             time.Time          `json:"time"`
-	Action           string             `json:"action"`
-	ID               string             `json:"id,omitempty"`
-	Harness          registry.Harness   `json:"harness,omitempty"`
-	Presence         registry.Presence  `json:"presence,omitempty"`
-	PreviousPresence registry.Presence  `json:"previous_presence,omitempty"`
-	Activity         *registry.Activity `json:"activity,omitempty"`
+	Time   time.Time `json:"time"`
+	Action string    `json:"action"`
+	//exhaustruct:optional
+	ID string `json:"id,omitempty"`
+	//exhaustruct:optional
+	Harness registry.Harness `json:"harness,omitempty"`
+	//exhaustruct:optional
+	Presence registry.Presence `json:"presence,omitempty"`
+	//exhaustruct:optional
+	PreviousPresence registry.Presence `json:"previous_presence,omitempty"`
+	//exhaustruct:optional
+	Activity *registry.Activity `json:"activity,omitempty"`
+	//exhaustruct:optional
 	PreviousActivity *registry.Activity `json:"previous_activity,omitempty"`
-	SessionID        string             `json:"session_id,omitempty"`
-	SessionPath      string             `json:"session_path,omitempty"`
-	Label            string             `json:"label,omitempty"`
-	NativeEvent      string             `json:"native_event,omitempty"`
-	CWD              string             `json:"cwd,omitempty"`
-	Location         string             `json:"location,omitempty"`
+	//exhaustruct:optional
+	SessionID string `json:"session_id,omitempty"`
+	//exhaustruct:optional
+	SessionPath string `json:"session_path,omitempty"`
+	//exhaustruct:optional
+	Label string `json:"label,omitempty"`
+	//exhaustruct:optional
+	NativeEvent string `json:"native_event,omitempty"`
+	//exhaustruct:optional
+	CWD string `json:"cwd,omitempty"`
+	//exhaustruct:optional
+	Location string `json:"location,omitempty"`
 }
 type watchUpdateProcessor struct {
 	app      *application
@@ -84,8 +97,9 @@ type watchUpdateProcessor struct {
 }
 
 type watchEventWriter struct {
-	app           *application
-	format        string
+	app    *application
+	format string
+	//exhaustruct:optional
 	headerWritten bool
 }
 
@@ -93,25 +107,31 @@ func (app *application) prepareWatch(opts watchOptions) (watchOptions, error) {
 	if opts.formatSet && strings.TrimSpace(opts.format) == "" {
 		return opts, fmt.Errorf("%w: empty value", errInvalidWatchFormat)
 	}
+
 	opts = normalizeWatchOptions(opts)
 	if app.outputJSON {
 		if opts.formatSet {
 			return opts, errWatchFormatJSONConflict
 		}
+
 		opts.format = watchFormatJSON
 	}
+
 	if !app.outputJSON && opts.format != watchFormatTable && opts.format != watchFormatPlain {
 		return opts, fmt.Errorf("%w: %q", errInvalidWatchFormat, opts.format)
 	}
+
 	return opts, nil
 }
 
 func (app *application) runWatch(ctx context.Context, opts watchOptions) error {
 	ahtClient := client.New(client.Config{StorePath: app.resolvedStorePath()})
+
 	err := app.runBrokerWatch(ctx, opts, ahtClient)
 	if err == nil {
 		return nil
 	}
+
 	if !client.IsUnavailable(err) {
 		return fmt.Errorf("watching registry broker: %w", err)
 	}
@@ -126,16 +146,19 @@ func (app *application) runBrokerWatch(
 ) error {
 	processor := newWatchUpdateProcessor(app, opts)
 	initialized := false
+
 	err := ahtClient.Watch(ctx, opts.filter, func(state registry.StateSnapshot) error {
 		first := !initialized
 		if first {
 			initialized = true
 		}
+
 		return processor.accept(state.Sessions, first)
 	})
 	if err != nil {
 		return fmt.Errorf("watching AHT state: %w", err)
 	}
+
 	return nil
 }
 
@@ -144,7 +167,9 @@ func (app *application) runFilesystemWatch(ctx context.Context, opts watchOption
 	if _, _, e := watchTarget(s); e != nil {
 		return e
 	}
+
 	processor := newWatchUpdateProcessor(app, opts)
+
 	err := s.Watch(ctx, registry.WatchOptions{
 		Filter:            opts.filter,
 		Debounce:          opts.debounce,
@@ -153,11 +178,13 @@ func (app *application) runFilesystemWatch(ctx context.Context, opts watchOption
 		if app.reportWatchResultError(result) {
 			return nil
 		}
+
 		return processor.accept(result.Sessions, result.Initial)
 	})
 	if err != nil {
 		return fmt.Errorf("watching registry store: %w", err)
 	}
+
 	return nil
 }
 
@@ -179,7 +206,9 @@ func (p *watchUpdateProcessor) accept(rawSessions []registry.Session, initial bo
 				return err
 			}
 		}
+
 		notifyWatchReady(p.options.ready)
+
 		return nil
 	}
 
@@ -191,7 +220,9 @@ func (p *watchUpdateProcessor) accept(rawSessions []registry.Session, initial bo
 	if err := p.writer.write(events); err != nil {
 		return err
 	}
+
 	p.previous = currentSessions
+
 	return nil
 }
 
@@ -199,7 +230,9 @@ func (app *application) reportWatchResultError(result registry.WatchResult) bool
 	if result.Err == nil {
 		return false
 	}
+
 	app.warnf("watch warning: %v\n", result.Err)
+
 	return true
 }
 
@@ -207,12 +240,15 @@ func normalizeWatchOptions(opts watchOptions) watchOptions {
 	if strings.TrimSpace(opts.format) == "" {
 		opts.format = watchFormatTable
 	}
+
 	if opts.debounce <= 0 {
 		opts.debounce = defaultWatchDebounce
 	}
+
 	if opts.now == nil {
 		opts.now = func() time.Time { return time.Now().UTC() }
 	}
+
 	return opts
 }
 
@@ -221,17 +257,22 @@ func watchTarget(s *registry.Journal) (string, string, error) {
 	if e != nil {
 		return "", "", fmt.Errorf("resolve watch target: %w", e)
 	}
+
 	d := filepath.Dir(p)
+
 	i, e := os.Stat(d)
 	if e != nil {
 		if os.IsNotExist(e) {
 			return "", "", fmt.Errorf("%w: %s", errWatchStateDirectoryMissing, d)
 		}
+
 		return "", "", fmt.Errorf("stat watch state directory: %w", e)
 	}
+
 	if !i.IsDir() {
 		return "", "", fmt.Errorf("%w: %s", errWatchStateDirectoryNotDir, d)
 	}
+
 	return p, d, nil
 }
 
@@ -246,6 +287,7 @@ func watchSessionMap(s []registry.Session) map[string]registry.Session {
 	for _, v := range s {
 		m[v.ID] = v
 	}
+
 	return m
 }
 
@@ -253,59 +295,81 @@ func snapshotWatchEvents(s []registry.Session, at time.Time) []watchEvent {
 	if len(s) == 0 {
 		return []watchEvent{{Time: at.UTC(), Action: watchActionSnapshotEmpty}}
 	}
+
 	o := []watchEvent{}
 	for _, v := range s {
-		o = append(o, watchEventFromSession(watchActionSnapshot, v, registry.Session{}, at))
+		o = append(o, watchEventFromSession(watchActionSnapshot, v, at))
 	}
+
 	sortWatchEvents(o)
+
 	return o
 }
 
 //nolint:cyclop // event diffing compares each independent session dimension
-func diffWatchEvents(p, n map[string]registry.Session, at time.Time) []watchEvent {
+func diffWatchEvents(
+	p map[string]registry.Session,
+	n map[string]registry.Session,
+	at time.Time,
+) []watchEvent {
 	o := []watchEvent{}
+
 	for id, v := range n {
 		old, ok := p[id]
 		if !ok {
-			o = append(o, watchEventFromSession(watchActionAdded, v, registry.Session{}, at))
+			o = append(o, watchEventFromSession(watchActionAdded, v, at))
 			continue
 		}
+
 		if v.Presence() != old.Presence() {
-			o = append(o, watchEventFromSession(watchActionPresenceChanged, v, old, at))
+			changed := watchEventFromSession(watchActionPresenceChanged, v, at)
+			changed.PreviousPresence = old.Presence()
+
+			o = append(o, changed)
 			if v.Presence() == registry.PresenceGone {
-				o = append(o, watchEventFromSession(watchActionProcessGone, v, old, at))
+				o = append(o, watchEventFromSession(watchActionProcessGone, v, at))
 			}
 		}
+
 		if v.Presence() == registry.PresenceLive && v.Process != nil && old.Process == nil {
-			o = append(o, watchEventFromSession(watchActionProcessBound, v, old, at))
+			o = append(o, watchEventFromSession(watchActionProcessBound, v, at))
 		}
+
 		if !activityEqual(v.Activity(), old.Activity()) {
-			o = append(o, watchEventFromSession(watchActionActivityChanged, v, old, at))
+			changed := watchEventFromSession(watchActionActivityChanged, v, at)
+			changed.PreviousActivity = old.Activity()
+			o = append(o, changed)
 		}
+
 		if !multiplexerLocationEqual(v.Location, old.Location) {
-			o = append(o, watchEventFromSession(watchActionLocationChanged, v, old, at))
+			o = append(o, watchEventFromSession(watchActionLocationChanged, v, at))
 		}
+
 		if nativeEvent(v) != nativeEvent(old) {
-			o = append(o, watchEventFromSession(watchActionNativeEvent, v, old, at))
+			o = append(o, watchEventFromSession(watchActionNativeEvent, v, at))
 		}
 	}
+
 	for id, v := range p {
 		if _, ok := n[id]; !ok {
-			o = append(o, watchEventFromSession(watchActionRemoved, v, registry.Session{}, at))
+			o = append(o, watchEventFromSession(watchActionRemoved, v, at))
 		}
 	}
+
 	sortWatchEvents(o)
+
 	return o
 }
 
-func activityEqual(a, b *registry.Activity) bool {
+func activityEqual(a *registry.Activity, b *registry.Activity) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
+
 	return *a == *b
 }
 
-func multiplexerLocationEqual(a, b registry.Location) bool {
+func multiplexerLocationEqual(a registry.Location, b registry.Location) bool {
 	a.WindowName, b.WindowName = "", ""
 	a.TabName, b.TabName = "", ""
 	a.WorkspaceName, b.WorkspaceName = "", ""
@@ -313,6 +377,7 @@ func multiplexerLocationEqual(a, b registry.Location) bool {
 	a.PanePID, b.PanePID = 0, 0
 	a.PaneTTY, b.PaneTTY = "", ""
 	a.ClientTTY, b.ClientTTY = "", ""
+
 	return a == b
 }
 
@@ -320,37 +385,63 @@ func nativeEvent(s registry.Session) string {
 	if s.Observations.Native == nil {
 		return ""
 	}
+
 	return s.Observations.Native.Event
 }
 
-func watchEventFromSession(a string, s, p registry.Session, at time.Time) watchEvent {
-	e := watchEvent{Time: at.UTC(), Action: a, ID: s.ID, Harness: s.Harness, Presence: s.Presence(), Activity: s.Activity(), SessionID: s.SessionID, SessionPath: s.SessionPath, Label: sessionDisplayLabel(s), NativeEvent: nativeEvent(s), CWD: s.CWD, Location: watchMultiplexerLabel(s.Location)}
+func watchEventFromSession(a string, s registry.Session, at time.Time) watchEvent {
+	e := watchEvent{
+		Time:        at.UTC(),
+		Action:      a,
+		ID:          s.ID,
+		Harness:     s.Harness,
+		Presence:    s.Presence(),
+		Activity:    s.Activity(),
+		SessionID:   s.SessionID,
+		SessionPath: s.SessionPath,
+		Label:       sessionDisplayLabel(s),
+		NativeEvent: nativeEvent(s),
+		CWD:         s.CWD,
+		Location:    watchMultiplexerLabel(s.Location),
+	}
 	if !s.UpdatedAt.IsZero() {
 		e.Time = s.UpdatedAt
 	}
+
 	if a == watchActionPresenceChanged {
 		e.Time = s.PresenceChangedAt
-		e.PreviousPresence = p.Presence()
 	}
+
 	if a == watchActionActivityChanged {
 		e.Time = s.ActivityChangedAt
-		e.PreviousActivity = p.Activity()
 	}
+
 	if e.Time.IsZero() {
 		e.Time = at.UTC()
 	}
+
 	return e
 }
 
 func sortWatchEvents(e []watchEvent) {
-	order := map[string]int{watchActionPresenceChanged: watchActivityOrder - 1, watchActionActivityChanged: watchActivityOrder, watchActionProcessBound: watchProcessOrder, watchActionProcessGone: watchProcessOrder, watchActionLocationChanged: watchLocationOrder, watchActionNativeEvent: watchNativeOrder}
+	order := map[string]int{
+		watchActionPresenceChanged: watchActivityOrder - 1,
+		watchActionActivityChanged: watchActivityOrder,
+		watchActionProcessBound:    watchProcessOrder,
+		watchActionProcessGone:     watchProcessOrder,
+		watchActionLocationChanged: watchLocationOrder,
+		watchActionNativeEvent:     watchNativeOrder,
+	}
+
 	sort.SliceStable(e, func(i, j int) bool {
 		if !e[i].Time.Equal(e[j].Time) {
 			return e[i].Time.Before(e[j].Time)
 		}
+
 		if e[i].ID != e[j].ID {
 			return e[i].ID < e[j].ID
 		}
+
 		return order[e[i].Action] < order[e[j].Action]
 	})
 }
@@ -359,16 +450,20 @@ func watchMultiplexerLabel(location registry.Location) string {
 	if location.Empty() {
 		return ""
 	}
+
 	parts := []string{string(location.Kind)}
 	if session := multiplexerSessionLabel(location); session != "-" {
 		parts = append(parts, session)
 	}
+
 	if container := multiplexerContainerLabel(location); container != "-" {
 		parts = append(parts, container)
 	}
+
 	if location.PaneID != "" {
 		parts = append(parts, location.PaneID)
 	}
+
 	return strings.Join(parts, ":")
 }
 
@@ -376,6 +471,7 @@ func (w *watchEventWriter) write(e []watchEvent) error {
 	if len(e) == 0 {
 		return nil
 	}
+
 	for _, v := range e {
 		switch w.format {
 		case watchFormatJSON:
@@ -392,18 +488,22 @@ func (w *watchEventWriter) write(e []watchEvent) error {
 			}
 		}
 	}
+
 	return nil
 }
 
 func (w *watchEventWriter) writeTableEvent(event watchEvent) error {
 	line := formatWatchTableEvent(event)
+
 	header := formatWatchTableHeader()
 	if max(text.StringWidth(line), text.StringWidth(header)) > w.app.maxLineWidth() {
 		w.headerWritten = false
+
 		label := event.Label
 		if event.Action == watchActionSnapshotEmpty {
 			label = "no sessions"
 		}
+
 		return w.app.writeHumanDetails([]humanDetail{
 			{label: "Time", value: event.Time.UTC().Format(time.RFC3339)},
 			{label: "Event", value: event.Action},
@@ -413,29 +513,64 @@ func (w *watchEventWriter) writeTableEvent(event watchEvent) error {
 			{label: "Session", value: label, wrap: wrapHumanSession},
 		})
 	}
+
 	if !w.headerWritten {
-		if err := w.app.writeln(header + "\n" + strings.Repeat("─", text.StringWidth(header))); err != nil {
+		if err := w.app.writeln(
+			header + "\n" + strings.Repeat("─", text.StringWidth(header)),
+		); err != nil {
 			return err
 		}
+
 		w.headerWritten = true
 	}
+
 	return w.app.writeln(line)
 }
 
 func formatWatchTableHeader() string {
-	return fmt.Sprintf("%-20s  %-18s  %-10s  %-8s  %-11s  %s", "Time", "Event", "Agent", "Presence", "Activity", "Session")
+	return fmt.Sprintf(
+		"%-20s  %-18s  %-10s  %-8s  %-11s  %s",
+		"Time",
+		"Event",
+		"Agent",
+		"Presence",
+		"Activity",
+		"Session",
+	)
 }
 
 func formatWatchPlainEvent(e watchEvent) string {
 	if e.Action == watchActionSnapshotEmpty {
 		return e.Time.UTC().Format(time.RFC3339) + " snapshot_empty no sessions"
 	}
-	return sanitizeHumanText(strings.Join([]string{e.Time.UTC().Format(time.RFC3339), e.Action, string(e.Harness), string(e.Presence), formatActivity(e.Activity), "session=" + e.Label}, " "))
+
+	return sanitizeHumanText(
+		strings.Join(
+			[]string{
+				e.Time.UTC().Format(time.RFC3339),
+				e.Action,
+				string(e.Harness),
+				string(e.Presence),
+				formatActivity(e.Activity),
+				"session=" + e.Label,
+			},
+			" ",
+		),
+	)
 }
 
 func formatWatchTableEvent(e watchEvent) string {
 	if e.Action == watchActionSnapshotEmpty {
 		return e.Time.UTC().Format(time.RFC3339) + "  snapshot_empty      no sessions"
 	}
-	return fmt.Sprintf("%s  %-18s  %-10s  %-8s  %-11s  %s", e.Time.UTC().Format(time.RFC3339), e.Action, e.Harness, e.Presence, formatActivity(e.Activity), sanitizeHumanText(e.Label))
+
+	return fmt.Sprintf(
+		"%s  %-18s  %-10s  %-8s  %-11s  %s",
+		e.Time.UTC().Format(time.RFC3339),
+		e.Action,
+		e.Harness,
+		e.Presence,
+		formatActivity(e.Activity),
+		sanitizeHumanText(e.Label),
+	)
 }
