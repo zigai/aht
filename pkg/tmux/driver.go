@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -17,11 +18,14 @@ var (
 // Driver implements [mux.Driver] and [mux.Interrupter] for tmux.
 type Driver struct {
 	LookPath func(string) (string, error)
+	// ServerProcesses, when non-nil, replaces the process scan that finds tmux
+	// servers outside the standard socket directories.
+	ServerProcesses ServerProcessLister
 }
 
 // NewDriver returns a tmux driver.
 func NewDriver() Driver {
-	return Driver{LookPath: nil}
+	return Driver{LookPath: nil, ServerProcesses: nil}
 }
 
 // Kind returns [registry.MultiplexerTmux].
@@ -54,7 +58,11 @@ func (d Driver) ListPanes(ctx context.Context) ([]mux.Pane, error) {
 		//nolint:nilerr // an optional unavailable multiplexer contributes no panes
 		return nil, nil
 	}
-	panes, err := ListPanes(ctx)
+	panes, err := ListPanesWithOptions(ctx, ListOptions{
+		Env:             Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
+		ServerProcesses: d.ServerProcesses,
+		SocketPaths:     nil,
+	})
 	if err != nil {
 		return nil, err
 	}

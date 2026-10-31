@@ -19,6 +19,15 @@ var (
 	errEffectiveUserID = errors.New("effective user id outside uint32 range")
 )
 
+// ServerProcessFrom reports whether a current-user process, given its kernel
+// command name and arguments, is a tmux server that discovery should query.
+func ServerProcessFrom(pid int, name string, args []string) (ServerProcess, bool) {
+	if pid <= 0 || len(args) == 0 || (!isTmuxServerComm(name) && !isTmuxServerArgs(args)) {
+		return ServerProcess{PID: 0, Args: nil}, false
+	}
+	return ServerProcess{PID: pid, Args: args}, true
+}
+
 func listCurrentUserTmuxServers(ctx context.Context) ([]ServerProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("tmux process context: %w", err)
@@ -72,14 +81,15 @@ func readLinuxServerProcess(pid int, uid uint32) (*ServerProcess, error) {
 		return nil, errNotTmuxServer
 	}
 	args := strings.Split(trimmed, "\x00")
-	commData, commErr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-	if commErr == nil && isTmuxServerComm(strings.TrimSpace(string(commData))) {
-		return &ServerProcess{PID: pid, Args: args}, nil
+	name := ""
+	if commData, commErr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); commErr == nil {
+		name = strings.TrimSpace(string(commData))
 	}
-	if !isTmuxServerArgs(args) {
+	process, ok := ServerProcessFrom(pid, name, args)
+	if !ok {
 		return nil, errNotTmuxServer
 	}
-	return &ServerProcess{PID: pid, Args: args}, nil
+	return &process, nil
 }
 
 func isTmuxServerArgs(args []string) bool {

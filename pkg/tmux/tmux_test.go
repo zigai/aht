@@ -3,7 +3,10 @@ package tmux
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -182,6 +185,36 @@ func TestDiscoverServersCombinesSocketAndProcessCandidates(t *testing.T) {
 		identities = append(identities, server.Identity)
 	}
 	want := []string{"/tmp/current.sock", "/tmp/named.sock", "/tmp/custom.sock"}
+	if !slices.Equal(identities, want) {
+		t.Fatalf("discovered servers = %q, want %q", identities, want)
+	}
+}
+
+func TestDiscoverServersQueriesServerFoundByPathAndNameOnce(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", directory)
+	// A bare tmux client follows $TMUX, so the default server is only the
+	// socket-directory default outside tmux.
+	t.Setenv("TMUX", "")
+	socketDirectory := filepath.Join(directory, "tmux-"+strconv.Itoa(os.Getuid()))
+	servers, err := discoverServers(t.Context(), ListOptions{
+		Env:         Env{TMUX: "", TMUXPane: ""},
+		SocketPaths: []string{filepath.Join(socketDirectory, "default"), filepath.Join(socketDirectory, "named")},
+		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
+			return []ServerProcess{
+				{PID: 10, Args: []string{"tmux"}},
+				{PID: 11, Args: []string{"tmux", "-L", "named"}},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := make([]string, 0, len(servers))
+	for _, server := range servers {
+		identities = append(identities, server.Identity)
+	}
+	want := []string{filepath.Join(socketDirectory, "default"), filepath.Join(socketDirectory, "named")}
 	if !slices.Equal(identities, want) {
 		t.Fatalf("discovered servers = %q, want %q", identities, want)
 	}

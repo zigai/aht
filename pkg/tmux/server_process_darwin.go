@@ -13,6 +13,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ServerProcessFrom reports whether a current-user process, given its kernel
+// command name and arguments, is a tmux server that discovery should query.
+func ServerProcessFrom(pid int, name string, args []string) (ServerProcess, bool) {
+	if pid <= 0 || !isDarwinTmuxCommand(name) {
+		return ServerProcess{PID: 0, Args: nil}, false
+	}
+	return ServerProcess{PID: pid, Args: args}, true
+}
+
 func listCurrentUserTmuxServers(ctx context.Context) ([]ServerProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list tmux servers: %w", err)
@@ -41,7 +50,7 @@ func darwinTmuxServer(ctx context.Context, process unix.KinfoProc) (ServerProces
 	}
 	pid := int(process.Proc.P_pid)
 	command := darwinProcessCommand(process.Proc.P_comm[:])
-	if pid <= 0 || !strings.HasPrefix(filepath.Base(command), "tmux") {
+	if pid <= 0 || !isDarwinTmuxCommand(command) {
 		return zero, false, nil
 	}
 	data, err := unix.SysctlRaw("kern.procargs2", pid)
@@ -56,6 +65,10 @@ func darwinTmuxServer(ctx context.Context, process unix.KinfoProc) (ServerProces
 		return zero, false, fmt.Errorf("parsing tmux process %d arguments: %w", pid, err)
 	}
 	return ServerProcess{PID: pid, Args: args}, true, nil
+}
+
+func isDarwinTmuxCommand(name string) bool {
+	return strings.HasPrefix(filepath.Base(name), "tmux")
 }
 
 func darwinProcessCommand(data []byte) string {

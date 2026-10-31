@@ -7,6 +7,7 @@ import "fmt"
 // callers.
 type Process struct {
 	PID                int
+	Name               string
 	PPID               int
 	ProcessGroupID     int
 	Foreground         bool

@@ -32,10 +32,17 @@ var (
 	}
 )
 
-func listMultiplexerPanes(ctx context.Context) ([]mux.Pane, error) {
+func listMultiplexerPanes(ctx context.Context, processes []processinfo.Process) ([]mux.Pane, error) {
 	panes := make([]mux.Pane, 0)
 	var listErrors []error
 	for _, driver := range defaultMultiplexerDrivers {
+		// Reuse the cycle's process scan instead of rescanning /proc for tmux servers.
+		if tmuxDriver, ok := driver.(tmux.Driver); ok {
+			tmuxDriver.ServerProcesses = func(context.Context) ([]tmux.ServerProcess, error) {
+				return tmuxServerProcesses(processes), nil
+			}
+			driver = tmuxDriver
+		}
 		listed, listErr := driver.ListPanes(ctx)
 		if listErr != nil {
 			listErrors = append(listErrors, listErr)
@@ -44,6 +51,16 @@ func listMultiplexerPanes(ctx context.Context) ([]mux.Pane, error) {
 		panes = append(panes, listed...)
 	}
 	return panes, errors.Join(listErrors...)
+}
+
+func tmuxServerProcesses(processes []processinfo.Process) []tmux.ServerProcess {
+	servers := make([]tmux.ServerProcess, 0)
+	for _, process := range processes {
+		if server, ok := tmux.ServerProcessFrom(process.PID, process.Name, process.Args); ok {
+			servers = append(servers, server)
+		}
+	}
+	return servers
 }
 
 func locationPresence(ctx context.Context, location registry.Location) (registry.Presence, error) {

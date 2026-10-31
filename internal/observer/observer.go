@@ -146,7 +146,7 @@ type Observer struct {
 	grace                   time.Duration
 	healthPath              string
 	processList             ProcessLister
-	paneList                mux.PaneLister
+	paneList                func(context.Context, []processinfo.Process) ([]mux.Pane, error)
 	locationPresence        func(context.Context, registry.Location) (registry.Presence, error)
 	catalogList             CatalogLister
 	screenCapture           mux.ScreenCapturer
@@ -188,9 +188,9 @@ func New(opts Options) *Observer {
 	if processList == nil {
 		processList = processinfo.List
 	}
-	paneList := opts.PaneList
-	if paneList == nil {
-		paneList = listMultiplexerPanes
+	paneList := listMultiplexerPanes
+	if opts.PaneList != nil {
+		paneList = func(ctx context.Context, _ []processinfo.Process) ([]mux.Pane, error) { return opts.PaneList(ctx) }
 	}
 	checkLocation := opts.LocationPresence
 	if checkLocation == nil {
@@ -309,7 +309,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		return o.failCycle(at, "process-enumeration", err, "listing processes", result)
 	}
 	result.Processes = len(processes)
-	panes, paneErr := o.paneList(ctx)
+	panes, paneErr := o.paneList(ctx, processes)
 	if paneErr != nil {
 		result.Degraded = true
 		result.Error = paneErr.Error()
@@ -994,6 +994,7 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 		}
 		process := processinfo.Process{
 			PID:             observation.Process.PID,
+			Name:            "",
 			PPID:            observation.Process.PPID,
 			ProcessGroupID:  observation.Process.ProcessGroupID,
 			Foreground:      observation.Process.Foreground,

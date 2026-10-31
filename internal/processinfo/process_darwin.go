@@ -170,6 +170,7 @@ func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) 
 		pids = append(pids, strconv.Itoa(pid))
 		processes = append(processes, Process{
 			PID:                pid,
+			Name:               darwinCString(process.Proc.P_comm[:]),
 			PPID:               int(process.Eproc.Ppid),
 			ProcessGroupID:     int(process.Eproc.Pgid),
 			Foreground:         false,

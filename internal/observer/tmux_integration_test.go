@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -216,4 +217,27 @@ func activityValue(value *registry.Activity) registry.Activity {
 		return ""
 	}
 	return *value
+}
+
+func TestMultiplexerPanesFindCustomSocketServerInScannedProcesses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real tmux integration test")
+	}
+	server := testtmux.New(t, gotmux.NewSessionOptions{Name: "custom", Program: gotmux.Exec("sleep", "30")})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	found := func(processes []processinfo.Process) bool {
+		panes, _ := listMultiplexerPanes(ctx, processes)
+		return slices.ContainsFunc(panes, func(pane mux.Pane) bool { return pane.Location.ServerID == server.Socket })
+	}
+	if found(nil) {
+		t.Fatal("custom -S server found without its process, so the scan below proves nothing")
+	}
+	processes, err := processinfo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found(processes) {
+		t.Fatal("custom -S server not found from the cycle's process scan")
+	}
 }

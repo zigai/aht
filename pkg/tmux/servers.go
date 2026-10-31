@@ -39,6 +39,9 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 	servers := make([]serverSpec, 0, len(processes)+len(sockets)+1)
 	seen := make(map[string]struct{}, len(processes)+len(sockets)+1)
 	add := func(server serverSpec) {
+		// Sockets are found as paths but processes as -L names; compare both as
+		// paths so one server is queried once.
+		server.Identity = canonicalServerIdentity(server.Identity)
 		if _, exists := seen[server.Identity]; exists {
 			return
 		}
@@ -63,6 +66,18 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 		add(server)
 	}
 	return servers, nil
+}
+
+func canonicalServerIdentity(identity string) string {
+	cfg, err := gotmuxConfigForIdentity(identity)
+	if err != nil {
+		return identity
+	}
+	server, err := gotmux.New(cfg)
+	if err != nil {
+		return identity
+	}
+	return server.Endpoint().String()
 }
 
 func serverSpecFromArgs(args []string) (serverSpec, bool) {

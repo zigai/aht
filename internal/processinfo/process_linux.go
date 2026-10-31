@@ -314,7 +314,7 @@ func parseLinuxStat(stat string) (Process, error) {
 		return Process{}, errInvalidProcessStartTime
 	}
 	return Process{
-		PID: pid, PPID: ppid, ProcessGroupID: pgrp, Foreground: ttpgid > 0 && pgrp == ttpgid,
+		PID: pid, Name: stat[openParen+1 : closeParen], PPID: ppid, ProcessGroupID: pgrp, Foreground: ttpgid > 0 && pgrp == ttpgid,
 		StartIdentity: fields[startIndex], Executable: "", CWD: "", TTY: "", AgentHint: "",
 		MultiplexerKind: "", MultiplexerServer: "", MultiplexerSession: "", MultiplexerPane: "", Args: nil,
 	}, nil
