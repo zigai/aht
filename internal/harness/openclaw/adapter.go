@@ -31,7 +31,7 @@ func New() openclawHarness {
 		CatalogCreates:   false,
 		ID:               registry.Harness("openclaw"),
 		Aliases:          nil,
-		ProcessNames:     []string{"openclaw"},
+		ProcessNames:     []string{"openclaw", "openclaw-gateway"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
 			SessionPath: nil,
