@@ -1,0 +1,3 @@
+- Runs TestCommandCancellationKillsProcessGroup 20 times under the race detector; all pass.
+- Replaces the group kill with a parent-only kill: the test fails with 'background child survived cancellation'; with the real group kill it passes.
+- Runs just check; it passes.
