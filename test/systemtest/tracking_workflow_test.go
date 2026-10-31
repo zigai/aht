@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -78,6 +79,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 
 	maliciousSessionID := "tracked-session\x1b]0;owned\x07\u202ereordered"
 	maliciousCWD := workingDir + "/\x1b[31mcolored\x1b[0m"
+	agent := startSystemTestAgent(t, root, maliciousCWD, environment)
 	reportInput := strings.NewReader(
 		`{"session_id":"tracked-session","cwd":"` +
 			workingDir +
@@ -99,7 +101,7 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 		"--cwd", maliciousCWD,
 		"--raw-stdin-defaults-only",
 		"--no-tmux",
-		"--pid", "2147483647",
+		"--pid", strconv.Itoa(agent.command.Process.Pid),
 	)
 	transcript.Write(reportOutput)
 
@@ -218,6 +220,31 @@ func TestBuiltBinaryTrackingWorkflow(t *testing.T) {
 	stopSystemTestCommand(t, restartedTracker)
 
 	assertSensitiveSentinelAbsent(t, root, sensitiveSentinel, transcript.Bytes())
+}
+
+func startSystemTestAgent(
+	t *testing.T,
+	root string,
+	workingDir string,
+	environment []string,
+) *runningTestCommand {
+	t.Helper()
+
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatalf("find sleep: %v", err)
+	}
+
+	if err := os.Mkdir(workingDir, 0o700); err != nil {
+		t.Fatalf("create agent directory: %v", err)
+	}
+
+	agentPath := filepath.Join(root, "codex")
+	if err := os.Symlink(sleep, agentPath); err != nil {
+		t.Fatalf("link agent process: %v", err)
+	}
+
+	return startSystemTestCommand(t, agentPath, workingDir, environment, "300")
 }
 
 func shortSystemTestRoot(t *testing.T, directories ...string) string {
