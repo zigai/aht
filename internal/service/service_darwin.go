@@ -38,6 +38,7 @@ func RenderLaunchAgent(opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	args := []string{
 		normalized.Binary,
 		"--store",
@@ -51,6 +52,7 @@ func RenderLaunchAgent(opts Options) (string, error) {
 		normalized.GracePeriod.String(),
 		"--quiet",
 	}
+
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	b.WriteString(
@@ -61,18 +63,23 @@ func RenderLaunchAgent(opts Options) (string, error) {
 	)
 	b.WriteString("<plist version=\"1.0\"><dict>\n")
 	b.WriteString("<key>Label</key>")
+
 	if err := writePlistString(&b, darwinLabel); err != nil {
 		return "", fmt.Errorf("render launch agent label: %w", err)
 	}
+
 	b.WriteString("<key>ProgramArguments</key><array>\n")
+
 	for _, arg := range args {
 		if err := writePlistString(&b, arg); err != nil {
 			return "", fmt.Errorf("render launch agent argument: %w", err)
 		}
 	}
+
 	b.WriteString("</array>\n<key>RunAtLoad</key><true/>\n")
 	b.WriteString("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n")
 	b.WriteString("</dict></plist>\n")
+
 	return b.String(), nil
 }
 
@@ -81,10 +88,12 @@ func platformBackend(opts Options) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	path, err := launchAgentPath()
 	if err != nil {
 		return nil, err
 	}
+
 	return &darwinBackend{
 		path:     path,
 		rendered: rendered,
@@ -97,6 +106,7 @@ func launchAgentPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
+
 	return filepath.Join(home, "Library", "LaunchAgents", darwinPlistName), nil
 }
 
@@ -121,6 +131,7 @@ func (b *darwinBackend) load(ctx context.Context, executor CommandExecutor) erro
 	if output, err := executor.Run(ctx, "launchctl", "bootstrap", b.domain, b.path); err != nil {
 		return wrapManagerError("launchctl bootstrap observer", output, err)
 	}
+
 	return nil
 }
 
@@ -128,6 +139,7 @@ func (b *darwinBackend) restart(ctx context.Context, executor CommandExecutor) e
 	if err := b.unload(ctx, executor); err != nil {
 		return err
 	}
+
 	return b.load(ctx, executor)
 }
 
@@ -136,9 +148,11 @@ func (b *darwinBackend) unload(ctx context.Context, executor CommandExecutor) er
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("unload launchd service: %w", err)
 	}
+
 	if err != nil && !managerMissing(output) {
 		return wrapManagerError("launchctl bootout observer", output, err)
 	}
+
 	return nil
 }
 
@@ -153,8 +167,10 @@ func (b *darwinBackend) running(
 				return state == "running", state, nil
 			}
 		}
+
 		return false, "", fmt.Errorf("%w: launchctl did not report a state", errInstalledArguments)
 	}
+
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false, "", fmt.Errorf("checking launchd service status: %w", err)
 	}
@@ -166,6 +182,7 @@ func (b *darwinBackend) running(
 		strings.Contains(strings.ToLower(string(output)), "could not find service") {
 		return false, "not running", nil
 	}
+
 	return false, "", wrapManagerError("checking launchd service status", output, err)
 }
 
@@ -176,10 +193,14 @@ func writePlistString(b *strings.Builder, value string) error {
 	}) {
 		return errInvalidPlistText
 	}
+
 	b.WriteString("<string>")
+
 	if err := xml.EscapeText(b, []byte(value)); err != nil {
 		return fmt.Errorf("encode plist text: %w", err)
 	}
+
 	b.WriteString("</string>\n")
+
 	return nil
 }

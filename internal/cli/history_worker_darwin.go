@@ -11,5 +11,6 @@ func setHistoryPriority() error {
 	if err := unix.Setpriority(unix.PRIO_PROCESS, 0, lowestNice); err != nil {
 		return fmt.Errorf("set history refresh priority: %w", err)
 	}
+
 	return nil
 }

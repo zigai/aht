@@ -16,6 +16,7 @@ func stampTitleSource(info os.FileInfo) (titleSourceStamp, error) {
 			errors.ErrUnsupported,
 		)
 	}
+
 	return titleSourceStamp{
 		Device: strconv.FormatInt(int64(stat.Dev), 10),
 		Inode:  stat.Ino,
