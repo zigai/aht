@@ -518,7 +518,7 @@ func observeWatchSession(t *testing.T, store *registry.Journal, id string) regis
 
 func writeWatchTestFile(t *testing.T, path string, data []byte) {
 	t.Helper()
-	//nolint:gosec // callers construct paths beneath t.TempDir
+
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

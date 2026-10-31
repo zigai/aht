@@ -84,7 +84,7 @@ func recordHelper(path string) int {
 	}
 
 	content := fmt.Sprintf("cwd=%s\nhome=%s\n", cwd, os.Getenv("HOME"))
-	if err := os.WriteFile( //nolint:gosec // G703: the path is passed by the fixture that starts this helper.
+	if err := os.WriteFile(
 		path,
 		[]byte(content),
 		0o600,
@@ -126,7 +126,7 @@ func runTracker(store string) int {
 }
 
 func listSessions() int {
-	data, err := os.ReadFile( //nolint:gosec // G703: the path is set by the fixture that starts this helper.
+	data, err := os.ReadFile(
 		os.Getenv(sessionsFileEnv),
 	)
 	if err != nil {
@@ -150,7 +150,7 @@ func listen(network string, address string) error {
 }
 
 func fakeInstall(args []string) int {
-	log, err := os.OpenFile( //nolint:gosec // G703: the path is set by the fixture that starts this helper.
+	log, err := os.OpenFile(
 		os.Getenv(installLogEnv),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
 		0o600,
@@ -168,7 +168,7 @@ func fakeInstall(args []string) int {
 	}
 
 	integration := filepath.Join(os.Getenv("HOME"), ".fake-integration")
-	if err := os.WriteFile( //nolint:gosec // G703: the path is under the HOME that the fixture sets.
+	if err := os.WriteFile(
 		integration,
 		[]byte("installed\n"),
 		0o600,

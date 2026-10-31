@@ -269,7 +269,6 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Same inode, same length and restored mtime still invalidates via ctime.
-	//nolint:gosec // G703: path belongs to the isolated t.TempDir fixture, not transcript input.
 	if err = os.WriteFile(
 		path,
 		[]byte(strings.ReplaceAll(string(data), "refresh", "changed")),
@@ -289,7 +288,6 @@ func TestIndexRefreshesAppendAndRewrite(t *testing.T) {
 		"Refresh",
 		"Removed",
 	) + `{"type":"session_info","name":"rewritten"}` + "\n"
-	//nolint:gosec // G703: path belongs to the isolated t.TempDir fixture, not transcript input.
 	if err = os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
 		t.Fatal(err)
 	}

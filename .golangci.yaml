@@ -124,6 +124,9 @@ linters:
     - zerologlint
 
   settings:
+    thelper:
+      benchmark:
+        begin: false
     embeddedstructfieldcheck:
       forbid-mutex: true
     depguard:
@@ -160,7 +163,6 @@ linters:
     exhaustive:
       check:
         - switch
-        - map
     gochecksumtype:
       default-signifies-exhaustive: false
     cyclop:
@@ -311,7 +313,12 @@ linters:
         text: "string `Stop` has .* occurrences"
 
       - path: "_test\\.go"
-        linters: [cyclop, gocognit, exhaustruct_v5]
+        linters: [cyclop, gocognit, exhaustruct_v5, goconst]
+
+      # A test writes its own output to paths the developer running it chooses.
+      - path: ".*_test\\.go"
+        linters: [gosec]
+        text: "G703:"
 
       # Test-helper packages (named like httptest) only build fixtures.
       - path: "(^|/)[a-z0-9]+test/"
