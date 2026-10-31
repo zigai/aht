@@ -34,7 +34,14 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		t.Fatal(err)
 	}
 
-	nativePath := filepath.Join(host.launched.Root, "grok-native")
+	// Keep the native command name so report and the observer recognize the
+	// process as Grok.
+	nativeDir := filepath.Join(host.launched.Root, "native")
+	if err := os.Mkdir(nativeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	nativePath := filepath.Join(nativeDir, "grok")
 	copyExecutable(t, sourcePath, nativePath)
 
 	pane := host.startGrokPane(t, command, nativePath)
