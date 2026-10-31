@@ -19,12 +19,12 @@ func TestReadPayloadInputAcceptsExactLimit(t *testing.T) {
 	}
 }
 
-func TestReadPayloadDefaultsInputDropsLargeToolContent(t *testing.T) {
+func TestReadReportPayloadInputDropsLargeToolContent(t *testing.T) {
 	t.Parallel()
 
 	payload := `{"session_id":"session","tool_input":{"path":"/tmp/image.png"},"tool_response":"` +
 		strings.Repeat("x", maxPayloadInputBytes) + `"}`
-	data, err := readPayloadDefaultsInput(strings.NewReader(payload))
+	data, err := readReportPayloadInput(strings.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +44,11 @@ func TestReadPayloadDefaultsInputDropsLargeToolContent(t *testing.T) {
 	}
 }
 
-func TestReadPayloadDefaultsInputRejectsOversizedMetadata(t *testing.T) {
+func TestReadReportPayloadInputRejectsOversizedMetadata(t *testing.T) {
 	t.Parallel()
 
 	payload := `{"session_id":"` + strings.Repeat("x", maxPayloadInputBytes) + `"}`
-	_, err := readPayloadDefaultsInput(strings.NewReader(payload))
+	_, err := readReportPayloadInput(strings.NewReader(payload))
 	if !errors.Is(err, errPayloadInputTooLarge) {
 		t.Fatalf("error = %v, want %v", err, errPayloadInputTooLarge)
 	}

@@ -132,7 +132,7 @@ func (app *application) newReportCommand() *cobra.Command {
 	f.StringArrayVar(&options.attributes, "attribute", nil, "extra `<key=value>` attribute")
 	f.StringArrayVar(&options.resumeCommand, "resume-command", nil, "resume command argv `<item>`, repeatable")
 	f.StringVar(&options.evidence, "evidence", options.evidence, "evidence `<kind>` (managed shims)")
-	f.BoolVar(&options.rawStdin, "raw-stdin", false, "store stdin as raw hook payload")
+	f.BoolVar(&options.rawStdin, "raw-stdin", false, "store stdin as the hook payload, without tool input and output")
 	f.BoolVar(&options.rawDefaultsOnly, "raw-stdin-defaults-only", false, "read stdin for defaults without storing raw payload")
 	f.BoolVar(&options.noTmux, "no-tmux", false, "do not collect tmux context")
 	_ = f.MarkHidden("evidence")

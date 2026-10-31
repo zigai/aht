@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -398,5 +399,33 @@ func TestPrepareReportKeepsClaudeStopRunningWhileBackgroundWorkIsInFlight(t *tes
 				t.Fatalf("activity = %v, want %s", claim, test.want)
 			}
 		})
+	}
+}
+
+func TestPrepareReportStoresClaudePostToolUseWithoutToolContent(t *testing.T) {
+	t.Parallel()
+
+	payload := `{"session_id":"claude-read","cwd":"/work","hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"/work/big.log"},"tool_response":"` +
+		strings.Repeat("x", maxPayloadInputBytes) + `"}`
+	prepared, err := prepareReport(
+		strings.NewReader(payload),
+		reportOptions{harness: "claude", activity: "running", event: "PostToolUse", rawStdin: true},
+		reportRuntimeContext{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(prepared.observation.Report().Payload, &stored); err != nil {
+		t.Fatalf("decoding stored payload: %v", err)
+	}
+	if string(stored["tool_name"]) != `"Read"` {
+		t.Fatalf("hook metadata was not stored: %s", prepared.observation.Report().Payload)
+	}
+	if _, ok := stored["tool_input"]; ok {
+		t.Fatal("tool_input was stored")
+	}
+	if _, ok := stored["tool_response"]; ok {
+		t.Fatal("tool_response was stored")
 	}
 }
