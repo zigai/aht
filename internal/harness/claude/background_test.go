@@ -20,11 +20,11 @@ func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 		"workflow":      {`{"background_tasks":[{"id":"a","type":"workflow","status":"running"}]}`, registry.ActivityRunning},
 		"cloud session": {`{"background_tasks":[{"id":"a","type":"cloud session","status":"running"}]}`, registry.ActivityRunning},
 		"MCP task":      {`{"background_tasks":[{"id":"a","type":"MCP task","status":"running"}]}`, registry.ActivityRunning},
-		"subagent beside dev server": {
-			`{"background_tasks":[{"id":"a","type":"shell","status":"running"},{"id":"b","type":"subagent","status":"running"}]}`,
+		"shell":         {`{"background_tasks":[{"id":"a","type":"shell","status":"running","command":"go test ./..."}]}`, registry.ActivityRunning},
+		"shell beside monitor": {
+			`{"background_tasks":[{"id":"a","type":"monitor","status":"running"},{"id":"b","type":"shell","status":"running"}]}`,
 			registry.ActivityRunning,
 		},
-		"shell":           {`{"background_tasks":[{"id":"a","type":"shell","status":"running"}]}`, registry.ActivityIdle},
 		"monitor":         {`{"background_tasks":[{"id":"a","type":"monitor","status":"running"}]}`, registry.ActivityIdle},
 		"teammate":        {`{"background_tasks":[{"id":"a","type":"teammate","status":"running"}]}`, registry.ActivityIdle},
 		"unknown type":    {`{"background_tasks":[{"id":"a","type":"local_future","status":"running"}]}`, registry.ActivityIdle},

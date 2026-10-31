@@ -21,10 +21,12 @@ const (
 )
 
 // heldTaskTypes lists background task types that report back to the main
-// session when they finish. Shell, monitor, and teammate tasks can outlive the
-// work that started them (dev servers, log watchers, idle teammates), so they
-// never keep a stopped turn running.
+// session when they finish. Claude Code wakes the session when a background
+// shell command exits, so the turn keeps running while it waits, even for a
+// command that never exits. Monitor and teammate tasks stream events or idle
+// without ending the work, so they never keep a stopped turn running.
 var heldTaskTypes = map[string]bool{
+	"shell":         true,
 	"subagent":      true,
 	"workflow":      true,
 	"cloud session": true,
