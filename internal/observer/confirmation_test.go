@@ -268,6 +268,15 @@ func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 	// Let both sessions be confirmed, created, and reach a stable screen state.
 	waitForScreenIdleSession(t, store, 2)
 	time.Sleep(time.Second)
+	// Every visible change is journaled at once, so an empty journal means the
+	// automatic checkpoint has caught up.
+	deadline := time.Now().Add(10 * time.Second)
+	for statIdentity(t, path+".journal.jsonl").size != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("journal was not checkpointed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	snapshot := statIdentity(t, path)
 	journal := statIdentity(t, path+".journal.jsonl")
 	health := statIdentity(t, path+".observer-health.json")

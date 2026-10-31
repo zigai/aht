@@ -343,7 +343,7 @@ func TestHeartbeatObservationsDoNotJournalOrRewriteSnapshot(t *testing.T) {
 	if _, err := store.Observe(t.Context(), Observation{Harness: HarnessCodex, At: at.Add(time.Second), Subject: ObservationIdentity{SessionID: "native-visible"}, Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process}}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, func() bool { return markFile(t, path) != snapshotBefore }, "visible change was not persisted promptly")
+	waitFor(t, defaultPersistenceMaxDelay+2*time.Second, func() bool { return markFile(t, path) != snapshotBefore }, "visible change was not persisted promptly")
 	assertPersistedRunning(t, path, "native-visible")
 }
 

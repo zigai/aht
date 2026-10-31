@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	defaultPersistenceSettle   = 25 * time.Millisecond
-	defaultPersistenceMaxDelay = 250 * time.Millisecond
+	// Visible changes are fsynced to the journal at once, so the snapshot is a
+	// checkpoint; a wide window bounds full rewrites under constant hook traffic.
+	defaultPersistenceSettle   = 500 * time.Millisecond
+	defaultPersistenceMaxDelay = 2 * time.Second
 	// defaultBackgroundPersistInterval bounds how long state that consumers
 	// cannot see, such as refreshed evidence timestamps, stays memory-only.
 	defaultBackgroundPersistInterval = time.Minute
