@@ -625,7 +625,7 @@ func stopTargetForSession(s registry.Session) (stopTarget, bool) {
 		}, true
 	}
 
-	if s.Process != nil && s.Process.PID > 0 {
+	if s.Process != nil && s.Process.PID > 0 && !sharedHarnessProcess(s.Harness) {
 		return stopTarget{
 			Method: "pid-interrupt",
 			Target: strconv.Itoa(s.Process.PID),
@@ -634,6 +634,12 @@ func stopTargetForSession(s registry.Session) (stopTarget, bool) {
 	}
 
 	return stopTarget{}, false
+}
+
+func sharedHarnessProcess(id registry.Harness) bool {
+	rules := catalog.Rules{}
+
+	return rules.Known(id) && !rules.Policy(id).ExclusiveProcess
 }
 
 func sendStopSignal(ctx context.Context, s sessionStopSignaler, t stopTarget) error {

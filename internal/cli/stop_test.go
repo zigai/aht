@@ -394,6 +394,30 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 	}
 }
 
+func TestStopTargetSkipsSharedHarnessProcess(t *testing.T) {
+	t.Parallel()
+
+	rules := catalog.Rules{}
+	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
+
+	for _, id := range catalog.Harnesses() {
+		session := registry.Session{Harness: id, Process: process}
+		target, ok := stopTargetForSession(session)
+
+		if rules.Policy(id).ExclusiveProcess {
+			if !ok || target.Method != "pid-interrupt" || target.PID != 42 {
+				t.Errorf("%s: exclusive process target = %#v, %t", id, target, ok)
+			}
+
+			continue
+		}
+
+		if ok {
+			t.Errorf("%s: shared process produced stop target %#v", id, target)
+		}
+	}
+}
+
 func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
 	t.Parallel()
 
