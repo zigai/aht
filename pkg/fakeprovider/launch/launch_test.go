@@ -417,15 +417,24 @@ func TestCommandCancellationKillsProcessGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	cmd := s.Command(ctx, "-c", "touch ready; (sleep 0.5; touch marker) & sleep 30")
+	cmd := s.Command(
+		ctx,
+		"-c",
+		"(while :; do touch marker; sleep 0.05; done) & touch ready; sleep 30",
+	)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 
 	waitForPath(t, ready)
+	waitForPath(t, marker)
 	cancel()
 
 	_ = cmd.Wait()
+
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
 
 	time.Sleep(time.Second)
 
