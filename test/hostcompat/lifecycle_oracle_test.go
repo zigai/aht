@@ -372,7 +372,7 @@ func startEvent(id registry.Harness) string {
 func turnEndEvent(id registry.Harness) string {
 	switch id {
 	case registry.Harness("pi"):
-		return "agent_end"
+		return "agent_settled"
 	case registry.Harness("omp"):
 		return "session_stop"
 	case registry.Harness("copilot"):
