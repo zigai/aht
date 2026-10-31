@@ -34,12 +34,14 @@ func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 
 	for _, session := range sessions {
 		key, label, keyStr := sessionGroupKey(session, groupBy)
+
 		summary := byKey[key]
 		if summary == nil {
 			summary = newSummaryForGroup(session, groupBy, key, label, keyStr)
 			byKey[key] = summary
 			order = append(order, key)
 		}
+
 		summary.addSession(session)
 	}
 
@@ -47,7 +49,9 @@ func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 	for _, key := range order {
 		result = append(result, *byKey[key])
 	}
+
 	sortSummaries(result, groupBy)
+
 	return result
 }
 
@@ -81,6 +85,7 @@ func multiplexerSummaryKey(session Session) (summaryGroupKey, string, string) {
 	}
 
 	var label string
+
 	switch {
 	case session.Location.SessionName != "":
 		label = session.Location.SessionName
@@ -91,7 +96,9 @@ func multiplexerSummaryKey(session Session) (summaryGroupKey, string, string) {
 	}
 
 	idOrName := cmp.Or(key.id, key.name)
+
 	var keyStr string
+
 	switch {
 	case key.server != "":
 		keyStr = string(key.kind) + ":" + key.server + ":" + idOrName
@@ -115,6 +122,7 @@ func projectSummaryKey(session Session) (summaryGroupKey, string, string) {
 			projectRoot: "",
 			harness:     "",
 		}
+
 		return key, "unknown", ""
 	}
 
@@ -147,10 +155,12 @@ func harnessSummaryKey(session Session) (summaryGroupKey, string, string) {
 		projectRoot: "",
 		harness:     session.Harness,
 	}
+
 	label := string(session.Harness)
 	if label == "" {
 		label = "unknown"
 	}
+
 	return key, label, string(session.Harness)
 }
 
@@ -221,14 +231,17 @@ func sortMultiplexerSummaries(summaries []Summary) {
 	slices.SortFunc(summaries, func(a, b Summary) int {
 		aEmpty := a.MultiplexerKind == "" && a.MultiplexerServerID == "" &&
 			a.MultiplexerSessionID == "" && a.MultiplexerSessionName == ""
+
 		bEmpty := b.MultiplexerKind == "" && b.MultiplexerServerID == "" &&
 			b.MultiplexerSessionID == "" && b.MultiplexerSessionName == ""
 		if aEmpty != bEmpty {
 			if aEmpty {
 				return 1
 			}
+
 			return -1
 		}
+
 		return cmp.Or(
 			cmp.Compare(a.MultiplexerKind, b.MultiplexerKind),
 			cmp.Compare(a.MultiplexerServerID, b.MultiplexerServerID),
@@ -242,13 +255,16 @@ func sortMultiplexerSummaries(summaries []Summary) {
 func sortProjectSummaries(summaries []Summary) {
 	slices.SortFunc(summaries, func(a, b Summary) int {
 		aEmpty := a.ProjectRoot == ""
+
 		bEmpty := b.ProjectRoot == ""
 		if aEmpty != bEmpty {
 			if aEmpty {
 				return 1
 			}
+
 			return -1
 		}
+
 		return cmp.Or(
 			cmp.Compare(strings.ToLower(a.GroupLabel), strings.ToLower(b.GroupLabel)),
 			cmp.Compare(a.GroupLabel, b.GroupLabel),
@@ -261,13 +277,16 @@ func sortProjectSummaries(summaries []Summary) {
 func sortHarnessSummaries(summaries []Summary) {
 	slices.SortFunc(summaries, func(a, b Summary) int {
 		aEmpty := a.Harness == ""
+
 		bEmpty := b.Harness == ""
 		if aEmpty != bEmpty {
 			if aEmpty {
 				return 1
 			}
+
 			return -1
 		}
+
 		return cmp.Or(
 			cmp.Compare(strings.ToLower(string(a.Harness)), strings.ToLower(string(b.Harness))),
 			cmp.Compare(string(a.Harness), string(b.Harness)),
@@ -278,6 +297,7 @@ func sortHarnessSummaries(summaries []Summary) {
 
 func (s *Summary) addSession(session Session) {
 	s.Total++
+
 	switch session.Presence() {
 	case PresenceLive:
 		s.Live++
@@ -288,9 +308,11 @@ func (s *Summary) addSession(session Session) {
 	default:
 		s.PresenceUnknown++
 	}
+
 	if session.Presence() == PresenceGone {
 		return
 	}
+
 	s.addActivity(session.Activity())
 }
 
@@ -299,6 +321,7 @@ func (s *Summary) addActivity(activity *Activity) {
 		s.ActivityUnknown++
 		return
 	}
+
 	switch *activity {
 	case ActivityRunning:
 		s.Running++

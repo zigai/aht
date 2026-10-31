@@ -16,10 +16,20 @@ import (
 // not merely a matching ID printed by --help or accepted by a flag parser.
 func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	t.Helper()
-	previous := host.waitForObservation(t, "completed native session to resume", host.validateSession)
+	previous := host.waitForObservation(
+		t,
+		"completed native session to resume",
+		host.validateSession,
+	)
 	oldCallID := host.callID
-	host.scriptShellRoundTrip(host.scriptCallID(true), lifecycleShellCommand(host.contract.ID), false)
+	host.scriptShellRoundTrip(
+		host.scriptCallID(true),
+		lifecycleShellCommand(host.contract.ID),
+		false,
+	)
+
 	var output []byte
+
 	switch host.contract.ID {
 	case registry.Harness("kimi-code"):
 		host.runKimiACP(t, host.headlessCommand(t, original.Env), &previous, false)
@@ -28,33 +38,56 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	case registry.Harness("droid"):
 		output = host.runDroidRPC(t, original.Env, &previous, false)
 	default:
-		command := exec.CommandContext(t.Context(), original.Path, resumeArguments(host.contract.ID, original.Args[1:], previous)...)
+		command := exec.CommandContext(
+			t.Context(),
+			original.Path,
+			resumeArguments(host.contract.ID, original.Args[1:], previous)...,
+		)
 		command.Env = original.Env
 		command.Dir = host.launched.Work
 		output = host.runHostCommand(t, command)
 	}
+
 	host.assertResumeRestoredHistory(t, oldCallID)
 	host.waitForSession(t, output)
-	resumed := host.waitForObservation(t, "terminal resumed native identity", func(session registry.Session) bool {
-		return session.SessionID == previous.SessionID && host.validateSession(session)
-	})
-	if resumed.ID != previous.ID || resumed.Observations.Native.SessionID != previous.Observations.Native.SessionID {
+
+	resumed := host.waitForObservation(
+		t,
+		"terminal resumed native identity",
+		func(session registry.Session) bool {
+			return session.SessionID == previous.SessionID && host.validateSession(session)
+		},
+	)
+	if resumed.ID != previous.ID ||
+		resumed.Observations.Native.SessionID != previous.Observations.Native.SessionID {
 		t.Fatal("resume changed the AHT or native session identity")
 	}
-	if resumed.Observations.Native.ObservedAt.Before(previous.Observations.Native.ObservedAt) || resumed.Observations.Native.ObservedAt.Equal(previous.Observations.Native.ObservedAt) {
+
+	if resumed.Observations.Native.ObservedAt.Before(previous.Observations.Native.ObservedAt) ||
+		resumed.Observations.Native.ObservedAt.Equal(previous.Observations.Native.ObservedAt) {
 		t.Fatal("resume oracle accepted stale terminal evidence from the original process")
 	}
 }
 
 func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID string) {
 	t.Helper()
+
 	if err := host.provider.Err(); err != nil {
-		t.Fatalf("resumed provider exchange failed: %v\n%s", err, providerRequestSummary(host.provider))
+		t.Fatalf(
+			"resumed provider exchange failed: %v\n%s",
+			err,
+			providerRequestSummary(host.provider),
+		)
 	}
+
 	requests := host.provider.Requests()
 	if len(requests) != 2 {
-		t.Fatalf("resume made %d provider requests, want a restored turn and tool continuation", len(requests))
+		t.Fatalf(
+			"resume made %d provider requests, want a restored turn and tool continuation",
+			len(requests),
+		)
 	}
+
 	if host.contract.ID == registry.Harness("droid") {
 		if !jsonContainsString(requests[0].Body, compatibilityFinalText) {
 			t.Fatal("resumed model request did not restore the prior native conversation")
@@ -69,6 +102,7 @@ func jsonContainsString(body json.RawMessage, expected string) bool {
 	if json.Unmarshal(body, &value) != nil {
 		return false
 	}
+
 	return containsString(value, expected)
 }
 
@@ -89,14 +123,24 @@ func containsString(value any, expected string) bool {
 			}
 		}
 	}
+
 	return false
 }
 
 func resumeArguments(id registry.Harness, original []string, session registry.Session) []string {
 	args := append([]string(nil), original...)
+
 	switch id {
 	case registry.Harness("codex"):
-		return []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "resume", session.SessionID, compatibilityPrompt}
+		return []string{
+			"exec",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--dangerously-bypass-hook-trust",
+			"--skip-git-repo-check",
+			"resume",
+			session.SessionID,
+			compatibilityPrompt,
+		}
 	case registry.Harness("copilot"):
 		return append(args, "--resume="+session.SessionID)
 	case registry.Harness("pi"):
@@ -108,7 +152,20 @@ func resumeArguments(id registry.Harness, original []string, session registry.Se
 	case registry.Harness("hermes"):
 		// Oneshot (-z) persists history but ignores --resume. The native chat
 		// query path loads that same session's full conversation from SQLite.
-		return []string{"chat", "-q", compatibilityPrompt, "-Q", "--provider", "custom", "--model", fakeModel, "--yolo", "--accept-hooks", "--resume", session.SessionID}
+		return []string{
+			"chat",
+			"-q",
+			compatibilityPrompt,
+			"-Q",
+			"--provider",
+			"custom",
+			"--model",
+			fakeModel,
+			"--yolo",
+			"--accept-hooks",
+			"--resume",
+			session.SessionID,
+		}
 	case registry.Harness("opencode"), registry.Harness("kilo"):
 		return append(args, "--session", session.SessionID)
 	case registry.Harness("openclaw"):
@@ -123,5 +180,6 @@ func resumeReference(session registry.Session) string {
 	if session.SessionPath != "" {
 		return session.SessionPath
 	}
+
 	return session.SessionID
 }

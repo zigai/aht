@@ -25,28 +25,35 @@ func SessionTitles(ctx context.Context, sessions []Session) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return titles, fmt.Errorf("read session titles: %w", err)
 	}
+
 	byHarness := make(map[registry.Harness][]int)
+
 	for i, session := range sessions {
 		if session.SessionID != "" {
 			byHarness[session.Harness] = append(byHarness[session.Harness], i)
 		}
 	}
+
 	var failures []error
+
 	for id, indices := range byHarness {
 		adapter, ok := catalog.Find(id)
 		if !ok {
 			continue
 		}
+
 		reader, ok := adapter.(harness.TitleReader)
 		if !ok {
 			continue
 		}
+
 		batch := make([]registry.ObservationIdentity, len(indices))
 		for i, index := range indices {
 			var attributes map[string]string
 			if native := sessions[index].Observations.Native; native != nil {
 				attributes = native.Attributes
 			}
+
 			batch[i] = registry.ObservationIdentity{
 				SessionID:   sessions[index].SessionID,
 				SessionPath: sessions[index].SessionPath,
@@ -54,13 +61,16 @@ func SessionTitles(ctx context.Context, sessions []Session) ([]string, error) {
 				Attributes:  attributes,
 			}
 		}
+
 		found, err := reader.SessionTitles(ctx, batch)
 		for i, index := range indices {
 			titles[index] = found[i]
 		}
+
 		if err != nil {
 			failures = append(failures, fmt.Errorf("lookup %s session titles: %w", id, err))
 		}
 	}
+
 	return titles, errors.Join(failures...)
 }

@@ -378,7 +378,11 @@ func DefaultStorePath() string {
 }
 
 // NewSubscription creates a subscription wrapping custom channels.
-func NewSubscription(snapshots <-chan StateSnapshot, errCh <-chan error, cancel context.CancelFunc) *Subscription {
+func NewSubscription(
+	snapshots <-chan StateSnapshot,
+	errCh <-chan error,
+	cancel context.CancelFunc,
+) *Subscription {
 	return broker.NewSubscription(snapshots, errCh, cancel)
 }
 
@@ -389,12 +393,19 @@ func IsUnavailable(err error) bool {
 
 // Resolve finds a single session matching selector using the provided session lister.
 func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Session, error) {
-	return client.Resolve(ctx, lister, selector) //nolint:wrapcheck // facade forwards client error unchanged
+	return client.Resolve( //nolint:wrapcheck // facade forwards client error unchanged
+		ctx,
+		lister,
+		selector,
+	)
 }
 
 // ResolveSessions resolves a selector against an existing session snapshot.
 func ResolveSessions(sessions []Session, selector Selector) (Session, error) {
-	return client.ResolveSessions(sessions, selector) //nolint:wrapcheck // facade forwards client error unchanged
+	return client.ResolveSessions( //nolint:wrapcheck // facade forwards client error unchanged
+		sessions,
+		selector,
+	)
 }
 
 // Current returns the session for the calling agent context using the provided client.
@@ -403,13 +414,25 @@ func Current(ctx context.Context, c *Client) (Session, error) {
 }
 
 // ExplainSession returns an Explanation for the given session.
-func ExplainSession(ctx context.Context, session Session, opts ExplainOptions) (Explanation, error) {
-	return manage.ExplainSession(ctx, session, opts) //nolint:wrapcheck // facade forwards manage error unchanged
+func ExplainSession(
+	ctx context.Context,
+	session Session,
+	opts ExplainOptions,
+) (Explanation, error) {
+	return manage.ExplainSession( //nolint:wrapcheck // facade forwards manage error unchanged
+		ctx,
+		session,
+		opts,
+	)
 }
 
 // ReadTrackerHealth reads and evaluates the tracker health sidecar at path.
 func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (TrackerHealth, error) {
-	return manage.ReadTrackerHealth(path, now, maxAge) //nolint:wrapcheck // facade forwards manage error unchanged
+	return manage.ReadTrackerHealth( //nolint:wrapcheck // facade forwards manage error unchanged
+		path,
+		now,
+		maxAge,
+	)
 }
 
 // Capabilities returns the static capabilities of harnessID.

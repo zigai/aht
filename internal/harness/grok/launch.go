@@ -8,10 +8,21 @@ import (
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
-func (grokHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (grokHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	home := filepath.Join(paths.Root, "grok")
-	config := fmt.Sprintf("[model.%s]\nmodel = %q\nbase_url = %q\nname = \"AHT compatibility\"\nenv_key = \"AHT_FAKEPROVIDER_API_KEY\"\napi_backend = \"responses\"\n\n[models]\ndefault = %q\n\n[ui]\nprompt_suggestions = false\n",
-		harness.LaunchProviderName, model.Model, model.Endpoint+"/v1", harness.LaunchProviderName)
+	config := fmt.Sprintf(
+		"[model.%s]\nmodel = %q\nbase_url = %q\nname = \"AHT "+
+			"compatibility\"\nenv_key = \"AHT_FAKEPROVIDER_API_KEY\"\napi_back"+
+			"end = \"responses\"\n\n[models]\ndefault = "+
+			"%q\n\n[ui]\nprompt_suggestions = false\n",
+		harness.LaunchProviderName,
+		model.Model,
+		model.Endpoint+"/v1",
+		harness.LaunchProviderName,
+	)
 	trusted := fmt.Sprintf("[folders.%q]\ntrusted = true\n", paths.Work)
 
 	return harness.LaunchPlan{
@@ -35,13 +46,24 @@ func (grokHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMod
 			},
 		},
 		Headless: func(prompt string) ([]string, error) {
-			return []string{"-p", prompt, "--model", harness.LaunchProviderName, "--always-approve", "--disable-web-search", "--no-memory", "--max-turns", "2"}, nil
+			return []string{
+				"-p",
+				prompt,
+				"--model",
+				harness.LaunchProviderName,
+				"--always-approve",
+				"--disable-web-search",
+				"--no-memory",
+				"--max-turns",
+				"2",
+			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			args := []string{"--model", harness.LaunchProviderName}
 			if prompt != "" {
 				args = append(args, prompt)
 			}
+
 			return args, nil
 		},
 		ShellTool: harness.LaunchTool{

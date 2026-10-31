@@ -17,11 +17,16 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func makeTestSession(id string, presence registry.Presence, activity registry.Activity) registry.Session {
+func makeTestSession(
+	id string,
+	presence registry.Presence,
+	activity registry.Activity,
+) registry.Session {
 	var act *registry.Activity
 	if activity != "" {
 		act = &activity
 	}
+
 	return registry.Session{
 		SchemaVersion: 1,
 		ID:            id,
@@ -64,18 +69,31 @@ func TestWaitValidation(t *testing.T) {
 			wantErr: client.ErrSessionRequired,
 		},
 		{
-			name:    "negative timeout",
-			options: client.WaitOptions{ID: "sess-1", Activity: client.ActivityIdle, Timeout: -time.Second},
+			name: "negative timeout",
+			options: client.WaitOptions{
+				ID:       "sess-1",
+				Activity: client.ActivityIdle,
+				Timeout:  -time.Second,
+			},
 			wantErr: client.ErrInvalidDuration,
 		},
 		{
-			name:    "negative stable-for",
-			options: client.WaitOptions{ID: "sess-1", Activity: client.ActivityIdle, StableFor: -time.Second},
+			name: "negative stable-for",
+			options: client.WaitOptions{
+				ID:        "sess-1",
+				Activity:  client.ActivityIdle,
+				StableFor: -time.Second,
+			},
 			wantErr: client.ErrInvalidDuration,
 		},
 		{
-			name:    "stable-for exceeds timeout",
-			options: client.WaitOptions{ID: "sess-1", Activity: client.ActivityIdle, Timeout: time.Second, StableFor: 2 * time.Second},
+			name: "stable-for exceeds timeout",
+			options: client.WaitOptions{
+				ID:        "sess-1",
+				Activity:  client.ActivityIdle,
+				Timeout:   time.Second,
+				StableFor: 2 * time.Second,
+			},
 			wantErr: client.ErrInvalidDuration,
 		},
 		{
@@ -94,13 +112,21 @@ func TestWaitValidation(t *testing.T) {
 			wantErr: registry.ErrUnknownActivity,
 		},
 		{
-			name:    "contradictory presence gone with activity",
-			options: client.WaitOptions{ID: "sess-1", Presence: client.PresenceGone, Activity: client.ActivityIdle},
+			name: "contradictory presence gone with activity",
+			options: client.WaitOptions{
+				ID:       "sess-1",
+				Presence: client.PresenceGone,
+				Activity: client.ActivityIdle,
+			},
 			wantErr: client.ErrContradictoryCondition,
 		},
 		{
-			name:    "contradictory presence unknown with activity",
-			options: client.WaitOptions{ID: "sess-1", Presence: client.PresenceUnknown, Activity: client.ActivityRunning},
+			name: "contradictory presence unknown with activity",
+			options: client.WaitOptions{
+				ID:       "sess-1",
+				Presence: client.PresenceUnknown,
+				Activity: client.ActivityRunning,
+			},
 			wantErr: client.ErrContradictoryCondition,
 		},
 	}
@@ -108,6 +134,7 @@ func TestWaitValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			_, err := c.Wait(context.Background(), tt.options)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Wait() err = %v, want %v", err, tt.wantErr)
@@ -133,12 +160,15 @@ func TestWaitInitiallySatisfied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
+
 	if !res.Initial {
 		t.Errorf("res.Initial = %v, want true", res.Initial)
 	}
+
 	if res.Session.ID != "sess-init" {
 		t.Errorf("res.Session.ID = %q, want sess-init", res.Session.ID)
 	}
+
 	if !tw.Closed() {
 		t.Error("expected watcher to be closed after wait")
 	}
@@ -155,9 +185,11 @@ func TestWaitInitiallySatisfiedWithStableFor(t *testing.T) {
 		c := client.New(client.Config{})
 		c.SetWatcherForTest(tw)
 
-		var res client.WaitResult
-		var waitErr error
-		var wg sync.WaitGroup
+		var (
+			res     client.WaitResult
+			waitErr error
+			wg      sync.WaitGroup
+		)
 		wg.Go(func() {
 			res, waitErr = c.Wait(context.Background(), client.WaitOptions{
 				ID:        "sess-stable",
@@ -172,12 +204,15 @@ func TestWaitInitiallySatisfiedWithStableFor(t *testing.T) {
 		if waitErr != nil {
 			t.Fatalf("Wait() error = %v", waitErr)
 		}
+
 		if res.Initial {
 			t.Errorf("res.Initial = %v, want false with StableFor", res.Initial)
 		}
+
 		if res.Session.ID != "sess-stable" {
 			t.Errorf("res.Session.ID = %q, want sess-stable", res.Session.ID)
 		}
+
 		if !tw.Closed() {
 			t.Error("expected watcher to be closed")
 		}
@@ -195,9 +230,11 @@ func TestWaitEventualTransition(t *testing.T) {
 		c := client.New(client.Config{})
 		c.SetWatcherForTest(tw)
 
-		var res client.WaitResult
-		var waitErr error
-		var wg sync.WaitGroup
+		var (
+			res     client.WaitResult
+			waitErr error
+			wg      sync.WaitGroup
+		)
 		wg.Go(func() {
 			res, waitErr = c.Wait(context.Background(), client.WaitOptions{
 				ID:       "sess-trans",
@@ -217,9 +254,11 @@ func TestWaitEventualTransition(t *testing.T) {
 		if waitErr != nil {
 			t.Fatalf("Wait() error = %v", waitErr)
 		}
+
 		if res.Initial {
 			t.Errorf("res.Initial = %v, want false for transition", res.Initial)
 		}
+
 		if res.Session.Activity() == nil || *res.Session.Activity() != registry.ActivityIdle {
 			t.Errorf("res.Session.Activity = %v, want idle", res.Session.Activity())
 		}
@@ -243,7 +282,9 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 			res client.WaitResult
 			err error
 		}
+
 		done := make(chan waitOutcome, 1)
+
 		go func() {
 			res, err := c.Wait(context.Background(), client.WaitOptions{
 				ID:        "sess-flicker",
@@ -269,6 +310,7 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 		// Sleep past the original 300ms deadline; wait must NOT complete because it flickered!
 		time.Sleep(250 * time.Millisecond)
 		synctest.Wait()
+
 		select {
 		case out := <-done:
 			t.Fatalf("Wait completed prematurely after flicker at original deadline: %+v", out)
@@ -277,12 +319,14 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 
 		// Now transition back to idle and let it stay stable for full 300ms
 		idleStart := time.Now()
+
 		tw.SendSessions(idle)
 		synctest.Wait()
 
 		// Advance to just before the 300ms stability deadline
 		time.Sleep(250 * time.Millisecond)
 		synctest.Wait()
+
 		select {
 		case out := <-done:
 			t.Fatalf("Wait completed before full stability interval elapsed: %+v", out)
@@ -298,12 +342,16 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 			if out.err != nil {
 				t.Fatalf("Wait() error = %v", out.err)
 			}
+
 			if out.res.Session.ID != "sess-flicker" {
 				t.Errorf("res.Session.ID = %q, want sess-flicker", out.res.Session.ID)
 			}
-			if out.res.Session.Activity() == nil || *out.res.Session.Activity() != registry.ActivityIdle {
+
+			if out.res.Session.Activity() == nil ||
+				*out.res.Session.Activity() != registry.ActivityIdle {
 				t.Errorf("res.Session.Activity = %v, want idle", out.res.Session.Activity())
 			}
+
 			if elapsed := time.Since(idleStart); elapsed < 300*time.Millisecond {
 				t.Errorf("virtual elapsed time since second idle = %v, want >= 300ms", elapsed)
 			}
@@ -324,8 +372,10 @@ func TestWaitTimeout(t *testing.T) {
 		c := client.New(client.Config{})
 		c.SetWatcherForTest(tw)
 
-		var waitErr error
-		var wg sync.WaitGroup
+		var (
+			waitErr error
+			wg      sync.WaitGroup
+		)
 		wg.Go(func() {
 			_, waitErr = c.Wait(context.Background(), client.WaitOptions{
 				ID:       "sess-timeout",
@@ -340,6 +390,7 @@ func TestWaitTimeout(t *testing.T) {
 		if !errors.Is(waitErr, client.ErrWaitTimeout) {
 			t.Fatalf("Wait() error = %v, want ErrWaitTimeout", waitErr)
 		}
+
 		if !tw.Closed() {
 			t.Error("expected watcher to be closed after timeout")
 		}
@@ -358,8 +409,11 @@ func TestWaitCallerCancellation(t *testing.T) {
 		c.SetWatcherForTest(tw)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		var waitErr error
-		var wg sync.WaitGroup
+
+		var (
+			waitErr error
+			wg      sync.WaitGroup
+		)
 		wg.Go(func() {
 			_, waitErr = c.Wait(ctx, client.WaitOptions{
 				ID:       "sess-cancel",
@@ -374,16 +428,23 @@ func TestWaitCallerCancellation(t *testing.T) {
 		if !errors.Is(waitErr, context.Canceled) {
 			t.Fatalf("Wait() error = %v, want context.Canceled", waitErr)
 		}
+
 		if !tw.Closed() {
 			t.Error("expected watcher to be closed after cancellation")
 		}
 	})
 }
 
-func assertPresenceErrorOnWaitActivity(t *testing.T, sessionID string, presence registry.Presence, wantErr error) {
+func assertPresenceErrorOnWaitActivity(
+	t *testing.T,
+	sessionID string,
+	presence registry.Presence,
+	wantErr error,
+) {
 	t.Helper()
 	t.Run("initially "+string(presence), func(t *testing.T) {
 		t.Parallel()
+
 		sess := makeTestSession(sessionID+"-init", presence, "")
 		tw := client.NewTestWatcher()
 		tw.SendSessions(sess)
@@ -403,15 +464,21 @@ func assertPresenceErrorOnWaitActivity(t *testing.T, sessionID string, presence 
 	t.Run("transitions to "+string(presence), func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			running := makeTestSession(sessionID+"-trans", registry.PresenceLive, registry.ActivityRunning)
+			running := makeTestSession(
+				sessionID+"-trans",
+				registry.PresenceLive,
+				registry.ActivityRunning,
+			)
 			tw := client.NewTestWatcher()
 			tw.SendSessions(running)
 
 			c := client.New(client.Config{})
 			c.SetWatcherForTest(tw)
 
-			var waitErr error
-			var wg sync.WaitGroup
+			var (
+				waitErr error
+				wg      sync.WaitGroup
+			)
 			wg.Go(func() {
 				_, waitErr = c.Wait(context.Background(), client.WaitOptions{
 					ID:       sessionID + "-trans",
@@ -435,7 +502,12 @@ func assertPresenceErrorOnWaitActivity(t *testing.T, sessionID string, presence 
 
 func TestWaitSessionDisappeared(t *testing.T) {
 	t.Parallel()
-	assertPresenceErrorOnWaitActivity(t, "sess-gone", registry.PresenceGone, client.ErrSessionDisappeared)
+	assertPresenceErrorOnWaitActivity(
+		t,
+		"sess-gone",
+		registry.PresenceGone,
+		client.ErrSessionDisappeared,
+	)
 }
 
 func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
@@ -443,6 +515,7 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 
 	t.Run("initially gone", func(t *testing.T) {
 		t.Parallel()
+
 		gone := makeTestSession("sess-want-gone-1", registry.PresenceGone, "")
 		tw := client.NewTestWatcher()
 		tw.SendSessions(gone)
@@ -457,9 +530,11 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Wait() error = %v", err)
 		}
+
 		if !res.Initial {
 			t.Errorf("res.Initial = %v, want true", res.Initial)
 		}
+
 		if res.Session.Presence() != registry.PresenceGone {
 			t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence())
 		}
@@ -468,16 +543,22 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 	t.Run("transitions to gone", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			live := makeTestSession("sess-want-gone-2", registry.PresenceLive, registry.ActivityRunning)
+			live := makeTestSession(
+				"sess-want-gone-2",
+				registry.PresenceLive,
+				registry.ActivityRunning,
+			)
 			tw := client.NewTestWatcher()
 			tw.SendSessions(live)
 
 			c := client.New(client.Config{})
 			c.SetWatcherForTest(tw)
 
-			var res client.WaitResult
-			var waitErr error
-			var wg sync.WaitGroup
+			var (
+				res     client.WaitResult
+				waitErr error
+				wg      sync.WaitGroup
+			)
 			wg.Go(func() {
 				res, waitErr = c.Wait(context.Background(), client.WaitOptions{
 					ID:       "sess-want-gone-2",
@@ -495,9 +576,11 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 			if waitErr != nil {
 				t.Fatalf("Wait() error = %v", waitErr)
 			}
+
 			if res.Initial {
 				t.Errorf("res.Initial = %v, want false for transition", res.Initial)
 			}
+
 			if res.Session.Presence() != registry.PresenceGone {
 				t.Errorf("res.Session.Presence = %v, want gone", res.Session.Presence())
 			}
@@ -507,7 +590,12 @@ func TestWaitPresenceGoneSucceedsWhenRequested(t *testing.T) {
 
 func TestWaitUnknownState(t *testing.T) {
 	t.Parallel()
-	assertPresenceErrorOnWaitActivity(t, "sess-unk", registry.PresenceUnknown, client.ErrUnknownState)
+	assertPresenceErrorOnWaitActivity(
+		t,
+		"sess-unk",
+		registry.PresenceUnknown,
+		client.ErrUnknownState,
+	)
 }
 
 func TestWaitSessionNotFoundAndDeleted(t *testing.T) {
@@ -515,6 +603,7 @@ func TestWaitSessionNotFoundAndDeleted(t *testing.T) {
 
 	t.Run("absent in initial snapshot", func(t *testing.T) {
 		t.Parallel()
+
 		other := makeTestSession("other-sess", registry.PresenceLive, registry.ActivityRunning)
 		tw := client.NewTestWatcher()
 		tw.SendSessions(other)
@@ -534,15 +623,21 @@ func TestWaitSessionNotFoundAndDeleted(t *testing.T) {
 	t.Run("removed in subsequent snapshot", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			target := makeTestSession("target-sess", registry.PresenceLive, registry.ActivityRunning)
+			target := makeTestSession(
+				"target-sess",
+				registry.PresenceLive,
+				registry.ActivityRunning,
+			)
 			tw := client.NewTestWatcher()
 			tw.SendSessions(target)
 
 			c := client.New(client.Config{})
 			c.SetWatcherForTest(tw)
 
-			var waitErr error
-			var wg sync.WaitGroup
+			var (
+				waitErr error
+				wg      sync.WaitGroup
+			)
 			wg.Go(func() {
 				_, waitErr = c.Wait(context.Background(), client.WaitOptions{
 					ID:       "target-sess",
@@ -573,34 +668,66 @@ func TestWaitPresenceGoneSucceedsWhenSessionIsRemoved(t *testing.T) {
 		sequence  [][]registry.Session
 	}{
 		{name: "removed while live", sequence: [][]registry.Session{nil}},
-		{name: "gone then removed", sequence: [][]registry.Session{{makeTestSession("removed-sess", registry.PresenceGone, "")}, nil}},
+		{
+			name: "gone then removed",
+			sequence: [][]registry.Session{
+				{
+					makeTestSession(
+						"removed-sess",
+						registry.PresenceGone,
+						"",
+					),
+				},
+				nil,
+			},
+		},
 		{name: "removed with stable-for", stableFor: time.Second, sequence: [][]registry.Session{nil, nil}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				tw := client.NewTestWatcher()
-				tw.SendSessions(makeTestSession("removed-sess", registry.PresenceLive, registry.ActivityRunning))
+				tw.SendSessions(
+					makeTestSession(
+						"removed-sess",
+						registry.PresenceLive,
+						registry.ActivityRunning,
+					),
+				)
+
 				c := client.New(client.Config{})
 				c.SetWatcherForTest(tw)
 
-				var res client.WaitResult
-				var waitErr error
-				var wg sync.WaitGroup
+				var (
+					res     client.WaitResult
+					waitErr error
+					wg      sync.WaitGroup
+				)
 				wg.Go(func() {
-					res, waitErr = c.Wait(context.Background(), client.WaitOptions{ID: "removed-sess", Presence: client.PresenceGone, StableFor: tc.stableFor})
+					res, waitErr = c.Wait(
+						context.Background(),
+						client.WaitOptions{
+							ID:        "removed-sess",
+							Presence:  client.PresenceGone,
+							StableFor: tc.stableFor,
+						},
+					)
 				})
 				synctest.Wait()
+
 				for _, sessions := range tc.sequence {
 					tw.SendSessions(sessions...)
 					synctest.Wait()
 				}
+
 				wg.Wait()
 
 				if waitErr != nil {
 					t.Fatalf("Wait() error = %v, want removal to satisfy gone", waitErr)
 				}
-				if res.Initial || res.Session.ID != "removed-sess" || res.Session.Presence() != registry.PresenceGone {
+
+				if res.Initial || res.Session.ID != "removed-sess" ||
+					res.Session.Presence() != registry.PresenceGone {
 					t.Fatalf("Wait() result = %#v, want non-initial gone session", res)
 				}
 			})
@@ -615,6 +742,7 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)
 		_ = os.Remove(broker.SocketPath(storePath))
@@ -626,10 +754,12 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 	}
 
 	observation := runningObservation("disconnect-session")
+
 	accepted, err := store.Observe(t.Context(), observation)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := store.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -660,6 +790,7 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 	})
 
 	waitErrCh := make(chan error, 1)
+
 	go func() {
 		_, waitErr := c.Wait(t.Context(), client.WaitOptions{
 			ID:       accepted.ID,
@@ -695,7 +826,16 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 
 	presence := registry.PresenceLive
 	running := registry.ActivityRunning
-	observed, err := fileStore.Observe(t.Context(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "durable-sess"}, Evidence: &registry.Report{Claim: &presence, Activity: &running}})
+
+	observed, err := fileStore.Observe(
+		t.Context(),
+		registry.Observation{
+			Harness:  registry.Harness("pi"),
+			At:       time.Now().UTC(),
+			Subject:  registry.ObservationIdentity{SessionID: "durable-sess"},
+			Evidence: &registry.Report{Claim: &presence, Activity: &running},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,6 +847,7 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 
 	resCh := make(chan client.WaitResult, 1)
 	errCh := make(chan error, 1)
+
 	go func() {
 		res, waitErr := c.Wait(t.Context(), client.WaitOptions{
 			ID:       observed.ID,
@@ -716,6 +857,7 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 			errCh <- waitErr
 			return
 		}
+
 		resCh <- res
 	}()
 
@@ -724,7 +866,16 @@ func TestWaitDurableWatchBehavior(t *testing.T) {
 
 	// Update session to idle on durable file store
 	idle := registry.ActivityIdle
-	_, err = fileStore.Observe(t.Context(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC().Add(time.Second), Subject: registry.ObservationIdentity{SessionID: "durable-sess"}, Evidence: &registry.Report{Claim: &presence, Activity: &idle}})
+
+	_, err = fileStore.Observe(
+		t.Context(),
+		registry.Observation{
+			Harness:  registry.Harness("pi"),
+			At:       time.Now().UTC().Add(time.Second),
+			Subject:  registry.ObservationIdentity{SessionID: "durable-sess"},
+			Evidence: &registry.Report{Claim: &presence, Activity: &idle},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,6 +897,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 
 	t.Run("cleans up on success", func(t *testing.T) {
 		t.Parallel()
+
 		session := makeTestSession("sess-clean-1", registry.PresenceLive, registry.ActivityIdle)
 		tw := client.NewTestWatcher()
 		tw.SendSessions(session)
@@ -760,6 +912,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !tw.Closed() {
 			t.Error("watcher was not closed on success")
 		}
@@ -768,7 +921,11 @@ func TestWaitResourceCleanup(t *testing.T) {
 	t.Run("cleans up on timeout", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
-			session := makeTestSession("sess-clean-2", registry.PresenceLive, registry.ActivityRunning)
+			session := makeTestSession(
+				"sess-clean-2",
+				registry.PresenceLive,
+				registry.ActivityRunning,
+			)
 			tw := client.NewTestWatcher()
 			tw.SendSessions(session)
 
@@ -795,6 +952,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 
 	t.Run("cleans up on error", func(t *testing.T) {
 		t.Parallel()
+
 		session := makeTestSession("sess-clean-3", registry.PresenceGone, "")
 		tw := client.NewTestWatcher()
 		tw.SendSessions(session)
@@ -809,6 +967,7 @@ func TestWaitResourceCleanup(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
+
 		if !tw.Closed() {
 			t.Error("watcher was not closed on error")
 		}

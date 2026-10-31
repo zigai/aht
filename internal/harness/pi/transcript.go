@@ -7,7 +7,22 @@ import (
 )
 
 func (piHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"*.jsonl"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: transcript.TreeRecord, FastRecord: transcript.FastTreeRecord, Document: nil, Query: nil, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
+	return transcript.Reader{
+		Patterns:          []string{"*.jsonl"},
+		Sources:           transcriptSources,
+		SkipDirectory:     nil,
+		SkipFile:          nil,
+		SourceMetadata:    nil,
+		Initialize:        nil,
+		Extra:             nil,
+		Record:            transcript.TreeRecord,
+		FastRecord:        transcript.FastTreeRecord,
+		Document:          nil,
+		Query:             nil,
+		LocalTitles:       false,
+		RewritableHeaders: nil,
+		Parent:            nil,
+	}
 }
 
 func transcriptSources(home string) ([]string, error) {

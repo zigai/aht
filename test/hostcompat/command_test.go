@@ -20,30 +20,48 @@ const compatibilityWaitDelay = time.Second
 
 func buildCompatibilityOracle(t *testing.T) string {
 	t.Helper()
+
 	if binary := os.Getenv("AHT_COMPAT_BINARY"); binary != "" {
 		oracle, err := filepath.Abs(binary)
 		if err != nil {
 			t.Fatalf("resolve prebuilt compatibility binary: %v", err)
 		}
+
 		return oracle
 	}
+
 	oracle := filepath.Join(t.TempDir(), "aht-compat-oracle")
+
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle", "-o", oracle, ".")
+
+	command := exec.CommandContext(
+		ctx,
+		"go",
+		"build",
+		"-ldflags",
+		"-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle",
+		"-o",
+		oracle,
+		".",
+	)
+
 	command.Dir = filepath.Clean(filepath.Join(sourceDirectory(), "..", ".."))
 	if output, err := compatibilityOutput(ctx, command); err != nil {
 		t.Fatalf("building compatibility oracle: %v\n%s", err, output)
 	}
+
 	return oracle
 }
 
-func copyExecutable(t *testing.T, sourcePath, target string) {
+func copyExecutable(t *testing.T, sourcePath string, target string) {
 	t.Helper()
+
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() {
 		if err := source.Close(); err != nil {
 			t.Error(err)
@@ -55,6 +73,7 @@ func copyExecutable(t *testing.T, sourcePath, target string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, copyErr := io.Copy(destination, source)
 	if err := errors.Join(copyErr, destination.Close()); err != nil {
 		t.Fatal(err)
@@ -63,9 +82,11 @@ func copyExecutable(t *testing.T, sourcePath, target string) {
 
 func compatibilityOutput(ctx context.Context, command *exec.Cmd) ([]byte, error) {
 	var output bytes.Buffer
+
 	command.Stdout = &output
 	command.Stderr = &output
 	err := runCompatibilityCommand(ctx, command)
+
 	return output.Bytes(), err
 }
 
@@ -76,21 +97,29 @@ func runCompatibilityCommand(ctx context.Context, command *exec.Cmd) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("compatibility command canceled before start: %w", err)
 	}
+
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	command.WaitDelay = compatibilityWaitDelay
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("start compatibility command: %w", err)
 	}
+
 	canceled := make(chan struct{})
+
 	var cancelErr error
+
 	stop := context.AfterFunc(ctx, func() {
 		cancelErr = killCompatibilityGroup(command)
+
 		close(canceled)
 	})
 	waitErr := command.Wait()
+
 	if !stop() {
 		// Join the cancellation callback before reading its result or returning.
 		<-canceled
+
 		waitErr = errors.Join(waitErr, ctx.Err(), cancelErr)
 	}
 	// A successful leader may still leave children holding its output pipes.
@@ -98,8 +127,13 @@ func runCompatibilityCommand(ctx context.Context, command *exec.Cmd) error {
 }
 
 func killCompatibilityGroup(command *exec.Cmd) error {
-	if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := syscall.Kill(
+		-command.Process.Pid,
+		syscall.SIGKILL,
+	); err != nil &&
+		!errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("kill compatibility process group: %w", err)
 	}
+
 	return nil
 }

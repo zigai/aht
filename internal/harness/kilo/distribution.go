@@ -5,5 +5,16 @@ import (
 )
 
 func (kiloHarness) Distribution() harness.Distribution {
-	return harness.Distribution{Source: "npm", Package: "@kilocode/cli", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "kilo", Family: "part-plugin", PackageExtras: "", Install: nil}
+	return harness.Distribution{
+		Source:        "npm",
+		Package:       "@kilocode/cli",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "kilo",
+		Family:        "part-plugin",
+		PackageExtras: "",
+		Install:       nil,
+	}
 }

@@ -23,17 +23,27 @@ func TestManagerDoctorReportsHistoryRefreshWithoutCreatingIndex(t *testing.T) {
 			result := manager.Doctor(t.Context(), opts)
 			assertDoctorInvariants(t, result)
 			found := historyDoctorCheck(t, result)
+
 			want := manage.DoctorStatusWarn
 			if scenario == "complete" {
 				want = manage.DoctorStatusOK
 			}
+
 			if found.Status != want {
 				t.Fatalf("%s status = %s, want %s", scenario, found.Status, want)
 			}
+
 			if scenario == "complete" || scenario == "partial" {
-				requireHistoryRefreshMessage(t, catalog, strings.Join(append([]string{found.Message}, found.Details...), "; "), scenario == "partial")
+				requireHistoryRefreshMessage(
+					t,
+					catalog,
+					strings.Join(append([]string{found.Message}, found.Details...), "; "),
+					scenario == "partial",
+				)
 			}
+
 			requireHistoryDoctorJSON(t, result, found.Message)
+
 			if scenario == "missing" || scenario == "stale" {
 				if _, err := os.Stat(indexPath); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("doctor created or repaired index: %v", err)
@@ -45,51 +55,80 @@ func TestManagerDoctorReportsHistoryRefreshWithoutCreatingIndex(t *testing.T) {
 
 func requireHistoryDoctorJSON(t *testing.T, result manage.DoctorResult, wantMessage string) {
 	t.Helper()
+
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var decoded manage.DoctorResult
 	if err = json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
+
 	if historyDoctorCheck(t, decoded).Message != wantMessage {
 		t.Fatalf("JSON lost history diagnostic: %s", encoded)
 	}
 }
 
-func prepareHistoryDoctor(t *testing.T, scenario string) (*manage.Manager, manage.DoctorOptions, history.Catalog, string) {
+func prepareHistoryDoctor(
+	t *testing.T,
+	scenario string,
+) (*manage.Manager, manage.DoctorOptions, history.Catalog, string) {
 	t.Helper()
 	home := isolateDoctorEnvironment(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
-	manager := manage.New(manage.Config{Binary: "aht", StorePath: filepath.Join(home, "sessions.json")})
+	manager := manage.New(
+		manage.Config{Binary: "aht", StorePath: filepath.Join(home, "sessions.json")},
+	)
 	opts := manage.DoctorOptions{ConfigPath: filepath.Join(home, "config.toml")}
+
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	indexPath := filepath.Join(cacheDir, "aht", "history-v1.sqlite")
-	historyCatalog := history.Catalog{Sources: []history.Source{{Harness: registry.Harness("pi"), Path: filepath.Join(home, "transcripts")}}}
+
+	historyCatalog := history.Catalog{
+		Sources: []history.Source{
+			{Harness: registry.Harness("pi"), Path: filepath.Join(home, "transcripts")},
+		},
+	}
 	if scenario == "missing" {
 		return manager, opts, historyCatalog, indexPath
 	}
+
 	if err := os.MkdirAll(historyCatalog.Sources[0].Path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := "{\"type\":\"session\",\"id\":\"sample\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"sample text\"}}\n"
-	if err := os.WriteFile(filepath.Join(historyCatalog.Sources[0].Path, "session.jsonl"), []byte(body), 0o600); err != nil {
+
+	body := "{\"type\":\"session\",\"id\":\"sample\"}\n{\"type\":\"message\"," +
+		"\"message\":{\"role\":\"user\",\"content\":\"sample text\"}}\n"
+	if err := os.WriteFile(
+		filepath.Join(historyCatalog.Sources[0].Path, "session.jsonl"),
+		[]byte(body),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
+
 	var wantErr error
+
 	if scenario == "partial" {
-		historyCatalog.Sources = append(historyCatalog.Sources, history.Source{Harness: registry.Harness("pi"), Path: filepath.Join(home, "missing")})
+		historyCatalog.Sources = append(
+			historyCatalog.Sources,
+			history.Source{Harness: registry.Harness("pi"), Path: filepath.Join(home, "missing")},
+		)
 		wantErr = history.ErrIncomplete
 	}
+
 	if _, err := historyCatalog.Refresh(t.Context()); !errors.Is(err, wantErr) {
 		t.Fatalf("%s refresh = %v, want %v", scenario, err, wantErr)
 	}
+
 	switch scenario {
 	case "corrupt":
 		if err := os.WriteFile(indexPath+".refresh.json", []byte("{"), 0o600); err != nil {
@@ -100,55 +139,100 @@ func prepareHistoryDoctor(t *testing.T, scenario string) (*manage.Manager, manag
 			t.Fatal(err)
 		}
 	}
+
 	return manager, opts, historyCatalog, indexPath
 }
 
 func historyDoctorCheck(t *testing.T, result manage.DoctorResult) manage.DoctorCheck {
 	t.Helper()
+
 	for _, check := range result.Checks {
 		if check.ID == "history.refresh" {
 			return check
 		}
 	}
+
 	t.Fatal("history.refresh check was not run")
+
 	return manage.DoctorCheck{}
 }
 
-func requireHistoryRefreshMessage(t *testing.T, historyCatalog history.Catalog, message string, partial bool) {
+func requireHistoryRefreshMessage(
+	t *testing.T,
+	historyCatalog history.Catalog,
+	message string,
+	partial bool,
+) {
 	t.Helper()
+
 	status, err := historyCatalog.RefreshStatus(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, detail := range []string{status.CompletedAt.Format(time.RFC3339Nano), "checked=1", "reparsed=", "resumed=", "unchanged=", "bytes_parsed=", "parse_time=", "store_time=", "issues="} {
+
+	for _, detail := range []string{
+		status.CompletedAt.Format(
+			time.RFC3339Nano,
+		),
+		"checked=1",
+		"reparsed=",
+		"resumed=",
+		"unchanged=",
+		"bytes_parsed=",
+		"parse_time=",
+		"store_time=",
+		"issues=",
+	} {
 		if !strings.Contains(message, detail) {
 			t.Fatalf("human diagnostic missing %q: %s", detail, message)
 		}
 	}
-	if partial && (!strings.Contains(message, "partial") || !strings.Contains(message, "issues=1")) {
+
+	if partial &&
+		(!strings.Contains(message, "partial") || !strings.Contains(message, "issues=1")) {
 		t.Fatalf("partial refresh obscured: %s", message)
 	}
 }
 
 func TestDoctorReportsEveryCheckWhenConfigIsInvalid(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
-	writeDoctorFile(t, filepath.Join(home, ".config", "aht", "config.toml"), "[ui]\nsrot = \"updated\"\n")
+	writeDoctorFile(
+		t,
+		filepath.Join(home, ".config", "aht", "config.toml"),
+		"[ui]\nsrot = \"updated\"\n",
+	)
 
 	result := newDoctorManager(t, home, "").Doctor(t.Context(), manage.DoctorOptions{})
 
 	assertDoctorInvariants(t, result)
+
 	configCheck := findDoctorCheck(t, result, "config.file")
-	if configCheck.Status != manage.DoctorStatusFail || !strings.Contains(configCheck.Message, "ui.srot") {
+	if configCheck.Status != manage.DoctorStatusFail ||
+		!strings.Contains(configCheck.Message, "ui.srot") {
 		t.Fatalf("config.file = %+v, want a failure naming ui.srot", configCheck)
 	}
+
 	for _, id := range []string{"tracker.service", "detection.manifests"} {
-		if check := findDoctorCheck(t, result, id); check.Status != manage.DoctorStatusSkip || check.Needs != "config.file" {
+		if check := findDoctorCheck(
+			t,
+			result,
+			id,
+		); check.Status != manage.DoctorStatusSkip ||
+			check.Needs != "config.file" {
 			t.Fatalf("%s = %+v, want skip needing config.file", id, check)
 		}
 	}
-	for _, id := range []string{"install.path", "observer.platform", "observer.process-enumeration", "store.read", "tracker.health"} {
+
+	for _, id := range []string{
+		"install.path",
+		"observer.platform",
+		"observer.process-enumeration",
+		"store.read",
+		"tracker.health",
+	} {
 		findDoctorCheck(t, result, id)
 	}
+
 	if !result.Failed() {
 		t.Fatal("Failed() = false with a failing config check")
 	}
@@ -158,9 +242,14 @@ func TestDoctorNoConfigIgnoresConfigFiles(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
 	writeDoctorFile(t, filepath.Join(home, ".config", "aht", "config.toml"), "not toml [")
 
-	result := newDoctorManager(t, home, "").Doctor(t.Context(), manage.DoctorOptions{NoConfig: true})
+	result := newDoctorManager(
+		t,
+		home,
+		"",
+	).Doctor(t.Context(), manage.DoctorOptions{NoConfig: true})
 
 	assertDoctorInvariants(t, result)
+
 	if check := findDoctorCheck(t, result, "config.file"); check.Status != manage.DoctorStatusSkip {
 		t.Fatalf("config.file = %+v, want skip under NoConfig", check)
 	}
@@ -168,29 +257,48 @@ func TestDoctorNoConfigIgnoresConfigFiles(t *testing.T) {
 
 func TestDoctorLeavesStateDirectoryUnchanged(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
+
 	stateDir := filepath.Join(home, "state")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	storePath := filepath.Join(stateDir, "state.json")
 	manager := newDoctorManager(t, home, storePath)
 
 	manager.Doctor(t.Context(), manage.DoctorOptions{})
+
 	if entries := listDirectory(t, stateDir); len(entries) != 0 {
 		t.Fatalf("doctor created %v in an empty state directory", entries)
 	}
 
 	presence := registry.PresenceLive
+
 	store := registry.NewJournal(storePath, catalog.Rules{})
-	if _, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), Subject: registry.ObservationIdentity{SessionID: "one"}, Evidence: &registry.Report{Claim: &presence}}); err != nil {
+	if _, err := store.Observe(
+		t.Context(),
+		registry.Observation{
+			Harness:  registry.Harness("codex"),
+			Subject:  registry.ObservationIdentity{SessionID: "one"},
+			Evidence: &registry.Report{Claim: &presence},
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
+
 	before := listDirectory(t, stateDir)
+
 	result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 	if after := listDirectory(t, stateDir); !slices.Equal(before, after) {
 		t.Fatalf("state directory changed from %v to %v", before, after)
 	}
-	if check := findDoctorCheck(t, result, "store.read"); check.Status != manage.DoctorStatusOK || !strings.HasPrefix(check.Message, "1 session,") {
+
+	if check := findDoctorCheck(
+		t,
+		result,
+		"store.read",
+	); check.Status != manage.DoctorStatusOK ||
+		!strings.HasPrefix(check.Message, "1 session,") {
 		t.Fatalf("store.read = %+v, want one stored session", check)
 	}
 }
@@ -210,13 +318,20 @@ func TestDoctorStoreFailuresOfferReset(t *testing.T) {
 			storePath := filepath.Join(home, "custom", "state.json")
 			writeDoctorFile(t, storePath, test.content)
 
-			result := newDoctorManager(t, home, storePath).Doctor(t.Context(), manage.DoctorOptions{})
+			result := newDoctorManager(
+				t,
+				home,
+				storePath,
+			).Doctor(t.Context(), manage.DoctorOptions{})
 
 			assertDoctorInvariants(t, result)
+
 			check := findDoctorCheck(t, result, "store.read")
-			if check.Status != manage.DoctorStatusFail || !strings.Contains(check.Message, test.message) {
+			if check.Status != manage.DoctorStatusFail ||
+				!strings.Contains(check.Message, test.message) {
 				t.Fatalf("store.read = %+v, want failure containing %q", check, test.message)
 			}
+
 			if want := "aht --store " + storePath + " manage state reset --force"; check.Fix.Command != want {
 				t.Fatalf("store.read fix = %q, want %q", check.Fix.Command, want)
 			}
@@ -228,12 +343,21 @@ func TestDoctorChecksConfiguredManifestDirectory(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
 	manifests := filepath.Join(home, "manifests")
 	writeDoctorFile(t, filepath.Join(manifests, "agy.toml"), "invalid [")
-	writeDoctorFile(t, filepath.Join(home, ".config", "aht", "config.toml"), "[detection]\nmanifests_dir = \""+manifests+"\"\n")
+	writeDoctorFile(
+		t,
+		filepath.Join(home, ".config", "aht", "config.toml"),
+		"[detection]\nmanifests_dir = \""+manifests+"\"\n",
+	)
 
 	result := newDoctorManager(t, home, "").Doctor(t.Context(), manage.DoctorOptions{})
 
 	assertDoctorInvariants(t, result)
-	if check := findDoctorCheck(t, result, "detection.manifests"); check.Status != manage.DoctorStatusFail {
+
+	if check := findDoctorCheck(
+		t,
+		result,
+		"detection.manifests",
+	); check.Status != manage.DoctorStatusFail {
 		t.Fatalf("detection.manifests = %+v, want failure from the configured directory", check)
 	}
 }
@@ -241,13 +365,16 @@ func TestDoctorChecksConfiguredManifestDirectory(t *testing.T) {
 func TestDoctorListsEachExecutableOnPathOnce(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
 	first := writeExecutable(t, filepath.Join(home, "first", "aht"))
+
 	linked := filepath.Join(home, "linked", "aht")
 	if err := os.MkdirAll(filepath.Dir(linked), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Symlink(first, linked); err != nil {
 		t.Fatal(err)
 	}
+
 	second := writeExecutable(t, filepath.Join(home, "second", "aht"))
 
 	tests := []struct {
@@ -256,21 +383,44 @@ func TestDoctorListsEachExecutableOnPathOnce(t *testing.T) {
 		status  manage.DoctorStatus
 		details []string
 	}{
-		{name: "absent", path: []string{filepath.Join(home, "empty")}, status: manage.DoctorStatusInfo, details: nil},
-		{name: "one copy through a symlink", path: []string{filepath.Dir(first), filepath.Dir(linked)}, status: manage.DoctorStatusOK, details: nil},
-		{name: "two copies", path: []string{filepath.Dir(linked), filepath.Dir(first), filepath.Dir(second)}, status: manage.DoctorStatusWarn, details: []string{linked, second + " (this executable)"}},
+		{
+			name:    "absent",
+			path:    []string{filepath.Join(home, "empty")},
+			status:  manage.DoctorStatusInfo,
+			details: nil,
+		},
+		{
+			name:    "one copy through a symlink",
+			path:    []string{filepath.Dir(first), filepath.Dir(linked)},
+			status:  manage.DoctorStatusOK,
+			details: nil,
+		},
+		{
+			name:    "two copies",
+			path:    []string{filepath.Dir(linked), filepath.Dir(first), filepath.Dir(second)},
+			status:  manage.DoctorStatusWarn,
+			details: []string{linked, second + " (this executable)"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("PATH", strings.Join(test.path, string(os.PathListSeparator)))
-			manager := manage.New(manage.Config{Binary: second, StorePath: filepath.Join(home, "state.json")})
+			manager := manage.New(
+				manage.Config{Binary: second, StorePath: filepath.Join(home, "state.json")},
+			)
 
 			result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 
 			assertDoctorInvariants(t, result)
+
 			check := findDoctorCheck(t, result, "install.path")
 			if check.Status != test.status || !slices.Equal(check.Details, test.details) {
-				t.Fatalf("install.path = %+v, want %s with details %v", check, test.status, test.details)
+				t.Fatalf(
+					"install.path = %+v, want %s with details %v",
+					check,
+					test.status,
+					test.details,
+				)
 			}
 		})
 	}
@@ -278,43 +428,74 @@ func TestDoctorListsEachExecutableOnPathOnce(t *testing.T) {
 
 func TestDoctorIntegrationInstalledByAnotherExecutable(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
-	installed, err := filepath.EvalSymlinks(writeExecutable(t, filepath.Join(home, "installed", "aht")))
+
+	installed, err := filepath.EvalSymlinks(
+		writeExecutable(t, filepath.Join(home, "installed", "aht")),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	installerDir := filepath.Join(home, "installer")
 	if err := os.Symlink(filepath.Dir(installed), installerDir); err != nil {
 		t.Fatal(err)
 	}
+
 	installer := filepath.Join(installerDir, "aht")
 	current := writeExecutable(t, filepath.Join(home, "current", "aht"))
 	harness := registry.Harness("claude")
-	manager := manage.New(manage.Config{Binary: current, StorePath: filepath.Join(home, "state.json")})
+	manager := manage.New(
+		manage.Config{Binary: current, StorePath: filepath.Join(home, "state.json")},
+	)
 
 	t.Setenv("PATH", filepath.Dir(installer))
+
 	for _, binary := range []string{installer, installed} {
-		if _, err := manage.New(manage.Config{Binary: binary}).InstallIntegration(t.Context(), harness, manage.IntegrationOptions{}); err != nil {
+		if _, err := manage.New(manage.Config{Binary: binary}).
+			InstallIntegration(t.Context(), harness, manage.IntegrationOptions{}); err != nil {
 			t.Fatal(err)
 		}
+
 		result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 		assertDoctorInvariants(t, result)
-		if check := findDoctorCheck(t, result, "integrations.claude"); check.Status != manage.DoctorStatusInfo || !strings.Contains(check.Message, installer) {
-			t.Fatalf("integration installed by %s = %+v, want info naming %s", binary, check, installer)
+
+		if check := findDoctorCheck(
+			t,
+			result,
+			"integrations.claude",
+		); check.Status != manage.DoctorStatusInfo ||
+			!strings.Contains(check.Message, installer) {
+			t.Fatalf(
+				"integration installed by %s = %+v, want info naming %s",
+				binary,
+				check,
+				installer,
+			)
 		}
 	}
 
 	t.Setenv("PATH", filepath.Dir(current))
 	result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 	assertDoctorInvariants(t, result)
+
 	stale := findDoctorCheck(t, result, "integrations.claude")
 	if stale.Status != manage.DoctorStatusWarn || !stale.Fix.Automatic {
-		t.Fatalf("integration stale for this executable = %+v, want warn with an automatic fix", stale)
+		t.Fatalf(
+			"integration stale for this executable = %+v, want warn with an automatic fix",
+			stale,
+		)
 	}
+
 	if _, err := stale.Repair(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+
 	result = manager.Doctor(t.Context(), manage.DoctorOptions{})
-	if check := findDoctorCheck(t, result, "integrations.claude"); check.Status != manage.DoctorStatusOK {
+	if check := findDoctorCheck(
+		t,
+		result,
+		"integrations.claude",
+	); check.Status != manage.DoctorStatusOK {
 		t.Fatalf("integration after repair = %+v, want ok", check)
 	}
 }
@@ -322,6 +503,7 @@ func TestDoctorIntegrationInstalledByAnotherExecutable(t *testing.T) {
 func TestDoctorRepairWithoutAutomaticFix(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
 	result := newDoctorManager(t, home, "").Doctor(t.Context(), manage.DoctorOptions{})
+
 	check := findDoctorCheck(t, result, "observer.platform")
 	if _, err := check.Repair(t.Context()); !errors.Is(err, manage.ErrNoRepair) {
 		t.Fatalf("Repair() error = %v, want %v", err, manage.ErrNoRepair)
@@ -335,43 +517,79 @@ func isolateDoctorEnvironment(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("PATH", filepath.Join(home, "bin"))
+
 	for _, key := range []string{"AHT_CONFIG", registry.StorePathEnv, registry.StateDirEnv} {
 		t.Setenv(key, "")
 	}
-	for _, key := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "CLINE_DIR", "CLINE_HOOKS_DIR", "KIMI_CODE_HOME", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "HERMES_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "KILO_CONFIG_DIR"} {
+
+	for _, key := range []string{
+		"CLAUDE_CONFIG_DIR",
+		"CODEX_HOME",
+		"COPILOT_HOME",
+		"CLINE_DIR",
+		"CLINE_HOOKS_DIR",
+		"KIMI_CODE_HOME",
+		"GROK_HOME",
+		"PI_CODING_AGENT_DIR",
+		"PI_CONFIG_DIR",
+		"HERMES_HOME",
+		"OPENCODE_CONFIG_DIR",
+		"OPENCODE_CONFIG",
+		"KILO_CONFIG_DIR",
+	} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
+
 	return home
 }
 
-func newDoctorManager(t *testing.T, home, storePath string) *manage.Manager {
+func newDoctorManager(t *testing.T, home string, storePath string) *manage.Manager {
 	t.Helper()
+
 	if storePath == "" {
 		storePath = filepath.Join(home, "state.json")
 	}
-	return manage.New(manage.Config{Binary: filepath.Join(home, "bin", "aht"), StorePath: storePath})
+
+	return manage.New(
+		manage.Config{Binary: filepath.Join(home, "bin", "aht"), StorePath: storePath},
+	)
 }
 
 func assertDoctorInvariants(t *testing.T, result manage.DoctorResult) {
 	t.Helper()
+
 	var counts manage.DoctorSummary
+
 	seen := make(map[string]bool)
+
 	for _, check := range result.Checks {
 		if want := strings.ToLower(check.Group) + "." + check.Name(); check.ID != want {
-			t.Errorf("check id %q does not match group %q and name %q", check.ID, check.Group, check.Name())
+			t.Errorf(
+				"check id %q does not match group %q and name %q",
+				check.ID,
+				check.Group,
+				check.Name(),
+			)
 		}
+
 		countDoctorStatus(t, &counts, check)
-		if (check.Status == manage.DoctorStatusWarn || check.Status == manage.DoctorStatusFail) && check.Fix == nil {
+
+		if (check.Status == manage.DoctorStatusWarn || check.Status == manage.DoctorStatusFail) &&
+			check.Fix == nil {
 			t.Errorf("%s is %s without a fix", check.ID, check.Status)
 		}
+
 		if check.Needs != "" && !seen[check.Needs] {
 			t.Errorf("%s needs %q, which did not run before it", check.ID, check.Needs)
 		}
+
 		seen[check.ID] = true
 	}
+
 	if counts != result.Summary {
 		t.Errorf("summary = %+v, counted %+v", result.Summary, counts)
 	}
+
 	if result.Failed() != (counts.Fail > 0) {
 		t.Errorf("Failed() = %t with %d failures", result.Failed(), counts.Fail)
 	}
@@ -379,6 +597,7 @@ func assertDoctorInvariants(t *testing.T, result manage.DoctorResult) {
 
 func countDoctorStatus(t *testing.T, counts *manage.DoctorSummary, check manage.DoctorCheck) {
 	t.Helper()
+
 	switch check.Status {
 	case manage.DoctorStatusOK:
 		counts.OK++
@@ -397,20 +616,25 @@ func countDoctorStatus(t *testing.T, counts *manage.DoctorSummary, check manage.
 
 func findDoctorCheck(t *testing.T, result manage.DoctorResult, id string) manage.DoctorCheck {
 	t.Helper()
+
 	for _, check := range result.Checks {
 		if check.ID == id {
 			return check
 		}
 	}
+
 	t.Fatalf("doctor report has no %s check", id)
+
 	return manage.DoctorCheck{}
 }
 
-func writeDoctorFile(t *testing.T, path, content string) {
+func writeDoctorFile(t *testing.T, path string, content string) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -419,25 +643,31 @@ func writeDoctorFile(t *testing.T, path, content string) {
 func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
 	writeDoctorFile(t, path, "#!/bin/sh\n")
+
 	if err := os.Chmod(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	return path
 }
 
 func listDirectory(t *testing.T, dir string) []string {
 	t.Helper()
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	listing := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		listing = append(listing, entry.Name()+" "+info.ModTime().String()+" "+info.Mode().String())
 	}
+
 	return listing
 }

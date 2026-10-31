@@ -112,6 +112,8 @@ type (
 
 // Config identifies the local AHT instance used by a Client. Empty fields use
 // the current user's default registry and its associated broker socket.
+//
+//exhaustruct:optional
 type Config struct {
 	StorePath  string
 	SocketPath string
@@ -121,10 +123,17 @@ type Config struct {
 // stateStore is the routing client's operational contract.
 type stateStore interface {
 	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
-	ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error)
+	ObserveBatch(
+		ctx context.Context,
+		observations []registry.Observation,
+	) ([]registry.Session, error)
 	List(ctx context.Context, filter registry.Filter) ([]registry.Session, error)
 	Get(ctx context.Context, id string) (registry.Session, error)
-	SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error)
+	SummaryWithOptions(
+		ctx context.Context,
+		filter registry.Filter,
+		opts registry.SummaryOptions,
+	) ([]registry.Summary, error)
 	GC(ctx context.Context, maxAge time.Duration) (registry.GCResult, error)
 	Reset(ctx context.Context) (registry.ResetResult, error)
 }
@@ -184,8 +193,11 @@ func New(config Config) *Client {
 
 	realtime := broker.NewClientForSocket(socketPath)
 
-	var store stateStore
-	var configErr error
+	var (
+		store     stateStore
+		configErr error
+	)
+
 	switch mode {
 	case ModeRealtimeOnly:
 		store = realtime
@@ -229,10 +241,14 @@ func (c *Client) Realtime() *broker.Client {
 
 // Subscribe returns an active subscription streaming state snapshots from the broker.
 // Subscribe requires a running broker and is not supported in [ModeDurableOnly].
-func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*broker.Subscription, error) {
+func (c *Client) Subscribe(
+	ctx context.Context,
+	filter registry.Filter,
+) (*broker.Subscription, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
+
 	if c.mode == ModeDurableOnly {
 		return nil, ErrRealtimeRequired
 	}
@@ -250,25 +266,36 @@ func (c *Client) Ping(ctx context.Context) error {
 	if c.configErr != nil {
 		return c.configErr
 	}
+
 	return publicError(c.realtime.Ping(ctx))
 }
 
 // Observe records one agent-harness observation using the configured Mode.
 // Only ModeAuto falls back to durable storage when the broker is unavailable.
-func (c *Client) Observe(ctx context.Context, observation registry.Observation) (registry.Session, error) {
+func (c *Client) Observe(
+	ctx context.Context,
+	observation registry.Observation,
+) (registry.Session, error) {
 	if c.configErr != nil {
 		return registry.Session{}, c.configErr
 	}
+
 	session, err := c.store.Observe(ctx, observation)
+
 	return session, publicError(err)
 }
 
 // ObserveBatch atomically records a group of agent-harness observations.
-func (c *Client) ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error) {
+func (c *Client) ObserveBatch(
+	ctx context.Context,
+	observations []registry.Observation,
+) ([]registry.Session, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
+
 	sessions, err := c.store.ObserveBatch(ctx, observations)
+
 	return sessions, publicError(err)
 }
 
@@ -277,10 +304,12 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
+
 	sessions, err := c.store.List(ctx, filter)
 	if err != nil {
 		return nil, publicError(err)
 	}
+
 	return registry.FilterSessions(sessions, filter), nil
 }
 
@@ -289,22 +318,34 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	if c.configErr != nil {
 		return registry.Session{}, c.configErr
 	}
+
 	session, err := c.store.Get(ctx, id)
+
 	return session, publicError(err)
 }
 
 // SummaryWithOptions returns aggregate session counts with the given options.
-func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
+func (c *Client) SummaryWithOptions(
+	ctx context.Context,
+	filter registry.Filter,
+	opts registry.SummaryOptions,
+) ([]registry.Summary, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
+
 	summaries, err := c.store.SummaryWithOptions(ctx, filter, opts)
+
 	return summaries, publicError(err)
 }
 
 // Summary returns aggregate session counts grouped by terminal-multiplexer session.
 func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
+	return c.SummaryWithOptions(
+		ctx,
+		filter,
+		registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession},
+	)
 }
 
 // GC removes gone-session tombstones at least deleteAfter old.
@@ -312,7 +353,9 @@ func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GC
 	if c.configErr != nil {
 		return registry.GCResult{}, c.configErr
 	}
+
 	result, err := c.store.GC(ctx, deleteAfter)
+
 	return result, publicError(err)
 }
 
@@ -320,7 +363,9 @@ func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
 	if c.configErr != nil {
 		return registry.ResetResult{}, c.configErr
 	}
+
 	result, err := c.store.Reset(ctx)
+
 	return result, publicError(err)
 }
 
@@ -334,6 +379,7 @@ func (c *Client) Watch(
 	if c.configErr != nil {
 		return c.configErr
 	}
+
 	if yield == nil {
 		return errHandlerRequired
 	}
@@ -343,6 +389,7 @@ func (c *Client) Watch(
 		return err
 	}
 	defer subscription.Close()
+
 	return watchSnapshots(ctx, subscription, yield)
 }
 
@@ -351,8 +398,13 @@ func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrUnavailable)
 }
 
-func watchSnapshots(ctx context.Context, subscription *broker.Subscription, yield func(registry.StateSnapshot) error) error {
+func watchSnapshots(
+	ctx context.Context,
+	subscription *broker.Subscription,
+	yield func(registry.StateSnapshot) error,
+) error {
 	snapshots := subscription.Snapshots
+
 	errorsChannel := subscription.Errors
 	for snapshots != nil || errorsChannel != nil {
 		select {
@@ -363,6 +415,7 @@ func watchSnapshots(ctx context.Context, subscription *broker.Subscription, yiel
 				snapshots = nil
 				continue
 			}
+
 			if err := yield(snapshot); err != nil {
 				return fmt.Errorf("handling AHT state snapshot: %w", err)
 			}
@@ -371,6 +424,7 @@ func watchSnapshots(ctx context.Context, subscription *broker.Subscription, yiel
 				errorsChannel = nil
 				continue
 			}
+
 			if watchErr != nil {
 				return publicError(watchErr)
 			}
@@ -384,6 +438,7 @@ func (e *OperationError) Error() string {
 	if e.Message == "" {
 		return e.Code
 	}
+
 	return e.Code + ": " + e.Message
 }
 
@@ -396,9 +451,11 @@ func publicError(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	if broker.IsUnavailable(err) {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+
 	if errors.Is(err, broker.ErrProtocol) {
 		return fmt.Errorf("%w: %w", ErrProtocol, err)
 	}
@@ -406,5 +463,6 @@ func publicError(err error) error {
 	if remoteError, ok := errors.AsType[*broker.RemoteError](err); ok {
 		return &OperationError{Code: remoteError.Code, Message: remoteError.Message, cause: err}
 	}
+
 	return err
 }

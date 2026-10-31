@@ -16,6 +16,7 @@ func TestSystemdAnalyzeAcceptsManagedUnit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("service validation requires systemd-analyze: %v", err)
 	}
+
 	for _, test := range []struct {
 		name, store string
 	}{
@@ -32,13 +33,17 @@ func TestSystemdAnalyzeAcceptsManagedUnit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("render systemd unit: %v", err)
 			}
+
 			path := filepath.Join(t.TempDir(), linuxUnitName)
 			if err := os.WriteFile(path, []byte(unit), 0o600); err != nil {
 				t.Fatalf("write systemd unit: %v", err)
 			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, validator, "--user", "verify", path).CombinedOutput()
+
+			output, err := exec.CommandContext(ctx, validator, "--user", "verify", path).
+				CombinedOutput()
 			if err != nil {
 				t.Fatalf("systemd-analyze rejected managed unit: %v\n%s", err, output)
 			}

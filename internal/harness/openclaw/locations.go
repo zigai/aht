@@ -10,10 +10,12 @@ import (
 
 func (openclawHarness) Locations(_ string) []harness.Location {
 	state := openclawStateDir()
+
 	config := filepath.Join(state, "openclaw.json")
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); value != "" {
 		config = value
 	}
+
 	workspace := filepath.Join(state, "workspace")
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_WORKSPACE_DIR")); value != "" {
 		workspace = value
@@ -29,7 +31,17 @@ func (openclawHarness) Locations(_ string) []harness.Location {
 			filepath.Join(workspace, "BOOT.md"),
 			filepath.Join(workspace, "BOOTSTRAP.md"),
 		).
-		Global(harness.LocationKindSkills, filepath.Join(state, "skills"), filepath.Join(workspace, "skills"), filepath.Join(workspace, ".agents", "skills")).
+		Global(harness.LocationKindSkills, filepath.Join(
+			state,
+			"skills",
+		), filepath.Join(
+			workspace,
+			"skills",
+		), filepath.Join(
+			workspace,
+			".agents",
+			"skills",
+		)).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
 		Locations()
 }
@@ -38,10 +50,12 @@ func openclawStateDir() string {
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR")); value != "" {
 		return value
 	}
+
 	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
 	if home == "" {
 		home = harness.HomeDir()
 	}
+
 	if home == "" {
 		return ""
 	}
@@ -50,5 +64,6 @@ func openclawStateDir() string {
 	if profile != "" && profile != "default" {
 		return filepath.Join(home, ".openclaw-"+profile)
 	}
+
 	return filepath.Join(home, ".openclaw")
 }

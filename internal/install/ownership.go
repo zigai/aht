@@ -25,9 +25,15 @@ const (
 )
 
 var (
-	integrationVersionPattern = regexp.MustCompile(`(?i)(?:aht[_-]?integration[_-]?version\s*[=:]|--reporter-version)\s*["']?([0-9]+)`)
-	integrationSourcePattern  = regexp.MustCompile(`(?i)(?:aht[_-]?integration\s*[=:]|--reporter\s)`)
-	integrationIDPattern      = regexp.MustCompile(`(?i)AHT_INTEGRATION_ID\s*=\s*["']?([a-z0-9_-]+)`)
+	integrationVersionPattern = regexp.MustCompile(
+		`(?i)(?:aht[_-]?integration[_-]?version\s*[=:]|--reporter-version)\s*["']?([0-9]+)`,
+	)
+	integrationSourcePattern = regexp.MustCompile(
+		`(?i)(?:aht[_-]?integration\s*[=:]|--reporter\s)`,
+	)
+	integrationIDPattern = regexp.MustCompile(
+		`(?i)AHT_INTEGRATION_ID\s*=\s*["']?([a-z0-9_-]+)`,
+	)
 )
 
 // ArtifactStatus describes whether a managed integration artifact is absent,
@@ -39,6 +45,7 @@ func (s ArtifactStatus) Valid() bool {
 	case ArtifactMissing, ArtifactCurrent, ArtifactStale, ArtifactForeign:
 		return true
 	}
+
 	return false
 }
 
@@ -56,20 +63,26 @@ func classifyArtifactWithID(path string) (ArtifactStatus, string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return ArtifactMissing, "", nil
 		}
+
 		return "", "", fmt.Errorf("checking artifact %s: %w", path, err)
 	}
+
 	contentPath := path
 	if info.IsDir() {
 		contentPath = filepath.Join(path, ".aht-managed")
 	}
+
 	data, err := os.ReadFile(contentPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ArtifactForeign, "", nil
 		}
+
 		return "", "", fmt.Errorf("reading artifact %s: %w", contentPath, err)
 	}
+
 	content := string(data)
+
 	return classifyArtifactContent(content), integrationIDFromContent(content), nil
 }
 
@@ -82,6 +95,7 @@ func classifyArtifactContent(content string) ArtifactStatus {
 	if len(match) != integrationCaptureGroups {
 		return ArtifactStale
 	}
+
 	version, err := strconv.Atoi(match[1])
 	if err != nil || version != expectedIntegrationVersion(content) {
 		return ArtifactStale
@@ -95,10 +109,12 @@ func expectedIntegrationVersion(content string) int {
 	if len(match) != integrationCaptureGroups {
 		return managedIntegrationVersion
 	}
+
 	id, err := catalog.Parse(match[1])
 	if err != nil {
 		return managedIntegrationVersion
 	}
+
 	return catalog.IntegrationVersionFor(id)
 }
 
@@ -107,10 +123,12 @@ func integrationIDFromContent(content string) string {
 	if len(match) != integrationCaptureGroups {
 		return ""
 	}
+
 	id, err := catalog.Parse(match[1])
 	if err != nil {
 		return strings.ToLower(match[1])
 	}
+
 	return string(id)
 }
 
@@ -119,8 +137,10 @@ func classifyArtifactForHarness(path string, harnessID registry.Harness) (Artifa
 	if err != nil || status == ArtifactMissing || status == ArtifactForeign {
 		return status, err
 	}
+
 	if integrationID != "" && integrationID != string(harnessID) {
 		return ArtifactForeign, nil
 	}
+
 	return status, nil
 }

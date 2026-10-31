@@ -22,11 +22,14 @@ func (app *application) newCurrentCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("current session: %w", err)
 			}
+
 			if app.outputJSON {
 				return app.writeJSON(session)
 			}
+
 			return app.writeSessionDetails(session)
 		},
 	}
+
 	return command
 }

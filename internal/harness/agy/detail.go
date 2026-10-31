@@ -4,7 +4,11 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func (agyHarness) ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail {
+func (agyHarness) ActivityDetail(
+	event string,
+	activity registry.Activity,
+	attributes map[string]string,
+) *registry.ActivityDetail {
 	if activity == registry.ActivityWaiting && event == "PreToolUse" {
 		switch attributes["agy_tool_name"] {
 		case "ask_permission":
@@ -13,9 +17,13 @@ func (agyHarness) ActivityDetail(event string, activity registry.Activity, attri
 			return new(registry.ActivityDetailQuestion)
 		}
 	}
+
 	return nil
 }
 
 func (agyHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false}, Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}}
+	return registry.DetailCapabilities{
+		Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+	}
 }

@@ -30,14 +30,20 @@ type inspectedArtifact struct {
 
 // Inspect reports whether a harness integration or its shim fallback is
 // current, honoring cancellation while consulting native harness CLIs.
-func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (IntegrationStatus, error) {
+func Inspect(
+	ctx context.Context,
+	harnessID registry.Harness,
+	binary string,
+) (IntegrationStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return IntegrationStatus{}, fmt.Errorf("inspect integration context: %w", err)
 	}
+
 	plan, advisor, err := installPlanForHarness(harnessID, binary)
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
+
 	if noInstallRequiredHarness(harnessID) {
 		if action, ok := nativeCatalogAction(plan); ok {
 			return IntegrationStatus{
@@ -49,8 +55,10 @@ func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (In
 			}, nil
 		}
 	}
+
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(harnessID))
 	paths := append(planPaths(plan), shimPath)
+
 	result := IntegrationStatus{
 		Harness:  harnessID,
 		Status:   ArtifactCurrent,
@@ -61,26 +69,37 @@ func Inspect(ctx context.Context, harnessID registry.Harness, binary string) (In
 	if err := inspectIntegrationPlan(ctx, plan, &result); err != nil {
 		return IntegrationStatus{}, err
 	}
+
 	if err := markDesiredIntegrationState(ctx, harnessID, binary, &result); err != nil {
 		return IntegrationStatus{}, err
 	}
+
 	nativeStatus := result.Status
+
 	result, err = mergeShimStatus(result, shimPath)
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
+
 	if advisor != nil {
-		result.NextStep = advisor.StatusNextStep(nativeStatus == ArtifactCurrent, nativeStatus == ArtifactStale)
+		result.NextStep = advisor.StatusNextStep(
+			nativeStatus == ArtifactCurrent,
+			nativeStatus == ArtifactStale,
+		)
 	}
 
 	return result, nil
 }
 
-func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspkg.InstallPlan, harnesspkg.InstallAdvisor, error) {
+func installPlanForHarness(
+	harnessID registry.Harness,
+	binary string,
+) (harnesspkg.InstallPlan, harnesspkg.InstallAdvisor, error) {
 	adapter, ok := catalog.Find(harnessID)
 	if !ok {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
+
 	installer, ok := adapter.(harnesspkg.Installable)
 	if !ok {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
@@ -89,7 +108,9 @@ func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspk
 	if !utf8.ValidString(binary) {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errBinaryEncoding, binary)
 	}
+
 	advisor, _ := adapter.(harnesspkg.InstallAdvisor)
+
 	plan, err := installer.InstallPlan(binary)
 	if err != nil {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("plan %s integration: %w", harnessID, err)
@@ -98,14 +119,20 @@ func installPlanForHarness(harnessID registry.Harness, binary string) (harnesspk
 	return plan, advisor, nil
 }
 
-func inspectIntegrationPlan(ctx context.Context, plan harnesspkg.InstallPlan, result *IntegrationStatus) error {
+func inspectIntegrationPlan(
+	ctx context.Context,
+	plan harnesspkg.InstallPlan,
+	result *IntegrationStatus,
+) error {
 	for _, action := range plan.Actions {
 		statuses, err := inspectAction(ctx, action)
 		if err != nil {
 			return err
 		}
+
 		for _, item := range statuses {
 			mergeInspectedArtifact(result, item)
+
 			if result.Status == ArtifactForeign {
 				return nil
 			}
@@ -115,21 +142,25 @@ func inspectIntegrationPlan(ctx context.Context, plan harnesspkg.InstallPlan, re
 	return nil
 }
 
-func markDesiredIntegrationState(ctx context.Context, harnessID registry.Harness, binary string, result *IntegrationStatus) error {
+func markDesiredIntegrationState(
+	ctx context.Context,
+	harnessID registry.Harness,
+	binary string,
+	result *IntegrationStatus,
+) error {
 	if result.Status != ArtifactCurrent {
 		return nil
 	}
+
 	dryRun, err := Run(ctx, Options{
-		Harness:      harnessID,
-		Binary:       binary,
-		TargetBinary: "",
-		DryRun:       true,
-		Force:        false,
-		UseShim:      false,
+		Harness: harnessID,
+		Binary:  binary,
+		DryRun:  true,
 	})
 	if err != nil {
 		return fmt.Errorf("checking desired integration state: %w", err)
 	}
+
 	if dryRun.Changed {
 		result.Status = ArtifactStale
 		result.Message = "managed integration differs from the desired configuration"
@@ -143,14 +174,17 @@ func mergeShimStatus(result IntegrationStatus, path string) (IntegrationStatus, 
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
+
 	if status == ArtifactForeign {
 		result.Status, result.Message = status, "foreign content at "+path
 		return result, nil
 	}
+
 	if result.Status == ArtifactMissing && (status == ArtifactCurrent || status == ArtifactStale) {
 		result.Status = status
 		result.Message = "shim fallback is " + string(status)
 	}
+
 	return result, nil
 }
 
@@ -168,7 +202,10 @@ func mergeInspectedArtifact(result *IntegrationStatus, item inspectedArtifact) {
 	}
 }
 
-func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]inspectedArtifact, error) {
+func inspectAction(
+	ctx context.Context,
+	action harnesspkg.InstallAction,
+) ([]inspectedArtifact, error) {
 	switch value := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
 		return inspectCommandHooks(ctx, value.Plan)
@@ -187,73 +224,100 @@ func inspectAction(ctx context.Context, action harnesspkg.InstallAction) ([]insp
 	}
 }
 
-func inspectCommandHooks(ctx context.Context, plan harnesspkg.JSONCommandHookInstallPlan) ([]inspectedArtifact, error) {
+func inspectCommandHooks(
+	ctx context.Context,
+	plan harnesspkg.JSONCommandHookInstallPlan,
+) ([]inspectedArtifact, error) {
 	statuses, err := inspectSharedFile(plan.Path)
 	if err != nil || plan.Trust == nil || statuses[0].status == ArtifactMissing {
 		return statuses, err
 	}
+
 	trusted, err := plan.Trust.Inspect(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inspecting %s hook trust: %w", plan.Label, err)
 	}
+
 	if !trusted {
-		statuses = append(statuses, inspectedArtifact{path: plan.Label + " trust", status: ArtifactStale})
+		statuses = append(
+			statuses,
+			inspectedArtifact{path: plan.Label + " trust", status: ArtifactStale},
+		)
 	}
+
 	return statuses, nil
 }
 
-func inspectPluginAction(ctx context.Context, plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
+func inspectPluginAction(
+	ctx context.Context,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) ([]inspectedArtifact, error) {
 	result, err := inspectOwnedPath(plan.Dir)
 	if err != nil {
 		return result, err
 	}
+
 	if plan.Registration != nil {
 		registration, inspectErr := inspectRegistration(ctx, plan)
 		if inspectErr != nil {
 			return nil, inspectErr
 		}
+
 		return append(result, registration), nil
 	}
+
 	retired, err := inspectRetiredPlugins(plan)
 	if err != nil {
 		return nil, err
 	}
+
 	result = append(result, retired...)
 	if plan.ImportManifest == nil {
 		return result, nil
 	}
+
 	manifest, err := readImportManifest(plan.ImportManifest.Path)
 	if err != nil {
 		return nil, err
 	}
+
 	status := ArtifactMissing
+
 	for _, entry := range manifest.Imports {
 		if entry.name() != plan.ImportManifest.Name {
 			continue
 		}
+
 		status = ArtifactCurrent
 		if entry.source() != plan.ImportManifest.Source {
 			status = ArtifactStale
 		}
+
 		for _, component := range plan.ImportManifest.Components {
 			if !slices.Contains(entry.components(), component) {
 				status = ArtifactStale
 			}
 		}
+
 		break
 	}
+
 	return append(result, inspectedArtifact{path: plan.ImportManifest.Path, status: status}), nil
 }
 
 // inspectRetiredPlugins reports managed plugins at former locations as stale
 // so that an upgrade moves them.
-func inspectRetiredPlugins(plan harnesspkg.PluginDirectoryInstallPlan) ([]inspectedArtifact, error) {
+func inspectRetiredPlugins(
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) ([]inspectedArtifact, error) {
 	var stale []inspectedArtifact
+
 	for _, retired := range plan.Retired {
 		status, err := ClassifyArtifact(retired.Dir)
 		if err != nil {
 			return nil, err
 		}
+
 		if status == ArtifactCurrent || status == ArtifactStale {
 			stale = append(stale, inspectedArtifact{path: retired.Dir, status: ArtifactStale})
 		}
@@ -268,12 +332,15 @@ func inspectSharedFile(path string) ([]inspectedArtifact, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return []inspectedArtifact{{path: path, status: ArtifactMissing}}, nil
 		}
+
 		return nil, fmt.Errorf("reading integration artifact %s: %w", path, err)
 	}
+
 	status := classifyArtifactContent(string(data))
 	if status == ArtifactForeign {
 		status = ArtifactMissing
 	}
+
 	return []inspectedArtifact{{path: path, status: status}}, nil
 }
 
@@ -282,6 +349,7 @@ func inspectOwnedPath(path string) ([]inspectedArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return []inspectedArtifact{{path: path, status: status}}, nil
 }
 
@@ -304,5 +372,6 @@ func planPaths(plan harnesspkg.InstallPlan) []string {
 			}
 		}
 	}
+
 	return paths
 }

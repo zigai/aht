@@ -12,12 +12,26 @@ func (opencodeHarness) Locations(projectDir string) []harness.Location {
 	dir := opencodeUserConfigDir()
 
 	builder := harness.NewLocationBuilder(projectDir).
-		Global(harness.LocationKindConfig, filepath.Join(dir, "opencode.json"), filepath.Join(dir, "opencode.jsonc"), filepath.Join(dir, "tui.json"))
+		Global(harness.LocationKindConfig, filepath.Join(
+			dir,
+			"opencode.json",
+		), filepath.Join(
+			dir,
+			"opencode.jsonc",
+		), filepath.Join(
+			dir,
+			"tui.json",
+		))
 	if value := strings.TrimSpace(os.Getenv("OPENCODE_CONFIG")); value != "" {
 		builder.Global(harness.LocationKindConfig, value)
 	}
+
 	if value := strings.TrimSpace(os.Getenv("OPENCODE_CONFIG_DIR")); value != "" {
-		builder.Global(harness.LocationKindConfig, filepath.Join(value, "opencode.json"), filepath.Join(value, "opencode.jsonc"))
+		builder.Global(
+			harness.LocationKindConfig,
+			filepath.Join(value, "opencode.json"),
+			filepath.Join(value, "opencode.jsonc"),
+		)
 		builder.Global(harness.LocationKindInstructions, filepath.Join(value, "AGENTS.md"))
 		builder.Global(harness.LocationKindSkills, filepath.Join(value, "skills"))
 		builder.Global(harness.LocationKindCommands, filepath.Join(value, "commands"))

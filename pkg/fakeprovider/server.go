@@ -40,8 +40,10 @@ type Server struct {
 	serveDone   chan error
 	holds       chan *Hold
 	closing     chan struct{}
-	handlers    sync.WaitGroup
+	//exhaustruct:optional
+	handlers sync.WaitGroup
 
+	//exhaustruct:optional
 	mu      sync.Mutex
 	closed  bool
 	session *session
@@ -62,22 +64,28 @@ func Start(options Options) (*Server, error) {
 	if address == "" {
 		address = defaultAddress
 	}
+
 	model := options.Model
 	if model == "" {
 		model = defaultModel
 	}
+
 	script := options.Script
 	if script == nil {
 		script = Echo()
 	}
+
 	if slices.Contains(options.SideMarkers, "") {
 		return nil, errEmptySideMarker
 	}
+
 	var listenConfig net.ListenConfig
+
 	listener, err := listenConfig.Listen(context.Background(), "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("listen for fake provider: %w", err)
 	}
+
 	server := &Server{
 		model:       model,
 		sideMarkers: slices.Clone(options.SideMarkers),
@@ -87,21 +95,23 @@ func Start(options Options) (*Server, error) {
 		serveDone:   make(chan error, 1),
 		holds:       make(chan *Hold),
 		closing:     make(chan struct{}),
-		handlers:    sync.WaitGroup{},
-		mu:          sync.Mutex{},
 		closed:      false,
 		session:     newSession(script),
 		changed:     make(chan struct{}),
 	}
-	//nolint:exhaustruct_v5,gosec // Loopback test provider without timeouts: the test decides how long held requests and streams stay open.
+	// Loopback test provider without timeouts: the test decides how long held requests and streams
+	// stay open.
+	//nolint:gosec // Intentional local test-provider lifecycle; see above.
 	server.httpServer = &http.Server{Handler: server}
 	go func() {
 		err := server.httpServer.Serve(listener)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
+
 		server.serveDone <- err
 	}()
+
 	return server, nil
 }
 
@@ -127,6 +137,7 @@ func (s *Server) Close() error {
 		s.mu.Unlock()
 		return nil
 	}
+
 	s.closed = true
 	close(s.closing)
 	s.mu.Unlock()
@@ -134,6 +145,7 @@ func (s *Server) Close() error {
 	closeErr := s.httpServer.Close()
 	s.handlers.Wait()
 	serveErr := <-s.serveDone
+
 	return errors.Join(closeErr, serveErr)
 }
 
@@ -141,6 +153,7 @@ func (s *Server) Close() error {
 func (s *Server) Requests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return cloneRequests(s.session.requests)
 }
 
@@ -148,6 +161,7 @@ func (s *Server) Requests() []Request {
 func (s *Server) SideRequests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return cloneRequests(s.session.side)
 }
 
@@ -156,13 +170,16 @@ func (s *Server) WaitRequests(ctx context.Context, count int) ([]Request, error)
 	if count < 0 {
 		return nil, fmt.Errorf("%w: %d", errNegativeCount, count)
 	}
+
 	for {
 		s.mu.Lock()
 		if len(s.session.requests) >= count {
 			requests := cloneRequests(s.session.requests[:count])
 			s.mu.Unlock()
+
 			return requests, nil
 		}
+
 		changed := s.changed
 		s.mu.Unlock()
 
@@ -180,6 +197,7 @@ func (s *Server) WaitRequests(ctx context.Context, count int) ([]Request, error)
 func (s *Server) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.session.err
 }
 
@@ -188,8 +206,10 @@ func (s *Server) Reset(script Script) {
 	if script == nil {
 		script = Echo()
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	close(s.session.abandoned)
 	s.session = newSession(script)
 	s.notifyLocked()
@@ -203,55 +223,67 @@ func (s *Server) Holds() <-chan *Hold {
 func (s *Server) enter() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.closed {
 		return false
 	}
+
 	s.handlers.Add(1)
+
 	return true
 }
 
 func (s *Server) current() *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.session
 }
 
 func (s *Server) recordConversation(request Request) (*session, Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	gen := s.session
 	request.Kind = KindConversation
 	request.Index = len(gen.requests)
 	request.Outcome = OutcomePending
 	gen.requests = append(gen.requests, request)
+
 	s.notifyLocked()
+
 	return gen, request
 }
 
 func (s *Server) recordSide(request Request) (*session, Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	gen := s.session
 	request.Kind = KindSide
 	request.Index = len(gen.side)
 	request.Outcome = OutcomePending
 	gen.side = append(gen.side, request)
+
 	return gen, request
 }
 
 func (s *Server) setOutcome(gen *session, request Request, outcome Outcome) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if request.Kind == KindSide {
 		gen.side[request.Index].Outcome = outcome
 		return
 	}
+
 	gen.requests[request.Index].Outcome = outcome
 }
 
 func (s *Server) fail(gen *session, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if gen.err == nil {
 		gen.err = err
 	}
@@ -267,5 +299,6 @@ func cloneRequests(requests []Request) []Request {
 	for i, request := range requests {
 		clones[i] = request.clone()
 	}
+
 	return clones
 }

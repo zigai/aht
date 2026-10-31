@@ -18,12 +18,16 @@ const partV2Query = `SELECT s.id AS session_id, s.title AS title, s.directory AS
 
 func PartDatabaseQuery(ctx context.Context, db *sql.DB) (string, RowReader, error) {
 	var current bool
-	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='session_message')").Scan(&current); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE "+
+		"type='table' AND name='session_message')").
+		Scan(&current); err != nil {
 		return "", nil, fmt.Errorf("inspect history schema: %w", err)
 	}
+
 	if current {
 		return partV2Query, partV2Row, nil
 	}
+
 	return partV1Query, partV1Row, nil
 }
 
@@ -32,6 +36,7 @@ func partV1Row(ctx context.Context, t *Decoder, row Row) error {
 	if err != nil {
 		return err
 	}
+
 	switch Str(r, "type") {
 	case "text":
 		if row.Role == "user" || row.Role == "assistant" {
@@ -40,6 +45,7 @@ func partV1Row(ctx context.Context, t *Decoder, row Row) error {
 	case "tool":
 		t.Capture(ctx, "tool", ToolBlockText(r), row.MessageID, 0, StoredTime(row.Timestamp))
 	}
+
 	return nil
 }
 
@@ -48,13 +54,16 @@ func partV2Row(ctx context.Context, t *Decoder, row Row) error {
 	if err != nil {
 		return err
 	}
+
 	if row.Role == "user" {
 		t.Capture(ctx, "user", Str(r, "text"), row.MessageID, 0, StoredTime(row.Timestamp))
 	}
+
 	if row.Role == "assistant" {
 		for _, part := range MessageParts(r["content"], "assistant", true) {
 			t.Capture(ctx, part.Role, part.Text, row.MessageID, 0, StoredTime(row.Timestamp))
 		}
 	}
+
 	return nil
 }

@@ -13,5 +13,6 @@ func transcriptQuery(ctx context.Context, db *sql.DB) (string, transcript.RowRea
 	if err != nil {
 		return "", nil, fmt.Errorf("prepare transcript query: %w", err)
 	}
+
 	return query, parse, nil
 }

@@ -28,6 +28,7 @@ var (
 
 var allHarnesses = installableHarnesses()
 
+//exhaustruct:optional
 type Options struct {
 	Harness      registry.Harness
 	Binary       string
@@ -57,6 +58,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("install integration context: %w", err)
 	}
+
 	if opts.Binary == "" {
 		opts.Binary = defaultBinary
 	}
@@ -80,6 +82,7 @@ func noInstallRequiredHarness(harnessID registry.Harness) bool {
 	if !ok {
 		return false
 	}
+
 	_, ok = adapter.(harnesspkg.NoInstallRequired)
 
 	return ok
@@ -102,10 +105,13 @@ func fileNeedsUpdate(path string, content string, force bool) (bool, error) {
 	if !force && !strings.Contains(string(current), managedMarker) {
 		return false, fmt.Errorf("%w: %s; pass --force to replace it", errForeignFile, path)
 	}
+
 	if !force {
 		currentIntegration := integrationIDFromContent(string(current))
+
 		nextIntegration := integrationIDFromContent(content)
-		if currentIntegration != "" && nextIntegration != "" && currentIntegration != nextIntegration {
+		if currentIntegration != "" && nextIntegration != "" &&
+			currentIntegration != nextIntegration {
 			return false, fmt.Errorf(
 				"%w: %s is managed by the %s integration; pass --force to replace it",
 				errForeignFile,

@@ -43,12 +43,12 @@ func (osRegistryFS) OpenFile(path string, flag int, mode os.FileMode) (registryF
 	return os.OpenFile(path, flag, mode)
 }
 
-func (osRegistryFS) CreateTemp(dir, pattern string) (registryFile, error) {
+func (osRegistryFS) CreateTemp(dir string, pattern string) (registryFile, error) {
 	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
 	return os.CreateTemp(dir, pattern)
 }
 
-func (osRegistryFS) Rename(oldPath, newPath string) error {
+func (osRegistryFS) Rename(oldPath string, newPath string) error {
 	//nolint:wrapcheck // Preserve os.PathError text; the caller adds context.
 	return os.Rename(oldPath, newPath)
 }
@@ -78,7 +78,9 @@ func registryFSForDir(dir string) registryFS {
 		if !valid {
 			panic("registry filesystem has invalid type")
 		}
+
 		return fs
 	}
+
 	return osRegistryFS{}
 }

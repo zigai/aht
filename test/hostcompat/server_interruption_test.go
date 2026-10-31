@@ -18,20 +18,27 @@ func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	t.Helper()
 	baseURL, client, process := startNativeServer(t, host, env)
 	query := "?directory=" + url.QueryEscape(host.launched.Work)
+
 	var session struct {
 		ID string `json:"id"`
 	}
 	serverPermissionJSON(t, client, baseURL+"/session"+query, http.MethodPost,
 		map[string]string{"title": "AHT native active interruption"}, &session)
+
 	if session.ID == "" {
 		t.Fatal("native interruption session has no identity")
 	}
+
 	sessionURL := baseURL + "/session/" + url.PathEscape(session.ID)
 	serverPermissionJSON(t, client, sessionURL+"/prompt_async"+query, http.MethodPost,
 		map[string]any{
-			"model": map[string]string{"providerID": harness.LaunchProviderName, "modelID": fakeModel},
+			"model": map[string]string{
+				"providerID": harness.LaunchProviderName,
+				"modelID":    fakeModel,
+			},
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 		}, nil)
+
 	select {
 	case hold := <-host.provider.Holds():
 		if hold.Request.Index != 0 {
@@ -42,11 +49,15 @@ func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("native server did not reach active provider request")
 	}
+
 	host.waitForActiveSession(t)
+
 	var aborted bool
 	serverPermissionJSON(t, client, sessionURL+"/abort"+query, http.MethodPost, nil, &aborted)
+
 	if !aborted {
 		t.Fatal("native session abort was rejected")
 	}
+
 	serverPermissionIdle(t, client, baseURL, query, session.ID, process)
 }

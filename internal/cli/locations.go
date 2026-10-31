@@ -20,9 +20,12 @@ type locationsOptions struct {
 func (app *application) newLocationsCommand() *cobra.Command {
 	options := locationsOptions{projectDir: ""}
 	command := &cobra.Command{
-		Use:           "locations [harness...]",
-		Short:         "List where agent harnesses keep settings, instructions, and skills",
-		Long:          "List where agent harnesses read settings, instructions, skills, commands, and MCP definitions. Harnesses read some kinds from several alternative paths, so most paths do not exist. Without harness arguments, every harness is listed.",
+		Use:   "locations [harness...]",
+		Short: "List where agent harnesses keep settings, instructions, and skills",
+		Long: "List where agent harnesses read settings, instructions, " +
+			"skills, commands, and MCP definitions. Harnesses read some " +
+			"kinds from several alternative paths, so most paths do not " +
+			"exist. Without harness arguments, every harness is listed.",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -30,17 +33,23 @@ func (app *application) newLocationsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			locations, err := selectedLocations(args, projectDir)
 			if err != nil {
 				return err
 			}
+
 			if app.outputJSON {
 				return app.writeJSON(locations)
 			}
+
 			return app.writeLocationsTable(locations)
 		},
 	}
-	command.Flags().StringVar(&options.projectDir, "project", "", "project `<dir>` for project-scoped locations (default: current directory)")
+	command.Flags().
+		StringVar(&options.projectDir, "project", "", "project `<dir>` for project-scoped locations (default: "+
+			"current directory)")
+
 	return command
 }
 
@@ -50,12 +59,15 @@ func resolveProjectDir(dir string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve current directory: %w", err)
 		}
+
 		return current, nil
 	}
+
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve project directory: %w", err)
 	}
+
 	return absolute, nil
 }
 
@@ -63,21 +75,29 @@ func selectedLocations(args []string, projectDir string) ([]harness.Location, er
 	if len(args) == 0 {
 		return harness.AllLocations(projectDir), nil
 	}
+
 	selected := make([]registry.Harness, 0, len(args))
 	for _, arg := range args {
 		harnessID, err := harness.Parse(arg)
 		if err != nil {
-			return nil, exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, arg), exitCodeUsage)
+			return nil, exitCode(
+				fmt.Errorf("%w %q", registry.ErrUnknownHarness, arg),
+				exitCodeUsage,
+			)
 		}
+
 		if !slices.Contains(selected, harnessID) {
 			selected = append(selected, harnessID)
 		}
 	}
+
 	var locations []harness.Location
+
 	for _, harnessID := range selected {
 		found, _ := harness.LocationsFor(harnessID, projectDir)
 		locations = append(locations, found...)
 	}
+
 	return locations, nil
 }
 
@@ -90,16 +110,33 @@ func (app *application) writeLocationsTable(locations []harness.Location) error 
 		locationColumns      = 5
 		minLocationPathWidth = 36
 	)
+
 	pathWidth := minLocationPathWidth
 	for _, location := range locations {
 		pathWidth = max(pathWidth, text.StringWidth(location.Path))
 	}
-	fixed := locationHarnessWidth + locationKindWidth + locationScopeWidth + locationExistsWidth + (locationColumns-1)*humanColumnGap
+
+	fixed := locationHarnessWidth +
+		locationKindWidth +
+		locationScopeWidth +
+		locationExistsWidth +
+		(locationColumns-1)*humanColumnGap
 	pathWidth = min(pathWidth, max(minLocationPathWidth, app.maxLineWidth()-fixed))
+
 	rows := make([][]string, 0, len(locations))
 	for _, location := range locations {
-		rows = append(rows, []string{string(location.Harness), string(location.Kind), string(location.Scope), location.Path, yesNo(location.Exists)})
+		rows = append(
+			rows,
+			[]string{
+				string(location.Harness),
+				string(location.Kind),
+				string(location.Scope),
+				location.Path,
+				yesNo(location.Exists),
+			},
+		)
 	}
+
 	return app.writeWrappedHumanTable(
 		[]humanColumn{
 			{heading: "Harness", width: locationHarnessWidth},

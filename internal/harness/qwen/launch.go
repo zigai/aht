@@ -9,7 +9,10 @@ import (
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
-func (qwenHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (qwenHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	common := []string{"--auth-type", "openai", "--model", model.Model}
 
 	return harness.LaunchPlan{
@@ -34,6 +37,7 @@ func (qwenHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMod
 			if prompt == "" {
 				return common, nil
 			}
+
 			return append([]string{"-i", prompt}, common...), nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -53,15 +57,18 @@ func launchSettings(existing []byte) ([]byte, error) {
 			return nil, fmt.Errorf("decode qwen settings: %w", err)
 		}
 	}
+
 	settings["memory"] = map[string]any{
 		"enableManagedAutoMemory": false,
 		"enableManagedAutoDream":  false,
 		"enableAutoSkill":         false,
 	}
 	settings["ui"] = map[string]any{"enableFollowupSuggestions": false}
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode qwen settings: %w", err)
 	}
+
 	return data, nil
 }

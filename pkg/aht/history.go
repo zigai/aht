@@ -71,6 +71,7 @@ func SearchHistory(ctx context.Context, query HistoryQuery) (HistoryResult, erro
 		//nolint:wrapcheck // the returned error already carries operation context
 		return result, err
 	}
+
 	return result, nil
 }
 
@@ -78,17 +79,19 @@ func SearchHistory(ctx context.Context, query HistoryQuery) (HistoryResult, erro
 // the same coverage and error contract as [SearchHistory].
 func ListHistory(ctx context.Context, query HistoryListQuery) (HistoryResult, error) {
 	var historyCatalog HistoryCatalog
+
 	result, err := historyCatalog.List(ctx, query)
 	if err != nil {
 		//nolint:wrapcheck // the returned error already carries operation context
 		return result, err
 	}
+
 	return result, nil
 }
 
 // ResumeCommand returns the native command that resumes a harness session, to
 // run in the session's working directory. sessionPath is the native transcript
 // path when known. It returns nil when the harness cannot resume by identity.
-func ResumeCommand(harness Harness, sessionID, sessionPath string) []string {
+func ResumeCommand(harness Harness, sessionID string, sessionPath string) []string {
 	return catalog.ResumeCommandFor(harness, sessionID, sessionPath)
 }

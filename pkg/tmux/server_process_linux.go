@@ -25,6 +25,7 @@ func ServerProcessFrom(pid int, name string, args []string) (ServerProcess, bool
 	if pid <= 0 || len(args) == 0 || (!isTmuxServerComm(name) && !isTmuxServerArgs(args)) {
 		return ServerProcess{PID: 0, Args: nil}, false
 	}
+
 	return ServerProcess{PID: pid, Args: args}, true
 }
 
@@ -32,35 +33,45 @@ func listCurrentUserTmuxServers(ctx context.Context) ([]ServerProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("tmux process context: %w", err)
 	}
+
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("reading /proc: %w", err)
 	}
+
 	euid := os.Geteuid()
 	if euid < 0 || euid > int(^uint32(0)) {
 		return nil, fmt.Errorf("%d: %w", euid, errEffectiveUserID)
 	}
+
 	uid := uint32(euid)
 	processes := make([]ServerProcess, 0)
+
 	for _, entry := range entries {
 		pid, parseErr := strconv.Atoi(entry.Name())
 		if parseErr != nil || pid <= 0 {
 			continue
 		}
+
 		process, processErr := readLinuxServerProcess(pid, uid)
 		if processErr != nil {
 			if skippableServerProcessError(processErr) {
 				continue
 			}
+
 			return nil, processErr
 		}
+
 		processes = append(processes, *process)
 	}
+
 	return processes, nil
 }
 
 func skippableServerProcessError(err error) bool {
-	return errors.Is(err, errNotTmuxServer) || errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.ESRCH)
+	return errors.Is(err, errNotTmuxServer) || errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, syscall.ESRCH)
 }
 
 func readLinuxServerProcess(pid int, uid uint32) (*ServerProcess, error) {
@@ -68,27 +79,34 @@ func readLinuxServerProcess(pid int, uid uint32) (*ServerProcess, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stat tmux process: %w", err)
 	}
+
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != uid {
 		return nil, errNotTmuxServer
 	}
+
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
 		return nil, fmt.Errorf("read tmux command line: %w", err)
 	}
+
 	trimmed := strings.TrimRight(string(data), "\x00")
 	if trimmed == "" {
 		return nil, errNotTmuxServer
 	}
+
 	args := strings.Split(trimmed, "\x00")
+
 	name := ""
 	if commData, commErr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); commErr == nil {
 		name = strings.TrimSpace(string(commData))
 	}
+
 	process, ok := ServerProcessFrom(pid, name, args)
 	if !ok {
 		return nil, errNotTmuxServer
 	}
+
 	return &process, nil
 }
 
@@ -96,18 +114,23 @@ func isTmuxServerArgs(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
+
 	for index, arg := range args {
 		base := filepath.Base(arg)
 		if strings.HasPrefix(base, "tmux: server") {
 			return true
 		}
+
 		if index != 0 || !isTmuxBinaryName(base) {
 			continue
 		}
-		if slices.Contains(args[1:], "server") || slices.Contains(args[1:], "-D") || slices.Contains(args[1:], "-d") {
+
+		if slices.Contains(args[1:], "server") || slices.Contains(args[1:], "-D") ||
+			slices.Contains(args[1:], "-d") {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -115,8 +138,11 @@ func isTmuxServerComm(comm string) bool {
 	if strings.HasPrefix(comm, "tmux: server") {
 		return true
 	}
-	if strings.HasPrefix(comm, "tmux") && (strings.Contains(comm, "serve") || strings.HasSuffix(comm, ":")) {
+
+	if strings.HasPrefix(comm, "tmux") &&
+		(strings.Contains(comm, "serve") || strings.HasSuffix(comm, ":")) {
 		return true
 	}
+
 	return false
 }

@@ -62,26 +62,37 @@ type watchRunState struct {
 // Watch yields serialized snapshots until ctx is canceled or yield returns an
 // error. It observes the store directory before the initial scan and keeps its
 // parent watched so atomic replacement and directory recreation remain visible.
-func (s *FileStore) Watch(ctx context.Context, opts WatchOptions, yield func(WatchResult) error) error {
+func (s *FileStore) Watch(
+	ctx context.Context,
+	opts WatchOptions,
+	yield func(WatchResult) error,
+) error {
 	if ctx.Err() != nil {
 		return nil
 	}
+
 	if yield == nil {
 		return errWatchYieldRequired
 	}
+
 	opts = normalizeFileStoreWatchOptions(opts)
+
 	target, directory, err := fileStoreWatchTarget(s.path)
 	if err != nil {
 		return err
 	}
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("creating store watcher: %w", err)
 	}
+
 	defer func() { _ = watcher.Close() }()
+
 	if err := addFileStoreWatchPaths(watcher, directory); err != nil {
 		return err
 	}
+
 	watch := fileStoreWatch{
 		store:             s,
 		options:           opts,
@@ -96,6 +107,7 @@ func (s *FileStore) Watch(ctx context.Context, opts WatchOptions, yield func(Wat
 	if err := watch.scan(ctx); err != nil {
 		return err
 	}
+
 	return watch.run(ctx)
 }
 
@@ -105,9 +117,11 @@ func (watch *fileStoreWatch) scan(ctx context.Context) error {
 		return nil
 	default:
 	}
+
 	if err := watch.ensureDirectoryWatch(); err != nil {
 		return watch.yieldError(err)
 	}
+
 	sessions, updatedAt, err := watch.store.watchSnapshot(ctx, watch.options.Filter)
 	if err != nil {
 		select {
@@ -117,19 +131,28 @@ func (watch *fileStoreWatch) scan(ctx context.Context) error {
 			return watch.yieldError(err)
 		}
 	}
+
 	initial := !watch.haveBaseline
 	unchanged := watch.haveBaseline && watchSessionsEqual(watch.baseline, sessions)
 	// The fresh file snapshot is private; only callback values need cloning.
 	watch.baseline = sessions
 	watch.baselineUpdatedAt = updatedAt
 	watch.haveBaseline = true
+
 	if unchanged {
 		return nil
 	}
-	result := WatchResult{Sessions: cloneWatchSessions(sessions), UpdatedAt: updatedAt, Initial: initial, Err: nil}
+
+	result := WatchResult{
+		Sessions:  cloneWatchSessions(sessions),
+		UpdatedAt: updatedAt,
+		Initial:   initial,
+		Err:       nil,
+	}
 	if err := watch.yield(result); err != nil {
 		return fmt.Errorf("yielding watch snapshot: %w", err)
 	}
+
 	return nil
 }
 
@@ -143,23 +166,32 @@ func (watch *fileStoreWatch) yieldError(watchErr error) error {
 	if err := watch.yield(result); err != nil {
 		return fmt.Errorf("yielding watch error: %w", err)
 	}
+
 	return nil
 }
 
 func (watch *fileStoreWatch) run(ctx context.Context) error {
 	debounceTimer := time.NewTimer(time.Hour)
+
 	debounceTimer.Stop()
 	defer debounceTimer.Stop()
+
 	reconcile := time.NewTicker(watch.options.ReconcileInterval)
 	defer reconcile.Stop()
 
-	state := watchRunState{watch: watch, debounceTimer: debounceTimer, debounce: nil, reconcile: reconcile.C}
+	state := watchRunState{
+		watch:         watch,
+		debounceTimer: debounceTimer,
+		debounce:      nil,
+		reconcile:     reconcile.C,
+	}
 	for ctx.Err() == nil {
 		done, err := state.step(ctx)
 		if err != nil || done {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -171,16 +203,19 @@ func (state *watchRunState) step(ctx context.Context) (bool, error) {
 		if !ok {
 			return true, nil
 		}
+
 		if isFileStoreWatchDirectoryRemoval(event, state.watch.directory) {
 			if err := state.watch.watcher.Remove(state.watch.directory); err != nil &&
 				!errors.Is(err, fsnotify.ErrNonExistentWatch) {
 				return false, state.watch.handleWatcherError(ctx, err)
 			}
 		}
+
 		if isFileStoreWatchEvent(event, state.watch.target, state.watch.directory) {
 			state.debounceTimer.Reset(state.watch.options.Debounce)
 			state.debounce = state.debounceTimer.C
 		}
+
 		return false, nil
 	case <-state.debounce:
 		state.debounce = nil
@@ -191,6 +226,7 @@ func (state *watchRunState) step(ctx context.Context) (bool, error) {
 		if !ok {
 			return true, nil
 		}
+
 		return false, state.watch.handleWatcherError(ctx, watchErr)
 	}
 }
@@ -199,9 +235,11 @@ func (watch *fileStoreWatch) handleWatcherError(ctx context.Context, watchErr er
 	if watchErr == nil {
 		return nil
 	}
+
 	if err := watch.yieldError(watchErr); err != nil {
 		return err
 	}
+
 	return watch.scan(ctx)
 }
 
@@ -209,9 +247,11 @@ func normalizeFileStoreWatchOptions(opts WatchOptions) WatchOptions {
 	if opts.Debounce <= 0 {
 		opts.Debounce = defaultWatchDebounce
 	}
+
 	if opts.ReconcileInterval <= 0 {
 		opts.ReconcileInterval = defaultWatchReconcileInterval
 	}
+
 	return opts
 }
 
@@ -220,9 +260,11 @@ func addFileStoreWatchPaths(watcher *fsnotify.Watcher, directory string) error {
 	if !isSystemOrTempRoot(root) {
 		_ = watcher.Add(root)
 	}
+
 	if err := watcher.Add(directory); err != nil {
 		return fmt.Errorf("watching store directory: %w", err)
 	}
+
 	return nil
 }
 
@@ -232,14 +274,18 @@ func (watch *fileStoreWatch) ensureDirectoryWatch() error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
+
 		return fmt.Errorf("stating store watch directory: %w", err)
 	}
+
 	if !info.IsDir() {
 		return fmt.Errorf("%w: %s", errWatchParentNotDirectory, watch.directory)
 	}
+
 	if err := watch.watcher.Add(watch.directory); err != nil {
 		return fmt.Errorf("watching store directory: %w", err)
 	}
+
 	return nil
 }
 
@@ -248,26 +294,33 @@ func fileStoreWatchTarget(path string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("resolving store watch target: %w", err)
 	}
+
 	directory := filepath.Dir(target)
+
 	info, err := os.Stat(directory)
 	if err != nil {
 		return "", "", fmt.Errorf("stating store watch directory: %w", err)
 	}
+
 	if !info.IsDir() {
 		return "", "", fmt.Errorf("%w: %s", errWatchParentNotDirectory, directory)
 	}
+
 	return filepath.Clean(target), directory, nil
 }
 
-func isFileStoreWatchEvent(event fsnotify.Event, target, directory string) bool {
+func isFileStoreWatchEvent(event fsnotify.Event, target string, directory string) bool {
 	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
 		return false
 	}
+
 	path, err := filepath.Abs(event.Name)
 	if err != nil {
 		return false
 	}
+
 	path = filepath.Clean(path)
+
 	return path == target || path == target+".journal.jsonl" || path == directory
 }
 
@@ -275,22 +328,26 @@ func isFileStoreWatchDirectoryRemoval(event fsnotify.Event, directory string) bo
 	if event.Op&(fsnotify.Rename|fsnotify.Remove) == 0 {
 		return false
 	}
+
 	path, err := filepath.Abs(event.Name)
 	if err != nil {
 		return false
 	}
+
 	return filepath.Clean(path) == directory
 }
 
-func watchSessionsEqual(left, right []Session) bool {
+func watchSessionsEqual(left []Session, right []Session) bool {
 	if len(left) != len(right) {
 		return false
 	}
+
 	for index := range left {
 		if !reflect.DeepEqual(left[index], right[index]) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -298,25 +355,33 @@ func cloneWatchSessions(sessions []Session) []Session {
 	if sessions == nil {
 		return nil
 	}
+
 	cloned := make([]Session, len(sessions))
 	for index := range sessions {
 		cloned[index] = cloneSessionValue(sessions[index])
 	}
+
 	return cloned
 }
 
-func (s *FileStore) watchSnapshot(ctx context.Context, filter Filter) ([]Session, time.Time, error) {
+func (s *FileStore) watchSnapshot(
+	ctx context.Context,
+	filter Filter,
+) ([]Session, time.Time, error) {
 	snap, err := s.load(ctx)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+
 	sessions := make([]Session, 0, len(snap.Sessions))
 	now := s.now().UTC()
+
 	for _, session := range snap.Sessions {
 		session.SchemaVersion = storeSchemaVersion
 		session.resolveDetail(s.reducer.rules.Policy(session.Harness), now)
 		sessions = append(sessions, session)
 	}
+
 	return FilterSessions(sessions, filter), snap.UpdatedAt, nil
 }
 
@@ -325,12 +390,16 @@ func isSystemOrTempRoot(dir string) bool {
 	if clean == "/" || clean == "." || clean == filepath.Dir(clean) {
 		return true
 	}
+
 	temp := filepath.Clean(os.TempDir())
 	if clean == temp || CanonicalPath(clean) == CanonicalPath(temp) {
 		return true
 	}
-	if clean == "/tmp" || clean == "/var/tmp" || clean == "/private/tmp" || clean == "/private/var/tmp" {
+
+	if clean == "/tmp" || clean == "/var/tmp" || clean == "/private/tmp" ||
+		clean == "/private/var/tmp" {
 		return true
 	}
+
 	return false
 }

@@ -13,10 +13,12 @@ func (s *FileStore) load(ctx context.Context) (snapshot, error) {
 	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
 		return newSnapshot(), nil
 	}
+
 	lock, err := openStoreLock(ctx, s.path+".lock", nil)
 	if err != nil {
 		return snapshot{}, err
 	}
+
 	return s.loadLocked(ctx, lock)
 }
 
@@ -28,14 +30,17 @@ func (s *FileStore) Verify(ctx context.Context) (int, error) {
 	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
+
 	lock, err := openExistingStoreLock(ctx, s.path+".lock")
 	if err != nil {
 		return 0, err
 	}
+
 	snap, err := s.loadLocked(ctx, lock)
 	if err != nil {
 		return 0, err
 	}
+
 	return len(snap.Sessions), nil
 }
 
@@ -44,13 +49,16 @@ func (s *FileStore) loadLocked(ctx context.Context, lock *storeLock) (snapshot, 
 	if err != nil {
 		return snapshot{}, closeStoreLock(lock, err)
 	}
+
 	entries, err := readJournal(s.path)
 	if err != nil {
 		return snapshot{}, closeStoreLock(lock, err)
 	}
+
 	if err := s.reducer.foldJournal(ctx, &snap, entries); err != nil {
 		return snapshot{}, closeStoreLock(lock, err)
 	}
+
 	return snap, closeStoreLock(lock, validateSnapshot(snap))
 }
 
@@ -58,14 +66,17 @@ func (s *MemoryStore) drainLocked(ctx context.Context) error {
 	if s.owner == nil {
 		return ErrStoreClosed
 	}
+
 	lock, err := openStoreLock(ctx, s.path+".lock", nil)
 	if err != nil {
 		return err
 	}
+
 	err = closeStoreLock(lock, s.consumeJournalLocked(ctx))
 	if err == nil {
 		s.refreshDetailsLocked()
 	}
+
 	return err
 }
 
@@ -74,17 +85,22 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if len(entries) == 0 || entries[len(entries)-1].Sequence <= s.snapshot.JournalSequence {
 		return nil
 	}
+
 	candidate, changes, err := s.reducer.replayJournal(ctx, s.snapshot, entries)
 	if err != nil {
 		return fmt.Errorf("reducing journal: %w", err)
 	}
+
 	if err := validateSnapshot(candidate); err != nil {
 		return err
 	}
+
 	s.acceptSnapshotLocked(candidate, changes)
+
 	return nil
 }
 
@@ -93,9 +109,11 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 func (s *MemoryStore) acceptSnapshotLocked(candidate snapshot, changes []Change) {
 	s.snapshot = candidate
 	s.storageRevision++
+
 	if len(changes) == 0 {
 		return
 	}
+
 	s.visibleRevision = s.storageRevision
 	s.revision++
 	close(s.stateChanged)
@@ -106,38 +124,52 @@ func (s *MemoryStore) acceptSnapshotLocked(candidate snapshot, changes []Change)
 func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.owner == nil {
 		return journalResult{}, ErrStoreClosed
 	}
+
 	lock, err := openStoreLock(ctx, s.path+".lock", nil)
 	if err != nil {
 		return journalResult{}, err
 	}
+
 	result, err := s.commandLocked(ctx, entry)
+
 	return result, closeStoreLock(lock, err)
 }
 
-func (s *MemoryStore) commandLocked(ctx context.Context, entry journalEntry) (journalResult, error) {
+func (s *MemoryStore) commandLocked(
+	ctx context.Context,
+	entry journalEntry,
+) (journalResult, error) {
 	if err := s.consumeJournalLocked(ctx); err != nil {
 		return journalResult{}, err
 	}
+
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
 	entry.Sequence = candidate.JournalSequence + 1
 	entry.ReceivedAt = s.now().UTC()
+
 	result, err := s.reducer.applyJournalEntry(ctx, &candidate, entry)
 	if err != nil {
 		return journalResult{}, err
 	}
+
 	if err := validateSnapshot(candidate); err != nil {
 		return journalResult{}, err
 	}
+
 	if err := validateNativePayloadChanges(s.snapshot, candidate); err != nil {
 		return journalResult{}, err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return journalResult{}, fmt.Errorf("committing registry command: %w", err)
 	}
-	if journalWorthy(entry, result) || !maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
+
+	if journalWorthy(entry, result) ||
+		!maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
 		if err := appendJournal(s.path, entry); err != nil {
 			return journalResult{}, err
 		}
@@ -147,10 +179,16 @@ func (s *MemoryStore) commandLocked(ctx context.Context, entry journalEntry) (jo
 		// fallback writers that fold the on-disk snapshot and journal.
 		candidate.JournalSequence = s.snapshot.JournalSequence
 	}
+
 	if expireTombstones(&candidate, entry.ReceivedAt, s.tombstoneTTL) > 0 {
-		result.changes = stateChanges(State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}, State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt})
+		result.changes = stateChanges(
+			State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+			State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+		)
 	}
+
 	s.acceptSnapshotLocked(candidate, result.changes)
+
 	return result, nil
 }
 
@@ -162,10 +200,12 @@ func journalWorthy(entry journalEntry, result journalResult) bool {
 	if entry.Reset || entry.DeleteAfter != nil || len(result.changes) > 0 {
 		return true
 	}
+
 	for index := range entry.Observations {
 		if entry.Observations[index].Kind() == "report" {
 			return true
 		}
 	}
+
 	return false
 }

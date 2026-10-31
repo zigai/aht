@@ -50,8 +50,18 @@ type inspectReport struct {
 	} `json:"install"`
 }
 
-func newRegistration(command string, pluginID string, version string, allowConversationAccess bool) harness.PluginRegistration {
-	return registration{command: command, pluginID: pluginID, version: version, allowConversationAccess: allowConversationAccess}
+func newRegistration(
+	command string,
+	pluginID string,
+	version string,
+	allowConversationAccess bool,
+) harness.PluginRegistration {
+	return registration{
+		command:                 command,
+		pluginID:                pluginID,
+		version:                 version,
+		allowConversationAccess: allowConversationAccess,
+	}
 }
 
 func (registration registration) ID() string {
@@ -63,39 +73,64 @@ func (registration registration) Label() string {
 }
 
 //nolint:cyclop // Classification checks independent native registration dimensions.
-func (registration registration) Inspect(ctx context.Context, pluginDir string) (harness.PluginRegistrationState, error) {
+func (registration registration) Inspect(
+	ctx context.Context,
+	pluginDir string,
+) (harness.PluginRegistrationState, error) {
 	if _, err := exec.LookPath(registration.command); err != nil {
 		if _, statErr := os.Stat(pluginDir); errors.Is(statErr, os.ErrNotExist) {
 			return harness.PluginRegistrationMissing, nil
 		}
-		return harness.PluginRegistrationMissing, fmt.Errorf("%w: executable %q was not found", errCLIRequired, registration.command)
+
+		return harness.PluginRegistrationMissing, fmt.Errorf(
+			"%w: executable %q was not found",
+			errCLIRequired,
+			registration.command,
+		)
 	}
 
-	output, err := harness.RunCommand(ctx, inspectTimeout, outputLimit, registration.command, "plugins", "inspect", "--all", "--json")
+	output, err := harness.RunCommand(
+		ctx,
+		inspectTimeout,
+		outputLimit,
+		registration.command,
+		"plugins",
+		"inspect",
+		"--all",
+		"--json",
+	)
 	if err != nil {
 		return harness.PluginRegistrationMissing, fmt.Errorf("inspecting OpenClaw plugins: %w", err)
 	}
+
 	reports, err := decodeInspectReports(output)
 	if err != nil {
 		return harness.PluginRegistrationMissing, err
 	}
+
 	for _, report := range reports {
 		if report.Plugin.ID != registration.pluginID {
 			continue
 		}
+
 		if !sameCleanPath(report.Install.SourcePath, pluginDir) {
 			return harness.PluginRegistrationForeign, nil
 		}
+
 		version := report.Plugin.Version
 		if version == "" {
 			version = report.Install.Version
 		}
-		if report.Plugin.Status != "loaded" || report.Install.Source != "path" || version != registration.version ||
+
+		if report.Plugin.Status != "loaded" || report.Install.Source != "path" ||
+			version != registration.version ||
 			(registration.allowConversationAccess && !report.Policy.AllowConversationAccess) {
 			return harness.PluginRegistrationStale, nil
 		}
+
 		return harness.PluginRegistrationCurrent, nil
 	}
+
 	return harness.PluginRegistrationMissing, nil
 }
 
@@ -103,37 +138,78 @@ func (registration registration) EnsureMutable(pluginDir string) error {
 	if strings.TrimSpace(os.Getenv("OPENCLAW_NIX_MODE")) == "1" {
 		return errNixMode
 	}
+
 	if _, err := exec.LookPath(registration.command); err != nil {
 		return fmt.Errorf("%w: executable %q was not found", errCLIRequired, registration.command)
 	}
+
 	return nil
 }
 
 func (registration registration) Install(ctx context.Context, pluginDir string) error {
-	if _, err := harness.RunCommand(ctx, mutationTimeout, outputLimit, registration.command, "plugins", "install", pluginDir, "--link", "--force", "--accept-capabilities"); err != nil {
+	if _, err := harness.RunCommand(
+		ctx,
+		mutationTimeout,
+		outputLimit,
+		registration.command,
+		"plugins",
+		"install",
+		pluginDir,
+		"--link",
+		"--force",
+		"--accept-capabilities",
+	); err != nil {
 		return fmt.Errorf("registering OpenClaw plugin: %w", err)
 	}
+
 	if !registration.allowConversationAccess {
 		return nil
 	}
+
 	key := "plugins.entries." + registration.pluginID + ".hooks.allowConversationAccess"
-	if _, err := harness.RunCommand(ctx, mutationTimeout, outputLimit, registration.command, "config", "set", key, "true", "--strict-json"); err != nil {
+	if _, err := harness.RunCommand(
+		ctx,
+		mutationTimeout,
+		outputLimit,
+		registration.command,
+		"config",
+		"set",
+		key,
+		"true",
+		"--strict-json",
+	); err != nil {
 		return fmt.Errorf("granting OpenClaw conversation-hook access: %w", err)
 	}
+
 	return nil
 }
 
-func (registration registration) CleanupFailedInstall(ctx context.Context, previousState harness.PluginRegistrationState, pluginDir string) error {
+func (registration registration) CleanupFailedInstall(
+	ctx context.Context,
+	previousState harness.PluginRegistrationState,
+	pluginDir string,
+) error {
 	if previousState != harness.PluginRegistrationMissing {
 		return nil
 	}
+
 	return registration.Remove(ctx, pluginDir)
 }
 
 func (registration registration) Remove(ctx context.Context, pluginDir string) error {
-	if _, err := harness.RunCommand(ctx, mutationTimeout, outputLimit, registration.command, "plugins", "uninstall", registration.pluginID, "--force"); err != nil {
+	if _, err := harness.RunCommand(
+		ctx,
+		mutationTimeout,
+		outputLimit,
+		registration.command,
+		"plugins",
+		"uninstall",
+		registration.pluginID,
+		"--force",
+	); err != nil {
 		return fmt.Errorf("unregistering OpenClaw plugin: %w", err)
 	}
+
 	return nil
 }
 
@@ -142,12 +218,14 @@ func decodeInspectReports(data []byte) ([]inspectReport, error) {
 	if err := json.Unmarshal(data, &reports); err == nil {
 		return reports, nil
 	}
+
 	var wrapper struct {
 		Plugins []inspectReport `json:"plugins"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
 		return nil, fmt.Errorf("parsing OpenClaw plugin inspection: %w", err)
 	}
+
 	return wrapper.Plugins, nil
 }
 
@@ -155,10 +233,13 @@ func sameCleanPath(left string, right string) bool {
 	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
 		return false
 	}
+
 	leftAbs, leftErr := filepath.Abs(left)
+
 	rightAbs, rightErr := filepath.Abs(right)
 	if leftErr != nil || rightErr != nil {
 		return filepath.Clean(left) == filepath.Clean(right)
 	}
+
 	return filepath.Clean(leftAbs) == filepath.Clean(rightAbs)
 }

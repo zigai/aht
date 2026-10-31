@@ -26,7 +26,11 @@ func TestFromCommandResolvesProcessNames(t *testing.T) {
 		want    registry.Harness
 	}{
 		{name: "openclaw", command: "openclaw", want: registry.Harness("openclaw")},
-		{name: "openclaw path", command: "/usr/local/bin/openclaw", want: registry.Harness("openclaw")},
+		{
+			name:    "openclaw path",
+			command: "/usr/local/bin/openclaw",
+			want:    registry.Harness("openclaw"),
+		},
 		{name: "hermes", command: "hermes", want: registry.Harness("hermes")},
 		{name: "hermes agent", command: "hermes-agent", want: registry.Harness("hermes")},
 	}
@@ -37,7 +41,13 @@ func TestFromCommandResolvesProcessNames(t *testing.T) {
 
 			got, ok := harness.FromCommand(test.command)
 			if !ok || got != test.want {
-				t.Fatalf("FromCommand(%q) = (%q, %t), want (%q, true)", test.command, got, ok, test.want)
+				t.Fatalf(
+					"FromCommand(%q) = (%q, %t), want (%q, true)",
+					test.command,
+					got,
+					ok,
+					test.want,
+				)
 			}
 		})
 	}
@@ -65,6 +75,7 @@ func TestParseMatchesNamesWithoutPunctuation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse(%q) returned error: %v", test.value, err)
 			}
+
 			if got != test.want {
 				t.Fatalf("Parse(%q) = %q, want %q", test.value, got, test.want)
 			}

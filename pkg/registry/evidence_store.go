@@ -7,11 +7,12 @@ import (
 	"time"
 )
 
-func observationTime(observedAt, receivedAt time.Time) time.Time {
+func observationTime(observedAt time.Time, receivedAt time.Time) time.Time {
 	observedAt = observedAt.UTC()
 	if observedAt.After(receivedAt.Add(maxObservedAtFutureSkew)) {
 		return receivedAt
 	}
+
 	return observedAt
 }
 
@@ -39,6 +40,7 @@ func sourceSlotTime(session Session, observation Observation) time.Time {
 		}
 	case *Verification, nil:
 	}
+
 	return time.Time{}
 }
 
@@ -57,6 +59,7 @@ func existingSlot(session Session, observation Observation) any {
 	case *Verification, nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -70,21 +73,30 @@ func sequencedObservationTime(
 	}
 
 	reporter := strings.TrimSpace(observation.Report().Reporter.Integration)
+
 	previous := session.Observations.Native
 	if reporter == "" ||
 		previous == nil ||
 		strings.TrimSpace(previous.Reporter.Integration) != reporter {
 		return at, nil
 	}
-	if err := validateSequenceOrder(reporter, previous.Reporter.Sequence, observation.Report().Reporter.Sequence); err != nil {
+
+	if err := validateSequenceOrder(
+		reporter,
+		previous.Reporter.Sequence,
+		observation.Report().Reporter.Sequence,
+	); err != nil {
 		return time.Time{}, err
 	}
+
 	if observation.Report().Reporter.Sequence == nil {
 		if at.Equal(previous.ObservedAt) && !observationEquivalent(session, observation, at) {
 			at = previous.ObservedAt.Add(time.Nanosecond)
 		}
+
 		return at, nil
 	}
+
 	if !at.After(previous.ObservedAt) {
 		at = previous.ObservedAt.Add(time.Nanosecond)
 	}
@@ -92,7 +104,7 @@ func sequencedObservationTime(
 	return at, nil
 }
 
-func validateSequenceOrder(reporter string, previous, current *uint64) error {
+func validateSequenceOrder(reporter string, previous *uint64, current *uint64) error {
 	if previous != nil && current == nil {
 		return fmt.Errorf(
 			"%w: reporter %q omitted sequence after using sequence %d",
@@ -101,6 +113,7 @@ func validateSequenceOrder(reporter string, previous, current *uint64) error {
 			*previous,
 		)
 	}
+
 	if previous != nil && current != nil && *current <= *previous {
 		return fmt.Errorf(
 			"%w: reporter %q sequence %d does not follow %d",
@@ -110,13 +123,18 @@ func validateSequenceOrder(reporter string, previous, current *uint64) error {
 			*previous,
 		)
 	}
+
 	return nil
 }
 
 func observationEquivalent(session Session, observation Observation, at time.Time) bool {
 	candidate := session
 	storeObservation(&candidate, observation, at)
-	return reflect.DeepEqual(existingSlot(session, observation), existingSlot(candidate, observation))
+
+	return reflect.DeepEqual(
+		existingSlot(session, observation),
+		existingSlot(candidate, observation),
+	)
 }
 
 // storeObservation records an observation in the appropriate slot.
@@ -142,42 +160,78 @@ func storeNativeObservation(session *Session, observation Observation, at time.T
 	if observation.ProcessIdentity() != nil {
 		process = *observation.ProcessIdentity()
 	}
-	session.Incarnation.NativeEnded = observation.Report().Lifecycle != nil && *observation.Report().Lifecycle == NativeLifecycleEnd
+
+	session.Incarnation.NativeEnded = observation.Report().Lifecycle != nil &&
+		*observation.Report().Lifecycle == NativeLifecycleEnd
 	if process.Complete() {
 		session.Incarnation.NativeProcess = process
 	}
+
 	reporter := observation.Report().Reporter
 	reporter.Sequence = clonePtr(reporter.Sequence)
 	detail := session.nativeDetail(observation.Report(), process, at)
-	session.Observations.Native = &NativeObservation{Reporter: reporter, Event: observation.Report().Event, Lifecycle: clonePtr(observation.Report().Lifecycle), Presence: clonePtr(observation.Report().Claim), Activity: session.nativeActivity(observation.Report(), process), SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ObservedAt: at, Attributes: cloneAttributes(observation.Report().Attributes), RawPayload: cloneRaw(observation.Report().Payload), Process: process, Detail: detail}
+	session.Observations.Native = &NativeObservation{
+		Reporter:    reporter,
+		Event:       observation.Report().Event,
+		Lifecycle:   clonePtr(observation.Report().Lifecycle),
+		Presence:    clonePtr(observation.Report().Claim),
+		Activity:    session.nativeActivity(observation.Report(), process),
+		SessionID:   observation.Subject.SessionID,
+		SessionPath: observation.Subject.SessionPath,
+		ObservedAt:  at,
+		Attributes:  cloneAttributes(observation.Report().Attributes),
+		RawPayload:  cloneRaw(observation.Report().Payload),
+		Process:     process,
+		Detail:      detail,
+	}
 }
 
 func (s Session) nativeActivity(report *Report, process ProcessIdentity) *Activity {
 	activity := report.Activity
+
 	previous := s.Observations.Native
 	if activity == nil && s.Presence() != PresenceGone && !reportEnds(report) &&
 		previous != nil && !nativeEnded(previous) && previous.Reporter.Integration == report.Reporter.Integration &&
 		s.Process != nil && s.Process.Equal(process) && previous.Process.Equal(process) {
 		activity = previous.Activity
 	}
+
 	return clonePtr(activity)
 }
 
 func storeProcessObservation(session *Session, observation Observation, at time.Time) {
 	present := observation.Present() != nil && *observation.Present()
+
 	var process ProcessIdentity
 	if observation.ProcessIdentity() != nil {
 		process = *observation.ProcessIdentity()
 	}
-	session.Observations.Process = &ProcessObservation{Present: present, Process: process, ObservedAt: at}
+
+	session.Observations.Process = &ProcessObservation{
+		Present:    present,
+		Process:    process,
+		ObservedAt: at,
+	}
 }
 
 func storeMultiplexerObservation(session *Session, observation Observation, at time.Time) {
-	session.Observations.Location = &MultiplexerObservation{Process: *observation.ProcessIdentity(), Location: *observation.Location(), ObservedAt: at}
+	session.Observations.Location = &MultiplexerObservation{
+		Process:    *observation.ProcessIdentity(),
+		Location:   *observation.Location(),
+		ObservedAt: at,
+	}
 }
 
 func storeCatalogObservation(session *Session, observation Observation, at time.Time) {
-	session.Observations.Catalog = &CatalogObservation{SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath, ResumeCommand: append([]string(nil), observation.Listing().ResumeCommand...), CWD: observation.Listing().CWD, ProjectRoot: observation.Listing().ProjectRoot, ProcessPID: observation.Listing().ProcessPID, ObservedAt: at}
+	session.Observations.Catalog = &CatalogObservation{
+		SessionID:     observation.Subject.SessionID,
+		SessionPath:   observation.Subject.SessionPath,
+		ResumeCommand: append([]string(nil), observation.Listing().ResumeCommand...),
+		CWD:           observation.Listing().CWD,
+		ProjectRoot:   observation.Listing().ProjectRoot,
+		ProcessPID:    observation.Listing().ProcessPID,
+		ObservedAt:    at,
+	}
 }
 
 func storeScreenObservation(session *Session, observation Observation, at time.Time) {

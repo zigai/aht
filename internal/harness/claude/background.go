@@ -62,9 +62,11 @@ func (claudeHarness) PayloadActivity(
 	if event != harness.HookEventStop || activity != registry.ActivityIdle {
 		return activity
 	}
+
 	if holdsBackgroundTask(payload) || holdsSessionWakeup(payload, at) {
 		return registry.ActivityRunning
 	}
+
 	return activity
 }
 
@@ -76,6 +78,7 @@ func holdsBackgroundTask(payload map[string]any) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -86,12 +89,14 @@ func holdsSessionWakeup(payload map[string]any, at time.Time) bool {
 		if !ok {
 			continue
 		}
+
 		schedule, ok := parseCronSchedule(harness.PayloadString(cron, "schedule"))
 		//nolint:gosmopolitan // Claude Code evaluates session crons in the local timezone.
 		if ok && schedule.firesWithin(at.Local(), wakeupHorizon) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -100,22 +105,28 @@ func holdsSessionWakeup(payload map[string]any, at time.Time) bool {
 // Unsupported syntax reports false so the turn is treated as finished.
 func parseCronSchedule(expression string) (cronSchedule, bool) {
 	var unsupported cronSchedule
+
 	fields := strings.Fields(expression)
 	if len(fields) != cronFieldCount {
 		return unsupported, false
 	}
+
 	var sets [cronFieldCount]uint64
+
 	for index, field := range fields {
 		set, ok := parseCronField(field, cronFieldBounds[index][0], cronFieldBounds[index][1])
 		if !ok {
 			return unsupported, false
 		}
+
 		sets[index] = set
 	}
+
 	weekdays := sets[4]
 	if weekdays&(1<<cronSundayAlias) != 0 {
 		weekdays |= 1
 	}
+
 	return cronSchedule{
 		minutes:  sets[0],
 		hours:    sets[1],
@@ -130,15 +141,18 @@ func parseCronSchedule(expression string) (cronSchedule, bool) {
 
 func parseCronField(field string, low int, high int) (uint64, bool) {
 	var set uint64
+
 	for part := range strings.SplitSeq(field, ",") {
 		first, last, step, ok := parseCronPart(part, low, high)
 		if !ok {
 			return 0, false
 		}
+
 		for value := first; value <= last; value += step {
 			set |= 1 << value
 		}
 	}
+
 	return set, true
 }
 
@@ -147,22 +161,29 @@ func parseCronField(field string, low int, high int) (uint64, bool) {
 func parseCronPart(part string, low int, high int) (int, int, int, bool) {
 	base, stepText, hasStep := strings.Cut(part, "/")
 	step := 1
+
 	if hasStep {
 		parsed, err := strconv.Atoi(stepText)
 		if err != nil || parsed <= 0 {
 			return 0, 0, 0, false
 		}
+
 		step = parsed
 	}
+
 	if base == "*" {
 		return low, high, step, true
 	}
+
 	if from, to, isRange := strings.Cut(base, "-"); isRange {
 		first, firstOK := cronValue(from, low, high)
 		last, lastOK := cronValue(to, low, high)
+
 		return first, last, step, firstOK && lastOK && first <= last
 	}
+
 	value, ok := cronValue(base, low, high)
+
 	return value, value, step, ok && !hasStep
 }
 
@@ -180,6 +201,7 @@ func (schedule cronSchedule) firesWithin(from time.Time, horizon time.Duration) 
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -189,11 +211,14 @@ func (schedule cronSchedule) matches(at time.Time) bool {
 		!hasCronBit(schedule.months, int(at.Month())) {
 		return false
 	}
+
 	day := hasCronBit(schedule.days, at.Day())
+
 	weekday := hasCronBit(schedule.weekdays, int(at.Weekday()))
 	if schedule.daysRestricted && schedule.weekdaysRestricted {
 		return day || weekday
 	}
+
 	return day && weekday
 }
 

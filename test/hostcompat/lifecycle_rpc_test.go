@@ -15,13 +15,19 @@ func (host *isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 	input, next := permissionJSONPipes(t, command)
 	process := startPermissionProcess(t, host, command)
-	sendPermissionJSON(t, input, map[string]any{"id": "compat-prompt", "type": "prompt", "message": compatibilityPrompt})
+	sendPermissionJSON(
+		t,
+		input,
+		map[string]any{"id": "compat-prompt", "type": "prompt", "message": compatibilityPrompt},
+	)
+
 	for expected := range 2 {
 		select {
 		case hold := <-host.provider.Holds():
 			if hold.Request.Index != expected {
 				t.Fatalf("Pi provider checkpoint = %d, want %d", hold.Request.Index, expected)
 			}
+
 			host.waitForActiveSession(t)
 			hold.Release()
 		case <-process.done:
@@ -30,16 +36,21 @@ func (host *isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
 			t.Fatalf("Pi did not reach provider checkpoint %d", expected)
 		}
 	}
+
 	awaitPiCompletion(t, next)
+
 	if err := input.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	process.wait(t)
 }
 
 func awaitPiCompletion(t *testing.T, next func() map[string]any) {
 	t.Helper()
+
 	ended := false
+
 	for {
 		frame := next()
 		switch frame["type"] {
@@ -49,11 +60,13 @@ func awaitPiCompletion(t *testing.T, next func() map[string]any) {
 			}
 		case "agent_end":
 			assertPiCompletedAssistant(t, frame)
+
 			ended = true
 		case "agent_settled":
 			if !ended {
 				t.Fatal("Pi settled without native agent_end")
 			}
+
 			return
 		}
 	}
@@ -61,10 +74,12 @@ func awaitPiCompletion(t *testing.T, next func() map[string]any) {
 
 func assertPiCompletedAssistant(t *testing.T, frame map[string]any) {
 	t.Helper()
+
 	messages, ok := frame["messages"].([]any)
 	if !ok || len(messages) == 0 {
 		t.Fatal("Pi agent_end has no completed assistant response")
 	}
+
 	last, ok := messages[len(messages)-1].(map[string]any)
 	if !ok || last["role"] != "assistant" || last["stopReason"] != "stop" {
 		t.Fatal("Pi did not complete the native assistant response successfully")

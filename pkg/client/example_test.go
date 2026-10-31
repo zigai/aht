@@ -21,8 +21,22 @@ func ExampleClient_List() {
 
 	storePath := filepath.Join(directory, "sessions.json")
 	presence := registry.PresenceLive
+
 	activity := registry.ActivityRunning
-	if _, err := registry.NewJournal(storePath, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "example"}, Evidence: &registry.Report{Claim: &presence, Activity: &activity}}); err != nil {
+	if _, err := registry.NewJournal(storePath, catalog.Rules{}).
+		Observe(context.Background(), registry.Observation{
+			Harness: registry.Harness(
+				"pi",
+			),
+			At: time.Now().UTC(),
+			Subject: registry.ObservationIdentity{
+				SessionID: "example",
+			},
+			Evidence: &registry.Report{
+				Claim:    &presence,
+				Activity: &activity,
+			},
+		}); err != nil {
 		panic(err)
 	}
 
@@ -30,6 +44,7 @@ func ExampleClient_List() {
 		StorePath:  storePath,
 		SocketPath: filepath.Join(directory, "offline.sock"),
 	})
+
 	sessions, err := aht.List(
 		context.Background(),
 		client.Filter{Presence: client.PresenceLive},
@@ -52,7 +67,21 @@ func ExampleClient_Wait() {
 	storePath := filepath.Join(directory, "sessions.json")
 	presence := registry.PresenceLive
 	activity := registry.ActivityIdle
-	observed, err := registry.NewJournal(storePath, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "wait-example"}, Evidence: &registry.Report{Claim: &presence, Activity: &activity}})
+
+	observed, err := registry.NewJournal(storePath, catalog.Rules{}).
+		Observe(context.Background(), registry.Observation{
+			Harness: registry.Harness(
+				"pi",
+			),
+			At: time.Now().UTC(),
+			Subject: registry.ObservationIdentity{
+				SessionID: "wait-example",
+			},
+			Evidence: &registry.Report{
+				Claim:    &presence,
+				Activity: &activity,
+			},
+		})
 	if err != nil {
 		panic(err)
 	}
@@ -61,6 +90,7 @@ func ExampleClient_Wait() {
 		StorePath: storePath,
 		Mode:      client.ModeDurableOnly,
 	})
+
 	res, err := aht.Wait(context.Background(), client.WaitOptions{
 		ID:       observed.ID,
 		Activity: client.ActivityIdle,

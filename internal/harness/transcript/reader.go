@@ -79,7 +79,14 @@ type (
 	}
 )
 
-func (d *Decoder) Capture(ctx context.Context, role, body, id string, line int, at time.Time) {
+func (d *Decoder) Capture(
+	ctx context.Context,
+	role string,
+	body string,
+	id string,
+	line int,
+	at time.Time,
+) {
 	if d.Emit != nil {
 		d.Emit(ctx, role, body, id, line, at)
 	}

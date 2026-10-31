@@ -28,6 +28,7 @@ func RenderSystemdUnit(opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return strings.Join([]string{
 		"# " + ManagedMarker,
 		"# version: " + strconv.Itoa(ManagedVersion),
@@ -38,7 +39,16 @@ func RenderSystemdUnit(opts Options) (string, error) {
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",
-		"ExecStart=" + systemdArg(normalized.Binary) + " --store " + systemdArg(normalized.StorePath) + " manage tracker run --interval " + normalized.Interval.String() + " --grace-period " + normalized.GracePeriod.String() + " --quiet",
+		"ExecStart=" + systemdArg(
+			normalized.Binary,
+		) + " --store " + systemdArg(
+			normalized.StorePath,
+		) +
+			" manage tracker run --interval " +
+			normalized.Interval.String() +
+			" --grace-period " +
+			normalized.GracePeriod.String() +
+			" --quiet",
 		"Restart=on-failure",
 		"RestartSec=30s",
 		"",
@@ -53,10 +63,12 @@ func platformBackend(opts Options) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	path, err := systemdUnitPath()
 	if err != nil {
 		return nil, err
 	}
+
 	return &linuxBackend{path: path, rendered: rendered}, nil
 }
 
@@ -65,11 +77,24 @@ func systemdUnitPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
+
 	return filepath.Join(base, "systemd", "user", linuxUnitName), nil
 }
 
 func (b *linuxBackend) describe() Result {
-	return Result{Platform: "linux", Manager: "systemd", ManagedPath: b.path, ManagedVersion: ManagedVersion, Path: b.path, Version: ManagedVersion, Installed: false, Current: false, Running: false, Changed: false, Message: ""}
+	return Result{
+		Platform:       "linux",
+		Manager:        "systemd",
+		ManagedPath:    b.path,
+		ManagedVersion: ManagedVersion,
+		Path:           b.path,
+		Version:        ManagedVersion,
+		Installed:      false,
+		Current:        false,
+		Running:        false,
+		Changed:        false,
+		Message:        "",
+	}
 }
 func (b *linuxBackend) content() string { return b.rendered }
 
@@ -77,20 +102,36 @@ func (b *linuxBackend) reload(ctx context.Context, executor CommandExecutor) err
 	if output, err := executor.Run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		return wrapManagerError("systemctl daemon-reload", output, err)
 	}
+
 	return nil
 }
 
 func (b *linuxBackend) load(ctx context.Context, executor CommandExecutor) error {
-	if output, err := executor.Run(ctx, "systemctl", "--user", "enable", "--now", linuxUnitName); err != nil {
+	if output, err := executor.Run(
+		ctx,
+		"systemctl",
+		"--user",
+		"enable",
+		"--now",
+		linuxUnitName,
+	); err != nil {
 		return wrapManagerError("systemctl enable observer", output, err)
 	}
+
 	return nil
 }
 
 func (b *linuxBackend) restart(ctx context.Context, executor CommandExecutor) error {
-	if output, err := executor.Run(ctx, "systemctl", "--user", "restart", linuxUnitName); err != nil {
+	if output, err := executor.Run(
+		ctx,
+		"systemctl",
+		"--user",
+		"restart",
+		linuxUnitName,
+	); err != nil {
 		return wrapManagerError("systemctl restart observer", output, err)
 	}
+
 	return nil
 }
 
@@ -99,17 +140,23 @@ func (b *linuxBackend) unload(ctx context.Context, executor CommandExecutor) err
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("unload systemd service: %w", err)
 	}
+
 	if err != nil && !managerMissing(output) {
 		return wrapManagerError("systemctl disable observer", output, err)
 	}
+
 	return nil
 }
 
-func (b *linuxBackend) running(ctx context.Context, executor CommandExecutor) (bool, string, error) {
+func (b *linuxBackend) running(
+	ctx context.Context,
+	executor CommandExecutor,
+) (bool, string, error) {
 	output, err := executor.Run(ctx, "systemctl", "--user", "is-active", "--quiet", linuxUnitName)
 	if err == nil {
 		return true, "running", nil
 	}
+
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false, "", fmt.Errorf("checking systemd service status: %w", err)
 	}
@@ -118,9 +165,13 @@ func (b *linuxBackend) running(ctx context.Context, executor CommandExecutor) (b
 		inactive = 3
 		unknown  = 4
 	)
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && (exitErr.ExitCode() == inactive || exitErr.ExitCode() == unknown) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](
+		err,
+	); ok &&
+		(exitErr.ExitCode() == inactive || exitErr.ExitCode() == unknown) {
 		return false, "not running", nil
 	}
+
 	return false, "", wrapManagerError("checking systemd service status", output, err)
 }
 
@@ -128,9 +179,14 @@ func systemdArg(value string) string {
 	if value == "" {
 		return "\"\""
 	}
+
 	value = strings.ReplaceAll(strings.ReplaceAll(value, "%", "%%"), "$", "$$")
-	if strings.IndexFunc(value, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '"' || r == '\'' || r == '\\' }) < 0 {
+	if strings.IndexFunc(
+		value,
+		func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '"' || r == '\'' || r == '\\' },
+	) < 0 {
 		return value
 	}
+
 	return strconv.Quote(value)
 }

@@ -16,8 +16,9 @@ func (primeHarness) Distribution() harness.Distribution {
 	}
 }
 
-func distributionInstall(version, work, bin string) []harness.DistributionCommand {
+func distributionInstall(version string, work string, bin string) []harness.DistributionCommand {
 	installer := filepath.Join(work, "prime-agent-install.sh")
+
 	return []harness.DistributionCommand{
 		harness.DownloadCommand(primeInstallerURL, installer),
 		{

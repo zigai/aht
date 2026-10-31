@@ -37,7 +37,10 @@ func NewStoreForSocket(storePath string, socketPath string) *Store {
 // Client returns the realtime client used by the store.
 func (s *Store) Client() *Client { return s.client }
 
-func (s *Store) Observe(ctx context.Context, observation registry.Observation) (registry.Session, error) {
+func (s *Store) Observe(
+	ctx context.Context,
+	observation registry.Observation,
+) (registry.Session, error) {
 	session, err := s.client.Observe(ctx, observation)
 	if !IsUnavailable(err) {
 		return session, err
@@ -98,7 +101,11 @@ func (s *Store) Get(ctx context.Context, id string) (registry.Session, error) {
 
 // Summary returns filtered multiplexer-session summaries from broker or fallback.
 func (s *Store) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return s.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
+	return s.SummaryWithOptions(
+		ctx,
+		filter,
+		registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession},
+	)
 }
 
 // SummaryWithOptions returns filtered summaries with options from broker or fallback.
@@ -111,6 +118,7 @@ func (s *Store) SummaryWithOptions(
 	if !IsUnavailable(err) {
 		return summaries, err
 	}
+
 	summaries, err = s.fallback.SummaryWithOptions(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("summarizing fallback registry: %w", err)

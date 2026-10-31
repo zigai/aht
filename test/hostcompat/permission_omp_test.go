@@ -19,25 +19,33 @@ var errOmpApprovalRequest = errors.New("unexpected OMP native approval request")
 func ompPermissionResponse(request map[string]any, allow bool) (map[string]any, error) {
 	id, _ := request["id"].(string)
 	title, _ := request["title"].(string)
+
 	options, _ := request["options"].([]any)
-	if id == "" || request["type"] != "extension_ui_request" || request["method"] != "select" || strings.SplitN(title, "\n", 2)[0] != "Allow tool: bash" {
+	if id == "" || request["type"] != "extension_ui_request" || request["method"] != "select" ||
+		strings.SplitN(title, "\n", 2)[0] != "Allow tool: bash" {
 		return nil, errOmpApprovalRequest
 	}
+
 	counts := make(map[string]int)
+
 	for _, option := range options {
 		label, ok := option.(string)
 		if !ok {
 			return nil, errOmpApprovalRequest
 		}
+
 		counts[label]++
 	}
+
 	if counts["Approve"] != 1 || counts["Deny"] != 1 {
 		return nil, errOmpApprovalRequest
 	}
+
 	choice := "Deny"
 	if allow {
 		choice = "Approve"
 	}
+
 	return map[string]any{"type": "extension_ui_response", "id": id, "value": choice}, nil
 }
 
@@ -52,13 +60,24 @@ func TestOmpPermissionResponse(t *testing.T) {
 			if allow {
 				want = "Approve"
 			}
+
 			t.Run(options+"/"+want, func(t *testing.T) {
 				var request map[string]any
-				if err := json.Unmarshal([]byte(`{"type":"extension_ui_request","method":"select","id":"native-id","title":"Allow tool: bash\nCommand: printf aht-compat-marker","options":`+options+`}`), &request); err != nil {
+				if err := json.Unmarshal(
+					[]byte(
+						`{"type":"extension_ui_request","method":"select",`+
+							`"id":"native-id","title":"Allow tool: bash\nCommand: printf `+
+							`aht-compat-marker","options":`+options+`}`,
+					),
+					&request,
+				); err != nil {
 					t.Fatal(err)
 				}
+
 				response, err := ompPermissionResponse(request, allow)
-				if err != nil || response["id"] != "native-id" || response["type"] != "extension_ui_response" || response["value"] != want {
+				if err != nil || response["id"] != "native-id" ||
+					response["type"] != "extension_ui_response" ||
+					response["value"] != want {
 					t.Fatalf("response = %v, %v; want correlated %s", response, err, want)
 				}
 			})
@@ -79,11 +98,22 @@ func TestOmpPermissionResponseRejectsInvalidRequest(t *testing.T) {
 	} {
 		t.Run(patch, func(t *testing.T) {
 			for _, allow := range []bool{true, false} {
-				request := map[string]any{"type": "extension_ui_request", "method": "select", "id": "native-id", "title": "Allow tool: bash", "options": []any{"Approve", "Deny"}}
+				request := map[string]any{
+					"type":    "extension_ui_request",
+					"method":  "select",
+					"id":      "native-id",
+					"title":   "Allow tool: bash",
+					"options": []any{"Approve", "Deny"},
+				}
 				if err := json.Unmarshal([]byte(patch), &request); err != nil {
 					t.Fatal(err)
 				}
-				if response, err := ompPermissionResponse(request, allow); response != nil || !errors.Is(err, errOmpApprovalRequest) {
+
+				if response, err := ompPermissionResponse(
+					request,
+					allow,
+				); response != nil ||
+					!errors.Is(err, errOmpApprovalRequest) {
 					t.Fatalf("invalid request answered: %v, %v", response, err)
 				}
 			}

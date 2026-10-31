@@ -19,27 +19,39 @@ var runtimeFixtures embed.FS
 
 func runtimeScript(t *testing.T, name string) string {
 	t.Helper()
+
 	data, err := runtimeFixtures.ReadFile("testdata/" + name)
 	if err != nil {
 		t.Fatalf("read runtime fixture %s: %v", name, err)
 	}
+
 	return string(data)
 }
 
-func runNodeRuntime(t *testing.T, moduleName string, module string, driver string, extraFiles map[string]string) {
+func runNodeRuntime(
+	t *testing.T,
+	moduleName string,
+	module string,
+	driver string,
+	extraFiles map[string]string,
+) {
 	t.Helper()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "package.json"), `{"type":"module"}`, 0o600)
 	writeTestFile(t, filepath.Join(dir, moduleName), module, 0o600)
+
 	for path, content := range extraFiles {
 		writeTestFile(t, filepath.Join(dir, path), content, 0o600)
 	}
+
 	driverPath := filepath.Join(dir, "driver.mjs")
 	writeTestFile(t, driverPath, driver, 0o600)
+
 	args := []string{driverPath}
 	if strings.HasSuffix(moduleName, ".ts") {
 		args = []string{"--experimental-strip-types", driverPath}
 	}
+
 	runGeneratedCommand(t, "", "node", args...)
 }
 
@@ -47,14 +59,17 @@ func writeRuntimeArtifact(t *testing.T, name string, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	writeTestFile(t, path, content, 0o600)
+
 	return path
 }
 
 func writeTestFile(t *testing.T, path string, content string, mode os.FileMode) {
 	t.Helper()
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("create generated runtime directory: %v", err)
 	}
+
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatalf("write generated runtime file: %v", err)
 	}
@@ -62,12 +77,15 @@ func writeTestFile(t *testing.T, path string, content string, mode os.FileMode) 
 
 func runGeneratedCommand(t *testing.T, stdin string, name string, args ...string) {
 	t.Helper()
+
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
+
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = os.Environ()
 	command.Dir = filepath.Dir(command.Path)
 	command.Stdin = strings.NewReader(stdin)
+
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run %s: %v\n%s", strings.Join(command.Args, " "), err, output)
@@ -76,10 +94,12 @@ func runGeneratedCommand(t *testing.T, stdin string, name string, args ...string
 
 func requireRuntimeTool(t *testing.T, name string) string {
 	t.Helper()
+
 	path, err := exec.LookPath(name)
 	if err != nil {
 		t.Fatalf("generated-artifact validation requires %s: %v", name, err)
 	}
+
 	return path
 }
 
@@ -91,12 +111,14 @@ func TestMatchInvocationRequiresSameFrameAndAdjacentFlags(t *testing.T) {
 		{"report", "openclaw", "--activity", "failed"},
 	}
 	matched := false
+
 	for _, inv := range invocations {
 		if matchInvocation(inv, []string{"report", "openclaw", "--activity", "running"}) {
 			matched = true
 			break
 		}
 	}
+
 	if matched {
 		t.Fatal("matchInvocation accepted cross-invocation arguments")
 	}
@@ -124,14 +146,17 @@ func captureBinary(t *testing.T) captureExecutable {
 
 func captureBinaryIn(t *testing.T, directory string) captureExecutable {
 	t.Helper()
+
 	dir := filepath.Join(t.TempDir(), directory)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	capture := filepath.Join(dir, "arguments")
 	command := filepath.Join(dir, "aht-capture")
 	script := runtimeScript(t, "sh/capture-report.sh")
 	writeTestFile(t, command, script, 0o700)
+
 	return captureExecutable{command: command, path: capture}
 }
 
@@ -142,22 +167,27 @@ func captureBinaryCommand(t *testing.T) string {
 
 func parseCapturedInvocations(content string) [][]string {
 	var invocations [][]string
+
 	for chunk := range strings.SplitSeq(content, "---") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
 		}
+
 		var args []string
+
 		for line := range strings.SplitSeq(chunk, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" {
 				args = append(args, line)
 			}
 		}
+
 		if len(args) > 0 {
 			invocations = append(invocations, args)
 		}
 	}
+
 	return invocations
 }
 
@@ -165,25 +195,31 @@ func matchInvocation(args []string, expected []string) bool {
 	if len(expected) == 0 {
 		return true
 	}
+
 	if len(args) < len(expected) {
 		return false
 	}
+
 	idx := 0
 	for idx < len(expected) && !strings.HasPrefix(expected[idx], "-") {
 		if idx >= len(args) || args[idx] != expected[idx] {
 			return false
 		}
+
 		idx++
 	}
+
 	for i := idx; i < len(expected); i += 2 {
 		flag := expected[i]
 		if i+1 >= len(expected) {
 			return slices.Contains(args, flag)
 		}
+
 		if !hasFlagValue(args, flag, expected[i+1]) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -193,19 +229,25 @@ func hasFlagValue(args []string, flag string, value string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 func requireCapturedArguments(t *testing.T, path string, expected ...string) {
 	t.Helper()
+
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			content := string(data)
 			if strings.Contains(content, generatedRuntimeSensitiveSentinel) {
-				t.Fatalf("generated runtime leaked sensitive payload into report arguments:\n%s", content)
+				t.Fatalf(
+					"generated runtime leaked sensitive payload into report arguments:\n%s",
+					content,
+				)
 			}
+
 			invocations := parseCapturedInvocations(content)
 			for _, inv := range invocations {
 				if matchInvocation(inv, expected) {
@@ -215,8 +257,10 @@ func requireCapturedArguments(t *testing.T, path string, expected ...string) {
 		} else if !os.IsNotExist(err) {
 			t.Fatalf("read generated runtime capture: %v", err)
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	data, _ := os.ReadFile(path)
 	t.Fatalf("generated runtime arguments in %s missing framed %q:\n%s", path, expected, data)
 }

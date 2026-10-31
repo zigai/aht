@@ -36,11 +36,14 @@ var (
 	ErrNonPositiveInterval = errors.New("tracker.interval must be positive")
 	ErrNegativeGracePeriod = errors.New("tracker.grace_period must be non-negative")
 	ErrConfigIsDirectory   = strata.ErrPathIsDirectory
-	ErrConfigFileTooLarge  = fmt.Errorf("%w: config file exceeds 1 MiB limit", strata.ErrFileTooLarge)
-	ErrConfigNotFound      = errors.New("config file not found")
-	ErrParseConfig         = errors.New("failed to parse config file")
-	ErrAccessConfig        = errors.New("failed to access config file")
-	ErrInvalidDuration     = errors.New("invalid duration")
+	ErrConfigFileTooLarge  = fmt.Errorf(
+		"%w: config file exceeds 1 MiB limit",
+		strata.ErrFileTooLarge,
+	)
+	ErrConfigNotFound  = errors.New("config file not found")
+	ErrParseConfig     = errors.New("failed to parse config file")
+	ErrAccessConfig    = errors.New("failed to access config file")
+	ErrInvalidDuration = errors.New("invalid duration")
 
 	validSortKeys = map[string]string{
 		"updated":             "updated",
@@ -110,6 +113,8 @@ type DetectionConfig struct {
 }
 
 // Options controls layered configuration resolution.
+//
+//exhaustruct:optional
 type Options struct {
 	Path     string
 	Explicit bool
@@ -128,9 +133,11 @@ func (c *Config) ValidateWith(meta *strata.Metadata) error {
 	if err := c.validateUI(meta); err != nil {
 		return err
 	}
+
 	if err := c.validateRetention(meta); err != nil {
 		return err
 	}
+
 	return c.validateTracker(meta)
 }
 
@@ -170,12 +177,15 @@ func UserConfigDir() string {
 	if val := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); val != "" {
 		return val
 	}
+
 	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
 		return filepath.Join(home, ".config")
 	}
+
 	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
 		return dir
 	}
+
 	return ""
 }
 
@@ -184,12 +194,18 @@ func DefaultPath() string {
 	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
 		return val
 	}
-	if path, err := strata.EditPath(strata.WithAppName("aht"), strata.WithFormats(".toml")); err == nil {
+
+	if path, err := strata.EditPath(
+		strata.WithAppName("aht"),
+		strata.WithFormats(".toml"),
+	); err == nil {
 		return path
 	}
+
 	if dir := UserConfigDir(); dir != "" {
 		return filepath.Join(dir, "aht", "config.toml")
 	}
+
 	return filepath.Join(os.TempDir(), "aht", "config.toml")
 }
 
@@ -255,10 +271,13 @@ func WriteConfigFile(path string) error {
 	if path == "" {
 		path = DefaultPath()
 	}
+
 	if err := validateTOMLPath(path); err != nil {
 		return err
 	}
+
 	_, err := publishConfigFile(path, true)
+
 	return err
 }
 
@@ -272,16 +291,20 @@ func EnsureConfigFile(path string) (bool, error) {
 	if path == "" {
 		path = DefaultPath()
 	}
+
 	if err := validateTOMLPath(path); err != nil {
 		return false, err
 	}
+
 	info, err := os.Stat(path)
 	if err == nil {
 		if info.IsDir() {
 			return false, fmt.Errorf("%w: %s", ErrConfigIsDirectory, path)
 		}
+
 		return false, nil
 	}
+
 	if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("%w %s: %w", ErrAccessConfig, path, err)
 	}
@@ -295,13 +318,16 @@ func ParseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil
 	}
+
 	d, err := strata.ParseDuration(s)
 	if err != nil {
 		if _, numErr := strconv.Atoi(s); numErr == nil {
 			return 0, fmt.Errorf("%w: %q (e.g. %q or %q)", ErrMissingUnitSuffix, s, s+"d", s+"h")
 		}
+
 		return 0, fmt.Errorf("%w: %w", ErrInvalidDuration, err)
 	}
+
 	return d, nil
 }
 
@@ -311,7 +337,14 @@ func NormalizeSort(s string) (string, error) {
 	if key, ok := validSortKeys[norm]; ok {
 		return key, nil
 	}
-	return "", fmt.Errorf("%w %q, must be one of: updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed", ErrInvalidSort, s)
+
+	return "", fmt.Errorf(
+		"%w %q, must be one of: updated, created, harness, presence, "+
+			"activity, cwd, id, multiplexer, tmux, presence-changed, "+
+			"activity-changed",
+		ErrInvalidSort,
+		s,
+	)
 }
 
 // Validate checks configuration invariants.
@@ -323,25 +356,36 @@ func (c *Config) validateUI(meta *strata.Metadata) error {
 	if err := c.validatePresence(meta); err != nil {
 		return err
 	}
+
 	if err := c.validateSort(meta); err != nil {
 		return err
 	}
+
 	return c.validateTimeFormat(meta)
 }
 
 func (c *Config) validatePresence(meta *strata.Metadata) error {
 	trimmed := strings.ToLower(strings.TrimSpace(c.UI.DefaultPresence))
+
 	c.UI.DefaultPresence = trimmed
 	if trimmed == "" || trimmed == "all" {
 		return nil
 	}
+
 	if _, err := registry.NormalizePresence(trimmed); err != nil {
-		valErr := fmt.Errorf("%w %q (allowed: live, gone, unknown, all): %w", ErrInvalidPresence, c.UI.DefaultPresence, err)
+		valErr := fmt.Errorf(
+			"%w %q (allowed: live, gone, unknown, all): %w",
+			ErrInvalidPresence,
+			c.UI.DefaultPresence,
+			err,
+		)
 		if meta != nil {
 			return meta.NewConfigError("ui.default_presence", valErr)
 		}
+
 		return valErr
 	}
+
 	return nil
 }
 
@@ -349,27 +393,38 @@ func (c *Config) validateSort(meta *strata.Metadata) error {
 	if c.UI.Sort == "" {
 		return nil
 	}
+
 	norm, err := NormalizeSort(c.UI.Sort)
 	if err != nil {
 		if meta != nil {
 			return meta.NewConfigError("ui.sort", err)
 		}
+
 		return err
 	}
+
 	c.UI.Sort = norm
+
 	return nil
 }
 
 func (c *Config) validateTimeFormat(meta *strata.Metadata) error {
 	tf := strings.ToLower(strings.TrimSpace(c.UI.TimeFormat))
+
 	c.UI.TimeFormat = tf
 	if tf == "" || tf == "relative" || tf == "absolute" || tf == "iso8601" {
 		return nil
 	}
-	valErr := fmt.Errorf("%w %q (allowed: relative, absolute, iso8601)", ErrInvalidTimeFormat, c.UI.TimeFormat)
+
+	valErr := fmt.Errorf(
+		"%w %q (allowed: relative, absolute, iso8601)",
+		ErrInvalidTimeFormat,
+		c.UI.TimeFormat,
+	)
 	if meta != nil {
 		return meta.NewConfigError("ui.time_format", valErr)
 	}
+
 	return valErr
 }
 
@@ -377,20 +432,29 @@ func (c *Config) validateRetention(meta *strata.Metadata) error {
 	if c.Retention.TombstoneTTL == "" {
 		return nil
 	}
+
 	d, err := ParseDuration(c.Retention.TombstoneTTL)
 	if err != nil {
-		valErr := fmt.Errorf("invalid retention.tombstone_ttl %q: %w", c.Retention.TombstoneTTL, err)
+		valErr := fmt.Errorf(
+			"invalid retention.tombstone_ttl %q: %w",
+			c.Retention.TombstoneTTL,
+			err,
+		)
 		if meta != nil {
 			return meta.NewConfigError("retention.tombstone_ttl", valErr)
 		}
+
 		return valErr
 	}
+
 	if d <= 0 {
 		if meta != nil {
 			return meta.NewConfigError("retention.tombstone_ttl", ErrNonPositiveTTL)
 		}
+
 		return ErrNonPositiveTTL
 	}
+
 	return nil
 }
 
@@ -398,6 +462,7 @@ func (c *Config) validateTracker(meta *strata.Metadata) error {
 	if err := c.validateInterval(meta); err != nil {
 		return err
 	}
+
 	return c.validateGracePeriod(meta)
 }
 
@@ -405,20 +470,25 @@ func (c *Config) validateInterval(meta *strata.Metadata) error {
 	if c.Tracker.Interval == "" {
 		return nil
 	}
+
 	d, err := ParseDuration(c.Tracker.Interval)
 	if err != nil {
 		valErr := fmt.Errorf("invalid tracker.interval %q: %w", c.Tracker.Interval, err)
 		if meta != nil {
 			return meta.NewConfigError("tracker.interval", valErr)
 		}
+
 		return valErr
 	}
+
 	if d <= 0 {
 		if meta != nil {
 			return meta.NewConfigError("tracker.interval", ErrNonPositiveInterval)
 		}
+
 		return ErrNonPositiveInterval
 	}
+
 	return nil
 }
 
@@ -426,20 +496,25 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 	if c.Tracker.GracePeriod == "" {
 		return nil
 	}
+
 	d, err := ParseDuration(c.Tracker.GracePeriod)
 	if err != nil {
 		valErr := fmt.Errorf("invalid tracker.grace_period %q: %w", c.Tracker.GracePeriod, err)
 		if meta != nil {
 			return meta.NewConfigError("tracker.grace_period", valErr)
 		}
+
 		return valErr
 	}
+
 	if d < 0 {
 		if meta != nil {
 			return meta.NewConfigError("tracker.grace_period", ErrNegativeGracePeriod)
 		}
+
 		return ErrNegativeGracePeriod
 	}
+
 	return nil
 }
 
@@ -448,6 +523,7 @@ func TombstoneTTL(cfg Config) (time.Duration, error) {
 	if cfg.Retention.TombstoneTTL == "" {
 		return 0, nil
 	}
+
 	return ParseDuration(cfg.Retention.TombstoneTTL)
 }
 
@@ -466,10 +542,12 @@ func LoadWithOptions(opts Options) (Config, string, error) {
 func LoadWithMetadata(opts Options) (Config, *strata.Metadata, string, error) {
 	strataOpts, targetPath := strataLoadOptions(opts)
 	cfg, meta, err := strata.LoadWithMetadata[Config](strataOpts...)
+
 	resolvedPath := resolveConfigPath(opts, targetPath, meta)
 	if err != nil {
 		return Config{}, nil, resolvedPath, classifyLoadError(err, opts, targetPath, resolvedPath)
 	}
+
 	return cfg, meta, resolvedPath, nil
 }
 
@@ -489,14 +567,17 @@ func strataLoadOptions(opts Options) ([]strata.Option, string) {
 	if targetPath == "" {
 		targetPath = strings.TrimSpace(os.Getenv(ConfigEnv))
 	}
+
 	if targetPath == "" {
 		return strataOpts, ""
 	}
+
 	if opts.Explicit {
 		strataOpts = append(strataOpts, strata.WithPath(targetPath))
 	} else {
 		strataOpts = append(strataOpts, strata.WithOptionalPath(targetPath))
 	}
+
 	if targetPath == "-" && opts.Stdin != nil {
 		strataOpts = append(strataOpts, strata.WithStdin(opts.Stdin))
 	}
@@ -509,6 +590,7 @@ func validateTOMLPath(path string) error {
 	if err != nil {
 		return fmt.Errorf("select TOML config path %s: %w", path, err)
 	}
+
 	return nil
 }
 
@@ -516,31 +598,38 @@ func resolveConfigPath(opts Options, targetPath string, meta *strata.Metadata) s
 	if opts.NoConfig {
 		return ""
 	}
+
 	resolvedPath := DefaultPath()
 	if targetPath != "" {
 		resolvedPath = targetPath
 	}
+
 	if meta != nil {
 		if active := meta.ActiveFiles(); len(active) > 0 {
 			resolvedPath = active[len(active)-1]
 		}
 	}
+
 	return resolvedPath
 }
 
-func classifyLoadError(err error, opts Options, targetPath, resolvedPath string) error {
+func classifyLoadError(err error, opts Options, targetPath string, resolvedPath string) error {
 	if errors.Is(err, strata.ErrFileTooLarge) {
 		return fmt.Errorf("%w: %s", ErrConfigFileTooLarge, resolvedPath)
 	}
+
 	if errors.Is(err, os.ErrNotExist) && opts.Explicit {
 		return fmt.Errorf("%w %s: %w", ErrConfigNotFound, targetPath, err)
 	}
+
 	if _, ok := errors.AsType[*os.PathError](err); ok {
 		return fmt.Errorf("%w %s: %w", ErrAccessConfig, resolvedPath, err)
 	}
+
 	if isValidationOrDurationError(err) {
 		return err
 	}
+
 	return fmt.Errorf("%w %s: %w", ErrParseConfig, resolvedPath, err)
 }
 

@@ -36,6 +36,7 @@ func TestSessionTitlesSearchRegisteredProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if want := []string{"Second title", "First title", "", ""}; !slices.Equal(titles, want) {
 		t.Fatalf("titles = %q, want %q", titles, want)
 	}
@@ -43,32 +44,48 @@ func TestSessionTitlesSearchRegisteredProjects(t *testing.T) {
 
 func writeTitleDatabase(t *testing.T, dataDir string, sessionID string, title string) {
 	t.Helper()
+
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	db, err := sql.Open("sqlite", filepath.Join(dataDir, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() { _ = db.Close() }()
-	if _, err := db.ExecContext(t.Context(), "CREATE TABLE sessions(id TEXT PRIMARY KEY, parent_session_id TEXT, title TEXT)"); err != nil {
+
+	if _, err := db.ExecContext(
+		t.Context(),
+		"CREATE TABLE sessions(id TEXT PRIMARY KEY, parent_session_id TEXT, title TEXT)",
+	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), "INSERT INTO sessions VALUES(?, NULL, ?)", sessionID, title); err != nil {
+
+	if _, err := db.ExecContext(
+		t.Context(),
+		"INSERT INTO sessions VALUES(?, NULL, ?)",
+		sessionID,
+		title,
+	); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func writeProjects(t *testing.T, home string, projects []crushProject) {
 	t.Helper()
+
 	dir := filepath.Join(home, ".local", "share", "crush")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	data, err := json.Marshal(map[string]any{"projects": projects})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "projects.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -25,14 +25,20 @@ func TestSummarySeparatesServersAndCountsAllActivities(t *testing.T) {
 			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil),
 		},
 	}
+
 	summaries := Summaries(sessions)
 	if len(summaries) != 2 {
 		t.Fatalf("summaries = %#v, want distinct servers", summaries)
 	}
-	if summaries[0].MultiplexerServerID != "first" || summaries[0].Failed != 1 || summaries[0].Gone != 1 || summaries[0].Total != 2 {
+
+	if summaries[0].MultiplexerServerID != "first" || summaries[0].Failed != 1 ||
+		summaries[0].Gone != 1 ||
+		summaries[0].Total != 2 {
 		t.Fatalf("first summary = %#v", summaries[0])
 	}
-	if summaries[1].MultiplexerServerID != "second" || summaries[1].Interrupted != 1 || summaries[1].Total != 1 {
+
+	if summaries[1].MultiplexerServerID != "second" || summaries[1].Interrupted != 1 ||
+		summaries[1].Total != 1 {
 		t.Fatalf("second summary = %#v", summaries[1])
 	}
 }
@@ -119,43 +125,60 @@ func TestSummariesSumConservationAndNilActivity(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	s := summaries[0]
 
 	// Total conservation
 	if s.Total != len(sessions) {
 		t.Fatalf("Total = %d, want %d", s.Total, len(sessions))
 	}
+
 	if s.Live+s.Gone+s.PresenceUnknown != s.Total {
 		t.Fatalf("Presence conservation failed: Live(%d) + Gone(%d) + PresUnknown(%d) != Total(%d)",
 			s.Live, s.Gone, s.PresenceUnknown, s.Total)
 	}
+
 	if s.Live != 3 {
 		t.Errorf("Live = %d, want 3", s.Live)
 	}
+
 	if s.Gone != 2 {
 		t.Errorf("Gone = %d, want 2", s.Gone)
 	}
+
 	if s.PresenceUnknown != 3 {
 		t.Errorf("PresenceUnknown = %d, want 3", s.PresenceUnknown)
 	}
 
 	// Activity conservation over active/unknown presence (Live + PresenceUnknown)
 	activeTotal := s.Live + s.PresenceUnknown
+
 	sumActivities := s.Running + s.Waiting + s.Idle + s.Failed + s.Interrupted + s.ActivityUnknown
 	if sumActivities != activeTotal {
-		t.Fatalf("Activity conservation failed: sum(%d) != activeTotal(%d)", sumActivities, activeTotal)
+		t.Fatalf(
+			"Activity conservation failed: sum(%d) != activeTotal(%d)",
+			sumActivities,
+			activeTotal,
+		)
 	}
+
 	if s.Running != 2 {
 		t.Errorf("Running = %d, want 2 (1 live, 1 unknown presence)", s.Running)
 	}
+
 	if s.Idle != 1 {
 		t.Errorf("Idle = %d, want 1", s.Idle)
 	}
+
 	if s.Failed != 0 {
 		t.Errorf("Failed = %d, want 0 (gone sessions must not contribute to activity)", s.Failed)
 	}
+
 	if s.ActivityUnknown != 3 {
-		t.Errorf("ActivityUnknown = %d, want 3 (1 live nil, 1 unknown pres nil, 1 blank pres nil)", s.ActivityUnknown)
+		t.Errorf(
+			"ActivityUnknown = %d, want 3 (1 live nil, 1 unknown pres nil, 1 blank pres nil)",
+			s.ActivityUnknown,
+		)
 	}
 }
 
@@ -217,32 +240,41 @@ func TestSummariesAllActivitiesAndPresenceStates(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	s := summaries[0]
 
 	if s.Total != 8 {
 		t.Errorf("Total = %d, want 8", s.Total)
 	}
+
 	if s.Live != 7 {
 		t.Errorf("Live = %d, want 7", s.Live)
 	}
+
 	if s.Gone != 1 {
 		t.Errorf("Gone = %d, want 1", s.Gone)
 	}
+
 	if s.Running != 1 {
 		t.Errorf("Running = %d, want 1", s.Running)
 	}
+
 	if s.Waiting != 1 {
 		t.Errorf("Waiting = %d, want 1", s.Waiting)
 	}
+
 	if s.Idle != 1 {
 		t.Errorf("Idle = %d, want 1", s.Idle)
 	}
+
 	if s.Failed != 1 {
 		t.Errorf("Failed = %d, want 1", s.Failed)
 	}
+
 	if s.Interrupted != 1 {
 		t.Errorf("Interrupted = %d, want 1", s.Interrupted)
 	}
+
 	if s.ActivityUnknown != 2 {
 		t.Errorf("ActivityUnknown = %d, want 2 (unknownAct + invalidAct)", s.ActivityUnknown)
 	}
@@ -280,17 +312,25 @@ func TestSummariesProjectGroupingCollidingBasenames(t *testing.T) {
 	// Stable ordering sorts by label then root
 	first, second := summaries[0], summaries[1]
 	if first.GroupLabel != "service" || second.GroupLabel != "service" {
-		t.Fatalf("both labels should be 'service', got %q and %q", first.GroupLabel, second.GroupLabel)
+		t.Fatalf(
+			"both labels should be 'service', got %q and %q",
+			first.GroupLabel,
+			second.GroupLabel,
+		)
 	}
+
 	if first.ProjectRoot != "/home/alice/work/service" {
 		t.Errorf("first root = %q, want /home/alice/work/service", first.ProjectRoot)
 	}
+
 	if first.Total != 2 {
 		t.Errorf("first total = %d, want 2", first.Total)
 	}
+
 	if second.ProjectRoot != "/home/bob/other/service" {
 		t.Errorf("second root = %q, want /home/bob/other/service", second.ProjectRoot)
 	}
+
 	if second.Total != 1 {
 		t.Errorf("second total = %d, want 1", second.Total)
 	}
@@ -336,12 +376,15 @@ func TestSummariesProjectGroupingUnknownAndMissingRoot(t *testing.T) {
 	if summaries[0].Project != "alpha" || summaries[0].ProjectRoot != "/home/user/alpha" {
 		t.Errorf("summary[0] = %+v, want alpha", summaries[0])
 	}
+
 	if summaries[1].Project != "unknown" || summaries[1].ProjectRoot != "/var/projects/unknown" {
 		t.Errorf("summary[1] = %+v, want literal unknown project", summaries[1])
 	}
+
 	if summaries[2].Project != "unknown" || summaries[2].ProjectRoot != "" {
 		t.Errorf("summary[2] = %+v, want missing root group", summaries[2])
 	}
+
 	if summaries[2].Total != 2 {
 		t.Errorf("missing root total = %d, want 2", summaries[2].Total)
 	}
@@ -383,10 +426,13 @@ func TestSummariesHarnessGroupingAndUnknown(t *testing.T) {
 	if summaries[0].Harness != HarnessClaude || summaries[0].Total != 1 {
 		t.Errorf("summary[0] = %+v, want claude", summaries[0])
 	}
+
 	if summaries[1].Harness != HarnessCodex || summaries[1].Total != 1 {
 		t.Errorf("summary[1] = %+v, want codex", summaries[1])
 	}
-	if summaries[2].Harness != "" || summaries[2].GroupLabel != "unknown" || summaries[2].Total != 2 {
+
+	if summaries[2].Harness != "" || summaries[2].GroupLabel != "unknown" ||
+		summaries[2].Total != 2 {
 		t.Errorf("summary[2] = %+v, want unknown harness", summaries[2])
 	}
 }
@@ -418,18 +464,27 @@ func TestSummariesMultiplexerGroupingServerQualified(t *testing.T) {
 		}, // unlocated
 	}
 
-	summaries := SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+	summaries := SummariesWithOptions(
+		sessions,
+		SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession},
+	)
 	if len(summaries) != 3 {
 		t.Fatalf("expected 3 mux groups, got %d", len(summaries))
 	}
 
 	// srv1:work, srv2:work, then unlocated
-	if summaries[0].MultiplexerServerID != "srv1" || summaries[0].MultiplexerSessionName != "work" || summaries[0].Total != 2 {
+	if summaries[0].MultiplexerServerID != "srv1" ||
+		summaries[0].MultiplexerSessionName != "work" ||
+		summaries[0].Total != 2 {
 		t.Errorf("summary[0] = %+v, want srv1:work with total 2", summaries[0])
 	}
-	if summaries[1].MultiplexerServerID != "srv2" || summaries[1].MultiplexerSessionName != "work" || summaries[1].Total != 1 {
+
+	if summaries[1].MultiplexerServerID != "srv2" ||
+		summaries[1].MultiplexerSessionName != "work" ||
+		summaries[1].Total != 1 {
 		t.Errorf("summary[1] = %+v, want srv2:work with total 1", summaries[1])
 	}
+
 	if summaries[2].GroupLabel != "unknown" || summaries[2].Total != 1 {
 		t.Errorf("summary[2] = %+v, want unlocated with total 1", summaries[2])
 	}
@@ -469,11 +524,17 @@ func TestSummariesFiltersBeforeGrouping(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	if summaries[0].Total != 2 {
 		t.Errorf("total = %d, want 2 (only claude sessions)", summaries[0].Total)
 	}
+
 	if summaries[0].Live != 1 || summaries[0].Gone != 1 {
-		t.Errorf("Live = %d, Gone = %d, want 1 live and 1 gone", summaries[0].Live, summaries[0].Gone)
+		t.Errorf(
+			"Live = %d, Gone = %d, want 1 live and 1 gone",
+			summaries[0].Live,
+			summaries[0].Gone,
+		)
 	}
 }
 
@@ -483,19 +544,41 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "sessions.json")
 	fileStore := NewJournal(storePath, fixtureRules{})
+
 	memStore, err := OpenMemoryStore(storePath, fixtureRules{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	running := ActivityRunning
-	obs1 := Observation{Harness: HarnessClaude, At: time.Time{}, Subject: ObservationIdentity{SessionID: "sess-1"}, Evidence: &Report{Claim: new(PresenceLive), Activity: &running, Location: &Location{Kind: MultiplexerTmux, SessionName: "main"}, Listing: &Listing{ProjectRoot: "/repo/one"}}}
-	obs2 := Observation{Harness: HarnessCodex, At: time.Time{}, Subject: ObservationIdentity{SessionID: "sess-2"}, Evidence: &Report{Claim: new(PresenceLive), Activity: &running, Location: &Location{Kind: MultiplexerTmux, SessionName: "other"}, Listing: &Listing{ProjectRoot: "/repo/two"}}}
+	obs1 := Observation{
+		Harness: HarnessClaude,
+		At:      time.Time{},
+		Subject: ObservationIdentity{SessionID: "sess-1"},
+		Evidence: &Report{
+			Claim:    new(PresenceLive),
+			Activity: &running,
+			Location: &Location{Kind: MultiplexerTmux, SessionName: "main"},
+			Listing:  &Listing{ProjectRoot: "/repo/one"},
+		},
+	}
+	obs2 := Observation{
+		Harness: HarnessCodex,
+		At:      time.Time{},
+		Subject: ObservationIdentity{SessionID: "sess-2"},
+		Evidence: &Report{
+			Claim:    new(PresenceLive),
+			Activity: &running,
+			Location: &Location{Kind: MultiplexerTmux, SessionName: "other"},
+			Listing:  &Listing{ProjectRoot: "/repo/two"},
+		},
+	}
 
 	ctx := t.Context()
 	if _, err := fileStore.ObserveBatch(ctx, []Observation{obs1, obs2}); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := memStore.ObserveBatch(ctx, []Observation{obs1, obs2}); err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +589,12 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 		SummaryGroupByHarness,
 	} {
 		opts := SummaryOptions{GroupBy: groupBy}
+
 		fileSum, err := fileStore.SummaryWithOptions(ctx, Filter{}, opts)
 		if err != nil {
 			t.Fatalf("fileStore summary error for %s: %v", groupBy, err)
 		}
+
 		memSum, err := memStore.SummaryWithOptions(ctx, Filter{}, opts)
 		if err != nil {
 			t.Fatalf("memStore summary error for %s: %v", groupBy, err)
@@ -519,8 +604,14 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 	}
 }
 
-func assertSummaryParity(t *testing.T, groupBy SummaryGroupBy, fileSum, memSum []Summary) {
+func assertSummaryParity(
+	t *testing.T,
+	groupBy SummaryGroupBy,
+	fileSum []Summary,
+	memSum []Summary,
+) {
 	t.Helper()
+
 	if diff := cmp.Diff(fileSum, memSum); diff != "" {
 		t.Fatalf("group %s summary mismatch (-file +mem):\n%s", groupBy, diff)
 	}
@@ -541,6 +632,7 @@ func TestSummariesUnsupportedGroupBy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, err = memStore.SummaryWithOptions(ctx, Filter{}, SummaryOptions{GroupBy: "invalid-group"})
 	if !errors.Is(err, ErrUnsupportedGroupBy) {
 		t.Fatalf("expected ErrUnsupportedGroupBy, got %v", err)

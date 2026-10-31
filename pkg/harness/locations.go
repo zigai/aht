@@ -54,6 +54,7 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]Location, bo
 	if !ok {
 		return nil, false
 	}
+
 	locations := make([]Location, 0, len(found))
 	for _, location := range found {
 		_, err := os.Stat(location.Path)
@@ -65,17 +66,20 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]Location, bo
 			Exists:  err == nil,
 		})
 	}
+
 	return locations, true
 }
 
 // AllLocations returns the locations of every supported harness in canonical order.
 func AllLocations(projectDir string) []Location {
 	var locations []Location
+
 	for _, harnessID := range Supported() {
 		found, ok := LocationsFor(harnessID, projectDir)
 		if ok {
 			locations = append(locations, found...)
 		}
 	}
+
 	return locations
 }

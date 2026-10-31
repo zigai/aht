@@ -5,5 +5,16 @@ import (
 )
 
 func (crushHarness) Distribution() harness.Distribution {
-	return harness.Distribution{Source: "npm", Package: "@charmland/crush", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "crush", Family: "", PackageExtras: "", Install: nil}
+	return harness.Distribution{
+		Source:        "npm",
+		Package:       "@charmland/crush",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "crush",
+		Family:        "",
+		PackageExtras: "",
+		Install:       nil,
+	}
 }

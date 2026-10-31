@@ -18,8 +18,10 @@ func TestContextAwareIntegrationEntryPointsPreserveCancellation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	options := Options{Harness: registry.Harness("codex"), Binary: testInstallBinary}
 
 	for _, test := range []struct {
@@ -53,19 +55,18 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	harnesses := Harnesses()
+
 	results := make([]Result, 0, len(harnesses))
 	for _, h := range harnesses {
 		res, err := Run(context.Background(), Options{
 			Harness:      h,
 			Binary:       defaultBinary,
 			TargetBinary: "/usr/bin/opencode",
-			DryRun:       false,
-			Force:        false,
-			UseShim:      false,
 		})
 		if err != nil {
 			t.Fatalf("Run for %s returned error: %v", h, err)
 		}
+
 		results = append(results, res)
 	}
 
@@ -73,6 +74,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 		if result.Error != "" {
 			t.Fatalf("unexpected result error for %s: %s", result.Harness, result.Error)
 		}
+
 		if result.Path == "" {
 			t.Fatalf("expected path for %s", result.Harness)
 		}
@@ -93,6 +95,7 @@ func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 		if !ok {
 			t.Fatalf("Harnesses contains unknown harness %q", harness)
 		}
+
 		if _, installable := adapter.(harnesspkg.Installable); !installable {
 			t.Fatalf("Harnesses contains %q without install plan", harness)
 		}
@@ -104,11 +107,13 @@ func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
 // directory where any path built from a missing home would land.
 func withoutHome(t *testing.T) string {
 	t.Helper()
+
 	for _, entry := range os.Environ() {
 		if name, _, _ := strings.Cut(entry, "="); name != "" {
 			t.Setenv(name, "")
 		}
 	}
+
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 
@@ -125,8 +130,10 @@ func TestInstallPlansWithoutHomeFailOrStayAbsolute(t *testing.T) {
 				if !errors.Is(err, harnesspkg.ErrHomeUnknown) {
 					t.Fatalf("plan error = %v, want %v", err, harnesspkg.ErrHomeUnknown)
 				}
+
 				return
 			}
+
 			for _, path := range planPaths(plan) {
 				if !filepath.IsAbs(path) {
 					t.Errorf("plan path %q is relative without a home directory", path)
@@ -146,7 +153,18 @@ func TestIntegrationEntryPointsWithoutHomeFailWithoutTouchingWorkingDirectory(t 
 	}{
 		{name: "install", run: func() error { _, err := Run(t.Context(), options); return err }},
 		{name: "remove", run: func() error { _, err := Remove(t.Context(), options); return err }},
-		{name: "inspect", run: func() error { _, err := Inspect(t.Context(), options.Harness, options.Binary); return err }},
+		{
+			name: "inspect",
+			run: func() error {
+				_, err := Inspect(
+					t.Context(),
+					options.Harness,
+					options.Binary,
+				)
+
+				return err
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.run(); !errors.Is(err, harnesspkg.ErrHomeUnknown) {
@@ -154,6 +172,7 @@ func TestIntegrationEntryPointsWithoutHomeFailWithoutTouchingWorkingDirectory(t 
 			}
 		})
 	}
+
 	entries, err := os.ReadDir(workDir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("working directory entries = %v, %v, want none", entries, err)
@@ -187,10 +206,12 @@ func TestInstallPlanFollowsEnvironmentOverrideWithoutHome(t *testing.T) {
 			if err != nil {
 				t.Fatalf("plan with %s set and no home: %v", test.variable, err)
 			}
+
 			paths := planPaths(plan)
 			if len(paths) == 0 {
 				t.Fatal("plan has no paths")
 			}
+
 			for _, path := range paths {
 				if !strings.HasPrefix(path, override+string(filepath.Separator)) {
 					t.Errorf("plan path %q is outside %s=%q", path, test.variable, override)
@@ -207,45 +228,69 @@ func TestNoInstallRequiredIntegrationManagementIsArtifactFree(t *testing.T) {
 	commandDir := t.TempDir()
 	calledPath := filepath.Join(commandDir, "called")
 	commandPath := filepath.Join(commandDir, "prime-agent")
+
 	command := "#!/bin/sh\nprintf called > " + calledPath + "\nexit 97\n"
 	if err := writeExecutableTestFile(commandPath, []byte(command)); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Setenv("PATH", commandDir)
 
 	const label = "native session catalog"
-	result, err := Run(t.Context(), Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary})
+
+	result, err := Run(
+		t.Context(),
+		Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	requireNoInstallResult(t, result, label)
 
 	status, err := Inspect(t.Context(), registry.Harness("prime-agent"), testInstallBinary)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	requireNoInstallStatus(t, status, label)
 
-	removed, err := Remove(t.Context(), Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary})
+	removed, err := Remove(
+		t.Context(),
+		Options{Harness: registry.Harness("prime-agent"), Binary: testInstallBinary},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	requireNoInstallResult(t, removed, label)
 
 	upgraded, err := Upgrade(t.Context(), testInstallBinary, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	requireUpgradeExcludesHarness(t, upgraded, "prime-agent")
+
 	if _, err := os.Stat(calledPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("native catalog command was executed: %v", err)
 	}
+
 	requireEmptyDirectory(t, stateDir)
 }
 
 func requireNoInstallResult(t *testing.T, result Result, label string) {
 	t.Helper()
-	want := Result{Harness: "prime-agent", Path: label, Changed: false, Message: "no setup required", NextStep: "", Snippet: "", Error: ""}
+
+	want := Result{
+		Harness:  "prime-agent",
+		Path:     label,
+		Changed:  false,
+		Message:  "no setup required",
+		NextStep: "",
+		Snippet:  "",
+		Error:    "",
+	}
 	if result != want {
 		t.Fatalf("result = %+v, want %+v", result, want)
 	}
@@ -253,13 +298,17 @@ func requireNoInstallResult(t *testing.T, result Result, label string) {
 
 func requireNoInstallStatus(t *testing.T, status IntegrationStatus, label string) {
 	t.Helper()
-	if status.Status != ArtifactCurrent || status.Message != "no setup required" || len(status.Paths) != 1 || status.Paths[0] != label {
+
+	if status.Status != ArtifactCurrent || status.Message != "no setup required" ||
+		len(status.Paths) != 1 ||
+		status.Paths[0] != label {
 		t.Fatalf("status = %+v", status)
 	}
 }
 
 func requireUpgradeExcludesHarness(t *testing.T, results []Result, harness string) {
 	t.Helper()
+
 	for _, result := range results {
 		if result.Harness == harness {
 			t.Fatalf("upgrade included no-artifact integration: %+v", result)
@@ -269,10 +318,12 @@ func requireUpgradeExcludesHarness(t *testing.T, results []Result, harness strin
 
 func requireEmptyDirectory(t *testing.T, path string) {
 	t.Helper()
+
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(entries) != 0 {
 		t.Fatalf("integration management wrote state artifacts: %v", entries)
 	}
@@ -309,6 +360,7 @@ func TestInstallRejectsBinaryPathThatIsNotUTF8(t *testing.T) {
 	if !errors.Is(err, errBinaryEncoding) {
 		t.Fatalf("install error = %v, want errBinaryEncoding", err)
 	}
+
 	entries, readErr := os.ReadDir(home)
 	if readErr != nil || len(entries) != 0 {
 		t.Fatalf("rejected install wrote %v (%v)", entries, readErr)

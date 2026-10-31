@@ -14,15 +14,18 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func writeTitleFixture(t *testing.T, root, name, body string) string {
+func writeTitleFixture(t *testing.T, root string, name string, body string) string {
 	t.Helper()
+
 	path := filepath.Join(root, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	return path
 }
 
@@ -30,11 +33,22 @@ func TestSessionTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	generated := writeTitleFixture(t, root, "generated.jsonl", `{"type":"ai-title","sessionId":"generated","aiTitle":"Generated title"}
-`)
-	manual := writeTitleFixture(t, root, "manual.jsonl", `{"type":"custom-title","sessionId":"manual","customTitle":"Manual title"}
+	generated := writeTitleFixture(
+		t,
+		root,
+		"generated.jsonl",
+		`{"type":"ai-title","sessionId":"generated","aiTitle":"Generated title"}
+`,
+	)
+	manual := writeTitleFixture(
+		t,
+		root,
+		"manual.jsonl",
+		`{"type":"custom-title","sessionId":"manual","customTitle":"Manual title"}
 {"type":"ai-title","sessionId":"manual","aiTitle":"Later generated title"}
-`)
+`,
+	)
+
 	titles, err := aht.SessionTitles(t.Context(), []aht.Session{
 		{Harness: aht.HarnessClaude, SessionID: "generated", SessionPath: generated},
 		{Harness: aht.HarnessClaude, SessionID: "manual", SessionPath: manual},
@@ -42,6 +56,7 @@ func TestSessionTitlesReadsClaudeGeneratedAndManualTitles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if diff := cmp.Diff([]string{"Generated title", "Manual title"}, titles); diff != "" {
 		t.Fatalf("titles mismatch (-want +got):\n%s", diff)
 	}
@@ -51,10 +66,15 @@ func TestSessionTitlesReadsHarnessNativeNames(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex")
-	writeTitleFixture(t, codexHome, "session_index.jsonl", `{"id":"codex-1","thread_name":"Old title"}
+	writeTitleFixture(
+		t,
+		codexHome,
+		"session_index.jsonl",
+		`{"id":"codex-1","thread_name":"Old title"}
 {"id":"codex-2","thread_name":"Second thread"}
 {"id":"codex-1","thread_name":"Current title"}
-`)
+`,
+	)
 	pi := writeTitleFixture(t, root, "pi.jsonl", `{"type":"session","id":"pi-1"}
 {"type":"session_info","name":"First name"}
 {"type":"message","message":{"content":"private prompt"}}
@@ -64,24 +84,61 @@ func TestSessionTitlesReadsHarnessNativeNames(t *testing.T) {
 {"type":"session","id":"omp-1","title":"Stale header title"}
 {"type":"message","message":{"content":"private prompt"}}
 `)
-	claude := writeTitleFixture(t, root, "claude.jsonl", `{"type":"ai-title","sessionId":"claude-1","aiTitle":"Claude title"}
-`)
+	claude := writeTitleFixture(
+		t,
+		root,
+		"claude.jsonl",
+		`{"type":"ai-title","sessionId":"claude-1","aiTitle":"Claude title"}
+`,
+	)
 	sessions := []aht.Session{
-		{Harness: aht.HarnessCodex, SessionID: "codex-1", SessionPath: filepath.Join(codexHome, "sessions", "2026", "rollout.jsonl")},
-		{Harness: aht.HarnessCodex, SessionID: "codex-2", SessionPath: filepath.Join(codexHome, "archived_sessions", "rollout.jsonl")},
+		{
+			Harness:     aht.HarnessCodex,
+			SessionID:   "codex-1",
+			SessionPath: filepath.Join(codexHome, "sessions", "2026", "rollout.jsonl"),
+		},
+		{
+			Harness:     aht.HarnessCodex,
+			SessionID:   "codex-2",
+			SessionPath: filepath.Join(codexHome, "archived_sessions", "rollout.jsonl"),
+		},
 		{Harness: aht.HarnessPi, SessionID: "pi-1", SessionPath: pi},
 		{Harness: aht.HarnessOmp, SessionID: "omp-1", SessionPath: omp},
 		{Harness: aht.HarnessPi, SessionID: "another-pi", SessionPath: pi},
 		{Harness: aht.HarnessOmp, SessionID: "another-omp", SessionPath: omp},
-		{Harness: aht.HarnessCodex, SessionID: "unknown", SessionPath: filepath.Join(codexHome, "sessions", "unknown.jsonl")},
+		{
+			Harness:     aht.HarnessCodex,
+			SessionID:   "unknown",
+			SessionPath: filepath.Join(codexHome, "sessions", "unknown.jsonl"),
+		},
 		{Harness: aht.HarnessClaude, SessionID: "claude-1", SessionPath: claude},
-		{Harness: aht.HarnessAmp, SessionID: "T-amp", Observations: registry.Observations{Native: &registry.NativeObservation{Attributes: map[string]string{"amp_title": "Amp title"}}}},
+		{
+			Harness:   aht.HarnessAmp,
+			SessionID: "T-amp",
+			Observations: registry.Observations{
+				Native: &registry.NativeObservation{
+					Attributes: map[string]string{"amp_title": "Amp title"},
+				},
+			},
+		},
 	}
+
 	titles, err := aht.SessionTitles(t.Context(), sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Current title", "Second thread", "Current name", "Fast title", "", "", "", "Claude title", "Amp title"}
+
+	want := []string{
+		"Current title",
+		"Second thread",
+		"Current name",
+		"Fast title",
+		"",
+		"",
+		"",
+		"Claude title",
+		"Amp title",
+	}
 	if diff := cmp.Diff(want, titles); diff != "" {
 		t.Fatalf("titles mismatch (-want +got):\n%s", diff)
 	}
@@ -94,6 +151,7 @@ func TestSessionTitlesPreservesSuccessfulNamesOnReadFailure(t *testing.T) {
 {"type":"session_info","name":"Present"}
 `)
 	bad := writeTitleFixture(t, root, "bad.jsonl", strings.Repeat("x", 65<<10))
+
 	titles, err := aht.SessionTitles(t.Context(), []aht.Session{
 		{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: pi},
 		{Harness: aht.HarnessOmp, SessionID: "omp", SessionPath: bad},
@@ -101,6 +159,7 @@ func TestSessionTitlesPreservesSuccessfulNamesOnReadFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("oversized native record did not report an error")
 	}
+
 	if diff := cmp.Diff([]string{"Present", ""}, titles); diff != "" {
 		t.Fatalf("titles mismatch (-want +got):\n%s", diff)
 	}
@@ -110,7 +169,11 @@ func TestSessionTitlesHonorsCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := aht.SessionTitles(ctx, []aht.Session{{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: "ignored"}})
+
+	_, err := aht.SessionTitles(
+		ctx,
+		[]aht.Session{{Harness: aht.HarnessPi, SessionID: "pi", SessionPath: "ignored"}},
+	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lookup error = %v", err)
 	}

@@ -15,6 +15,10 @@ func ExampleLocationFromEnv() {
 	}
 
 	location := tmux.LocationFromEnv(env)
-	fmt.Printf("Inside: %t, PaneID: %s\n", (location.Kind == registry.MultiplexerTmux), location.PaneID)
+	fmt.Printf(
+		"Inside: %t, PaneID: %s\n",
+		(location.Kind == registry.MultiplexerTmux),
+		location.PaneID,
+	)
 	// Output: Inside: true, PaneID: %0
 }

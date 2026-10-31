@@ -15,16 +15,23 @@ import (
 )
 
 // SessionTitles reads the last native session_info name from each Pi transcript.
-func (piHarness) SessionTitles(ctx context.Context, identities []registry.ObservationIdentity) ([]string, error) {
+func (piHarness) SessionTitles(
+	ctx context.Context,
+	identities []registry.ObservationIdentity,
+) ([]string, error) {
 	titles := make([]string, len(identities))
+
 	var failures []error
+
 	for i, identity := range identities {
 		if err := ctx.Err(); err != nil {
 			return titles, errors.Join(append(failures, err)...)
 		}
+
 		if identity.SessionID == "" || identity.SessionPath == "" {
 			continue
 		}
+
 		title, err := readSessionTitle(ctx, identity.SessionID, identity.SessionPath)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("read Pi session title: %w", err))
@@ -32,23 +39,29 @@ func (piHarness) SessionTitles(ctx context.Context, identities []registry.Observ
 			titles[i] = title
 		}
 	}
+
 	return titles, errors.Join(failures...)
 }
 
-func readSessionTitle(ctx context.Context, sessionID, path string) (string, error) {
+func readSessionTitle(ctx context.Context, sessionID string, path string) (string, error) {
 	file, err := titlefile.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
+
 	if err != nil {
 		return "", fmt.Errorf("open Pi transcript: %w", err)
 	}
+
 	defer func() { _ = file.Close() }() // Read-only close cannot change the observed name.
+
 	reader := bufio.NewReader(file)
+
 	valid, err := matchesSession(ctx, reader, sessionID)
 	if err != nil || !valid {
 		return "", err
 	}
+
 	return scanSessionName(ctx, reader)
 }
 
@@ -57,32 +70,40 @@ func matchesSession(ctx context.Context, reader *bufio.Reader, sessionID string)
 	if errors.Is(err, io.EOF) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, fmt.Errorf("read Pi session header: %w", err)
 	}
+
 	header, err := transcript.ParseTree(first)
 	if err != nil {
 		return false, fmt.Errorf("decode Pi session header: %w", err)
 	}
+
 	return header.Type == "session" && header.ID == sessionID, nil
 }
 
 func scanSessionName(ctx context.Context, reader *bufio.Reader) (string, error) {
 	title := ""
+
 	for {
 		line, err := titlefile.ReadLine(ctx, reader)
 		if errors.Is(err, io.EOF) {
 			return title, nil
 		}
+
 		if errors.Is(err, titlefile.ErrRecordTooLarge) {
 			continue
 		}
+
 		if err != nil {
 			return title, fmt.Errorf("scan Pi session names: %w", err)
 		}
+
 		if !bytes.Contains(line, []byte(`"session_info"`)) {
 			continue
 		}
+
 		entry, decodeErr := transcript.ParseTree(line)
 		if decodeErr == nil && entry.Type == "session_info" {
 			title = entry.Name

@@ -11,26 +11,39 @@ import (
 
 func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 	t.Parallel()
+
 	at := localNoon(9, 26)
+
 	for name, test := range map[string]struct {
 		payload string
 		want    registry.Activity
 	}{
-		"subagent":      {`{"background_tasks":[{"id":"a","type":"subagent","status":"running"}]}`, registry.ActivityRunning},
-		"workflow":      {`{"background_tasks":[{"id":"a","type":"workflow","status":"running"}]}`, registry.ActivityRunning},
-		"cloud session": {`{"background_tasks":[{"id":"a","type":"cloud session","status":"running"}]}`, registry.ActivityRunning},
-		"MCP task":      {`{"background_tasks":[{"id":"a","type":"MCP task","status":"running"}]}`, registry.ActivityRunning},
-		"shell":         {`{"background_tasks":[{"id":"a","type":"shell","status":"running","command":"go test ./..."}]}`, registry.ActivityRunning},
+		"subagent": {`{"background_tasks":[{"id":"a","type":"subagent",` +
+			`"status":"running"}]}`, registry.ActivityRunning},
+		"workflow": {`{"background_tasks":[{"id":"a","type":"workflow",` +
+			`"status":"running"}]}`, registry.ActivityRunning},
+		"cloud session": {`{"background_tasks":[{"id":"a","type":"cloud session",` +
+			`"status":"running"}]}`, registry.ActivityRunning},
+		"MCP task": {`{"background_tasks":[{"id":"a","type":"MCP task",` +
+			`"status":"running"}]}`, registry.ActivityRunning},
+		"shell": {`{"background_tasks":[{"id":"a","type":"shell",` +
+			`"status":"running","command":"go test ./..."}]}`, registry.ActivityRunning},
 		"shell beside monitor": {
-			`{"background_tasks":[{"id":"a","type":"monitor","status":"running"},{"id":"b","type":"shell","status":"running"}]}`,
+			`{"background_tasks":[{"id":"a","type":"monitor",` +
+				`"status":"running"},{"id":"b","type":"shell",` +
+				`"status":"running"}]}`,
 			registry.ActivityRunning,
 		},
-		"monitor":         {`{"background_tasks":[{"id":"a","type":"monitor","status":"running"}]}`, registry.ActivityIdle},
-		"teammate":        {`{"background_tasks":[{"id":"a","type":"teammate","status":"running"}]}`, registry.ActivityIdle},
-		"unknown type":    {`{"background_tasks":[{"id":"a","type":"local_future","status":"running"}]}`, registry.ActivityIdle},
-		"empty arrays":    {`{"background_tasks":[],"session_crons":[]}`, registry.ActivityIdle},
-		"absent arrays":   {`{}`, registry.ActivityIdle},
-		"malformed tasks": {`{"background_tasks":{"type":"subagent"},"session_crons":"*/5 * * * *"}`, registry.ActivityIdle},
+		"monitor": {`{"background_tasks":[{"id":"a","type":"monitor",` +
+			`"status":"running"}]}`, registry.ActivityIdle},
+		"teammate": {`{"background_tasks":[{"id":"a","type":"teammate",` +
+			`"status":"running"}]}`, registry.ActivityIdle},
+		"unknown type": {`{"background_tasks":[{"id":"a","type":"local_future",` +
+			`"status":"running"}]}`, registry.ActivityIdle},
+		"empty arrays":  {`{"background_tasks":[],"session_crons":[]}`, registry.ActivityIdle},
+		"absent arrays": {`{}`, registry.ActivityIdle},
+		"malformed tasks": {`{"background_tasks":{"type":"subagent"},"session_crons":"*/` +
+			`5 * * * *"}`, registry.ActivityIdle},
 		"self-paced wakeup in ten minutes": {
 			`{"session_crons":[{"id":"c","schedule":"10 12 26 9 *","recurring":false}]}`,
 			registry.ActivityRunning,
@@ -54,11 +67,18 @@ func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
 			var payload map[string]any
 			if err := json.Unmarshal([]byte(test.payload), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if got := New().PayloadActivity(harness.HookEventStop, registry.ActivityIdle, payload, at); got != test.want {
+
+			if got := New().PayloadActivity(
+				harness.HookEventStop,
+				registry.ActivityIdle,
+				payload,
+				at,
+			); got != test.want {
 				t.Fatalf("PayloadActivity = %s, want %s", got, test.want)
 			}
 		})
@@ -67,8 +87,12 @@ func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 
 func TestPayloadActivityOnlyRefinesIdleStop(t *testing.T) {
 	t.Parallel()
+
 	at := localNoon(9, 26)
-	payload := map[string]any{"background_tasks": []any{map[string]any{"id": "a", "type": "subagent"}}}
+
+	payload := map[string]any{
+		"background_tasks": []any{map[string]any{"id": "a", "type": "subagent"}},
+	}
 	for _, test := range []struct {
 		event    string
 		activity registry.Activity
@@ -86,8 +110,10 @@ func TestPayloadActivityOnlyRefinesIdleStop(t *testing.T) {
 
 func TestCronScheduleFollowsClaudeCodeSyntax(t *testing.T) {
 	t.Parallel()
+
 	saturdayNoon := localNoon(9, 26)
 	sundayNoon := localNoon(9, 27)
+
 	firstOfMonth := localNoon(10, 1)
 	for _, test := range []struct {
 		expression string
@@ -114,6 +140,7 @@ func TestCronScheduleFollowsClaudeCodeSyntax(t *testing.T) {
 		if !ok {
 			t.Fatalf("parseCronSchedule(%q) rejected supported syntax", test.expression)
 		}
+
 		if got := schedule.matches(test.at); got != test.want {
 			t.Fatalf("%q matches %s = %t, want %t", test.expression, test.at, got, test.want)
 		}
@@ -122,6 +149,7 @@ func TestCronScheduleFollowsClaudeCodeSyntax(t *testing.T) {
 
 func TestCronScheduleRejectsUnsupportedSyntax(t *testing.T) {
 	t.Parallel()
+
 	for _, expression := range []string{
 		"",
 		"* * * *",

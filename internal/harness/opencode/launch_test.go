@@ -11,10 +11,12 @@ import (
 func TestLaunchDisablesAuxiliaryTitleRequests(t *testing.T) {
 	root := t.TempDir()
 	model := harness.LaunchModel{Endpoint: "http://127.0.0.1:1234", APIKey: "fake", Model: "fake"}
+
 	plan, err := New().LaunchPlan(harness.LaunchPaths{Root: root}, model)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	configPath := filepath.Join(root, "opencode", "opencode.json")
 	for _, file := range plan.Files {
 		if file.Path != configPath {
@@ -26,6 +28,7 @@ func TestLaunchDisablesAuxiliaryTitleRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			var config struct {
 				Model  string `json:"model"`
 				Agents map[string]struct {
@@ -35,14 +38,18 @@ func TestLaunchDisablesAuxiliaryTitleRequests(t *testing.T) {
 			if err := json.Unmarshal(data, &config); err != nil {
 				t.Fatal(err)
 			}
+
 			if len(config.Agents) != 1 || !config.Agents["title"].Disabled {
 				t.Fatalf("scratch launch must disable only the auxiliary title agent: %s", data)
 			}
+
 			if config.Model != harness.LaunchProviderName+"/fake" {
 				t.Fatalf("primary model changed: %s", data)
 			}
 		}
+
 		return
 	}
+
 	t.Fatal("launch plan has no native config")
 }

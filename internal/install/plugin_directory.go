@@ -25,19 +25,25 @@ type pluginDirectoryInstall struct {
 	removeTree   func(string) error
 }
 
-func renderInstallFiles(specs []harnesspkg.RenderedFileInstallSpec, kind string) (map[string]string, error) {
+func renderInstallFiles(
+	specs []harnesspkg.RenderedFileInstallSpec,
+	kind string,
+) (map[string]string, error) {
 	files := make(map[string]string, len(specs))
 	for _, spec := range specs {
 		if err := validateInstallRelativePath(spec.Name); err != nil {
 			return nil, err
 		}
+
 		content, err := renderInstallContent(spec.Content, spec.JSONContent)
 		if err != nil {
 			return nil, fmt.Errorf("encoding %s file %s: %w", kind, spec.Name, err)
 		}
+
 		if _, exists := files[spec.Name]; exists {
 			return nil, fmt.Errorf("%w: %q", errDuplicatePluginFileName, spec.Name)
 		}
+
 		files[spec.Name] = content
 	}
 
@@ -49,10 +55,12 @@ func validateInstallRelativePath(name string) error {
 	if trimmed == "" || filepath.IsAbs(trimmed) || strings.Contains(trimmed, `\`) {
 		return fmt.Errorf("%w: %q", errInvalidPluginFileName, name)
 	}
+
 	cleaned := filepath.Clean(trimmed)
 	if cleaned != trimmed || cleaned == "." {
 		return fmt.Errorf("%w: %q", errInvalidPluginFileName, name)
 	}
+
 	for part := range strings.SplitSeq(cleaned, string(filepath.Separator)) {
 		if part == "" || part == "." || part == ".." {
 			return fmt.Errorf("%w: %q", errInvalidPluginFileName, name)
@@ -83,6 +91,7 @@ func (plugin pluginDirectoryInstall) rename(oldPath string, newPath string) erro
 	} else {
 		err = os.Rename(oldPath, newPath)
 	}
+
 	if err != nil {
 		return fmt.Errorf("renaming %s to %s: %w", oldPath, newPath, err)
 	}
@@ -97,6 +106,7 @@ func (plugin pluginDirectoryInstall) removeAll(path string) error {
 	} else {
 		err = os.RemoveAll(path)
 	}
+
 	if err != nil {
 		return fmt.Errorf("removing directory tree %s: %w", path, err)
 	}
@@ -109,6 +119,7 @@ func (plugin pluginDirectoryInstall) ensureManaged(force bool) error {
 	if err != nil {
 		return err
 	}
+
 	if !managed && !force {
 		return fmt.Errorf("%w: %s; pass --force to replace it", errForeignFile, plugin.dir)
 	}
@@ -125,9 +136,11 @@ func (plugin pluginDirectoryInstall) managed() (bool, error) {
 
 		return false, fmt.Errorf("checking plugin directory: %w", err)
 	}
+
 	if !info.IsDir() {
 		return false, nil
 	}
+
 	if plugin.markerFile == "" {
 		return false, nil
 	}
@@ -153,12 +166,14 @@ func (plugin pluginDirectoryInstall) needsUpdate() (bool, error) {
 
 		return false, fmt.Errorf("checking plugin directory %s: %w", plugin.dir, err)
 	}
+
 	if !info.IsDir() {
 		return true, nil
 	}
 
 	for name, content := range plugin.files {
 		path := filepath.Join(plugin.dir, name)
+
 		current, err := os.ReadFile(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -167,6 +182,7 @@ func (plugin pluginDirectoryInstall) needsUpdate() (bool, error) {
 
 			return false, fmt.Errorf("reading plugin file %s: %w", path, err)
 		}
+
 		if string(current) != content {
 			return true, nil
 		}
@@ -185,6 +201,7 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating staged plugin directory: %w", err)
 	}
+
 	keep := false
 	defer func() {
 		if !keep {
@@ -198,9 +215,11 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 			return "", fmt.Errorf("writing plugin file %s: %w", path, err)
 		}
 	}
+
 	if err := syncDir(stagedDir); err != nil {
 		return "", err
 	}
+
 	keep = true
 
 	return stagedDir, nil
@@ -215,6 +234,7 @@ func writeStagedPluginFile(path string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("opening staged plugin file: %w", err)
 	}
+
 	keepOpen := true
 	defer func() {
 		if keepOpen {
@@ -225,12 +245,15 @@ func writeStagedPluginFile(path string, data []byte) error {
 	if _, err := file.Write(data); err != nil {
 		return fmt.Errorf("writing staged plugin file: %w", err)
 	}
+
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("syncing staged plugin file: %w", err)
 	}
+
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("closing staged plugin file: %w", err)
 	}
+
 	keepOpen = false
 
 	return nil
@@ -238,10 +261,12 @@ func writeStagedPluginFile(path string, data []byte) error {
 
 func (plugin pluginDirectoryInstall) hasStaleFiles() (bool, error) {
 	expectedDirs := plugin.expectedDirs()
+
 	err := filepath.WalkDir(plugin.dir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if path == plugin.dir {
 			return nil
 		}
@@ -250,6 +275,7 @@ func (plugin pluginDirectoryInstall) hasStaleFiles() (bool, error) {
 		if err != nil {
 			return fmt.Errorf("relativizing plugin path: %w", err)
 		}
+
 		if entry.IsDir() {
 			if _, ok := expectedDirs[rel]; ok {
 				return nil
@@ -257,6 +283,7 @@ func (plugin pluginDirectoryInstall) hasStaleFiles() (bool, error) {
 
 			return errStalePluginFile
 		}
+
 		if _, ok := plugin.files[rel]; !ok {
 			return errStalePluginFile
 		}
@@ -266,9 +293,11 @@ func (plugin pluginDirectoryInstall) hasStaleFiles() (bool, error) {
 	if err == nil {
 		return false, nil
 	}
+
 	if errors.Is(err, errStalePluginFile) {
 		return true, nil
 	}
+
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
@@ -278,6 +307,7 @@ func (plugin pluginDirectoryInstall) hasStaleFiles() (bool, error) {
 
 func (plugin pluginDirectoryInstall) expectedDirs() map[string]struct{} {
 	dirs := make(map[string]struct{})
+
 	for name := range plugin.files {
 		dir := filepath.Dir(name)
 		for dir != "." {
@@ -306,10 +336,12 @@ func (plugin pluginDirectoryInstall) installStaged() (func() error, func() error
 // at the install operation level.
 func (plugin pluginDirectoryInstall) replace(stagedDir string) (func() error, func() error, error) {
 	parent := filepath.Dir(plugin.dir)
+
 	backup, backupExists, err := plugin.backupCurrent(parent)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if err := plugin.rename(stagedDir, plugin.dir); err != nil {
 		cause := fmt.Errorf("installing staged plugin directory: %w", err)
 		return nil, nil, errors.Join(cause, plugin.restoreBackup(backup, backupExists))
@@ -330,9 +362,11 @@ func (plugin pluginDirectoryInstall) backupCurrent(parent string) (string, bool,
 	if err != nil {
 		return "", false, fmt.Errorf("creating plugin backup path: %w", err)
 	}
+
 	if err := os.Remove(backup); err != nil {
 		return "", false, fmt.Errorf("preparing plugin backup path: %w", err)
 	}
+
 	if err := plugin.rename(plugin.dir, backup); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return "", false, fmt.Errorf("backing up plugin directory: %w", err)
@@ -348,6 +382,7 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 	if !backupExists {
 		return nil
 	}
+
 	if err := plugin.rename(backup, plugin.dir); err != nil {
 		return fmt.Errorf("restoring plugin directory backup %s: %w", backup, err)
 	}
@@ -355,11 +390,16 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 	return nil
 }
 
-func (plugin pluginDirectoryInstall) rollbackReplacement(parent string, backup string, backupExists bool) error {
+func (plugin pluginDirectoryInstall) rollbackReplacement(
+	parent string,
+	backup string,
+	backupExists bool,
+) error {
 	var removeErr error
 	if err := plugin.removeAll(plugin.dir); err != nil {
 		removeErr = fmt.Errorf("removing staged plugin directory: %w", err)
 	}
+
 	restoreErr := plugin.restoreBackup(backup, backupExists)
 	if restoreErr == nil {
 		restoreErr = syncDir(parent)
@@ -368,7 +408,11 @@ func (plugin pluginDirectoryInstall) rollbackReplacement(parent string, backup s
 	return errors.Join(removeErr, restoreErr)
 }
 
-func (plugin pluginDirectoryInstall) commitReplacement(parent string, backup string, backupExists bool) error {
+func (plugin pluginDirectoryInstall) commitReplacement(
+	parent string,
+	backup string,
+	backupExists bool,
+) error {
 	if backupExists {
 		if err := plugin.removeAll(backup); err != nil {
 			return fmt.Errorf("removing plugin directory backup %s: %w", backup, err)

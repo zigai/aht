@@ -54,6 +54,8 @@ type Server struct {
 }
 
 // Options configures a broker server.
+//
+//exhaustruct:optional
 type Options struct {
 	Store            *registry.MemoryStore
 	SocketPath       string
@@ -74,6 +76,7 @@ func New(opts Options) *Server {
 	if wt <= 0 {
 		wt = writeTimeout
 	}
+
 	return &Server{
 		store:            opts.Store,
 		socketPath:       opts.SocketPath,
@@ -89,9 +92,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	if ctx == nil {
 		return errContextNil
 	}
+
 	if s.store == nil {
 		return errStoreNil
 	}
+
 	if s.socketPath == "" {
 		return errSocketPathEmpty
 	}
@@ -101,17 +106,22 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	defer cleanupLocal(s.socketPath, listener)
+
 	return s.serve(ctx, listener)
 }
 
 func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
+
 	var connections sync.WaitGroup
+
 	defer func() {
 		cancel()
 		connections.Wait()
 	}()
+
 	listenerCleanup := cancelclose.OnCancel(ctx, listener)
+
 	defer func() {
 		cancel()
 		listenerCleanup()
@@ -122,6 +132,7 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 	}
 
 	semaphore := make(chan struct{}, s.maxConnections)
+
 	for {
 		connection, acceptErr := listener.Accept()
 		if acceptErr != nil {
@@ -137,10 +148,12 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 			connections.Go(func() {
 				defer func() {
 					<-semaphore
+
 					if s.onConnectionDone != nil {
 						s.onConnectionDone()
 					}
 				}()
+
 				s.handleConnection(ctx, connection)
 			})
 		default:
@@ -153,12 +166,14 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 
 func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	defer cancelclose.OnCancel(ctx, connection)()
+
 	if err := connection.SetReadDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		return
 	}
 
 	scanner := bufio.NewScanner(connection)
 	scanner.Buffer(make([]byte, scannerInitialBytes), maxRequestBytes)
+
 	if !scanner.Scan() {
 		return
 	}
@@ -168,10 +183,12 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		_ = s.writeResponse(connection, errorResponse(request.ID, "invalid_json", err))
 		return
 	}
+
 	if err := validateRequest(request); err != nil {
 		_ = s.writeResponse(connection, errorResponse(request.ID, "invalid_request", err))
 		return
 	}
+
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {
 		return
 	}
@@ -189,6 +206,7 @@ func validateRequest(request broker.Request) error {
 	if request.Version != broker.ProtocolVersion {
 		return fmt.Errorf("%w: %d", errProtocolVersion, request.Version)
 	}
+
 	if request.ID == "" {
 		return errRequestIDRequired
 	}
@@ -210,14 +228,17 @@ func validateRequest(request broker.Request) error {
 	if request.Method == broker.MethodObserve && request.Observation == nil {
 		return errObservationRequired
 	}
+
 	if request.Method == broker.MethodObserveBatch {
 		if len(request.Observations) == 0 {
 			return errBatchRequired
 		}
+
 		if len(request.Observations) > maxBatchObservations {
 			return fmt.Errorf("%w: maximum %d", errBatchTooLarge, maxBatchObservations)
 		}
 	}
+
 	if request.Method == broker.MethodGet && request.SessionID == "" {
 		return errSessionIDRequired
 	}
@@ -229,11 +250,13 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 	response := newResponse(request.ID, "result")
 
 	var err error
+
 	switch request.Method {
 	case broker.MethodPing:
 		response.Now = time.Now().UTC()
 	case broker.MethodObserve:
 		var session registry.Session
+
 		session, err = s.store.Observe(ctx, *request.Observation)
 		response.Session = &session
 	case broker.MethodObserveBatch:
@@ -242,6 +265,7 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 		response.Sessions, err = s.store.List(ctx, request.Filter)
 	case broker.MethodGet:
 		var session registry.Session
+
 		session, err = s.store.Get(ctx, request.SessionID)
 		response.Session = &session
 	case broker.MethodSummary:
@@ -249,16 +273,20 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 		if opts.GroupBy == "" {
 			opts.GroupBy = registry.SummaryGroupByMultiplexerSession
 		}
+
 		response.Summaries, err = s.store.SummaryWithOptions(ctx, request.Filter, opts)
 	case broker.MethodGC:
 		var result registry.GCResult
+
 		result, err = s.store.GC(ctx, request.DeleteAfter)
 		response.GC = &result
 	case broker.MethodReset:
 		var result registry.ResetResult
+
 		result, err = s.store.Reset(ctx)
 		response.Reset = &result
 	}
+
 	if err != nil {
 		return operationErrorResponse(request.ID, err)
 	}
@@ -276,35 +304,44 @@ func (s *Server) serveSubscription(
 		_ = s.writeResponse(connection, operationErrorResponse(request.ID, err))
 		return
 	}
+
 	if err := s.writeResponse(connection, snapshotResponse(request.ID, state)); err != nil {
 		return
 	}
 
 	revision := state.Revision
+
 	for {
 		waitCtx, cancel := context.WithTimeout(ctx, heartbeatInterval)
 		next, waitErr := s.store.WaitForRevision(waitCtx, revision, request.Filter)
+
 		cancel()
+
 		if waitErr != nil {
 			if ctx.Err() != nil {
 				return
 			}
+
 			if errors.Is(waitErr, context.DeadlineExceeded) {
 				response := newResponse(request.ID, "heartbeat")
+
 				response.Now = time.Now().UTC()
 				if err := s.writeResponse(connection, response); err != nil {
 					return
 				}
+
 				continue
 			}
 
 			_ = s.writeResponse(connection, operationErrorResponse(request.ID, waitErr))
+
 			return
 		}
 
 		if err := s.writeResponse(connection, snapshotResponse(request.ID, next)); err != nil {
 			return
 		}
+
 		revision = next.Revision
 	}
 }
@@ -316,14 +353,14 @@ func snapshotResponse(id string, state registry.StateSnapshot) broker.Response {
 	return response
 }
 
-func errorResponse(id, code string, err error) broker.Response {
+func errorResponse(id string, code string, err error) broker.Response {
 	response := newResponse(id, "error")
 	response.Error = &broker.Error{Code: code, Message: err.Error()}
 
 	return response
 }
 
-func newResponse(id, responseType string) broker.Response {
+func newResponse(id string, responseType string) broker.Response {
 	return broker.Response{
 		Version:   broker.ProtocolVersion,
 		ID:        id,
@@ -341,6 +378,7 @@ func newResponse(id, responseType string) broker.Response {
 
 func operationErrorResponse(id string, err error) broker.Response {
 	code := "operation_failed"
+
 	switch {
 	case errors.Is(err, registry.ErrSessionNotFound):
 		code = "not_found"
@@ -360,22 +398,29 @@ func (s *Server) writeResponse(connection net.Conn, response broker.Response) er
 	if err != nil {
 		return fmt.Errorf("encoding broker response: %w", err)
 	}
+
 	if len(encoded) >= broker.MaxResponseBytes {
-		encoded, err = json.Marshal(errorResponse(response.ID, "response_too_large", errResponseTooLarge))
+		encoded, err = json.Marshal(
+			errorResponse(response.ID, "response_too_large", errResponseTooLarge),
+		)
 		if err != nil {
 			return fmt.Errorf("encoding oversized-response error: %w", err)
 		}
 	}
+
 	timeout := s.writeTimeout
 	if timeout <= 0 {
 		timeout = writeTimeout
 	}
+
 	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return fmt.Errorf("setting broker write deadline: %w", err)
 	}
+
 	if _, err := connection.Write(append(encoded, '\n')); err != nil {
 		return fmt.Errorf("writing broker response: %w", err)
 	}
+
 	if err := connection.SetWriteDeadline(time.Time{}); err != nil {
 		return fmt.Errorf("clearing broker write deadline: %w", err)
 	}

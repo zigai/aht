@@ -34,13 +34,18 @@ func DefaultCatalogList(ctx context.Context) ([]CatalogEntry, error) {
 	return defaultCatalogList(ctx, catalog.NativeCatalog)
 }
 
-func defaultCatalogList(ctx context.Context, listNative func(context.Context) ([]catalog.NativeCatalogEntry, error)) ([]CatalogEntry, error) {
+func defaultCatalogList(
+	ctx context.Context,
+	listNative func(context.Context) ([]catalog.NativeCatalogEntry, error),
+) ([]CatalogEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("catalog context: %w", err)
 	}
+
 	configured, configuredErr := configuredCatalog()
 	native, nativeErr := listNative(ctx)
 	configured = append(configured, nativeCatalogEntries(native)...)
+
 	return configured, errors.Join(configuredErr, nativeErr)
 }
 
@@ -49,25 +54,31 @@ func configuredCatalog() ([]CatalogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if payload == "" {
 		return nil, nil
 	}
+
 	entries, err := decodeCatalog([]byte(payload))
 	if err != nil {
 		return nil, err
 	}
+
 	for index := range entries {
 		if entries[index].Harness == "" {
 			return nil, fmt.Errorf("%w at index %d", errCatalogEntryHarness, index)
 		}
+
 		normalized, err := catalog.Parse(string(entries[index].Harness))
 		if err != nil {
 			return nil, fmt.Errorf("catalog entry %d: %w", index, err)
 		}
+
 		entries[index].Harness = normalized
 		entries[index].ResumeCommand = append([]string(nil), entries[index].ResumeCommand...)
 		entries[index].Attributes = cloneAttributes(entries[index].Attributes)
 	}
+
 	return entries, nil
 }
 
@@ -75,13 +86,24 @@ func nativeCatalogEntries(entries []catalog.NativeCatalogEntry) []CatalogEntry {
 	result := make([]CatalogEntry, 0, len(entries))
 	for _, entry := range entries {
 		result = append(result, CatalogEntry{
-			Harness: entry.Harness, SessionID: entry.Session.SessionID, SessionPath: entry.Session.SessionPath,
-			ResumeCommand: append([]string(nil), entry.Session.ResumeCommand...), CWD: entry.Session.CWD,
-			ProjectRoot: entry.Session.ProjectRoot, ProcessPID: entry.Session.ProcessPID, Current: entry.Session.Current,
-			Activity: entry.Session.Activity, Attributes: cloneAttributes(entry.Session.Attributes), Title: entry.Session.Title,
-			Reporter: entry.Reporter,
+			Harness:     entry.Harness,
+			SessionID:   entry.Session.SessionID,
+			SessionPath: entry.Session.SessionPath,
+			ResumeCommand: append(
+				[]string(nil),
+				entry.Session.ResumeCommand...,
+			),
+			CWD:         entry.Session.CWD,
+			ProjectRoot: entry.Session.ProjectRoot,
+			ProcessPID:  entry.Session.ProcessPID,
+			Current:     entry.Session.Current,
+			Activity:    entry.Session.Activity,
+			Attributes:  cloneAttributes(entry.Session.Attributes),
+			Title:       entry.Session.Title,
+			Reporter:    entry.Reporter,
 		})
 	}
+
 	return result
 }
 
@@ -89,8 +111,10 @@ func cloneAttributes(attributes map[string]string) map[string]string {
 	if attributes == nil {
 		return nil
 	}
+
 	cloned := make(map[string]string, len(attributes))
 	maps.Copy(cloned, attributes)
+
 	return cloned
 }
 
@@ -99,17 +123,21 @@ func catalogPayload() (string, error) {
 	if len(payload) > maxCatalogBytes {
 		return "", errCatalogTooLarge
 	}
+
 	if payload != "" {
 		return payload, nil
 	}
+
 	path := strings.TrimSpace(os.Getenv(catalogFileEnv))
 	if path == "" {
 		return "", nil
 	}
+
 	data, err := readCatalogFile(path)
 	if err != nil {
 		return "", err
 	}
+
 	return string(data), nil
 }
 
@@ -118,29 +146,42 @@ func readCatalogFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening catalog file %q: %w", path, err)
 	}
+
 	file, err := root.Open(filepath.Base(path))
 	if err != nil {
 		closeErr := root.Close()
 		if closeErr != nil {
-			return nil, fmt.Errorf("opening catalog file %q: %w; closing root: %w", path, err, closeErr)
+			return nil, fmt.Errorf(
+				"opening catalog file %q: %w; closing root: %w",
+				path,
+				err,
+				closeErr,
+			)
 		}
+
 		return nil, fmt.Errorf("opening catalog file %q: %w", path, err)
 	}
+
 	data, readErr := io.ReadAll(io.LimitReader(file, maxCatalogBytes+1))
 	closeErr := file.Close()
 	rootCloseErr := root.Close()
+
 	if readErr != nil {
 		return nil, fmt.Errorf("reading catalog file %q: %w", path, readErr)
 	}
+
 	if closeErr != nil {
 		return nil, fmt.Errorf("closing catalog file %q: %w", path, closeErr)
 	}
+
 	if rootCloseErr != nil {
 		return nil, fmt.Errorf("closing catalog root for %q: %w", path, rootCloseErr)
 	}
+
 	if len(data) > maxCatalogBytes {
 		return nil, fmt.Errorf("reading catalog file %q: %w", path, errCatalogTooLarge)
 	}
+
 	return data, nil
 }
 
@@ -149,14 +190,17 @@ func decodeCatalog(data []byte) ([]CatalogEntry, error) {
 	if err := json.Unmarshal(data, &entries); err == nil && entries != nil {
 		return entries, nil
 	}
+
 	var envelope struct {
 		Sessions []CatalogEntry `json:"sessions"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("decoding catalog JSON: %w", err)
 	}
+
 	if envelope.Sessions == nil {
 		return nil, fmt.Errorf("decoding catalog JSON: %w", errCatalogSessionsType)
 	}
+
 	return envelope.Sessions, nil
 }

@@ -15,9 +15,11 @@ func SessionCWD(session Session) string {
 	if session.CWD != "" {
 		return session.CWD
 	}
+
 	if session.Process != nil && session.Process.CWD != "" {
 		return session.Process.CWD
 	}
+
 	return session.Location.PaneCurrentPath
 }
 
@@ -26,38 +28,46 @@ func CanonicalPath(p string) string {
 	if strings.TrimSpace(p) == "" {
 		return ""
 	}
+
 	cleaned := filepath.Clean(p)
 	if abs, err := filepath.Abs(cleaned); err == nil {
 		cleaned = abs
 	}
+
 	return canonicalizeExistingOrParent(cleaned)
 }
 
 // PathsEqual reports whether p1 and p2 resolve to the same canonical path.
-func PathsEqual(p1, p2 string) bool {
+func PathsEqual(p1 string, p2 string) bool {
 	if p1 == "" || p2 == "" {
 		return false
 	}
+
 	if p1 == p2 {
 		return true
 	}
+
 	return CanonicalPath(p1) == CanonicalPath(p2)
 }
 
 // PathWithinOrEqual reports whether target is equal to base or located within base.
-func PathWithinOrEqual(target, base string) bool {
+func PathWithinOrEqual(target string, base string) bool {
 	targetCanon := CanonicalPath(target)
+
 	baseCanon := CanonicalPath(base)
 	if targetCanon == "" || baseCanon == "" {
 		return false
 	}
+
 	if targetCanon == baseCanon {
 		return true
 	}
+
 	rel, err := filepath.Rel(baseCanon, targetCanon)
 	if err != nil {
 		return false
 	}
+
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -66,14 +76,17 @@ func MatchesProject(session Session, project string, subtree bool) bool {
 	if project == "" {
 		return true
 	}
+
 	sessionProj := session.ProjectRoot
 	if sessionProj == "" {
 		sessionProj = SessionCWD(session)
 	}
+
 	if subtree {
 		return PathWithinOrEqual(session.ProjectRoot, project) ||
 			PathWithinOrEqual(SessionCWD(session), project)
 	}
+
 	return PathsEqual(sessionProj, project)
 }
 
@@ -82,6 +95,7 @@ func MatchesServer(session Session, server string) bool {
 	if session.Location.ServerID == server {
 		return true
 	}
+
 	return PathsEqual(session.Location.ServerID, server)
 }
 
@@ -89,6 +103,7 @@ func MatchesServer(session Session, server string) bool {
 func (filter Filter) NormalizePaths() Filter {
 	filter.Project = CanonicalPath(filter.Project)
 	filter.CWD = CanonicalPath(filter.CWD)
+
 	return filter
 }
 
@@ -101,28 +116,39 @@ func FilterSessions(sessions []Session, filter Filter) []Session {
 		if filter.Harness != "" && session.Harness != filter.Harness {
 			continue
 		}
+
 		if filter.Presence != "" && session.Presence() != filter.Presence {
 			continue
 		}
-		if filter.Activity != "" && (session.Activity() == nil || *session.Activity() != filter.Activity) {
+
+		if filter.Activity != "" &&
+			(session.Activity() == nil || *session.Activity() != filter.Activity) {
 			continue
 		}
-		if filter.MultiplexerSession != "" && session.Location.SessionName != filter.MultiplexerSession && session.Location.SessionID != filter.MultiplexerSession {
+
+		if filter.MultiplexerSession != "" &&
+			session.Location.SessionName != filter.MultiplexerSession &&
+			session.Location.SessionID != filter.MultiplexerSession {
 			continue
 		}
 
 		if filter.CWD != "" && !PathsEqual(SessionCWD(session), filter.CWD) {
 			continue
 		}
+
 		if filter.Project != "" && !MatchesProject(session, filter.Project, filter.ProjectSubtree) {
 			continue
 		}
+
 		if !matchesFilterLocation(session, filter) {
 			continue
 		}
+
 		filtered = append(filtered, session)
 	}
+
 	sortSessions(filtered)
+
 	return filtered
 }
 
@@ -134,11 +160,18 @@ func sessionIDForObservation(observation Observation) string {
 	case observation.Subject.SessionPath != "":
 		parts = append(parts, "path", filepath.Clean(observation.Subject.SessionPath))
 	case observation.ProcessIdentity() != nil && observation.ProcessIdentity().Complete():
-		parts = append(parts, "process", strconv.Itoa(observation.ProcessIdentity().PID), observation.ProcessIdentity().StartIdentity)
+		parts = append(
+			parts,
+			"process",
+			strconv.Itoa(observation.ProcessIdentity().PID),
+			observation.ProcessIdentity().StartIdentity,
+		)
 	default:
 		parts = append(parts, "event", observation.Report().Event)
 	}
+
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+
 	return string(observation.Harness) + "-" + hex.EncodeToString(sum[:8])
 }
 
@@ -146,13 +179,16 @@ func matchesFilterLocation(session Session, filter Filter) bool {
 	if filter.MultiplexerKind != "" && session.Location.Kind != filter.MultiplexerKind {
 		return false
 	}
+
 	if filter.MultiplexerServer != "" && !MatchesServer(session, filter.MultiplexerServer) {
 		return false
 	}
+
 	if filter.MultiplexerPane != "" &&
 		session.Location.PaneID != filter.MultiplexerPane {
 		return false
 	}
+
 	return true
 }
 
@@ -173,12 +209,14 @@ func sortSessions(sessions []Session) {
 	})
 }
 
-func compareNumericStrings(left, right string) int {
+func compareNumericStrings(left string, right string) int {
 	leftNumber, leftErr := strconv.Atoi(left)
+
 	rightNumber, rightErr := strconv.Atoi(right)
 	if leftErr == nil && rightErr == nil {
 		return cmp.Compare(leftNumber, rightNumber)
 	}
+
 	return strings.Compare(left, right)
 }
 
@@ -189,6 +227,7 @@ func maxTime(values ...time.Time) time.Time {
 			latest = value
 		}
 	}
+
 	return latest
 }
 
@@ -196,10 +235,13 @@ func canonicalizeExistingOrParent(path string) string {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		return filepath.Clean(resolved)
 	}
+
 	parent := filepath.Dir(path)
 	if parent == path || parent == "." || parent == "/" || parent == string(filepath.Separator) {
 		return path
 	}
+
 	resolvedParent := canonicalizeExistingOrParent(parent)
+
 	return filepath.Join(resolvedParent, filepath.Base(path))
 }

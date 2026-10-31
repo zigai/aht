@@ -11,12 +11,17 @@ import (
 
 const launchModelName = "AHT fakeprovider"
 
-func (opencodeHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (opencodeHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	configDir := filepath.Join(paths.Root, "opencode")
+
 	configJSON, err := launchConfigJSON(model)
 	if err != nil {
 		return harness.LaunchPlan{}, err
 	}
+
 	selected := harness.LaunchProviderName + "/" + model.Model
 
 	return harness.LaunchPlan{
@@ -36,6 +41,7 @@ func (opencodeHarness) LaunchPlan(paths harness.LaunchPaths, model harness.Launc
 			if prompt == "" {
 				return nil, nil
 			}
+
 			return []string{"--prompt", prompt}, nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -57,16 +63,21 @@ func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
 		"agents": map[string]any{"title": map[string]any{"disabled": true}},
 		"provider": map[string]any{
 			harness.LaunchProviderName: map[string]any{
-				"npm":     "@ai-sdk/openai-compatible",
-				"name":    launchModelName,
-				"options": map[string]any{"baseURL": model.Endpoint + "/v1", "apiKey": model.APIKey},
-				"models":  map[string]any{model.Model: map[string]any{"name": launchModelName}},
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": launchModelName,
+				"options": map[string]any{
+					"baseURL": model.Endpoint + "/v1",
+					"apiKey":  model.APIKey,
+				},
+				"models": map[string]any{model.Model: map[string]any{"name": launchModelName}},
 			},
 		},
 	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("encode opencode config: %w", err)
 	}
+
 	return data, nil
 }

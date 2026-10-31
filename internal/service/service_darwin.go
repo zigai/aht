@@ -38,11 +38,27 @@ func RenderLaunchAgent(opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	args := []string{normalized.Binary, "--store", normalized.StorePath, "manage", "tracker", "run", "--interval", normalized.Interval.String(), "--grace-period", normalized.GracePeriod.String(), "--quiet"}
+	args := []string{
+		normalized.Binary,
+		"--store",
+		normalized.StorePath,
+		"manage",
+		"tracker",
+		"run",
+		"--interval",
+		normalized.Interval.String(),
+		"--grace-period",
+		normalized.GracePeriod.String(),
+		"--quiet",
+	}
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-	b.WriteString("<!-- " + ManagedMarker + " -->\n<!-- version: " + strconv.Itoa(ManagedVersion) + " -->\n")
-	b.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
+	b.WriteString(
+		"<!-- " + ManagedMarker + " -->\n<!-- version: " + strconv.Itoa(ManagedVersion) + " -->\n",
+	)
+	b.WriteString(
+		"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n",
+	)
 	b.WriteString("<plist version=\"1.0\"><dict>\n")
 	b.WriteString("<key>Label</key>")
 	if err := writePlistString(&b, darwinLabel); err != nil {
@@ -69,7 +85,11 @@ func platformBackend(opts Options) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &darwinBackend{path: path, rendered: rendered, domain: fmt.Sprintf("gui/%d", os.Getuid())}, nil
+	return &darwinBackend{
+		path:     path,
+		rendered: rendered,
+		domain:   fmt.Sprintf("gui/%d", os.Getuid()),
+	}, nil
 }
 
 func launchAgentPath() (string, error) {
@@ -81,7 +101,19 @@ func launchAgentPath() (string, error) {
 }
 
 func (b *darwinBackend) describe() Result {
-	return Result{Platform: "darwin", Manager: "launchctl", ManagedPath: b.path, ManagedVersion: ManagedVersion, Path: b.path, Version: ManagedVersion, Installed: false, Current: false, Running: false, Changed: false, Message: ""}
+	return Result{
+		Platform:       "darwin",
+		Manager:        "launchctl",
+		ManagedPath:    b.path,
+		ManagedVersion: ManagedVersion,
+		Path:           b.path,
+		Version:        ManagedVersion,
+		Installed:      false,
+		Current:        false,
+		Running:        false,
+		Changed:        false,
+		Message:        "",
+	}
 }
 func (b *darwinBackend) content() string                               { return b.rendered }
 func (b *darwinBackend) reload(context.Context, CommandExecutor) error { return nil }
@@ -110,7 +142,10 @@ func (b *darwinBackend) unload(ctx context.Context, executor CommandExecutor) er
 	return nil
 }
 
-func (b *darwinBackend) running(ctx context.Context, executor CommandExecutor) (bool, string, error) {
+func (b *darwinBackend) running(
+	ctx context.Context,
+	executor CommandExecutor,
+) (bool, string, error) {
 	output, err := executor.Run(ctx, "launchctl", "print", b.domain+"/"+darwinLabel)
 	if err == nil {
 		for line := range strings.Lines(string(output)) {
@@ -125,7 +160,10 @@ func (b *darwinBackend) running(ctx context.Context, executor CommandExecutor) (
 	}
 	// Missing-service diagnostics are distinct from an unavailable GUI domain,
 	// insufficient privileges, or a failure to execute launchctl itself.
-	if _, exited := errors.AsType[*exec.ExitError](err); exited && strings.Contains(strings.ToLower(string(output)), "could not find service") {
+	if _, exited := errors.AsType[*exec.ExitError](
+		err,
+	); exited &&
+		strings.Contains(strings.ToLower(string(output)), "could not find service") {
 		return false, "not running", nil
 	}
 	return false, "", wrapManagerError("checking launchd service status", output, err)

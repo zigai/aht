@@ -28,10 +28,12 @@ func (e *upgradeExecutor) Run(ctx context.Context, name string, args ...string) 
 		err := exec.CommandContext(ctx, "/bin/sh", "-c", "exit 3").Run()
 		return nil, fmt.Errorf("inactive service: %w", err)
 	}
+
 	if args[1] == "daemon-reload" && e.failReload {
 		e.failReload = false
 		return nil, errManagerTestFailure
 	}
+
 	return nil, nil
 }
 
@@ -55,82 +57,121 @@ func TestUpgradePreservesTrackerSettingsAndState(t *testing.T) {
 	}
 }
 
-func verifyTrackerUpgrade(t *testing.T, stopped, stale, dryRun bool) {
+func verifyTrackerUpgrade(t *testing.T, stopped bool, stale bool, dryRun bool) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	options := Options{Binary: "/tmp/new aht", StorePath: filepath.Join(dir, "state with % and \"quotes\".json"), Interval: 7 * time.Second, GracePeriod: 19 * time.Second}
+	options := Options{
+		Binary:      "/tmp/new aht",
+		StorePath:   filepath.Join(dir, `state with % and "quotes".json`),
+		Interval:    7 * time.Second,
+		GracePeriod: 19 * time.Second,
+	}
+
 	want, err := RenderSystemdUnit(options)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	previous := want
 	if stale {
-		previous = strings.ReplaceAll(strings.ReplaceAll(want, "version: "+strconv.Itoa(ManagedVersion), "version: "+strconv.Itoa(ManagedVersion-1)), "/tmp/new aht", "/tmp/old aht")
+		previous = strings.ReplaceAll(
+			strings.ReplaceAll(
+				want,
+				"version: "+strconv.Itoa(ManagedVersion),
+				"version: "+strconv.Itoa(ManagedVersion-1),
+			),
+			"/tmp/new aht",
+			"/tmp/old aht",
+		)
 	}
+
 	path := filepath.Join(dir, "systemd", "user", linuxUnitName)
 	if err := writeAtomic(path, []byte(previous)); err != nil {
 		t.Fatal(err)
 	}
+
 	executor := &upgradeExecutor{stopped: stopped}
+
 	result, err := New(executor).Upgrade(t.Context(), options.Binary, dryRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Running == stopped || !result.Installed || result.Changed != (!dryRun && (stale || !stopped)) {
+
+	if result.Running == stopped || !result.Installed ||
+		result.Changed != (!dryRun && (stale || !stopped)) {
 		t.Fatalf("result = %+v", result)
 	}
+
 	wantMessage := expectedTrackerUpgradeMessage(stopped, stale, dryRun)
 	if result.Message != wantMessage {
 		t.Fatalf("result.Message = %q, want %q", result.Message, wantMessage)
 	}
+
 	expected := want
 	if dryRun {
 		expected = previous
 	}
+
 	assertServiceContent(t, path, expected)
 	assertUpgradeManagerCalls(t, executor.calls, stopped, stale, dryRun)
 }
 
-func expectedTrackerUpgradeMessage(stopped, stale, dryRun bool) string {
+func expectedTrackerUpgradeMessage(stopped bool, stale bool, dryRun bool) string {
 	if dryRun {
 		if stopped {
 			return "would update (stopped)"
 		}
+
 		return "would update and restart"
 	}
+
 	if stopped {
 		if stale {
 			return "stopped (updated)"
 		}
+
 		return "stopped (up to date)"
 	}
+
 	return "updated and restarted"
 }
 
-func assertUpgradeManagerCalls(t *testing.T, got [][]string, stopped, stale, dryRun bool) {
+func assertUpgradeManagerCalls(
+	t *testing.T,
+	got [][]string,
+	stopped bool,
+	stale bool,
+	dryRun bool,
+) {
 	t.Helper()
+
 	calls := [][]string{{"systemctl", "--user", "is-active", "--quiet", linuxUnitName}}
 	if !dryRun && stale {
 		calls = append(calls, []string{"systemctl", "--user", "daemon-reload"})
 	}
+
 	if !dryRun && !stopped {
 		calls = append(calls, []string{"systemctl", "--user", "restart", linuxUnitName})
 	}
+
 	if !reflect.DeepEqual(got, calls) {
 		t.Fatalf("calls = %v, want %v", got, calls)
 	}
 }
 
-func assertServiceContent(t *testing.T, path, expected string) {
+func assertServiceContent(t *testing.T, path string, expected string) {
 	t.Helper()
+
 	got, err := os.ReadFile(path)
 	if expected == "" {
 		if !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("missing service created: %v", err)
 		}
+
 		return
 	}
+
 	if err != nil || string(got) != expected {
 		t.Fatalf("service content = %q, %v; want %q", got, err, expected)
 	}
@@ -145,15 +186,19 @@ func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 			options := Options{Binary: "/bin/aht", StorePath: test.store, Interval: 7 * time.Second}
 			if _, err := New(&recordingExecutor{}).Install(t.Context(), options); err != nil {
 				t.Fatal(err)
 			}
 
-			result, err := New(&upgradeExecutor{stopped: true}).Upgrade(t.Context(), options.Binary, true)
+			result, err := New(
+				&upgradeExecutor{stopped: true},
+			).Upgrade(t.Context(), options.Binary, true)
 			if err != nil {
 				t.Fatalf("upgrade could not read the installed unit: %v", err)
 			}
+
 			if !result.Current {
 				t.Fatalf("upgrade recovered different settings: %+v", result)
 			}
@@ -162,23 +207,32 @@ func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
 }
 
 func TestUpgradeLeavesMissingForeignAndInvalidServicesAlone(t *testing.T) {
-	for _, content := range []string{"", "user service", "# aht managed observer service\n# version: 7\nExecStart=/bin/aht --unknown setting\n"} {
+	for _, content := range []string{
+		"",
+		"user service",
+		"# aht managed observer service\n# version: 7\nExecStart=/bin/aht --unknown setting\n",
+	} {
 		t.Run(content, func(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 			path, err := systemdUnitPath()
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if content != "" {
 				if err := writeAtomic(path, []byte(content)); err != nil {
 					t.Fatal(err)
 				}
 			}
+
 			executor := &upgradeExecutor{}
+
 			result, err := New(executor).Upgrade(t.Context(), "/bin/aht", false)
 			if (err != nil) != (content != "") || result.Changed || len(executor.calls) != 0 {
 				t.Fatalf("result = %+v, err = %v, calls = %v", result, err, executor.calls)
 			}
+
 			assertServiceContent(t, path, content)
 		})
 	}
@@ -186,23 +240,32 @@ func TestUpgradeLeavesMissingForeignAndInvalidServicesAlone(t *testing.T) {
 
 func TestUpgradeRollbackDoesNotStartStoppedTracker(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	previous, err := RenderSystemdUnit(Options{Binary: "/bin/old-aht", StorePath: "/tmp/state", Interval: time.Second})
+
+	previous, err := RenderSystemdUnit(
+		Options{Binary: "/bin/old-aht", StorePath: "/tmp/state", Interval: time.Second},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	path, err := systemdUnitPath()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := writeAtomic(path, []byte(previous)); err != nil {
 		t.Fatal(err)
 	}
+
 	executor := &upgradeExecutor{stopped: true, failReload: true}
+
 	_, err = New(executor).Upgrade(t.Context(), "/bin/new-aht", false)
 	if !errors.Is(err, errManagerTestFailure) {
 		t.Fatalf("error = %v", err)
 	}
+
 	assertServiceContent(t, path, previous)
+
 	for _, call := range executor.calls {
 		if call[2] != "is-active" && call[2] != "daemon-reload" {
 			t.Fatalf("rollback started stopped tracker: %v", executor.calls)

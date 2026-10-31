@@ -124,7 +124,15 @@ func CommandName(ctx context.Context, pid int) (string, error) {
 }
 
 func darwinPSInventory(ctx context.Context, pids []string) (map[int]darwinPSRow, error) {
-	output, err := command.Run(ctx, "/bin/ps", nil, "-o", "pid=,ppid=,pgid=,tpgid=,tty=,comm=,args=", "-p", strings.Join(pids, ","))
+	output, err := command.Run(
+		ctx,
+		"/bin/ps",
+		nil,
+		"-o",
+		"pid=,ppid=,pgid=,tpgid=,tty=,comm=,args=",
+		"-p",
+		strings.Join(pids, ","),
+	)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("wait for ps process inventory: %w", ctxErr)
@@ -165,7 +173,10 @@ func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) 
 		pid := int(process.Proc.P_pid)
 		startIdentity, validStart := darwinProcessStartIdentity(process)
 		if pid <= 0 || process.Eproc.Ppid < 0 || process.Eproc.Pgid < 0 || !validStart {
-			return nil, nil, &TableError{Path: "kern.proc.uid", Err: fmt.Errorf("pid %d: %w", pid, errInvalidDarwinProcessRecord)}
+			return nil, nil, &TableError{
+				Path: "kern.proc.uid",
+				Err:  fmt.Errorf("pid %d: %w", pid, errInvalidDarwinProcessRecord),
+			}
 		}
 		pids = append(pids, strconv.Itoa(pid))
 		processes = append(processes, Process{
@@ -236,7 +247,17 @@ func parseDarwinPSRow(fields []string) (darwinPSRow, error) {
 }
 
 func darwinLsofCWD(ctx context.Context, pids []string) (map[int]string, error) {
-	output, err := command.Run(ctx, "/usr/sbin/lsof", nil, "-a", "-d", "cwd", "-p", strings.Join(pids, ","), "-Fn")
+	output, err := command.Run(
+		ctx,
+		"/usr/sbin/lsof",
+		nil,
+		"-a",
+		"-d",
+		"cwd",
+		"-p",
+		strings.Join(pids, ","),
+		"-Fn",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("run lsof process inventory: %w", err)
 	}

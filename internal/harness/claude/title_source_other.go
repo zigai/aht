@@ -23,5 +23,8 @@ func openTitleSource(path string) (*os.File, os.FileInfo, error) {
 }
 
 func stampTitleSource(_ os.FileInfo) (titleSourceStamp, error) {
-	return titleSourceStamp{}, fmt.Errorf("inspect Claude transcript identity on this platform: %w", errors.ErrUnsupported)
+	return titleSourceStamp{}, fmt.Errorf(
+		"inspect Claude transcript identity on this platform: %w",
+		errors.ErrUnsupported,
+	)
 }

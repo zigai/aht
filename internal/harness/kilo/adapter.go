@@ -63,19 +63,23 @@ func (kiloHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "plugin", kiloPluginName),
-		Label:       "kilo plugin",
-		ConfigLabel: "kilo plugin",
-		Content: harness.RenderScriptTemplate(
-			kiloPluginTemplate,
-			kiloIntegrationID,
-			binary,
-			kiloIntegrationSource,
-			integrationVersion,
-		),
-		JSONContent: nil,
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "plugin", kiloPluginName),
+				Label:       "kilo plugin",
+				ConfigLabel: "kilo plugin",
+				Content: harness.RenderScriptTemplate(
+					kiloPluginTemplate,
+					kiloIntegrationID,
+					binary,
+					kiloIntegrationSource,
+					integrationVersion,
+				),
+				JSONContent: nil,
+			}},
+		},
+	}, nil
 }
 
 func (kiloHarness) ResumeCommand(sessionID string, _ string) []string {

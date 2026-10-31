@@ -30,12 +30,15 @@ func (manifest *importManifest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return fmt.Errorf("decoding import manifest object: %w", err)
 	}
+
 	if raw, ok := fields[importsKey]; ok {
 		if err := json.Unmarshal(raw, &manifest.Imports); err != nil {
 			return fmt.Errorf("decoding import manifest entries: %w", err)
 		}
+
 		delete(fields, importsKey)
 	}
+
 	manifest.extra = fields
 
 	return nil
@@ -46,10 +49,12 @@ func (manifest importManifest) MarshalJSON() ([]byte, error) {
 	if imports == nil {
 		imports = []importEntry{}
 	}
+
 	rawImports, err := json.Marshal(imports)
 	if err != nil {
 		return nil, fmt.Errorf("encoding import manifest entries: %w", err)
 	}
+
 	fields := make(map[string]json.RawMessage, len(manifest.extra)+1)
 	maps.Copy(fields, manifest.extra)
 	fields[importsKey] = rawImports
@@ -91,18 +96,27 @@ func newImportEntry(plan harnesspkg.ImportManifestInstallPlan, now time.Time) im
 
 // withPlan returns the entry with the fields aht owns brought in line with the
 // plan, and whether that changed anything. Fields it does not own are kept.
-func (entry importEntry) withPlan(plan harnesspkg.ImportManifestInstallPlan, now time.Time) (importEntry, bool) {
+func (entry importEntry) withPlan(
+	plan harnesspkg.ImportManifestInstallPlan,
+	now time.Time,
+) (importEntry, bool) {
 	next := importEntry{fields: make(map[string]json.RawMessage, len(entry.fields)+1)}
 	maps.Copy(next.fields, entry.fields)
+
 	changed := false
+
 	if entry.source() != plan.Source {
 		next.set("source", plan.Source)
+
 		changed = true
 	}
+
 	if entry.importedAt() == "" {
 		next.set("importedAt", now.Format(time.RFC3339))
+
 		changed = true
 	}
+
 	components := slices.Clone(entry.components())
 	for _, component := range plan.Components {
 		if !slices.Contains(components, component) {
@@ -110,6 +124,7 @@ func (entry importEntry) withPlan(plan harnesspkg.ImportManifestInstallPlan, now
 			changed = true
 		}
 	}
+
 	if changed {
 		next.set("components", components)
 	}
@@ -145,5 +160,6 @@ func (entry importEntry) set(key string, value any) {
 	if err != nil {
 		panic(fmt.Sprintf("encoding import manifest field %s: %v", key, err))
 	}
+
 	entry.fields[key] = data
 }

@@ -39,10 +39,12 @@ type serveRequest struct {
 
 func (app *application) newServeCommand() *cobra.Command {
 	var address string
+
 	command := &cobra.Command{
-		Use:           "serve",
-		Short:         "Serve the fake model provider in the foreground",
-		Long:          "Serve the Echo fake model provider until Ctrl-C. Each model request is printed when it arrives.",
+		Use:   "serve",
+		Short: "Serve the fake model provider in the foreground",
+		Long: "Serve the Echo fake model provider until Ctrl-C. Each model " +
+			"request is printed when it arrives.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -50,10 +52,13 @@ func (app *application) newServeCommand() *cobra.Command {
 			if err := validateAddress(address); err != nil {
 				return err
 			}
+
 			return app.runServe(cmd.Context(), address)
 		},
 	}
-	command.Flags().StringVar(&address, "address", "", "listen address `<host:port>` [default: 127.0.0.1:0]")
+	command.Flags().
+		StringVar(&address, "address", "", "listen address `<host:port>` [default: 127.0.0.1:0]")
+
 	return command
 }
 
@@ -69,16 +74,20 @@ func (app *application) runServe(ctx context.Context, address string) error {
 	if err != nil {
 		return fmt.Errorf("start fake provider: %w", err)
 	}
+
 	if err := app.writeListening(server.URL()); err != nil {
 		return finish(err, server.Close())
 	}
+
 	return finish(app.streamRequests(ctx, server), server.Close())
 }
 
 func (app *application) streamRequests(ctx context.Context, server *fakeprovider.Server) error {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+
 	printedConversation, printedSide := 0, 0
+
 	for {
 		conversation := server.Requests()
 		side := server.SideRequests()
@@ -86,12 +95,15 @@ func (app *application) streamRequests(ctx context.Context, server *fakeprovider
 		slices.SortStableFunc(pending, func(a, b fakeprovider.Request) int {
 			return a.ReceivedAt.Compare(b.ReceivedAt)
 		})
+
 		for _, request := range pending {
 			if err := app.writeRequest(request); err != nil {
 				return err
 			}
 		}
+
 		printedConversation, printedSide = len(conversation), len(side)
+
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("stop serving requests: %w", ctx.Err())
@@ -104,6 +116,7 @@ func (app *application) writeListening(url string) error {
 	if app.outputJSON {
 		return app.writeJSONLine(serveListening{Event: eventListening, URL: url})
 	}
+
 	return app.writeDetails([]detail{{label: "URL", value: url}})
 }
 
@@ -118,19 +131,32 @@ func (app *application) writeRequest(request fakeprovider.Request) error {
 			UserText: request.UserText,
 		})
 	}
-	return app.writef("%s #%d %s %s %q\n", request.Kind, request.Index, request.Protocol, request.Path, request.UserText)
+
+	return app.writef(
+		"%s #%d %s %s %q\n",
+		request.Kind,
+		request.Index,
+		request.Protocol,
+		request.Path,
+		request.UserText,
+	)
 }
 
 func validateAddress(address string) error {
 	if address == "" {
 		return nil
 	}
+
 	_, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return usageError{err: fmt.Errorf("%w %q: want HOST:PORT", errInvalidAddress, address)}
 	}
+
 	if _, err := strconv.ParseUint(port, 10, portBits); err != nil {
-		return usageError{err: fmt.Errorf("%w %q: port must be from 0 to 65535", errInvalidAddress, address)}
+		return usageError{
+			err: fmt.Errorf("%w %q: port must be from 0 to 65535", errInvalidAddress, address),
+		}
 	}
+
 	return nil
 }

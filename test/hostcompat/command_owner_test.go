@@ -16,20 +16,26 @@ import (
 
 func TestCompatibilityCommandDeadline(t *testing.T) {
 	t.Parallel()
+
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
+
 	command := compatibilityFixtureCommand(t, "block", "")
 	started := time.Now()
+
 	output, err := compatibilityOutput(ctx, command)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("blocked command error = %v, want deadline exceeded; output: %s", err, output)
 	}
+
 	if command.ProcessState == nil {
 		t.Fatal("timed-out command was not reaped")
 	}
+
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("command exceeded its cancellation/drain budget: %s", elapsed)
 	}
+
 	if !bytes.Contains(output, []byte("fixture ready")) {
 		t.Fatalf("command did not reach its blocking operation: %s", output)
 	}
@@ -39,20 +45,26 @@ func TestCompatibilityCommandInheritedOutput(t *testing.T) {
 	t.Parallel()
 	work := t.TempDir()
 	lockPath := filepath.Join(work, "child.lock")
+
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
+
 	command := compatibilityFixtureCommand(t, "inherited-output", work)
+
 	output, err := compatibilityOutput(ctx, command)
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("inherited output error = %v, want pipe-drain timeout; output: %s", err, output)
 	}
+
 	if command.ProcessState == nil || !command.ProcessState.Success() {
 		t.Fatal("successful group leader was not reaped")
 	}
+
 	lock, err := os.OpenFile(lockPath, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() {
 		if err := lock.Close(); err != nil {
 			t.Error(err)
@@ -62,14 +74,17 @@ func TestCompatibilityCommandInheritedOutput(t *testing.T) {
 	// Successful reacquisition proves group cleanup reached that descendant.
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
+
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+
 	for {
 		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
 			return
 		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
 			t.Fatal(err)
 		}
+
 		select {
 		case <-deadline.C:
 			t.Fatal("descendant survived cancellation of its owned process group")
@@ -81,47 +96,62 @@ func TestCompatibilityCommandInheritedOutput(t *testing.T) {
 func TestCompatibilityOracleStaging(t *testing.T) {
 	t.Parallel()
 	oracle := filepath.Join(t.TempDir(), "oracle")
+
 	const content = "immutable oracle fixture"
 	if err := os.WriteFile(oracle, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	first, _ := stageOracle(t, oracle)
 	t.Run("isolated_scenario", func(t *testing.T) {
 		second, _ := stageOracle(t, oracle)
 		if first == second {
 			t.Fatal("scenarios share their staged oracle")
 		}
+
 		assertCompatibilityOracleContent(t, second+".real", content)
+
 		if err := os.WriteFile(second+".real", []byte("changed scenario copy"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	})
+
 	for _, path := range []string{oracle, first + ".real"} {
 		assertCompatibilityOracleContent(t, path, content)
 	}
+
 	info, err := os.Stat(first + ".real")
 	if err != nil || info.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("staged oracle is not executable: error = %v", err)
 	}
 }
 
-func assertCompatibilityOracleContent(t *testing.T, path, content string) {
+func assertCompatibilityOracleContent(t *testing.T, path string, content string) {
 	t.Helper()
+
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != content {
 		t.Fatalf("oracle content at %s = %q, error = %v", path, data, err)
 	}
 }
 
-func compatibilityFixtureCommand(t *testing.T, mode, work string) *exec.Cmd {
+func compatibilityFixtureCommand(t *testing.T, mode string, work string) *exec.Cmd {
 	t.Helper()
+
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestCompatibilityCommandFixture$")
+
+	command := exec.CommandContext(
+		t.Context(),
+		executable,
+		"-test.run=^TestCompatibilityCommandFixture$",
+	)
+
 	command.Env = append(isolatedEnvironment(), "AHT_COMPAT_COMMAND_FIXTURE="+mode)
 	command.Dir = work
+
 	return command
 }
 
@@ -130,17 +160,20 @@ func TestCompatibilityCommandFixture(t *testing.T) {
 	if mode == "" {
 		t.Skip("subprocess fixture")
 	}
+
 	switch mode {
 	case "block":
 		if _, err := os.Stdout.WriteString("fixture ready\n"); err != nil {
 			t.Fatal(err)
 		}
+
 		<-time.After(time.Minute)
 	case "hold-output":
 		holdCompatibilityFixtureOutput(t)
 	case "inherited-output":
 		command := compatibilityFixtureCommand(t, "hold-output", "")
 		command.Stdout = os.Stdout
+
 		command.Stderr = os.Stderr
 		if err := command.Start(); err != nil {
 			t.Fatal(err)
@@ -148,14 +181,18 @@ func TestCompatibilityCommandFixture(t *testing.T) {
 		// The owner intentionally exits while its child keeps stdout open.
 		// The outer command owner must clean up the entire process group.
 		defer func() { _ = command.Process.Release() }()
+
 		deadline := time.NewTimer(5 * time.Second)
 		defer deadline.Stop()
+
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
+
 		for {
 			if _, err := os.Stat("child.lock.ready"); err == nil {
 				return
 			}
+
 			select {
 			case <-deadline.C:
 				t.Fatal("descendant did not acquire its lock")
@@ -169,16 +206,21 @@ func TestCompatibilityCommandFixture(t *testing.T) {
 
 func holdCompatibilityFixtureOutput(t *testing.T) {
 	t.Helper()
+
 	lock, err := os.OpenFile("child.lock", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() { _ = lock.Close() }()
+
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile("child.lock.ready", nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	<-time.After(time.Minute)
 }

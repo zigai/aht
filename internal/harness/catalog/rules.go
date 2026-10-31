@@ -21,20 +21,38 @@ func (Rules) Policy(id registry.Harness) registry.Policy {
 	adapter, ok := Find(id)
 	if !ok {
 		return registry.Policy{
-			ExclusiveProcess: false, Authority: registry.AuthorityHook, ScreenFallback: false, RetainNativeActivity: false, Reporter: "", CatalogCreates: false, DetailReporters: nil, Details: registry.DetailCapabilities{Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}, Screen: registry.DetailSupport{
-				Permission: false, Question: false, UsageLimit: false,
-			}},
+			ExclusiveProcess:     false,
+			Authority:            registry.AuthorityHook,
+			ScreenFallback:       false,
+			RetainNativeActivity: false,
+			Reporter:             "",
+			CatalogCreates:       false,
+			DetailReporters:      nil,
+			Details: registry.DetailCapabilities{
+				Native: registry.DetailSupport{
+					Permission: false,
+					Question:   false,
+					UsageLimit: false,
+				},
+				Screen: registry.DetailSupport{
+					Permission: false, Question: false, UsageLimit: false,
+				},
+			},
 		}
 	}
+
 	definition := adapter.Definition()
+
 	retainNativeActivity := false
 	if retainer, ok := adapter.(nativeActivityRetainer); ok {
 		retainNativeActivity = retainer.RetainNativeActivity()
 	}
+
 	var reporters []string
 	if provider, ok := adapter.(detailReporters); ok {
 		reporters = provider.DetailReporters()
 	}
+
 	return registry.Policy{
 		DetailReporters:      reporters,
 		Details:              DetailCapabilitiesFor(id),
@@ -52,5 +70,6 @@ func Harnesses() []registry.Harness {
 	for _, adapter := range adapters {
 		result = append(result, adapter.Definition().ID)
 	}
+
 	return result
 }

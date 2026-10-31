@@ -81,6 +81,7 @@ var adaptersByID = func() map[registry.Harness]harness.Adapter {
 			byID[id] = adapter
 		}
 	}
+
 	return byID
 }()
 
@@ -115,7 +116,9 @@ func SupportsScreen(harnessID registry.Harness) bool {
 	if !ok {
 		return false
 	}
+
 	provider, ok := adapter.(harness.ScreenManifestProvider)
+
 	return ok && provider.ScreenManifest() != ""
 }
 
@@ -124,7 +127,9 @@ func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) 
 	if !ok {
 		return nil, false
 	}
+
 	filter, ok := adapter.(harness.ProcessFilter)
+
 	return filter, ok
 }
 
@@ -133,20 +138,24 @@ func IntegrationVersionFor(harnessID registry.Harness) int {
 	if !ok {
 		return harness.IntegrationVersion
 	}
+
 	return adapter.Definition().IntegrationVersion
 }
 
 func Parse(value string) (registry.Harness, error) {
 	normalized := normalizeToken(value)
+
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
 		if normalized == normalizeToken(string(definition.ID)) {
 			return definition.ID, nil
 		}
+
 		if containsNormalizedToken(definition.Aliases, normalized) {
 			return definition.ID, nil
 		}
 	}
+
 	return "", fmt.Errorf("%w %q", registry.ErrUnknownHarness, value)
 }
 
@@ -155,6 +164,7 @@ func SupportedNames() []string {
 	for _, adapter := range adapters {
 		names = append(names, string(adapter.Definition().ID))
 	}
+
 	return names
 }
 
@@ -163,17 +173,20 @@ func EnvNames(harnessID registry.Harness, field harness.EnvField) []string {
 	if adapter, ok := Find(harnessID); ok {
 		names = appendUnique(names, envNamesForField(adapter.Definition().Env, field)...)
 	}
+
 	return names
 }
 
 func FromCommand(command string) (registry.Harness, bool) {
 	normalized := normalizeToken(filepath.Base(command))
+
 	for _, adapter := range adapters {
 		definition := adapter.Definition()
 		if containsNormalizedToken(definition.ProcessNames, normalized) {
 			return definition.ID, true
 		}
 	}
+
 	return "", false
 }
 
@@ -182,29 +195,38 @@ func ProcessNames(harnessID registry.Harness) []string {
 	if !ok {
 		return nil
 	}
+
 	return adapter.Definition().ProcessNames
 }
 
-func PayloadDefaults(harnessID registry.Harness, rawPayload json.RawMessage) (harness.PayloadDefaults, error) {
+func PayloadDefaults(
+	harnessID registry.Harness,
+	rawPayload json.RawMessage,
+) (harness.PayloadDefaults, error) {
 	if len(rawPayload) == 0 {
 		return emptyPayloadDefaults, nil
 	}
+
 	adapter, ok := Find(harnessID)
 	if !ok {
 		return emptyPayloadDefaults, nil
 	}
+
 	payloadAdapter, ok := adapter.(harness.PayloadAdapter)
 	if !ok {
 		return emptyPayloadDefaults, nil
 	}
+
 	var payload map[string]any
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
 		return emptyPayloadDefaults, fmt.Errorf("decoding hook payload defaults: %w", err)
 	}
+
 	defaults, err := payloadAdapter.PayloadDefaults(payload)
 	if err != nil {
 		return emptyPayloadDefaults, fmt.Errorf("deriving harness payload defaults: %w", err)
 	}
+
 	return defaults, nil
 }
 
@@ -220,18 +242,22 @@ func ActivityFromPayload(
 	if len(rawPayload) == 0 || activity == "" {
 		return activity, nil
 	}
+
 	adapter, ok := Find(harnessID)
 	if !ok {
 		return activity, nil
 	}
+
 	activityAdapter, ok := adapter.(harness.PayloadActivityAdapter)
 	if !ok {
 		return activity, nil
 	}
+
 	var payload map[string]any
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
 		return activity, fmt.Errorf("decoding hook payload activity: %w", err)
 	}
+
 	return activityAdapter.PayloadActivity(event, activity, payload, at), nil
 }
 
@@ -239,14 +265,17 @@ func PayloadCompatible(harnessID registry.Harness, rawPayload json.RawMessage) b
 	if len(rawPayload) == 0 {
 		return true
 	}
+
 	adapter, ok := Find(harnessID)
 	if !ok {
 		return true
 	}
+
 	payloadAdapter, ok := adapter.(harness.PayloadAdapter)
 	if !ok {
 		return true
 	}
+
 	return payloadAdapter.PayloadCompatible(rawPayload)
 }
 
@@ -255,10 +284,12 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 	if !ok {
 		return nil
 	}
+
 	resumable, ok := adapter.(harness.Resumable)
 	if !ok {
 		return nil
 	}
+
 	return resumable.ResumeCommand(sessionID, sessionPath)
 }
 
@@ -269,10 +300,12 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Loca
 	if !ok {
 		return nil, false
 	}
+
 	provider, ok := adapter.(harness.LocationProvider)
 	if !ok {
 		return nil, false
 	}
+
 	return provider.Locations(projectDir), true
 }
 
@@ -282,13 +315,20 @@ func WithResumeCommand(observation registry.Observation) registry.Observation {
 	case *registry.Sighting, *registry.Placement, *registry.Reading, *registry.Verification, nil:
 		return observation
 	}
+
 	if observation.Listing() != nil && len(observation.Listing().ResumeCommand) > 0 {
 		return observation
 	}
-	command := ResumeCommandFor(observation.Harness, observation.Subject.SessionID, observation.Subject.SessionPath)
+
+	command := ResumeCommandFor(
+		observation.Harness,
+		observation.Subject.SessionID,
+		observation.Subject.SessionPath,
+	)
 	if len(command) == 0 {
 		return observation
 	}
+
 	if observation.Listing() == nil {
 		observation.SetListing(&registry.Listing{
 			ResumeCommand: nil,
@@ -298,7 +338,9 @@ func WithResumeCommand(observation registry.Observation) registry.Observation {
 			Current:       false,
 		})
 	}
+
 	observation.Listing().ResumeCommand = command
+
 	return observation
 }
 
@@ -314,10 +356,12 @@ func HandleHook(
 	if !ok {
 		return emptyHookResult, false, nil
 	}
+
 	hookAdapter, ok := adapter.(harness.HookAdapter)
 	if !ok {
 		return emptyHookResult, false, nil
 	}
+
 	result, err := hookAdapter.HandleHook(ctx, harness.HookInvocation{
 		Event:      explicitEvent,
 		RawPayload: rawPayload,
@@ -327,18 +371,25 @@ func HandleHook(
 	if result.Response == nil {
 		result.Response = map[string]any{}
 	}
+
 	if err != nil {
 		return result, true, fmt.Errorf("handle %s hook: %w", harnessID, err)
 	}
+
 	return result, true, nil
 }
 
-func LifecycleFor(id registry.Harness, event string, attributes map[string]string) harness.LifecycleDefaults {
+func LifecycleFor(
+	id registry.Harness,
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if adapter, ok := Find(id); ok {
 		if translator, ok := adapter.(harness.LifecycleAdapter); ok {
 			return translator.LifecycleDefaults(event, attributes)
 		}
 	}
+
 	return harness.TranslateLifecycle(event, "")
 }
 
@@ -346,16 +397,21 @@ func PrepareObservation(observation registry.Observation) registry.Observation {
 	if observation.Kind() != "report" {
 		return observation
 	}
+
 	report := observation.Report()
 	defaults := LifecycleFor(observation.Harness, report.Event, report.Attributes)
+
 	report.Event = defaults.Event
 	if report.Lifecycle == nil && defaults.Lifecycle != "" {
 		report.Lifecycle = &defaults.Lifecycle
 	}
+
 	if report.Claim == nil && defaults.Presence != "" {
 		report.Claim = &defaults.Presence
 	}
+
 	prepareDetail(observation)
+
 	return WithResumeCommand(observation)
 }
 
@@ -365,7 +421,11 @@ func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 			return detailAdapter.DetailCapabilities()
 		}
 	}
-	return registry.DetailCapabilities{Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}, Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false}}
+
+	return registry.DetailCapabilities{
+		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+	}
 }
 
 func HookTimeoutSecondsFor(id registry.Harness, event string) int {
@@ -374,36 +434,51 @@ func HookTimeoutSecondsFor(id registry.Harness, event string) int {
 			return policy.HookTimeoutSeconds(event)
 		}
 	}
+
 	return harness.HookTimeoutSeconds
 }
 
 func nativeCatalog(ctx context.Context, sources []harness.Adapter) ([]NativeCatalogEntry, error) {
-	var entries []NativeCatalogEntry
-	var failures []error
+	var (
+		entries  []NativeCatalogEntry
+		failures []error
+	)
+
 	for _, adapter := range sources {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, fmt.Errorf("list native catalogs: %w", err))
 			break
 		}
+
 		provider, ok := adapter.(harness.CatalogProvider)
 		if !ok {
 			continue
 		}
+
 		definition := adapter.Definition()
 		sessions, err := provider.Catalog(ctx)
 		reporter := registry.Reporter{
 			Sequence: nil, Integration: definition.IntegrationSource,
 			Version: definition.IntegrationVersion, MultiSession: !definition.ExclusiveProcess,
 		}
+
 		for _, session := range sessions {
 			session.ResumeCommand = append([]string(nil), session.ResumeCommand...)
 			session.Attributes = cloneCatalogAttributes(session.Attributes)
-			entries = append(entries, NativeCatalogEntry{Harness: definition.ID, Reporter: reporter, Session: session})
+			entries = append(
+				entries,
+				NativeCatalogEntry{Harness: definition.ID, Reporter: reporter, Session: session},
+			)
 		}
+
 		if err != nil && !errors.Is(err, harness.ErrCatalogUnavailable) {
-			failures = append(failures, fmt.Errorf("list %s native catalog: %w", definition.ID, err))
+			failures = append(
+				failures,
+				fmt.Errorf("list %s native catalog: %w", definition.ID, err),
+			)
 		}
 	}
+
 	return entries, errors.Join(failures...)
 }
 
@@ -411,8 +486,10 @@ func cloneCatalogAttributes(attributes map[string]string) map[string]string {
 	if attributes == nil {
 		return nil
 	}
+
 	cloned := make(map[string]string, len(attributes))
 	maps.Copy(cloned, attributes)
+
 	return cloned
 }
 
@@ -455,13 +532,16 @@ func appendUnique(values []string, next ...string) []string {
 	for _, value := range values {
 		seen[value] = struct{}{}
 	}
+
 	for _, value := range next {
 		if _, ok := seen[value]; ok {
 			continue
 		}
+
 		seen[value] = struct{}{}
 		values = append(values, value)
 	}
+
 	return values
 }
 
@@ -475,6 +555,7 @@ func containsNormalizedToken(values []string, normalized string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -483,11 +564,17 @@ func prepareDetail(observation registry.Observation) {
 	if report.Detail != nil || report.Activity == nil {
 		return
 	}
+
 	adapter, ok := Find(observation.Harness)
 	if !ok {
 		return
 	}
+
 	if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
-		report.Detail = detailAdapter.ActivityDetail(report.Event, *report.Activity, report.Attributes)
+		report.Detail = detailAdapter.ActivityDetail(
+			report.Event,
+			*report.Activity,
+			report.Attributes,
+		)
 	}
 }

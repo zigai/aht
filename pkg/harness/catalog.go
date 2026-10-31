@@ -14,16 +14,19 @@ func Parse(value string) (registry.Harness, error) {
 	if err != nil {
 		return "", fmt.Errorf("parsing harness: %w", err)
 	}
+
 	return harnessID, nil
 }
 
 // Supported returns every harness recognized by this AHT version.
 func Supported() []registry.Harness {
 	adapters := catalog.All()
+
 	harnesses := make([]registry.Harness, 0, len(adapters))
 	for _, adapter := range adapters {
 		harnesses = append(harnesses, adapter.Definition().ID)
 	}
+
 	return harnesses
 }
 

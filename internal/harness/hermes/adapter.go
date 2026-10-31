@@ -64,20 +64,32 @@ func (hermesHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	version := strconv.Itoa(integrationVersion)
 	dir := filepath.Join(base, "plugins", hermesPluginName)
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-		Dir:   dir,
-		Label: "Hermes plugin",
-		Files: []harness.RenderedFileInstallSpec{
-			{Name: "plugin.yaml", Content: hermesPluginManifest(version), JSONContent: nil},
-			{Name: "__init__.py", Content: renderHermesPlugin(binary, version), JSONContent: nil},
-			{Name: hermesMarkerFileName, Content: hermesMarkerContent(version), JSONContent: nil},
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
+				Dir:   dir,
+				Label: "Hermes plugin",
+				Files: []harness.RenderedFileInstallSpec{
+					{Name: "plugin.yaml", Content: hermesPluginManifest(version), JSONContent: nil},
+					{
+						Name:        "__init__.py",
+						Content:     renderHermesPlugin(binary, version),
+						JSONContent: nil,
+					},
+					{
+						Name:        hermesMarkerFileName,
+						Content:     hermesMarkerContent(version),
+						JSONContent: nil,
+					},
+				},
+				SnippetOrder:   []string{"plugin.yaml", "__init__.py", hermesMarkerFileName},
+				MarkerFile:     hermesMarkerFileName,
+				ImportManifest: nil,
+				Retired:        nil,
+				Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
+			}},
 		},
-		SnippetOrder:   []string{"plugin.yaml", "__init__.py", hermesMarkerFileName},
-		MarkerFile:     hermesMarkerFileName,
-		ImportManifest: nil,
-		Retired:        nil,
-		Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
-	}}}}, nil
+	}, nil
 }
 
 func (hermesHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -92,6 +104,7 @@ func hermesHome() string {
 	if configured := strings.TrimSpace(os.Getenv("HERMES_HOME")); configured != "" {
 		return configured
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
@@ -125,5 +138,10 @@ func renderHermesPlugin(binary string, version string) string {
 }
 
 func hermesMarkerContent(version string) string {
-	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=hermes\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, hermesIntegrationSource)
+	return fmt.Sprintf(
+		"%s\nAHT_INTEGRATION_ID=hermes\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n",
+		harness.ManagedMarker,
+		version,
+		hermesIntegrationSource,
+	)
 }

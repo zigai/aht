@@ -64,24 +64,38 @@ func (crushHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.ManagedTextBlockAction{Plan: harness.ManagedTextBlockInstallPlan{
-		Path:        path,
-		Label:       "crush hooks",
-		ConfigLabel: "crush config",
-		StartMarker: crushManagedIntegrationStart,
-		EndMarker:   crushManagedIntegrationEnd,
-		Block:       crushHookBlock(binary),
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.ManagedTextBlockAction{Plan: harness.ManagedTextBlockInstallPlan{
+				Path:        path,
+				Label:       "crush hooks",
+				ConfigLabel: "crush config",
+				StartMarker: crushManagedIntegrationStart,
+				EndMarker:   crushManagedIntegrationEnd,
+				Block:       crushHookBlock(binary),
+			}},
+		},
+	}, nil
 }
 
 func crushHookBlock(binary string) string {
-	command := harness.ReportHookCommand(binary, registry.Harness("crush"), registry.ActivityRunning, harness.HookEventPreToolUse, crushIntegrationSource)
+	command := harness.ReportHookCommand(
+		binary,
+		registry.Harness("crush"),
+		registry.ActivityRunning,
+		harness.HookEventPreToolUse,
+		crushIntegrationSource,
+	)
 
 	return crushManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=crush\n" +
 		"hook add " + harness.HookEventPreToolUse +
 		" --name " + crushHookName +
-		" --timeout " + strconv.Itoa(harness.HookTimeoutSeconds) +
-		" --command " + harness.ShellQuote(command) + "\n" +
+		" --timeout " + strconv.Itoa(
+		harness.HookTimeoutSeconds,
+	) +
+		" --command " + harness.ShellQuote(
+		command,
+	) + "\n" +
 		crushManagedIntegrationEnd + "\n"
 }
 
@@ -99,8 +113,16 @@ func (crushHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (crushHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "crush_hook_event", harness.PayloadString(payload, "event"))
-	harness.AddAttributeString(attributes, "crush_tool_name", harness.PayloadString(payload, "tool_name"))
+	harness.AddAttributeString(
+		attributes,
+		"crush_hook_event",
+		harness.PayloadString(payload, "event"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"crush_tool_name",
+		harness.PayloadString(payload, "tool_name"),
+	)
 
 	return harness.PayloadDefaults{
 		SessionID:   harness.PayloadString(payload, "session_id"),
@@ -116,6 +138,7 @@ func crushConfigDir() string {
 	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
 		return filepath.Join(value, "crush")
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""

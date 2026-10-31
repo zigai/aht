@@ -20,6 +20,7 @@ type Observation struct {
 }
 
 type Report struct {
+	//exhaustruct:optional
 	DetailObservedAt *time.Time        `json:"detail_observed_at,omitempty"`
 	Detail           *ActivityDetail   `json:"detail,omitempty"`
 	Reporter         Reporter          `json:"reporter"`
@@ -77,6 +78,7 @@ func (o Observation) Kind() string {
 	case nil:
 		return ""
 	}
+
 	return ""
 }
 
@@ -85,6 +87,7 @@ func (o Observation) Report() *Report {
 	if !ok || report == nil {
 		return new(Report)
 	}
+
 	return report
 }
 
@@ -104,6 +107,7 @@ func (o Observation) ProcessIdentity() *ProcessIdentity {
 	case *Listing, *Verification, nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -111,6 +115,7 @@ func (o Observation) Present() *bool {
 	if evidence, ok := o.Evidence.(*Sighting); ok && evidence != nil {
 		return &evidence.Present
 	}
+
 	return nil
 }
 
@@ -123,6 +128,7 @@ func (o Observation) ActivityClaim() *Activity {
 	case *Sighting, *Placement, *Listing, *Verification, nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -135,6 +141,7 @@ func (o Observation) Location() *Location {
 	case *Sighting, *Reading, *Listing, *Verification, nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -147,6 +154,7 @@ func (o Observation) Listing() *Listing {
 	case *Sighting, *Placement, *Reading, *Verification, nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -154,6 +162,7 @@ func (o Observation) Reading() *ScreenObservation {
 	if evidence, ok := o.Evidence.(*Reading); ok {
 		return (*ScreenObservation)(evidence)
 	}
+
 	return nil
 }
 
@@ -166,6 +175,7 @@ func (o *Observation) SetProcess(process *ProcessIdentity) {
 			evidence.Process = *process
 		} else {
 			var empty ProcessIdentity
+
 			evidence.Process = empty
 		}
 	case *Placement:

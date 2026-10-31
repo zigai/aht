@@ -27,9 +27,12 @@ const (
 var (
 	errDetectionTestHarnessRequired    = errors.New("harness argument is required")
 	errDetectionScreenRequired         = errors.New("--screen is required")
-	errDetectionManifestConfigConflict = errors.New("--manifest and --config-dir cannot be used together")
+	errDetectionManifestConfigConflict = errors.New(
+		"--manifest and --config-dir cannot be used together",
+	)
 )
 
+//exhaustruct:optional
 type detectionTestOptions struct {
 	screenPath   string
 	manifestPath string
@@ -51,12 +54,15 @@ func (app *application) newDetectionCommand() *cobra.Command {
 		},
 	}
 	command.AddCommand(app.newDetectionTestCommand())
+
 	return command
 }
 
 func (app *application) newDetectionTestCommand() *cobra.Command {
 	options := detectionTestOptions{}
+
 	var harnessID registry.Harness
+
 	command := &cobra.Command{
 		Use:           "test <harness>",
 		Short:         "Test detection rules against a saved screen fixture",
@@ -66,29 +72,36 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 			if len(args) != 1 {
 				return exitCode(errDetectionTestHarnessRequired, exitCodeUsage)
 			}
+
 			return nil
 		},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if options.screenPath == "" {
 				return exitCode(errDetectionScreenRequired, exitCodeUsage)
 			}
+
 			if options.manifestPath != "" && options.configDir != "" {
 				return exitCode(errDetectionManifestConfigConflict, exitCodeUsage)
 			}
+
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
 			}
+
 			if options.manifestPath == "" && !cmd.Flags().Changed("config-dir") {
 				options.configDir = cfg.Detection.ManifestsDir
 			}
+
 			harnessID, err = catalog.Parse(args[0])
 			if err != nil {
 				if options.manifestPath == "" {
 					return exitCode(err, exitCodeUsage)
 				}
+
 				harnessID = registry.Harness(strings.TrimSpace(args[0]))
 			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -96,23 +109,33 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 		},
 	}
 
-	command.Flags().StringVar(&options.screenPath, "screen", "", "saved terminal screen fixture `<path>` or - for stdin")
-	command.Flags().StringVar(&options.manifestPath, "manifest", "", "explicit detection manifest `<path>`")
-	command.Flags().StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
+	command.Flags().
+		StringVar(&options.screenPath, "screen", "", "saved terminal screen fixture `<path>` or - for stdin")
+	command.Flags().
+		StringVar(&options.manifestPath, "manifest", "", "explicit detection manifest `<path>`")
+	command.Flags().
+		StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
 	command.Flags().StringVar(&options.title, "title", "", "terminal window or pane `<title>`")
 	command.Flags().BoolVar(&options.showScreen, "show-screen", false, "echo screen text in output")
 
 	return command
 }
 
-func (app *application) runDetectionTest(ctx context.Context, harnessID registry.Harness, opts detectionTestOptions) error {
+func (app *application) runDetectionTest(
+	ctx context.Context,
+	harnessID registry.Harness,
+	opts detectionTestOptions,
+) error {
 	rawScreen, err := agentstate.ReadScreenInput(opts.screenPath, app.stdin)
 	if err != nil {
 		return exitCode(err, exitCodeGeneral)
 	}
 
 	inspection, err := detection.Inspect(ctx, harnessID, rawScreen, detection.Options{
-		Title: opts.title, ManifestPath: opts.manifestPath, ConfigDir: opts.configDir, IncludeScreen: opts.showScreen,
+		Title:         opts.title,
+		ManifestPath:  opts.manifestPath,
+		ConfigDir:     opts.configDir,
+		IncludeScreen: opts.showScreen,
 	})
 	if err != nil {
 		return exitCode(err, exitCodeGeneral)
@@ -134,18 +157,22 @@ func (app *application) writeDetectionInspection(inspection detection.Inspection
 	if inspection.Warning != "" {
 		details = append(details, humanDetail{label: "Warning", value: inspection.Warning})
 	}
+
 	if inspection.Title != "" {
 		details = append(details, humanDetail{label: "Title", value: inspection.Title})
 	}
+
 	details = append(details,
 		humanDetail{label: "Lines evaluated", value: strconv.Itoa(inspection.LinesEvaluated)},
 		humanDetail{label: "Effective activity", value: string(inspection.Decision.Activity)},
 		humanDetail{label: "Reason", value: inspection.Decision.Reason},
 	)
+
 	winning := inspection.WinningRule
 	if winning == "" {
 		winning = "none"
 	}
+
 	details = append(details, humanDetail{label: "Winning rule", value: winning})
 
 	if err := app.writeHumanDetails(details); err != nil {
@@ -160,9 +187,11 @@ func (app *application) writeDetectionInspection(inspection detection.Inspection
 		if err := app.writeln(""); err != nil {
 			return err
 		}
+
 		if err := app.writeln("Screen:"); err != nil {
 			return err
 		}
+
 		if err := app.writeln(inspection.Screen); err != nil {
 			return err
 		}
@@ -175,9 +204,11 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 	if len(candidates) == 0 {
 		return nil
 	}
+
 	if err := app.writeln(""); err != nil {
 		return err
 	}
+
 	columns := []humanColumn{
 		{heading: "Rule", width: detectionRuleWidth, wrap: wrapHumanIdentifier},
 		{heading: "State", width: detectionStateWidth},
@@ -186,6 +217,7 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 		{heading: "Match", width: detectionMatchWidth},
 		{heading: "Reason", width: detectionReasonWidth},
 	}
+
 	rows := make([][]string, 0, len(candidates))
 	for _, c := range candidates {
 		matchLabel := "no"
@@ -194,10 +226,12 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 		} else if c.Matched {
 			matchLabel = "match"
 		}
+
 		region := c.Region
 		if region == "" {
 			region = "all"
 		}
+
 		rows = append(rows, []string{
 			c.ID,
 			c.State,
@@ -207,5 +241,6 @@ func (app *application) writeDetectionCandidatesTable(candidates []detection.Can
 			c.Reason,
 		})
 	}
+
 	return app.writeWrappedHumanTable(columns, rows)
 }

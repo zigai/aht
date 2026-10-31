@@ -21,32 +21,40 @@ func cleanPrompt(body string) string {
 
 func splitInjected(body string) (string, string) {
 	body = strings.TrimSpace(body)
+
 	text := body
 	if strings.HasPrefix(text, localCommandCaveat) {
 		return body, ""
 	}
+
 	if strings.HasPrefix(text, agentsInstructionsHeader) {
 		_, text, _ = strings.Cut(text, "\n")
 		text = strings.TrimSpace(text)
 	}
+
 	var command, arguments string
+
 	for {
 		name, content, rest, ok := leadingBlock(text)
 		if !ok {
 			break
 		}
+
 		switch name {
 		case "command-name":
 			command = strings.TrimSpace(content)
 		case "command-args":
 			arguments = strings.TrimSpace(content)
 		}
+
 		text = strings.TrimSpace(rest)
 	}
+
 	injected := strings.TrimSpace(body[:len(body)-len(text)])
 	if text == "" && command != "" {
 		text = strings.TrimSpace(command + " " + arguments)
 	}
+
 	return injected, text
 }
 
@@ -56,26 +64,34 @@ func leadingBlock(text string) (string, string, string, bool) {
 	if !strings.HasPrefix(text, "<") {
 		return "", "", "", false
 	}
+
 	end := 1
 	for end < len(text) && blockNameByte(text[end]) {
 		end++
 	}
+
 	if end == 1 || end == len(text) {
 		return "", "", "", false
 	}
+
 	name := text[1:end]
+
 	open := strings.IndexByte(text, '>')
 	if open < 0 || !blockNameTerminator(text[end]) {
 		return "", "", "", false
 	}
+
 	if text[open-1] == '/' {
 		return name, "", text[open+1:], true
 	}
+
 	closing := "</" + name + ">"
+
 	content, rest, ok := strings.Cut(text[open+1:], closing)
 	if !ok {
 		return "", "", "", false
 	}
+
 	return name, content, rest, true
 }
 
@@ -84,5 +100,8 @@ func blockNameTerminator(character byte) bool {
 }
 
 func blockNameByte(character byte) bool {
-	return character == '-' || character == '_' || character == ':' || character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'
+	return character == '-' || character == '_' || character == ':' ||
+		character >= 'a' && character <= 'z' ||
+		character >= 'A' && character <= 'Z' ||
+		character >= '0' && character <= '9'
 }

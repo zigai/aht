@@ -5,5 +5,16 @@ import (
 )
 
 func (opencodeHarness) Distribution() harness.Distribution {
-	return harness.Distribution{Source: "npm", Package: "@opencode/cli", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "opencode", Family: "part-plugin", PackageExtras: "", Install: nil}
+	return harness.Distribution{
+		Source:        "npm",
+		Package:       "@opencode/cli",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "opencode",
+		Family:        "part-plugin",
+		PackageExtras: "",
+		Install:       nil,
+	}
 }

@@ -17,10 +17,12 @@ import (
 func TestInvalidModeDoesNotCreateState(t *testing.T) {
 	t.Parallel()
 	storePath := filepath.Join(t.TempDir(), "state", "sessions.json")
+
 	c := aht.New(aht.Config{Mode: "typo", StorePath: storePath})
 	if _, err := c.List(t.Context(), aht.Filter{}); !errors.Is(err, aht.ErrInvalidMode) {
 		t.Fatalf("List error = %v, want ErrInvalidMode", err)
 	}
+
 	if _, err := os.Stat(filepath.Dir(storePath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invalid mode touched state directory: %v", err)
 	}
@@ -53,7 +55,21 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 
 	live := aht.PresenceLive
 	activity := aht.ActivityRunning
-	obs := aht.Observation{Harness: aht.HarnessClaude, At: time.Now().UTC(), Subject: aht.ObservationIdentity{SessionID: "sess-facade-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: nil, Location: nil, Listing: nil, Attributes: nil, Payload: nil}}
+	obs := aht.Observation{
+		Harness: aht.HarnessClaude,
+		At:      time.Now().UTC(),
+		Subject: aht.ObservationIdentity{SessionID: "sess-facade-1"},
+		Evidence: &registry.Report{
+			Lifecycle:  nil,
+			Claim:      &live,
+			Activity:   &activity,
+			Process:    nil,
+			Location:   nil,
+			Listing:    nil,
+			Attributes: nil,
+			Payload:    nil,
+		},
+	}
 
 	created, err := store.Observe(t.Context(), obs)
 	if err != nil {
@@ -61,9 +77,8 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 	}
 
 	c := aht.New(aht.Config{
-		StorePath:  storePath,
-		SocketPath: "",
-		Mode:       aht.ModeDurableOnly,
+		StorePath: storePath,
+		Mode:      aht.ModeDurableOnly,
 	})
 
 	// Test aht.Resolve
@@ -73,6 +88,7 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aht.Resolve failed: %v", err)
 	}
+
 	if resolved.ID != created.ID {
 		t.Fatalf("resolved ID = %q, want %q", resolved.ID, created.ID)
 	}
@@ -92,6 +108,7 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 	if !ok || caps.Harness != aht.HarnessPi {
 		t.Fatalf("aht.Capabilities(HarnessPi) = %+v, %v", caps, ok)
 	}
+
 	all := aht.AllCapabilities()
 	if len(all) == 0 {
 		t.Fatal("aht.AllCapabilities() is empty")
@@ -110,10 +127,12 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 		Harness:  aht.HarnessPi,
 		Liveness: registry.NewLiveness(aht.PresenceLive, registry.ActivityValue(&running), nil),
 	}
+
 	exp, err := aht.ExplainSession(t.Context(), session, aht.ExplainOptions{})
 	if err != nil {
 		t.Fatalf("ExplainSession err = %v", err)
 	}
+
 	if exp.SessionID != "s-facade" {
 		t.Fatalf("exp.SessionID = %q, want s-facade", exp.SessionID)
 	}
@@ -123,6 +142,7 @@ func TestNewManagerUsesConfiguredStorePath(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
+
 	manager := aht.NewManager(aht.ManagerConfig{StorePath: storePath})
 	if got := manager.HealthPath(); filepath.Dir(got) != filepath.Dir(storePath) {
 		t.Fatalf("HealthPath() = %q, want a path next to %q", got, storePath)
@@ -134,10 +154,12 @@ func TestExplainSessionDoesNotDuplicateErrorContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+
 	_, err := aht.ExplainSession(ctx, aht.Session{}, aht.ExplainOptions{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ExplainSession error = %v, want context.Canceled", err)
 	}
+
 	if strings.Count(err.Error(), "explain session") != 1 {
 		t.Fatalf("ExplainSession error repeats its context: %q", err)
 	}

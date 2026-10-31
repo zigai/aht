@@ -36,6 +36,7 @@ CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(body A
 CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
+//nolint:lll // multi-line SQL schema has exact bytes; no SQL fixture loader.
 const indexSchema = `
 CREATE TABLE directories (
  harness TEXT NOT NULL, root TEXT NOT NULL, path TEXT NOT NULL,
@@ -79,8 +80,10 @@ DROP TABLE IF EXISTS directories;
 `
 
 var (
-	errIndexSchema = errors.New("unrecognized history index; choose a new IndexPath or remove the disposable AHT index")
-	errIndexWAL    = errors.New("history index cannot use write-ahead logging")
+	errIndexSchema = errors.New(
+		"unrecognized history index; choose a new IndexPath or remove the disposable AHT index",
+	)
+	errIndexWAL = errors.New("history index cannot use write-ahead logging")
 )
 
 // indexedFile is one history's committed index entry. resumeID is its first
@@ -114,30 +117,44 @@ type historyIndex struct {
 // history-v1.sqlite.invalid and rebuilt once. An explicit path is never moved
 // aside. Unusable indexes return ErrIndexUnavailable so searches can scan native
 // history; lock contention waits until the context is canceled.
-func openHistoryIndex(ctx context.Context, path string, sources []Source, waiting func()) (*historyIndex, error) {
+func openHistoryIndex(
+	ctx context.Context,
+	path string,
+	sources []Source,
+	waiting func(),
+) (*historyIndex, error) {
 	cached := path == ""
+
 	path, err := historyIndexPath(path)
 	if err != nil {
 		return nil, indexUnavailable(err)
 	}
+
 	index, err := openIndexDatabase(ctx, path, sources, waiting)
 	if err == nil {
 		return index, nil
 	}
+
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("open history index: %w", ctx.Err())
 	}
+
 	if !cached {
 		return nil, indexUnavailable(err)
 	}
 	// The default cache is disposable: delete the unusable database and
 	// rebuild it once.
 	if healErr := removeIndex(path); healErr != nil {
-		return nil, errors.Join(indexUnavailable(err), fmt.Errorf("remove invalid history index: %w", healErr))
+		return nil, errors.Join(
+			indexUnavailable(err),
+			fmt.Errorf("remove invalid history index: %w", healErr),
+		)
 	}
+
 	if index, err = openIndexDatabase(ctx, path, sources, waiting); err != nil {
 		return nil, indexUnavailable(fmt.Errorf("rebuild history index: %w", err))
 	}
+
 	return index, nil
 }
 
@@ -147,29 +164,41 @@ func historyIndexPath(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("locate history index: %w", err)
 		}
+
 		path = filepath.Join(root, "aht", "history-v1.sqlite")
 	}
+
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve history index: %w", err)
 	}
+
 	return path, nil
 }
 
 // openIndexDatabase opens an existing index database, creating an empty one when
 // the file holds no tables yet.
-func openIndexDatabase(ctx context.Context, path string, sources []Source, waiting func()) (*historyIndex, error) {
+func openIndexDatabase(
+	ctx context.Context,
+	path string,
+	sources []Source,
+	waiting func(),
+) (*historyIndex, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create history index directory: %w", err)
 	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open history index: %w", err)
 	}
+
 	if err = file.Close(); err != nil {
 		return nil, fmt.Errorf("close history index file: %w", err)
 	}
+
 	var uri url.URL
+
 	uri.Scheme, uri.Path = "file", path
 	uri.RawQuery = url.Values{
 		"_pragma": {"foreign_keys(1)", "busy_timeout(100)", "synchronous(NORMAL)"},
@@ -180,18 +209,23 @@ func openIndexDatabase(ctx context.Context, path string, sources []Source, waiti
 	if err != nil {
 		return nil, fmt.Errorf("open history index database: %w", err)
 	}
+
 	db.SetMaxOpenConns(1)
+
 	index := new(historyIndex)
 	index.db = db
 	index.sourceFilter, index.sourceArgs = sourceSQL(sources)
 	index.files, index.paths, index.seen = map[string]indexedFile{}, map[string]Source{}, map[string]bool{}
+
 	index.candidates, index.plans, index.excluded = map[int64]bool{}, map[int64]*indexedMatches{}, map[int64]bool{}
 	if err = index.connect(ctx, waiting); err != nil {
 		return nil, errors.Join(err, index.close(ctx))
 	}
+
 	if err = index.initialize(ctx); err != nil {
 		return nil, errors.Join(err, index.close(ctx))
 	}
+
 	return index, nil
 }
 
@@ -202,7 +236,9 @@ func (index *historyIndex) connect(ctx context.Context, waiting func()) error {
 	if err != nil {
 		return fmt.Errorf("connect history index: %w", err)
 	}
+
 	index.conn = &indexConnection{Conn: conn, waiting: waiting}
+
 	return nil
 }
 
@@ -210,15 +246,19 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 	if err := index.ensureSchema(ctx); err != nil {
 		return err
 	}
+
 	if err := index.enableWAL(ctx); err != nil {
 		return err
 	}
+
 	if err := index.loadFiles(ctx); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
+
 		return err
 	}
+
 	return nil
 }
 
@@ -229,54 +269,74 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion {
 		if err := index.validateSchemaTables(ctx, version); err != nil {
 			return err
 		}
+
 		if version == indexVersion {
 			return nil
 		}
 	} else if version != 0 || appID != 0 {
 		return errIndexSchema
 	}
+
 	tx, err := index.conn.begin(ctx)
 	if err != nil {
 		return index.failure(fmt.Errorf("create history index: %w", err))
 	}
+
 	if err = index.createSchema(ctx, tx); err != nil {
 		return errors.Join(err, tx.Rollback(ctx))
 	}
+
 	if err = tx.Commit(ctx); err != nil {
 		return index.failure(fmt.Errorf("create history index: %w", err))
 	}
+
 	return nil
 }
 
 func (index *historyIndex) validateSchemaTables(ctx context.Context, version int) error {
 	var count int
-	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('files','conversations','parts','parts_fts','directories')").Scan(ctx, &count); err != nil {
+	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND "+
+		"name IN ('files','conversations','parts','parts_fts',"+
+		"'directories')").
+		Scan(ctx, &count); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
+
 		return fmt.Errorf("inspect history index tables: %w", err)
 	}
+
 	required := requiredIndexTableCount
 	if version < indexVersion {
 		required--
 	}
+
 	if count < required {
 		return errIndexSchema
 	}
+
 	var foreignCount int
-	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('files','conversations','parts','parts_fts','directories') AND name NOT LIKE 'parts_fts_%'").Scan(ctx, &foreignCount); err != nil {
+	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND "+
+		"name NOT LIKE 'sqlite_%' AND name NOT IN ('files',"+
+		"'conversations','parts','parts_fts','directories') AND name "+
+		"NOT LIKE 'parts_fts_%'").
+		Scan(ctx, &foreignCount); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
+
 		return fmt.Errorf("inspect history index foreign tables: %w", err)
 	}
+
 	if foreignCount != 0 {
 		return errIndexSchema
 	}
+
 	return nil
 }
 
@@ -288,52 +348,69 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *indexTransactio
 	if err != nil {
 		return err
 	}
+
 	switch {
 	case version == indexVersion && appID == indexApplicationID:
 		return nil
 	case appID == indexApplicationID && version >= oldestIndexVersion && version < indexVersion:
 		index.rebuilt = true
+
 		if _, err := tx.ExecContext(ctx, dropIndexSchema+indexSchema); err != nil {
 			return fmt.Errorf("rebuild history index: %w", err)
 		}
+
 		return nil
 	case version != 0 || appID != 0:
 		return errIndexSchema
 	}
+
 	if err := index.inspectSchemaEmptiness(ctx, tx); err != nil {
 		return err
 	}
+
 	if _, err := tx.ExecContext(ctx, indexSchema); err != nil {
 		return fmt.Errorf("create history index: %w", err)
 	}
+
 	return nil
 }
 
 // readIndexSchema reads the application ID and schema version in one statement,
 // so a concurrent creator's commit cannot pair one value with the other's
 // previous state.
-func readIndexSchema(ctx context.Context, queryRow func(string, ...any) *indexRow) (int, int, error) {
+func readIndexSchema(
+	ctx context.Context,
+	queryRow func(string, ...any) *indexRow,
+) (int, int, error) {
 	var appID, version int
-	if err := queryRow("SELECT a.application_id, v.user_version FROM pragma_application_id a, pragma_user_version v").Scan(ctx, &appID, &version); err != nil {
+	if err := queryRow(
+		"SELECT a.application_id, v.user_version FROM pragma_application_id a, pragma_user_version v",
+	).Scan(ctx, &appID, &version); err != nil {
 		if isIndexContentFailure(err) {
 			return 0, 0, schemaFailure(err)
 		}
+
 		return 0, 0, fmt.Errorf("read history index schema version: %w", err)
 	}
+
 	return appID, version, nil
 }
 
 func (index *historyIndex) inspectSchemaEmptiness(ctx context.Context, tx *indexTransaction) error {
 	var tables int
-	if err := tx.queryRow("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").Scan(ctx, &tables); err != nil {
+	if err := tx.queryRow("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").
+		Scan(ctx, &tables); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
+
 		return fmt.Errorf("inspect history index: %w", err)
 	}
+
 	if tables != 0 {
 		return errIndexSchema
 	}
+
 	return nil
 }
 
@@ -347,33 +424,54 @@ func (index *historyIndex) enableWAL(ctx context.Context) error {
 	if err := index.conn.queryRow("PRAGMA journal_mode=WAL").Scan(ctx, &mode); err != nil {
 		return index.failure(fmt.Errorf("enable history index WAL: %w", err))
 	}
+
 	if !strings.EqualFold(mode, "wal") {
 		return fmt.Errorf("%w: journal mode %q", errIndexWAL, mode)
 	}
+
 	return nil
 }
 
 func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
-	rows, err := index.conn.QueryContext(ctx, "SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted FROM files f WHERE "+index.sourceFilter, index.sourceArgs...)
+	rows, err := index.conn.QueryContext(
+		ctx,
+		"SELECT id,"+firstConversationSQL+",harness,path,stamp,checkpoint,issues,omitted FROM files f "+
+			"WHERE "+index.sourceFilter,
+		index.sourceArgs...,
+	)
 	if err != nil {
 		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
 			return schemaFailure(err)
 		}
+
 		return fmt.Errorf("read indexed histories: %w", err)
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
+
 	for rows.Next() {
 		var file indexedFile
-		if err = rows.Scan(&file.id, &file.resumeID, &file.harness, &file.path, &file.stamp, &file.checkpoint, &file.issues, &file.omitted); err != nil {
+		if err = rows.Scan(
+			&file.id,
+			&file.resumeID,
+			&file.harness,
+			&file.path,
+			&file.stamp,
+			&file.checkpoint,
+			&file.issues,
+			&file.omitted,
+		); err != nil {
 			return fmt.Errorf("read indexed file: %w", err)
 		}
+
 		key := file.harness + "\x00" + file.path
 		index.paths[key] = Source{Harness: registry.Harness(file.harness), Path: file.path}
 		index.files[key] = file
 	}
+
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("read indexed files: %w", err)
 	}
+
 	return nil
 }
 
@@ -382,20 +480,25 @@ func (index *historyIndex) beginWrite(ctx context.Context) error {
 	if err != nil {
 		return index.failure(err)
 	}
+
 	index.tx = tx
+
 	return nil
 }
 
 // endWrite commits an open refresh transaction.
 func (index *historyIndex) endWrite(ctx context.Context) error {
 	tx := index.tx
+
 	index.tx = nil
 	if tx == nil {
 		return nil
 	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return index.failure(fmt.Errorf("commit history index: %w", err))
 	}
+
 	return nil
 }
 
@@ -403,10 +506,12 @@ func (index *historyIndex) endWrite(ctx context.Context) error {
 // committed index visible.
 func (index *historyIndex) rollbackWrite(ctx context.Context) error {
 	tx := index.tx
+
 	index.tx = nil
 	if tx == nil {
 		return nil
 	}
+
 	return tx.Rollback(ctx)
 }
 
@@ -414,7 +519,9 @@ func (index *historyIndex) failure(err error) error {
 	if !isIndexContentFailure(err) {
 		return err
 	}
+
 	index.unavailable = errors.Join(index.unavailable, ErrIndexUnavailable, err)
+
 	return index.unavailable
 }
 
@@ -424,35 +531,53 @@ func (index *historyIndex) commit(ctx context.Context) error {
 	if index.unavailable != nil {
 		return index.unavailable
 	}
+
 	var vanished []Source
+
 	for key, source := range index.paths {
 		if index.seen[key] {
 			continue
 		}
+
 		if _, err := os.Stat(source.Path); errors.Is(err, os.ErrNotExist) {
 			vanished = append(vanished, source)
 		}
 	}
+
 	if len(vanished) == 0 {
 		return index.saveDirectories(ctx)
 	}
+
 	slices.SortFunc(vanished, func(a, b Source) int {
 		if byHarness := cmp.Compare(a.Harness, b.Harness); byHarness != 0 {
 			return byHarness
 		}
+
 		return cmp.Compare(a.Path, b.Path)
 	})
+
 	if err := index.beginWrite(ctx); err != nil {
 		return err
 	}
+
 	for _, source := range vanished {
-		if _, err := index.tx.ExecContext(ctx, "DELETE FROM files WHERE harness=? AND path=?", source.Harness, source.Path); err != nil {
-			return errors.Join(index.failure(fmt.Errorf("remove deleted indexed history: %w", err)), index.rollbackWrite(ctx))
+		if _, err := index.tx.ExecContext(
+			ctx,
+			"DELETE FROM files WHERE harness=? AND path=?",
+			source.Harness,
+			source.Path,
+		); err != nil {
+			return errors.Join(
+				index.failure(fmt.Errorf("remove deleted indexed history: %w", err)),
+				index.rollbackWrite(ctx),
+			)
 		}
 	}
+
 	if err := index.endWrite(ctx); err != nil {
 		return err
 	}
+
 	return index.saveDirectories(ctx)
 }
 
@@ -461,28 +586,39 @@ func (index *historyIndex) close(ctx context.Context) error {
 	if index.queries != nil {
 		err = index.queries.close()
 	}
+
 	err = errors.Join(err, index.rollbackWrite(ctx))
 	if index.conn != nil {
 		err = errors.Join(err, closeConn(index.conn.Conn))
 	}
+
 	if index.db != nil {
 		err = errors.Join(err, index.db.Close())
 	}
+
 	if err != nil {
 		return fmt.Errorf("close history index: %w", err)
 	}
+
 	return nil
 }
 
-func (index *historyIndex) reportIssues(s *search, source Source, file indexedFile, selected map[string]bool) {
+func (index *historyIndex) reportIssues(
+	s *search,
+	source Source,
+	file indexedFile,
+	selected map[string]bool,
+) {
 	var issues []Issue
 	if err := json.Unmarshal([]byte(file.issues), &issues); err != nil {
 		s.issue(source, file.path, fmt.Errorf("decode history index issues: %w", err))
 		return
 	}
+
 	for position := range issues {
 		issues[position].Source = source
 	}
+
 	s.reportIssues(file.path, issues, file.omitted, selected)
 }
 
@@ -519,6 +655,7 @@ func indexSQLiteCode(err error) int {
 	if !errors.As(err, &sqliteErr) {
 		return 0
 	}
+
 	return sqliteErr.Code() & sqlitePrimaryCodeMask
 }
 
@@ -533,6 +670,7 @@ func closeConn(conn *sql.Conn) error {
 	if err := conn.Close(); err != nil && !errors.Is(err, sql.ErrConnDone) {
 		return fmt.Errorf("close history index connection: %w", err)
 	}
+
 	return nil
 }
 
@@ -543,6 +681,7 @@ func removeIndex(path string) error {
 			return fmt.Errorf("remove unusable history index: %w", err)
 		}
 	}
+
 	return nil
 }
 
@@ -550,6 +689,7 @@ func cleanIndexDir(path string) string {
 	if path == "" {
 		return ""
 	}
+
 	return filepath.Clean(path)
 }
 
@@ -557,15 +697,23 @@ func directorySQL(dirs []string) (string, []any) {
 	if len(dirs) == 0 {
 		return "1", nil
 	}
+
 	predicates := make([]string, 0, len(dirs))
+
 	var args []any
+
 	for _, dir := range dirs {
 		dir = filepath.Clean(dir)
 		prefix := strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator)
 		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
-		predicates = append(predicates, "(c.cwd=? OR (c.cwd>=? AND c.cwd<?) OR c.root=? OR (c.root>=? AND c.root<?))")
+
+		predicates = append(
+			predicates,
+			"(c.cwd=? OR (c.cwd>=? AND c.cwd<?) OR c.root=? OR (c.root>=? AND c.root<?))",
+		)
 		args = append(args, dir, prefix, upper, dir, prefix, upper)
 	}
+
 	return "(" + strings.Join(predicates, " OR ") + ")", args
 }
 
@@ -576,16 +724,27 @@ func sourceSQL(sources []Source) (string, []any) {
 	if sources == nil {
 		return "1", nil
 	}
+
 	if len(sources) == 0 {
 		return "0", nil
 	}
+
 	filters := make([]string, 0, len(sources))
+
 	var args []any
+
 	for _, source := range sources {
-		prefix := strings.TrimRight(source.Path, string(filepath.Separator)) + string(filepath.Separator)
+		prefix := strings.TrimRight(
+			source.Path,
+			string(filepath.Separator),
+		) + string(
+			filepath.Separator,
+		)
 		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
+
 		filters = append(filters, "(f.harness=? AND (f.path=? OR (f.path>=? AND f.path<?)))")
 		args = append(args, source.Harness, source.Path, prefix, upper)
 	}
+
 	return "(" + strings.Join(filters, " OR ") + ")", args
 }

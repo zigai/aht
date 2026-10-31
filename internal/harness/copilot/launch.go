@@ -16,7 +16,10 @@ var (
 	errLaunchConfig = errors.New("copilot config conflicts with the launch trust list")
 )
 
-func (copilotHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (copilotHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	return harness.LaunchPlan{
 		Executable: "copilot",
 		Protocol:   fakeprovider.ProtocolOpenAIChat,
@@ -40,6 +43,7 @@ func (copilotHarness) LaunchPlan(paths harness.LaunchPaths, model harness.Launch
 			if prompt == "" {
 				return nil, errEmptyPrompt
 			}
+
 			return []string{"-p", prompt, "--allow-all", "--no-auto-update", "--stream", "off"}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
@@ -47,6 +51,7 @@ func (copilotHarness) LaunchPlan(paths harness.LaunchPaths, model harness.Launch
 			if prompt != "" {
 				args = append(args, "-i", prompt)
 			}
+
 			return args, nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -65,21 +70,28 @@ func launchConfig(existing []byte, work string) ([]byte, error) {
 			return nil, fmt.Errorf("decode copilot config: %w", err)
 		}
 	}
+
 	folders := []any{}
+
 	if value, ok := config["trusted_folders"]; ok {
 		list, ok := value.([]any)
 		if !ok {
 			return nil, fmt.Errorf("%w: trusted_folders is %T", errLaunchConfig, value)
 		}
+
 		folders = list
 	}
+
 	if !slices.Contains(folders, any(work)) {
 		folders = append(folders, work)
 	}
+
 	config["trusted_folders"] = folders
+
 	content, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode copilot config: %w", err)
 	}
+
 	return append(content, '\n'), nil
 }

@@ -74,20 +74,25 @@ func (kimiCodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.ManagedTextBlockAction{Plan: harness.ManagedTextBlockInstallPlan{
-		Path:        filepath.Join(base, "config.toml"),
-		Label:       "kimi-code hooks",
-		ConfigLabel: "kimi-code config",
-		StartMarker: kimiCodeManagedIntegrationStart,
-		EndMarker:   kimiCodeManagedIntegrationEnd,
-		Block:       kimiCodeHookBlock(binary),
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.ManagedTextBlockAction{Plan: harness.ManagedTextBlockInstallPlan{
+				Path:        filepath.Join(base, "config.toml"),
+				Label:       "kimi-code hooks",
+				ConfigLabel: "kimi-code config",
+				StartMarker: kimiCodeManagedIntegrationStart,
+				EndMarker:   kimiCodeManagedIntegrationEnd,
+				Block:       kimiCodeHookBlock(binary),
+			}},
+		},
+	}, nil
 }
 
 func (kimiCodeHarness) ResumeCommand(sessionID string, _ string) []string {
 	if sessionID == "" {
 		return nil
 	}
+
 	return []string{kimiCommand, kimiSessionFlag, sessionID}
 }
 
@@ -97,15 +102,37 @@ func (kimiCodeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	sessionID := harness.PayloadString(payload, "session_id")
+
 	sessionPath, err := kimiCodeSessionPath(sessionID)
 	if err != nil {
 		return harness.PayloadDefaults{}, err
 	}
+
 	attributes := make(map[string]string)
-	for _, field := range []string{"hook_event_name", "source", "client_type", "session_title", "tool_name", "tool_call_id", "agent_id", "decision", "reason", "error_type"} {
-		harness.AddAttributeString(attributes, "kimi_code_"+field, harness.PayloadString(payload, field))
+	for _, field := range []string{
+		"hook_event_name",
+		"source",
+		"client_type",
+		"session_title",
+		"tool_name",
+		"tool_call_id",
+		"agent_id",
+		"decision",
+		"reason",
+		"error_type",
+	} {
+		harness.AddAttributeString(
+			attributes,
+			"kimi_code_"+field,
+			harness.PayloadString(payload, field),
+		)
 	}
-	harness.AddAttributeString(attributes, "kimi_code_turn_id", payloadScalarString(payload, "turn_id"))
+
+	harness.AddAttributeString(
+		attributes,
+		"kimi_code_turn_id",
+		payloadScalarString(payload, "turn_id"),
+	)
 
 	return harness.PayloadDefaults{
 		SessionID:   sessionID,
@@ -137,16 +164,25 @@ func kimiCodeHookBlock(binary string) string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString(kimiCodeManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=kimi-code\n")
+	builder.WriteString(
+		kimiCodeManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=kimi-code\n",
+	)
+
 	for _, spec := range specs {
 		builder.WriteString("\n[[hooks]]\nevent = " + tomlQuoteString(spec.event) + "\n")
+
 		if spec.matcher != "" {
 			builder.WriteString("matcher = " + tomlQuoteString(spec.matcher) + "\n")
 		}
-		builder.WriteString("command = " + tomlQuoteString(kimiCodeHookCommand(binary, spec)) + "\n")
+
+		builder.WriteString(
+			"command = " + tomlQuoteString(kimiCodeHookCommand(binary, spec)) + "\n",
+		)
 		builder.WriteString("timeout = " + strconv.Itoa(harness.HookTimeoutSeconds) + "\n")
 	}
+
 	builder.WriteString("\n" + kimiCodeManagedIntegrationEnd + "\n")
+
 	return builder.String()
 }
 
@@ -155,12 +191,15 @@ func tomlQuoteString(value string) string {
 	if err != nil {
 		panic(fmt.Errorf("encode TOML string: %w", err))
 	}
+
 	encoded = bytes.ReplaceAll(encoded, []byte{0x7f}, []byte(`\u007f`))
+
 	return string(encoded)
 }
 
 func kimiCodeHookCommand(binary string, spec kimiCodeHookSpec) string {
 	dimension, _, _ := strings.Cut(string(spec.transition), ":")
+
 	return strings.Join([]string{
 		harness.ShellQuote(binary), "report", "kimi-code",
 		"--" + dimension, spec.transition.State(), "--event", spec.event,
@@ -186,53 +225,71 @@ func kimiCodeSessionPath(sessionID string) (string, error) {
 	if !kimiCodeSessionDirectoryName(sessionID) {
 		return "", nil
 	}
+
 	home := kimiCodeHome()
 	if home == "" {
 		return "", nil
 	}
 
 	sessionsRoot := filepath.Join(home, "sessions")
+
 	workDirs, err := os.ReadDir(sessionsRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
+
 		return "", fmt.Errorf("reading Kimi Code sessions: %w", err)
 	}
+
 	for _, workDir := range workDirs {
 		if !workDir.IsDir() {
 			continue
 		}
+
 		sessionPath := filepath.Join(sessionsRoot, workDir.Name(), sessionID)
+
 		info, statErr := os.Stat(sessionPath)
 		if statErr == nil && info.IsDir() {
 			return sessionPath, nil
 		}
+
 		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 			return "", fmt.Errorf("inspecting Kimi Code session: %w", statErr)
 		}
 	}
+
 	return "", nil
 }
 
 func kimiCodeSessionDirectoryName(sessionID string) bool {
-	return sessionID != "" && sessionID != "." && sessionID != ".." && filepath.Base(sessionID) == sessionID
+	return sessionID != "" && sessionID != "." && sessionID != ".." &&
+		filepath.Base(sessionID) == sessionID
 }
 
 func kimiCodeHome() string {
 	if value := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME")); value != "" {
 		return value
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
+
 	return filepath.Join(home, ".kimi-code")
 }
 
-func (kimiCodeHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (kimiCodeHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["kimi_code_hook_event_name"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "kimi_code_source", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "kimi_code_source", "source", "reason"),
+	)
 }

@@ -17,9 +17,11 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("discover tmux servers: %w", err)
 	}
+
 	sockets := opts.SocketPaths
 	if sockets == nil {
 		var err error
+
 		sockets, err = gotmux.DiscoverSockets()
 		if err != nil {
 			return nil, fmt.Errorf("discover tmux sockets: %w", err)
@@ -32,6 +34,7 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 	if err != nil {
 		return nil, err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("discover tmux servers: %w", err)
 	}
@@ -45,6 +48,7 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 		if _, exists := seen[server.Identity]; exists {
 			return
 		}
+
 		seen[server.Identity] = struct{}{}
 		servers = append(servers, server)
 	}
@@ -52,6 +56,7 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 	if socket := tmuxServerSocket(opts.Env.TMUX); socket != "" {
 		add(serverSpec{Identity: socket})
 	}
+
 	for _, socket := range sockets {
 		if socket != "" {
 			add(serverSpec{Identity: socket})
@@ -63,8 +68,10 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 		if !ok {
 			continue
 		}
+
 		add(server)
 	}
+
 	return servers, nil
 }
 
@@ -73,10 +80,12 @@ func canonicalServerIdentity(identity string) string {
 	if err != nil {
 		return identity
 	}
+
 	server, err := gotmux.New(cfg)
 	if err != nil {
 		return identity
 	}
+
 	return server.Endpoint().String()
 }
 
@@ -84,6 +93,7 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if len(args) == 0 {
 		return serverSpec{Identity: ""}, false
 	}
+
 	base := filepath.Base(args[0])
 	if !isTmuxBinaryName(base) {
 		return serverSpec{Identity: ""}, false
@@ -93,16 +103,20 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if len(args) == 2 && args[1] == "-d" {
 		return serverSpec{Identity: "default"}, true
 	}
+
 	parsed, err := gotmux.ParseCommandLine(args[1:])
 	if err != nil {
 		return serverSpec{Identity: ""}, false
 	}
+
 	if socket := parsed.Config.SocketPath; socket != "" {
 		return serverSpec{Identity: socket}, true
 	}
+
 	if name := parsed.Config.SocketName; name != "" {
 		return serverSpec{Identity: "-L:" + name}, true
 	}
+
 	return serverSpec{Identity: "default"}, true
 }
 
@@ -111,6 +125,8 @@ func isTmuxBinaryName(name string) bool {
 	if base == "tmux" || base == "tmux:" || strings.HasPrefix(base, "tmux: server") {
 		return true
 	}
+
 	clean := strings.TrimSuffix(strings.TrimSuffix(base, ".bin"), ".real")
+
 	return clean == "tmux" || clean == "tmux:"
 }

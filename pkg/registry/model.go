@@ -212,10 +212,13 @@ type Listing struct {
 	ResumeCommand []string `json:"resume_command,omitempty"`
 	CWD           string   `json:"cwd,omitempty"`
 	ProjectRoot   string   `json:"project_root,omitempty"`
-	ProcessPID    int      `json:"process_pid,omitempty"`
-	Current       bool     `json:"current"`
+	//exhaustruct:optional
+	ProcessPID int `json:"process_pid,omitempty"`
+	//exhaustruct:optional
+	Current bool `json:"current"`
 }
 
+//exhaustruct:optional
 type Filter struct {
 	Harness            Harness         `json:"harness"`
 	Presence           Presence        `json:"presence"`
@@ -274,14 +277,21 @@ func (p Presence) Valid() bool {
 	case PresenceLive, PresenceGone, PresenceUnknown:
 		return true
 	}
+
 	return false
 }
 
 func (a Activity) Valid() bool {
 	switch a {
-	case ActivityRunning, ActivityWaiting, ActivityIdle, ActivityFailed, ActivityInterrupted, ActivityUnknown:
+	case ActivityRunning,
+		ActivityWaiting,
+		ActivityIdle,
+		ActivityFailed,
+		ActivityInterrupted,
+		ActivityUnknown:
 		return true
 	}
+
 	return false
 }
 
@@ -290,6 +300,7 @@ func (l NativeLifecycle) Valid() bool {
 	case NativeLifecycleStart, NativeLifecycleResume, NativeLifecycleEnd:
 		return true
 	}
+
 	return false
 }
 
@@ -298,11 +309,31 @@ func (k MultiplexerKind) Valid() bool {
 	case MultiplexerTmux, MultiplexerZellij, MultiplexerHerdr:
 		return true
 	}
+
 	return false
 }
 
 func (l Location) Empty() bool {
-	return l == (Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""})
+	return l == (Location{
+		Kind:            "",
+		ServerID:        "",
+		SessionID:       "",
+		SessionName:     "",
+		WorkspaceID:     "",
+		WorkspaceName:   "",
+		TabID:           "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "",
+		WindowIndex:     "",
+		WindowName:      "",
+		PaneID:          "",
+		PaneIndex:       "",
+		PaneCurrentPath: "",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+	})
 }
 
 func (p ProcessIdentity) Complete() bool { return p.PID > 0 && p.StartIdentity != "" }
@@ -338,7 +369,11 @@ func NormalizeActivity(value string) (Activity, error) {
 		return ActivityIdle, nil
 	case string(ActivityFailed), "error", "errored", "crash", "crashed":
 		return ActivityFailed, nil
-	case string(ActivityInterrupted), "paused", "stopped", "canceled", "cancelled": //nolint:misspell // British spelling remains a supported input alias.
+	case string(ActivityInterrupted),
+		"paused",
+		"stopped",
+		"canceled",
+		"cancelled": //nolint:misspell // British spelling remains a supported input alias.
 		return ActivityInterrupted, nil
 	case string(ActivityUnknown):
 		return ActivityUnknown, nil

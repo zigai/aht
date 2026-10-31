@@ -19,20 +19,29 @@ var errRecursiveShimTarget = errors.New("target binary resolves to managed shim"
 func installShim(opts Options, harness registry.Harness) (Result, error) {
 	dir := filepath.Join(registry.DefaultStateDir(), "shims")
 	path := filepath.Join(dir, string(harness))
+
 	target, err := resolveShimTarget(opts.TargetBinary, string(harness), dir, path)
 	if err != nil {
 		return Result{}, err
 	}
-	script := shimScript(opts.Binary, string(harness), target, catalog.IntegrationVersionFor(harness))
+
+	script := shimScript(
+		opts.Binary,
+		string(harness),
+		target,
+		catalog.IntegrationVersionFor(harness),
+	)
 
 	contentChanged, err := fileNeedsUpdate(path, script, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
+
 	modeChanged, err := shimModeNeedsUpdate(path)
 	if err != nil {
 		return Result{}, err
 	}
+
 	changed := contentChanged || modeChanged
 
 	if changed && !opts.DryRun {
@@ -41,7 +50,11 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 		}
 	}
 
-	message := fmt.Sprintf("%s shim installed; put %s before the real harness binary in PATH", harness, dir)
+	message := fmt.Sprintf(
+		"%s shim installed; put %s before the real harness binary in PATH",
+		harness,
+		dir,
+	)
 	if !changed {
 		message = "already installed"
 	}
@@ -63,8 +76,15 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 
 func writeShimChanges(path string, script string, contentChanged bool) error {
 	if contentChanged {
-		return writeFileAtomicMode(path, []byte(script), shimFileMode, "creating shim directory", "writing shim")
+		return writeFileAtomicMode(
+			path,
+			[]byte(script),
+			shimFileMode,
+			"creating shim directory",
+			"writing shim",
+		)
 	}
+
 	if err := os.Chmod(path, shimFileMode); err != nil {
 		return fmt.Errorf("making shim executable: %w", err)
 	}
@@ -90,10 +110,12 @@ func classifyShimArtifact(path string) (ArtifactStatus, error) {
 	if err != nil || status != ArtifactCurrent {
 		return status, err
 	}
+
 	modeChanged, err := shimModeNeedsUpdate(path)
 	if err != nil {
 		return "", err
 	}
+
 	if modeChanged {
 		return ArtifactStale, nil
 	}
@@ -101,7 +123,12 @@ func classifyShimArtifact(path string) (ArtifactStatus, error) {
 	return status, nil
 }
 
-func resolveShimTarget(target string, harness string, shimDir string, shimPath string) (string, error) {
+func resolveShimTarget(
+	target string,
+	harness string,
+	shimDir string,
+	shimPath string,
+) (string, error) {
 	if target != "" {
 		if pathInDir(target, shimDir) || samePath(target, shimPath) {
 			return "", fmt.Errorf("%w: %s", errRecursiveShimTarget, target)
@@ -114,6 +141,7 @@ func resolveShimTarget(target string, harness string, shimDir string, shimPath s
 	if err != nil {
 		return "", fmt.Errorf("finding %s binary: %w", harness, err)
 	}
+
 	if pathInDir(found, shimDir) || samePath(found, shimPath) {
 		return "", fmt.Errorf("%w: %s", errRecursiveShimTarget, found)
 	}
@@ -134,6 +162,7 @@ func lookPathExcludingShimDir(file string, shimDir string) (string, error) {
 		if strings.TrimSpace(dir) == "" || samePath(dir, shimDir) {
 			continue
 		}
+
 		candidate := filepath.Join(dir, file)
 		if isExecutable(candidate) {
 			return candidate, nil
@@ -151,23 +180,27 @@ func isExecutable(path string) bool {
 	if err != nil || info.IsDir() {
 		return false
 	}
+
 	return info.Mode()&0o111 != 0
 }
 
 func pathInDir(path string, dir string) bool {
 	path = canonicalPath(path)
 	dir = canonicalPath(dir)
+
 	relative, err := filepath.Rel(dir, path)
 	if err != nil {
 		return false
 	}
 
-	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+	return relative == "." ||
+		(relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }
 
 func samePath(left string, right string) bool {
 	left = canonicalPath(left)
 	right = canonicalPath(right)
+
 	return left == right
 }
 
@@ -176,6 +209,7 @@ func canonicalPath(path string) string {
 	if err == nil {
 		path = absolute
 	}
+
 	evaluated, err := filepath.EvalSymlinks(path)
 	if err == nil {
 		path = evaluated
@@ -185,6 +219,7 @@ func canonicalPath(path string) string {
 }
 
 func shimScript(binary string, harness string, target string, version int) string {
+	//nolint:lll // multi-line generated shell must preserve exact bytes.
 	return fmt.Sprintf(`#!/bin/sh
 set -u
 
@@ -199,5 +234,15 @@ harness_bin=%s
 status=$?
 "$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --reporter-version %d --reporter %s-shim --quiet >/dev/null 2>&1 || true
 exit "$status"
-`, harnesspkg.ShellQuote(managedMarker), harness, version, harnesspkg.ShellQuote(binary), harnesspkg.ShellQuote(target), harnesspkg.ShellQuote(harness), version, harness, harnesspkg.ShellQuote(harness), version, harness)
+`, harnesspkg.ShellQuote(
+		managedMarker,
+	), harness, version, harnesspkg.ShellQuote(
+		binary,
+	), harnesspkg.ShellQuote(
+		target,
+	), harnesspkg.ShellQuote(
+		harness,
+	), version, harness, harnesspkg.ShellQuote(
+		harness,
+	), version, harness)
 }

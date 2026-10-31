@@ -51,25 +51,72 @@ func TestTranscriptLatestTitleSource(t *testing.T) {
 		wantCustom string
 		wantAI     string
 	}{
-		{name: "auto replaces manual", records: []string{titleRecord("s1", "Manual", "manual"), titleRecord("s1", "Automatic", "auto")}, wantTitle: "Automatic", wantCustom: "", wantAI: "Automatic"},
-		{name: "manual replaces auto", records: []string{titleRecord("s1", "Automatic", "auto"), titleRecord("s1", "Manual", "manual")}, wantTitle: "Manual", wantCustom: "Manual", wantAI: ""},
-		{name: "empty title ignored", records: []string{titleRecord("s1", "Manual", "manual"), titleRecord("s1", "", "auto")}, wantTitle: "Manual", wantCustom: "Manual", wantAI: ""},
+		{
+			name: "auto replaces manual",
+			records: []string{
+				titleRecord("s1", "Manual", "manual"),
+				titleRecord("s1", "Automatic", "auto"),
+			},
+			wantTitle:  "Automatic",
+			wantCustom: "",
+			wantAI:     "Automatic",
+		},
+		{
+			name: "manual replaces auto",
+			records: []string{
+				titleRecord("s1", "Automatic", "auto"),
+				titleRecord("s1", "Manual", "manual"),
+			},
+			wantTitle:  "Manual",
+			wantCustom: "Manual",
+			wantAI:     "",
+		},
+		{
+			name: "empty title ignored",
+			records: []string{
+				titleRecord("s1", "Manual", "manual"),
+				titleRecord("s1", "", "auto"),
+			},
+			wantTitle:  "Manual",
+			wantCustom: "Manual",
+			wantAI:     "",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+
 			var conversation transcript.Conversation
+
 			recognized := false
-			decoder := transcript.Decoder{Conversation: &conversation, Recognized: &recognized, Emit: nil, Issue: nil, Metadata: nil, IncludeTools: false}
+			decoder := transcript.Decoder{
+				Conversation: &conversation,
+				Recognized:   &recognized,
+				Emit:         nil,
+				Issue:        nil,
+				Metadata:     nil,
+				IncludeTools: false,
+			}
+
 			for line, data := range test.records {
 				var record transcript.Record
 				if err := json.Unmarshal([]byte(data), &record); err != nil {
 					t.Fatal(err)
 				}
+
 				New().Transcript().Record(t.Context(), &decoder, record, line+1)
 			}
-			if !recognized || conversation.Title != test.wantTitle || conversation.CustomTitle != test.wantCustom || conversation.AITitle != test.wantAI {
-				t.Fatalf("title metadata = %#v, want title %q, custom %q, AI %q", conversation, test.wantTitle, test.wantCustom, test.wantAI)
+
+			if !recognized || conversation.Title != test.wantTitle ||
+				conversation.CustomTitle != test.wantCustom ||
+				conversation.AITitle != test.wantAI {
+				t.Fatalf(
+					"title metadata = %#v, want title %q, custom %q, AI %q",
+					conversation,
+					test.wantTitle,
+					test.wantCustom,
+					test.wantAI,
+				)
 			}
 		})
 	}
@@ -79,9 +126,16 @@ func TestSubagentParent(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.FromSlash("/home/user/.qwen/projects/-repo")
-	if got, want := subagentParent(filepath.Join(root, "subagents", "s1", "agent-a1.jsonl")), filepath.Join(root, "chats", "s1.jsonl"); got != want {
+	if got, want := subagentParent(
+		filepath.Join(root, "subagents", "s1", "agent-a1.jsonl"),
+	), filepath.Join(
+		root,
+		"chats",
+		"s1.jsonl",
+	); got != want {
 		t.Fatalf("subagent parent = %q, want %q", got, want)
 	}
+
 	if got := subagentParent(filepath.Join(root, "chats", "s1.jsonl")); got != "" {
 		t.Fatalf("session transcript has parent %q", got)
 	}

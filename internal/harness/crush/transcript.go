@@ -19,7 +19,22 @@ const nativeQuery = `SELECT s.id AS session_id, s.title AS title, '' AS cwd,
  WHERE s.parent_session_id IS NULL`
 
 func (crushHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{databaseName}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: transcriptSourceMetadata, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
+	return transcript.Reader{
+		Patterns:          []string{databaseName},
+		Sources:           transcriptSources,
+		SkipDirectory:     nil,
+		SkipFile:          nil,
+		SourceMetadata:    transcriptSourceMetadata,
+		Initialize:        nil,
+		Extra:             nil,
+		Record:            nil,
+		FastRecord:        nil,
+		Document:          nil,
+		Query:             transcriptQuery,
+		LocalTitles:       false,
+		RewritableHeaders: nil,
+		Parent:            nil,
+	}
 }
 
 func transcriptSources(home string) ([]string, error) {
@@ -27,6 +42,7 @@ func transcriptSources(home string) ([]string, error) {
 	if path == "" {
 		return nil, nil
 	}
+
 	projects, err := readProjects(path)
 	if err != nil {
 		return nil, err
@@ -40,11 +56,13 @@ func transcriptSourceMetadata(path string, _ bool, issue func(string, error)) ma
 	if projectsFile == "" {
 		return nil
 	}
+
 	projects, err := readProjects(projectsFile)
 	if err != nil {
 		issue(projectsFile, err)
 		return nil
 	}
+
 	database := filepath.Clean(path)
 	for _, project := range projects {
 		if project.databasePath() == database {
@@ -64,28 +82,36 @@ func readDatabaseRow(ctx context.Context, t *transcript.Decoder, row transcript.
 	if err != nil {
 		return fmt.Errorf("decode history row: %w", err)
 	}
+
 	if t.Conversation.CWD == "" {
 		t.Conversation.CWD = t.Metadata["cwd"]
 	}
+
 	if t.Conversation.ProjectRoot == "" {
 		t.Conversation.ProjectRoot = t.Metadata["cwd"]
 	}
+
 	if model := transcript.Str(r, "model"); model != "" {
 		t.Conversation.Model = model
 	}
+
 	role, ok := transcript.RecognizedRole(row.Role)
 	if !ok {
 		return nil
 	}
+
 	var parts []transcript.Record
 	if json.Unmarshal([]byte(transcript.Str(r, "parts")), &parts) != nil {
 		return transcript.ErrInvalidRecord
 	}
+
 	text, tools := messageText(parts)
+
 	timestamp := transcript.StoredTime(row.Timestamp)
 	if text != "" {
 		t.Capture(ctx, role, text, row.MessageID, 0, timestamp)
 	}
+
 	if tools != "" {
 		t.Capture(ctx, "tool", tools, row.MessageID, 0, timestamp)
 	}
@@ -95,11 +121,13 @@ func readDatabaseRow(ctx context.Context, t *transcript.Decoder, row transcript.
 
 func messageText(parts []transcript.Record) (string, string) {
 	var text, tools []string
+
 	for _, part := range parts {
 		data := transcript.Obj(part, "data")
 		switch transcript.Str(part, "type") {
 		case "text":
 			var hidden bool
+
 			_ = json.Unmarshal(data["hidden"], &hidden)
 			if body := transcript.Str(data, "text"); body != "" && !hidden {
 				text = append(text, body)
@@ -109,7 +137,10 @@ func messageText(parts []transcript.Record) (string, string) {
 		case "tool_result":
 			tools = append(tools, transcript.Str(data, "name")+" "+transcript.Str(data, "content"))
 		case "shell_command":
-			tools = append(tools, transcript.Str(data, "command")+" "+transcript.Str(data, "output"))
+			tools = append(
+				tools,
+				transcript.Str(data, "command")+" "+transcript.Str(data, "output"),
+			)
 		}
 	}
 

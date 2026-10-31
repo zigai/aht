@@ -59,25 +59,30 @@ func (ompHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "extensions", ompExtensionName),
-		Label:       "oh-my-pi extension",
-		ConfigLabel: "oh-my-pi extension",
-		Content: harness.RenderScriptTemplate(
-			ompExtensionTemplate,
-			ompIntegrationID,
-			binary,
-			ompIntegrationSourceID,
-			integrationVersion,
-		),
-		JSONContent: nil,
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "extensions", ompExtensionName),
+				Label:       "oh-my-pi extension",
+				ConfigLabel: "oh-my-pi extension",
+				Content: harness.RenderScriptTemplate(
+					ompExtensionTemplate,
+					ompIntegrationID,
+					binary,
+					ompIntegrationSourceID,
+					integrationVersion,
+				),
+				JSONContent: nil,
+			}},
+		},
+	}, nil
 }
 
 func (ompHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 	if sessionPath != "" {
 		return []string{ompIntegrationID, ompSessionFlag, sessionPath}
 	}
+
 	if sessionID != "" {
 		return []string{ompIntegrationID, ompSessionFlag, sessionID}
 	}
@@ -91,12 +96,20 @@ func (ompHarness) ObservableProcess(process processinfo.Process) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
-func (ompHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (ompHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["omp_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "omp_reason", "omp_approval_reason", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "omp_reason", "omp_approval_reason", "source", "reason"),
+	)
 }

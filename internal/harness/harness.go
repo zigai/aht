@@ -129,11 +129,20 @@ type PayloadAdapter interface {
 // PayloadActivityAdapter refines the activity a generated hook declares when
 // the native payload distinguishes states that the hook event alone cannot.
 type PayloadActivityAdapter interface {
-	PayloadActivity(event string, activity registry.Activity, payload map[string]any, at time.Time) registry.Activity
+	PayloadActivity(
+		event string,
+		activity registry.Activity,
+		payload map[string]any,
+		at time.Time,
+	) registry.Activity
 }
 
 type ActivityDetailAdapter interface {
-	ActivityDetail(event string, activity registry.Activity, attributes map[string]string) *registry.ActivityDetail
+	ActivityDetail(
+		event string,
+		activity registry.Activity,
+		attributes map[string]string,
+	) *registry.ActivityDetail
 	DetailCapabilities() registry.DetailCapabilities
 }
 

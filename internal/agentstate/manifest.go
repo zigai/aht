@@ -82,6 +82,7 @@ func DefaultConfigDir() string {
 	if configDir == "" {
 		return ""
 	}
+
 	return filepath.Join(configDir, "aht", "detection")
 }
 
@@ -89,13 +90,16 @@ func (l Loader) Supports(harnessID registry.Harness) bool {
 	if catalog.SupportsScreen(harnessID) {
 		return true
 	}
+
 	_, err := os.Stat(l.overridePath(harnessID))
+
 	return err == nil
 }
 
 func (l Loader) Load(harnessID registry.Harness) (Manifest, error) {
 	path := l.overridePath(harnessID)
 	key := string(harnessID) + "\x00" + path
+
 	fingerprint := manifestFileFingerprint(path)
 	if cached, ok := manifestCache.Load(key); ok {
 		if entry, valid := cached.(manifestCacheEntry); valid &&
@@ -119,9 +123,11 @@ func (l Loader) overridePath(harnessID registry.Harness) string {
 	if configDir == "" {
 		configDir = DefaultConfigDir()
 	}
+
 	if configDir == "" {
 		return ""
 	}
+
 	return filepath.Join(configDir, string(harnessID)+".toml")
 }
 
@@ -129,16 +135,27 @@ func ParseManifest(data []byte, harnessID registry.Harness) (Manifest, error) {
 	if len(data) > maxManifestBytes {
 		return Manifest{}, errManifestTooLarge
 	}
+
 	var manifest Manifest
-	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&manifest); err != nil {
+	if err := toml.NewDecoder(bytes.NewReader(data)).
+		DisallowUnknownFields().
+		Decode(&manifest); err != nil {
 		return Manifest{}, fmt.Errorf("%w: parsing TOML: %w", errManifestInvalid, err)
 	}
+
 	if manifest.Agent != string(harnessID) {
-		return Manifest{}, fmt.Errorf("%w: agent %q does not match %q", errManifestInvalid, manifest.Agent, harnessID)
+		return Manifest{}, fmt.Errorf(
+			"%w: agent %q does not match %q",
+			errManifestInvalid,
+			manifest.Agent,
+			harnessID,
+		)
 	}
+
 	if err := manifest.validate(); err != nil {
 		return Manifest{}, err
 	}
+
 	if err := manifest.compileRules(); err != nil {
 		return Manifest{}, err
 	}
@@ -153,11 +170,14 @@ func LoadExplicitManifest(path string, harnessID registry.Harness) (Manifest, er
 	if err != nil {
 		return Manifest{}, fmt.Errorf("reading detection manifest: %w", err)
 	}
+
 	manifest, err := ParseManifest(data, harnessID)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("parsing detection manifest: %w", err)
 	}
+
 	manifest.Source = path
+
 	return manifest, nil
 }
 
@@ -166,11 +186,14 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 	if source == "" {
 		return "", errScreenPathRequired
 	}
+
 	var reader io.Reader
+
 	if source == "-" {
 		if stdin == nil {
 			return "", errStdinUnavailable
 		}
+
 		reader = stdin
 	} else {
 		file, err := os.Open(source)
@@ -178,32 +201,44 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 			return "", fmt.Errorf("open screen fixture: %w", err)
 		}
 		defer func() { _ = file.Close() }()
+
 		reader = file
 	}
+
 	data, err := io.ReadAll(io.LimitReader(reader, MaxScreenBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read screen fixture: %w", err)
 	}
+
 	if len(data) > MaxScreenBytes {
 		return "", ErrScreenTooLarge
 	}
+
 	return string(data), nil
 }
 
 func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
+
 	if catalog.SupportsScreen(harnessID) {
 		var err error
+
 		bundled, err = loadBundled(harnessID)
 		if err != nil {
 			return Manifest{}, err
 		}
 	}
+
 	if path == "" {
 		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
-		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
+
+		return Manifest{}, fmt.Errorf(
+			"%w: unsupported screen harness %q",
+			errManifestInvalid,
+			harnessID,
+		)
 	}
 
 	data, readErr := readManifestFile(path)
@@ -211,13 +246,21 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 		if catalog.SupportsScreen(harnessID) {
 			return bundled, nil
 		}
-		return Manifest{}, fmt.Errorf("%w: unsupported screen harness %q", errManifestInvalid, harnessID)
+
+		return Manifest{}, fmt.Errorf(
+			"%w: unsupported screen harness %q",
+			errManifestInvalid,
+			harnessID,
+		)
 	}
+
 	if readErr != nil {
 		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("reading local override %s: %w", path, readErr)
 		}
+
 		bundled.Warning = fmt.Sprintf("reading local override %s: %v", path, readErr)
+
 		return bundled, nil
 	}
 
@@ -226,9 +269,12 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 		if !catalog.SupportsScreen(harnessID) {
 			return Manifest{}, fmt.Errorf("loading local override %s: %w", path, parseErr)
 		}
+
 		bundled.Warning = fmt.Sprintf("ignoring invalid local override %s: %v", path, parseErr)
+
 		return bundled, nil
 	}
+
 	local.Source = path
 
 	return local, nil
@@ -238,11 +284,13 @@ func manifestFileFingerprint(path string) string {
 	if path == "" {
 		return "none"
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "missing"
 		}
+
 		return "error:" + err.Error()
 	}
 
@@ -255,31 +303,70 @@ func readManifestFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("open manifest: %w", err)
 	}
 	defer func() { _ = file.Close() }()
+
 	data, err := io.ReadAll(io.LimitReader(file, maxManifestBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
+
 	if len(data) > maxManifestBytes {
 		return nil, errManifestTooLarge
 	}
+
 	return data, nil
 }
 
 func (manifest *Manifest) compileRules() error {
 	for index := range manifest.Rules {
 		rule := &manifest.Rules[index]
+
 		var err error
-		if rule.regexAllCompiled, err = compileRuleExpressions(rule.RegexAll, rule.CaseSensitive); err != nil {
-			return fmt.Errorf("%w: compiling rule %q regex_all: %w", errManifestInvalid, rule.ID, err)
+		if rule.regexAllCompiled, err = compileRuleExpressions(
+			rule.RegexAll,
+			rule.CaseSensitive,
+		); err != nil {
+			return fmt.Errorf(
+				"%w: compiling rule %q regex_all: %w",
+				errManifestInvalid,
+				rule.ID,
+				err,
+			)
 		}
-		if rule.regexAnyCompiled, err = compileRuleExpressions(rule.RegexAny, rule.CaseSensitive); err != nil {
-			return fmt.Errorf("%w: compiling rule %q regex_any: %w", errManifestInvalid, rule.ID, err)
+
+		if rule.regexAnyCompiled, err = compileRuleExpressions(
+			rule.RegexAny,
+			rule.CaseSensitive,
+		); err != nil {
+			return fmt.Errorf(
+				"%w: compiling rule %q regex_any: %w",
+				errManifestInvalid,
+				rule.ID,
+				err,
+			)
 		}
-		if rule.regexNoneCompiled, err = compileRuleExpressions(rule.RegexNone, rule.CaseSensitive); err != nil {
-			return fmt.Errorf("%w: compiling rule %q regex_none: %w", errManifestInvalid, rule.ID, err)
+
+		if rule.regexNoneCompiled, err = compileRuleExpressions(
+			rule.RegexNone,
+			rule.CaseSensitive,
+		); err != nil {
+			return fmt.Errorf(
+				"%w: compiling rule %q regex_none: %w",
+				errManifestInvalid,
+				rule.ID,
+				err,
+			)
 		}
-		if rule.titleRegexAnyCompiled, err = compileRuleExpressions(rule.TitleRegexAny, rule.CaseSensitive); err != nil {
-			return fmt.Errorf("%w: compiling rule %q title_regex_any: %w", errManifestInvalid, rule.ID, err)
+
+		if rule.titleRegexAnyCompiled, err = compileRuleExpressions(
+			rule.TitleRegexAny,
+			rule.CaseSensitive,
+		); err != nil {
+			return fmt.Errorf(
+				"%w: compiling rule %q title_regex_any: %w",
+				errManifestInvalid,
+				rule.ID,
+				err,
+			)
 		}
 	}
 
@@ -293,6 +380,7 @@ func compileRuleExpressions(expressions []string, caseSensitive bool) ([]*regexp
 		if err != nil {
 			return nil, fmt.Errorf("compiling regular expression %q: %w", expression, err)
 		}
+
 		compiled = append(compiled, pattern)
 	}
 
@@ -302,59 +390,100 @@ func compileRuleExpressions(expressions []string, caseSensitive bool) ([]*regexp
 func loadBundled(harnessID registry.Harness) (Manifest, error) {
 	adapter, ok := catalog.Find(harnessID)
 	if !ok {
-		return Manifest{}, fmt.Errorf("reading bundled manifest for %s: %w", harnessID, errBundledManifestNotFound)
+		return Manifest{}, fmt.Errorf(
+			"reading bundled manifest for %s: %w",
+			harnessID,
+			errBundledManifestNotFound,
+		)
 	}
+
 	provider, ok := adapter.(harness.ScreenManifestProvider)
 	if !ok {
-		return Manifest{}, fmt.Errorf("reading bundled manifest for %s: %w", harnessID, errBundledManifestNotFound)
+		return Manifest{}, fmt.Errorf(
+			"reading bundled manifest for %s: %w",
+			harnessID,
+			errBundledManifestNotFound,
+		)
 	}
+
 	manifest, err := ParseManifest([]byte(provider.ScreenManifest()), harnessID)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("loading bundled manifest for %s: %w", harnessID, err)
 	}
+
 	manifest.Source = "bundled:" + string(harnessID)
+
 	return manifest, nil
 }
 
 func (manifest *Manifest) validate() error {
 	if manifest.Version != manifestSchemaVersion || len(manifest.Rules) == 0 {
-		return fmt.Errorf("%w: schema version %d or empty rules", errManifestInvalid, manifest.Version)
+		return fmt.Errorf(
+			"%w: schema version %d or empty rules",
+			errManifestInvalid,
+			manifest.Version,
+		)
 	}
+
 	seen := make(map[string]struct{}, len(manifest.Rules))
 	for index, rule := range manifest.Rules {
 		if strings.TrimSpace(rule.ID) == "" {
 			return fmt.Errorf("%w: rules[%d] has no id", errManifestInvalid, index)
 		}
+
 		if _, exists := seen[rule.ID]; exists {
 			return fmt.Errorf("%w: duplicate rule id %q", errManifestInvalid, rule.ID)
 		}
+
 		seen[rule.ID] = struct{}{}
 		if err := rule.validate(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
 func (rule Rule) validate() error {
 	activity, err := registry.NormalizeActivity(rule.State)
 	if err != nil || activity == registry.ActivityUnknown || activity == "" {
-		return fmt.Errorf("%w: rule %q has unsupported state %q", errManifestInvalid, rule.ID, rule.State)
+		return fmt.Errorf(
+			"%w: rule %q has unsupported state %q",
+			errManifestInvalid,
+			rule.ID,
+			rule.State,
+		)
 	}
+
 	if rule.Detail != "" && !rule.Detail.ValidFor(activity) {
 		return fmt.Errorf("%w: rule %q has invalid activity detail", errManifestInvalid, rule.ID)
 	}
+
 	if _, err := selectRegion(rule.Region, nil); err != nil {
 		return fmt.Errorf("%w: rule %q: %w", errManifestInvalid, rule.ID, err)
 	}
+
 	if !rule.hasPositiveMatcher() {
 		return fmt.Errorf("%w: rule %q has no positive matcher", errManifestInvalid, rule.ID)
 	}
+
 	return rule.validateMatchers()
 }
 
 func (rule Rule) hasPositiveMatcher() bool {
-	return len(rule.All)+len(rule.Any)+len(rule.RegexAll)+len(rule.RegexAny)+len(rule.TitleAny)+len(rule.TitleRegexAny) > 0
+	return len(
+		rule.All,
+	)+len(
+		rule.Any,
+	)+len(
+		rule.RegexAll,
+	)+len(
+		rule.RegexAny,
+	)+len(
+		rule.TitleAny,
+	)+len(
+		rule.TitleRegexAny,
+	) > 0
 }
 
 func (rule Rule) validateMatchers() error {
@@ -374,16 +503,27 @@ func (rule Rule) validateMatchers() error {
 	for _, group := range groups {
 		for index, value := range group.values {
 			if strings.TrimSpace(value) == "" {
-				return fmt.Errorf("%w: rule %q %s[%d] is empty", errManifestInvalid, rule.ID, group.name, index)
+				return fmt.Errorf(
+					"%w: rule %q %s[%d] is empty",
+					errManifestInvalid,
+					rule.ID,
+					group.name,
+					index,
+				)
 			}
 		}
 	}
+
 	return nil
 }
 
 func sortedRules(rules []Rule) []Rule {
 	result := append([]Rule(nil), rules...)
-	slices.SortStableFunc(result, func(left, right Rule) int { return cmp.Compare(right.Priority, left.Priority) })
+	slices.SortStableFunc(
+		result,
+		func(left, right Rule) int { return cmp.Compare(right.Priority, left.Priority) },
+	)
+
 	return result
 }
 
@@ -392,14 +532,17 @@ func selectRegion(value string, lines []string) ([]string, error) {
 	if value == "" || value == "all" {
 		return lines, nil
 	}
+
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 || (parts[0] != "bottom" && parts[0] != "top") {
 		return nil, fmt.Errorf("%w: %q", errInvalidRegion, value)
 	}
+
 	count, err := strconv.Atoi(parts[1])
 	if err != nil || count <= 0 {
 		return nil, fmt.Errorf("%w: %q", errInvalidRegion, value)
 	}
+
 	if parts[0] == "top" {
 		count = min(count, len(lines))
 		return lines[:count], nil
@@ -408,6 +551,7 @@ func selectRegion(value string, lines []string) ([]string, error) {
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
 	}
+
 	count = min(count, len(lines))
 
 	return lines[len(lines)-count:], nil

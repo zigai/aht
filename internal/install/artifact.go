@@ -42,28 +42,47 @@ func installRenderedFile(opts Options, file renderedFileInstall) (Result, error)
 		return Result{}, err
 	}
 
-	if err := writeInstallFile(file.Path, []byte(file.Content), changed, opts.DryRun, file.CreateDirError, file.WriteError); err != nil {
+	if err := writeInstallFile(
+		file.Path,
+		[]byte(file.Content),
+		changed,
+		opts.DryRun,
+		file.CreateDirError,
+		file.WriteError,
+	); err != nil {
 		return Result{}, err
 	}
 
 	return Result{
-		Harness:  string(file.Harness),
-		Path:     file.Path,
-		Changed:  changed,
-		Message:  installStatusMessage(changed, opts.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
+		Harness: string(file.Harness),
+		Path:    file.Path,
+		Changed: changed,
+		Message: installStatusMessage(
+			changed,
+			opts.DryRun,
+			file.DryRunMessage,
+			file.AlreadyInstalledMessage,
+			file.InstalledMessage,
+		),
 		NextStep: "",
 		Snippet:  file.Content,
 		Error:    "",
 	}, nil
 }
 
-func installStatusMessage(changed bool, dryRun bool, dryRunMsg, alreadyInstalledMsg, installedMsg string) string {
+func installStatusMessage(
+	changed bool,
+	dryRun bool,
+	dryRunMsg string, alreadyInstalledMsg string, installedMsg string,
+) string {
 	if dryRun {
 		return dryRunMsg
 	}
+
 	if !changed {
 		return alreadyInstalledMsg
 	}
+
 	return installedMsg
 }
 
@@ -77,28 +96,50 @@ func installJSONHookFile(opts Options, file jsonHookFileInstall) (Result, error)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", file.Path, err)
 	}
+
 	data, err := json.MarshalIndent(harnessConfig, "", "  ")
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", file.EncodeError, err)
 	}
+
 	data = append(data, '\n')
 
-	if err := writeInstallFile(file.Path, data, changed, opts.DryRun, file.CreateDirError, file.WriteError); err != nil {
+	if err := writeInstallFile(
+		file.Path,
+		data,
+		changed,
+		opts.DryRun,
+		file.CreateDirError,
+		file.WriteError,
+	); err != nil {
 		return Result{}, err
 	}
 
 	return Result{
-		Harness:  string(file.Harness),
-		Path:     file.Path,
-		Changed:  changed,
-		Message:  installStatusMessage(changed, opts.DryRun, file.DryRunMessage, file.AlreadyInstalledMessage, file.InstalledMessage),
+		Harness: string(file.Harness),
+		Path:    file.Path,
+		Changed: changed,
+		Message: installStatusMessage(
+			changed,
+			opts.DryRun,
+			file.DryRunMessage,
+			file.AlreadyInstalledMessage,
+			file.InstalledMessage,
+		),
 		NextStep: "",
 		Snippet:  string(data),
 		Error:    "",
 	}, nil
 }
 
-func writeInstallFile(path string, data []byte, changed bool, dryRun bool, createDirError string, writeError string) error {
+func writeInstallFile(
+	path string,
+	data []byte,
+	changed bool,
+	dryRun bool,
+	createDirError string,
+	writeError string,
+) error {
 	if !changed || dryRun {
 		return nil
 	}
@@ -115,20 +156,24 @@ func readJSONObject(path string) (map[string]any, error) {
 
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
+
 	if len(bytes.TrimSpace(data)) == 0 {
 		return make(map[string]any), nil
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
+
 	var harnessConfig map[string]any
 	if err := decoder.Decode(&harnessConfig); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing %s: %w", path, errTrailingData)
 	}
+
 	if harnessConfig == nil {
 		harnessConfig = make(map[string]any)
 	}

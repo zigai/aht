@@ -16,7 +16,13 @@ func (ompHarness) Locations(projectDir string) []harness.Location {
 		Global(harness.LocationKindSkills, filepath.Join(dir, "skills")).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
 		Global(harness.LocationKindCommands, filepath.Join(dir, "commands")).
-		Project(harness.LocationKindConfig, filepath.Join(".omp", "config.yml"), filepath.Join(".omp", "settings.json")).
+		Project(harness.LocationKindConfig, filepath.Join(
+			".omp",
+			"config.yml",
+		), filepath.Join(
+			".omp",
+			"settings.json",
+		)).
 		Project(harness.LocationKindMCP, filepath.Join(".omp", "mcp.json"), filepath.Join(".omp", ".mcp.json")).
 		Project(harness.LocationKindInstructions, "AGENTS.md", filepath.Join(".omp", "AGENTS.md")).
 		Project(harness.LocationKindSkills, filepath.Join(".omp", "skills"), filepath.Join(".agents", "skills")).

@@ -8,14 +8,24 @@ import (
 
 func isolateDirEnvironment(t *testing.T) string {
 	t.Helper()
-	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "XDG_DATA_HOME"} {
+
+	for _, name := range []string{
+		"PI_CODING_AGENT_DIR",
+		"PI_CONFIG_DIR",
+		"OMP_PROFILE",
+		"PI_PROFILE",
+		"XDG_DATA_HOME",
+	} {
 		t.Setenv(name, "")
+
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
 	return home
 }
 
@@ -41,7 +51,10 @@ func TestAgentDir(t *testing.T) {
 		},
 		{
 			name: "agent dir override replaces the default profile agent dir",
-			env:  map[string]string{"PI_CODING_AGENT_DIR": "/srv/agent", "PI_CONFIG_DIR": ".custom-omp"},
+			env: map[string]string{
+				"PI_CODING_AGENT_DIR": "/srv/agent",
+				"PI_CONFIG_DIR":       ".custom-omp",
+			},
 			want: func(string) string { return "/srv/agent" },
 		},
 		{
@@ -71,7 +84,11 @@ func TestAgentDir(t *testing.T) {
 		},
 		{
 			name: "explicitly empty canonical profile selects the default despite the legacy one",
-			env:  map[string]string{"OMP_PROFILE": "", "PI_PROFILE": "legacy", "PI_CODING_AGENT_DIR": "/srv/agent"},
+			env: map[string]string{
+				"OMP_PROFILE":         "",
+				"PI_PROFILE":          "legacy",
+				"PI_CODING_AGENT_DIR": "/srv/agent",
+			},
 			want: func(string) string { return "/srv/agent" },
 		},
 		{
@@ -91,6 +108,7 @@ func TestAgentDir(t *testing.T) {
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
+
 			if got, want := ompAgentDir(), test.want(home); got != want {
 				t.Fatalf("ompAgentDir() = %q, want %q", got, want)
 			}
@@ -160,18 +178,22 @@ func TestSessionsDir(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			home := isolateDirEnvironment(t)
+
 			data := t.TempDir()
 			if test.dataDirs != nil {
 				t.Setenv("XDG_DATA_HOME", data)
 			}
+
 			for _, dir := range test.dataDirs {
 				if err := os.MkdirAll(filepath.Join(data, dir), 0o750); err != nil {
 					t.Fatal(err)
 				}
 			}
+
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
+
 			if got, want := sessionsDirUnder(home), test.want(home, data); got != want {
 				t.Fatalf("sessionsDirUnder() = %q, want %q", got, want)
 			}

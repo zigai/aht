@@ -27,15 +27,19 @@ const (
 )
 
 var (
-	errAllWithAgents            = errors.New("all cannot be combined with agent names")
-	errAgentRequired            = errors.New("at least one agent or all is required")
-	errCleanSelection           = errors.New("choose exactly one of --all or --older-than")
-	errNegativeCleanAge         = errors.New("older-than must be nonnegative")
-	errInfoReference            = errors.New("provide one session reference or --pane")
-	errInfoConfig               = errors.New("--config-dir requires --explain")
-	errStopSelection            = errors.New("provide one or more sessions, or --all")
-	errStopAllConfirmation      = errors.New("stopping all sessions was not confirmed (pass -y to confirm)")
-	errCleanAllConfirmation     = errors.New("cleaning all gone sessions was not confirmed (pass -y to confirm)")
+	errAllWithAgents       = errors.New("all cannot be combined with agent names")
+	errAgentRequired       = errors.New("at least one agent or all is required")
+	errCleanSelection      = errors.New("choose exactly one of --all or --older-than")
+	errNegativeCleanAge    = errors.New("older-than must be nonnegative")
+	errInfoReference       = errors.New("provide one session reference or --pane")
+	errInfoConfig          = errors.New("--config-dir requires --explain")
+	errStopSelection       = errors.New("provide one or more sessions, or --all")
+	errStopAllConfirmation = errors.New(
+		"stopping all sessions was not confirmed (pass -y to confirm)",
+	)
+	errCleanAllConfirmation = errors.New(
+		"cleaning all gone sessions was not confirmed (pass -y to confirm)",
+	)
 	errIntegrationStatusFail    = errors.New("one or more integrations could not be inspected")
 	errTargetBinaryNeedsShim    = errors.New("--target-binary requires --shim")
 	errTargetBinaryWithAll      = errors.New("--target-binary cannot be used with all")
@@ -49,6 +53,7 @@ var (
 	errUnknownConfigKey         = errors.New("unknown configuration key")
 )
 
+//exhaustruct:optional
 type integrationCommandOptions struct {
 	binary, targetBinary string
 	dryRun, force, shim  bool
@@ -59,12 +64,14 @@ type setupResult struct {
 	Tracker      service.Result   `json:"tracker"`
 }
 
+//exhaustruct:optional
 type cleanOptions struct {
 	all       bool
 	olderThan time.Duration
 	ageSet    bool
 }
 
+//exhaustruct:optional
 type infoOptions struct {
 	explain                 bool
 	paneID                  string
@@ -82,7 +89,9 @@ type explainedInfoResult struct {
 func (app *application) newSetupCommand() *cobra.Command {
 	options := integrationCommandOptions{}
 	serviceConfig := serviceOptions{interval: serviceDefaultInterval}
+
 	var serviceOptions service.Options
+
 	command := &cobra.Command{
 		Use:           "setup <agent... | all>",
 		Short:         "Set up harness integrations and start background tracking",
@@ -92,47 +101,65 @@ func (app *application) newSetupCommand() *cobra.Command {
 			if len(args) == 0 {
 				return exitCode(errSetupHarnessRequired, exitCodeUsage)
 			}
+
 			return nil
 		},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := selectedHarnesses(args, false); err != nil {
 				return exitCode(err, exitCodeUsage)
 			}
+
 			if options.binary == "" {
 				options.binary = defaultInstallBinary()
 			}
+
 			serviceConfig.binary = options.binary
 			serviceConfig.dryRun = options.dryRun
+
 			var err error
+
 			serviceOptions, err = app.configuredServiceOptions(cmd, serviceConfig)
+
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			integrations, integrationErr := installIntegrations(cmd.Context(), args, options)
+
 			tracker, trackerErr := runServiceOperation(cmd.Context(), "update", serviceOptions)
 			if trackerErr != nil {
 				trackerErr = fmt.Errorf("enable tracker: %w", trackerErr)
 			}
+
 			result := setupResult{Integrations: integrations, Tracker: tracker}
 			if app.outputJSON {
 				if err := app.writeJSON(result); err != nil {
 					return err
 				}
+
 				return errors.Join(integrationErr, trackerErr)
 			}
+
 			if err := app.writeIntegrationResults(integrations, false); err != nil {
 				return err
 			}
+
 			if err := app.writef("tracker: %s\nnext: aht list\n", tracker.Message); err != nil {
 				return err
 			}
+
 			return errors.Join(integrationErr, trackerErr)
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&options.binary, "binary", "", "AHT binary `<path>` used by integrations and tracker")
+	flags.StringVar(
+		&options.binary,
+		"binary",
+		"",
+		"AHT binary `<path>` used by integrations and tracker",
+	)
 	flags.BoolVarP(&options.dryRun, "dry-run", "n", false, "show changes without writing")
 	flags.BoolVarP(&options.force, "force", "f", false, "replace foreign integration files")
+
 	return command
 }
 
@@ -150,13 +177,21 @@ func (app *application) newTrackerCommand() *cobra.Command {
 	}
 	run := app.newTrackerRunCommand()
 	run.Short = "Service entry point; not intended for manual use"
-	command.AddCommand(run, app.newTrackerEnableCommand(), app.newTrackerDisableCommand(), app.newTrackerStatusCommand())
+	command.AddCommand(
+		run,
+		app.newTrackerEnableCommand(),
+		app.newTrackerDisableCommand(),
+		app.newTrackerStatusCommand(),
+	)
+
 	return command
 }
 
 func (app *application) newTrackerEnableCommand() *cobra.Command {
 	options := serviceOptions{interval: serviceDefaultInterval}
+
 	var parsed service.Options
+
 	command := &cobra.Command{
 		Use:           "enable",
 		Short:         "Install, update, and start background tracking",
@@ -165,7 +200,9 @@ func (app *application) newTrackerEnableCommand() *cobra.Command {
 		Args:          cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			var err error
+
 			parsed, err = app.configuredServiceOptions(cmd, options)
+
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -173,14 +210,21 @@ func (app *application) newTrackerEnableCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("enable tracker: %w", err)
 			}
+
 			return app.writeServiceResult(result)
 		},
 	}
 	flags := command.Flags()
 	flags.StringVar(&options.binary, "binary", "", "AHT binary `<path>` run by the tracker")
-	flags.DurationVar(&options.interval, "interval", options.interval, "reconciliation `<duration>`")
+	flags.DurationVar(
+		&options.interval,
+		"interval",
+		options.interval,
+		"reconciliation `<duration>`",
+	)
 	flags.DurationVar(&options.grace, "grace-period", options.grace, "absence grace `<duration>`")
 	flags.BoolVarP(&options.dryRun, "dry-run", "n", false, "show changes without writing")
+
 	return command
 }
 
@@ -193,24 +237,35 @@ func (app *application) newTrackerDisableCommand() *cobra.Command {
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options, err := app.parseServiceOptions(serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval, dryRun: dryRun})
+			options, err := app.parseServiceOptions(
+				serviceOptions{
+					binary:   defaultInstallBinary(),
+					interval: serviceDefaultInterval,
+					dryRun:   dryRun,
+				},
+			)
 			if err != nil {
 				return err
 			}
+
 			result, err := runServiceOperation(cmd.Context(), "uninstall", options)
 			if err != nil {
 				return fmt.Errorf("disable tracker: %w", err)
 			}
+
 			return app.writeServiceResult(result)
 		},
 	}
 	command.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show changes without writing")
+
 	return command
 }
 
 func (app *application) newTrackerStatusCommand() *cobra.Command {
 	serviceConfig := serviceOptions{interval: serviceDefaultInterval}
+
 	var options service.Options
+
 	command := &cobra.Command{
 		Use:           statusCommandName,
 		Short:         "Show background tracking state",
@@ -219,7 +274,9 @@ func (app *application) newTrackerStatusCommand() *cobra.Command {
 		Args:          cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			var err error
+
 			options, err = app.configuredServiceOptions(cmd, serviceConfig)
+
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -227,13 +284,25 @@ func (app *application) newTrackerStatusCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("tracker status: %w", err)
 			}
+
 			return app.writeServiceResult(result)
 		},
 	}
 	flags := command.Flags()
 	flags.StringVar(&serviceConfig.binary, "binary", "", "expected AHT binary `<path>`")
-	flags.DurationVar(&serviceConfig.interval, "interval", serviceConfig.interval, "expected reconciliation `<duration>`")
-	flags.DurationVar(&serviceConfig.grace, "grace-period", serviceConfig.grace, "expected absence grace `<duration>`")
+	flags.DurationVar(
+		&serviceConfig.interval,
+		"interval",
+		serviceConfig.interval,
+		"expected reconciliation `<duration>`",
+	)
+	flags.DurationVar(
+		&serviceConfig.grace,
+		"grace-period",
+		serviceConfig.grace,
+		"expected absence grace `<duration>`",
+	)
+
 	return command
 }
 
@@ -241,10 +310,12 @@ func (app *application) writeServiceResult(result service.Result) error {
 	if app.outputJSON {
 		return app.writeJSON(result)
 	}
+
 	state := "disabled"
 	if result.Installed {
 		state = "enabled"
 	}
+
 	return app.writeHumanDetails([]humanDetail{
 		{label: "State", value: state},
 		{label: "Manager", value: result.Manager},
@@ -269,14 +340,21 @@ func (app *application) newStateCommand() *cobra.Command {
 			return exitCode(errSilentUsageError, exitCodeUsage)
 		},
 	}
-	command.AddCommand(app.newStatePathCommand(), app.newStateResetCommand(), app.newStateCleanCommand())
+	command.AddCommand(
+		app.newStatePathCommand(),
+		app.newStateResetCommand(),
+		app.newStateCleanCommand(),
+	)
+
 	return command
 }
 
 //nolint:gocognit,cyclop // clean selection validation, age calculations, confirmation, and garbage collection
 func (app *application) newStateCleanCommand() *cobra.Command {
 	options := cleanOptions{}
+
 	var yes bool
+
 	command := &cobra.Command{
 		Use:           "clean",
 		Short:         "Delete gone session records",
@@ -288,24 +366,30 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			options.ageSet = cmd.Flags().Changed("older-than")
 			if options.all && options.ageSet {
 				return exitCode(errCleanSelection, exitCodeUsage)
 			}
+
 			if !options.all && !options.ageSet && cfg.Retention.TombstoneTTL != "" {
 				d, err := config.TombstoneTTL(cfg)
 				if err != nil {
 					return fmt.Errorf("parsing tombstone TTL: %w", err)
 				}
+
 				options.olderThan = d
 				options.ageSet = true
 			}
+
 			if options.all == options.ageSet {
 				return exitCode(errCleanSelection, exitCodeUsage)
 			}
+
 			if options.olderThan < 0 {
 				return exitCode(errNegativeCleanAge, exitCodeUsage)
 			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -314,20 +398,31 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 				if stdin == nil {
 					stdin = os.Stdin
 				}
-				confirmed, err := app.confirmAction(cmd.Context(), stdin, "Delete all gone session records? [y/N]: ", "--yes")
+
+				confirmed, err := app.confirmAction(
+					cmd.Context(),
+					stdin,
+					"Delete all gone session records? [y/N]: ",
+					"--yes",
+				)
 				if err != nil {
 					return err
 				}
+
 				if !confirmed {
 					return exitCode(errCleanAllConfirmation, exitCodeGeneral)
 				}
 			}
+
 			return app.runRegistryClean(cmd.Context(), options)
 		},
 	}
 	command.Flags().BoolVarP(&options.all, "all", "a", false, "delete every gone session record")
-	command.Flags().BoolVarP(&yes, "yes", "y", false, "confirm deleting all gone records without prompting")
-	command.Flags().DurationVar(&options.olderThan, "older-than", 0, "delete gone records older than this `<duration>`")
+	command.Flags().
+		BoolVarP(&yes, "yes", "y", false, "confirm deleting all gone records without prompting")
+	command.Flags().
+		DurationVar(&options.olderThan, "older-than", 0, "delete gone records older than this `<duration>`")
+
 	return command
 }
 
@@ -336,13 +431,16 @@ func (app *application) runRegistryClean(ctx context.Context, opts cleanOptions)
 	if opts.all {
 		age = 0
 	}
+
 	result, err := app.registryStore().GC(ctx, age)
 	if err != nil {
 		return fmt.Errorf("clean state: %w", err)
 	}
+
 	if app.outputJSON {
 		return app.writeJSON(result)
 	}
+
 	return app.writef("deleted=%d remaining=%d\n", result.Deleted, result.Remaining)
 }
 
@@ -359,75 +457,111 @@ func (app *application) newInfoCommand() *cobra.Command {
 			if (len(args) == 0) == (options.paneID == "") {
 				return exitCode(errInfoReference, exitCodeUsage)
 			}
+
 			if cmd.Flags().Changed("config-dir") && !options.explain {
 				return exitCode(errInfoConfig, exitCodeUsage)
 			}
+
 			cfg, err := app.loadConfig()
 			if err != nil {
 				return err
 			}
+
 			if !cmd.Flags().Changed("config-dir") && cfg.Detection.ManifestsDir != "" {
 				options.configDir = cfg.Detection.ManifestsDir
 			}
+
 			options.disableScreenInspection = false
 			if cfg.Detection.ScreenInspection != nil && !*cfg.Detection.ScreenInspection {
 				options.disableScreenInspection = true
 			}
+
 			if cmd.Flags().Changed("screen-inspection") {
 				options.disableScreenInspection = !screenInspection
 			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var session registry.Session
-			var err error
+			var (
+				session registry.Session
+				err     error
+			)
 			if options.paneID != "" {
-				session, err = app.resolvePaneSession(cmd.Context(), options.paneID, options.serverID, options.multiplexerKind)
+				session, err = app.resolvePaneSession(
+					cmd.Context(),
+					options.paneID,
+					options.serverID,
+					options.multiplexerKind,
+				)
 			} else {
 				session, err = app.resolveSession(cmd.Context(), args[0])
 			}
+
 			if err != nil {
 				return err
 			}
+
 			return app.writeInfo(cmd.Context(), session, options)
 		},
 	}
-	command.Flags().BoolVar(&options.explain, "explain", false, "explain how the activity state was selected")
+	command.Flags().
+		BoolVar(&options.explain, "explain", false, "explain how the activity state was selected")
 	command.Flags().StringVar(&options.paneID, "pane", "", "multiplexer pane `<id>`")
 	command.Flags().StringVar(&options.serverID, "server", "", "multiplexer server `<id>`")
-	command.Flags().StringVar(&options.multiplexerKind, "multiplexer", "", "multiplexer `<kind>`: tmux, zellij, herdr")
-	command.Flags().StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
-	command.Flags().BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
+	command.Flags().
+		StringVar(&options.multiplexerKind, "multiplexer", "", "multiplexer `<kind>`: tmux, zellij, herdr")
+	command.Flags().
+		StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
+	command.Flags().
+		BoolVar(&screenInspection, "screen-inspection", true, "enable terminal multiplexer screen inspection")
+
 	return command
 }
 
-func (app *application) writeInfo(ctx context.Context, session registry.Session, opts infoOptions) error {
+func (app *application) writeInfo(
+	ctx context.Context,
+	session registry.Session,
+	opts infoOptions,
+) error {
 	if !opts.explain {
 		if app.outputJSON {
 			return app.writeJSON(session)
 		}
+
 		return app.writeSessionDetails(session)
 	}
+
 	explanation, explanationErr := evaluateExplanation(ctx, session, opts)
 	if app.outputJSON {
-		if err := app.writeJSON(explainedInfoResult{Session: session, Explanation: explanation}); err != nil {
+		if err := app.writeJSON(
+			explainedInfoResult{Session: session, Explanation: explanation},
+		); err != nil {
 			return err
 		}
+
 		return explanationErr
 	}
+
 	if err := app.writeSessionDetails(session); err != nil {
 		return err
 	}
+
 	if err := app.writef("\nActivity diagnosis:\n"); err != nil {
 		return err
 	}
+
 	if err := app.writeExplanationDetails(explanation); err != nil {
 		return err
 	}
+
 	return explanationErr
 }
 
-func (app *application) resolveSession(ctx context.Context, reference string) (registry.Session, error) {
+func (app *application) resolveSession(
+	ctx context.Context,
+	reference string,
+) (registry.Session, error) {
 	session, err := app.registryStore().Resolve(ctx, client.Selector{
 		ID:                "",
 		Reference:         reference,
@@ -442,14 +576,19 @@ func (app *application) resolveSession(ctx context.Context, reference string) (r
 	if err != nil {
 		return registry.Session{}, fmt.Errorf("resolve session: %w", err)
 	}
+
 	return session, nil
 }
 
 func (app *application) newWatchCommand() *cobra.Command {
 	options := listOptions{}
-	var noSnapshot bool
-	var watchFormat string
-	var prepared watchOptions
+
+	var (
+		noSnapshot  bool
+		watchFormat string
+		prepared    watchOptions
+	)
+
 	command := &cobra.Command{
 		Use:           "watch",
 		Short:         "Stream session changes",
@@ -461,13 +600,16 @@ func (app *application) newWatchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			if !cmd.Flags().Changed("presence") && cfg.UI.DefaultPresence != "" {
 				options.presence = cfg.UI.DefaultPresence
 			}
+
 			filter, err := buildFilter(options)
 			if err != nil {
 				return err
 			}
+
 			prepared, err = app.prepareWatch(watchOptions{
 				filter:     filter,
 				harness:    options.harness,
@@ -475,6 +617,7 @@ func (app *application) newWatchCommand() *cobra.Command {
 				format:     watchFormat,
 				formatSet:  cmd.Flags().Changed("format"),
 			})
+
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -485,6 +628,7 @@ func (app *application) newWatchCommand() *cobra.Command {
 	configureSessionFilterFlags(flags, &options)
 	flags.BoolVar(&noSnapshot, "no-snapshot", false, "start with future changes only")
 	flags.StringVar(&watchFormat, "format", "", "output format: `<table|plain>`")
+
 	return command
 }
 
@@ -502,28 +646,35 @@ func (app *application) newStopCommand() *cobra.Command {
 			if all && len(args) > 0 {
 				return exitCode(errStopSelection, exitCodeUsage)
 			}
+
 			if !all && len(args) == 0 {
 				return exitCode(errStopSelection, exitCodeUsage)
 			}
+
 			if all && !yes && !dryRun {
 				stdin := app.stdin
 				if stdin == nil {
 					stdin = os.Stdin
 				}
+
 				confirmed, err := app.confirmStopAll(cmd.Context(), stdin)
 				if err != nil {
 					return err
 				}
+
 				if !confirmed {
 					return exitCode(errStopAllConfirmation, exitCodeGeneral)
 				}
 			}
+
 			return app.runStop(cmd.Context(), args, all, dryRun)
 		},
 	}
 	command.Flags().BoolVarP(&all, "all", "a", false, "stop every live session")
 	command.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show targets without sending signals")
-	command.Flags().BoolVarP(&yes, "yes", "y", false, "confirm stopping all sessions without prompting")
+	command.Flags().
+		BoolVarP(&yes, "yes", "y", false, "confirm stopping all sessions without prompting")
+
 	return command
 }
 
@@ -547,6 +698,7 @@ func (app *application) newManageConfigCommand() *cobra.Command {
 		app.newConfigInitCommand(),
 		app.newConfigSchemaCommand(),
 	)
+
 	return command
 }
 
@@ -562,6 +714,7 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
+
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -569,9 +722,11 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 			if path == "" {
 				path = config.DefaultPath()
 			}
+
 			if app.outputJSON {
 				return app.writeJSON(map[string]string{"path": path})
 			}
+
 			return app.writef("%s\n", path)
 		},
 	}
@@ -580,6 +735,7 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 //nolint:gocognit,cyclop // display configuration with optional provenance
 func (app *application) newConfigShowCommand() *cobra.Command {
 	var showProvenance bool
+
 	cmd := &cobra.Command{
 		Use:           "show",
 		Short:         "Print effective configuration",
@@ -600,11 +756,13 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 						Line     int    `json:"line,omitempty"`
 						RawValue string `json:"raw_value,omitempty"`
 					}
+
 					type provenanceResult struct {
 						Config      config.Config        `json:"config"`
 						ActiveFiles []string             `json:"active_files"`
 						Origins     map[string]keyOrigin `json:"origins"`
 					}
+
 					allConfigKeys := []string{
 						"ui.default_presence",
 						"ui.sort",
@@ -621,6 +779,7 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 						"detection.screen_inspection",
 					}
 					origins := make(map[string]keyOrigin)
+
 					for _, k := range allConfigKeys {
 						if o, ok := app.cfgMeta.Where(k); ok {
 							origins[k] = keyOrigin{
@@ -631,24 +790,31 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 							}
 						}
 					}
+
 					return app.writeJSON(provenanceResult{
 						Config:      cfg,
 						ActiveFiles: app.cfgMeta.ActiveFiles(),
 						Origins:     origins,
 					})
 				}
+
 				return app.writeJSON(cfg)
 			}
+
 			if showProvenance && app.cfgMeta != nil {
 				var b strings.Builder
+
 				active := app.cfgMeta.ActiveFiles()
 				if len(active) > 0 {
 					fmt.Fprintf(&b, "# Active configuration files (highest precedence last):\n")
+
 					for _, f := range active {
 						fmt.Fprintf(&b, "#   - %s\n", f)
 					}
+
 					fmt.Fprintf(&b, "\n")
 				}
+
 				allConfigKeys := []string{
 					"ui.default_presence",
 					"ui.sort",
@@ -676,28 +842,37 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 						}
 					}
 				}
+
 				fmt.Fprintf(&b, "\n")
+
 				data, err := toml.Marshal(cfg)
 				if err != nil {
 					return fmt.Errorf("encode config toml: %w", err)
 				}
+
 				b.Write(data)
+
 				return app.writef("%s", b.String())
 			}
+
 			data, err := toml.Marshal(cfg)
 			if err != nil {
 				return fmt.Errorf("encode config toml: %w", err)
 			}
+
 			return app.writef("%s", string(data))
 		},
 	}
-	cmd.Flags().BoolVar(&showProvenance, "provenance", false, "include layer provenance for resolved keys")
+	cmd.Flags().
+		BoolVar(&showProvenance, "provenance", false, "include layer provenance for resolved keys")
+
 	return cmd
 }
 
 //nolint:gocognit // manage config get command with JSON and provenance formatting
 func (app *application) newConfigGetCommand() *cobra.Command {
 	var showProvenance bool
+
 	cmd := &cobra.Command{
 		Use:           "get <key>",
 		Short:         "Get a configuration setting by key",
@@ -710,6 +885,7 @@ func (app *application) newConfigGetCommand() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			key := args[0]
+
 			val, ok := getConfigValue(app.cfg, key)
 			if !ok {
 				return exitCode(fmt.Errorf("%w: %q", errUnknownConfigKey, key), exitCodeUsage)
@@ -730,6 +906,7 @@ func (app *application) newConfigGetCommand() *cobra.Command {
 						}
 					}
 				}
+
 				return app.writeJSON(res)
 			}
 
@@ -749,7 +926,9 @@ func (app *application) newConfigGetCommand() *cobra.Command {
 			return app.writef("%v\n", val)
 		},
 	}
-	cmd.Flags().BoolVar(&showProvenance, "provenance", false, "include layer provenance for the key")
+	cmd.Flags().
+		BoolVar(&showProvenance, "provenance", false, "include layer provenance for the key")
+
 	return cmd
 }
 
@@ -764,11 +943,13 @@ func getConfigValue(cfg config.Config, key string) (any, bool) {
 		if cfg.UI.SortDesc != nil {
 			return *cfg.UI.SortDesc, true
 		}
+
 		return false, true
 	case "ui.absolute_time":
 		if cfg.UI.AbsoluteTime != nil {
 			return *cfg.UI.AbsoluteTime, true
 		}
+
 		return false, true
 	case "ui.time_format":
 		return cfg.UI.TimeFormat, true
@@ -786,6 +967,7 @@ func getConfigValue(cfg config.Config, key string) (any, bool) {
 		if cfg.Tracker.Quiet != nil {
 			return *cfg.Tracker.Quiet, true
 		}
+
 		return false, true
 	case "detection.manifests_dir":
 		return cfg.Detection.ManifestsDir, true
@@ -793,6 +975,7 @@ func getConfigValue(cfg config.Config, key string) (any, bool) {
 		if cfg.Detection.ScreenInspection != nil {
 			return *cfg.Detection.ScreenInspection, true
 		}
+
 		return true, true
 	default:
 		return nil, false
@@ -823,10 +1006,12 @@ func (app *application) newConfigSetCommand() *cobra.Command {
 			if app.noConfig {
 				return exitCode(errNoConfigDisallowsSet, exitCodeUsage)
 			}
+
 			return nil
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			key, val := args[0], args[1]
+
 			path, err := app.configEditPath()
 			if err != nil {
 				return exitCode(err, exitCodeUsage)
@@ -844,6 +1029,7 @@ func (app *application) newConfigSetCommand() *cobra.Command {
 					"set":   true,
 				})
 			}
+
 			return app.writef("set %s = %s in %s\n", key, val, path)
 		},
 	}
@@ -853,6 +1039,7 @@ func (app *application) configEditPath() (string, error) {
 	if app.configPath == "-" {
 		return "", errStdinDisallowsSet
 	}
+
 	options := []strata.Option{strata.WithFormats(".toml")}
 	if app.configPath != "" {
 		options = append(options, strata.WithPath(app.configPath))
@@ -861,25 +1048,30 @@ func (app *application) configEditPath() (string, error) {
 	} else {
 		options = append(options, strata.WithAppName("aht"))
 	}
+
 	path, err := strata.EditPath(options...)
 	if err != nil {
 		return "", fmt.Errorf("select config edit path: %w", err)
 	}
+
 	return path, nil
 }
 
-func setConfigValue(path, key, value string) error {
+func setConfigValue(path string, key string, value string) error {
 	if err := ensureEditableConfigFile(path); err != nil {
 		return err
 	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read config %s: %w", path, err)
 	}
+
 	updated, err := strata.SetBytes(".toml", data, key, value)
 	if err != nil {
 		return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
 	}
+
 	_, err = strata.Load[config.Config](
 		strata.WithPath("-"),
 		strata.WithStdin(bytes.NewReader(updated)),
@@ -889,9 +1081,11 @@ func setConfigValue(path, key, value string) error {
 	if err != nil {
 		return exitCode(fmt.Errorf("updated configuration is invalid: %w", err), exitCodeUsage)
 	}
+
 	if err := strata.Set[config.Config](path, key, value); err != nil {
 		return exitCode(fmt.Errorf("set key %q: %w", key, err), exitCodeUsage)
 	}
+
 	return nil
 }
 
@@ -899,12 +1093,14 @@ func ensureEditableConfigFile(path string) error {
 	if _, err := config.EnsureConfigFile(path); err != nil {
 		return fmt.Errorf("ensure config file %s: %w", path, err)
 	}
+
 	return nil
 }
 
 //nolint:gocognit,cyclop // manage config init path, stdin template output, directory checks, and publication
 func (app *application) newConfigInitCommand() *cobra.Command {
 	var force bool
+
 	cmd := &cobra.Command{
 		Use:           "init",
 		Short:         "Initialize default configuration file",
@@ -915,9 +1111,11 @@ func (app *application) newConfigInitCommand() *cobra.Command {
 			if app.noConfig {
 				return exitCode(errNoConfigDisallowsInit, exitCodeUsage)
 			}
+
 			if app.configPath == "-" && app.outputJSON {
 				return exitCode(errInitJSONTemplateConflict, exitCodeUsage)
 			}
+
 			if app.configPath == "-" {
 				return app.writef("%s", config.DefaultConfigTemplate())
 			}
@@ -931,9 +1129,11 @@ func (app *application) newConfigInitCommand() *cobra.Command {
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("%w %s: %w", config.ErrAccessConfig, path, err)
 			}
+
 			if err == nil && info.IsDir() {
 				return fmt.Errorf("%w: %s", config.ErrConfigIsDirectory, path)
 			}
+
 			if err == nil && !force {
 				if app.outputJSON {
 					return app.writeJSON(map[string]any{
@@ -942,23 +1142,29 @@ func (app *application) newConfigInitCommand() *cobra.Command {
 						"message": "config file already exists (use --force to overwrite)",
 					})
 				}
+
 				app.warnf("config file already exists at %s (use --force to overwrite)\n", path)
+
 				return nil
 			}
 
 			if err := config.WriteConfigFile(path); err != nil {
 				return fmt.Errorf("init config: %w", err)
 			}
+
 			if app.outputJSON {
 				return app.writeJSON(map[string]any{
 					"created": true,
 					"path":    path,
 				})
 			}
+
 			app.warnf("created %s\n", path)
+
 			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing configuration file")
+
 	return cmd
 }

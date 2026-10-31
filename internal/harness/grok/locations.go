@@ -16,7 +16,25 @@ func (grokHarness) Locations(projectDir string) []harness.Location {
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
 		Home(harness.LocationKindCommands, filepath.Join(".agents", "commands")).
 		Project(harness.LocationKindConfig, filepath.Join(".grok", "config.toml")).
-		Project(harness.LocationKindInstructions, "AGENTS.md", "CLAUDE.md", "Claude.md", "CLAUDE.local.md", "Agents.md", "AGENT.md", filepath.Join(".grok", "rules"), filepath.Join(".claude", "rules")).
+		Project(
+			harness.LocationKindInstructions,
+			"AGENTS.md",
+			"CLAUDE.md",
+			"Claude.md",
+			"CLAUDE.local.md",
+			"Agents.md",
+			"AGENT.md",
+			filepath.Join(
+
+				".grok",
+
+				"rules",
+			),
+			filepath.Join(
+				".claude",
+				"rules",
+			),
+		).
 		Project(harness.LocationKindSkills, filepath.Join(".grok", "skills")).
 		Locations()
 }

@@ -29,8 +29,10 @@ const (
 
 var (
 	errCatalogSessionsMissing  = errors.New("prime agent session catalog is missing sessions array")
-	errCatalogSessionIDMissing = errors.New("prime agent catalog record is missing durable sessionId")
-	errDaemonNotRunning        = errors.New("prime agent daemon socket not found")
+	errCatalogSessionIDMissing = errors.New(
+		"prime agent catalog record is missing durable sessionId",
+	)
+	errDaemonNotRunning = errors.New("prime agent daemon socket not found")
 )
 
 type primeHarness struct{ harness.BaseAdapter }
@@ -99,13 +101,15 @@ func (primeHarness) InstallPlan(string) (harness.InstallPlan, error) {
 
 func (primeHarness) NoInstallRequired() {}
 
-func (primeHarness) ResumeCommand(sessionID, sessionPath string) []string {
+func (primeHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 	if sessionPath != "" {
 		return []string{primeAgentCommand, harness.ResumeFlag, sessionPath}
 	}
+
 	if sessionID != "" {
 		return []string{primeAgentCommand, harness.ResumeFlag, sessionID}
 	}
+
 	return nil
 }
 
@@ -118,20 +122,37 @@ func (primeHarness) Catalog(ctx context.Context) ([]harness.CatalogSession, erro
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("read Prime Agent session catalog: %w", err)
 	}
+
 	binary, err := exec.LookPath(primeAgentCommand)
 	if err != nil {
-		return nil, errors.Join(harness.ErrCatalogUnavailable, fmt.Errorf("resolve %s: %w", primeAgentCommand, err))
+		return nil, errors.Join(
+			harness.ErrCatalogUnavailable,
+			fmt.Errorf("resolve %s: %w", primeAgentCommand, err),
+		)
 	}
+
 	if !daemonSocketExists() {
 		return nil, errors.Join(harness.ErrCatalogUnavailable, errDaemonNotRunning)
 	}
-	output, err := command.RunWithLimits(ctx, primeCatalogTimeout, primeCatalogOutputLimit, binary, nil, "sessions", "--all", "--json")
+
+	output, err := command.RunWithLimits(
+		ctx,
+		primeCatalogTimeout,
+		primeCatalogOutputLimit,
+		binary,
+		nil,
+		"sessions",
+		"--all",
+		"--json",
+	)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("read Prime Agent session catalog: %w", ctx.Err())
 		}
+
 		return nil, fmt.Errorf("read Prime Agent session catalog: %w", err)
 	}
+
 	return parseCatalog(output)
 }
 
@@ -140,19 +161,29 @@ func parseCatalog(data []byte) ([]harness.CatalogSession, error) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		return nil, fmt.Errorf("decode Prime Agent session catalog: %w", err)
 	}
+
 	if document.Sessions == nil {
 		return nil, errCatalogSessionsMissing
 	}
+
 	sessions := make([]harness.CatalogSession, 0, len(document.Sessions))
+
 	var failures []error
+
 	for index, record := range document.Sessions {
 		session, err := record.catalogSession()
 		if err != nil {
-			failures = append(failures, fmt.Errorf("decode Prime Agent session catalog record %d: %w", index+1, err))
+			failures = append(
+				failures,
+				fmt.Errorf("decode Prime Agent session catalog record %d: %w", index+1, err),
+			)
+
 			continue
 		}
+
 		sessions = append(sessions, session)
 	}
+
 	return sessions, errors.Join(failures...)
 }
 
@@ -161,10 +192,12 @@ func (record catalogRecord) catalogSession() (harness.CatalogSession, error) {
 	if sessionID == "" {
 		return harness.CatalogSession{}, errCatalogSessionIDMissing
 	}
+
 	sessionPath := strings.TrimSpace(record.SessionFile)
 	cwd := strings.TrimSpace(record.CWD)
 	activity := primeActivity(record.Activity)
 	processPID := record.WorkerPID
+
 	current := processPID > 0
 	if !current {
 		processPID = 0
@@ -172,6 +205,7 @@ func (record catalogRecord) catalogSession() (harness.CatalogSession, error) {
 	} else if record.IsQuotaParked {
 		activity = registry.ActivityFailed
 	}
+
 	return harness.CatalogSession{
 		SessionID:     sessionID,
 		SessionPath:   sessionPath,
@@ -205,23 +239,29 @@ func (record catalogRecord) attributes() map[string]string {
 		}
 	}
 	add("prime_active_session_id", record.ActiveSessionID)
+
 	if record.ID != record.ActiveSessionID {
 		add("prime_catalog_id", record.ID)
 	}
+
 	add("prime_lifecycle", record.Lifecycle)
 	add("prime_runtime_kind", record.RuntimeKind)
+
 	if record.IsQuotaParked {
 		attributes["prime_quota_parked"] = "true"
 	}
+
 	add("prime_session_name", record.SessionName)
 	add("prime_first_message", record.FirstMessage)
 	add("prime_parent_session_path", record.ParentSessionPath)
 	add("prime_parent_session_id", record.ParentSessionID)
 	add("prime_parent_active_session_id", record.ParentActiveSessionID)
 	add("prime_rlm_child_id", record.RLMChildID)
+
 	if record.RLMDepth > 0 {
 		attributes["prime_rlm_depth"] = strconv.Itoa(record.RLMDepth)
 	}
+
 	return attributes
 }
 
@@ -231,6 +271,7 @@ func daemonSocketExists() bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -240,9 +281,11 @@ func daemonSocketPaths() []string {
 	if value := strings.TrimSpace(os.Getenv("PRIME_AGENT_DAEMON_SOCKET")); value != "" {
 		return []string{expandHome(value, harness.HomeDir())}
 	}
+
 	uid := strconv.Itoa(os.Getuid())
 	tmp := firstEnv("TMPDIR")
 	legacyTmp := firstEnv("TMPDIR", "TMP", "TEMP")
+
 	return []string{
 		filepath.Join(tmp, "prime-agent-rust-"+uid, "daemon.sock"),
 		filepath.Join(tmp, "prime-agent-"+uid, "daemon.sock"),
@@ -256,6 +299,7 @@ func firstEnv(names ...string) string {
 			return value
 		}
 	}
+
 	return "/tmp"
 }
 
@@ -267,9 +311,11 @@ func primeAgentDirUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("PRIME_AGENT_CODING_AGENT_DIR")); value != "" {
 		return expandHome(value, home)
 	}
+
 	if home == "" {
 		return ""
 	}
+
 	return filepath.Join(home, ".prime", "agent")
 }
 
@@ -277,21 +323,26 @@ func primeSessionsDir(home string) string {
 	if value := strings.TrimSpace(os.Getenv("PRIME_AGENT_SESSION_DIR")); value != "" {
 		return expandHome(value, home)
 	}
+
 	if agentDir := primeAgentDirUnder(home); agentDir != "" {
 		return filepath.Join(agentDir, "sessions")
 	}
+
 	return ""
 }
 
-func expandHome(path, home string) string {
+func expandHome(path string, home string) string {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path
 	}
+
 	if home == "" {
 		return ""
 	}
+
 	if path == "~" {
 		return home
 	}
+
 	return filepath.Join(home, strings.TrimPrefix(path, "~/"))
 }

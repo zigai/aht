@@ -59,13 +59,17 @@ func (grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "hooks", grokHookFileName),
-		Label:       "grok hooks",
-		ConfigLabel: "grok hooks",
-		Content:     "",
-		JSONContent: grokHookConfig(binary),
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "hooks", grokHookFileName),
+				Label:       "grok hooks",
+				ConfigLabel: "grok hooks",
+				Content:     "",
+				JSONContent: grokHookConfig(binary),
+			}},
+		},
+	}, nil
 }
 
 func (grokHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -85,6 +89,7 @@ func grokPayloadValidator(rawPayload json.RawMessage) bool {
 	if !ok {
 		return false
 	}
+
 	return harness.PayloadStringAny(payload, "sessionId", "session_id") != "" &&
 		harness.PayloadStringAny(payload, "hookEventName", "hook_event_name") != "" &&
 		harness.PayloadString(payload, "cwd") != "" &&
@@ -93,9 +98,21 @@ func grokPayloadValidator(rawPayload json.RawMessage) bool {
 
 func (grokHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "grok_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name"))
-	harness.AddAttributeString(attributes, "grok_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "grok_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
+	harness.AddAttributeString(
+		attributes,
+		"grok_hook_event",
+		harness.PayloadStringAny(payload, "hookEventName", "hook_event_name"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"grok_start_source",
+		harness.PayloadString(payload, "source"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"grok_tool_name",
+		harness.PayloadStringAny(payload, "toolName", "tool_name"),
+	)
 	harness.AddAttributeString(attributes, "grok_notification_type", harness.PayloadStringAny(
 		payload,
 		"notificationType",
@@ -123,7 +140,11 @@ func grokHookConfig(binary string) map[string]any {
 		{
 			event:   harness.HookEventUserPromptSubmit,
 			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventUserPromptSubmit),
+			command: grokHookCommand(
+				binary,
+				registry.ActivityRunning,
+				harness.HookEventUserPromptSubmit,
+			),
 		},
 		{
 			event:   harness.HookEventPreToolUse,
@@ -133,12 +154,20 @@ func grokHookConfig(binary string) map[string]any {
 		{
 			event:   harness.HookEventPostToolUse,
 			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUse),
+			command: grokHookCommand(
+				binary,
+				registry.ActivityRunning,
+				harness.HookEventPostToolUse,
+			),
 		},
 		{
 			event:   harness.HookEventPostToolUseFailure,
 			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPostToolUseFailure),
+			command: grokHookCommand(
+				binary,
+				registry.ActivityRunning,
+				harness.HookEventPostToolUseFailure,
+			),
 		},
 		{
 			event:   "PermissionDenied",
@@ -182,6 +211,7 @@ func grokHookConfig(binary string) map[string]any {
 		if !ok {
 			existing = nil
 		}
+
 		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.matcher, spec.command))
 	}
 
@@ -207,13 +237,20 @@ func grokCommandHookGroup(matcher string, command string) map[string]any {
 }
 
 func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(binary, registry.Harness("grok"), transition, event, grokIntegrationSource)
+	return harness.ReportHookCommand(
+		binary,
+		registry.Harness("grok"),
+		transition,
+		event,
+		grokIntegrationSource,
+	)
 }
 
 func grokHome() string {
 	if value := strings.TrimSpace(os.Getenv("GROK_HOME")); value != "" {
 		return value
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
@@ -222,9 +259,16 @@ func grokHome() string {
 	return filepath.Join(home, ".grok")
 }
 
-func (grokHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (grokHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["grok_hook_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "grok_start_source", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "grok_start_source", "source", "reason"),
+	)
 }

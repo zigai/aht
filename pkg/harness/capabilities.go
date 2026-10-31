@@ -65,11 +65,20 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 			IntegrationSource:  "",
 			IntegrationVersion: 0,
 			Details: registry.DetailCapabilities{
-				Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-				Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+				Native: registry.DetailSupport{
+					Permission: false,
+					Question:   false,
+					UsageLimit: false,
+				},
+				Screen: registry.DetailSupport{
+					Permission: false,
+					Question:   false,
+					UsageLimit: false,
+				},
 			},
 		}, false
 	}
+
 	definition := adapter.Definition()
 	_, isInstallable := adapter.(harness.Installable)
 	_, isResumable := adapter.(harness.Resumable)
@@ -101,19 +110,26 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 // AllCapabilities returns the static capabilities of all supported harnesses in canonical order.
 func AllCapabilities() []Capabilities {
 	adapters := catalog.All()
+
 	result := make([]Capabilities, 0, len(adapters))
 	for _, adapter := range adapters {
 		def := adapter.Definition()
+
 		caps, ok := CapabilitiesFor(def.ID)
 		if ok {
 			result = append(result, caps)
 		}
 	}
+
 	return result
 }
 
 // InspectRuntime inspects the runtime installation status of a harness integration.
-func InspectRuntime(ctx context.Context, id registry.Harness, binary string) (RuntimeStatus, error) {
+func InspectRuntime(
+	ctx context.Context,
+	id registry.Harness,
+	binary string,
+) (RuntimeStatus, error) {
 	status, err := install.Inspect(ctx, id, binary)
 	if err != nil {
 		return RuntimeStatus{
@@ -140,6 +156,7 @@ func InspectRuntime(ctx context.Context, id registry.Harness, binary string) (Ru
 // AllRuntimeStatuses inspects the runtime installation status of all supported harnesses.
 func AllRuntimeStatuses(ctx context.Context, binary string) []RuntimeStatus {
 	all := Supported()
+
 	results := make([]RuntimeStatus, 0, len(all))
 	for _, id := range all {
 		st, err := InspectRuntime(ctx, id, binary)
@@ -151,9 +168,12 @@ func AllRuntimeStatuses(ctx context.Context, binary string) []RuntimeStatus {
 				Status:    "error",
 				Message:   err.Error(),
 			})
+
 			continue
 		}
+
 		results = append(results, st)
 	}
+
 	return results
 }

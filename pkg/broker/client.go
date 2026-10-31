@@ -69,13 +69,18 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // Observe records one observation in the broker.
-func (c *Client) Observe(ctx context.Context, observation registry.Observation) (registry.Session, error) {
+func (c *Client) Observe(
+	ctx context.Context,
+	observation registry.Observation,
+) (registry.Session, error) {
 	request := newRequest(MethodObserve)
 	request.Observation = &observation
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return registry.Session{}, err
 	}
+
 	if response.Session == nil {
 		return registry.Session{}, fmt.Errorf("%w: observe response omitted session", ErrProtocol)
 	}
@@ -90,13 +95,16 @@ func (c *Client) ObserveBatch(
 ) ([]registry.Session, error) {
 	request := newRequest(MethodObserveBatch)
 	request.Observations = observations
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return nil, err
 	}
+
 	if response.Sessions == nil {
 		return []registry.Session{}, nil
 	}
+
 	return response.Sessions, nil
 }
 
@@ -104,13 +112,16 @@ func (c *Client) ObserveBatch(
 func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.Session, error) {
 	request := newRequest(MethodList)
 	request.Filter = filter.NormalizePaths()
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return nil, err
 	}
+
 	if response.Sessions == nil {
 		return []registry.Session{}, nil
 	}
+
 	return registry.FilterSessions(response.Sessions, request.Filter), nil
 }
 
@@ -118,10 +129,12 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	request := newRequest(MethodGet)
 	request.SessionID = id
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return registry.Session{}, err
 	}
+
 	if response.Session == nil {
 		return registry.Session{}, fmt.Errorf("%w: get response omitted session", ErrProtocol)
 	}
@@ -130,44 +143,61 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 }
 
 // SummaryWithOptions returns filtered summaries with options.
-func (c *Client) SummaryWithOptions(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
+func (c *Client) SummaryWithOptions(
+	ctx context.Context,
+	filter registry.Filter,
+	opts registry.SummaryOptions,
+) ([]registry.Summary, error) {
 	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", registry.ErrUnsupportedGroupBy, opts.GroupBy)
 	}
+
 	if needsSnapshotFiltering(filter) {
 		return c.summarizeLocally(ctx, filter, opts)
 	}
+
 	request := newRequest(MethodSummary)
 	request.Filter = filter.NormalizePaths()
 	request.SummaryOptions = opts
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return nil, err
 	}
+
 	if response.Summaries == nil {
 		return []registry.Summary{}, nil
 	}
+
 	for _, summary := range response.Summaries {
-		if opts.GroupBy != "" && opts.GroupBy != registry.SummaryGroupByMultiplexerSession && summary.GroupBy != opts.GroupBy {
+		if opts.GroupBy != "" && opts.GroupBy != registry.SummaryGroupByMultiplexerSession &&
+			summary.GroupBy != opts.GroupBy {
 			return c.summarizeLocally(ctx, filter, opts)
 		}
 	}
+
 	return response.Summaries, nil
 }
 
 // Summary returns filtered multiplexer-session summaries.
 func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession})
+	return c.SummaryWithOptions(
+		ctx,
+		filter,
+		registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession},
+	)
 }
 
 // GC removes expired gone-session tombstones through the broker.
 func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GCResult, error) {
 	request := newRequest(MethodGC)
 	request.DeleteAfter = deleteAfter
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return registry.GCResult{}, err
 	}
+
 	if response.GC == nil {
 		return registry.GCResult{}, fmt.Errorf("%w: gc response omitted result", ErrProtocol)
 	}
@@ -177,10 +207,12 @@ func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GC
 
 func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
 	request := newRequest(MethodReset)
+
 	response, err := c.roundTrip(ctx, request)
 	if err != nil {
 		return registry.ResetResult{}, err
 	}
+
 	if response.Reset == nil {
 		return registry.ResetResult{}, fmt.Errorf("%w: reset response omitted result", ErrProtocol)
 	}
@@ -189,7 +221,11 @@ func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
 }
 
 // NewSubscription returns a Subscription wrapping the given channels and optional cancel function.
-func NewSubscription(snapshots <-chan registry.StateSnapshot, errCh <-chan error, cancel context.CancelFunc) *Subscription {
+func NewSubscription(
+	snapshots <-chan registry.StateSnapshot,
+	errCh <-chan error,
+	cancel context.CancelFunc,
+) *Subscription {
 	return &Subscription{Snapshots: snapshots, Errors: errCh, cancel: cancel, done: nil}
 }
 
@@ -200,6 +236,7 @@ func (s *Subscription) Close() {
 	if s != nil && s.cancel != nil {
 		s.cancel()
 	}
+
 	if s != nil && s.done != nil {
 		<-s.done
 	}
@@ -208,12 +245,15 @@ func (s *Subscription) Close() {
 // Subscribe returns the initial snapshot followed by strictly newer revisions.
 func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscription, error) {
 	subscriptionCtx, cancel := context.WithCancel(ctx)
+
 	connection, err := c.dial(subscriptionCtx)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+
 	cleanup := cancelclose.OnCancel(subscriptionCtx, connection)
+
 	transferred := false
 	defer func() {
 		if !transferred {
@@ -224,38 +264,50 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 
 	request := newRequest(MethodSubscribe)
 	request.Filter = filter.NormalizePaths()
+
 	request = request.prepare()
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
 		return nil, fmt.Errorf("sending subscribe request: %w", contextError(subscriptionCtx, err))
 	}
 
 	decoder := responseScanner(connection)
+
 	first, err := readResponse(decoder)
 	if err != nil {
 		return nil, fmt.Errorf("reading subscribe response: %w", contextError(subscriptionCtx, err))
 	}
+
 	if err := validateResponse(request, first); err != nil {
 		return nil, err
 	}
+
 	if first.Snapshot == nil {
 		return nil, fmt.Errorf("%w: subscribe response omitted snapshot", ErrProtocol)
 	}
 
 	snapshots := make(chan registry.StateSnapshot, 1)
 	errorsChannel := make(chan error, 1)
+
 	first.Snapshot.Sessions = registry.FilterSessions(first.Snapshot.Sessions, request.Filter)
 	snapshots <- *first.Snapshot
 
 	done := make(chan struct{})
 	transferred = true
+
 	go func() {
 		defer close(done)
 		defer cancel()
 		defer cleanup()
+
 		runSubscription(subscriptionCtx, decoder, request, snapshots, errorsChannel)
 	}()
 
-	return &Subscription{Snapshots: snapshots, Errors: errorsChannel, cancel: cancel, done: done}, nil
+	return &Subscription{
+		Snapshots: snapshots,
+		Errors:    errorsChannel,
+		cancel:    cancel,
+		done:      done,
+	}, nil
 }
 
 // IsUnavailable reports whether err means no broker accepted the connection or
@@ -280,17 +332,23 @@ func runSubscription(
 			if ctx.Err() == nil {
 				errorsChannel <- fmt.Errorf("reading subscription: %w", err)
 			}
+
 			return
 		}
+
 		if err := validateResponse(request, response); err != nil {
 			errorsChannel <- err
 			return
 		}
+
 		if response.Type == "heartbeat" || response.Snapshot == nil {
 			continue
 		}
 
-		response.Snapshot.Sessions = registry.FilterSessions(response.Snapshot.Sessions, request.Filter)
+		response.Snapshot.Sessions = registry.FilterSessions(
+			response.Snapshot.Sessions,
+			request.Filter,
+		)
 		select {
 		case <-ctx.Done():
 			return
@@ -301,11 +359,16 @@ func runSubscription(
 
 // Older brokers ignore additive filter and grouping fields. Aggregate their
 // snapshots locally when a summary cannot prove it honored the requested group.
-func (c *Client) summarizeLocally(ctx context.Context, filter registry.Filter, opts registry.SummaryOptions) ([]registry.Summary, error) {
+func (c *Client) summarizeLocally(
+	ctx context.Context,
+	filter registry.Filter,
+	opts registry.SummaryOptions,
+) ([]registry.Summary, error) {
 	sessions, err := c.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
+
 	return registry.SummariesWithOptions(sessions, opts), nil
 }
 
@@ -325,6 +388,7 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 	if err != nil {
 		return Response{}, fmt.Errorf("reading broker response: %w", contextError(ctx, err))
 	}
+
 	if err := validateResponse(request, response); err != nil {
 		return Response{}, err
 	}
@@ -335,6 +399,7 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 func responseScanner(reader io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(nil, MaxResponseBytes)
+
 	return scanner
 }
 
@@ -343,12 +408,15 @@ func readResponse(scanner *bufio.Scanner) (Response, error) {
 		if err := scanner.Err(); err != nil {
 			return Response{}, fmt.Errorf("%w: reading response frame: %w", ErrProtocol, err)
 		}
+
 		return Response{}, io.EOF
 	}
+
 	var response Response
 	if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
 		return Response{}, fmt.Errorf("%w: decoding response frame: %w", ErrProtocol, err)
 	}
+
 	return response, nil
 }
 
@@ -356,11 +424,13 @@ func contextError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("broker operation canceled: %w", ctx.Err())
 	}
+
 	return err
 }
 
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	dialCtx := ctx
+
 	cancel := func() {}
 	if _, ok := ctx.Deadline(); !ok && c.dialTimeout > 0 {
 		dialCtx, cancel = context.WithTimeout(ctx, c.dialTimeout)
@@ -377,23 +447,12 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 
 func newRequest(method string) Request {
 	return Request{
-		Version:      0,
-		ID:           "",
-		Method:       method,
-		Observation:  nil,
-		Observations: nil,
-		Filter: registry.Filter{
-			Harness:            "",
-			Presence:           "",
-			Activity:           "",
-			MultiplexerSession: "",
-			Project:            "",
-			ProjectSubtree:     false,
-			CWD:                "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerPane:    "",
-		},
+		Version:        0,
+		ID:             "",
+		Method:         method,
+		Observation:    nil,
+		Observations:   nil,
+		Filter:         registry.Filter{},
 		SessionID:      "",
 		DeleteAfter:    0,
 		SummaryOptions: registry.SummaryOptions{GroupBy: ""},
@@ -413,9 +472,16 @@ func validateResponse(request Request, response Response) error {
 	if response.Version != ProtocolVersion {
 		return fmt.Errorf("%w: version %d", ErrProtocol, response.Version)
 	}
+
 	if response.ID != request.ID {
-		return fmt.Errorf("%w: response id %q does not match %q", ErrProtocol, response.ID, request.ID)
+		return fmt.Errorf(
+			"%w: response id %q does not match %q",
+			ErrProtocol,
+			response.ID,
+			request.ID,
+		)
 	}
+
 	if response.Error != nil {
 		return &RemoteError{Code: response.Error.Code, Message: response.Error.Message}
 	}
@@ -446,5 +512,7 @@ func (e *RemoteError) Unwrap() error {
 }
 
 func needsSnapshotFiltering(filter registry.Filter) bool {
-	return filter.Project != "" || filter.CWD != "" || filter.MultiplexerKind != "" || filter.MultiplexerServer != "" || filter.MultiplexerPane != ""
+	return filter.Project != "" || filter.CWD != "" || filter.MultiplexerKind != "" ||
+		filter.MultiplexerServer != "" ||
+		filter.MultiplexerPane != ""
 }

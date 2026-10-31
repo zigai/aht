@@ -21,9 +21,11 @@ func TestReadTrackerHealthMissing(t *testing.T) {
 	if !errors.Is(err, manage.ErrHealthMissing) {
 		t.Fatalf("err = %v, want ErrHealthMissing", err)
 	}
+
 	if health.Status != manage.HealthStatusMissing {
 		t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusMissing)
 	}
+
 	if health.Fresh {
 		t.Fatal("health.Fresh should be false for missing sidecar")
 	}
@@ -32,19 +34,23 @@ func TestReadTrackerHealthMissing(t *testing.T) {
 func TestReadTrackerHealthCorrupt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+
 	path := filepath.Join(dir, "corrupt.observer-health.json")
 	if err := os.WriteFile(path, []byte("{invalid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	now := time.Now().UTC()
 
 	health, err := manage.ReadTrackerHealth(path, now, time.Minute)
 	if !errors.Is(err, manage.ErrHealthCorrupt) {
 		t.Fatalf("err = %v, want ErrHealthCorrupt", err)
 	}
+
 	if health.Status != manage.HealthStatusCorrupt {
 		t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusCorrupt)
 	}
+
 	if health.Fresh {
 		t.Fatal("health.Fresh should be false for corrupt sidecar")
 	}
@@ -52,12 +58,14 @@ func TestReadTrackerHealthCorrupt(t *testing.T) {
 
 func TestReadTrackerHealthDegraded(t *testing.T) {
 	t.Parallel()
+
 	now := time.Now().UTC()
 
 	t.Run("enumeration error", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := filepath.Join(dir, "degraded.observer-health.json")
+
 		data := `{
 			"pid": 1234,
 			"interval": 300000000,
@@ -75,12 +83,15 @@ func TestReadTrackerHealthDegraded(t *testing.T) {
 		if !errors.Is(err, manage.ErrHealthDegraded) {
 			t.Fatalf("err = %v, want ErrHealthDegraded", err)
 		}
+
 		if health.Status != manage.HealthStatusDegraded {
 			t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusDegraded)
 		}
+
 		if health.Message != "permission denied on /proc/999/status" {
 			t.Fatalf("health.Message = %q", health.Message)
 		}
+
 		if health.Fresh {
 			t.Fatal("health.Fresh should be false for degraded tracker")
 		}
@@ -90,6 +101,7 @@ func TestReadTrackerHealthDegraded(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := filepath.Join(dir, "degraded-flag.observer-health.json")
+
 		data := `{
 			"pid": 1234,
 			"interval": 300000000,
@@ -106,6 +118,7 @@ func TestReadTrackerHealthDegraded(t *testing.T) {
 		if !errors.Is(err, manage.ErrHealthDegraded) {
 			t.Fatalf("err = %v, want ErrHealthDegraded", err)
 		}
+
 		if health.Status != manage.HealthStatusDegraded {
 			t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusDegraded)
 		}
@@ -116,6 +129,7 @@ func TestReadTrackerHealthIncomplete(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "incomplete.observer-health.json")
+
 	data := `{
 		"pid": 1234,
 		"interval": 300000000,
@@ -127,12 +141,14 @@ func TestReadTrackerHealthIncomplete(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	now := time.Now().UTC()
 
 	health, err := manage.ReadTrackerHealth(path, now, time.Minute)
 	if !errors.Is(err, manage.ErrReconciliationIncomplete) {
 		t.Fatalf("err = %v, want ErrReconciliationIncomplete", err)
 	}
+
 	if health.Fresh {
 		t.Fatal("health.Fresh should be false for incomplete reconciliation")
 	}
@@ -140,9 +156,11 @@ func TestReadTrackerHealthIncomplete(t *testing.T) {
 
 func TestReadTrackerHealthStale(t *testing.T) {
 	t.Parallel()
+
 	now := time.Date(2026, 9, 19, 20, 10, 0, 0, time.UTC)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stale.observer-health.json")
+
 	data := `{
 		"pid": 1234,
 		"interval": 300000000,
@@ -160,12 +178,15 @@ func TestReadTrackerHealthStale(t *testing.T) {
 	if !errors.Is(err, manage.ErrHealthStale) {
 		t.Fatalf("err = %v, want ErrHealthStale", err)
 	}
+
 	if health.Status != manage.HealthStatusStale {
 		t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusStale)
 	}
+
 	if health.Fresh {
 		t.Fatal("health.Fresh should be false for stale tracker")
 	}
+
 	if health.Age != 5*time.Minute {
 		t.Fatalf("health.Age = %v, want 5m", health.Age)
 	}
@@ -173,9 +194,11 @@ func TestReadTrackerHealthStale(t *testing.T) {
 
 func TestReadTrackerHealthHealthy(t *testing.T) {
 	t.Parallel()
+
 	now := time.Date(2026, 9, 19, 20, 10, 0, 0, time.UTC)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "healthy.observer-health.json")
+
 	data := `{
 		"pid": 1234,
 		"interval": 300000000,
@@ -196,14 +219,22 @@ func TestReadTrackerHealthHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if health.Status != manage.HealthStatusHealthy {
 		t.Fatalf("health.Status = %q, want %q", health.Status, manage.HealthStatusHealthy)
 	}
+
 	if !health.Fresh {
 		t.Fatal("health.Fresh should be true for recent reconciliation")
 	}
+
 	if health.Cycles != 120 || health.Observations != 45 || health.Sessions != 3 {
-		t.Fatalf("unexpected counters: cycles=%d, obs=%d, sess=%d", health.Cycles, health.Observations, health.Sessions)
+		t.Fatalf(
+			"unexpected counters: cycles=%d, obs=%d, sess=%d",
+			health.Cycles,
+			health.Observations,
+			health.Sessions,
+		)
 	}
 
 	// Test JSON marshaling preserves stable fields
@@ -211,11 +242,26 @@ func TestReadTrackerHealthHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var raw map[string]any
 	if err := json.Unmarshal(marshaled, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"pid", "interval", "started_at", "last_attempt_at", "last_success_at", "cycles", "observations", "sessions", "degraded", "fresh", "age", "status"} {
+
+	for _, expected := range []string{
+		"pid",
+		"interval",
+		"started_at",
+		"last_attempt_at",
+		"last_success_at",
+		"cycles",
+		"observations",
+		"sessions",
+		"degraded",
+		"fresh",
+		"age",
+		"status",
+	} {
 		if _, ok := raw[expected]; !ok {
 			t.Errorf("missing expected field %q in serialized tracker health", expected)
 		}
@@ -229,6 +275,7 @@ func TestManagerTrackerHealth(t *testing.T) {
 	healthPath := storePath + ".observer-health.json"
 	now := time.Now().UTC()
 	staleTime := now.Add(-time.Hour).Format(time.RFC3339Nano)
+
 	data := fmt.Sprintf(`{
 		"pid": 5678,
 		"interval": 300000000,
@@ -256,6 +303,7 @@ func TestManagerTrackerHealth(t *testing.T) {
 	if !errors.Is(err, manage.ErrHealthStale) {
 		t.Fatalf("expected ErrHealthStale for stale file against current time, got %v", err)
 	}
+
 	if health.PID != 5678 {
 		t.Fatalf("health.PID = %d, want 5678", health.PID)
 	}

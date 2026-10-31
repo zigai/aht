@@ -42,13 +42,31 @@ func NewReducer(rules Rules) Reducer {
 	return Reducer{rules: rules}
 }
 
-func (r Reducer) Apply(state State, batch []Observation, receivedAt time.Time) (State, []Change, error) {
-	previous := snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, Sessions: state.Sessions, UpdatedAt: state.UpdatedAt, EndedProcesses: nil}
+func (r Reducer) Apply(
+	state State,
+	batch []Observation,
+	receivedAt time.Time,
+) (State, []Change, error) {
+	previous := snapshot{
+		JournalSequence: 0,
+		SchemaVersion:   storeSchemaVersion,
+		Sessions:        state.Sessions,
+		UpdatedAt:       state.UpdatedAt,
+		EndedProcesses:  nil,
+	}
+
 	candidate := cloneRegistrySnapshot(previous)
-	if _, _, err := r.applyObservationBatch(context.Background(), &candidate, batch, receivedAt); err != nil {
+	if _, _, err := r.applyObservationBatch(
+		context.Background(),
+		&candidate,
+		batch,
+		receivedAt,
+	); err != nil {
 		return state, nil, err
 	}
+
 	result := State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt}
+
 	return result, stateChanges(state, result), nil
 }
 
@@ -57,5 +75,6 @@ func (a Authority) Valid() bool {
 	case AuthorityHook, AuthorityScreen, AuthorityProcess:
 		return true
 	}
+
 	return false
 }

@@ -76,14 +76,26 @@ func (e *UnsupportedSchemaError) Error() string {
 	if e.Version != 0 {
 		version = strconv.Itoa(e.Version)
 	}
-	return fmt.Sprintf("unsupported store schema %s at %s; run aht --store %s manage state reset --force or move/remove the file", version, e.Path, e.Path)
+
+	return fmt.Sprintf(
+		"unsupported store schema %s at %s; run aht --store %s manage state reset --force or move/remove the file",
+		version,
+		e.Path,
+		e.Path,
+	)
 }
 
 func NewFileStore(path string, rules Rules) *FileStore {
 	if path == "" {
 		path = DefaultStorePath()
 	}
-	return &FileStore{reducer: NewReducer(rules), path: path, now: func() time.Time { return time.Now().UTC() }, onLockContention: nil}
+
+	return &FileStore{
+		reducer:          NewReducer(rules),
+		path:             path,
+		now:              func() time.Time { return time.Now().UTC() },
+		onLockContention: nil,
+	}
 }
 
 func (s *FileStore) Path() string { return s.path }
@@ -92,7 +104,9 @@ func (s *FileStore) List(ctx context.Context, filter Filter) ([]Session, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
 	}
+
 	sessions, _, err := s.watchSnapshot(ctx, filter)
+
 	return sessions, err
 }
 
@@ -100,36 +114,51 @@ func (s *FileStore) Get(ctx context.Context, id string) (Session, error) {
 	if err := ctx.Err(); err != nil {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
+
 	snap, err := s.load(ctx)
 	if err != nil {
 		return Session{}, err
 	}
+
 	session, ok := snap.Sessions[id]
 	if !ok {
 		return Session{}, ErrSessionNotFound
 	}
+
 	session.SchemaVersion = storeSchemaVersion
 	session.resolveDetail(s.reducer.rules.Policy(session.Harness), s.now().UTC())
+
 	return session, nil
 }
 
 // Summary returns filtered multiplexer-session summaries.
 func (s *FileStore) Summary(ctx context.Context, filter Filter) ([]Summary, error) {
-	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+	return s.SummaryWithOptions(
+		ctx,
+		filter,
+		SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession},
+	)
 }
 
 // SummaryWithOptions returns filtered summaries grouped according to opts.
-func (s *FileStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
+func (s *FileStore) SummaryWithOptions(
+	ctx context.Context,
+	filter Filter,
+	opts SummaryOptions,
+) ([]Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("checking context: %w", err)
 	}
+
 	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
+
 	sessions, _, err := s.watchSnapshot(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
+
 	return SummariesWithOptions(sessions, opts), nil
 }
 
@@ -140,23 +169,29 @@ func (s *FileStore) withSnapshot(ctx context.Context, mutator func(*snapshot) er
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
 	}
+
 	lock, err := openStoreLock(ctx, s.path+".lock", s.onLockContention)
 	if err != nil {
 		return err
 	}
+
 	snap, err := s.loadSnapshot()
 	if err != nil {
 		return closeStoreLock(lock, err)
 	}
+
 	if err := mutator(&snap); err != nil {
 		return closeStoreLock(lock, err)
 	}
+
 	if err := validateSnapshot(snap); err != nil {
 		return closeStoreLock(lock, fmt.Errorf("validating updated store: %w", err))
 	}
+
 	if err := ctx.Err(); err != nil {
 		return closeStoreLock(lock, fmt.Errorf("updating store: %w", err))
 	}
+
 	return closeStoreLock(lock, writeSnapshotAtomic(s.path, snap))
 }
 
@@ -164,6 +199,7 @@ func closeStoreLock(lock *storeLock, err error) error {
 	if closeErr := lock.Close(); closeErr != nil {
 		return errors.Join(err, closeErr)
 	}
+
 	return err
 }
 
@@ -173,30 +209,38 @@ func (s *FileStore) loadSnapshot() (snapshot, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return newSnapshot(), nil
 		}
+
 		return snapshot{}, fmt.Errorf("reading store: %w", err)
 	}
+
 	var header struct {
 		SchemaVersion int `json:"schema_version"`
 	}
 	if err := json.Unmarshal(data, &header); err != nil {
 		return snapshot{}, fmt.Errorf("%w: decoding snapshot version: %w", ErrCorruptStore, err)
 	}
+
 	if header.SchemaVersion != storeSchemaVersion {
 		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: header.SchemaVersion}
 	}
+
 	var snap snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return snapshot{}, fmt.Errorf("%w: parsing store %s: %w", ErrCorruptStore, s.path, err)
 	}
+
 	if snap.SchemaVersion != storeSchemaVersion {
 		return snapshot{}, &UnsupportedSchemaError{Path: s.path, Version: snap.SchemaVersion}
 	}
+
 	if snap.Sessions == nil {
 		snap.Sessions = make(map[string]Session)
 	}
+
 	if err := validateSnapshot(snap); err != nil {
 		return snapshot{}, err
 	}
+
 	return snap, nil
 }
 
@@ -207,25 +251,36 @@ func readSnapshotFile(path string) ([]byte, error) {
 	}
 	// Closing a read-only snapshot has no pending writes to finalize.
 	defer func() { _ = file.Close() }()
+
 	info, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stating store: %w", err)
 	}
+
 	if info.Size() > maxSnapshotBytes {
 		return nil, ErrStoreTooLarge
 	}
+
 	data, err := io.ReadAll(io.LimitReader(file, maxSnapshotBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading store: %w", err)
 	}
+
 	if len(data) > maxSnapshotBytes {
 		return nil, ErrStoreTooLarge
 	}
+
 	return data, nil
 }
 
 func newSnapshot() snapshot {
-	return snapshot{JournalSequence: 0, SchemaVersion: storeSchemaVersion, UpdatedAt: time.Time{}, Sessions: make(map[string]Session), EndedProcesses: nil}
+	return snapshot{
+		JournalSequence: 0,
+		SchemaVersion:   storeSchemaVersion,
+		UpdatedAt:       time.Time{},
+		Sessions:        make(map[string]Session),
+		EndedProcesses:  nil,
+	}
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {
@@ -233,44 +288,58 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 	if err != nil {
 		return fmt.Errorf("encoding store: %w", err)
 	}
+
 	data = append(data, '\n')
 	if len(data) > maxSnapshotBytes {
 		return ErrStoreTooLarge
 	}
+
 	dir := filepath.Dir(path)
+
 	fs := registryFSFor(path)
 	if err := fs.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
 	}
+
 	temp, err := fs.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("creating temp store: %w", err)
 	}
+
 	tempPath := temp.Name()
+
 	keep := false
 	defer func() {
 		if keep {
 			return
 		}
+
 		_ = temp.Close()
 		_ = fs.Remove(tempPath)
 	}()
+
 	if err := temp.Chmod(0o600); err != nil {
 		return fmt.Errorf("setting temp store permissions: %w", err)
 	}
+
 	if _, err := temp.Write(data); err != nil {
 		return fmt.Errorf("writing temp store: %w", err)
 	}
+
 	if err := temp.Sync(); err != nil {
 		return fmt.Errorf("syncing temp store: %w", err)
 	}
+
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("closing temp store: %w", err)
 	}
+
 	if err := fs.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("renaming temp store: %w", err)
 	}
+
 	keep = true
+
 	return syncDir(dir)
 }
 
@@ -280,8 +349,10 @@ func syncDir(dir string) error {
 		return fmt.Errorf("opening state directory: %w", err)
 	}
 	defer func() { _ = handle.Close() }()
+
 	if err := handle.Sync(); err != nil {
 		return fmt.Errorf("syncing state directory: %w", err)
 	}
+
 	return nil
 }

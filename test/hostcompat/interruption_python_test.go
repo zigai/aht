@@ -10,29 +10,68 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const acpCancelledStopReason = "cancelled" //nolint:misspell // reason: "cancelled" is the ACP prompt-turn stopReason value.
+// reason: "cancelled" is the ACP prompt-turn stopReason value.
+//
+//nolint:misspell // Exact protocol spelling; see above.
+const acpCancelledStopReason = "cancelled"
 
 // ACP cancellation is a notification; the original prompt returns the cancellation stop reason:
 // https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation
 func runPythonInterruption(t *testing.T, host *isolatedHost, env []string) {
 	t.Helper()
+
 	if host.contract.ID != registry.Harness("hermes") {
 		t.Fatalf("unsupported Python interruption host %s", host.contract.ID)
 	}
+
 	command := host.command(t, env, "acp", "--accept-hooks")
 	wire := newPythonPermissionWire(t, command)
 	process := startPermissionProcess(t, host, command)
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "initialize", "method": "initialize", "params": map[string]any{"protocolVersion": 1, "clientInfo": map[string]any{"name": "aht-compat", "version": "1"}, "clientCapabilities": map[string]any{}}})
+	wire.send(
+		t,
+		map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "initialize",
+			"method":  "initialize",
+			"params": map[string]any{
+				"protocolVersion":    1,
+				"clientInfo":         map[string]any{"name": "aht-compat", "version": "1"},
+				"clientCapabilities": map[string]any{},
+			},
+		},
+	)
 	wire.response(t, "initialize")
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "new", "method": "session/new", "params": map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}}})
+	wire.send(
+		t,
+		map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "new",
+			"method":  "session/new",
+			"params":  map[string]any{"cwd": host.launched.Work, "mcpServers": []any{}},
+		},
+	)
 	created := wire.response(t, "new")
+
 	var session struct {
 		SessionID string `json:"sessionId"` //nolint:tagliatelle // ACP wire field.
 	}
 	if err := json.Unmarshal(created.Result, &session); err != nil || session.SessionID == "" {
 		t.Fatalf("Hermes ACP returned invalid session: %s (%v)", created.Result, err)
 	}
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "id": "prompt", "method": "session/prompt", "params": map[string]any{"sessionId": session.SessionID, "prompt": []any{map[string]any{"type": "text", "text": compatibilityPrompt}}}})
+
+	wire.send(
+		t,
+		map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "prompt",
+			"method":  "session/prompt",
+			"params": map[string]any{
+				"sessionId": session.SessionID,
+				"prompt":    []any{map[string]any{"type": "text", "text": compatibilityPrompt}},
+			},
+		},
+	)
+
 	select {
 	case hold := <-host.provider.Holds():
 		if hold.Request.Index != 0 {
@@ -43,20 +82,35 @@ func runPythonInterruption(t *testing.T, host *isolatedHost, env []string) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("Python host did not reach active provider request")
 	}
+
 	host.waitForActiveSession(t)
 
-	wire.send(t, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": session.SessionID}})
+	wire.send(
+		t,
+		map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/cancel",
+			"params":  map[string]any{"sessionId": session.SessionID},
+		},
+	)
 	// The provider response stays held: neither a tool call nor process exit
 	// can stand in for the native prompt's cancellation response.
 	completed := wire.response(t, "prompt")
+
 	var result struct {
 		StopReason string `json:"stopReason"` //nolint:tagliatelle // ACP wire field.
 	}
-	if err := json.Unmarshal(completed.Result, &result); err != nil || result.StopReason != acpCancelledStopReason {
+	if err := json.Unmarshal(
+		completed.Result,
+		&result,
+	); err != nil ||
+		result.StopReason != acpCancelledStopReason {
 		t.Fatalf("native prompt did not report cancellation: %s (%v)", completed.Result, err)
 	}
+
 	if err := wire.input.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	process.wait(t)
 }

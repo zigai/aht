@@ -289,15 +289,21 @@ func (h *matchHeap) Len() int { return len(h.items) }
 
 // Less orders the root at the least preferred match: [heap.Pop] yields the match
 // a result limit would drop first.
-func (h *matchHeap) Less(i, j int) bool { return h.compare(h.items[j].Match, h.items[i].Match) < 0 }
+func (h *matchHeap) Less(
+	i int,
+	j int,
+) bool {
+	return h.compare(h.items[j].Match, h.items[i].Match) < 0
+}
 
-func (h *matchHeap) Swap(i, j int) { h.items[i], h.items[j] = h.items[j], h.items[i] }
+func (h *matchHeap) Swap(i int, j int) { h.items[i], h.items[j] = h.items[j], h.items[i] }
 
 func (h *matchHeap) Push(value any) {
 	match, ok := value.(retainedMatch)
 	if !ok {
 		panic("history: matchHeap holds only retainedMatch values")
 	}
+
 	h.items = append(h.items, match)
 }
 
@@ -305,6 +311,7 @@ func (h *matchHeap) Pop() any {
 	last := len(h.items) - 1
 	value := h.items[last]
 	h.items = h.items[:last]
+
 	return value
 }
 
@@ -315,17 +322,21 @@ func (f Filter) Validate() error {
 			return fmt.Errorf("%w: %w", ErrInvalidQuery, err)
 		}
 	}
+
 	if f.MinMessages < 0 {
 		return fmt.Errorf("%w: minimum messages must be nonnegative", ErrInvalidQuery)
 	}
+
 	if !f.Since.IsZero() && !f.Until.IsZero() && f.Until.Before(f.Since) {
 		return fmt.Errorf("%w: until precedes since", ErrInvalidQuery)
 	}
+
 	switch f.Presence {
 	case "", registry.PresenceLive, registry.PresenceGone:
 		return nil
 	case registry.PresenceUnknown:
 	}
+
 	return fmt.Errorf("%w: invalid presence %q; choose live or gone", ErrInvalidQuery, f.Presence)
 }
 
@@ -335,30 +346,39 @@ func (q Query) Validate() error {
 	if err := q.Filter.Validate(); err != nil {
 		return err
 	}
+
 	if len(q.Terms) == 0 {
 		return fmt.Errorf("%w: provide at least one search term", ErrInvalidQuery)
 	}
+
 	if err := validateTermText(slices.Concat(q.Terms, q.Exclude)); err != nil {
 		return err
 	}
+
 	if q.Limit < 0 {
 		return fmt.Errorf("%w: limit must be nonnegative (0 means unlimited)", ErrInvalidQuery)
 	}
+
 	if q.Excerpts < 0 {
 		return fmt.Errorf("%w: excerpts must be nonnegative", ErrInvalidQuery)
 	}
+
 	if err := validateSort(q.Sort, true); err != nil {
 		return err
 	}
+
 	if err := validateRole(q.Role); err != nil {
 		return err
 	}
+
 	if _, err := compileMatchers(q.Terms, q); err != nil {
 		return err
 	}
+
 	if _, err := compileMatchers(q.Exclude, q); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -368,10 +388,12 @@ func (q Query) combined() Query {
 		q.Terms = slices.Concat([]string{q.Text}, q.Terms)
 		q.Text = ""
 	}
+
 	if q.Harness != "" {
 		q.Harnesses = slices.Concat(q.Harnesses, []registry.Harness{q.Harness})
 		q.Harness = ""
 	}
+
 	return q
 }
 
@@ -380,9 +402,11 @@ func (q ListQuery) Validate() error {
 	if err := q.Filter.Validate(); err != nil {
 		return err
 	}
+
 	if q.Limit < 0 {
 		return fmt.Errorf("%w: limit must be nonnegative (0 means unlimited)", ErrInvalidQuery)
 	}
+
 	return validateSort(q.Sort, false)
 }
 
@@ -415,17 +439,25 @@ func validateTermText(terms []string) error {
 		if strings.TrimSpace(term) == "" {
 			return fmt.Errorf("%w: provide nonempty text", ErrInvalidQuery)
 		}
+
 		if len(term) > maxQueryBytes {
 			return fmt.Errorf("%w: text exceeds 4096 bytes", ErrInvalidQuery)
 		}
 	}
+
 	return nil
 }
 
 func validateRole(role string) error {
-	if role != "" && !slices.Contains([]string{"user", "assistant", "agent", "context", "tool", "all"}, role) {
-		return fmt.Errorf("%w: invalid role %q; choose user, agent, assistant, context, tool, or all", ErrInvalidQuery, role)
+	if role != "" &&
+		!slices.Contains([]string{"user", "assistant", "agent", "context", "tool", "all"}, role) {
+		return fmt.Errorf(
+			"%w: invalid role %q; choose user, agent, assistant, context, tool, or all",
+			ErrInvalidQuery,
+			role,
+		)
 	}
+
 	return nil
 }
 
@@ -438,6 +470,7 @@ func validateSort(sort Sort, search bool) error {
 			return nil
 		}
 	}
+
 	return fmt.Errorf("%w: invalid sort %q", ErrInvalidQuery, sort)
 }
 
@@ -449,8 +482,10 @@ func validateSort(sort Sort, search bool) error {
 // do not mutate input slices.
 func (c Catalog) Search(ctx context.Context, query Query) (Result, error) {
 	var s search
+
 	s.mode = modeSearch
 	s.query = query
+
 	return c.run(ctx, &s)
 }
 
@@ -458,8 +493,10 @@ func (c Catalog) Search(ctx context.Context, query Query) (Result, error) {
 // excerpts, refreshing the index like Search.
 func (c Catalog) List(ctx context.Context, query ListQuery) (Result, error) {
 	var s search
+
 	s.mode = modeList
 	s.query = query.searchQuery()
+
 	return c.run(ctx, &s)
 }
 
@@ -469,12 +506,27 @@ func (c Catalog) List(ctx context.Context, query ListQuery) (Result, error) {
 // matches. Sort and Limit must be zero.
 func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool) (Result, error) {
 	if query.Limit != 0 || query.Sort != "" {
-		return Result{Matches: []Match{}, Sources: []SourceStatus{}, Issues: []Issue{}, OmittedIssues: 0, Truncated: false, Refresh: nil, Reparsed: nil, IndexUnavailable: false}, fmt.Errorf("%w: streamed searches report matches in discovery order without sort or limit", ErrInvalidQuery)
+		return Result{
+			Matches:          []Match{},
+			Sources:          []SourceStatus{},
+			Issues:           []Issue{},
+			OmittedIssues:    0,
+			Truncated:        false,
+			Refresh:          nil,
+			Reparsed:         nil,
+			IndexUnavailable: false,
+		}, fmt.Errorf(
+			"%w: streamed searches report matches in discovery order without sort or limit",
+			ErrInvalidQuery,
+		)
 	}
+
 	var s search
+
 	s.mode = modeSearch
 	s.query = query
 	s.stream = yield
+
 	return c.run(ctx, &s)
 }
 
@@ -484,26 +536,34 @@ func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool
 // is returned without undoing committed index changes.
 func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	var s search
+
 	s.mode = modeRefresh
+
 	sources, err := c.begin(ctx, &s)
 	if err != nil || len(sources) == 0 {
 		return s.finalize(ctx), err
 	}
+
 	index, err := openHistoryIndex(ctx, c.IndexPath, s.indexSources(sources), s.waitingForIndex)
 	if err != nil {
 		s.result.IndexUnavailable = errors.Is(err, ErrIndexUnavailable)
 		return s.finalize(ctx), err
 	}
+
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
 	closeErr := index.close(ctx)
 	s.index = nil
 	s.result.IndexUnavailable = errors.Is(runErr, ErrIndexUnavailable)
 	result := s.finalize(ctx)
+
 	var statusErr error
-	if ctx.Err() == nil && closeErr == nil && s.indexErr == nil && index.unavailable == nil && !result.IndexUnavailable && (runErr == nil || errors.Is(runErr, ErrIncomplete)) {
+	if ctx.Err() == nil && closeErr == nil && s.indexErr == nil && index.unavailable == nil &&
+		!result.IndexUnavailable &&
+		(runErr == nil || errors.Is(runErr, ErrIncomplete)) {
 		statusErr = c.saveRefreshStatus(ctx, result, errors.Is(runErr, ErrIncomplete))
 	}
+
 	return result, errors.Join(runErr, closeErr, statusErr)
 }
 
@@ -512,17 +572,29 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 // sees what the harness wrote last; name the conversation's transcript as the only source to read
 // just that file. Text parts of one native message are joined with newlines. found is false
 // when the conversation has no such message or is not in the sources.
-func (c Catalog) LastMessage(ctx context.Context, sessionID, role string) (Excerpt, bool, error) {
+func (c Catalog) LastMessage(
+	ctx context.Context,
+	sessionID string,
+	role string,
+) (Excerpt, bool, error) {
 	var none Excerpt
 	if sessionID == "" || (role != "user" && role != "assistant") {
-		return none, false, fmt.Errorf("%w: a last message needs a session and the role user or assistant", ErrInvalidQuery)
+		return none, false, fmt.Errorf(
+			"%w: a last message needs a session and the role user or assistant",
+			ErrInvalidQuery,
+		)
 	}
-	var everything ListQuery
-	var s search
+
+	var (
+		everything ListQuery
+		s          search
+	)
+
 	s.mode = modeList
 	s.query = everything.searchQuery()
 	s.last = &lastMessage{session: sessionID, role: role, message: none, found: false}
 	_, err := c.runDirect(ctx, &s)
+
 	return s.last.message, s.last.found, err
 }
 
@@ -531,10 +603,13 @@ func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
 	if err != nil {
 		return s.finalize(ctx), err
 	}
+
 	if len(sources) == 0 {
 		return s.finalize(ctx), nil
 	}
+
 	err = c.searchIndexed(ctx, s, sources)
+
 	return s.finalize(ctx), err
 }
 
@@ -543,15 +618,19 @@ func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
 // the index must reproduce.
 func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) {
 	var s search
+
 	s.mode = modeSearch
 	s.query = query
+
 	return c.runDirect(ctx, &s)
 }
 
 func (c Catalog) listDirect(ctx context.Context, query ListQuery) (Result, error) {
 	var s search
+
 	s.mode = modeList
 	s.query = query.searchQuery()
+
 	return c.runDirect(ctx, &s)
 }
 
@@ -560,10 +639,13 @@ func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
 	if err != nil {
 		return s.finalize(ctx), err
 	}
+
 	if len(sources) == 0 {
 		return s.finalize(ctx), nil
 	}
+
 	err = s.runDirect(ctx, sources)
+
 	return s.finalize(ctx), err
 }
 
@@ -579,16 +661,21 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 		if !errors.Is(err, ErrIndexUnavailable) {
 			return err
 		}
+
 		s.result.IndexUnavailable = true
+
 		return s.runDirect(ctx, sources)
 	}
+
 	s.index = index
 	runErr := s.runIndexed(ctx, sources)
 	closeErr := index.close(ctx)
 	s.index = nil
+
 	if isIndexContentFailure(runErr) {
 		runErr = indexUnavailable(runErr)
 	}
+
 	if errors.Is(runErr, ErrIndexUnavailable) {
 		s.result.IndexUnavailable = true
 		if s.stream != nil && s.matched > 0 {
@@ -597,13 +684,16 @@ func (c Catalog) searchIndexed(ctx context.Context, s *search, sources []Source)
 		// The index is unusable, so its own close error is irrelevant.
 		s.reset()
 		s.result.IndexUnavailable = true
+
 		return s.runDirect(ctx, sources)
 	}
+
 	return errors.Join(runErr, closeErr)
 }
 
 func (s *search) waitingForIndex() {
 	var progress Progress
+
 	progress.Waiting = true
 	s.report(progress)
 }
@@ -615,21 +705,27 @@ func (c Catalog) begin(ctx context.Context, s *search) ([]Source, error) {
 	s.explicitSources = c.Sources != nil
 	s.progress = c.Progress
 	s.reset()
+
 	if err := s.prepare(); err != nil {
 		return nil, err
 	}
+
 	sources := c.Sources
 	if sources == nil {
 		var err error
+
 		sources, err = DefaultSources()
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	sources = dedupeSources(sources)
+
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("search history: %w", err)
 	}
+
 	return sources, nil
 }
 
@@ -638,14 +734,17 @@ func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	if err := ctx.Err(); err != nil {
 		scanErr = errors.Join(scanErr, fmt.Errorf("search history: %w", err))
 	}
+
 	var commitErr error
 	if scanErr == nil {
 		commitErr = s.index.commit(ctx)
 	}
+
 	var excerptErr error
 	if s.mode != modeRefresh {
 		excerptErr = s.index.readRetained(ctx, s)
 	}
+
 	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, ctx.Err(), s.resultError())
 }
 
@@ -657,13 +756,18 @@ func (s *search) indexSources(sources []Source) []Source {
 		if _, ok := s.selectSource(source); !ok || source.Path == "" {
 			continue
 		}
+
 		selected = append(selected, source)
 		if info, err := os.Stat(source.Path); err == nil && !info.IsDir() {
-			if resolved, err := resolveSymlinkFile(source.Path); err == nil && resolved != source.Path {
+			if resolved, err := resolveSymlinkFile(
+				source.Path,
+			); err == nil &&
+				resolved != source.Path {
 				selected = append(selected, Source{Harness: source.Harness, Path: resolved})
 			}
 		}
 	}
+
 	return selected
 }
 
@@ -671,6 +775,7 @@ func (s *search) runDirect(ctx context.Context, sources []Source) error {
 	if err := s.forEachSource(ctx, sources); err != nil {
 		return err
 	}
+
 	return errors.Join(ctx.Err(), s.resultError())
 }
 
@@ -681,27 +786,41 @@ func (s *search) runDirect(ctx context.Context, sources []Source) error {
 func (s *search) forEachSource(ctx context.Context, sources []Source) error {
 	skipped := make([]Issue, 0, len(sources))
 	selected := 0
+
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("search history: %w", err)
 		}
+
 		if s.halted() {
 			return nil
 		}
+
 		reason, ok := s.selectSource(source)
 		if ok {
 			selected++
+
 			s.scanSource(ctx, source)
+
 			continue
 		}
-		s.result.Sources = append(s.result.Sources, SourceStatus{Source: source, Status: "skipped", Files: 0})
-		skipped = append(skipped, Issue{Source: source, Path: source.Path, Message: reason, Record: false})
+
+		s.result.Sources = append(
+			s.result.Sources,
+			SourceStatus{Source: source, Status: "skipped", Files: 0},
+		)
+		skipped = append(
+			skipped,
+			Issue{Source: source, Path: source.Path, Message: reason, Record: false},
+		)
 	}
+
 	if selected == 0 && len(sources) > 0 {
 		for _, issue := range skipped {
 			s.recordIssue(issue)
 		}
 	}
+
 	return nil
 }
 
@@ -709,27 +828,34 @@ func (s *search) prepare() error {
 	if err := s.validate(); err != nil {
 		return err
 	}
+
 	s.query = s.query.combined()
+
 	s.query.Harnesses = uniqueHarnesses(s.query.Harnesses)
 	if err := s.absolutePaths(); err != nil {
 		return err
 	}
+
 	switch s.query.Role {
 	case "agent":
 		s.query.Role = "assistant"
 	case "tool":
 		s.query.IncludeTools = true
 	}
+
 	if s.query.Excerpts == 0 {
 		s.query.Excerpts = defaultExcerpts
 	}
+
 	s.prepareRegistry()
 	s.recent.compare = resultOrder(s.query.Sort)
 	s.terms, _ = compileMatchers(s.query.Terms, s.query)
+
 	s.exclude, _ = compileMatchers(s.query.Exclude, s.query)
 	if s.mode == modeSearch {
 		s.prefilter = newBytePrefilter(s.terms)
 	}
+
 	return nil
 }
 
@@ -741,6 +867,7 @@ func (s *search) validate() error {
 		return (ListQuery{Filter: s.query.Filter, Sort: s.query.Sort, Limit: s.query.Limit}).Validate()
 	case modeRefresh:
 	}
+
 	return nil
 }
 
@@ -752,6 +879,7 @@ func uniqueHarnesses(ids []registry.Harness) []registry.Harness {
 			harnesses = append(harnesses, parsed)
 		}
 	}
+
 	return harnesses
 }
 
@@ -762,20 +890,26 @@ func (s *search) absolutePaths() error {
 		if err != nil {
 			return fmt.Errorf("search directory: %w", err)
 		}
+
 		if !slices.Contains(directories, path) {
 			directories = append(directories, path)
 		}
 	}
+
 	s.query.Dirs = directories
+
 	excluded := make([]string, 0, len(s.query.ExcludeDirs))
 	for _, dir := range s.query.ExcludeDirs {
 		path, err := filepath.Abs(dir)
 		if err != nil {
 			return fmt.Errorf("exclude directory: %w", err)
 		}
+
 		excluded = append(excluded, path)
 	}
+
 	s.query.ExcludeDirs = excluded
+
 	return nil
 }
 
@@ -804,13 +938,22 @@ func (s *search) reset() {
 func (s *search) selectSource(source Source) (string, bool) {
 	if len(s.query.Harnesses) > 0 {
 		if !slices.Contains(s.query.Harnesses, source.Harness) {
-			return fmt.Sprintf("source skipped: harness %q is not among the requested harnesses", source.Harness), false
+			return fmt.Sprintf(
+				"source skipped: harness %q is not among the requested harnesses",
+				source.Harness,
+			), false
 		}
+
 		return "", true
 	}
+
 	if slices.Contains(s.query.IgnoreHarnesses, source.Harness) {
-		return fmt.Sprintf("source skipped: harness %q is excluded by the ignore list", source.Harness), false
+		return fmt.Sprintf(
+			"source skipped: harness %q is excluded by the ignore list",
+			source.Harness,
+		), false
 	}
+
 	return "", true
 }
 
@@ -821,10 +964,13 @@ func (s *search) issue(source Source, path string, err error) {
 func (s *search) recordIssue(issue Issue) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if !issue.Record {
 		s.failures++
 	}
+
 	var omitted int
+
 	s.result.Issues, omitted = retainIssue(s.result.Issues, issue)
 	s.result.OmittedIssues += omitted
 }
@@ -833,30 +979,42 @@ func retainIssue(issues []Issue, issue Issue) ([]Issue, int) {
 	if len(issues) < maxIssues {
 		return append(issues, issue), 0
 	}
+
 	last := 0
 	for position := range issues {
 		if compareIssues(issues[position], issues[last]) > 0 {
 			last = position
 		}
 	}
+
 	if compareIssues(issue, issues[last]) < 0 {
 		issues[last] = issue
 	}
+
 	return issues, 1
 }
 
 func (s *search) reportIssues(path string, issues []Issue, omitted int, selected map[string]bool) {
-	s.reportScopedIssues(&fileIssueBuffer{issues: map[string][]Issue{path: issues}, omitted: map[string]int{path: omitted}, selected: selected, parents: nil})
+	s.reportScopedIssues(
+		&fileIssueBuffer{
+			issues:   map[string][]Issue{path: issues},
+			omitted:  map[string]int{path: omitted},
+			selected: selected,
+			parents:  nil,
+		},
+	)
 }
 
 func (s *search) reportScopedIssues(buffer *fileIssueBuffer) {
 	for child, parent := range buffer.parents {
 		buffer.selected[child] = buffer.selected[parent]
 	}
+
 	omitted := 0
 	for path := range buffer.issues {
 		omitted += s.reportFileIssues(buffer, path)
 	}
+
 	s.mu.Lock()
 	s.result.OmittedIssues += omitted
 	s.mu.Unlock()
@@ -866,32 +1024,40 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 	issues := buffer.issues[path]
 	selected := buffer.selected[path]
 	omitted := 0
+
 	recordsSelected := s.recordIssuesSelected(selected)
 	if recordsSelected {
 		omitted = buffer.omitted[path]
 	}
+
 	for _, issue := range issues {
 		matches := selected
+
 		if issue.Record && !recordsSelected {
 			continue
 		}
+
 		if !issue.Record {
 			if s.toolsFailures[issue.Path] {
 				continue
 			}
+
 			if s.metadataFailures != nil {
 				s.mu.Lock()
 				s.metadataFailures[issue.Path] = true
 				s.mu.Unlock()
 			}
+
 			matches = s.fileIssueSelected(issue.Source, issue.Path)
 		}
+
 		if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
 			s.recordIssue(issue)
 		} else {
 			omitted++
 		}
 	}
+
 	return omitted
 }
 
@@ -903,9 +1069,11 @@ func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
 	if !s.accepts(c) {
 		return false
 	}
+
 	if s.mode != modeSearch {
 		return true
 	}
+
 	return matches && (s.query.Presence == "" || presence(s.registryStates(c)) == s.query.Presence)
 }
 
@@ -913,7 +1081,9 @@ func (s *search) explicitFileSource(source Source) bool {
 	if !s.explicitSources {
 		return false
 	}
+
 	info, err := os.Stat(source.Path)
+
 	return err == nil && !info.IsDir()
 }
 
@@ -921,7 +1091,9 @@ func (s *search) fileIssueSelected(source Source, path string) bool {
 	if s.mode == modeRefresh || s.explicitFileSource(source) || s.query.Since.IsZero() {
 		return true
 	}
+
 	info, err := os.Stat(path)
+
 	return err != nil || !info.ModTime().Before(s.query.Since)
 }
 
@@ -935,14 +1107,17 @@ func (s *search) fileIssue(source Source, path string, err error) {
 func (s *search) halted() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.stopped
 }
 
-func within(path, parent string) bool {
+func within(path string, parent string) bool {
 	if path == "" || parent == "" {
 		return false
 	}
+
 	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(path))
+
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -952,6 +1127,7 @@ func activeUntil(c Conversation) time.Time {
 	if c.UpdatedAt.IsZero() {
 		return c.CreatedAt
 	}
+
 	return c.UpdatedAt
 }
 
@@ -959,6 +1135,7 @@ func activeSince(c Conversation) time.Time {
 	if c.CreatedAt.IsZero() {
 		return c.UpdatedAt
 	}
+
 	return c.CreatedAt
 }
 
@@ -969,38 +1146,46 @@ func (s *search) accepts(c Conversation) bool {
 	if !f.acceptsDirs(c) || !f.acceptsTimes(c) {
 		return false
 	}
+
 	if f.GitBranch != "" && c.GitBranch != f.GitBranch {
 		return false
 	}
+
 	if f.Model != "" && !strings.Contains(strings.ToLower(c.Model), strings.ToLower(f.Model)) {
 		return false
 	}
+
 	return c.Messages >= f.MinMessages
 }
 
 func (f Filter) acceptsDirs(c Conversation) bool {
 	if len(f.Dirs) > 0 {
 		selected := false
+
 		for _, dir := range f.Dirs {
 			if within(c.CWD, dir) || within(c.ProjectRoot, dir) {
 				selected = true
 				break
 			}
 		}
+
 		if !selected {
 			return false
 		}
 	}
+
 	for _, dir := range f.ExcludeDirs {
 		if within(c.CWD, dir) || within(c.ProjectRoot, dir) {
 			return false
 		}
 	}
+
 	for _, path := range f.IgnorePaths {
 		if pathmatch.Match(c.CWD, path) || pathmatch.Match(c.ProjectRoot, path) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -1008,6 +1193,7 @@ func (f Filter) acceptsTimes(c Conversation) bool {
 	if !f.Since.IsZero() && (activeUntil(c).IsZero() || activeUntil(c).Before(f.Since)) {
 		return false
 	}
+
 	return f.Until.IsZero() || (!activeSince(c).IsZero() && !activeSince(c).After(f.Until))
 }
 
@@ -1019,13 +1205,16 @@ func presence(states []RegistryState) registry.Presence {
 		if state.Presence == registry.PresenceLive {
 			return registry.PresenceLive
 		}
+
 		if state.Presence != registry.PresenceGone {
 			allGone = false
 		}
 	}
+
 	if allGone {
 		return registry.PresenceGone
 	}
+
 	return registry.PresenceUnknown
 }
 
@@ -1036,17 +1225,21 @@ func (s *search) add(ctx context.Context, t *transcript) {
 		s.writer.finish(t.match.Conversation)
 		return
 	}
+
 	if s.last != nil {
 		if t.hasLast && t.match.Conversation.SessionID == s.last.session {
 			s.mu.Lock()
 			s.last.message, s.last.found = t.last, true
 			s.mu.Unlock()
 		}
+
 		return
 	}
+
 	if s.mode == modeSearch && !t.qualifies(len(s.terms)) {
 		return
 	}
+
 	s.keep(ctx, t.match, 0)
 }
 
@@ -1055,31 +1248,41 @@ func (s *search) add(ctx context.Context, t *transcript) {
 // have their excerpts. A positive limit never stops the scan: the heap holds
 // the best Limit matches seen so far, and Truncated records that more matched.
 func (s *search) keep(ctx context.Context, m Match, indexID int64) {
-	if s.mode == modeRefresh || m.Conversation.SessionID == "" || (s.mode == modeSearch && m.MatchingParts == 0) {
+	if s.mode == modeRefresh || m.Conversation.SessionID == "" ||
+		(s.mode == modeSearch && m.MatchingParts == 0) {
 		return
 	}
+
 	if !s.accepts(m.Conversation) {
 		return
 	}
+
 	states := s.registryStates(m.Conversation)
 	if s.query.Presence != "" && presence(states) != s.query.Presence {
 		return
 	}
+
 	m.RegistryStates = states
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.stopped {
 		return
 	}
+
 	s.matched++
 	if s.stream != nil {
 		enriched := []Match{m}
 		enrich(ctx, enriched)
+
 		if !s.stream(enriched[0]) {
 			s.stopped = true
 		}
+
 		return
 	}
+
 	s.retain(m, indexID)
 }
 
@@ -1088,12 +1291,14 @@ func (s *search) retain(m Match, indexID int64) {
 		s.result.Matches = append(s.result.Matches, m)
 		return
 	}
+
 	if s.recent.Len() < s.query.Limit {
 		heap.Push(&s.recent, retainedMatch{Match: m, indexID: indexID})
 	} else if s.recent.compare(m, s.recent.items[0].Match) < 0 {
 		s.recent.items[0] = retainedMatch{Match: m, indexID: indexID}
 		heap.Fix(&s.recent, 0)
 	}
+
 	if s.matched > s.query.Limit {
 		s.result.Truncated = true
 	}
@@ -1112,17 +1317,25 @@ func (s *search) finalize(ctx context.Context) Result {
 		ordered = make([]Match, len(s.result.Matches))
 		copy(ordered, s.result.Matches)
 	}
+
 	slices.SortStableFunc(ordered, resultOrder(s.query.Sort))
 	slices.SortFunc(s.result.Issues, compareIssues)
+
 	if ctx.Err() == nil {
 		enrich(ctx, ordered)
 	}
+
 	s.result.Matches = ordered
+
 	return s.result
 }
 
-func compareIssues(first, second Issue) int {
-	return cmp.Or(cmp.Compare(first.Source.Harness, second.Source.Harness), cmp.Compare(first.Path, second.Path), cmp.Compare(first.Message, second.Message))
+func compareIssues(first Issue, second Issue) int {
+	return cmp.Or(
+		cmp.Compare(first.Source.Harness, second.Source.Harness),
+		cmp.Compare(first.Path, second.Path),
+		cmp.Compare(first.Message, second.Message),
+	)
 }
 
 // resultOrder orders matches by the requested key, then by most recently updated
@@ -1145,18 +1358,23 @@ func resultOrder(sort Sort) func(a, b Match) int {
 			}
 		case "", SortUpdated:
 		}
+
 		if order := b.Conversation.UpdatedAt.Compare(a.Conversation.UpdatedAt); order != 0 {
 			return order
 		}
+
 		if order := b.Conversation.CreatedAt.Compare(a.Conversation.CreatedAt); order != 0 {
 			return order
 		}
+
 		if order := cmp.Compare(a.Conversation.Harness, b.Conversation.Harness); order != 0 {
 			return order
 		}
+
 		if order := cmp.Compare(a.Conversation.Path, b.Conversation.Path); order != 0 {
 			return order
 		}
+
 		return cmp.Compare(a.Conversation.SessionID, b.Conversation.SessionID)
 	}
 }
@@ -1169,6 +1387,7 @@ func resultOrder(sort Sort) func(a, b Match) int {
 // absolute keeps its cleaned form; deduplication itself never fails.
 func dedupeSources(sources []Source) []Source {
 	unique := make([]Source, 0, len(sources))
+
 	seen := make(map[Source]struct{}, len(sources))
 	for _, source := range sources {
 		if source.Path != "" {
@@ -1176,14 +1395,18 @@ func dedupeSources(sources []Source) []Source {
 			if err != nil {
 				absolute = filepath.Clean(source.Path)
 			}
+
 			source.Path = absolute
 		}
+
 		if _, ok := seen[source]; ok {
 			continue
 		}
+
 		seen[source] = struct{}{}
 		unique = append(unique, source)
 	}
+
 	return unique
 }
 
@@ -1191,10 +1414,12 @@ func (s *search) resultError() error {
 	if s.failures == 0 {
 		return nil
 	}
+
 	for _, source := range s.result.Sources {
 		if source.Status == "unsupported" && (s.explicitSources || len(s.query.Harnesses) > 0) {
 			return errors.Join(ErrIncomplete, ErrUnsupportedHarness)
 		}
 	}
+
 	return ErrIncomplete
 }

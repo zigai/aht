@@ -14,7 +14,10 @@ var errTmuxPaneNotLive = manage.ErrPaneNotLive
 
 type explainResult = manage.Explanation
 
-func (app *application) resolvePaneSession(ctx context.Context, paneID, serverID, multiplexerKind string) (registry.Session, error) {
+func (app *application) resolvePaneSession(
+	ctx context.Context,
+	paneID string, serverID string, multiplexerKind string,
+) (registry.Session, error) {
 	session, err := app.registryStore().Resolve(ctx, client.Selector{
 		ID:                "",
 		Reference:         "",
@@ -29,10 +32,15 @@ func (app *application) resolvePaneSession(ctx context.Context, paneID, serverID
 	if err != nil {
 		return registry.Session{}, fmt.Errorf("resolve pane %q: %w", paneID, err)
 	}
+
 	return session, nil
 }
 
-func evaluateExplanation(ctx context.Context, session registry.Session, opts infoOptions) (manage.Explanation, error) {
+func evaluateExplanation(
+	ctx context.Context,
+	session registry.Session,
+	opts infoOptions,
+) (manage.Explanation, error) {
 	exp, err := manage.ExplainSession(ctx, session, manage.ExplainOptions{
 		LiveScreen: !opts.disableScreenInspection,
 		ConfigDir:  opts.configDir,
@@ -40,6 +48,7 @@ func evaluateExplanation(ctx context.Context, session registry.Session, opts inf
 	if err != nil {
 		return exp, fmt.Errorf("explain session: %w", err)
 	}
+
 	return exp, nil
 }
 
@@ -71,5 +80,6 @@ func activityString(activity *registry.Activity) string {
 	if activity == nil {
 		return "none"
 	}
+
 	return string(*activity)
 }

@@ -65,41 +65,50 @@ func (gooseHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-		Dir:   filepath.Join(base, goosePluginName),
-		Label: "goose plugin",
-		Files: []harness.RenderedFileInstallSpec{
-			{
-				Name:    "plugin.json",
-				Content: "",
-				JSONContent: map[string]any{
-					"name":        goosePluginName,
-					"version":     harness.IntegrationVersion,
-					"description": harness.ManagedMarker,
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
+				Dir:   filepath.Join(base, goosePluginName),
+				Label: "goose plugin",
+				Files: []harness.RenderedFileInstallSpec{
+					{
+						Name:    "plugin.json",
+						Content: "",
+						JSONContent: map[string]any{
+							"name":        goosePluginName,
+							"version":     harness.IntegrationVersion,
+							"description": harness.ManagedMarker,
+						},
+					},
+					{
+						Name:        "hooks/hooks.json",
+						Content:     "",
+						JSONContent: gooseHookConfig(),
+					},
+					{
+						Name:        "scripts/report.sh",
+						Content:     gooseReportScript(binary),
+						JSONContent: nil,
+					},
+					{
+						Name:        gooseMarkerFileName,
+						Content:     gooseMarkerContent(),
+						JSONContent: nil,
+					},
 				},
-			},
-			{
-				Name:        "hooks/hooks.json",
-				Content:     "",
-				JSONContent: gooseHookConfig(),
-			},
-			{
-				Name:        "scripts/report.sh",
-				Content:     gooseReportScript(binary),
-				JSONContent: nil,
-			},
-			{
-				Name:        gooseMarkerFileName,
-				Content:     gooseMarkerContent(),
-				JSONContent: nil,
-			},
+				SnippetOrder: []string{
+					"plugin.json",
+					"hooks/hooks.json",
+					"scripts/report.sh",
+					gooseMarkerFileName,
+				},
+				MarkerFile:     gooseMarkerFileName,
+				ImportManifest: nil,
+				Retired:        nil,
+				Registration:   nil,
+			}},
 		},
-		SnippetOrder:   []string{"plugin.json", "hooks/hooks.json", "scripts/report.sh", gooseMarkerFileName},
-		MarkerFile:     gooseMarkerFileName,
-		ImportManifest: nil,
-		Retired:        nil,
-		Registration:   nil,
-	}}}}, nil
+	}, nil
 }
 
 func (gooseHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -117,9 +126,21 @@ func (gooseHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 func (gooseHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
 	harness.AddAttributeString(attributes, "goose_event", harness.PayloadString(payload, "event"))
-	harness.AddAttributeString(attributes, "goose_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "goose_tool_name", harness.PayloadString(payload, "tool_name"))
-	harness.AddAttributeString(attributes, "goose_matcher_context", harness.PayloadString(payload, "matcher_context"))
+	harness.AddAttributeString(
+		attributes,
+		"goose_start_source",
+		harness.PayloadString(payload, "source"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"goose_tool_name",
+		harness.PayloadString(payload, "tool_name"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"goose_matcher_context",
+		harness.PayloadString(payload, "matcher_context"),
+	)
 
 	cwd := harness.PayloadString(payload, "working_dir")
 
@@ -196,9 +217,25 @@ func gooseReportScript(binary string) string {
 		"  exit 0",
 		"fi",
 		"if [ \"$transition\" = gone ]; then",
-		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.Harness("goose"))) + " --presence \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(strconv.Itoa(harness.IntegrationVersion)) + " --reporter " + harness.ShellQuote(gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		"  " + harness.ShellQuote(
+			binary,
+		) + " report " + harness.ShellQuote(
+			string(registry.Harness("goose")),
+		) + " --presence \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(
+			strconv.Itoa(harness.IntegrationVersion),
+		) + " --reporter " + harness.ShellQuote(
+			gooseIntegrationSource,
+		) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
 		"else",
-		"  " + harness.ShellQuote(binary) + " report " + harness.ShellQuote(string(registry.Harness("goose"))) + " --activity \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(strconv.Itoa(harness.IntegrationVersion)) + " --reporter " + harness.ShellQuote(gooseIntegrationSource) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		"  " + harness.ShellQuote(
+			binary,
+		) + " report " + harness.ShellQuote(
+			string(registry.Harness("goose")),
+		) + " --activity \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(
+			strconv.Itoa(harness.IntegrationVersion),
+		) + " --reporter " + harness.ShellQuote(
+			gooseIntegrationSource,
+		) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
 		"fi",
 		"",
 	}, "\n")
@@ -223,9 +260,16 @@ func goosePluginsDir() string {
 	return filepath.Join(home, ".agents", "plugins")
 }
 
-func (gooseHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (gooseHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["goose_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "goose_start_source", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "goose_start_source", "source", "reason"),
+	)
 }

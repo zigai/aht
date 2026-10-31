@@ -42,6 +42,7 @@ func ActivityValue(activity *Activity) Activity {
 	if activity == nil {
 		return ActivityUnknown
 	}
+
 	return *activity
 }
 
@@ -54,6 +55,7 @@ func (s Session) Presence() Presence {
 	case Unknown, nil:
 		return PresenceUnknown
 	}
+
 	return PresenceUnknown
 }
 
@@ -68,6 +70,7 @@ func (s Session) Activity() *Activity {
 	case nil:
 		return new(ActivityUnknown)
 	}
+
 	return nil
 }
 
@@ -82,6 +85,7 @@ func (s Session) Decision() *ActivityDecision {
 	case nil:
 		return nil
 	}
+
 	return nil
 }
 
@@ -93,6 +97,7 @@ func (s *Session) setActivity(activity *Activity) {
 	if s.Presence() == PresenceGone {
 		return
 	}
+
 	s.Liveness = NewLiveness(s.Presence(), ActivityValue(activity), s.Decision())
 }
 
@@ -100,7 +105,9 @@ func (s *Session) setDecision(decision *ActivityDecision) {
 	if gone, ok := s.Liveness.(Gone); ok {
 		gone.Decision = decision
 		s.Liveness = gone
+
 		return
 	}
+
 	s.Liveness = NewLiveness(s.Presence(), ActivityValue(s.Activity()), decision)
 }

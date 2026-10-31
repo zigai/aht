@@ -64,25 +64,30 @@ func (piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "extensions", piExtensionName),
-		Label:       "pi extension",
-		ConfigLabel: "pi extension",
-		Content: harness.RenderScriptTemplate(
-			piExtensionTemplate,
-			piIntegrationID,
-			binary,
-			piIntegrationSourceID,
-			integrationVersion,
-		),
-		JSONContent: nil,
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "extensions", piExtensionName),
+				Label:       "pi extension",
+				ConfigLabel: "pi extension",
+				Content: harness.RenderScriptTemplate(
+					piExtensionTemplate,
+					piIntegrationID,
+					binary,
+					piIntegrationSourceID,
+					integrationVersion,
+				),
+				JSONContent: nil,
+			}},
+		},
+	}, nil
 }
 
 func (piHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 	if sessionPath != "" {
 		return []string{"pi", piSessionFlag, sessionPath}
 	}
+
 	if sessionID != "" {
 		return []string{"pi", piSessionFlag, sessionID}
 	}
@@ -103,9 +108,16 @@ func piAgentDir() string {
 	return filepath.Join(home, ".pi", "agent")
 }
 
-func (piHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (piHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["pi_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "pi_reason", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "pi_reason", "source", "reason"),
+	)
 }

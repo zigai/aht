@@ -59,29 +59,60 @@ func (openclawHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	version := strconv.Itoa(integrationVersion)
 	dir := filepath.Join(registry.DefaultStateDir(), "integrations", "openclaw", openclawPluginName)
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-		Dir:   dir,
-		Label: "OpenClaw plugin",
-		Files: []harness.RenderedFileInstallSpec{
-			{Name: "package.json", Content: "", JSONContent: map[string]any{
-				"name": openclawPluginName, "version": "0.0." + version, "private": true, "type": "module",
-				"openclaw": map[string]any{"extensions": []string{"./index.js"}},
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
+				Dir:   dir,
+				Label: "OpenClaw plugin",
+				Files: []harness.RenderedFileInstallSpec{
+					{Name: "package.json", Content: "", JSONContent: map[string]any{
+						"name":     openclawPluginName,
+						"version":  "0.0." + version,
+						"private":  true,
+						"type":     "module",
+						"openclaw": map[string]any{"extensions": []string{"./index.js"}},
+					}},
+					{Name: "openclaw.plugin.json", Content: "", JSONContent: map[string]any{
+						"id":          openclawPluginName,
+						"name":        "AHT State",
+						"version":     "0.0." + version,
+						"description": "Reports local OpenClaw session lifecycle and activity to aht.",
+						"activation":  map[string]any{"onCapabilities": []string{"hook"}},
+						"configSchema": map[string]any{
+							"type":                 "object",
+							"additionalProperties": false,
+							"properties":           map[string]any{},
+						},
+					}},
+					{
+						Name:        "index.js",
+						Content:     renderOpenclawPlugin(binary, version),
+						JSONContent: nil,
+					},
+					{
+						Name:        openclawMarkerFileName,
+						Content:     openclawMarkerContent(version),
+						JSONContent: nil,
+					},
+				},
+				SnippetOrder: []string{
+					"package.json",
+					"openclaw.plugin.json",
+					"index.js",
+					openclawMarkerFileName,
+				},
+				MarkerFile:     openclawMarkerFileName,
+				ImportManifest: nil,
+				Retired:        nil,
+				Registration: newRegistration(
+					openclawCommand,
+					openclawPluginName,
+					"0.0."+version,
+					true,
+				),
 			}},
-			{Name: "openclaw.plugin.json", Content: "", JSONContent: map[string]any{
-				"id": openclawPluginName, "name": "AHT State", "version": "0.0." + version,
-				"description":  "Reports local OpenClaw session lifecycle and activity to aht.",
-				"activation":   map[string]any{"onCapabilities": []string{"hook"}},
-				"configSchema": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}},
-			}},
-			{Name: "index.js", Content: renderOpenclawPlugin(binary, version), JSONContent: nil},
-			{Name: openclawMarkerFileName, Content: openclawMarkerContent(version), JSONContent: nil},
 		},
-		SnippetOrder:   []string{"package.json", "openclaw.plugin.json", "index.js", openclawMarkerFileName},
-		MarkerFile:     openclawMarkerFileName,
-		ImportManifest: nil,
-		Retired:        nil,
-		Registration:   newRegistration(openclawCommand, openclawPluginName, "0.0."+version, true),
-	}}}}, nil
+	}, nil
 }
 
 func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -102,5 +133,10 @@ func renderOpenclawPlugin(binary string, version string) string {
 }
 
 func openclawMarkerContent(version string) string {
-	return fmt.Sprintf("%s\nAHT_INTEGRATION_ID=openclaw\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n", harness.ManagedMarker, version, openclawIntegrationSource)
+	return fmt.Sprintf(
+		"%s\nAHT_INTEGRATION_ID=openclaw\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n",
+		harness.ManagedMarker,
+		version,
+		openclawIntegrationSource,
+	)
 }

@@ -32,10 +32,12 @@ func agentDirUnder(home string) string {
 
 func sessionsDirUnder(home string) string {
 	profile := activeProfile()
+
 	agentDir := agentDirUnder(home)
 	if agentDir == "" {
 		return ""
 	}
+
 	if agentDir == filepath.Join(profileRoot(home, profile), "agent") {
 		if root := xdgDataRoot(profile); root != "" {
 			return filepath.Join(root, "sessions")
@@ -68,6 +70,7 @@ func activeProfile() string {
 	if !ok {
 		value = os.Getenv("PI_PROFILE")
 	}
+
 	value = strings.TrimSpace(value)
 	if value == "default" {
 		return ""
@@ -80,22 +83,28 @@ func xdgDataRoot(profile string) string {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return ""
 	}
+
 	base := strings.TrimSpace(os.Getenv("XDG_DATA_HOME"))
 	if base == "" {
 		return ""
 	}
+
 	relative := "omp"
 	if profile != "" {
 		relative = filepath.Join(relative, "profiles", profile)
 	}
+
 	if !filepath.IsLocal(relative) {
 		return ""
 	}
+
 	dataHome, err := os.OpenRoot(base)
 	if err != nil {
 		return ""
 	}
+
 	_, statErr := dataHome.Stat(relative)
+
 	closeErr := dataHome.Close()
 	if statErr != nil || closeErr != nil {
 		return ""

@@ -12,16 +12,25 @@ import (
 func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
-	current := fmt.Sprintf(`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`, harness.IntegrationVersion)
+	current := fmt.Sprintf(
+		`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`,
+		harness.IntegrationVersion,
+	)
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current source metadata classified as %q", status)
 	}
-	previous := fmt.Sprintf(`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`, harness.IntegrationVersion-1)
+
+	previous := fmt.Sprintf(
+		`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`,
+		harness.IntegrationVersion-1,
+	)
 	if status := classifyArtifactContent(previous); status != ArtifactStale {
 		t.Fatalf("previous source metadata classified as %q", status)
 	}
 
-	stale := `{"command":"aht report codex --attribute aht_integration_version=7 --attribute aht_integration=codex-hook"}`
+	stale := `{"command":"aht report codex --attribute ` +
+		`aht_integration_version=7 --attribute ` +
+		`aht_integration=codex-hook"}`
 	if status := classifyArtifactContent(stale); status != ArtifactStale {
 		t.Fatalf("stale source metadata classified as %q", status)
 	}
@@ -34,12 +43,21 @@ func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 
 func TestClassifyArtifactContentUsesHarnessGeneration(t *testing.T) {
 	t.Parallel()
+
 	version := catalog.IntegrationVersionFor(registry.Harness("agy"))
-	current := fmt.Sprintf("aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d", version)
+
+	current := fmt.Sprintf(
+		"aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d",
+		version,
+	)
 	if status := classifyArtifactContent(current); status != ArtifactCurrent {
 		t.Fatalf("current agy status = %q", status)
 	}
-	stale := fmt.Sprintf("aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d", version-1)
+
+	stale := fmt.Sprintf(
+		"aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d",
+		version-1,
+	)
 	if status := classifyArtifactContent(stale); status != ArtifactStale {
 		t.Fatalf("stale agy status = %q", status)
 	}

@@ -32,6 +32,7 @@ func PayloadObject(rawPayload json.RawMessage) (map[string]any, bool) {
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
 		return nil, false
 	}
+
 	if payload == nil {
 		return nil, false
 	}
@@ -60,8 +61,10 @@ func validationString(value reflect.Value) (string, bool) {
 		if value.IsNil() {
 			return "", false
 		}
+
 		value = value.Elem()
 	}
+
 	if value.Kind() != reflect.String {
 		return "", false
 	}

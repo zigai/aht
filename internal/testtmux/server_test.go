@@ -16,10 +16,16 @@ import (
 
 func TestServerCleanupAndIsolation(t *testing.T) {
 	executable := Executable(t)
+
 	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("set -g @aht-user-config loaded\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(home, ".tmux.conf"),
+		[]byte("set -g @aht-user-config loaded\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
+
 	bin := t.TempDir()
 	writeRejectingWrapper(t, filepath.Join(bin, "tmux"))
 	t.Setenv("AHT_TEST_TMUX_EXECUTABLE", executable)
@@ -28,29 +34,37 @@ func TestServerCleanupAndIsolation(t *testing.T) {
 	t.Setenv("SHELL", "/bin/false")
 
 	var server *Server
+
 	t.Run("owned server", func(t *testing.T) {
 		server = New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
+
 		option, err := server.Tmux.GlobalSessionOptions().User(t.Context(), "@aht-user-config")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got, present := option.Effective.Get(); present {
 			t.Fatalf("test server loaded personal configuration: %q", got)
 		}
+
 		shell, err := server.Session.Options().DefaultShell(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got, _ := shell.Effective.Get(); got != "/bin/sh" {
 			t.Fatalf("default shell = %q, want isolated /bin/sh", got)
 		}
 	})
+
 	if server == nil {
 		t.Fatal("server did not start")
 	}
+
 	if exited, err := server.exited(t.Context()); err != nil || !exited {
 		t.Fatalf("test server survived cleanup: exited=%v, error=%v", exited, err)
 	}
+
 	if _, err := os.Stat(server.directory); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("test socket directory survived successful cleanup: %v", err)
 	}
@@ -61,16 +75,22 @@ func TestCloseReportsBlockedCleanup(t *testing.T) {
 	executable := server.executable
 	wrapper := filepath.Join(t.TempDir(), "blocked-tmux")
 	writeRejectingWrapper(t, wrapper)
+
 	server.executable = wrapper
 	defer func() { server.executable = executable }()
 
 	if err := server.Close(t.Context()); err == nil {
 		t.Fatal("blocked cleanup was reported as successful")
 	}
+
 	if _, err := os.Stat(server.Socket); err != nil {
 		t.Fatalf("failed cleanup lost the server socket: %v", err)
 	}
-	if identity := processinfo.StartIdentity(t.Context(), server.pid); identity != server.startIdentity {
+
+	if identity := processinfo.StartIdentity(
+		t.Context(),
+		server.pid,
+	); identity != server.startIdentity {
 		t.Fatal("failure fixture did not leave the original server alive")
 	}
 }
@@ -79,6 +99,7 @@ func TestCloseDoesNotTreatCanceledInspectionAsExit(t *testing.T) {
 	server := New(t, gotmux.NewSessionOptions{Program: gotmux.Exec("sleep", "60")})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+
 	if err := server.Close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close with canceled context = %v, want cancellation", err)
 	}
@@ -86,9 +107,15 @@ func TestCloseDoesNotTreatCanceledInspectionAsExit(t *testing.T) {
 
 func writeRejectingWrapper(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'blocked by personal tmux wrapper' >&2\nexit 99\n"), 0o600); err != nil {
+
+	if err := os.WriteFile(
+		path,
+		[]byte("#!/bin/sh\necho 'blocked by personal tmux wrapper' >&2\nexit 99\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Chmod(path, 0o700); err != nil {
 		t.Fatal(err)
 	}

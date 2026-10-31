@@ -11,12 +11,17 @@ import (
 
 const launchModelName = "AHT fakeprovider"
 
-func (kiloHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (kiloHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	configDir := filepath.Join(paths.Root, "kilo")
+
 	configJSON, err := launchConfigJSON(model)
 	if err != nil {
 		return harness.LaunchPlan{}, err
 	}
+
 	selected := harness.LaunchProviderName + "/" + model.Model
 
 	return harness.LaunchPlan{
@@ -36,6 +41,7 @@ func (kiloHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMod
 			if prompt == "" {
 				return []string{"--model", selected}, nil
 			}
+
 			return []string{"--model", selected, "--prompt", prompt}, nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -50,16 +56,21 @@ func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
 		"$schema": "https://opencode.ai/config.json",
 		"provider": map[string]any{
 			harness.LaunchProviderName: map[string]any{
-				"npm":     "@ai-sdk/openai-compatible",
-				"name":    launchModelName,
-				"options": map[string]any{"baseURL": model.Endpoint + "/v1", "apiKey": model.APIKey},
-				"models":  map[string]any{model.Model: map[string]any{"name": launchModelName}},
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": launchModelName,
+				"options": map[string]any{
+					"baseURL": model.Endpoint + "/v1",
+					"apiKey":  model.APIKey,
+				},
+				"models": map[string]any{model.Model: map[string]any{"name": launchModelName}},
 			},
 		},
 	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("encode kilo config: %w", err)
 	}
+
 	return data, nil
 }

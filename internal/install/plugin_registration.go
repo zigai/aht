@@ -19,23 +19,47 @@ func installRegisteredPlugin(
 	pluginChanged bool,
 ) (Result, error) {
 	registration := plan.Registration
+
 	state, err := registration.Inspect(ctx, plan.Dir)
 	if err != nil {
 		return Result{}, fmt.Errorf("inspecting %s registration: %w", registration.ID(), err)
 	}
+
 	if state == harnesspkg.PluginRegistrationForeign && !opts.Force {
-		return Result{}, fmt.Errorf("%w: %s; pass --force to replace it", errForeignFile, registration.Label())
+		return Result{}, fmt.Errorf(
+			"%w: %s; pass --force to replace it",
+			errForeignFile,
+			registration.Label(),
+		)
 	}
 
 	changed := pluginChanged || state != harnesspkg.PluginRegistrationCurrent
 	label := installLabel(plan.Label, harnessID, "plugin")
-	result := Result{Harness: string(harnessID), Path: plan.Dir, Changed: changed, Message: installMessage(label, changed, opts.DryRun), NextStep: "", Snippet: plugin.snippet(), Error: ""}
+
+	result := Result{
+		Harness:  string(harnessID),
+		Path:     plan.Dir,
+		Changed:  changed,
+		Message:  installMessage(label, changed, opts.DryRun),
+		NextStep: "",
+		Snippet:  plugin.snippet(),
+		Error:    "",
+	}
 	if !changed || opts.DryRun {
 		return result, nil
 	}
-	if err := applyRegisteredPlugin(ctx, registration, state, plan.Dir, plugin, pluginChanged); err != nil {
+
+	if err := applyRegisteredPlugin(
+		ctx,
+		registration,
+		state,
+		plan.Dir,
+		plugin,
+		pluginChanged,
+	); err != nil {
 		return Result{}, err
 	}
+
 	return result, nil
 }
 
@@ -52,25 +76,38 @@ func applyRegisteredPlugin(
 	}
 
 	var rollback, commit func() error
+
 	if pluginChanged {
 		var err error
+
 		rollback, commit, err = plugin.installStaged()
 		if err != nil {
 			return err
 		}
 	}
+
 	fail := func(cause error) error {
-		if cleanupErr := registration.CleanupFailedInstall(ctx, state, pluginDir); cleanupErr != nil {
-			cause = errors.Join(cause, fmt.Errorf("cleaning up %s registration: %w", registration.ID(), cleanupErr))
+		if cleanupErr := registration.CleanupFailedInstall(
+			ctx,
+			state,
+			pluginDir,
+		); cleanupErr != nil {
+			cause = errors.Join(
+				cause,
+				fmt.Errorf("cleaning up %s registration: %w", registration.ID(), cleanupErr),
+			)
 		}
+
 		return rollbackPluginDirectory(rollback, cause)
 	}
 	if err := registration.Install(ctx, pluginDir); err != nil {
 		return fail(fmt.Errorf("installing %s registration: %w", registration.ID(), err))
 	}
+
 	if commit == nil {
 		return nil
 	}
+
 	return commit()
 }
 
@@ -82,41 +119,67 @@ func removeRegisteredPlugin(
 	exists bool,
 ) (Result, error) {
 	registration := plan.Registration
+
 	state, err := registration.Inspect(ctx, plan.Dir)
 	if err != nil {
-		return Result{}, fmt.Errorf("inspecting %s registration before removal: %w", registration.ID(), err)
+		return Result{}, fmt.Errorf(
+			"inspecting %s registration before removal: %w",
+			registration.ID(),
+			err,
+		)
 	}
+
 	if state == harnesspkg.PluginRegistrationForeign {
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
 	}
+
 	registered := state != harnesspkg.PluginRegistrationMissing
+
 	changed := exists || registered
 	if !changed || opts.DryRun {
 		return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
 	}
+
 	if err := registration.EnsureMutable(plan.Dir); err != nil {
-		return Result{}, fmt.Errorf("checking whether %s registration is mutable: %w", registration.ID(), err)
+		return Result{}, fmt.Errorf(
+			"checking whether %s registration is mutable: %w",
+			registration.ID(),
+			err,
+		)
 	}
+
 	if registered {
 		if err := registration.Remove(ctx, plan.Dir); err != nil {
 			return Result{}, fmt.Errorf("removing %s registration: %w", registration.ID(), err)
 		}
 	}
+
 	if exists {
 		if err := os.RemoveAll(plan.Dir); err != nil {
 			return Result{}, fmt.Errorf("removing managed plugin %s: %w", plan.Dir, err)
 		}
 	}
+
 	return removeResult(harnessID, plan.Dir, true, false), nil
 }
 
-func inspectRegistration(ctx context.Context, plan harnesspkg.PluginDirectoryInstallPlan) (inspectedArtifact, error) {
+func inspectRegistration(
+	ctx context.Context,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (inspectedArtifact, error) {
 	registration := plan.Registration
+
 	state, err := registration.Inspect(ctx, plan.Dir)
 	if err != nil {
-		return inspectedArtifact{}, fmt.Errorf("inspecting %s registration status: %w", registration.ID(), err)
+		return inspectedArtifact{}, fmt.Errorf(
+			"inspecting %s registration status: %w",
+			registration.ID(),
+			err,
+		)
 	}
+
 	status := ArtifactMissing
+
 	switch state {
 	case harnesspkg.PluginRegistrationCurrent:
 		status = ArtifactCurrent
@@ -126,5 +189,6 @@ func inspectRegistration(ctx context.Context, plan harnesspkg.PluginDirectoryIns
 		status = ArtifactForeign
 	case harnesspkg.PluginRegistrationMissing:
 	}
+
 	return inspectedArtifact{path: registration.Label(), status: status}, nil
 }

@@ -17,7 +17,13 @@ func (qwenHarness) Locations(projectDir string) []harness.Location {
 		Global(harness.LocationKindCommands, filepath.Join(dir, "commands")).
 		Project(harness.LocationKindConfig, filepath.Join(".qwen", "settings.json")).
 		Project(harness.LocationKindMCP, filepath.Join(".qwen", "settings.json")).
-		Project(harness.LocationKindInstructions, "QWEN.md", filepath.Join(".qwen", "QWEN.local.md"), "AGENTS.md", filepath.Join(".qwen", "rules")).
+		Project(harness.LocationKindInstructions, "QWEN.md", filepath.Join(
+			".qwen",
+			"QWEN.local.md",
+		), "AGENTS.md", filepath.Join(
+			".qwen",
+			"rules",
+		)).
 		Project(harness.LocationKindSkills, filepath.Join(".qwen", "skills")).
 		Project(harness.LocationKindCommands, filepath.Join(".qwen", "commands")).
 		Locations()

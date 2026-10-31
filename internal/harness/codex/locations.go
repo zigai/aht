@@ -18,7 +18,13 @@ func (codexHarness) Locations(projectDir string) []harness.Location {
 
 	return builder.
 		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml")).
-		Global(harness.LocationKindInstructions, filepath.Join(home, "AGENTS.override.md"), filepath.Join(home, "AGENTS.md")).
+		Global(harness.LocationKindInstructions, filepath.Join(
+			home,
+			"AGENTS.override.md",
+		), filepath.Join(
+			home,
+			"AGENTS.md",
+		)).
 		Home(harness.LocationKindSkills, filepath.Join(".agents", "skills")).
 		Project(harness.LocationKindConfig, filepath.Join(".codex", "config.toml")).
 		Project(harness.LocationKindInstructions, "AGENTS.override.md", "AGENTS.md").

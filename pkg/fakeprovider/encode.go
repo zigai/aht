@@ -154,8 +154,10 @@ func encodeCalls(calls []ToolCall) ([]callJSON, error) {
 		if err != nil {
 			return nil, fmt.Errorf("encode arguments of tool call %q: %w", call.Name, err)
 		}
+
 		encoded = append(encoded, callJSON{ID: call.ID, Name: call.Name, Arguments: data})
 	}
+
 	return encoded, nil
 }
 
@@ -168,19 +170,27 @@ func completeBody(protocol Protocol, model string, reply Reply) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+
 	var body any
+
 	switch protocol {
 	case ProtocolAnthropicMessages:
-		body = newAnthropicMessage(model, anthropicContent(reply, calls), new(anthropicStopReason(calls)))
+		body = newAnthropicMessage(
+			model,
+			anthropicContent(reply, calls),
+			new(anthropicStopReason(calls)),
+		)
 	case ProtocolOpenAIChat:
 		body = newChatCompletion(model, reply, calls)
 	case ProtocolOpenAIResponses:
 		body = newResponseObject(model, responseOutput(reply, calls))
 	}
+
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encode reply: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -202,9 +212,14 @@ func anthropicContent(reply Reply, calls []callJSON) []any {
 	if includesText(reply) {
 		content = append(content, anthropicText{Type: "text", Text: reply.Text})
 	}
+
 	for _, call := range calls {
-		content = append(content, anthropicToolUse{Type: "tool_use", ID: call.ID, Name: call.Name, Input: call.Arguments})
+		content = append(
+			content,
+			anthropicToolUse{Type: "tool_use", ID: call.ID, Name: call.Name, Input: call.Arguments},
+		)
 	}
+
 	return content
 }
 
@@ -212,6 +227,7 @@ func anthropicStopReason(calls []callJSON) string {
 	if len(calls) > 0 {
 		return "tool_use"
 	}
+
 	return "end_turn"
 }
 
@@ -221,11 +237,17 @@ func newChatCompletion(model string, reply Reply, calls []callJSON) chatCompleti
 		Object:  "chat.completion",
 		Created: 1,
 		Model:   model,
-		Choices: []chatChoice{{
-			Index:        0,
-			Message:      chatMessage{Role: "assistant", Content: chatContent(reply, calls), ToolCalls: chatToolCalls(calls)},
-			FinishReason: chatFinishReason(calls),
-		}},
+		Choices: []chatChoice{
+			{
+				Index: 0,
+				Message: chatMessage{
+					Role:      "assistant",
+					Content:   chatContent(reply, calls),
+					ToolCalls: chatToolCalls(calls),
+				},
+				FinishReason: chatFinishReason(calls),
+			},
+		},
 		Usage: chatUsage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: usageTotalTokens},
 	}
 }
@@ -234,6 +256,7 @@ func chatContent(reply Reply, calls []callJSON) *string {
 	if reply.Text == "" && len(calls) > 0 {
 		return nil
 	}
+
 	return &reply.Text
 }
 
@@ -241,6 +264,7 @@ func chatFinishReason(calls []callJSON) string {
 	if len(calls) > 0 {
 		return "tool_calls"
 	}
+
 	return "stop"
 }
 
@@ -254,6 +278,7 @@ func chatToolCalls(calls []callJSON) []chatToolCall {
 			Function: chatFunction{Name: call.Name, Arguments: string(call.Arguments)},
 		})
 	}
+
 	return out
 }
 
@@ -283,9 +308,11 @@ func responseOutput(reply Reply, calls []callJSON) []any {
 	if includesText(reply) {
 		output = append(output, newMessageItem(reply.Text))
 	}
+
 	for _, call := range calls {
 		output = append(output, newFunctionItem(call))
 	}
+
 	return output
 }
 
@@ -312,15 +339,21 @@ func newFunctionItem(call callJSON) functionItem {
 
 func errorBody(protocol Protocol, message string) ([]byte, error) {
 	var body any
+
 	switch protocol {
 	case ProtocolAnthropicMessages:
-		body = anthropicError{Type: "error", Error: errorDetail{Type: "api_error", Message: message}}
+		body = anthropicError{
+			Type:  "error",
+			Error: errorDetail{Type: "api_error", Message: message},
+		}
 	case ProtocolOpenAIChat, ProtocolOpenAIResponses:
 		body = openAIError{Error: errorDetail{Type: "server_error", Message: message}}
 	}
+
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encode error reply: %w", err)
 	}
+
 	return data, nil
 }

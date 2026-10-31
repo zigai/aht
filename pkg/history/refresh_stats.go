@@ -39,27 +39,41 @@ type ReparsedFile struct {
 	Reason string `json:"reason"`
 }
 
-func (s *search) refreshed(source Source, path string, result refreshResult, storeTime time.Duration, stats *RefreshStats) {
+func (s *search) refreshed(
+	source Source,
+	path string,
+	result refreshResult,
+	storeTime time.Duration,
+	stats *RefreshStats,
+) {
 	stats.BytesParsed += result.bytes
 	stats.ParseTime += result.parseTime
+
 	stats.StoreTime += storeTime
 	if result.writer.resume != nil {
 		stats.Resumed++
 		return
 	}
+
 	stats.Reparsed++
 	if stats.Reasons == nil {
 		stats.Reasons = map[string]int{}
 	}
+
 	stats.Reasons[result.reason]++
-	s.result.Reparsed = append(s.result.Reparsed, ReparsedFile{Source: source, Path: path, Bytes: result.bytes, Reason: result.reason})
+	s.result.Reparsed = append(
+		s.result.Reparsed,
+		ReparsedFile{Source: source, Path: path, Bytes: result.bytes, Reason: result.reason},
+	)
 	slices.SortFunc(s.result.Reparsed, func(first, second ReparsedFile) int {
 		if order := cmp.Compare(second.Bytes, first.Bytes); order != 0 {
 			return order
 		}
+
 		if order := cmp.Compare(first.Source.Harness, second.Source.Harness); order != 0 {
 			return order
 		}
+
 		return cmp.Compare(first.Path, second.Path)
 	})
 	s.result.Reparsed = s.result.Reparsed[:min(maxReparsedFiles, len(s.result.Reparsed))]

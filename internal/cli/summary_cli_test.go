@@ -22,10 +22,18 @@ func TestListSummaryFlagValidation(t *testing.T) {
 	// 1. --group-by without --summary must fail at parse boundary with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
-		code := executeCLI(ctx, []string{"--store", storePath, "list", "--group-by", "project"}, strings.NewReader(""), &stdout, &stderr)
+
+		code := executeCLI(
+			ctx,
+			[]string{"--store", storePath, "list", "--group-by", "project"},
+			strings.NewReader(""),
+			&stdout,
+			&stderr,
+		)
 		if code != exitCodeUsage {
 			t.Fatalf("exit code = %d, want %d (exitCodeUsage)", code, exitCodeUsage)
 		}
+
 		if !strings.Contains(stderr.String(), "--group-by requires --summary") {
 			t.Fatalf("stderr = %q, want '--group-by requires --summary'", stderr.String())
 		}
@@ -34,10 +42,18 @@ func TestListSummaryFlagValidation(t *testing.T) {
 	// 2. --summary with unsupported --group-by value must fail with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
-		code := executeCLI(ctx, []string{"--store", storePath, "list", "--summary", "--group-by", "unsupported-dim"}, strings.NewReader(""), &stdout, &stderr)
+
+		code := executeCLI(
+			ctx,
+			[]string{"--store", storePath, "list", "--summary", "--group-by", "unsupported-dim"},
+			strings.NewReader(""),
+			&stdout,
+			&stderr,
+		)
 		if code != exitCodeUsage {
 			t.Fatalf("exit code = %d, want %d (exitCodeUsage)", code, exitCodeUsage)
 		}
+
 		if !strings.Contains(stderr.String(), "unsupported summary group-by") {
 			t.Fatalf("stderr = %q, want error about unsupported group-by", stderr.String())
 		}
@@ -46,7 +62,14 @@ func TestListSummaryFlagValidation(t *testing.T) {
 	// 3. --summary with invalid sort flags must fail with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
-		code := executeCLI(ctx, []string{"--store", storePath, "list", "--summary", "--sort", "updated"}, strings.NewReader(""), &stdout, &stderr)
+
+		code := executeCLI(
+			ctx,
+			[]string{"--store", storePath, "list", "--summary", "--sort", "updated"},
+			strings.NewReader(""),
+			&stdout,
+			&stderr,
+		)
 		if code != exitCodeUsage {
 			t.Fatalf("exit code = %d, want %d (exitCodeUsage)", code, exitCodeUsage)
 		}
@@ -64,14 +87,49 @@ func setupSummaryTableFixture(t *testing.T) (string, context.Context) {
 	waiting := registry.ActivityWaiting
 
 	obs := []registry.Observation{
-		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"}, Listing: &registry.Listing{ProjectRoot: "/home/alice/service"}}},
-		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-2"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &idle, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "worker"}, Listing: &registry.Listing{ProjectRoot: "/home/bob/service"}}},
-		{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-3"}, Evidence: &registry.Report{Claim: new(registry.PresenceGone), Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"}, Listing: &registry.Listing{ProjectRoot: "/home/carol/app"}}},
-		{Harness: registry.Harness("omp"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-4"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &waiting}},
+		{
+			Harness: registry.Harness("claude"),
+			At:      time.Now().UTC(),
+			Subject: registry.ObservationIdentity{SessionID: "sess-1"},
+			Evidence: &registry.Report{
+				Claim:    new(registry.PresenceLive),
+				Activity: &running,
+				Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"},
+				Listing:  &registry.Listing{ProjectRoot: "/home/alice/service"},
+			},
+		},
+		{
+			Harness: registry.Harness("claude"),
+			At:      time.Now().UTC(),
+			Subject: registry.ObservationIdentity{SessionID: "sess-2"},
+			Evidence: &registry.Report{
+				Claim:    new(registry.PresenceLive),
+				Activity: &idle,
+				Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "worker"},
+				Listing:  &registry.Listing{ProjectRoot: "/home/bob/service"},
+			},
+		},
+		{
+			Harness: registry.Harness("codex"),
+			At:      time.Now().UTC(),
+			Subject: registry.ObservationIdentity{SessionID: "sess-3"},
+			Evidence: &registry.Report{
+				Claim:    new(registry.PresenceGone),
+				Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "main"},
+				Listing:  &registry.Listing{ProjectRoot: "/home/carol/app"},
+			},
+		},
+		{
+			Harness:  registry.Harness("omp"),
+			At:       time.Now().UTC(),
+			Subject:  registry.ObservationIdentity{SessionID: "sess-4"},
+			Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &waiting},
+		},
 	}
 	if _, err := store.ObserveBatch(ctx, obs); err != nil {
 		t.Fatal(err)
 	}
+
 	return storePath, ctx
 }
 
@@ -84,17 +142,46 @@ func TestListSummaryTableRendering(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{name: "project", args: []string{"--group-by", "project"}, want: []string{"/home/alice/service", "/home/bob/service", "unknown"}},
+		{
+			name: "project",
+			args: []string{
+				"--group-by",
+				"project",
+			},
+			want: []string{
+				"/home/alice/service",
+				"/home/bob/service",
+				"unknown",
+			},
+		},
 		{name: "harness", args: []string{"--group-by", "harness"}, want: []string{"claude", "codex", "omp"}},
-		{name: "multiplexer_session", args: []string{"--group-by", "multiplexer-session"}, want: []string{"main", "worker", "unknown"}},
+		{
+			name: "multiplexer_session",
+			args: []string{
+				"--group-by",
+				"multiplexer-session",
+			},
+			want: []string{
+				"main",
+				"worker",
+				"unknown",
+			},
+		},
 		{name: "default_summary", want: []string{"main", "worker"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := runTestCLI(ctx, append([]string{"--store", storePath, "list", "--summary"}, test.args...), &stdout, &stderr)
+
+			err := runTestCLI(
+				ctx,
+				append([]string{"--store", storePath, "list", "--summary"}, test.args...),
+				&stdout,
+				&stderr,
+			)
 			if err != nil {
 				t.Fatalf("runTestCLI %s summary failed: %v", test.name, err)
 			}
+
 			out := stdout.String()
 			for _, want := range test.want {
 				if !strings.Contains(out, want) {
@@ -112,12 +199,24 @@ func setupSummaryJSONFixture(t *testing.T) (string, context.Context) {
 	ctx := t.Context()
 
 	running := registry.ActivityRunning
+
 	obs := []registry.Observation{
-		{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-1"}, Evidence: &registry.Report{Claim: new(registry.PresenceLive), Activity: &running, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "work"}, Listing: &registry.Listing{ProjectRoot: "/home/dev/myapp"}}},
+		{
+			Harness: registry.Harness("claude"),
+			At:      time.Now().UTC(),
+			Subject: registry.ObservationIdentity{SessionID: "sess-1"},
+			Evidence: &registry.Report{
+				Claim:    new(registry.PresenceLive),
+				Activity: &running,
+				Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "work"},
+				Listing:  &registry.Listing{ProjectRoot: "/home/dev/myapp"},
+			},
+		},
 	}
 	if _, err := store.ObserveBatch(ctx, obs); err != nil {
 		t.Fatal(err)
 	}
+
 	return storePath, ctx
 }
 
@@ -138,24 +237,36 @@ func TestListSummaryJSONRendering(t *testing.T) {
 
 func testListSummaryProjectJSON(t *testing.T, ctx context.Context, storePath string) {
 	t.Helper()
+
 	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "--json", "list", "--summary", "--group-by", "project"}, &stdout, &stderr)
+
+	err := runTestCLI(
+		ctx,
+		[]string{"--store", storePath, "--json", "list", "--summary", "--group-by", "project"},
+		&stdout,
+		&stderr,
+	)
 	if err != nil {
 		t.Fatalf("JSON project summary error: %v", err)
 	}
+
 	var summaries []registry.Summary
 	if err := json.Unmarshal(stdout.Bytes(), &summaries); err != nil {
 		t.Fatalf("Unmarshal error: %v\nstdout: %s", err, stdout.String())
 	}
+
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	if summaries[0].GroupBy != registry.SummaryGroupByProject {
 		t.Errorf("GroupBy = %q, want %q", summaries[0].GroupBy, registry.SummaryGroupByProject)
 	}
+
 	if summaries[0].Project != "myapp" || summaries[0].ProjectRoot != "/home/dev/myapp" {
 		t.Errorf("project fields mismatch: %+v", summaries[0])
 	}
+
 	if summaries[0].Total != 1 || summaries[0].Live != 1 || summaries[0].Running != 1 {
 		t.Errorf("counts mismatch: %+v", summaries[0])
 	}
@@ -163,21 +274,32 @@ func testListSummaryProjectJSON(t *testing.T, ctx context.Context, storePath str
 
 func testListSummaryHarnessJSON(t *testing.T, ctx context.Context, storePath string) {
 	t.Helper()
+
 	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "--json", "list", "--summary", "--group-by", "harness"}, &stdout, &stderr)
+
+	err := runTestCLI(
+		ctx,
+		[]string{"--store", storePath, "--json", "list", "--summary", "--group-by", "harness"},
+		&stdout,
+		&stderr,
+	)
 	if err != nil {
 		t.Fatalf("JSON harness summary error: %v", err)
 	}
+
 	var summaries []registry.Summary
 	if err := json.Unmarshal(stdout.Bytes(), &summaries); err != nil {
 		t.Fatalf("Unmarshal error: %v\nstdout: %s", err, stdout.String())
 	}
+
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	if summaries[0].GroupBy != registry.SummaryGroupByHarness {
 		t.Errorf("GroupBy = %q, want %q", summaries[0].GroupBy, registry.SummaryGroupByHarness)
 	}
+
 	if summaries[0].Harness != registry.Harness("claude") {
 		t.Errorf("Harness = %q, want %q", summaries[0].Harness, registry.Harness("claude"))
 	}
@@ -185,21 +307,32 @@ func testListSummaryHarnessJSON(t *testing.T, ctx context.Context, storePath str
 
 func testListSummaryDefaultJSON(t *testing.T, ctx context.Context, storePath string) {
 	t.Helper()
+
 	var stdout, stderr bytes.Buffer
-	err := runTestCLI(ctx, []string{"--store", storePath, "--json", "list", "--summary"}, &stdout, &stderr)
+
+	err := runTestCLI(
+		ctx,
+		[]string{"--store", storePath, "--json", "list", "--summary"},
+		&stdout,
+		&stderr,
+	)
 	if err != nil {
 		t.Fatalf("JSON default summary error: %v", err)
 	}
+
 	var summaries []registry.Summary
 	if err := json.Unmarshal(stdout.Bytes(), &summaries); err != nil {
 		t.Fatalf("Unmarshal error: %v\nstdout: %s", err, stdout.String())
 	}
+
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary, got %d", len(summaries))
 	}
+
 	if summaries[0].MultiplexerSessionName != "work" {
 		t.Errorf("legacy mux session name missing: %+v", summaries[0])
 	}
+
 	if summaries[0].Total != 1 || summaries[0].Live != 1 {
 		t.Errorf("counts mismatch: %+v", summaries[0])
 	}
@@ -214,10 +347,17 @@ func TestListSummaryEmptyState(t *testing.T) {
 	// Empty store table output prints "No results."
 	for _, groupBy := range []string{"project", "harness", "multiplexer-session"} {
 		var stdout, stderr bytes.Buffer
-		err := runTestCLI(ctx, []string{"--store", storePath, "list", "--summary", "--group-by", groupBy}, &stdout, &stderr)
+
+		err := runTestCLI(
+			ctx,
+			[]string{"--store", storePath, "list", "--summary", "--group-by", groupBy},
+			&stdout,
+			&stderr,
+		)
 		if err != nil {
 			t.Fatalf("empty summary error for %s: %v", groupBy, err)
 		}
+
 		if got := stdout.String(); got != "No results.\n" {
 			t.Fatalf("group %s: expected 'No results.\\n', got %q", groupBy, got)
 		}
@@ -229,5 +369,6 @@ type summaryFixtureRules struct{ catalog.Rules }
 func (r summaryFixtureRules) Policy(id registry.Harness) registry.Policy {
 	policy := r.Rules.Policy(id)
 	policy.Authority = registry.AuthorityHook
+
 	return policy
 }

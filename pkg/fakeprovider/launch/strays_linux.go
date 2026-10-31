@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	// linuxProcFS is the kernel process interface, independent of temporary directories.
+	linuxProcFS    = "/proc"
 	strayTermGrace = 3 * time.Second
 	strayKillGrace = 2 * time.Second
 )
@@ -20,37 +22,48 @@ var errStraysSurvived = errors.New("launched processes survived SIGKILL")
 
 func (h *Harness) stopStrays() error {
 	marker := []byte("AHT_STORE=" + h.Store)
+
 	pids := launchProcesses(marker)
 	if len(pids) == 0 {
 		return nil
 	}
+
 	signalAll(pids, syscall.SIGTERM)
+
 	if waitGone(marker, strayTermGrace) {
 		return nil
 	}
+
 	signalAll(launchProcesses(marker), syscall.SIGKILL)
+
 	if waitGone(marker, strayKillGrace) {
 		return nil
 	}
+
 	return fmt.Errorf("%w: %v", errStraysSurvived, launchProcesses(marker))
 }
 
 func launchProcesses(marker []byte) []int {
-	entries, err := os.ReadDir("/proc")
+	entries, err := os.ReadDir(linuxProcFS)
 	if err != nil {
 		return nil
 	}
+
 	self := os.Getpid()
+
 	var pids []int
+
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil || pid == self {
 			continue
 		}
-		environ, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+
+		environ, err := os.ReadFile(filepath.Join(linuxProcFS, entry.Name(), "environ"))
 		if err != nil {
 			continue
 		}
+
 		for variable := range bytes.SplitSeq(environ, []byte{0}) {
 			if bytes.Equal(variable, marker) {
 				pids = append(pids, pid)
@@ -58,6 +71,7 @@ func launchProcesses(marker []byte) []int {
 			}
 		}
 	}
+
 	return pids
 }
 
@@ -73,7 +87,9 @@ func waitGone(marker []byte, grace time.Duration) bool {
 		if len(launchProcesses(marker)) == 0 {
 			return true
 		}
+
 		time.Sleep(pollInterval)
 	}
+
 	return len(launchProcesses(marker)) == 0
 }

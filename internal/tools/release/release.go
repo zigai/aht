@@ -22,7 +22,12 @@ const (
 )
 
 // requiredChecks are the CI jobs that must succeed on the tagged commit.
-var requiredChecks = []string{"verify-linux", "verify-darwin", "artifact-validation", "change-compatibility"}
+var requiredChecks = []string{
+	"verify-linux",
+	"verify-darwin",
+	"artifact-validation",
+	"change-compatibility",
+}
 
 type workflowRun struct {
 	ID         int64  `json:"id"`
@@ -66,45 +71,93 @@ type releaseDraft struct {
 func (a application) requireCI(ctx context.Context, t target) error {
 	ticker := time.NewTicker(ciPollInterval)
 	defer ticker.Stop()
+
 	latest, err := a.waitForCI(ctx, t, ticker.C)
 	if err != nil {
 		return err
 	}
-	jobs, err := githubapi.Paginate[workflowJob](ctx, a.api, t.repoPath("/actions/runs/%d/jobs?filter=latest&per_page=100", latest.ID), "jobs")
+
+	jobs, err := githubapi.Paginate[workflowJob](
+		ctx,
+		a.api,
+		t.repoPath("/actions/runs/%d/jobs?filter=latest&per_page=100", latest.ID),
+		"jobs",
+	)
 	if err != nil {
 		return fmt.Errorf("list jobs of CI run %d: %w", latest.ID, err)
 	}
+
 	for _, name := range requiredChecks {
-		matches := slices.DeleteFunc(slices.Clone(jobs), func(job workflowJob) bool { return job.Name != name })
+		matches := slices.DeleteFunc(
+			slices.Clone(jobs),
+			func(job workflowJob) bool { return job.Name != name },
+		)
 		if len(matches) != 1 || matches[0].Conclusion != "success" {
-			return fmt.Errorf("%w: CI run %d did not successfully execute required check %s", errRelease, latest.ID, name)
+			return fmt.Errorf(
+				"%w: CI run %d did not successfully execute required check %s",
+				errRelease,
+				latest.ID,
+				name,
+			)
 		}
 	}
+
 	a.logf("Verified all required checks for %s: %s", t.sha, latest.HTMLURL)
+
 	return nil
 }
 
-func (a application) waitForCI(ctx context.Context, t target, ticks <-chan time.Time) (workflowRun, error) {
-	runsPath := t.repoPath("/actions/workflows/%s/runs?event=push&branch=%s&head_sha=%s&per_page=100", ciWorkflow, releaseBranch, t.sha)
+func (a application) waitForCI(
+	ctx context.Context,
+	t target,
+	ticks <-chan time.Time,
+) (workflowRun, error) {
+	runsPath := t.repoPath(
+		"/actions/workflows/%s/runs?event=push&branch=%s&head_sha=%s&per_page=100",
+		ciWorkflow,
+		releaseBranch,
+		t.sha,
+	)
 	for {
 		runs, err := githubapi.Paginate[workflowRun](ctx, a.api, runsPath, "workflow_runs")
 		if err != nil {
 			return workflowRun{}, fmt.Errorf("list CI runs: %w", err)
 		}
+
 		runs = slices.DeleteFunc(runs, func(run workflowRun) bool {
-			return run.HeadSHA != t.sha || run.Event != "push" || run.HeadBranch != releaseBranch || run.Path != ciWorkflowPath
+			return run.HeadSHA != t.sha || run.Event != "push" || run.HeadBranch != releaseBranch ||
+				run.Path != ciWorkflowPath
 		})
 		if len(runs) == 0 {
-			return workflowRun{}, fmt.Errorf("%w: CI for %s must complete successfully before release (latest: missing/none). Rerun Release after CI succeeds", errRelease, t.sha)
+			return workflowRun{}, fmt.Errorf(
+				"%w: CI for %s must complete successfully before release "+
+					"(latest: missing/none). Rerun Release after CI succeeds",
+				errRelease,
+				t.sha,
+			)
 		}
-		latest := slices.MaxFunc(runs, func(x, y workflowRun) int { return cmp.Compare(x.ID, y.ID) })
+
+		latest := slices.MaxFunc(
+			runs,
+			func(x, y workflowRun) int { return cmp.Compare(x.ID, y.ID) },
+		)
 		if latest.Status == "completed" {
 			if latest.Conclusion != "success" {
-				return workflowRun{}, fmt.Errorf("%w: CI for %s must complete successfully before release (latest: %s/%s). Rerun Release after CI succeeds", errRelease, t.sha, latest.Status, orNone(latest.Conclusion))
+				return workflowRun{}, fmt.Errorf(
+					"%w: CI for %s must complete successfully before release "+
+						"(latest: %s/%s). Rerun Release after CI succeeds",
+					errRelease,
+					t.sha,
+					latest.Status,
+					orNone(latest.Conclusion),
+				)
 			}
+
 			return latest, nil
 		}
+
 		a.logf("Waiting for CI for %s (%s): %s", t.sha, latest.Status, latest.HTMLURL)
+
 		select {
 		case <-ctx.Done():
 			return workflowRun{}, fmt.Errorf("wait for CI for %s: %w", t.sha, ctx.Err())
@@ -120,6 +173,7 @@ func (a application) prepareDraft(ctx context.Context, t target, notes string) e
 	if err != nil {
 		return err
 	}
+
 	if existing == nil {
 		// The marker is part of creation, so cleanup can reconcile a lost response.
 		create := newRelease{
@@ -130,26 +184,43 @@ func (a application) prepareDraft(ctx context.Context, t target, notes string) e
 			Draft:           true,
 			Prerelease:      strings.Contains(t.tag, "-"),
 		}
+
 		var created release
-		if err := a.api.Do(ctx, http.MethodPost, t.repoPath("/releases"), create, &created); err != nil {
+		if err := a.api.Do(
+			ctx,
+			http.MethodPost,
+			t.repoPath("/releases"),
+			create,
+			&created,
+		); err != nil {
 			return fmt.Errorf("create draft release %s: %w", t.tag, err)
 		}
+
 		existing = &created
 	}
+
 	if !t.owns(*existing) {
-		return fmt.Errorf("%w: tag %s belongs to another run; refusing to replace it", errRelease, t.tag)
+		return fmt.Errorf(
+			"%w: tag %s belongs to another run; refusing to replace it",
+			errRelease,
+			t.tag,
+		)
 	}
+
 	if err := a.output("release-id", strconv.FormatInt(existing.ID, 10)); err != nil {
 		return err
 	}
+
 	if err := a.output("published", strconv.FormatBool(!existing.Draft)); err != nil {
 		return err
 	}
+
 	if existing.Draft {
 		a.logf("Prepared draft release %d", existing.ID)
 	} else {
 		a.logf("Already published release %d", existing.ID)
 	}
+
 	return nil
 }
 
@@ -157,26 +228,33 @@ func (a application) prepareDraft(ctx context.Context, t target, notes string) e
 // lost is confirmed by reading the release back.
 func (a application) publishDraft(ctx context.Context, t target, id int64) error {
 	path := t.repoPath("/releases/%d", id)
+
 	var current release
 	if err := a.api.Get(ctx, path, &current); err != nil {
 		return fmt.Errorf("read release %d: %w", id, err)
 	}
+
 	if !t.owns(current) {
 		return fmt.Errorf("%w: refusing to publish a release owned by another run", errRelease)
 	}
+
 	if !current.Draft {
 		return nil
 	}
+
 	publishErr := a.api.Do(ctx, http.MethodPatch, path, releaseDraft{Draft: false}, nil)
 	if publishErr == nil {
 		a.logf("Published release %d", id)
 		return nil
 	}
+
 	var after release
 	if err := a.api.Get(ctx, path, &after); err != nil || !t.owns(after) || after.Draft {
 		return fmt.Errorf("publish release %d: %w", id, publishErr)
 	}
+
 	a.logf("Publication succeeded despite a lost API response")
+
 	return nil
 }
 
@@ -186,14 +264,24 @@ func (a application) cleanupDraft(ctx context.Context, t target) error {
 	if err != nil {
 		return err
 	}
+
 	if existing == nil || !existing.Draft || !t.owns(*existing) {
 		a.logf("No draft owned by this run needs cleanup")
 		return nil
 	}
-	if err := a.api.Do(ctx, http.MethodDelete, t.repoPath("/releases/%d", existing.ID), nil, nil); err != nil {
+
+	if err := a.api.Do(
+		ctx,
+		http.MethodDelete,
+		t.repoPath("/releases/%d", existing.ID),
+		nil,
+		nil,
+	); err != nil {
 		return fmt.Errorf("delete draft release %d: %w", existing.ID, err)
 	}
+
 	a.logf("Deleted owned draft %d", existing.ID)
+
 	return nil
 }
 
@@ -201,23 +289,28 @@ func (a application) cleanupDraft(ctx context.Context, t target) error {
 // failures, such as a forbidden lookup, are not treated as an absent release.
 func (a application) findRelease(ctx context.Context, t target) (*release, error) {
 	var found release
+
 	err := a.api.Get(ctx, t.repoPath("/releases/tags/%s", url.PathEscape(t.tag)), &found)
 	if githubapi.HasStatus(err, http.StatusNotFound) {
 		return nil, nil //nolint:nilnil // An absent release is an expected, non-error result.
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("find release %s: %w", t.tag, err)
 	}
+
 	return &found, nil
 }
 
 func (t target) owns(r release) bool {
-	return r.TagName == t.tag && r.TargetCommitish == t.sha && slices.Contains(strings.Split(r.Body, "\n"), t.marker)
+	return r.TagName == t.tag && r.TargetCommitish == t.sha &&
+		slices.Contains(strings.Split(r.Body, "\n"), t.marker)
 }
 
 func orNone(value string) string {
 	if value == "" {
 		return "none"
 	}
+
 	return value
 }

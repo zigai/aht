@@ -9,15 +9,24 @@ import (
 
 func TestResolveHarnessIdentifiesSessionProcesses(t *testing.T) {
 	t.Parallel()
+
 	for _, test := range []struct {
 		name    string
 		process processinfo.Process
 		want    registry.Harness
 	}{
 		{
-			name:    "scoped agent hint",
-			process: processinfo.Process{Executable: "/usr/bin/fence", AgentHint: "claude", Args: []string{"fence", "--", "node"}},
-			want:    "claude",
+			name: "scoped agent hint",
+			process: processinfo.Process{
+				Executable: "/usr/bin/fence",
+				AgentHint:  "claude",
+				Args: []string{
+					"fence",
+					"--",
+					"node",
+				},
+			},
+			want: "claude",
 		},
 		{
 			name: "omp headless session",
@@ -30,6 +39,7 @@ func TestResolveHarnessIdentifiesSessionProcesses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+
 			harness, ok := resolveHarness(test.process)
 			if !ok || harness != test.want {
 				t.Fatalf("resolveHarness = %q, %v; want %q", harness, ok, test.want)
@@ -40,6 +50,7 @@ func TestResolveHarnessIdentifiesSessionProcesses(t *testing.T) {
 
 func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 	t.Parallel()
+
 	for _, test := range []struct {
 		name    string
 		process processinfo.Process
@@ -96,6 +107,7 @@ func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+
 			harness, ok := resolveHarness(test.process)
 			if ok || harness != "" {
 				t.Fatalf("resolveHarness = %q, %v; want ignored", harness, ok)
@@ -106,10 +118,16 @@ func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 
 func TestResolveHarnessScansKnownWrappers(t *testing.T) {
 	t.Parallel()
+
 	for _, wrapper := range []string{"env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv"} {
 		t.Run(wrapper, func(t *testing.T) {
 			t.Parallel()
-			process := processinfo.Process{Executable: "/usr/bin/" + wrapper, Args: []string{wrapper, "--wrapper-option", "value", "--", "/usr/bin/codex"}}
+
+			process := processinfo.Process{
+				Executable: "/usr/bin/" + wrapper,
+				Args:       []string{wrapper, "--wrapper-option", "value", "--", "/usr/bin/codex"},
+			}
+
 			harness, ok := resolveHarness(process)
 			if !ok || harness != registry.Harness("codex") {
 				t.Fatalf("resolveHarness = %q, %v; want Codex behind %s", harness, ok, wrapper)
@@ -120,12 +138,14 @@ func TestResolveHarnessScansKnownWrappers(t *testing.T) {
 
 func TestHasAncestorHarness(t *testing.T) {
 	t.Parallel()
+
 	processes := map[int]processinfo.Process{
 		10: {PID: 10, PPID: 1},
 		20: {PID: 20, PPID: 10},
 		30: {PID: 30, PPID: 20},
 		40: {PID: 40, PPID: 1},
 	}
+
 	harnessByPID := map[int]registry.Harness{
 		10: registry.Harness("claude"),
 		20: registry.Harness("claude"),
@@ -135,12 +155,15 @@ func TestHasAncestorHarness(t *testing.T) {
 	if hasAncestorHarness(10, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 10 unexpectedly has ancestor with same harness")
 	}
+
 	if !hasAncestorHarness(20, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 20 should have PID 10 as ancestor with same harness")
 	}
+
 	if !hasAncestorHarness(30, registry.Harness("claude"), processes, harnessByPID) {
 		t.Fatal("PID 30 should have ancestor with same harness")
 	}
+
 	if hasAncestorHarness(40, registry.Harness("codex"), processes, harnessByPID) {
 		t.Fatal("PID 40 should not have ancestor with same harness")
 	}

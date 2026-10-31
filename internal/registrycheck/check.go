@@ -17,24 +17,40 @@ func Sessions(sessions []registry.Session) error {
 		if value := session.Activity(); value != nil {
 			activity = string(*value)
 		}
+
 		projected[index] = core.Session{
-			ID: session.ID, Harness: string(session.Harness), CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
-			HasLiveness: session.Liveness != nil, Presence: string(session.Presence()), Activity: activity,
-			ValidState:  session.Presence().Valid() && (session.Activity() == nil || session.Activity().Valid()),
-			NativeEnded: session.Observations.Native != nil && session.Observations.Native.Lifecycle != nil && *session.Observations.Native.Lifecycle == registry.NativeLifecycleEnd,
+			ID:          session.ID,
+			Harness:     string(session.Harness),
+			CreatedAt:   session.CreatedAt,
+			UpdatedAt:   session.UpdatedAt,
+			HasLiveness: session.Liveness != nil,
+			Presence:    string(session.Presence()),
+			Activity:    activity,
+			ValidState: session.Presence().Valid() &&
+				(session.Activity() == nil || session.Activity().Valid()),
+			NativeEnded: session.Observations.Native != nil &&
+				session.Observations.Native.Lifecycle != nil &&
+				*session.Observations.Native.Lifecycle == registry.NativeLifecycleEnd,
 		}
 	}
+
 	if err := core.Sessions(projected); err != nil {
 		return fmt.Errorf("registry sessions: %w", err)
 	}
+
 	return nil
 }
 
 func NewCoverage() *Coverage { return core.NewCoverage() }
 
-func Verification(before, after registry.Session) error {
-	if err := core.Verification(string(before.Presence()), string(after.Presence()), before.Process != nil && before.Process.Complete()); err != nil {
+func Verification(before registry.Session, after registry.Session) error {
+	if err := core.Verification(
+		string(before.Presence()),
+		string(after.Presence()),
+		before.Process != nil && before.Process.Complete(),
+	); err != nil {
 		return fmt.Errorf("registry verification: %w", err)
 	}
+
 	return nil
 }

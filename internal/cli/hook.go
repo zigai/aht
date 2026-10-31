@@ -27,6 +27,7 @@ var (
 	errHookHarnessRequired    = errors.New("hook requires exactly one harness argument")
 )
 
+//exhaustruct:optional
 type managedHookOptions struct {
 	event string
 }
@@ -39,9 +40,11 @@ func (app *application) newHookCommand() *cobra.Command {
 	options := managedHookOptions{}
 
 	cmd := &cobra.Command{
-		Use:           hookCommandName + " <harness>",
-		Short:         "Integration protocol endpoint; not intended for manual use",
-		Long:          "Integration protocol endpoint; not intended for manual use. Hook stdout is a JSON protocol response, so --json is required.",
+		Use:   hookCommandName + " <harness>",
+		Short: "Integration protocol endpoint; not intended for manual use",
+		Long: "Integration protocol endpoint; not intended for manual use. " +
+			"Hook stdout is a JSON protocol response, so --json is " +
+			"required.",
 		Hidden:        true,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -49,6 +52,7 @@ func (app *application) newHookCommand() *cobra.Command {
 			if len(args) != 1 {
 				return exitCode(errHookHarnessRequired, exitCodeUsage)
 			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -56,10 +60,12 @@ func (app *application) newHookCommand() *cobra.Command {
 			if stdin == nil {
 				stdin = os.Stdin
 			}
+
 			return app.runManagedHook(cmd.Context(), stdin, args[0], options)
 		},
 	}
 	cmd.Flags().StringVar(&options.event, "event", "", "native hook event `<name>`")
+
 	return cmd
 }
 
@@ -72,6 +78,7 @@ func (app *application) runManagedHook(
 	if !app.outputJSON {
 		return exitCode(errManagedHookJSONRequired, exitCodeUsage)
 	}
+
 	harnessID, err := catalog.Parse(harnessName)
 	if err != nil {
 		return fmt.Errorf("normalizing hook harness: %w", err)
@@ -81,16 +88,27 @@ func (app *application) runManagedHook(
 	if err != nil {
 		return fmt.Errorf("reading hook payload: %w", err)
 	}
+
 	rawPayload := rawPayloadFromHookBytes(data)
 	payload := hookPayloadObject(rawPayload)
 	parentArgs := parentProcessArgs(ctx)
-	result, ok, err := catalog.HandleHook(ctx, harnessID, opts.event, rawPayload, payload, parentArgs)
+
+	result, ok, err := catalog.HandleHook(
+		ctx,
+		harnessID,
+		opts.event,
+		rawPayload,
+		payload,
+		parentArgs,
+	)
 	if !ok {
 		return fmt.Errorf("%w: %s", errUnsupportedManagedHook, harnessID)
 	}
+
 	if err != nil {
 		return fmt.Errorf("handling managed hook: %w", err)
 	}
+
 	if result.ReportOK {
 		result.Report.SetProcess(reportProcessIdentity(harnessID, reportProcessAncestors(ctx, 0)))
 	}
@@ -102,20 +120,28 @@ func (app *application) runManagedHook(
 	return app.writeJSON(result.Response)
 }
 
-func reportManagedHook(ctx context.Context, store observationSink, result harness.HookResult) error {
+func reportManagedHook(
+	ctx context.Context,
+	store observationSink,
+	result harness.HookResult,
+) error {
 	if !result.ReportOK {
 		return nil
 	}
+
 	observation := catalog.PrepareObservation(result.Report)
 	if collected, err := tmux.Current(ctx); err == nil {
 		observation.SetLocation(&collected)
 	}
+
 	if collected := reportMultiplexerLocation(); !collected.Empty() {
 		observation.SetLocation(&collected)
 	}
+
 	if _, err := store.Observe(ctx, observation); err != nil {
 		return fmt.Errorf("recording managed hook observation: %w", err)
 	}
+
 	return nil
 }
 
@@ -124,6 +150,7 @@ func rawPayloadFromHookBytes(data []byte) json.RawMessage {
 	if err != nil {
 		return nil
 	}
+
 	return payload
 }
 

@@ -19,9 +19,19 @@ import (
 
 func TestResultStringIncludesDegradedStateAndError(t *testing.T) {
 	t.Parallel()
-	result := Result{Observations: 1, Sessions: 2, Processes: 3, Panes: 4, Degraded: true, Error: "pane inventory unavailable"}
+
+	result := Result{
+		Observations: 1,
+		Sessions:     2,
+		Processes:    3,
+		Panes:        4,
+		Degraded:     true,
+		Error:        "pane inventory unavailable",
+	}
+
 	text := result.String()
-	if !strings.Contains(text, "degraded=true") || !strings.Contains(text, `error="pane inventory unavailable"`) {
+	if !strings.Contains(text, "degraded=true") ||
+		!strings.Contains(text, `error="pane inventory unavailable"`) {
 		t.Fatalf("result string = %q", text)
 	}
 }
@@ -34,7 +44,10 @@ type failGoneOnceStore struct {
 	failed bool
 }
 
-func (store *failGoneOnceStore) ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error) {
+func (store *failGoneOnceStore) ObserveBatch(
+	ctx context.Context,
+	observations []registry.Observation,
+) ([]registry.Session, error) {
 	if !store.failed {
 		for _, observation := range observations {
 			if observation.Present() != nil && !*observation.Present() {
@@ -60,7 +73,10 @@ type conflictObservationStore struct {
 	batchOnly   bool
 }
 
-func (store *conflictObservationStore) Observe(ctx context.Context, observation registry.Observation) (registry.Session, error) {
+func (store *conflictObservationStore) Observe(
+	ctx context.Context,
+	observation registry.Observation,
+) (registry.Session, error) {
 	if !store.batchOnly && store.conflicts(observation) {
 		return registry.Session{}, registry.ErrObservationConflict
 	}
@@ -73,7 +89,10 @@ func (store *conflictObservationStore) Observe(ctx context.Context, observation 
 	return session, nil
 }
 
-func (store *conflictObservationStore) ObserveBatch(ctx context.Context, observations []registry.Observation) ([]registry.Session, error) {
+func (store *conflictObservationStore) ObserveBatch(
+	ctx context.Context,
+	observations []registry.Observation,
+) ([]registry.Session, error) {
 	if slices.ContainsFunc(observations, store.conflicts) {
 		return nil, registry.ErrObservationConflict
 	}
@@ -87,15 +106,18 @@ func (store *conflictObservationStore) ObserveBatch(ctx context.Context, observa
 }
 
 func (store *conflictObservationStore) conflicts(observation registry.Observation) bool {
-	return store.enabled && observation.ProcessIdentity() != nil && observation.ProcessIdentity().PID == store.conflictPID
+	return store.enabled && observation.ProcessIdentity() != nil &&
+		observation.ProcessIdentity().PID == store.conflictPID
 }
 
 func requireOnlySessionPresence(t *testing.T, store Store, want registry.Presence) {
 	t.Helper()
+
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 1 || sessions[0].Presence() != want {
 		t.Fatalf("sessions = %#v, want one %s session", sessions, want)
 	}
@@ -105,20 +127,36 @@ func requireOnlySessionPresence(t *testing.T, store Store, want registry.Presenc
 // registry when it went gone.
 func requireNoSessions(t *testing.T, store Store) {
 	t.Helper()
+
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 0 {
 		t.Fatalf("sessions = %#v, want gone process-only session removed", sessions)
 	}
 }
 
-func assertDegradedResult(t *testing.T, result Result, err error, targetErr error, expectedSubstrings ...string) {
+func assertDegradedResult(
+	t *testing.T,
+	result Result,
+	err error,
+	targetErr error,
+	expectedSubstrings ...string,
+) {
 	t.Helper()
-	if !errors.Is(err, targetErr) || !result.Degraded || !strings.Contains(result.Error, targetErr.Error()) {
-		t.Fatalf("RunOnce() error = %v, result = %#v, want degraded result wrapping %v", err, result, targetErr)
+
+	if !errors.Is(err, targetErr) || !result.Degraded ||
+		!strings.Contains(result.Error, targetErr.Error()) {
+		t.Fatalf(
+			"RunOnce() error = %v, result = %#v, want degraded result wrapping %v",
+			err,
+			result,
+			targetErr,
+		)
 	}
+
 	for _, substr := range expectedSubstrings {
 		if !strings.Contains(result.Error, substr) {
 			t.Fatalf("result.Error = %q, want substring %q", result.Error, substr)
@@ -126,20 +164,32 @@ func assertDegradedResult(t *testing.T, result Result, err error, targetErr erro
 	}
 }
 
-func assertDegradedHealth(t *testing.T, health Health, targetErr error, expectedSubstrings ...string) {
+func assertDegradedHealth(
+	t *testing.T,
+	health Health,
+	targetErr error,
+	expectedSubstrings ...string,
+) {
 	t.Helper()
+
 	if !health.Degraded || !strings.Contains(health.LastEnumerationError, targetErr.Error()) {
 		t.Fatalf("watcher health = %#v, want degraded with error %v", health, targetErr)
 	}
+
 	for _, substr := range expectedSubstrings {
 		if !strings.Contains(health.LastEnumerationError, substr) {
-			t.Fatalf("health.LastEnumerationError = %q, want substring %q", health.LastEnumerationError, substr)
+			t.Fatalf(
+				"health.LastEnumerationError = %q, want substring %q",
+				health.LastEnumerationError,
+				substr,
+			)
 		}
 	}
 }
 
 func assertGoneCount(t *testing.T, result Result, wantGone int) {
 	t.Helper()
+
 	if result.Gone != wantGone {
 		t.Fatalf("result gone = %d, want %d (result = %#v)", result.Gone, wantGone, result)
 	}
@@ -147,9 +197,11 @@ func assertGoneCount(t *testing.T, result Result, wantGone int) {
 
 func assertPartialSuccessCounters(t *testing.T, result Result, wantPresent int) {
 	t.Helper()
+
 	if result.Present != wantPresent {
 		t.Fatalf("RunOnce() result = %#v, want %d processes observed", result, wantPresent)
 	}
+
 	if result.Observations == 0 || result.Sessions == 0 || result.Changed == 0 {
 		t.Fatalf("partial-success counters = %#v, want persisted independent observation", result)
 	}
@@ -159,43 +211,75 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	at := time.Now().UTC().Add(-time.Minute)
-	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
+	process := processinfo.Process{
+		PID:            1234,
+		PPID:           1,
+		ProcessGroupID: 1234,
+		StartIdentity:  "boot:A",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/work",
+		TTY:            "/dev/pts/1",
+	}
 	processes := []processinfo.Process{process}
-	watcher := New(Options{StorePath: path, Now: func() time.Time { return at }, ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil }, PaneList: func(context.Context) ([]mux.Pane, error) { return nil, nil }, HealthPath: path + ".health"})
+	watcher := New(
+		Options{
+			StorePath:   path,
+			Now:         func() time.Time { return at },
+			ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil },
+			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+			HealthPath:  path + ".health",
+		},
+	)
+
 	first, err := watcher.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if first.Present != 1 || first.Gone != 0 {
 		t.Fatalf("first result: %#v", first)
 	}
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
+
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("present sessions: %v %#v", err, sessions)
 	}
+
 	session := sessions[0]
-	if session.Presence() != registry.PresenceLive || session.Activity() == nil || *session.Activity() != registry.ActivityUnknown {
+	if session.Presence() != registry.PresenceLive || session.Activity() == nil ||
+		*session.Activity() != registry.ActivityUnknown {
 		t.Fatalf("present session: %#v", session)
 	}
+
 	processes = nil
 	at = at.Add(time.Second)
+
 	second, err := watcher.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if second.Gone != 0 {
 		t.Fatalf("one miss marked gone: %#v", second)
 	}
+
 	at = at.Add(time.Second)
+
 	third, err := watcher.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if third.Gone != 1 {
 		t.Fatalf("second miss did not mark gone: %#v", third)
 	}
 	// A gone process-only session protects nothing, so it is removed.
-	if _, err := registry.NewJournal(path, catalog.Rules{}).Get(context.Background(), session.ID); !errors.Is(err, registry.ErrSessionNotFound) {
+	if _, err := registry.NewJournal(path, catalog.Rules{}).
+		Get(context.Background(), session.ID); !errors.Is(
+		err,
+		registry.ErrSessionNotFound,
+	) {
 		t.Fatalf("gone process-only session lookup error = %v, want not found", err)
 	}
 }
@@ -207,8 +291,17 @@ func TestObserverRetriesFailedGoneObservationAndEvictsTrackedProcess(t *testing.
 	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
-	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
+	process := processinfo.Process{
+		PID:            1234,
+		PPID:           1,
+		ProcessGroupID: 1234,
+		StartIdentity:  "boot:A",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/work",
+		TTY:            "/dev/pts/1",
+	}
 	processes := []processinfo.Process{process}
+
 	watcher := New(Options{
 		Store: store,
 		Now:   func() time.Time { return at },
@@ -221,21 +314,27 @@ func TestObserverRetriesFailedGoneObservationAndEvictsTrackedProcess(t *testing.
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	processes = nil
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	at = at.Add(time.Second)
 	failed, err := watcher.RunOnce(context.Background())
 	assertDegradedResult(t, failed, err, errFailGoneObservation, "recording observation batch")
 	assertDegradedHealth(t, watcher.Health(), errFailGoneObservation, "recording observation batch")
 	assertGoneCount(t, failed, 1)
+
 	at = at.Add(time.Second)
+
 	retried, err := watcher.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assertGoneCount(t, retried, 1)
 	requireNoSessions(t, baseStore)
 }
@@ -248,8 +347,24 @@ func TestObserverConflictDoesNotBlockIndependentObservation(t *testing.T) {
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
-		{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/conflict", TTY: "/dev/pts/1"},
-		{PID: 5678, PPID: 1, ProcessGroupID: 5678, StartIdentity: "boot:B", Executable: "/usr/bin/codex", CWD: "/valid", TTY: "/dev/pts/2"},
+		{
+			PID:            1234,
+			PPID:           1,
+			ProcessGroupID: 1234,
+			StartIdentity:  "boot:A",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/conflict",
+			TTY:            "/dev/pts/1",
+		},
+		{
+			PID:            5678,
+			PPID:           1,
+			ProcessGroupID: 5678,
+			StartIdentity:  "boot:B",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/valid",
+			TTY:            "/dev/pts/2",
+		},
 	}
 	watcher := New(Options{
 		Store:       store,
@@ -263,12 +378,17 @@ func TestObserverConflictDoesNotBlockIndependentObservation(t *testing.T) {
 	assertDegradedResult(t, result, err, registry.ErrObservationConflict)
 	assertDegradedHealth(t, watcher.Health(), registry.ErrObservationConflict)
 	assertPartialSuccessCounters(t, result, 2)
+
 	sessions, listErr := baseStore.List(context.Background(), registry.Filter{})
 	if listErr != nil {
 		t.Fatal(listErr)
 	}
+
 	if len(sessions) != 1 || sessions[0].Process == nil || sessions[0].Process.PID != 5678 {
-		t.Fatalf("sessions after conflicted cycle = %#v, want independent process persisted", sessions)
+		t.Fatalf(
+			"sessions after conflicted cycle = %#v, want independent process persisted",
+			sessions,
+		)
 	}
 }
 
@@ -279,8 +399,17 @@ func TestObserverRunWithResultsDeliversDegradedResultOnStoreFailure(t *testing.T
 	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
-	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
+	process := processinfo.Process{
+		PID:            1234,
+		PPID:           1,
+		ProcessGroupID: 1234,
+		StartIdentity:  "boot:A",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/work",
+		TTY:            "/dev/pts/1",
+	}
 	processes := []processinfo.Process{process}
+
 	watcher := New(Options{
 		Store: store,
 		Now:   func() time.Time { return at },
@@ -293,30 +422,43 @@ func TestObserverRunWithResultsDeliversDegradedResultOnStoreFailure(t *testing.T
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	processes = nil
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	at = at.Add(time.Second)
 
 	var streamed []Result
+
 	ctx, cancel := context.WithCancel(context.Background())
 	handle := func(r Result) error {
 		streamed = append(streamed, r)
+
 		cancel()
+
 		return nil
 	}
 	_ = watcher.RunWithResults(ctx, handle)
+
 	if len(streamed) != 1 {
 		t.Fatalf("streamed results = %d, want 1", len(streamed))
 	}
+
 	r := streamed[0]
-	if !r.Degraded || !strings.Contains(r.Error, errFailGoneObservation.Error()) || !strings.Contains(r.Error, "recording observation batch") || r.Gone != 1 {
+	if !r.Degraded || !strings.Contains(r.Error, errFailGoneObservation.Error()) ||
+		!strings.Contains(r.Error, "recording observation batch") ||
+		r.Gone != 1 {
 		t.Fatalf("streamed result = %#v, want degraded with error and gone counter", r)
 	}
+
 	health := watcher.Health()
-	if !health.Degraded || !strings.Contains(health.LastEnumerationError, errFailGoneObservation.Error()) || !strings.Contains(health.LastEnumerationError, "recording observation batch") {
+	if !health.Degraded ||
+		!strings.Contains(health.LastEnumerationError, errFailGoneObservation.Error()) ||
+		!strings.Contains(health.LastEnumerationError, "recording observation batch") {
 		t.Fatalf("watcher health = %#v, want degraded with observation error", health)
 	}
 }
@@ -325,8 +467,13 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 	t.Parallel()
 
 	store := &conflictObservationStore{
-		Store:       registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
-		conflictPID: 1234, enabled: true, batchOnly: true,
+		Store: registry.NewJournal(
+			filepath.Join(t.TempDir(), "sessions.json"),
+			catalog.Rules{},
+		),
+		conflictPID: 1234,
+		enabled:     true,
+		batchOnly:   true,
 	}
 	watcher := New(Options{
 		Store: store,
@@ -344,6 +491,7 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 	if !errors.Is(err, registry.ErrObservationConflict) {
 		t.Fatalf("RunOnce() error = %v, want original atomic conflict", err)
 	}
+
 	if result.Sessions == 0 {
 		t.Fatalf("successful individual retries were not recorded: result=%#v", result)
 	}
@@ -356,9 +504,26 @@ func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
-		{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/conflict", TTY: "/dev/pts/1"},
-		{PID: 5678, PPID: 1, ProcessGroupID: 5678, StartIdentity: "boot:B", Executable: "/usr/bin/codex", CWD: "/valid", TTY: "/dev/pts/2"},
+		{
+			PID:            1234,
+			PPID:           1,
+			ProcessGroupID: 1234,
+			StartIdentity:  "boot:A",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/conflict",
+			TTY:            "/dev/pts/1",
+		},
+		{
+			PID:            5678,
+			PPID:           1,
+			ProcessGroupID: 5678,
+			StartIdentity:  "boot:B",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/valid",
+			TTY:            "/dev/pts/2",
+		},
 	}
+
 	watcher := New(Options{
 		Store:       store,
 		Now:         func() time.Time { return at },
@@ -366,17 +531,25 @@ func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
 	})
-	if _, err := watcher.RunOnce(context.Background()); !errors.Is(err, registry.ErrObservationConflict) {
+	if _, err := watcher.RunOnce(
+		context.Background(),
+	); !errors.Is(
+		err,
+		registry.ErrObservationConflict,
+	) {
 		t.Fatalf("initial cycle error = %v, want observation conflict", err)
 	}
 
 	store.enabled = false
 	processes = nil
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -385,6 +558,7 @@ func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, session := range sessions {
 		if session.Process != nil && session.Process.PID == 5678 {
 			t.Fatalf("independent process was not retired after disappearing: %#v", sessions)
@@ -399,8 +573,17 @@ func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) 
 	baseStore := registry.NewJournal(path, catalog.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234}
 	at := time.Now().UTC().Add(-time.Minute)
-	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
+	process := processinfo.Process{
+		PID:            1234,
+		PPID:           1,
+		ProcessGroupID: 1234,
+		StartIdentity:  "boot:A",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/work",
+		TTY:            "/dev/pts/1",
+	}
 	processes := []processinfo.Process{process}
+
 	watcher := New(Options{
 		Store:       store,
 		Now:         func() time.Time { return at },
@@ -411,29 +594,36 @@ func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) 
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	processes = nil
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	store.enabled = true
 	at = at.Add(time.Second)
+
 	failed, err := watcher.RunOnce(context.Background())
 	if !errors.Is(err, registry.ErrObservationConflict) || failed.Gone != 1 {
 		t.Fatalf("conflicting absence cycle = %#v, err=%v", failed, err)
 	}
+
 	requireOnlySessionPresence(t, baseStore, registry.PresenceLive)
 
 	store.enabled = false
 	at = at.Add(time.Second)
+
 	retried, err := watcher.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if retried.Gone != 1 {
 		t.Fatalf("successful absence retry = %#v", retried)
 	}
+
 	requireNoSessions(t, baseStore)
 }
 
@@ -447,21 +637,27 @@ func TestObserverRejectsConcurrentRunsOnOneInstance(t *testing.T) {
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			close(entered)
 			<-release
+
 			return nil, nil
 		},
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
 	})
 	firstDone := make(chan error, 1)
+
 	go func() {
 		_, err := watcher.RunOnce(context.Background())
 		firstDone <- err
 	}()
+
 	<-entered
+
 	if _, err := watcher.RunOnce(context.Background()); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("concurrent RunOnce() error = %v, want ErrAlreadyRunning", err)
 	}
+
 	close(release)
+
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first RunOnce() error = %v", err)
 	}
@@ -471,12 +667,15 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
+
 	blockedParent := filepath.Join(root, "blocked")
 	if err := os.WriteFile(blockedParent, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	healthPath := filepath.Join(blockedParent, "health.json")
 	at := time.Now().UTC()
+
 	watcher := New(Options{
 		Store:       registry.NewJournal(filepath.Join(root, "sessions.json"), catalog.Rules{}),
 		HealthPath:  healthPath,
@@ -488,16 +687,21 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 	if _, err := watcher.RunOnce(context.Background()); err == nil {
 		t.Fatal("expected health persistence failure")
 	}
+
 	if err := os.Remove(blockedParent); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.MkdirAll(blockedParent, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	at = at.Add(time.Second)
+
 	if _, err := watcher.RunOnce(context.Background()); err != nil {
 		t.Fatalf("health write retry error = %v", err)
 	}
+
 	if _, err := os.Stat(healthPath); err != nil {
 		t.Fatalf("health file was not retried: %v", err)
 	}
@@ -507,8 +711,17 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	at := time.Now().UTC().Add(-time.Minute)
-	process := processinfo.Process{PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A", Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1"}
+	process := processinfo.Process{
+		PID:            1234,
+		PPID:           1,
+		ProcessGroupID: 1234,
+		StartIdentity:  "boot:A",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/work",
+		TTY:            "/dev/pts/1",
+	}
 	processes := []processinfo.Process{process}
+
 	options := Options{
 		StorePath: path,
 		Now:       func() time.Time { return at },
@@ -525,31 +738,58 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 
 	processes = nil
 	at = at.Add(time.Second)
+
 	result, err := New(options).RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if result.Gone != 1 {
 		t.Fatalf("restart result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 0 {
 		t.Fatalf("sessions after restart = %#v, want gone process-only session removed", sessions)
 	}
 }
 
-func seedHookCreatedLiveSession(t *testing.T, path string, at time.Time, process processinfo.Process) {
+func seedHookCreatedLiveSession(
+	t *testing.T,
+	path string,
+	at time.Time,
+	process processinfo.Process,
+) {
 	t.Helper()
+
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
-	_, err := registry.NewJournal(path, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at, Subject: registry.ObservationIdentity{SessionID: "hook-only"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence, Activity: &activity, Process: &registry.ProcessIdentity{
-		PID:           process.PID,
-		StartIdentity: process.StartIdentity,
-	}, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%1"}}})
+
+	_, err := registry.NewJournal(path, catalog.Rules{}).
+		Observe(context.Background(), registry.Observation{Harness: registry.Harness(
+			"omp",
+		), At: at, Subject: registry.ObservationIdentity{
+			SessionID: "hook-only",
+		}, Evidence: &registry.Report{
+			Event:    "agent_start",
+			Claim:    &presence,
+			Activity: &activity,
+			Process: &registry.ProcessIdentity{
+				PID: process.PID,
+
+				StartIdentity: process.StartIdentity,
+			},
+			Location: &registry.Location{
+				Kind:        registry.MultiplexerTmux,
+				SessionName: "0",
+				PaneID:      "%1",
+			},
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,18 +811,22 @@ func TestObserverMarksHookCreatedDeadProcessGoneInOneCycle(t *testing.T) {
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
 		HealthPath:  path + ".health",
 	}
+
 	result, err := New(options).RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if result.Gone != 1 {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone {
 		t.Fatalf("sessions after sweep: %#v", sessions)
 	}
@@ -606,23 +850,35 @@ func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPID(t *testing.T) {
 			HealthPath:  path + ".health",
 		}
 	}
-	liveProcesses := []processinfo.Process{{PID: 4321, StartIdentity: "boot:Z", Executable: "/usr/bin/omp"}}
+
+	liveProcesses := []processinfo.Process{
+		{PID: 4321, StartIdentity: "boot:Z", Executable: "/usr/bin/omp"},
+	}
 	if _, err := New(newOptions(at, liveProcesses)).RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
+
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceLive {
 		t.Fatalf("matching live process must stay live: %#v", sessions)
 	}
 
-	reusedProcesses := []processinfo.Process{{PID: 4321, StartIdentity: "boot:NEW", Executable: "/usr/bin/omp"}}
-	result, err := New(newOptions(at.Add(time.Second), reusedProcesses)).RunOnce(context.Background())
+	reusedProcesses := []processinfo.Process{
+		{PID: 4321, StartIdentity: "boot:NEW", Executable: "/usr/bin/omp"},
+	}
+
+	result, err := New(
+		newOptions(at.Add(time.Second), reusedProcesses),
+	).RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if result.Gone != 1 {
 		t.Fatalf("reused pid result gone = %d, want 1: %#v", result.Gone, result)
 	}
@@ -634,7 +890,28 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Minute)
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
-	_, err := registry.NewJournal(path, catalog.Rules{}).Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: at, Subject: registry.ObservationIdentity{SessionID: "hook-pi-pane"}, Evidence: &registry.Report{Event: "agent_start", Claim: &presence, Activity: &activity, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%1", PanePID: 1392}}})
+
+	_, err := registry.NewJournal(path, catalog.Rules{}).
+		Observe(context.Background(), registry.Observation{
+			Harness: registry.Harness(
+				"pi",
+			),
+			At: at,
+			Subject: registry.ObservationIdentity{
+				SessionID: "hook-pi-pane",
+			},
+			Evidence: &registry.Report{
+				Event:    "agent_start",
+				Claim:    &presence,
+				Activity: &activity,
+				Location: &registry.Location{
+					Kind:        registry.MultiplexerTmux,
+					SessionName: "0",
+					PaneID:      "%1",
+					PanePID:     1392,
+				},
+			},
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,18 +927,22 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
 		HealthPath:  path + ".health",
 	}
+
 	result, err := New(options).RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if result.Gone != 1 {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(context.Background(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone {
 		t.Fatalf("sessions after dead pane PID sweep: %#v", sessions)
 	}
@@ -674,8 +955,10 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 
 	store := registry.NewJournal(path, catalog.Rules{})
 	seedStaleSessionHistory(t, store, at)
+
 	preSessions, err := store.List(context.Background(), registry.Filter{})
-	if err != nil || len(preSessions) != 1 || preSessions[0].Presence() != registry.PresenceLive || preSessions[0].Observations.Process == nil {
+	if err != nil || len(preSessions) != 1 || preSessions[0].Presence() != registry.PresenceLive ||
+		preSessions[0].Observations.Process == nil {
 		t.Fatalf("precondition failed: sessions=%#v, error=%v", preSessions, err)
 	}
 
@@ -696,6 +979,7 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if result.Gone != 1 {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
@@ -704,13 +988,16 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone || sessions[0].Activity() != nil {
+
+	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceGone ||
+		sessions[0].Activity() != nil {
 		t.Fatalf("session was not retired: %#v", sessions)
 	}
 }
 
 func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 	t.Helper()
+
 	activity := registry.ActivityInterrupted
 	presence := registry.PresenceLive
 	present := false
@@ -718,31 +1005,79 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 
 	start := registry.NativeLifecycleStart
 	// 1. Initial hook observation
-	_, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at, Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_start", Lifecycle: &start, Claim: &presence, Activity: &activity, Process: &registry.ProcessIdentity{
-		PID:           process.PID,
-		StartIdentity: process.StartIdentity,
-	}, Location: &registry.Location{Kind: registry.MultiplexerTmux, SessionName: "0", PaneID: "%53"}}})
+	_, err := store.Observe(
+		context.Background(),
+		registry.Observation{
+			Harness: registry.Harness("omp"),
+			At:      at,
+			Subject: registry.ObservationIdentity{SessionID: "stale-session"},
+			Evidence: &registry.Report{
+				Event:     "agent_start",
+				Lifecycle: &start,
+				Claim:     &presence,
+				Activity:  &activity,
+				Process: &registry.ProcessIdentity{
+					PID:           process.PID,
+					StartIdentity: process.StartIdentity,
+				},
+				Location: &registry.Location{
+					Kind:        registry.MultiplexerTmux,
+					SessionName: "0",
+					PaneID:      "%53",
+				},
+			},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Prior process observation showing process is absent
-	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Sighting{Process: registry.ProcessIdentity{
-		PID:           process.PID,
-		StartIdentity: process.StartIdentity,
-	}, Present: present}})
+	_, err = store.Observe(
+		context.Background(),
+		registry.Observation{
+			Harness: registry.Harness("omp"),
+			At:      at.Add(time.Second),
+			Subject: registry.ObservationIdentity{SessionID: "stale-session"},
+			Evidence: &registry.Sighting{Process: registry.ProcessIdentity{
+				PID:           process.PID,
+				StartIdentity: process.StartIdentity,
+			}, Present: present},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 3. A subsequent start hook revived presence to live
-	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(2 * time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_start", Lifecycle: &start, Claim: &presence, Activity: &activity}})
+	_, err = store.Observe(
+		context.Background(),
+		registry.Observation{
+			Harness: registry.Harness("omp"),
+			At:      at.Add(2 * time.Second),
+			Subject: registry.ObservationIdentity{SessionID: "stale-session"},
+			Evidence: &registry.Report{
+				Event:     "agent_start",
+				Lifecycle: &start,
+				Claim:     &presence,
+				Activity:  &activity,
+			},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 4. Agent end hook with interrupted activity
-	_, err = store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: at.Add(3 * time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-session"}, Evidence: &registry.Report{Event: "agent_end", Activity: &activity}})
+	_, err = store.Observe(
+		context.Background(),
+		registry.Observation{
+			Harness:  registry.Harness("omp"),
+			At:       at.Add(3 * time.Second),
+			Subject:  registry.ObservationIdentity{SessionID: "stale-session"},
+			Evidence: &registry.Report{Event: "agent_end", Activity: &activity},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,8 +1085,10 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 
 func TestRunWithResultsStreamsEveryCycle(t *testing.T) {
 	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	results := make([]Result, 0, 1)
+
 	watcher := New(Options{
 		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
@@ -767,6 +1104,7 @@ func TestRunWithResultsStreamsEveryCycle(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
 	if len(results) != 1 {
 		t.Fatalf("result count = %d, want 1", len(results))
 	}

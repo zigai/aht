@@ -23,8 +23,11 @@ func ExampleNew() {
 
 func ExampleClient_List() {
 	client := aht.New(aht.Config{
-		SocketPath: filepath.Join("/nonexistent", "offline.sock"),
-		Mode:       aht.ModeRealtimeOnly,
+		SocketPath: filepath.Join(
+			"/nonexistent", //nolint:gocritic // filepathJoin: offline broker example requires an absent absolute path.
+			"offline.sock",
+		),
+		Mode: aht.ModeRealtimeOnly,
 	})
 
 	_, err := client.List(context.Background(), aht.Filter{Presence: aht.PresenceLive})
@@ -36,8 +39,11 @@ func ExampleClient_List() {
 
 func ExampleClient_Wait() {
 	client := aht.New(aht.Config{
-		SocketPath: filepath.Join("/nonexistent", "offline.sock"),
-		Mode:       aht.ModeRealtimeOnly,
+		SocketPath: filepath.Join(
+			"/nonexistent", //nolint:gocritic // filepathJoin: offline broker example requires an absent absolute path.
+			"offline.sock",
+		),
+		Mode: aht.ModeRealtimeOnly,
 	})
 
 	_, err := client.Wait(context.Background(), aht.WaitOptions{
@@ -60,13 +66,24 @@ func ExampleSearchHistory() {
 	if err != nil && !errors.Is(err, aht.ErrHistoryIncomplete) {
 		log.Fatal(err)
 	}
+
 	if errors.Is(err, aht.ErrHistoryIncomplete) {
 		// Some sources could not be searched; result still holds partial matches.
-		fmt.Printf("partial results: %d matches, %d issues\n", len(result.Matches), len(result.Issues))
+		fmt.Printf(
+			"partial results: %d matches, %d issues\n",
+			len(result.Matches),
+			len(result.Issues),
+		)
 	}
+
 	for _, match := range result.Matches {
 		conversation := match.Conversation
-		fmt.Printf("%s %s %s\n", conversation.Harness, conversation.SessionID, conversation.UpdatedAt.Format(time.RFC3339))
+		fmt.Printf(
+			"%s %s %s\n",
+			conversation.Harness,
+			conversation.SessionID,
+			conversation.UpdatedAt.Format(time.RFC3339),
+		)
 	}
 }
 
@@ -96,10 +113,15 @@ func ExampleClient_Watch() {
 	defer cancel()
 
 	client := aht.New(aht.Config{})
-	err := client.Watch(ctx, aht.Filter{Presence: aht.PresenceLive}, func(state aht.StateSnapshot) error {
-		fmt.Printf("revision %d: %d live sessions\n", state.Revision, len(state.Sessions))
-		return nil // a non-nil error stops watching and is returned
-	})
+
+	err := client.Watch(
+		ctx,
+		aht.Filter{Presence: aht.PresenceLive},
+		func(state aht.StateSnapshot) error {
+			fmt.Printf("revision %d: %d live sessions\n", state.Revision, len(state.Sessions))
+			return nil // a non-nil error stops watching and is returned
+		},
+	)
 	if err != nil {
 		log.Print(err)
 	}
@@ -108,14 +130,17 @@ func ExampleClient_Watch() {
 //nolint:testableexamples // titles come from machine-specific harness files, so this example is compiled but not run.
 func ExampleSessionTitles() {
 	ctx := context.Background()
+
 	sessions, err := aht.New(aht.Config{}).List(ctx, aht.Filter{Presence: aht.PresenceLive})
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	titles, err := aht.SessionTitles(ctx, sessions)
 	if err != nil {
 		log.Print(err) // titles still holds every title that was read
 	}
+
 	for i, session := range sessions {
 		fmt.Println(session.ID, titles[i])
 	}
@@ -130,10 +155,15 @@ func ExampleHistoryCatalog_Search() {
 		},
 		IndexPath: "/archive/aht-history.sqlite",
 	}
-	result, err := catalog.Search(context.Background(), aht.HistoryQuery{Terms: []string{"migration"}, Dirs: []string{"/work/app"}})
+
+	result, err := catalog.Search(
+		context.Background(),
+		aht.HistoryQuery{Terms: []string{"migration"}, Dirs: []string{"/work/app"}},
+	)
 	if err != nil && !errors.Is(err, aht.ErrHistoryIncomplete) {
 		log.Fatal(err)
 	}
+
 	for _, match := range result.Matches {
 		fmt.Println(match.Conversation.Harness, match.Conversation.Title)
 	}
@@ -148,8 +178,13 @@ func ExampleNewManager() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	if status.Status == aht.ArtifactStale {
-		if _, err := manager.InstallIntegration(ctx, aht.HarnessCodex, aht.IntegrationOptions{}); err != nil {
+		if _, err := manager.InstallIntegration(
+			ctx,
+			aht.HarnessCodex,
+			aht.IntegrationOptions{},
+		); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -158,6 +193,7 @@ func ExampleNewManager() {
 //nolint:testableexamples // writes to the local registry, so this example is compiled but not run.
 func ExampleClient_Observe() {
 	idle := aht.ActivityIdle
+
 	_, err := aht.New(aht.Config{}).Observe(context.Background(), aht.Observation{
 		Harness: aht.HarnessPi,
 		At:      time.Now(),

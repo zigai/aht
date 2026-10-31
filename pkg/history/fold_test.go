@@ -20,11 +20,14 @@ const foldFixtureBody = `{"type":"session","id":"fold-session","cwd":"/work/fold
 // foldSearch runs the production direct scan over one Pi-format transcript.
 func foldSearch(t *testing.T, body string, query Query) (Result, error) {
 	t.Helper()
+
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	catalog := Catalog{Sources: []Source{{Harness: registry.Harness("pi"), Path: path}}}
+
 	return catalog.searchDirect(t.Context(), query)
 }
 
@@ -33,6 +36,7 @@ func foldSearch(t *testing.T, body string, query Query) (Result, error) {
 // Swapping the normalizer means revisiting exactly this test.
 func TestFoldNormalizerContract(t *testing.T) {
 	t.Parallel()
+
 	for _, tt := range []struct{ name, text, want string }{
 		{"ascii", "Refresh TOKEN", "refresh token"},
 		{"sharp s", "Straße", "strasse"},
@@ -44,6 +48,7 @@ func TestFoldNormalizerContract(t *testing.T) {
 	} {
 		t.Run("fold "+tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			if got := fold(tt.text); got != tt.want {
 				t.Fatalf("fold(%q) = %q, want %q", tt.text, got, tt.want)
 			}
@@ -68,8 +73,15 @@ func TestFoldNormalizerContract(t *testing.T) {
 	} {
 		t.Run("foldRuneIndex "+tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			if got := foldRuneIndex(tt.text, tt.foldedOffset); got != tt.want {
-				t.Fatalf("foldRuneIndex(%q, %d) = %d, want %d", tt.text, tt.foldedOffset, got, tt.want)
+				t.Fatalf(
+					"foldRuneIndex(%q, %d) = %d, want %d",
+					tt.text,
+					tt.foldedOffset,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}
@@ -84,11 +96,14 @@ func TestFoldNormalizerContract(t *testing.T) {
 	} {
 		t.Run("search "+tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			result, err := foldSearch(t, foldFixtureBody, Query{Terms: []string{tt.query}})
 			if err != nil || len(result.Matches) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}
-			if len(result.Matches[0].Excerpts) != 1 || !strings.Contains(result.Matches[0].Excerpts[0].Text, tt.spelling) {
+
+			if len(result.Matches[0].Excerpts) != 1 ||
+				!strings.Contains(result.Matches[0].Excerpts[0].Text, tt.spelling) {
 				t.Fatalf("search %q excerpts = %#v", tt.query, result.Matches[0].Excerpts)
 			}
 		})
@@ -99,6 +114,7 @@ func TestFoldNormalizerContract(t *testing.T) {
 // every rune boundary of texts whose folds expand, shrink, and stay equal.
 func TestFoldRuneIndexProperties(t *testing.T) {
 	t.Parallel()
+
 	for _, text := range []string{
 		"",
 		"plain ascii text",
@@ -124,6 +140,7 @@ func TestFoldRuneIndexProperties(t *testing.T) {
 // body can push the window out of range.
 func TestFoldExcerptWindows(t *testing.T) {
 	t.Parallel()
+
 	for _, tt := range []struct {
 		name, body, query, token, want string
 		caseSensitive                  bool
@@ -174,24 +191,47 @@ func TestFoldExcerptWindows(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			message, err := json.Marshal(map[string]any{"type": "message", "id": "u1", "message": map[string]any{"role": "user", "content": tt.body}})
+
+			message, err := json.Marshal(
+				map[string]any{
+					"type":    "message",
+					"id":      "u1",
+					"message": map[string]any{"role": "user", "content": tt.body},
+				},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture := `{"type":"session","id":"fold-session","cwd":"/work/fold"}` + "\n" + string(message) + "\n"
-			result, err := foldSearch(t, fixture, Query{Terms: []string{tt.query}, CaseSensitive: tt.caseSensitive})
+
+			fixture := `{"type":"session","id":"fold-session","cwd":"/work/fold"}` + "\n" + string(
+				message,
+			) + "\n"
+
+			result, err := foldSearch(
+				t,
+				fixture,
+				Query{Terms: []string{tt.query}, CaseSensitive: tt.caseSensitive},
+			)
 			if err != nil || len(result.Matches) != 1 || len(result.Matches[0].Excerpts) != 1 {
 				t.Fatalf("search %q = %#v, %v", tt.query, result, err)
 			}
+
 			excerpt := result.Matches[0].Excerpts[0].Text
 			if !strings.Contains(excerpt, tt.token) {
 				t.Fatalf("excerpt for %q does not contain %q: %q", tt.query, tt.token, excerpt)
 			}
+
 			if excerpt != tt.want {
 				t.Fatalf("excerpt = %q, want %q", excerpt, tt.want)
 			}
+
 			if runes := utf8.RuneCountInString(excerpt); runes > excerptRunes+2 {
-				t.Fatalf("excerpt of %d runes exceeds the %d-rune window: %q", runes, excerptRunes, excerpt)
+				t.Fatalf(
+					"excerpt of %d runes exceeds the %d-rune window: %q",
+					runes,
+					excerptRunes,
+					excerpt,
+				)
 			}
 		})
 	}

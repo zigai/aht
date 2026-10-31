@@ -51,6 +51,7 @@ type MemoryStoreOptions struct {
 // once it has been gone for the tombstone TTL. Expiry runs when the store
 // opens, after every command, and from RunPersistence.
 type MemoryStore struct {
+	//exhaustruct:optional
 	mu sync.RWMutex
 
 	reducer      Reducer
@@ -81,33 +82,58 @@ func OpenMemoryStore(path string, rules Rules) (*MemoryStore, error) {
 
 // OpenMemoryStoreWithOptions loads path once, removes expired tombstones, and
 // returns an in-memory authoritative store.
-func OpenMemoryStoreWithOptions(path string, rules Rules, opts MemoryStoreOptions) (*MemoryStore, error) {
+func OpenMemoryStoreWithOptions(
+	path string,
+	rules Rules,
+	opts MemoryStoreOptions,
+) (*MemoryStore, error) {
 	ttl := opts.TombstoneTTL
 	if ttl <= 0 {
 		ttl = DefaultTombstoneTTL
 	}
+
 	fileStore := NewFileStore(path, rules)
 	if err := os.MkdirAll(filepath.Dir(fileStore.Path()), 0o700); err != nil {
 		return nil, fmt.Errorf("creating state directory: %w", err)
 	}
+
 	owner, err := tryStoreLock(fileStore.Path() + ".owner.lock")
 	if err != nil {
 		return nil, err
 	}
+
 	loaded, err := fileStore.load(context.Background())
 	if err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
+
 	store := &MemoryStore{
-		mu: sync.RWMutex{}, reducer: NewReducer(rules), path: fileStore.Path(), now: func() time.Time { return time.Now().UTC() },
-		tombstoneTTL: ttl, snapshot: cloneRegistrySnapshot(loaded), revision: 1,
-		storageRevision: 1, visibleRevision: 1, persistedRevision: 0, persistedAt: time.Time{}, backgroundPersistInterval: defaultBackgroundPersistInterval,
-		stateChanged: make(chan struct{}), owner: owner, dirty: make(chan struct{}, 1), flush: make(chan struct{}, 1),
+		reducer: NewReducer(
+			rules,
+		),
+		path:                      fileStore.Path(),
+		now:                       func() time.Time { return time.Now().UTC() },
+		tombstoneTTL:              ttl,
+		snapshot:                  cloneRegistrySnapshot(loaded),
+		revision:                  1,
+		storageRevision:           1,
+		visibleRevision:           1,
+		persistedRevision:         0,
+		persistedAt:               time.Time{},
+		backgroundPersistInterval: defaultBackgroundPersistInterval,
+		stateChanged: make(
+			chan struct{},
+		),
+		owner: owner,
+		dirty: make(chan struct{}, 1),
+		flush: make(chan struct{}, 1),
 	}
 	expireTombstones(&store.snapshot, store.now(), ttl)
+
 	if err := store.Flush(context.Background()); err != nil {
 		return nil, closeStoreLock(owner, err)
 	}
+
 	return store, nil
 }
 
@@ -115,10 +141,12 @@ func (s *MemoryStore) Close() error {
 	err := s.Flush(context.Background())
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.owner != nil {
 		err = closeStoreLock(s.owner, err)
 		s.owner = nil
 	}
+
 	return err
 }
 
@@ -127,24 +155,38 @@ func (s *MemoryStore) Path() string { return s.path }
 
 // Observe records one observation atomically.
 func (s *MemoryStore) Observe(ctx context.Context, observation Observation) (Session, error) {
-	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: []Observation{observation}, DeleteAfter: nil, Reset: false})
+	result, err := s.command(
+		ctx,
+		journalEntry{
+			Sequence:     0,
+			ReceivedAt:   time.Time{},
+			Observations: []Observation{observation},
+			DeleteAfter:  nil,
+			Reset:        false,
+		},
+	)
 	if err != nil {
 		return Session{}, err
 	}
+
 	if len(result.sessions) > 0 {
 		return cloneSessionValue(result.sessions[0]), nil
 	}
+
 	if result.ended > 0 {
 		return Session{}, ErrProcessEnded
 	}
 
 	s.mu.RLock()
+
 	id := findMatchingSession(s.snapshot.Sessions, observation)
 	if id == "" {
 		id = sessionIDForObservation(observation)
 	}
+
 	session, ok := s.snapshot.Sessions[id]
 	s.mu.RUnlock()
+
 	if !ok {
 		return Session{}, ErrSessionNotFound
 	}
@@ -154,15 +196,29 @@ func (s *MemoryStore) Observe(ctx context.Context, observation Observation) (Ses
 
 // ObserveBatch atomically reduces observations into memory and notifies state
 // subscribers only when the effective consumer-visible state changes.
-func (s *MemoryStore) ObserveBatch(ctx context.Context, observations []Observation) ([]Session, error) {
-	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: observations, DeleteAfter: nil, Reset: false})
+func (s *MemoryStore) ObserveBatch(
+	ctx context.Context,
+	observations []Observation,
+) ([]Session, error) {
+	result, err := s.command(
+		ctx,
+		journalEntry{
+			Sequence:     0,
+			ReceivedAt:   time.Time{},
+			Observations: observations,
+			DeleteAfter:  nil,
+			Reset:        false,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
+
 	saved := make([]Session, len(result.sessions))
 	for index := range saved {
 		saved[index] = cloneSessionValue(result.sessions[index])
 	}
+
 	return saved, nil
 }
 
@@ -187,6 +243,7 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 		s.mu.Unlock()
 		return Session{}, err
 	}
+
 	session, ok := s.snapshot.Sessions[id]
 	if !ok {
 		s.mu.Unlock()
@@ -202,24 +259,44 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 
 // Summary returns multiplexer-session summaries computed from one in-memory snapshot.
 func (s *MemoryStore) Summary(ctx context.Context, filter Filter) ([]Summary, error) {
-	return s.SummaryWithOptions(ctx, filter, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
+	return s.SummaryWithOptions(
+		ctx,
+		filter,
+		SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession},
+	)
 }
 
 // SummaryWithOptions returns summaries computed from one in-memory snapshot with options.
-func (s *MemoryStore) SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error) {
+func (s *MemoryStore) SummaryWithOptions(
+	ctx context.Context,
+	filter Filter,
+	opts SummaryOptions,
+) ([]Summary, error) {
 	if opts.GroupBy != "" && !opts.GroupBy.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedGroupBy, opts.GroupBy)
 	}
+
 	sessions, err := s.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
+
 	return SummariesWithOptions(sessions, opts), nil
 }
 
 // GC removes expired gone-session tombstones from memory.
 func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error) {
-	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: nil, DeleteAfter: &deleteAfter, Reset: false})
+	result, err := s.command(
+		ctx,
+		journalEntry{
+			Sequence:     0,
+			ReceivedAt:   time.Time{},
+			Observations: nil,
+			DeleteAfter:  &deleteAfter,
+			Reset:        false,
+		},
+	)
+
 	return result.gc, err
 }
 
@@ -234,13 +311,19 @@ func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, 
 		s.mu.Unlock()
 		return StateSnapshot{}, err
 	}
+
 	state := s.stateLocked(filter)
 	s.mu.Unlock()
+
 	return state, nil
 }
 
 // WaitForRevision blocks until a state revision newer than after is available.
-func (s *MemoryStore) WaitForRevision(ctx context.Context, after uint64, filter Filter) (StateSnapshot, error) {
+func (s *MemoryStore) WaitForRevision(
+	ctx context.Context,
+	after uint64,
+	filter Filter,
+) (StateSnapshot, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return StateSnapshot{}, fmt.Errorf("waiting for registry revision: %w", err)
@@ -251,12 +334,14 @@ func (s *MemoryStore) WaitForRevision(ctx context.Context, after uint64, filter 
 			s.mu.Unlock()
 			return StateSnapshot{}, err
 		}
+
 		if s.revision > after {
 			state := s.stateLocked(filter)
 			s.mu.Unlock()
 
 			return state, nil
 		}
+
 		changed := s.stateChanged
 		s.mu.Unlock()
 
@@ -303,30 +388,40 @@ func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 	case <-ctx.Done():
 		return fmt.Errorf("waiting to flush registry: %w", ctx.Err())
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.owner == nil {
 		return nil
 	}
+
 	lock, err := openStoreLock(ctx, s.path+".lock", nil)
 	if err != nil {
 		return err
 	}
+
 	if err := s.consumeJournalLocked(ctx); err != nil {
 		return closeStoreLock(lock, err)
 	}
+
 	s.expireTombstonesLocked()
+
 	if !s.persistDueLocked(force) {
 		return closeStoreLock(lock, nil)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
 	}
+
 	if err := persistJournalSnapshot(s.path, s.snapshot); err != nil {
 		return closeStoreLock(lock, err)
 	}
+
 	s.persistedRevision = s.storageRevision
 	s.persistedAt = time.Now()
+
 	return closeStoreLock(lock, nil)
 }
 
@@ -335,9 +430,11 @@ func (s *MemoryStore) persistDueLocked(force bool) bool {
 	if s.storageRevision <= s.persistedRevision {
 		return false
 	}
+
 	if force || s.visibleRevision > s.persistedRevision {
 		return true
 	}
+
 	return time.Since(s.persistedAt) >= s.backgroundPersistInterval
 }
 
@@ -347,17 +444,31 @@ func (s *MemoryStore) expireTombstonesLocked() {
 	if !hasExpiredTombstones(s.snapshot, now, s.tombstoneTTL) {
 		return
 	}
+
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
 	expireTombstones(&candidate, now, s.tombstoneTTL)
-	changes := stateChanges(State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}, State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt})
+	changes := stateChanges(
+		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+	)
 	s.acceptSnapshotLocked(candidate, changes)
 }
 
 func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
-	result, err := s.command(ctx, journalEntry{Sequence: 0, ReceivedAt: time.Time{}, Observations: nil, DeleteAfter: nil, Reset: true})
+	result, err := s.command(
+		ctx,
+		journalEntry{
+			Sequence:     0,
+			ReceivedAt:   time.Time{},
+			Observations: nil,
+			DeleteAfter:  nil,
+			Reset:        true,
+		},
+	)
 	if err != nil {
 		return ResetResult{}, err
 	}
+
 	return result.reset, s.Flush(ctx)
 }
 
@@ -367,7 +478,10 @@ func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
 // persisted with the next visible change, on a slow background interval, or on
 // shutdown. The caller owns this loop and must cancel ctx before discarding the
 // store.
-func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay time.Duration) error {
+func (s *MemoryStore) RunPersistence(
+	ctx context.Context,
+	settle time.Duration, maximumDelay time.Duration,
+) error {
 	settle, maximumDelay = normalizePersistenceOptions(settle, maximumDelay)
 
 	for {
@@ -380,46 +494,58 @@ func (s *MemoryStore) RunPersistence(ctx context.Context, settle, maximumDelay t
 				if ctx.Err() != nil {
 					return s.flushOnShutdown(ctx)
 				}
+
 				return fmt.Errorf("persisting registry snapshot: %w", err)
 			}
+
 			continue
 		}
 
 		if err := s.coalescePersistence(ctx, settle, maximumDelay); err != nil {
 			return s.flushOnShutdown(ctx)
 		}
+
 		if err := s.persist(ctx, false); err != nil {
 			if ctx.Err() != nil {
 				return s.flushOnShutdown(ctx)
 			}
+
 			return fmt.Errorf("persisting registry snapshot: %w", err)
 		}
 	}
 }
 
-func validateNativePayloadChanges(previous, candidate snapshot) error {
+func validateNativePayloadChanges(previous snapshot, candidate snapshot) error {
 	for id, session := range candidate.Sessions {
 		native := session.Observations.Native
 		// The reducer replaces native observations on change. Unchanged pointers
 		// belong to already validated state; only final retained payloads matter.
-		if native == nil || native == previous.Sessions[id].Observations.Native || len(native.RawPayload) == 0 || json.Valid(native.RawPayload) {
+		if native == nil || native == previous.Sessions[id].Observations.Native ||
+			len(native.RawPayload) == 0 ||
+			json.Valid(native.RawPayload) {
 			continue
 		}
 		// Ask the same codec used by persistence to construct its MarshalerError.
 		// Valid payloads require no serialization or encoded copy on this path.
 		_, err := json.Marshal(session)
+
 		return fmt.Errorf("encoding store: %w", err)
 	}
+
 	return nil
 }
 
-func normalizePersistenceOptions(settle, maximumDelay time.Duration) (time.Duration, time.Duration) {
+func normalizePersistenceOptions(
+	settle time.Duration, maximumDelay time.Duration,
+) (time.Duration, time.Duration) {
 	if settle <= 0 {
 		settle = defaultPersistenceSettle
 	}
+
 	if maximumDelay < settle {
 		maximumDelay = defaultPersistenceMaxDelay
 	}
+
 	return settle, maximumDelay
 }
 
@@ -445,11 +571,16 @@ func (s *MemoryStore) signalDirty() {
 	}
 }
 
-func (s *MemoryStore) coalescePersistence(ctx context.Context, settle, maximumDelay time.Duration) error {
+func (s *MemoryStore) coalescePersistence(
+	ctx context.Context,
+	settle time.Duration, maximumDelay time.Duration,
+) error {
 	settleTimer := time.NewTimer(settle)
 	defer settleTimer.Stop()
+
 	maximumTimer := time.NewTimer(maximumDelay)
 	defer maximumTimer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():

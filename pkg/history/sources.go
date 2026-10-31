@@ -53,28 +53,42 @@ func DefaultSources() ([]Source, error) {
 	if home == "" {
 		return nil, fmt.Errorf("locate history home: %w", harness.ErrHomeUnknown)
 	}
+
 	var sources []Source
+
 	for _, adapter := range catalog.All() {
 		reader := catalog.TranscriptFor(adapter.Definition().ID)
 		if reader.Sources != nil {
 			paths, err := reader.Sources(home)
 			if err != nil {
-				return nil, fmt.Errorf("discover %s history sources: %w", adapter.Definition().ID, err)
+				return nil, fmt.Errorf(
+					"discover %s history sources: %w",
+					adapter.Definition().ID,
+					err,
+				)
 			}
+
 			for _, path := range paths {
 				sources = append(sources, Source{Harness: adapter.Definition().ID, Path: path})
 			}
 		}
 	}
+
 	return sources, nil
 }
 
 func newFileIssueBuffer() *fileIssueBuffer {
-	return &fileIssueBuffer{issues: make(map[string][]Issue), omitted: make(map[string]int), selected: make(map[string]bool), parents: make(map[string]string)}
+	return &fileIssueBuffer{
+		issues:   make(map[string][]Issue),
+		omitted:  make(map[string]int),
+		selected: make(map[string]bool),
+		parents:  make(map[string]string),
+	}
 }
 
 func (buffer *fileIssueBuffer) recordIssue(issue Issue) {
 	var omitted int
+
 	buffer.issues[issue.Path], omitted = retainIssue(buffer.issues[issue.Path], issue)
 	buffer.omitted[issue.Path] += omitted
 }
@@ -88,7 +102,8 @@ func (buffer *fileIssueBuffer) recordProblem(source Source, path string, err err
 }
 
 func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, selected bool) {
-	buffer.selected[conversation.Path] = buffer.selected[conversation.Path] || (conversation.SessionID != "" && selected)
+	buffer.selected[conversation.Path] = buffer.selected[conversation.Path] ||
+		(conversation.SessionID != "" && selected)
 }
 
 func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
@@ -97,6 +112,7 @@ func (s *search) forgetMissingDirectories(ctx context.Context, source Source, st
 	if s.index == nil || status.Status != "missing" {
 		return
 	}
+
 	if _, err := s.index.loadDirectories(ctx, source); err != nil {
 		s.index.report(s, source, source.Path, err)
 	}
@@ -105,34 +121,44 @@ func (s *search) forgetMissingDirectories(ctx context.Context, source Source, st
 func (s *search) scanSource(ctx context.Context, source Source) {
 	status := SourceStatus{Source: source, Status: "searched", Files: 0}
 	defer func() { s.result.Sources = append(s.result.Sources, status) }()
+
 	resolved, info, ok := s.inspectSource(source, &status)
 	if !ok {
 		s.forgetMissingDirectories(ctx, resolved, status)
 		return
 	}
+
 	source = resolved
 	path := source.Path
 	before := s.failureCount()
+
 	var files []historyFile
+
 	if info.IsDir() {
 		root, err := os.OpenRoot(path)
 		if err != nil {
 			s.issue(source, path, err)
+
 			status.Status = "failed"
+
 			return
 		}
 		defer s.closeReader(source, path, root)
+
 		s.loadSourceMetadata(source, path, true)
+
 		if s.index == nil {
 			files = s.walkDirectory(ctx, source, root)
 		} else {
 			files = s.index.walkDirectory(ctx, s, source, root)
 		}
+
 		files = groupChildren(source.Harness, files)
 	} else if file, ok := s.singleFile(source, path); ok {
 		s.loadSourceMetadata(source, file.path, false)
 		files = []historyFile{file}
 	}
+
 	switch {
 	case s.mode == modeSearch && s.query.IncludeTools:
 		s.scanToolsFiles(ctx, source, files, &status)
@@ -141,6 +167,7 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 	default:
 		s.scanFilesParallel(ctx, source, files, &status)
 	}
+
 	if s.failureCount() > before {
 		status.Status = "failed"
 	}
@@ -149,31 +176,38 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 func (s *search) failureCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.failures
 }
 
 func (s *search) walkDirectory(ctx context.Context, source Source, root *os.Root) []historyFile {
 	var files []historyFile
+
 	err := fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := s.checkScan(ctx); err != nil {
 			return err
 		}
+
 		if walkErr != nil {
 			s.issue(source, filepath.Join(source.Path, path), walkErr)
 			return nil
 		}
+
 		skip, process := s.shouldVisitEntry(source, path, entry)
 		if skip {
 			return fs.SkipDir
 		}
+
 		if process {
 			files = append(files, rootFile(root, source.Path, path))
 		}
+
 		return nil
 	})
 	if err != nil && ctx.Err() == nil {
 		s.issue(source, source.Path, err)
 	}
+
 	return files
 }
 
@@ -184,10 +218,12 @@ func groupChildren(h registry.Harness, files []historyFile) []historyFile {
 	if parent == nil {
 		return files
 	}
+
 	positions := make(map[string]int, len(files))
 	for i, file := range files {
 		positions[file.path] = i
 	}
+
 	owners := make([]int, len(files))
 	for i, file := range files {
 		owners[i] = -1
@@ -195,25 +231,35 @@ func groupChildren(h registry.Harness, files []historyFile) []historyFile {
 			owners[i] = owner
 		}
 	}
+
 	for i, owner := range owners {
 		if owner >= 0 {
 			files[owner].children = append(files[owner].children, files[i])
 		}
 	}
+
 	grouped := files[:0]
 	for i, file := range files {
 		if owners[i] < 0 {
 			grouped = append(grouped, file)
 		}
 	}
+
 	return grouped
 }
 
-func rootFile(root *os.Root, base, relative string) historyFile {
+func rootFile(root *os.Root, base string, relative string) historyFile {
 	absolute := filepath.Join(base, relative)
 	if isDatabase(relative) {
-		return historyFile{path: absolute, database: true, open: nil, stat: func() (os.FileInfo, error) { return os.Stat(absolute) }, children: nil}
+		return historyFile{
+			path:     absolute,
+			database: true,
+			open:     nil,
+			stat:     func() (os.FileInfo, error) { return os.Stat(absolute) },
+			children: nil,
+		}
 	}
+
 	return historyFile{
 		path:     absolute,
 		database: false,
@@ -230,14 +276,17 @@ func (s *search) singleFile(source Source, path string) (historyFile, bool) {
 		s.issue(source, path, err)
 		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
 	}
+
 	info, err := os.Lstat(resolved)
 	if err != nil {
 		s.issue(source, resolved, err)
 		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
 	}
+
 	if !info.Mode().IsRegular() {
 		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
 	}
+
 	file := historyFile{
 		path:     resolved,
 		database: isDatabase(resolved),
@@ -248,34 +297,60 @@ func (s *search) singleFile(source Source, path string) (historyFile, bool) {
 	if file.database {
 		file.open = nil
 	}
+
 	return file, true
 }
 
 // scanFilesParallel scans without the index. Matches are ranked afterwards, so
 // workers may finish files in any order.
-func (s *search) scanFilesParallel(ctx context.Context, source Source, files []historyFile, status *SourceStatus) {
+func (s *search) scanFilesParallel(
+	ctx context.Context,
+	source Source,
+	files []historyFile,
+	status *SourceStatus,
+) {
 	if len(files) == 0 {
 		return
 	}
+
 	workers := min(maxScanWorkers, len(files), max(minScanWorkers, runtime.GOMAXPROCS(0)))
-	var next, done, inspected atomic.Int64
-	var wg sync.WaitGroup
+
+	var (
+		next, done, inspected atomic.Int64
+		wg                    sync.WaitGroup
+	)
 	wg.Add(workers)
+
 	for range workers {
 		go func() {
 			defer wg.Done()
+
 			for {
 				i := int(next.Add(1)) - 1
 				if i >= len(files) || ctx.Err() != nil || s.halted() {
 					return
 				}
+
 				inspected.Add(int64(s.scanFileDirect(ctx, source, files[i])))
+
 				var stats RefreshStats
-				s.report(Progress{Source: source, Done: int(done.Add(1)), Total: len(files), Refreshed: 0, Refresh: stats, IndexUnavailable: false, Waiting: false})
+				s.report(
+					Progress{
+						Source:           source,
+						Done:             int(done.Add(1)),
+						Total:            len(files),
+						Refreshed:        0,
+						Refresh:          stats,
+						IndexUnavailable: false,
+						Waiting:          false,
+					},
+				)
 			}
 		}()
 	}
+
 	wg.Wait()
+
 	status.Files += int(inspected.Load())
 }
 
@@ -285,56 +360,85 @@ func (s *search) scanFileDirect(ctx context.Context, source Source, file history
 	if !file.mayMatchTime(s.query.Filter) {
 		return 1 + len(file.children)
 	}
+
 	buffer := newFileIssueBuffer()
 	inspected := s.scanFileGroup(ctx, source, file, buffer)
 	s.reportScopedIssues(buffer)
+
 	return inspected
 }
 
-func (s *search) scanFileGroup(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer) int {
+func (s *search) scanFileGroup(
+	ctx context.Context,
+	source Source,
+	file historyFile,
+	buffer *fileIssueBuffer,
+) int {
 	if file.database {
 		s.scanDatabase(ctx, source, file.path, buffer)
 		return 1
 	}
+
 	inspected := 0
+
 	prefilter := s.prefilter
 	if !s.prefilterMembers(ctx, file) {
 		prefilter = nil
 	}
+
 	t, ok := s.readTranscriptFile(ctx, source, file, buffer, prefilter)
 	if ok {
 		inspected++
 	}
+
 	for _, child := range file.children {
 		c, ok := s.readTranscriptFile(ctx, source, child, buffer, prefilter)
 		if !ok {
 			continue
 		}
+
 		inspected++
+
 		switch {
 		case c == nil:
 		case t != nil && c.match.Conversation.SessionID == t.match.Conversation.SessionID:
 			buffer.parents[child.path] = t.match.Conversation.Path
 			t.absorb(c, s.query.Excerpts)
 		default:
-			buffer.selectConversation(c.match.Conversation, s.issueConversationSelected(c.match.Conversation, c.qualifies(len(s.terms))))
+			buffer.selectConversation(
+				c.match.Conversation,
+				s.issueConversationSelected(c.match.Conversation, c.qualifies(len(s.terms))),
+			)
 			s.add(ctx, c)
 		}
 	}
+
 	if t != nil {
-		buffer.selectConversation(t.match.Conversation, s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))))
+		buffer.selectConversation(
+			t.match.Conversation,
+			s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))),
+		)
 		s.add(ctx, t)
 	}
+
 	return inspected
 }
 
-func (s *search) readTranscriptFile(ctx context.Context, source Source, file historyFile, buffer *fileIssueBuffer, prefilter *bytePrefilter) (*transcript, bool) {
+func (s *search) readTranscriptFile(
+	ctx context.Context,
+	source Source,
+	file historyFile,
+	buffer *fileIssueBuffer,
+	prefilter *bytePrefilter,
+) (*transcript, bool) {
 	opened, err := file.open()
 	if err != nil {
 		buffer.issue(source, file.path, err)
 		return nil, false
 	}
+
 	var parsed *transcript
+
 	candidate, err := prefilter.matchesFile(ctx, opened)
 	switch {
 	case err != nil:
@@ -344,9 +448,11 @@ func (s *search) readTranscriptFile(ctx context.Context, source Source, file his
 	default:
 		s.checkTranscriptFormat(ctx, source, file.path, opened, buffer)
 	}
+
 	if err := opened.Close(); err != nil {
 		buffer.issue(source, file.path, err)
 	}
+
 	return parsed, true
 }
 
@@ -358,26 +464,31 @@ func (file historyFile) mayMatchTime(filter Filter) bool {
 	if filter.Since.IsZero() {
 		return true
 	}
+
 	info, err := file.stat()
 	if err != nil || filter.acceptsModificationTime(info.ModTime()) {
 		return true
 	}
+
 	if file.database {
 		for _, suffix := range []string{"-wal", "-journal"} {
 			info, err := os.Stat(file.path + suffix)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return true
 			}
+
 			if err == nil && filter.acceptsModificationTime(info.ModTime()) {
 				return true
 			}
 		}
 	}
+
 	for _, child := range file.children {
 		if child.mayMatchTime(filter) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -385,8 +496,10 @@ func (s *search) report(progress Progress) {
 	if s.progress == nil {
 		return
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	progress.Refresh = progress.Refresh.snapshot()
 	progress.IndexUnavailable = s.result.IndexUnavailable
 	s.progress(progress)
@@ -396,9 +509,11 @@ func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry)
 	if entry.IsDir() {
 		return skipHistoryDirectory(source.Harness, path), false
 	}
+
 	if skip := catalog.TranscriptFor(source.Harness).SkipFile; skip != nil && skip(path) {
 		return false, false
 	}
+
 	return false, entry.Type().IsRegular() && historyName(source.Harness, entry.Name())
 }
 
@@ -413,12 +528,21 @@ func historyName(h registry.Harness, name string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 func isIgnoredDirName(name string) bool {
 	switch name {
-	case ".git", "node_modules", ".cache", ".npm", ".cargo", "vendor", "__pycache__", ".venv", "venv":
+	case ".git",
+		"node_modules",
+		".cache",
+		".npm",
+		".cargo",
+		"vendor",
+		"__pycache__",
+		".venv",
+		"venv":
 		return true
 	default:
 		return false
@@ -429,12 +553,15 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 	if path == "." {
 		return false
 	}
+
 	if isIgnoredDirName(filepath.Base(path)) {
 		return true
 	}
+
 	if skip := catalog.TranscriptFor(h).SkipDirectory; skip != nil {
 		return skip(path)
 	}
+
 	return false
 }
 
@@ -445,34 +572,49 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.FileInfo, bool) {
 	if source.Path == "" {
 		status.Status = "failed"
+
 		s.issue(source, "", ErrInvalidSource)
+
 		return source, nil, false
 	}
+
 	path, err := filepath.Abs(source.Path)
 	if err != nil {
 		s.issue(source, source.Path, err)
+
 		status.Status = "failed"
+
 		return source, nil, false
 	}
+
 	source.Path = path
+
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		status.Status = "missing"
+
 		if s.explicitSources {
 			s.issue(source, path, err)
 		}
+
 		return source, nil, false
 	}
+
 	if err != nil {
 		s.issue(source, path, err)
+
 		status.Status = "failed"
+
 		return source, nil, false
 	}
+
 	if !supported(source.Harness) {
 		status.Status = "unsupported"
+
 		if len(s.query.Harnesses) > 0 || s.explicitSources {
 			s.issue(source, path, ErrUnsupportedHarness)
 		}
+
 		return source, nil, false
 	}
 
@@ -501,24 +643,33 @@ func resolveSymlinkFile(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve symlink source: %w", err)
 		}
+
 		if info.Mode()&os.ModeSymlink == 0 {
 			return path, nil
 		}
+
 		target, err := os.Readlink(path)
 		if err != nil {
 			return "", fmt.Errorf("read symlink target: %w", err)
 		}
+
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(path), target)
 		}
+
 		path = filepath.Clean(target)
 	}
+
 	return "", errSymlinkCycle
 }
 
 func (s *search) loadSourceMetadata(source Source, path string, isDir bool) {
 	s.sourceMetadata = nil
 	if load := catalog.TranscriptFor(source.Harness).SourceMetadata; load != nil {
-		s.sourceMetadata = load(path, isDir, func(path string, err error) { s.issue(source, path, err) })
+		s.sourceMetadata = load(
+			path,
+			isDir,
+			func(path string, err error) { s.issue(source, path, err) },
+		)
 	}
 }

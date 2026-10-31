@@ -16,8 +16,12 @@ const (
 	droidShellTimeoutSeconds   = 5
 )
 
-func (droidHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (droidHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	factoryDir := filepath.Join(paths.Home, ".factory")
+
 	return harness.LaunchPlan{
 		Executable: droidCommand,
 		Protocol:   fakeprovider.ProtocolOpenAIChat,
@@ -34,6 +38,7 @@ func (droidHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMo
 				if err != nil {
 					return nil, fmt.Errorf("resolve Droid trust root: %w", err)
 				}
+
 				return droidLaunchSettings(existing, model, trustRoot)
 			},
 		}},
@@ -47,6 +52,7 @@ func (droidHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMo
 			if prompt != "" {
 				args = append(args, prompt)
 			}
+
 			return args, nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -64,16 +70,31 @@ func (droidHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMo
 }
 
 func droidRPCArguments(work string) []string {
-	return []string{"exec", "--input-format", "stream-jsonrpc", "--output-format", "stream-jsonrpc", "--auto", "high", "--cwd", work}
+	return []string{
+		"exec",
+		"--input-format",
+		"stream-jsonrpc",
+		"--output-format",
+		"stream-jsonrpc",
+		"--auto",
+		"high",
+		"--cwd",
+		work,
+	}
 }
 
-func droidLaunchSettings(existing []byte, model harness.LaunchModel, trustRoot string) ([]byte, error) {
+func droidLaunchSettings(
+	existing []byte,
+	model harness.LaunchModel,
+	trustRoot string,
+) ([]byte, error) {
 	settings := make(map[string]any)
 	if existing != nil {
 		if err := json.Unmarshal(existing, &settings); err != nil {
 			return nil, fmt.Errorf("decode Droid settings: %w", err)
 		}
 	}
+
 	settings["model"] = droidLaunchModelID
 	trustedFolders := mapValue(settings, "trustedFolders")
 	trustedFolders[trustRoot] = map[string]any{"trustedAt": time.Now().UTC().Format(time.RFC3339)}
@@ -85,10 +106,12 @@ func droidLaunchSettings(existing []byte, model harness.LaunchModel, trustRoot s
 		"provider":        "generic-chat-completion-api",
 		"maxOutputTokens": droidLaunchMaxOutputTokens,
 	}}
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode Droid settings: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -97,7 +120,9 @@ func mapValue(parent map[string]any, key string) map[string]any {
 	if ok {
 		return value
 	}
+
 	value = make(map[string]any)
 	parent[key] = value
+
 	return value
 }

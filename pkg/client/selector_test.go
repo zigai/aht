@@ -38,6 +38,7 @@ func TestSelectorExactIDVsPrefixPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected exact match, got error: %v", err)
 	}
+
 	if resolved.ID != "claude-1000" {
 		t.Fatalf("resolved ID = %q, want claude-1000", resolved.ID)
 	}
@@ -84,16 +85,23 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve by native ID failed: %v", err)
 	}
+
 	if resolved.ID != "codex-0001" {
 		t.Fatalf("resolved ID = %q, want codex-0001", resolved.ID)
 	}
 
 	// Match by session path with normalization
 	sep := string(filepath.Separator)
+
 	dirtySessionPath := tempDir + sep + "." + sep + "agent-session.json"
 	if dirtySessionPath == sessions[1].SessionPath {
-		t.Fatalf("dirtySessionPath %q was unexpectedly equal to stored %q", dirtySessionPath, sessions[1].SessionPath)
+		t.Fatalf(
+			"dirtySessionPath %q was unexpectedly equal to stored %q",
+			dirtySessionPath,
+			sessions[1].SessionPath,
+		)
 	}
+
 	resolved, err = client.ResolveSessions(sessions, client.Selector{
 		ID:                "",
 		Reference:         dirtySessionPath,
@@ -108,6 +116,7 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve by normalized path failed: %v", err)
 	}
+
 	if resolved.ID != "cursor-0002" {
 		t.Fatalf("resolved ID = %q, want cursor-0002", resolved.ID)
 	}
@@ -193,6 +202,7 @@ func TestSelectorTwoServersWithSamePane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected unique resolution with server qualifier, got: %v", err)
 	}
+
 	if resolved.ID != "s1" {
 		t.Fatalf("resolved ID = %q, want s1", resolved.ID)
 	}
@@ -238,6 +248,7 @@ func TestSelectorCrossMultiplexerPanes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected unique resolution for tmux, got: %v", err)
 	}
+
 	if resolved.ID != "tmux-sess" {
 		t.Fatalf("resolved ID = %q, want tmux-sess", resolved.ID)
 	}
@@ -256,6 +267,7 @@ func TestSelectorCrossMultiplexerPanes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected unique resolution for zellij, got: %v", err)
 	}
+
 	if resolved.ID != "zellij-sess" {
 		t.Fatalf("resolved ID = %q, want zellij-sess", resolved.ID)
 	}
@@ -273,10 +285,12 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 
 	// Exact project root match with dirty path
 	sep := string(filepath.Separator)
+
 	dirtyProj := projRoot + sep + "." + sep + "sub" + sep + ".."
 	if dirtyProj == session.ProjectRoot {
 		t.Fatalf("dirtyProj %q was unexpectedly equal to stored %q", dirtyProj, session.ProjectRoot)
 	}
+
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
 		ID:                "",
 		Reference:         "",
@@ -291,6 +305,7 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exact project match failed: %v", err)
 	}
+
 	if resolved.ID != "path-sess" {
 		t.Fatalf("resolved ID = %q, want path-sess", resolved.ID)
 	}
@@ -326,6 +341,7 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("subtree match failed: %v", err)
 	}
+
 	if resolved.ID != "path-sess" {
 		t.Fatalf("resolved ID = %q, want path-sess", resolved.ID)
 	}
@@ -338,6 +354,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)
 		_ = os.Remove(broker.SocketPath(storePath))
@@ -347,9 +364,8 @@ func TestClientResolveDurableMode(t *testing.T) {
 	createdSession := setupTestSessionForStore(t, store)
 
 	durableClient := client.New(client.Config{
-		StorePath:  storePath,
-		SocketPath: "",
-		Mode:       client.ModeDurableOnly,
+		StorePath: storePath,
+		Mode:      client.ModeDurableOnly,
 	})
 
 	resolved, err := durableClient.Resolve(t.Context(), client.Selector{
@@ -366,6 +382,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("durable resolve failed: %v", err)
 	}
+
 	if resolved.ID != createdSession.ID {
 		t.Fatalf("durable resolved ID = %q, want %q", resolved.ID, createdSession.ID)
 	}
@@ -378,6 +395,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)
 		_ = os.Remove(broker.SocketPath(storePath))
@@ -387,6 +405,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	createdSession := setupTestSessionForStore(t, memoryStore)
 
 	socketPath := broker.SocketPath(storePath)
@@ -400,9 +419,11 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 
 	serverCtx, cancelServer := context.WithCancel(t.Context())
 	defer cancelServer()
+
 	go func() {
 		serverErrors <- server.Serve(serverCtx)
 	}()
+
 	select {
 	case <-ready:
 	case err := <-serverErrors:
@@ -434,6 +455,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("realtime resolve failed: %v", err)
 	}
+
 	if resolved.ID != createdSession.ID {
 		t.Fatalf("realtime resolved ID = %q, want %q", resolved.ID, createdSession.ID)
 	}
@@ -447,41 +469,56 @@ func setupTestSessionForStore(t *testing.T, store registry.Store) registry.Sessi
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
-	obs := registry.Observation{Harness: registry.Harness("claude"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-durable-1"}, Evidence: &registry.Report{Lifecycle: nil, Claim: &live, Activity: &activity, Process: nil, Location: &registry.Location{
-		Kind:            registry.MultiplexerTmux,
-		ServerID:        "/tmp/tmux-main.sock",
-		SessionID:       "$0",
-		SessionName:     "main",
-		WorkspaceID:     "",
-		WorkspaceName:   "",
-		TabID:           "",
-		TabIndex:        "",
-		TabName:         "",
-		WindowID:        "@0",
-		WindowIndex:     "0",
-		WindowName:      "win",
-		PaneID:          "%42",
-		PaneIndex:       "0",
-		PaneCurrentPath: "/tmp/project",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-	}, Listing: &registry.Listing{
-		ResumeCommand: nil,
-		CWD:           "/tmp/project",
-		ProjectRoot:   "/tmp/project",
-		ProcessPID:    0,
-		Current:       false,
-	}, Attributes: nil, Payload: nil}}
+	obs := registry.Observation{
+		Harness: registry.Harness("claude"),
+		At:      time.Now().UTC(),
+		Subject: registry.ObservationIdentity{SessionID: "sess-durable-1"},
+		Evidence: &registry.Report{
+			Lifecycle: nil,
+			Claim:     &live,
+			Activity:  &activity,
+			Process:   nil,
+			Location: &registry.Location{
+				Kind:            registry.MultiplexerTmux,
+				ServerID:        "/tmp/tmux-main.sock",
+				SessionID:       "$0",
+				SessionName:     "main",
+				WorkspaceID:     "",
+				WorkspaceName:   "",
+				TabID:           "",
+				TabIndex:        "",
+				TabName:         "",
+				WindowID:        "@0",
+				WindowIndex:     "0",
+				WindowName:      "win",
+				PaneID:          "%42",
+				PaneIndex:       "0",
+				PaneCurrentPath: "/tmp/project",
+				PanePID:         0,
+				PaneTTY:         "",
+				ClientTTY:       "",
+			},
+			Listing: &registry.Listing{
+				ResumeCommand: nil,
+				CWD:           "/tmp/project",
+				ProjectRoot:   "/tmp/project",
+				ProcessPID:    0,
+				Current:       false,
+			},
+			Attributes: nil,
+			Payload:    nil,
+		},
+	}
 
 	session, err := store.Observe(t.Context(), obs)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return session
 }
 
-func testSessionWithID(id, harness, sessionID string) registry.Session {
+func testSessionWithID(id string, harness string, sessionID string) registry.Session {
 	return registry.Session{
 		SchemaVersion: 2,
 		ID:            id,
@@ -499,17 +536,31 @@ func testSessionWithID(id, harness, sessionID string) registry.Session {
 		UpdatedAt:         time.Now().UTC(),
 		PresenceChangedAt: time.Now().UTC(),
 		ActivityChangedAt: time.Now().UTC(),
-		Liveness:          registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		Liveness: registry.NewLiveness(
+			registry.PresenceLive,
+			registry.ActivityValue(nil),
+			nil,
+		),
 	}
 }
 
-func testSessionWithNative(id, harness, sessionID, sessionPath string) registry.Session {
+func testSessionWithNative(
+	id string,
+	harness string,
+	sessionID string,
+	sessionPath string,
+) registry.Session {
 	s := testSessionWithID(id, harness, sessionID)
 	s.SessionPath = sessionPath
+
 	return s
 }
 
-func testSessionWithMultiplexer(id string, kind registry.MultiplexerKind, serverID, paneID string) registry.Session {
+func testSessionWithMultiplexer(
+	id string,
+	kind registry.MultiplexerKind,
+	serverID string, paneID string,
+) registry.Session {
 	s := testSessionWithID(id, "claude", "sess-"+id)
 	s.Location = registry.Location{
 		Kind:            kind,
@@ -531,37 +582,54 @@ func testSessionWithMultiplexer(id string, kind registry.MultiplexerKind, server
 		PaneTTY:         "",
 		ClientTTY:       "",
 	}
+
 	return s
 }
 
-func testSessionWithPaths(id, projectRoot, cwd string) registry.Session {
+func testSessionWithPaths(id string, projectRoot string, cwd string) registry.Session {
 	s := testSessionWithID(id, "claude", "sess-"+id)
 	s.ProjectRoot = projectRoot
 	s.CWD = cwd
+
 	return s
 }
 
 func TestResolveWithSessionLister(t *testing.T) {
 	t.Parallel()
 
-	store, err := registry.OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store, err := registry.OpenMemoryStore(
+		filepath.Join(t.TempDir(), "state.json"),
+		catalog.Rules{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	live := registry.PresenceLive
-	session, err := store.Observe(t.Context(), registry.Observation{Harness: registry.Harness("codex"), At: time.Now().UTC(), Subject: registry.ObservationIdentity{SessionID: "sess-custom-store"}, Evidence: &registry.Report{Claim: &live}})
+
+	session, err := store.Observe(
+		t.Context(),
+		registry.Observation{
+			Harness:  registry.Harness("codex"),
+			At:       time.Now().UTC(),
+			Subject:  registry.ObservationIdentity{SessionID: "sess-custom-store"},
+			Evidence: &registry.Report{Claim: &live},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Test with a direct SessionLister (MemoryStore), bypassing *Client
 	var lister client.SessionLister = store
+
 	resolved, err := client.Resolve(t.Context(), lister, client.Selector{
 		Reference: session.ID,
 	})
 	if err != nil {
 		t.Fatalf("Resolve with SessionLister failed: %v", err)
 	}
+
 	if resolved.ID != session.ID {
 		t.Fatalf("Resolve ID = %q, want %q", resolved.ID, session.ID)
 	}

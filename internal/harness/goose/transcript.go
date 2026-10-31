@@ -9,7 +9,22 @@ import (
 )
 
 func (gooseHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"sessions.db"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
+	return transcript.Reader{
+		Patterns:          []string{"sessions.db"},
+		Sources:           transcriptSources,
+		SkipDirectory:     nil,
+		SkipFile:          nil,
+		SourceMetadata:    nil,
+		Initialize:        nil,
+		Extra:             nil,
+		Record:            nil,
+		FastRecord:        nil,
+		Document:          nil,
+		Query:             transcriptQuery,
+		LocalTitles:       false,
+		RewritableHeaders: nil,
+		Parent:            nil,
+	}
 }
 
 func transcriptSources(home string) ([]string, error) {
@@ -21,8 +36,10 @@ func transcriptGoosePath(home string) string {
 	if runtime.GOOS == "darwin" {
 		root = filepath.Join(home, "Library", "Application Support", "Block", "goose")
 	}
+
 	if override := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(override) {
 		root = filepath.Join(override, "data")
 	}
+
 	return filepath.Join(root, "sessions", "sessions.db")
 }

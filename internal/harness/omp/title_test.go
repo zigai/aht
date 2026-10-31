@@ -16,6 +16,7 @@ func TestSessionTitlesUsesCurrentSlotAndNativeIdentity(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "current.jsonl")
 	legacy := filepath.Join(root, "legacy.jsonl")
+
 	cleared := filepath.Join(root, "cleared.jsonl")
 	for path, body := range map[string]string{
 		current: `{"type":"title","title":"Current name"}
@@ -33,6 +34,7 @@ func TestSessionTitlesUsesCurrentSlotAndNativeIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	titles, err := New().SessionTitles(t.Context(), []registry.ObservationIdentity{
 		{SessionID: "current", SessionPath: current},
 		{SessionID: "legacy", SessionPath: legacy},
@@ -43,6 +45,7 @@ func TestSessionTitlesUsesCurrentSlotAndNativeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if diff := cmp.Diff([]string{"Current name", "Later name", "", "", ""}, titles); diff != "" {
 		t.Fatalf("titles mismatch (-want +got):\n%s", diff)
 	}

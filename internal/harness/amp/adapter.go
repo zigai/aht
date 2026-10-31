@@ -58,19 +58,23 @@ func (ampHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "plugins", ampPluginName),
-		Label:       "amp plugin",
-		ConfigLabel: "amp plugin",
-		Content: harness.RenderScriptTemplate(
-			ampPluginTemplate,
-			ampIntegrationID,
-			binary,
-			ampIntegrationSource,
-			integrationVersion,
-		),
-		JSONContent: nil,
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "plugins", ampPluginName),
+				Label:       "amp plugin",
+				ConfigLabel: "amp plugin",
+				Content: harness.RenderScriptTemplate(
+					ampPluginTemplate,
+					ampIntegrationID,
+					binary,
+					ampIntegrationSource,
+					integrationVersion,
+				),
+				JSONContent: nil,
+			}},
+		},
+	}, nil
 }
 
 func (ampHarness) ResumeCommand(sessionID string, _ string) []string {

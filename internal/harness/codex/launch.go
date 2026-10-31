@@ -16,8 +16,12 @@ var (
 	errLaunchConfig = errors.New("codex config conflicts with the fake provider")
 )
 
-func (codexHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (codexHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	home := filepath.Join(paths.Root, "codex")
+
 	return harness.LaunchPlan{
 		Executable: codexCommand,
 		Protocol:   fakeprovider.ProtocolOpenAIResponses,
@@ -37,13 +41,23 @@ func (codexHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMo
 			if prompt == "" {
 				return nil, errEmptyPrompt
 			}
-			return []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "-C", paths.Work, prompt}, nil
+
+			return []string{
+				"exec",
+				"--dangerously-bypass-approvals-and-sandbox",
+				"--dangerously-bypass-hook-trust",
+				"--skip-git-repo-check",
+				"-C",
+				paths.Work,
+				prompt,
+			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			args := []string{"-C", paths.Work, "-m", model.Model}
 			if prompt != "" {
 				args = append(args, prompt)
 			}
+
 			return args, nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -60,14 +74,18 @@ func launchConfig(existing []byte, model harness.LaunchModel) ([]byte, error) {
 	if err := toml.Unmarshal(existing, &config); err != nil {
 		return nil, fmt.Errorf("decode codex config: %w", err)
 	}
+
 	providers := make(map[string]any)
+
 	if value, ok := config["model_providers"]; ok {
 		table, ok := value.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%w: model_providers is %T", errLaunchConfig, value)
 		}
+
 		providers = table
 	}
+
 	providers[harness.LaunchProviderName] = map[string]any{
 		"name":                 "AHT fakeprovider",
 		"base_url":             model.Endpoint + "/v1",
@@ -78,9 +96,11 @@ func launchConfig(existing []byte, model harness.LaunchModel) ([]byte, error) {
 	config["model"] = model.Model
 	config["model_provider"] = harness.LaunchProviderName
 	config["model_providers"] = providers
+
 	content, err := toml.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("encode codex config: %w", err)
 	}
+
 	return content, nil
 }

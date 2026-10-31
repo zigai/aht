@@ -27,16 +27,22 @@ func (app *application) newHistoryCommand() *cobra.Command {
 		},
 	}
 	command.AddCommand(app.newHistoryRefreshCommand())
+
 	return command
 }
 
 func (app *application) newHistoryRefreshCommand() *cobra.Command {
-	var harnesses []string
-	var sourceOptions searchOptions
+	var (
+		harnesses     []string
+		sourceOptions searchOptions
+	)
+
 	command := &cobra.Command{
-		Use:           "refresh",
-		Short:         "Index changed conversation histories so searches start warm",
-		Long:          "Parse every changed native history into the disposable search index without searching.\nThe tracker refreshes all histories at startup and after sessions go idle or end.",
+		Use:   "refresh",
+		Short: "Index changed conversation histories so searches start warm",
+		Long: "Parse every changed native history into the disposable " +
+			"search index without searching.\nThe tracker refreshes all " +
+			"histories at startup and after sessions go idle or end.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -45,28 +51,40 @@ func (app *application) newHistoryRefreshCommand() *cobra.Command {
 			if err != nil {
 				return exitCode(err, exitCodeUsage)
 			}
+
 			return app.runHistoryRefresh(cmd.Context(), harnesses, sources)
 		},
 	}
-	command.Flags().StringSliceVar(&harnesses, "harness", nil, "refresh only harness `<name,...>` histories")
-	command.Flags().StringArrayVar(&sourceOptions.sources, "source", nil, "refresh only this native history `<agent=path>`")
+	command.Flags().
+		StringSliceVar(&harnesses, "harness", nil, "refresh only harness `<name,...>` histories")
+	command.Flags().
+		StringArrayVar(&sourceOptions.sources, "source", nil, "refresh only this native history `<agent=path>`")
 	_ = command.Flags().MarkHidden("source")
+
 	return command
 }
 
-func (app *application) runHistoryRefresh(ctx context.Context, names []string, sources []history.Source) error {
+func (app *application) runHistoryRefresh(
+	ctx context.Context,
+	names []string,
+	sources []history.Source,
+) error {
 	sources, err := historyRefreshSources(names, sources)
 	if err != nil {
 		return err
 	}
+
 	guard, err := lockHistoryRefresh()
 	if errors.Is(err, errHistoryRefreshRunning) {
 		return nil
 	}
+
 	if err != nil {
 		return fmt.Errorf("history refresh: %w", err)
 	}
+
 	defer func() { _ = guard.Close() }()
+
 	progress := app.newSearchProgress()
 	refreshed := map[history.Source]int{}
 	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: func(p history.Progress) {
@@ -74,7 +92,9 @@ func (app *application) runHistoryRefresh(ctx context.Context, names []string, s
 		progress.update(p)
 	}}
 	result, refreshErr := catalog.Refresh(ctx)
+
 	progress.clear()
+
 	if app.outputJSON {
 		if err := app.writeJSONSafe(result); err != nil {
 			return err
@@ -84,38 +104,56 @@ func (app *application) runHistoryRefresh(ctx context.Context, names []string, s
 		for _, status := range result.Sources {
 			files += status.Files
 		}
+
 		for _, count := range refreshed {
 			changed += count
 		}
-		if err := app.writef("Checked %d histories; indexed %d changed.\n", files, changed); err != nil {
+
+		if err := app.writef(
+			"Checked %d histories; indexed %d changed.\n",
+			files,
+			changed,
+		); err != nil {
 			return err
 		}
+
 		app.writeSearchIssues(result, false)
 	}
+
 	if errors.Is(refreshErr, history.ErrIndexUnavailable) {
 		return fmt.Errorf("history refresh: %w", refreshErr)
 	}
+
 	return searchFailure(refreshErr)
 }
 
 func historyRefreshSources(names []string, sources []history.Source) ([]history.Source, error) {
 	var selected []registry.Harness
+
 	for _, name := range names {
 		id, err := harness.Parse(strings.TrimSpace(name))
 		if err != nil {
 			return nil, exitCode(fmt.Errorf("history refresh: %w", err), exitCodeUsage)
 		}
+
 		selected = append(selected, id)
 	}
+
 	if sources == nil {
 		var err error
+
 		sources, err = history.DefaultSources()
 		if err != nil {
 			return nil, fmt.Errorf("history refresh: %w", err)
 		}
 	}
+
 	if len(selected) > 0 {
-		sources = slices.DeleteFunc(sources, func(source history.Source) bool { return !slices.Contains(selected, source.Harness) })
+		sources = slices.DeleteFunc(
+			sources,
+			func(source history.Source) bool { return !slices.Contains(selected, source.Harness) },
+		)
 	}
+
 	return sources, nil
 }

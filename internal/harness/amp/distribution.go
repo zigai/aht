@@ -5,5 +5,16 @@ import (
 )
 
 func (ampHarness) Distribution() harness.Distribution {
-	return harness.Distribution{Source: "npm", Package: "@ampcode/cli", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "amp", Family: "", PackageExtras: "", Install: nil}
+	return harness.Distribution{
+		Source:        "npm",
+		Package:       "@ampcode/cli",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "amp",
+		Family:        "",
+		PackageExtras: "",
+		Install:       nil,
+	}
 }

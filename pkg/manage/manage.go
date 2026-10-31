@@ -96,12 +96,15 @@ func New(config Config) *Manager {
 	if config.Binary == "" {
 		config.Binary = "aht"
 	}
+
 	if config.StorePath == "" {
 		config.StorePath = registry.DefaultStorePath()
 	}
+
 	if config.TrackerInterval <= 0 {
 		config.TrackerInterval = defaultTrackerInterval
 	}
+
 	return &Manager{config: config}
 }
 
@@ -110,6 +113,7 @@ func (s ArtifactStatus) Valid() bool {
 	case ArtifactMissing, ArtifactCurrent, ArtifactStale, ArtifactForeign:
 		return true
 	}
+
 	return false
 }
 
@@ -135,6 +139,7 @@ func (m *Manager) InstallIntegration(
 	if err != nil {
 		return integrationResult(result), fmt.Errorf("installing %s integration: %w", harness, err)
 	}
+
 	return integrationResult(result), nil
 }
 
@@ -155,6 +160,7 @@ func (m *Manager) RemoveIntegration(
 	if err != nil {
 		return integrationResult(result), fmt.Errorf("removing %s integration: %w", harness, err)
 	}
+
 	return integrationResult(result), nil
 }
 
@@ -167,6 +173,7 @@ func (m *Manager) IntegrationStatus(
 	if err != nil {
 		return IntegrationStatus{}, fmt.Errorf("inspecting %s integration: %w", harness, err)
 	}
+
 	return IntegrationStatus{
 		Harness:  status.Harness,
 		Status:   ArtifactStatus(status.Status),
@@ -233,11 +240,14 @@ func trackerError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
+
 	if errors.Is(err, service.ErrForeign) {
 		return fmt.Errorf("%s: %w: %w", operation, ErrForeignTracker, err)
 	}
+
 	if errors.Is(err, service.ErrUnsupported) {
 		return fmt.Errorf("%s: %w: %w", operation, ErrUnsupportedTracker, err)
 	}
+
 	return fmt.Errorf("%s: %w", operation, err)
 }

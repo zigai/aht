@@ -21,16 +21,21 @@ func decodeTOML(data []byte, target any) error {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}
+
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(target); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
+
 		if strictErr, ok := errors.AsType[*toml.StrictMissingError](err); ok {
 			return fmt.Errorf("%w: %s", errUnknownFieldInConfig, strictErr.String())
 		}
+
 		return fmt.Errorf("decode toml: %w", err)
 	}
+
 	return nil
 }

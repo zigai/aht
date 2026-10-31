@@ -75,64 +75,130 @@ func (codexHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 			{
 				Event:   harness.HookEventSessionStart,
 				Matcher: "startup|resume|clear",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventSessionStart, codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityIdle,
+					harness.HookEventSessionStart,
+					codexIntegrationSource,
+				),
 			},
 			// Automatic compaction also fires SessionStart inside a turn that
 			// keeps running, so compaction reports presence without activity.
 			{
 				Event:   harness.HookEventSessionStart,
 				Matcher: "compact",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceLive, harness.HookEventSessionStart, codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.PresenceLive,
+					harness.HookEventSessionStart,
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   harness.HookEventUserPromptSubmit,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, harness.HookEventUserPromptSubmit, codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityRunning,
+					harness.HookEventUserPromptSubmit,
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   "PermissionRequest",
 				Matcher: "*",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityWaiting, "PermissionRequest", codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityWaiting,
+					"PermissionRequest",
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   harness.HookEventPostToolUse,
 				Matcher: "",
-				Command: harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, harness.HookEventPostToolUse, codexIntegrationSource),
+				Command: harness.RawStdinDefaultsReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityRunning,
+					harness.HookEventPostToolUse,
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   "PreCompact",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityRunning, "PreCompact", codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityRunning,
+					"PreCompact",
+					codexIntegrationSource,
+				),
 			},
 			// Automatic compaction continues the running turn; only manual
 			// compaction returns the session to idle.
 			{
 				Event:   "PostCompact",
 				Matcher: "manual",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, "PostCompact", codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityIdle,
+					"PostCompact",
+					codexIntegrationSource,
+				),
 			},
 			// SubagentStart and SubagentStop describe child agents inside the
 			// parent turn, which keeps running until Stop.
 			{
 				Event:   harness.HookEventStop,
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityIdle, harness.HookEventStop, codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityIdle,
+					harness.HookEventStop,
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   "Interrupt",
 				Matcher: "",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.ActivityInterrupted, "Interrupt", codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.ActivityInterrupted,
+					"Interrupt",
+					codexIntegrationSource,
+				),
 			},
 			{
 				Event:   harness.HookEventSessionEnd,
 				Matcher: "other",
-				Command: harness.ReportHookCommand(binary, registry.Harness("codex"), registry.PresenceGone, harness.HookEventSessionEnd, codexIntegrationSource),
+				Command: harness.ReportHookCommand(
+					binary,
+					registry.Harness("codex"),
+					registry.PresenceGone,
+					harness.HookEventSessionEnd,
+					codexIntegrationSource,
+				),
 			},
 		},
 		Trust: nil,
 	}
 	plan.Trust = hookTrust{path: plan.Path, hooks: plan.Hooks}
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.JSONCommandHooksAction{Plan: plan}, harness.ShimAction{}}}, nil
+
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.JSONCommandHooksAction{Plan: plan},
+			harness.ShimAction{},
+		},
+	}, nil
 }
 
 func (codexHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -149,12 +215,32 @@ func (codexHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (codexHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "codex_hook_event", harness.PayloadString(payload, "hook_event_name"))
-	harness.AddAttributeString(attributes, "codex_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "codex_permission_mode", harness.PayloadString(payload, "permission_mode"))
+	harness.AddAttributeString(
+		attributes,
+		"codex_hook_event",
+		harness.PayloadString(payload, "hook_event_name"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"codex_start_source",
+		harness.PayloadString(payload, "source"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"codex_permission_mode",
+		harness.PayloadString(payload, "permission_mode"),
+	)
 	harness.AddAttributeString(attributes, "codex_model", harness.PayloadString(payload, "model"))
-	harness.AddAttributeString(attributes, "codex_turn_id", harness.PayloadString(payload, "turn_id"))
-	harness.AddAttributeString(attributes, "codex_session_end_reason", harness.PayloadString(payload, "reason"))
+	harness.AddAttributeString(
+		attributes,
+		"codex_turn_id",
+		harness.PayloadString(payload, "turn_id"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"codex_session_end_reason",
+		harness.PayloadString(payload, "reason"),
+	)
 
 	return harness.PayloadDefaults{
 		SessionID:   harness.PayloadString(payload, "session_id"),
@@ -170,6 +256,7 @@ func codexHome() string {
 	if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
 		return value
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
@@ -178,11 +265,18 @@ func codexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-func (codexHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (codexHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["codex_hook_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"),
+	)
 }
 
 func (codexHarness) HookTimeoutSeconds(event string) int {
@@ -190,5 +284,6 @@ func (codexHarness) HookTimeoutSeconds(event string) int {
 	if event == harness.HookEventSessionEnd || event == "Interrupt" {
 		return terminalTimeoutSeconds
 	}
+
 	return harness.HookTimeoutSeconds
 }

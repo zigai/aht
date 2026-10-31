@@ -74,6 +74,7 @@ func SocketPath(storePath string) string {
 	if override := os.Getenv(SocketPathEnv); override != "" {
 		return override
 	}
+
 	if storePath == "" {
 		storePath = registry.DefaultStorePath()
 	}

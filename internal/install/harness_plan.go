@@ -27,6 +27,7 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+
 	if noInstallRequiredHarness(opts.Harness) {
 		if action, ok := nativeCatalogAction(plan); ok {
 			return noInstallRequiredResult(opts.Harness, action.Label), nil
@@ -42,11 +43,13 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 		if !handled {
 			continue
 		}
+
 		if err == nil {
 			if advisor != nil {
 				result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
 			}
 		}
+
 		return result, err
 	}
 
@@ -73,7 +76,12 @@ func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
 	return false
 }
 
-func installPlanAction(ctx context.Context, opts Options, harness registry.Harness, action harnesspkg.InstallAction) (Result, bool, error) {
+func installPlanAction(
+	ctx context.Context,
+	opts Options,
+	harness registry.Harness,
+	action harnesspkg.InstallAction,
+) (Result, bool, error) {
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
 		result, err := installTrustedJSONCommandHooks(ctx, opts, harness, typed.Plan)
@@ -118,6 +126,7 @@ func installTrustedJSONCommandHooks(
 	if err != nil || opts.DryRun || plan.Trust == nil {
 		return result, err
 	}
+
 	if err := plan.Trust.Install(ctx); err != nil {
 		return result, fmt.Errorf(
 			"trusting installed %s hooks: %w; fix the harness CLI and rerun aht manage integrations install %s",
@@ -171,18 +180,24 @@ func applyJSONCommandHooks(
 	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(harness, plan)
 
 	return func(harnessConfig map[string]any) (bool, error) {
-		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig, desiredConfig})
+		isManaged := isManagedSourceHookCommand(
+			source,
+			[]map[string]any{harnessConfig, desiredConfig},
+		)
 		changed := false
+
 		hooks := harnessConfig
 		if plan.HooksAtRoot {
 			changed = removeWrappedCommandHooks(harnessConfig, isManaged)
 		} else {
 			var err error
+
 			hooks, err = hooksObject(harnessConfig)
 			if err != nil {
 				return false, err
 			}
 		}
+
 		for _, event := range events {
 			updated, err := upsertManagedCommandHookGroups(
 				hooks,
@@ -193,13 +208,21 @@ func applyJSONCommandHooks(
 			if err != nil {
 				return false, err
 			}
+
 			changed = changed || updated
 		}
+
 		for event := range hooks {
 			if _, desired := desiredByEvent[event]; desired {
 				continue
 			}
-			removed := removeManagedJSONHookEvent(hooks, event, isManaged, removeManagedCommandHookGroups)
+
+			removed := removeManagedJSONHookEvent(
+				hooks,
+				event,
+				isManaged,
+				removeManagedCommandHookGroups,
+			)
 			changed = changed || removed
 		}
 
@@ -212,12 +235,15 @@ func hooksObject(harnessConfig map[string]any) (map[string]any, error) {
 	if !exists || value == nil {
 		hooks := make(map[string]any)
 		harnessConfig["hooks"] = hooks
+
 		return hooks, nil
 	}
+
 	hooks, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("%w: hooks is not an object", errHookConfigShape)
 	}
+
 	return hooks, nil
 }
 
@@ -226,10 +252,12 @@ func hookEventList(hooks map[string]any, event string) ([]any, error) {
 	if !exists || value == nil {
 		return nil, nil
 	}
+
 	definitions, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("%w: hooks.%s is not an array", errHookConfigShape, event)
 	}
+
 	return definitions, nil
 }
 
@@ -241,12 +269,15 @@ func buildJSONCommandHooks(
 	if !plan.OmitStatusMessage && statusMessage == "" {
 		statusMessage = managedMarker
 	}
+
 	desiredByEvent := make(map[string][]any)
+
 	events := make([]string, 0, len(plan.Hooks))
 	for _, hook := range plan.Hooks {
 		if _, exists := desiredByEvent[hook.Event]; !exists {
 			events = append(events, hook.Event)
 		}
+
 		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], commandHookGroup(
 			hook.Command,
 			hook.Matcher,
@@ -259,7 +290,9 @@ func buildJSONCommandHooks(
 	for _, hook := range plan.Hooks {
 		ownedCommands = append(ownedCommands, map[string]any{"command": hook.Command})
 	}
+
 	desiredConfig := map[string]any{"hooks": ownedCommands}
+
 	return desiredByEvent, events, desiredConfig
 }
 
@@ -292,12 +325,14 @@ func applyCursorJSONHooks(
 
 	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig})
+
 		changed := ensureCursorVersion(harnessConfig)
 		for _, hook := range plan.Hooks {
 			updated, err := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
 			if err != nil {
 				return false, err
 			}
+
 			changed = changed || updated
 		}
 
@@ -315,11 +350,17 @@ func ensureCursorVersion(harnessConfig map[string]any) bool {
 	return true
 }
 
-func upsertCursorHook(harnessConfig map[string]any, event string, command string, isManaged func(string) bool) (bool, error) {
+func upsertCursorHook(
+	harnessConfig map[string]any,
+	event string,
+	command string,
+	isManaged func(string) bool,
+) (bool, error) {
 	hooks, err := hooksObject(harnessConfig)
 	if err != nil {
 		return false, err
 	}
+
 	definitions, err := hookEventList(hooks, event)
 	if err != nil {
 		return false, err
@@ -346,16 +387,20 @@ func countManagedCursorHooks(
 ) (int, int) {
 	managedCount := 0
 	exactCount := 0
+
 	for _, definitionValue := range definitions {
 		definition, ok := definitionValue.(map[string]any)
 		if !ok {
 			continue
 		}
+
 		hookCommand, commandOK := definition["command"].(string)
 		if !commandOK || !isManaged(hookCommand) {
 			continue
 		}
+
 		managedCount++
+
 		if hookCommand == command {
 			exactCount++
 		}
@@ -367,12 +412,14 @@ func countManagedCursorHooks(
 func removeManagedCursorHooks(definitions []any, isManaged func(string) bool) ([]any, bool) {
 	cleanedDefinitions := make([]any, 0, len(definitions))
 	removed := false
+
 	for _, definitionValue := range definitions {
 		definition, ok := definitionValue.(map[string]any)
 		if !ok {
 			cleanedDefinitions = append(cleanedDefinitions, definitionValue)
 			continue
 		}
+
 		hookCommand, commandOK := definition["command"].(string)
 		if commandOK && isManaged(hookCommand) {
 			removed = true
@@ -401,10 +448,16 @@ func installManagedTextBlock(
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", plan.Path, err)
 	}
+
 	next := appendManagedTextBlock(cleaned, plan.Block)
 	if filepath.Ext(plan.Path) == ".toml" && validTOML(cleaned) && !validTOML(next) {
-		return Result{}, fmt.Errorf("%w: %s cannot take the managed block", errHookConfigShape, plan.Path)
+		return Result{}, fmt.Errorf(
+			"%w: %s cannot take the managed block",
+			errHookConfigShape,
+			plan.Path,
+		)
 	}
+
 	changed := current != next
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
@@ -457,7 +510,8 @@ func removeManagedTextBlock(current string, startMarker string, endMarker string
 		}
 
 		endOffset := strings.Index(current[start:], endMarker)
-		if endOffset < 0 || strings.Contains(current[start+len(startMarker):start+endOffset], startMarker) {
+		if endOffset < 0 ||
+			strings.Contains(current[start+len(startMarker):start+endOffset], startMarker) {
 			return "", errManagedBlockMarker
 		}
 
@@ -467,6 +521,7 @@ func removeManagedTextBlock(current string, startMarker string, endMarker string
 		}
 
 		before := strings.TrimRight(current[:start], " \t\r\n")
+
 		after := strings.TrimLeft(current[end:], "\r\n")
 		switch {
 		case before == "":
@@ -536,6 +591,7 @@ func installPluginDirectory(
 	if err != nil {
 		return Result{}, err
 	}
+
 	plugin := newPluginDirectoryInstall(plan, files)
 
 	if err := plugin.ensureManaged(opts.Force); err != nil {
@@ -546,6 +602,7 @@ func installPluginDirectory(
 	if err != nil {
 		return Result{}, err
 	}
+
 	if plan.Registration != nil {
 		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged)
 	}
@@ -558,7 +615,13 @@ func installPluginDirectory(
 	changed := pluginChanged || manifestChanged
 
 	if changed && !opts.DryRun {
-		if err := writePluginDirectoryChanges(plugin, plan.ImportManifest, manifest, pluginChanged, manifestChanged); err != nil {
+		if err := writePluginDirectoryChanges(
+			plugin,
+			plan.ImportManifest,
+			manifest,
+			pluginChanged,
+			manifestChanged,
+		); err != nil {
 			return Result{}, err
 		}
 	}
@@ -567,6 +630,7 @@ func installPluginDirectory(
 	if err != nil {
 		return Result{}, err
 	}
+
 	changed = changed || retiredChanged
 
 	label := installLabel(plan.Label, harness, "plugin")
@@ -589,11 +653,15 @@ func writePluginDirectoryChanges(
 	pluginChanged bool,
 	manifestChanged bool,
 ) error {
-	var rollback func() error
-	var commit func() error
-	var rollbackManifest func() error
+	var (
+		rollback         func() error
+		commit           func() error
+		rollbackManifest func() error
+	)
+
 	if pluginChanged {
 		var err error
+
 		rollback, commit, err = plugin.installStaged()
 		if err != nil {
 			return err
@@ -602,10 +670,12 @@ func writePluginDirectoryChanges(
 
 	if importPlan != nil && manifestChanged {
 		var err error
+
 		rollbackManifest, err = prepareImportManifestRollback(importPlan.Path)
 		if err != nil {
 			return rollbackPluginDirectory(rollback, err)
 		}
+
 		if err := writeImportManifest(importPlan.Path, manifest); err != nil {
 			return rollbackPluginDirectoryAndManifest(rollback, rollbackManifest, err)
 		}
@@ -620,6 +690,7 @@ func writePluginDirectoryChanges(
 
 func prepareImportManifestRollback(path string) (func() error, error) {
 	previous, err := os.ReadFile(path)
+
 	existed := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("reading import manifest rollback state: %w", err)
@@ -627,8 +698,14 @@ func prepareImportManifestRollback(path string) (func() error, error) {
 
 	return func() error {
 		if existed {
-			return writeFileAtomic(path, previous, "creating import manifest rollback directory", "restoring import manifest")
+			return writeFileAtomic(
+				path,
+				previous,
+				"creating import manifest rollback directory",
+				"restoring import manifest",
+			)
 		}
+
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("removing newly created import manifest: %w", err)
 		}
@@ -637,12 +714,16 @@ func prepareImportManifestRollback(path string) (func() error, error) {
 	}, nil
 }
 
-func rollbackPluginDirectoryAndManifest(rollbackPlugin, rollbackManifest func() error, cause error) error {
+func rollbackPluginDirectoryAndManifest(
+	rollbackPlugin func() error, rollbackManifest func() error,
+	cause error,
+) error {
 	if rollbackPlugin != nil {
 		if err := rollbackPlugin(); err != nil {
 			cause = errors.Join(cause, fmt.Errorf("rolling back plugin directory: %w", err))
 		}
 	}
+
 	if rollbackManifest != nil {
 		if err := rollbackManifest(); err != nil {
 			cause = errors.Join(cause, fmt.Errorf("rolling back import manifest: %w", err))
@@ -656,6 +737,7 @@ func rollbackPluginDirectory(rollback func() error, cause error) error {
 	if rollback == nil {
 		return cause
 	}
+
 	if err := rollback(); err != nil {
 		return errors.Join(cause, fmt.Errorf("rolling back plugin directory: %w", err))
 	}
@@ -676,7 +758,10 @@ func plannedImportManifest(
 	return importManifestWithPlan(*plan, now)
 }
 
-func importManifestWithPlan(plan harnesspkg.ImportManifestInstallPlan, now time.Time) (importManifest, bool, error) {
+func importManifestWithPlan(
+	plan harnesspkg.ImportManifestInstallPlan,
+	now time.Time,
+) (importManifest, bool, error) {
 	manifest, err := readImportManifest(plan.Path)
 	if err != nil {
 		return importManifest{}, false, err
@@ -722,6 +807,7 @@ func upsertImport(
 		if !changed {
 			return manifest, false
 		}
+
 		manifest.Imports = slices.Clone(manifest.Imports)
 		manifest.Imports[index] = next
 
@@ -738,6 +824,7 @@ func writeImportManifest(path string, manifest importManifest) error {
 	if err != nil {
 		return fmt.Errorf("encoding import manifest: %w", err)
 	}
+
 	data = append(data, '\n')
 
 	return writeFileAtomic(path, data, "creating config directory", "writing import manifest")
@@ -747,11 +834,18 @@ func writeFileAtomic(path string, data []byte, createDirError string, writeError
 	return writeFileAtomicMode(path, data, 0o600, createDirError, writeError)
 }
 
-func writeFileAtomicMode(path string, data []byte, mode os.FileMode, createDirError string, writeError string) error {
+func writeFileAtomicMode(
+	path string,
+	data []byte,
+	mode os.FileMode,
+	createDirError string,
+	writeError string,
+) error {
 	targetPath := path
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		targetPath = resolved
 	}
+
 	dir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("%s: %w", createDirError, err)
@@ -761,12 +855,15 @@ func writeFileAtomicMode(path string, data []byte, mode os.FileMode, createDirEr
 	if err != nil {
 		return fmt.Errorf("creating temp file for %s: %w", targetPath, err)
 	}
+
 	tempPath := temp.Name()
+
 	keep := false
 	defer func() {
 		if keep {
 			return
 		}
+
 		_ = temp.Close()
 		_ = os.Remove(tempPath)
 	}()
@@ -774,18 +871,23 @@ func writeFileAtomicMode(path string, data []byte, mode os.FileMode, createDirEr
 	if err := temp.Chmod(mode); err != nil {
 		return fmt.Errorf("setting temp file permissions: %w", err)
 	}
+
 	if _, err := temp.Write(data); err != nil {
 		return fmt.Errorf("%s: %w", writeError, err)
 	}
+
 	if err := temp.Sync(); err != nil {
 		return fmt.Errorf("syncing temp file: %w", err)
 	}
+
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("closing temp file: %w", err)
 	}
+
 	if err := os.Rename(tempPath, targetPath); err != nil {
 		return fmt.Errorf("%s: %w", writeError, err)
 	}
+
 	keep = true
 
 	return syncDir(dir)
@@ -817,19 +919,27 @@ func managedSource(source string, harness registry.Harness) string {
 }
 
 func isManagedSourceHookCommand(source string, configs []map[string]any) func(string) bool {
-	pattern := regexp.MustCompile(`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` + regexp.QuoteMeta(source) + `(?:['"\s]|$)`)
+	pattern := regexp.MustCompile(
+		`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` + regexp.QuoteMeta(
+			source,
+		) + `(?:['"\s]|$)`,
+	)
 	nativeID := nativeHookIDForSource(source)
+
 	binaries := make(map[string]bool)
 	for _, config := range configs {
 		collectOwnedHookBinaries(config, pattern, nativeID, binaries)
 	}
+
 	return func(command string) bool {
 		if pattern.MatchString(command) {
 			return true
 		}
+
 		if nativeID == "" {
 			return false
 		}
+
 		return canonicalNativeHookCommand(command, nativeID, binaries)
 	}
 }
@@ -839,37 +949,50 @@ func nativeHookIDForSource(source string) string {
 		if adapter.Definition().IntegrationSource != source {
 			continue
 		}
+
 		if _, ok := adapter.(harnesspkg.HookAdapter); ok {
 			return string(adapter.Definition().ID)
 		}
+
 		break
 	}
+
 	return ""
 }
 
-func canonicalNativeHookCommand(command, nativeID string, binaries map[string]bool) bool {
+func canonicalNativeHookCommand(command string, nativeID string, binaries map[string]bool) bool {
 	words, err := shlex.Split(command)
-	return err == nil && len(words) > 0 && binaries[words[0]] && canonicalNativeHookWords(command, nativeID, words)
+
+	return err == nil && len(words) > 0 && binaries[words[0]] &&
+		canonicalNativeHookWords(command, nativeID, words)
 }
 
-func canonicalNativeHookWords(command, nativeID string, words []string) bool {
+func canonicalNativeHookWords(command string, nativeID string, words []string) bool {
 	if nativeID == "" || len(words) != 6 ||
 		words[1] != "--json" || words[2] != "hook" || words[3] != nativeID ||
 		words[4] != "--event" || words[5] == "" {
 		return false
 	}
+
 	for i, word := range words {
 		words[i] = harnesspkg.ShellQuote(word)
 	}
+
 	return command == strings.Join(words, " ")
 }
 
-func collectOwnedHookBinaries(value any, sourcePattern *regexp.Regexp, nativeID string, binaries map[string]bool) {
+func collectOwnedHookBinaries(
+	value any,
+	sourcePattern *regexp.Regexp,
+	nativeID string,
+	binaries map[string]bool,
+) {
 	switch value := value.(type) {
 	case map[string]any:
 		if binary := ownedHookBinary(value, sourcePattern, nativeID); binary != "" {
 			binaries[binary] = true
 		}
+
 		for _, child := range value {
 			collectOwnedHookBinaries(child, sourcePattern, nativeID, binaries)
 		}
@@ -885,22 +1008,28 @@ func ownedHookBinary(hook map[string]any, sourcePattern *regexp.Regexp, nativeID
 	if !ok {
 		return ""
 	}
+
 	tagged := sourcePattern.MatchString(command)
+
 	marked := hook["statusMessage"] == managedMarker
 	if !tagged && !marked {
 		return ""
 	}
+
 	words, err := shlex.Split(command)
 	if err != nil || len(words) < 3 {
 		return ""
 	}
+
 	binary := words[0]
 	if tagged && words[1] == "report" {
 		return binary
 	}
+
 	if marked && canonicalNativeHookWords(command, nativeID, words) {
 		return binary
 	}
+
 	return ""
 }
 
@@ -917,6 +1046,7 @@ func installMessage(label string, changed bool, dryRun bool) string {
 	if dryRun {
 		return "dry run: " + label + " not written"
 	}
+
 	if !changed {
 		return "already installed"
 	}

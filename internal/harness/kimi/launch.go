@@ -11,10 +11,15 @@ import (
 
 var (
 	errKimiConfigMissing = errors.New("kimi-code config.toml is missing")
-	errKimiInitialPrompt = errors.New("kimi-code interactive sessions take no initial prompt on the command line")
+	errKimiInitialPrompt = errors.New(
+		"kimi-code interactive sessions take no initial prompt on the command line",
+	)
 )
 
-func (kimiCodeHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (kimiCodeHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	home := filepath.Join(paths.Root, "kimi")
 	provider := harness.LaunchProviderName
 	header := fmt.Sprintf(`default_model = %[1]q
@@ -46,6 +51,7 @@ capabilities = ["tool_use"]
 				if existing == nil {
 					return nil, errKimiConfigMissing
 				}
+
 				return append([]byte(header), existing...), nil
 			},
 		}},
@@ -56,6 +62,7 @@ capabilities = ["tool_use"]
 			if prompt != "" {
 				return nil, errKimiInitialPrompt
 			}
+
 			return []string{"--model", provider}, nil
 		},
 		ShellTool: harness.LaunchTool{

@@ -49,6 +49,7 @@ func NestedString(payload map[string]any, path ...string) string {
 		if !ok {
 			return ""
 		}
+
 		current = currentMap[part]
 	}
 
@@ -66,10 +67,12 @@ func FirstArrayString(payload map[string]any, keys ...string) string {
 		if !ok {
 			continue
 		}
+
 		items, ok := value.([]any)
 		if !ok {
 			continue
 		}
+
 		for _, item := range items {
 			text, textOK := item.(string)
 			if textOK && strings.TrimSpace(text) != "" {
@@ -87,6 +90,7 @@ func PayloadBoolString(payload map[string]any, keys ...string) string {
 		if !ok {
 			continue
 		}
+
 		switch typed := value.(type) {
 		case bool:
 			return strconv.FormatBool(typed)
@@ -108,6 +112,7 @@ func PayloadBool(payload map[string]any, keys ...string) bool {
 		if !ok {
 			continue
 		}
+
 		switch typed := value.(type) {
 		case bool:
 			return typed

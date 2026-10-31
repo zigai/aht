@@ -16,6 +16,7 @@ func ExampleNewClientForSocket() {
 
 func ExampleClient_List() {
 	client := broker.NewClientForSocket("/path/to/offline.sock")
+
 	_, err := client.List(context.Background(), registry.Filter{})
 	if broker.IsUnavailable(err) {
 		fmt.Println("broker is offline")

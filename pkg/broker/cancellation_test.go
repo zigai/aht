@@ -36,20 +36,26 @@ func TestRequestsCancelBlockedResponse(t *testing.T) {
 				if json.NewDecoder(connection).Decode(&request) == nil {
 					close(requestRead)
 				}
+
 				_, _ = io.Copy(io.Discard, connection)
 			})
+
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
+
 			result := make(chan error, 1)
 			go func() {
 				result <- operation(ctx, client)
 			}()
+
 			select {
 			case <-requestRead:
 			case <-time.After(time.Second):
 				t.Fatal("request was not received")
 			}
+
 			cancel()
+
 			select {
 			case err := <-result:
 				if !errors.Is(err, context.Canceled) {
@@ -70,16 +76,19 @@ func TestSubscriptionCloseJoinsReader(t *testing.T) {
 		if json.NewDecoder(connection).Decode(&request) != nil {
 			return
 		}
+
 		_ = json.NewEncoder(connection).Encode(broker.Response{
 			Version: broker.ProtocolVersion, ID: request.ID, Type: "snapshot",
 			Snapshot: &registry.StateSnapshot{},
 		})
 		_, _ = io.Copy(io.Discard, connection)
 	})
+
 	subscription, err := client.Subscribe(t.Context(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	<-subscription.Snapshots
 	subscription.Close()
 
@@ -95,31 +104,43 @@ func TestSubscriptionCloseJoinsReader(t *testing.T) {
 
 func socketClient(t *testing.T, serve func(net.Conn)) *broker.Client {
 	t.Helper()
+
 	path, err := shortSocketPath()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = os.Remove(path) })
+
 	var listenConfig net.ListenConfig
+
 	listener, err := listenConfig.Listen(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	done := make(chan struct{})
+
 	t.Cleanup(func() {
 		_ = listener.Close()
+
 		<-done
 	})
+
 	go func() {
 		defer close(done)
+
 		connection, acceptErr := listener.Accept()
 		if acceptErr != nil {
 			return
 		}
+
 		defer func() { _ = connection.Close() }()
+
 		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 		serve(connection)
 	}()
+
 	return broker.NewClientForSocket(path)
 }
 
@@ -129,13 +150,16 @@ func shortSocketPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating temporary socket path: %w", err)
 	}
+
 	path := socketFile.Name()
 	if err := socketFile.Close(); err != nil {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("closing temporary socket path: %w", err)
 	}
+
 	if err := os.Remove(path); err != nil {
 		return "", fmt.Errorf("removing temporary socket path: %w", err)
 	}
+
 	return path, nil
 }

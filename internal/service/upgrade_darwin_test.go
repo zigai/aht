@@ -36,7 +36,12 @@ func TestLaunchAgentUpgradePreservesSettingsAndRunningState(t *testing.T) {
 func verifyLaunchAgentUpgrade(t *testing.T, state string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	options := Options{Binary: "/tmp/new aht", StorePath: "/tmp/state & <data>.json", Interval: 7 * time.Second, GracePeriod: 19 * time.Second}
+	options := Options{
+		Binary:      "/tmp/new aht",
+		StorePath:   "/tmp/state & <data>.json",
+		Interval:    7 * time.Second,
+		GracePeriod: 19 * time.Second,
+	}
 	want, err := RenderLaunchAgent(options)
 	if err != nil {
 		t.Fatal(err)

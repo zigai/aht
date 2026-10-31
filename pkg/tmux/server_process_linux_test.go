@@ -8,11 +8,22 @@ import (
 
 func TestServerDiscoveryToleratesVanishedProcesses(t *testing.T) {
 	t.Parallel()
-	for _, err := range []error{os.ErrNotExist, os.ErrPermission, errNotTmuxServer, &os.PathError{Op: "read", Path: "/proc/42/cmdline", Err: syscall.ESRCH}} {
+
+	for _, err := range []error{
+		os.ErrNotExist,
+		os.ErrPermission,
+		errNotTmuxServer,
+		&os.PathError{
+			Op:   "read",
+			Path: "/proc/42/cmdline",
+			Err:  syscall.ESRCH,
+		},
+	} {
 		if !skippableServerProcessError(err) {
 			t.Fatalf("discovery rejected a transient process: %v", err)
 		}
 	}
+
 	if skippableServerProcessError(syscall.EIO) {
 		t.Fatal("discovery hid an unexpected failure")
 	}
@@ -20,6 +31,7 @@ func TestServerDiscoveryToleratesVanishedProcesses(t *testing.T) {
 
 func TestServerProcessFromSeparatesServersFromClients(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		name   string
 		comm   string
@@ -35,8 +47,15 @@ func TestServerProcessFromSeparatesServersFromClients(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+
 			if _, server := ServerProcessFrom(42, test.comm, test.args); server != test.server {
-				t.Fatalf("ServerProcessFrom(%q, %q) = %t, want %t", test.comm, test.args, server, test.server)
+				t.Fatalf(
+					"ServerProcessFrom(%q, %q) = %t, want %t",
+					test.comm,
+					test.args,
+					server,
+					test.server,
+				)
 			}
 		})
 	}

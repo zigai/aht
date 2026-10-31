@@ -20,6 +20,7 @@ const permissionMarker = ".aht-permission-marker"
 
 func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
 	t.Helper()
+
 	switch contract.ID {
 	case registry.Harness("claude"), registry.Harness("codex"), registry.Harness("copilot"):
 		runCLIPermissionScenarios(t, contract, oracle)
@@ -41,68 +42,115 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 	}
 }
 
-func newPermissionHost(t *testing.T, contract hostContract, oracle string, allow bool) *isolatedHost {
+func newPermissionHost(
+	t *testing.T,
+	contract hostContract,
+	oracle string,
+	allow bool,
+) *isolatedHost {
 	t.Helper()
 	host := newIsolatedHost(t, contract, oracle, false)
+
 	command := "printf " + compatibilityMarker + " > " + permissionMarker + "; cat " + permissionMarker
 	if contract.ID == registry.Harness("hermes") {
 		// Hermes asks only for dangerous shell operations. This nonexistent
 		// relative target cannot affect anything outside the work directory.
 		command = "rm -rf .aht-permission-unused; " + command
 	}
+
 	host.scriptShellRoundTrip(host.scriptCallID(false), command, !allow)
 	host.startTracker(t)
+
 	return host
 }
 
 func assertPermissionWaiting(t *testing.T, host *isolatedHost) registry.Session {
 	t.Helper()
-	waiting := host.waitForObservation(t, "live native permission wait before tool execution", func(session registry.Session) bool {
-		native := session.Observations.Native
-		return native != nil && native.SessionID != "" && native.Activity != nil &&
-			*native.Activity == registry.ActivityWaiting && session.Presence() == registry.PresenceLive &&
-			filepath.Clean(session.CWD) == filepath.Clean(host.launched.Work)
-	})
-	if waiting.Activity() == nil || (*waiting.Activity() != registry.ActivityWaiting && *waiting.Activity() != registry.ActivityUnknown) {
+
+	waiting := host.waitForObservation(
+		t,
+		"live native permission wait before tool execution",
+		func(session registry.Session) bool {
+			native := session.Observations.Native
+
+			return native != nil && native.SessionID != "" && native.Activity != nil &&
+				*native.Activity == registry.ActivityWaiting && session.Presence() == registry.PresenceLive &&
+				filepath.Clean(session.CWD) == filepath.Clean(host.launched.Work)
+		},
+	)
+	if waiting.Activity() == nil ||
+		(*waiting.Activity() != registry.ActivityWaiting && *waiting.Activity() != registry.ActivityUnknown) {
 		t.Fatalf("native permission wait has incompatible effective activity: %+v", waiting)
 	}
+
 	assertPermissionMarker(t, host, false)
+
 	if count := len(host.provider.Requests()); count != 1 {
-		t.Fatalf("permission decision must precede tool continuation; provider requests = %d", count)
+		t.Fatalf(
+			"permission decision must precede tool continuation; provider requests = %d",
+			count,
+		)
 	}
+
 	return waiting
 }
 
-func assertPermissionOutcome(t *testing.T, host *isolatedHost, waiting registry.Session, allow bool) {
+func assertPermissionOutcome(
+	t *testing.T,
+	host *isolatedHost,
+	waiting registry.Session,
+	allow bool,
+) {
 	t.Helper()
-	host.waitForObservation(t, "same native session leaving permission wait", func(session registry.Session) bool {
-		native := session.Observations.Native
-		return session.ID == waiting.ID && native != nil &&
-			native.SessionID == waiting.Observations.Native.SessionID &&
-			((native.Presence != nil && *native.Presence == registry.PresenceGone) ||
-				(native.Activity != nil && *native.Activity != registry.ActivityWaiting)) &&
-			(session.Activity() == nil || *session.Activity() != registry.ActivityWaiting)
-	})
+	host.waitForObservation(
+		t,
+		"same native session leaving permission wait",
+		func(session registry.Session) bool {
+			native := session.Observations.Native
+
+			return session.ID == waiting.ID && native != nil &&
+				native.SessionID == waiting.Observations.Native.SessionID &&
+				((native.Presence != nil && *native.Presence == registry.PresenceGone) ||
+					(native.Activity != nil && *native.Activity != registry.ActivityWaiting)) &&
+				(session.Activity() == nil || *session.Activity() != registry.ActivityWaiting)
+		},
+	)
 	assertPermissionMarker(t, host, allow)
+
 	if err := host.provider.Err(); err != nil {
-		t.Fatalf("permission continuation failed: %v\n%s", err, providerRequestSummary(host.provider))
+		t.Fatalf(
+			"permission continuation failed: %v\n%s",
+			err,
+			providerRequestSummary(host.provider),
+		)
 	}
 	// Rejection may terminate the native turn without asking the model again.
 	// Drivers verify that native outcome; the marker must still be absent.
 	if count := len(host.provider.Requests()); allow && count != 2 {
-		t.Fatalf("approved continuation requests = %d, want 2\n%s", count, providerRequestSummary(host.provider))
+		t.Fatalf(
+			"approved continuation requests = %d, want 2\n%s",
+			count,
+			providerRequestSummary(host.provider),
+		)
 	}
 }
 
 func assertPermissionMarker(t *testing.T, host *isolatedHost, exists bool) {
 	t.Helper()
+
 	data, err := os.ReadFile(filepath.Join(host.launched.Work, permissionMarker))
 	if !exists {
 		if !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("tool executed before approval or after rejection: marker=%q error=%v", data, err)
+			t.Fatalf(
+				"tool executed before approval or after rejection: marker=%q error=%v",
+				data,
+				err,
+			)
 		}
+
 		return
 	}
+
 	if err != nil || string(data) != "aht-compat-marker" {
 		t.Fatalf("approved tool did not produce exact marker: marker=%q error=%v", data, err)
 	}
@@ -114,45 +162,63 @@ type permissionProcess struct {
 	err     error
 }
 
-func startPermissionProcess(t *testing.T, host *isolatedHost, command *exec.Cmd) *permissionProcess {
+func startPermissionProcess(
+	t *testing.T,
+	host *isolatedHost,
+	command *exec.Cmd,
+) *permissionProcess {
 	t.Helper()
+
 	logFile, err := os.CreateTemp(host.launched.Root, "permission-*.log")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if command.Stdout == nil {
 		command.Stdout = logFile
 	}
+
 	if command.Stderr == nil {
 		command.Stderr = logFile
 	}
+
 	if command.SysProcAttr == nil {
 		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
+
 	command.Cancel = func() error { return syscall.Kill(-command.Process.Pid, syscall.SIGTERM) }
+
 	command.WaitDelay = compatibilityWaitDelay
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
+
 		t.Fatalf("start permission host: %v", err)
 	}
+
 	done := make(chan struct{})
+
 	process := &permissionProcess{command: command, done: done}
 	go func() {
 		process.err = command.Wait()
+
 		close(done)
 	}()
+
 	t.Cleanup(func() {
 		process.stopOwnedGroup(t)
+
 		_ = logFile.Close()
 		if t.Failed() {
 			logPermissionFailure(t, host, logFile.Name(), command.Process.Pid)
 		}
 	})
+
 	return process
 }
 
 func (process *permissionProcess) stopOwnedGroup(t *testing.T) {
 	t.Helper()
+
 	pid := process.command.Process.Pid
 	select {
 	case <-process.done:
@@ -160,12 +226,15 @@ func (process *permissionProcess) stopOwnedGroup(t *testing.T) {
 		// A production transport owns a separate native process group.
 		// Let its signal handler reap that group before forcing this one down.
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
+
 		select {
 		case <-process.done:
 		case <-time.After(4 * time.Second):
 		}
 	}
+
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
+
 	select {
 	case <-process.done:
 	case <-time.After(5 * time.Second):
@@ -175,16 +244,30 @@ func (process *permissionProcess) stopOwnedGroup(t *testing.T) {
 
 func logPermissionFailure(t *testing.T, host *isolatedHost, logPath string, pid int) {
 	t.Helper()
+
 	log, _ := os.ReadFile(logPath)
 	events, _ := os.ReadFile(host.nativeEvents)
-	t.Logf("isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s", log, events, providerRequestSummary(host.provider))
+	t.Logf(
+		"isolated permission host output:\n%s\nnative events:\n%s\nprovider:\n%s",
+		log,
+		events,
+		providerRequestSummary(host.provider),
+	)
 	// Cleanup runs after t.Context is canceled. This diagnostic owns a
 	// fresh, short budget and must never replace the scenario failure.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
 	observed, probeErr := host.launched.Sessions(ctx)
+
 	cancel()
+
 	sessions, encodeErr := json.MarshalIndent(observed, "", "  ")
-	t.Logf("owned launcher PID=%d; isolated native session state (probe error: %v, encode error: %v):\n%s", pid, probeErr, encodeErr, sessions)
+	t.Logf(
+		"owned launcher PID=%d; isolated native session state (probe error: %v, encode error: %v):\n%s",
+		pid,
+		probeErr,
+		encodeErr,
+		sessions,
+	)
 }
 
 func (process *permissionProcess) waitErr() error {
@@ -194,6 +277,7 @@ func (process *permissionProcess) waitErr() error {
 
 func (process *permissionProcess) wait(t *testing.T) {
 	t.Helper()
+
 	select {
 	case <-process.done:
 		if err := process.waitErr(); err != nil {
@@ -206,7 +290,12 @@ func (process *permissionProcess) wait(t *testing.T) {
 
 func (process *permissionProcess) interrupt(t *testing.T) {
 	t.Helper()
-	if err := syscall.Kill(-process.command.Process.Pid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+
+	if err := syscall.Kill(
+		-process.command.Process.Pid,
+		syscall.SIGINT,
+	); err != nil &&
+		!errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("interrupt owned permission host: %v", err)
 	}
 }

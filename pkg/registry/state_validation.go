@@ -10,6 +10,7 @@ func validateSnapshot(snap snapshot) error {
 			return fmt.Errorf("%w: session %q: %s", ErrCorruptStore, id, reason)
 		}
 	}
+
 	return nil
 }
 
@@ -17,12 +18,15 @@ func storedSessionCorruption(id string, session Session) string {
 	if reason := storedSessionIdentityCorruption(id, session); reason != "" {
 		return reason
 	}
+
 	if reason := storedSessionStateCorruption(session); reason != "" {
 		return reason
 	}
+
 	if !validStateDetail(session.Detail, session.Activity()) {
 		return "invalid activity detail"
 	}
+
 	return storedObservationCorruption(session.Observations)
 }
 
@@ -45,9 +49,11 @@ func storedSessionStateCorruption(session Session) string {
 	if session.Liveness == nil {
 		return "missing liveness"
 	}
+
 	if activity := session.Activity(); activity != nil && !activity.Valid() {
 		return "invalid activity"
 	}
+
 	switch {
 	case session.Process != nil && !validStoredProcess(*session.Process, false):
 		return "invalid process identity"
@@ -66,23 +72,30 @@ func storedObservationCorruption(observations Observations) string {
 	if native := observations.Native; native != nil && !validStoredNativeObservation(*native) {
 		return "invalid native observation"
 	}
+
 	if process := observations.Process; process != nil && !validStoredProcessObservation(*process) {
 		return "invalid process observation"
 	}
-	if multiplexer := observations.Location; multiplexer != nil && !validStoredMultiplexerObservation(*multiplexer) {
+
+	if multiplexer := observations.Location; multiplexer != nil &&
+		!validStoredMultiplexerObservation(*multiplexer) {
 		return "invalid multiplexer observation"
 	}
+
 	if catalog := observations.Catalog; catalog != nil && !validStoredCatalogObservation(*catalog) {
 		return "invalid catalog observation"
 	}
+
 	if screen := observations.Screen; screen != nil && !validStoredScreenObservation(*screen) {
 		return "invalid screen observation"
 	}
+
 	return ""
 }
 
 func validStoredProcessObservation(observation ProcessObservation) bool {
-	return !observation.ObservedAt.IsZero() && validStoredProcess(observation.Process, !observation.Present)
+	return !observation.ObservedAt.IsZero() &&
+		validStoredProcess(observation.Process, !observation.Present)
 }
 
 func validStoredMultiplexerObservation(observation MultiplexerObservation) bool {
@@ -115,7 +128,8 @@ func validStoredScreenObservation(observation ScreenObservation) bool {
 }
 
 func validStoredActivityDecision(decision ActivityDecision) bool {
-	return !decision.ObservedAt.IsZero() && validStoredProcess(decision.Process, true) && decision.ManifestVersion >= 0
+	return !decision.ObservedAt.IsZero() && validStoredProcess(decision.Process, true) &&
+		decision.ManifestVersion >= 0
 }
 
 func validStoredLifecycle(lifecycle *NativeLifecycle) bool {
@@ -135,5 +149,6 @@ func validStoredProcess(process ProcessIdentity, allowZero bool) bool {
 	if process == zero {
 		return allowZero
 	}
+
 	return process.Complete() && process.PPID >= 0 && process.ProcessGroupID >= 0
 }

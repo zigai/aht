@@ -7,9 +7,29 @@ import (
 )
 
 func (hermesHarness) Transcript() transcript.Reader {
-	return transcript.Reader{Patterns: []string{"state.db"}, Sources: transcriptSources, SkipDirectory: nil, SkipFile: nil, SourceMetadata: nil, Initialize: nil, Extra: nil, Record: nil, FastRecord: nil, Document: nil, Query: transcriptQuery, LocalTitles: false, RewritableHeaders: nil, Parent: nil}
+	return transcript.Reader{
+		Patterns:          []string{"state.db"},
+		Sources:           transcriptSources,
+		SkipDirectory:     nil,
+		SkipFile:          nil,
+		SourceMetadata:    nil,
+		Initialize:        nil,
+		Extra:             nil,
+		Record:            nil,
+		FastRecord:        nil,
+		Document:          nil,
+		Query:             transcriptQuery,
+		LocalTitles:       false,
+		RewritableHeaders: nil,
+		Parent:            nil,
+	}
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{filepath.Join(transcript.EnvPath("HERMES_HOME", filepath.Join(home, ".hermes")), "state.db")}, nil
+	return []string{
+		filepath.Join(
+			transcript.EnvPath("HERMES_HOME", filepath.Join(home, ".hermes")),
+			"state.db",
+		),
+	}, nil
 }

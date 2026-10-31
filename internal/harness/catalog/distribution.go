@@ -11,5 +11,17 @@ func DistributionFor(id registry.Harness) harness.Distribution {
 			return provider.Distribution()
 		}
 	}
-	return harness.Distribution{Source: "", Package: "", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "", Family: "", PackageExtras: "", Install: nil}
+
+	return harness.Distribution{
+		Source:        "",
+		Package:       "",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "",
+		Family:        "",
+		PackageExtras: "",
+		Install:       nil,
+	}
 }

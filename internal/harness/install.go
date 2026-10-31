@@ -164,7 +164,11 @@ type PluginRegistration interface {
 	Inspect(ctx context.Context, pluginDir string) (PluginRegistrationState, error)
 	EnsureMutable(pluginDir string) error
 	Install(ctx context.Context, pluginDir string) error
-	CleanupFailedInstall(ctx context.Context, previousState PluginRegistrationState, pluginDir string) error
+	CleanupFailedInstall(
+		ctx context.Context,
+		previousState PluginRegistrationState,
+		pluginDir string,
+	) error
 	Remove(ctx context.Context, pluginDir string) error
 }
 
@@ -189,7 +193,13 @@ func (NativeCatalogAction) installAction() {}
 
 func (ShimAction) installAction() {}
 
-func ReportHookCommand[T Transition](binary string, harness registry.Harness, transition T, event string, source string) string {
+func ReportHookCommand[T Transition](
+	binary string,
+	harness registry.Harness,
+	transition T,
+	event string,
+	source string,
+) string {
 	return reportHookCommand(binary, harness, transition, event, source, "--raw-stdin")
 }
 
@@ -200,7 +210,14 @@ func RawStdinDefaultsReportHookCommand[T Transition](
 	event string,
 	source string,
 ) string {
-	return reportHookCommand(binary, harness, transition, event, source, "--raw-stdin-defaults-only")
+	return reportHookCommand(
+		binary,
+		harness,
+		transition,
+		event,
+		source,
+		"--raw-stdin-defaults-only",
+	)
 }
 
 // State returns the activity or presence state represented by the transition.
@@ -224,15 +241,24 @@ func ShellQuote(value string) string {
 
 func ScriptString(value string) string {
 	var encoded strings.Builder
+
 	encoder := json.NewEncoder(&encoded)
 	encoder.SetEscapeHTML(false)
+
 	if err := encoder.Encode(value); err != nil {
 		panic(fmt.Errorf("encode script string: %w", err))
 	}
+
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
-func RenderScriptTemplate(template string, integrationID string, binary string, source string, version int) string {
+func RenderScriptTemplate(
+	template string,
+	integrationID string,
+	binary string,
+	source string,
+	version int,
+) string {
 	return strings.NewReplacer(
 		"{{MANAGED_MARKER}}", ManagedMarker,
 		"{{INTEGRATION_ID}}", integrationID,
@@ -258,10 +284,12 @@ func reportHookCommand[T Transition](
 		ShellQuote(string(harness)),
 	}
 	flag, value := hookTransitionArgument(transition)
+
 	parts = append(parts, flag, ShellQuote(value))
 	if event != "" {
 		parts = append(parts, "--event", ShellQuote(event))
 	}
+
 	parts = append(
 		parts,
 		"--reporter-version", ShellQuote(strconv.Itoa(IntegrationVersion)),
@@ -269,6 +297,7 @@ func reportHookCommand[T Transition](
 		stdinFlag,
 		"--quiet",
 	)
+
 	return strings.Join(parts, " ")
 }
 

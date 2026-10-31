@@ -9,7 +9,10 @@ import (
 
 var errEmptyPrompt = errors.New("goose headless run needs a prompt")
 
-func (gooseHarness) LaunchPlan(_ harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (gooseHarness) LaunchPlan(
+	_ harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	return harness.LaunchPlan{
 		Executable: gooseCommand,
 		Protocol:   fakeprovider.ProtocolOpenAIChat,
@@ -33,13 +36,35 @@ func (gooseHarness) LaunchPlan(_ harness.LaunchPaths, model harness.LaunchModel)
 			if prompt == "" {
 				return nil, errEmptyPrompt
 			}
-			return []string{"run", "--text", prompt, "--provider", "openai", "--model", model.Model, "--max-turns", "2", "--quiet"}, nil
+
+			return []string{
+				"run",
+				"--text",
+				prompt,
+				"--provider",
+				"openai",
+				"--model",
+				model.Model,
+				"--max-turns",
+				"2",
+				"--quiet",
+			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			if prompt == "" {
 				return []string{"session", "--provider", "openai", "--model", model.Model}, nil
 			}
-			return []string{"run", "--text", prompt, "--interactive", "--provider", "openai", "--model", model.Model}, nil
+
+			return []string{
+				"run",
+				"--text",
+				prompt,
+				"--interactive",
+				"--provider",
+				"openai",
+				"--model",
+				model.Model,
+			}, nil
 		},
 		ShellTool: harness.LaunchTool{
 			Name: "shell",

@@ -15,8 +15,12 @@ const (
 	launchMaxTokens     = 4096
 )
 
-func (piHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (piHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	agentDir := filepath.Join(paths.Root, "pi-agent")
+
 	modelsJSON, err := launchModelsJSON(model)
 	if err != nil {
 		return harness.LaunchPlan{}, err
@@ -33,10 +37,29 @@ func (piHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel
 		Setup:    nil,
 		Services: nil,
 		Headless: func(string) ([]string, error) {
-			return []string{"--mode", "rpc", "--provider", harness.LaunchProviderName, "--model", model.Model, "--approve", "--no-skills"}, nil
+			return []string{
+				"--mode",
+				"rpc",
+				"--provider",
+				harness.LaunchProviderName,
+				"--model",
+				model.Model,
+				"--approve",
+				"--no-skills",
+			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
-			return withPrompt([]string{"--provider", harness.LaunchProviderName, "--model", model.Model, "--approve", "--no-skills"}, prompt), nil
+			return withPrompt(
+				[]string{
+					"--provider",
+					harness.LaunchProviderName,
+					"--model",
+					model.Model,
+					"--approve",
+					"--no-skills",
+				},
+				prompt,
+			), nil
 		},
 		ShellTool: harness.LaunchTool{
 			Name:      "bash",
@@ -52,7 +75,10 @@ func launchModelsJSON(model harness.LaunchModel) ([]byte, error) {
 				"baseUrl": model.Endpoint + "/v1",
 				"api":     "openai-completions",
 				"apiKey":  model.APIKey,
-				"compat":  map[string]any{"supportsDeveloperRole": false, "supportsReasoningEffort": false},
+				"compat": map[string]any{
+					"supportsDeveloperRole":   false,
+					"supportsReasoningEffort": false,
+				},
 				"models": []any{map[string]any{
 					"id":            model.Model,
 					"name":          launchModelName,
@@ -64,10 +90,12 @@ func launchModelsJSON(model harness.LaunchModel) ([]byte, error) {
 			},
 		},
 	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("encode pi models: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -75,5 +103,6 @@ func withPrompt(args []string, prompt string) []string {
 	if prompt == "" {
 		return args
 	}
+
 	return append(args, "--", prompt)
 }

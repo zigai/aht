@@ -26,9 +26,17 @@ type copilotHookSpec struct {
 
 func New() copilotHarness {
 	return copilotHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true, CatalogCreates: false,
-		ID:           registry.Harness("copilot"),
-		Aliases:      []string{"github-copilot", "github_copilot", "copilot-cli", "copilot_cli", "github-copilot-cli", "github_copilot_cli"},
+		ExclusiveProcess: true,
+		CatalogCreates:   false,
+		ID:               registry.Harness("copilot"),
+		Aliases: []string{
+			"github-copilot",
+			"github_copilot",
+			"copilot-cli",
+			"copilot_cli",
+			"github-copilot-cli",
+			"github_copilot_cli",
+		},
 		ProcessNames: []string{"copilot"},
 		Env: harness.EnvKeys{
 			SessionID:   nil,
@@ -59,13 +67,17 @@ func (copilotHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	return harness.InstallPlan{Actions: []harness.InstallAction{harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
-		Path:        filepath.Join(base, "hooks", copilotHookFileName),
-		Label:       "copilot hooks",
-		ConfigLabel: "copilot hooks",
-		Content:     "",
-		JSONContent: copilotHookConfig(binary),
-	}}}}, nil
+	return harness.InstallPlan{
+		Actions: []harness.InstallAction{
+			harness.RenderedFileAction{Plan: harness.RenderedFileInstallPlan{
+				Path:        filepath.Join(base, "hooks", copilotHookFileName),
+				Label:       "copilot hooks",
+				ConfigLabel: "copilot hooks",
+				Content:     "",
+				JSONContent: copilotHookConfig(binary),
+			}},
+		},
+	}, nil
 }
 
 func (copilotHarness) ResumeCommand(sessionID string, _ string) []string {
@@ -82,12 +94,36 @@ func (copilotHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 
 func (copilotHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
 	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "copilot_notification_type", harness.PayloadStringAny(payload, "notificationType", "notification_type"))
-	harness.AddAttributeString(attributes, "copilot_hook_event", harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"))
-	harness.AddAttributeString(attributes, "copilot_tool_name", harness.PayloadStringAny(payload, "toolName", "tool_name"))
-	harness.AddAttributeString(attributes, "copilot_start_source", harness.PayloadString(payload, "source"))
-	harness.AddAttributeString(attributes, "copilot_reason", harness.PayloadString(payload, "reason"))
-	harness.AddAttributeString(attributes, "copilot_stop_reason", harness.PayloadStringAny(payload, "stopReason", "stop_reason"))
+	harness.AddAttributeString(
+		attributes,
+		"copilot_notification_type",
+		harness.PayloadStringAny(payload, "notificationType", "notification_type"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"copilot_hook_event",
+		harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"copilot_tool_name",
+		harness.PayloadStringAny(payload, "toolName", "tool_name"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"copilot_start_source",
+		harness.PayloadString(payload, "source"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"copilot_reason",
+		harness.PayloadString(payload, "reason"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"copilot_stop_reason",
+		harness.PayloadStringAny(payload, "stopReason", "stop_reason"),
+	)
 	harness.AddAttributeString(attributes, "copilot_error", harness.PayloadString(payload, "error"))
 
 	return harness.PayloadDefaults{
@@ -107,7 +143,11 @@ func copilotHookConfig(binary string) map[string]any {
 		{event: "userPromptSubmitted", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "preToolUse", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "permissionRequest", transition: harness.HookActivityWaiting, matcher: ""},
-		{event: "notification", transition: harness.HookActivityWaiting, matcher: "permission_prompt"},
+		{
+			event:      "notification",
+			transition: harness.HookActivityWaiting,
+			matcher:    "permission_prompt",
+		},
 		{event: "postToolUse", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "postToolUseFailure", transition: harness.HookActivityRunning, matcher: ""},
 		{event: "preCompact", transition: harness.HookActivityRunning, matcher: ""},
@@ -146,8 +186,16 @@ func copilotCommandHook(binary string, spec copilotHookSpec) map[string]any {
 }
 
 func copilotHookCommand(binary string, transition harness.HookTransition, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(binary, registry.Harness("copilot"), transition, event, copilotIntegrationSource) +
-		" --attribute " + harness.ShellQuote("copilot_hook_event="+event) +
+	return harness.RawStdinDefaultsReportHookCommand(
+		binary,
+		registry.Harness("copilot"),
+		transition,
+		event,
+		copilotIntegrationSource,
+	) +
+		" --attribute " + harness.ShellQuote(
+		"copilot_hook_event="+event,
+	) +
 		" >/dev/null 2>&1 || true"
 }
 
@@ -165,6 +213,7 @@ func copilotHome() string {
 	if value := strings.TrimSpace(os.Getenv("COPILOT_HOME")); value != "" {
 		return value
 	}
+
 	home := harness.HomeDir()
 	if home == "" {
 		return ""
@@ -173,9 +222,16 @@ func copilotHome() string {
 	return filepath.Join(home, ".copilot")
 }
 
-func (copilotHarness) LifecycleDefaults(event string, attributes map[string]string) harness.LifecycleDefaults {
+func (copilotHarness) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) harness.LifecycleDefaults {
 	if event == "" {
 		event = attributes["copilot_hook_event"]
 	}
-	return harness.TranslateLifecycle(event, harness.FirstAttribute(attributes, "copilot_start_source", "source", "reason"))
+
+	return harness.TranslateLifecycle(
+		event,
+		harness.FirstAttribute(attributes, "copilot_start_source", "source", "reason"),
+	)
 }

@@ -10,9 +10,14 @@ func TestResumeCommand(t *testing.T) {
 	t.Parallel()
 
 	h := New()
-	if cmd := h.ResumeCommand("T-12345", ""); len(cmd) != 4 || cmd[0] != "amp" || cmd[1] != "threads" || cmd[2] != "continue" || cmd[3] != "T-12345" {
+	if cmd := h.ResumeCommand(
+		"T-12345",
+		"",
+	); len(cmd) != 4 || cmd[0] != "amp" || cmd[1] != "threads" || cmd[2] != "continue" ||
+		cmd[3] != "T-12345" {
 		t.Fatalf("unexpected resume command: %v", cmd)
 	}
+
 	if cmd := h.ResumeCommand("", ""); cmd != nil {
 		t.Fatalf("expected nil for empty session ID, got: %v", cmd)
 	}
@@ -20,6 +25,7 @@ func TestResumeCommand(t *testing.T) {
 
 func TestConfigDirXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/custom-xdg")
+
 	if got := ampConfigDir(); got != "/tmp/custom-xdg/amp" {
 		t.Fatalf("expected XDG_CONFIG_HOME/amp, got %q", got)
 	}
@@ -29,11 +35,15 @@ func TestDefinition(t *testing.T) {
 	t.Parallel()
 
 	h := New()
+
 	def := h.Definition()
 	if def.ID != registry.Harness("amp") {
 		t.Fatalf("expected ID %q, got %q", registry.Harness("amp"), def.ID)
 	}
-	if !def.Capabilities.SessionStart || !def.Capabilities.SessionEnd || !def.Capabilities.RunningIdle || !def.Capabilities.WaitingPermission {
+
+	if !def.Capabilities.SessionStart || !def.Capabilities.SessionEnd ||
+		!def.Capabilities.RunningIdle ||
+		!def.Capabilities.WaitingPermission {
 		t.Fatalf("unexpected capabilities: %+v", def.Capabilities)
 	}
 }

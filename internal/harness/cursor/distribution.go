@@ -7,10 +7,25 @@ import (
 )
 
 func (cursorHarness) Distribution() harness.Distribution {
-	return harness.Distribution{Source: "weekly", Package: "", Repo: "", Asset: "", URL: "", MaxVersion: "", Directory: "cursor", Family: "", PackageExtras: "", Install: distributionInstall}
+	return harness.Distribution{
+		Source:        "weekly",
+		Package:       "",
+		Repo:          "",
+		Asset:         "",
+		URL:           "",
+		MaxVersion:    "",
+		Directory:     "cursor",
+		Family:        "",
+		PackageExtras: "",
+		Install:       distributionInstall,
+	}
 }
 
-func distributionInstall(_ string, work, _ string) []harness.DistributionCommand {
+func distributionInstall(_ string, work string, _ string) []harness.DistributionCommand {
 	script := filepath.Join(work, "install-cursor.sh")
-	return []harness.DistributionCommand{harness.DownloadCommand("https://cursor.com/install", script), {Name: "bash", Args: []string{script}, Env: nil}}
+
+	return []harness.DistributionCommand{
+		harness.DownloadCommand("https://cursor.com/install", script),
+		{Name: "bash", Args: []string{script}, Env: nil},
+	}
 }

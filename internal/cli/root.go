@@ -56,14 +56,16 @@ const (
 )
 
 var (
-	version                      = "dev"
-	commit                       = "none"
-	date                         = "unknown"
-	errInvalidAttribute          = errors.New("invalid attribute")
-	errInvalidListSort           = errors.New("invalid list sort")
-	errUnexpectedReportArg       = errors.New("unexpected report argument")
-	errMissingReportHarness      = errors.New("missing harness")
-	errConflictingReportStdin    = errors.New("--raw-stdin and --raw-stdin-defaults-only cannot be used together")
+	version                   = "dev"
+	commit                    = "none"
+	date                      = "unknown"
+	errInvalidAttribute       = errors.New("invalid attribute")
+	errInvalidListSort        = errors.New("invalid list sort")
+	errUnexpectedReportArg    = errors.New("unexpected report argument")
+	errMissingReportHarness   = errors.New("missing harness")
+	errConflictingReportStdin = errors.New(
+		"--raw-stdin and --raw-stdin-defaults-only cannot be used together",
+	)
 	errMissingReportIdentity     = errors.New("missing report identity or transition")
 	errSilentDoctorFailure       = errors.New("")
 	errInvalidObserveInterval    = errors.New("interval must be positive")
@@ -72,8 +74,12 @@ var (
 	errProcessEvidenceSequence   = errors.New("process evidence cannot include sequence")
 	errProcessEvidenceIdentity   = errors.New("process evidence requires pid and start identity")
 	errProcessEvidenceActivity   = errors.New("process evidence cannot include activity")
-	errManagedHookJSONRequired   = errors.New("hook commands require --json for their protocol response")
-	errListSummaryFlag           = errors.New("--sort, --desc, and --absolute-time are not valid with --summary")
+	errManagedHookJSONRequired   = errors.New(
+		"hook commands require --json for their protocol response",
+	)
+	errListSummaryFlag = errors.New(
+		"--sort, --desc, and --absolute-time are not valid with --summary",
+	)
 	errListAbsoluteJSON          = errors.New("--absolute-time cannot be used with --json")
 	errListGroupByWithoutSummary = errors.New("--group-by requires --summary")
 	errUnsupportedGroupBy        = registry.ErrUnsupportedGroupBy
@@ -85,19 +91,30 @@ var (
 )
 
 type application struct {
-	storePath          string
-	configPath         string
-	configExplicit     bool
-	noConfig           bool
-	cfgLoaded          bool
-	cfg                config.Config
-	cfgMeta            *strata.Metadata
+	//exhaustruct:optional
+	storePath string
+	//exhaustruct:optional
+	configPath string
+	//exhaustruct:optional
+	configExplicit bool
+	//exhaustruct:optional
+	noConfig bool
+	//exhaustruct:optional
+	cfgLoaded bool
+	//exhaustruct:optional
+	cfg config.Config
+	//exhaustruct:optional
+	cfgMeta *strata.Metadata
+	//exhaustruct:optional
 	resolvedConfigPath string
-	cfgErr             error
-	outputJSON         bool
-	stdin              io.Reader
-	stdout             io.Writer
-	stderr             io.Writer
+	//exhaustruct:optional
+	cfgErr error
+	//exhaustruct:optional
+	outputJSON bool
+	//exhaustruct:optional
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
 }
 
 type exitCoderError struct {
@@ -105,6 +122,7 @@ type exitCoderError struct {
 	code int
 }
 
+//exhaustruct:optional
 type listOptions struct {
 	harness, presence, activity, tmuxSession, multiplexerSession, sortBy, groupBy string
 	project, cwd, multiplexerKind, multiplexerServer, multiplexerPane             string
@@ -130,6 +148,7 @@ func (app *application) loadConfig() (config.Config, error) {
 	if app.cfgLoaded {
 		return app.cfg, app.cfgErr
 	}
+
 	app.configExplicit = app.configPath != ""
 	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
 		Path:     app.configPath,
@@ -142,13 +161,16 @@ func (app *application) loadConfig() (config.Config, error) {
 	app.resolvedConfigPath = resolved
 	app.cfgErr = exitCode(err, exitCodeUsage)
 	app.cfgLoaded = true
+
 	return app.cfg, app.cfgErr
 }
 
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := executeCLI(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+
 	stop()
+
 	if code != 0 {
 		os.Exit(code)
 	}
@@ -163,6 +185,7 @@ func exitCode(err error, code int) error {
 	if err == nil {
 		return nil
 	}
+
 	return &exitCoderError{err: err, code: code}
 }
 
@@ -172,12 +195,16 @@ func (app *application) configureCommandTree(cmd *cobra.Command) {
 	} else {
 		cmd.Flags().Bool("help", false, "show help")
 	}
+
 	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		if errors.Is(err, pflag.ErrHelp) || strings.Contains(err.Error(), "unknown shorthand flag: 'h'") {
+		if errors.Is(err, pflag.ErrHelp) ||
+			strings.Contains(err.Error(), "unknown shorthand flag: 'h'") {
 			return exitCode(errUnknownHelpShorthand, exitCodeUsage)
 		}
+
 		return err
 	})
+
 	for _, sub := range cmd.Commands() {
 		app.configureCommandTree(sub)
 	}
@@ -191,7 +218,9 @@ func configureCobra() {
 
 func (app *application) newRootCommand() *cobra.Command {
 	configureCobra()
+
 	var showVersion bool
+
 	root := &cobra.Command{
 		Use:           "aht",
 		Short:         "Discover, track, and search local coding-agent sessions",
@@ -210,25 +239,35 @@ func (app *application) newRootCommand() *cobra.Command {
 						"built":   date,
 					})
 				}
+
 				return app.writef("aht %s (commit: %s, built: %s)\n", version, commit, date)
 			}
+
 			if len(args) > 0 {
-				return exitCode(fmt.Errorf("%w %q for %q", errUnknownCommand, args[0], cmd.Name()), exitCodeUsage)
+				return exitCode(
+					fmt.Errorf("%w %q for %q", errUnknownCommand, args[0], cmd.Name()),
+					exitCodeUsage,
+				)
 			}
+
 			_ = cmd.Help()
+
 			return exitCode(errSilentUsageError, exitCodeUsage)
 		},
-		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: false},
 	}
 	root.SetOut(app.stdout)
 	root.SetErr(app.stderr)
+
 	if app.stdin != nil {
 		root.SetIn(app.stdin)
 	}
+
 	root.PersistentFlags().StringVar(&app.storePath, "store", "", "registry state `<path>`")
 	root.PersistentFlags().StringVar(&app.configPath, "config", "", "config file `<path>`")
-	root.PersistentFlags().BoolVar(&app.noConfig, "no-config", false, "bypass all configuration files")
-	root.PersistentFlags().BoolVar(&app.outputJSON, "json", false, "emit JSON (JSON Lines for streams)")
+	root.PersistentFlags().
+		BoolVar(&app.noConfig, "no-config", false, "bypass all configuration files")
+	root.PersistentFlags().
+		BoolVar(&app.outputJSON, "json", false, "emit JSON (JSON Lines for streams)")
 	root.PersistentFlags().Bool("help", false, "show help")
 	root.Flags().BoolVarP(&showVersion, "version", "V", false, "print version")
 
@@ -249,6 +288,7 @@ func (app *application) newRootCommand() *cobra.Command {
 	root.AddCommand(app.newDoctorCommand())
 	root.InitDefaultHelpCmd()
 	app.configureCommandTree(root)
+
 	return root
 }
 
@@ -276,10 +316,17 @@ func (app *application) newManageCommand() *cobra.Command {
 		app.newDetectionCommand(),
 		app.newHistoryCommand(),
 	)
+
 	return command
 }
 
-func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func executeCLI(
+	ctx context.Context,
+	args []string,
+	stdin io.Reader,
+	stdout io.Writer,
+	stderr io.Writer,
+) int {
 	app := &application{
 		stdin:  stdin,
 		stdout: stdout,
@@ -288,14 +335,18 @@ func executeCLI(ctx context.Context, args []string, stdin io.Reader, stdout, std
 	//nolint:contextcheck // Command tree is built before ExecuteContext receives the context.
 	root := app.newRootCommand()
 	root.SetArgs(args)
+
 	if stdin != nil {
 		root.SetIn(stdin)
 	}
+
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+
 	if err := root.ExecuteContext(ctx); err != nil {
 		return app.handleError(err)
 	}
+
 	return 0
 }
 
@@ -303,25 +354,33 @@ func (app *application) handleError(err error) int {
 	if errors.Is(err, syscall.EPIPE) {
 		return sigpipeExitCode
 	}
+
 	var exitCoder interface{ ExitCode() int }
 	if errors.As(err, &exitCoder) {
 		code := exitCoder.ExitCode()
 		if code == sigpipeExitCode {
 			return sigpipeExitCode
 		}
+
 		if errors.Is(err, context.Canceled) || code == exitCodeInterrupted {
 			return exitCodeInterrupted
 		}
+
 		app.printError(err)
+
 		return code
 	}
+
 	if errors.Is(err, context.Canceled) {
 		return exitCodeInterrupted
 	}
+
 	app.printError(err)
+
 	if isUsageError(err) {
 		return exitCodeUsage
 	}
+
 	return exitCodeGeneral
 }
 
@@ -329,6 +388,7 @@ func (app *application) printError(err error) {
 	if err.Error() == "" {
 		return
 	}
+
 	_, _ = fmt.Fprintln(app.stderr, err.Error())
 	if app.environmentError(err) {
 		_, _ = fmt.Fprintln(app.stderr, "Run 'aht doctor' for details.")
@@ -339,18 +399,23 @@ func (app *application) environmentError(err error) bool {
 	if errors.Is(err, config.ErrConfigNotFound) {
 		return false
 	}
+
 	if app.cfgErr != nil && errors.Is(err, app.cfgErr) {
 		return true
 	}
+
 	if _, ok := errors.AsType[*registry.UnsupportedSchemaError](err); ok {
 		return true
 	}
+
 	if _, ok := errors.AsType[*processinfo.UnsupportedError](err); ok {
 		return true
 	}
+
 	if _, ok := errors.AsType[*processinfo.PermissionError](err); ok {
 		return true
 	}
+
 	return errors.Is(err, registry.ErrCorruptStore) || errors.Is(err, service.ErrUnsupported)
 }
 
@@ -358,7 +423,9 @@ func isUsageError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	msg := err.Error()
+
 	return strings.HasPrefix(msg, "unknown flag") ||
 		strings.HasPrefix(msg, "unknown shorthand flag") ||
 		strings.HasPrefix(msg, "flag needs an argument") ||
@@ -372,6 +439,7 @@ func (app *application) resolvedStorePath() string {
 	if app.storePath != "" {
 		return app.storePath
 	}
+
 	return registry.DefaultStorePath()
 }
 
@@ -386,9 +454,11 @@ func (app *application) registryStore() *client.Client {
 func (app *application) writeJSON(value any) error {
 	e := json.NewEncoder(app.stdout)
 	e.SetIndent("", jsonIndent)
+
 	if err := e.Encode(value); err != nil {
 		return fmt.Errorf("writing JSON: %w", err)
 	}
+
 	return nil
 }
 
@@ -397,6 +467,7 @@ func (app *application) writeJSONLine(value any) error {
 	if err := e.Encode(value); err != nil {
 		return fmt.Errorf("writing JSON line: %w", err)
 	}
+
 	return nil
 }
 
@@ -404,6 +475,7 @@ func (app *application) writef(format string, args ...any) error {
 	if _, err := fmt.Fprintf(app.stdout, format, args...); err != nil {
 		return fmt.Errorf("writing output: %w", err)
 	}
+
 	return nil
 }
 
@@ -411,6 +483,7 @@ func (app *application) writeln(args ...any) error {
 	if _, err := fmt.Fprintln(app.stdout, args...); err != nil {
 		return fmt.Errorf("writing output: %w", err)
 	}
+
 	return nil
 }
 
@@ -431,6 +504,7 @@ func (app *application) newStatePathCommand() *cobra.Command {
 			if app.outputJSON {
 				return app.writeJSON(map[string]string{"path": app.resolvedStorePath()})
 			}
+
 			return app.writeln(app.resolvedStorePath())
 		},
 	}
@@ -441,16 +515,20 @@ func parseObservedAt(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
+
 	t, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing observed-at: %w", err)
 	}
+
 	return t, nil
 }
 
 func (app *application) newListCommand() *cobra.Command {
 	o := listOptions{}
+
 	var filter registry.Filter
+
 	cmd := &cobra.Command{
 		Use:           listCommandName,
 		Short:         "Show known sessions",
@@ -462,28 +540,46 @@ func (app *application) newListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			applyListConfig(&o, c, cfg)
+
 			if err := app.validateListOptions(o); err != nil {
 				return exitCode(err, exitCodeUsage)
 			}
+
 			filter, err = buildFilter(o)
+
 			return exitCode(err, exitCodeUsage)
 		},
 		RunE: func(c *cobra.Command, _ []string) error {
 			if o.summary {
 				return app.runListSummary(c.Context(), o, filter)
 			}
+
 			return app.runListSessions(c.Context(), o, filter)
 		},
 	}
 	f := cmd.Flags()
 	configureSessionFilterFlags(f, &o)
-	f.StringVar(&o.sortBy, "sort", "", "sort by: `<field>` (updated, created, harness, presence, activity, cwd, id, multiplexer, tmux, presence-changed, activity-changed)")
+	f.StringVar(
+		&o.sortBy,
+		"sort",
+		"",
+		"sort by: `<field>` (updated, created, harness, presence, "+
+			"activity, cwd, id, multiplexer, tmux, presence-changed, "+
+			"activity-changed)",
+	)
 	f.BoolVar(&o.summary, "summary", false, "summarize agent counts by multiplexer session")
-	f.StringVar(&o.groupBy, "group-by", "", "group summaries by: `<field>` (multiplexer-session, project, harness)")
+	f.StringVar(
+		&o.groupBy,
+		"group-by",
+		"",
+		"group summaries by: `<field>` (multiplexer-session, project, harness)",
+	)
 	f.BoolVar(&o.absoluteTime, "absolute-time", false, "show full timestamps")
 	f.BoolVar(&o.desc, "desc", false, "sort descending")
 	f.BoolVar(&o.full, "full", false, "show complete values using an adaptive layout")
+
 	return cmd
 }
 
@@ -491,14 +587,39 @@ func configureSessionFilterFlags(f *pflag.FlagSet, opts *listOptions) {
 	f.StringVar(&opts.harness, "harness", "", "filter by harness `<name>`")
 	f.StringVar(&opts.harness, "agent", "", "filter by harness `<name>` (alias for --harness)")
 	_ = f.MarkHidden("agent")
-	f.StringVar(&opts.presence, "presence", "", "filter by presence `<val>`: live, gone, unknown, all")
-	f.StringVar(&opts.activity, "activity", "", "filter by activity `<val>`: running, waiting, idle, unknown")
+	f.StringVar(
+		&opts.presence,
+		"presence",
+		"",
+		"filter by presence `<val>`: live, gone, unknown, all",
+	)
+	f.StringVar(
+		&opts.activity,
+		"activity",
+		"",
+		"filter by activity `<val>`: running, waiting, idle, unknown",
+	)
 	f.StringVar(&opts.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
-	f.StringVar(&opts.multiplexerSession, "multiplexer-session", "", "filter by multiplexer session `<name>`")
+	f.StringVar(
+		&opts.multiplexerSession,
+		"multiplexer-session",
+		"",
+		"filter by multiplexer session `<name>`",
+	)
 	f.StringVar(&opts.project, "project", "", "filter by project `<dir>`")
-	f.BoolVar(&opts.projectSubtree, "project-subtree", false, "include sessions within project subtrees")
+	f.BoolVar(
+		&opts.projectSubtree,
+		"project-subtree",
+		false,
+		"include sessions within project subtrees",
+	)
 	f.StringVar(&opts.cwd, "cwd", "", "filter by session working directory `<dir>`")
-	f.StringVar(&opts.multiplexerKind, "multiplexer", "", "filter by multiplexer `<kind>`: tmux, zellij, herdr")
+	f.StringVar(
+		&opts.multiplexerKind,
+		"multiplexer",
+		"",
+		"filter by multiplexer `<kind>`: tmux, zellij, herdr",
+	)
 	f.StringVar(&opts.multiplexerServer, "server", "", "filter by multiplexer server `<id>`")
 	f.StringVar(&opts.multiplexerPane, "pane", "", "filter by multiplexer pane `<id>`")
 }
@@ -508,14 +629,18 @@ func applyListConfig(opts *listOptions, cmd *cobra.Command, cfg config.Config) {
 	if !f.Changed("presence") && cfg.UI.DefaultPresence != "" {
 		opts.presence = cfg.UI.DefaultPresence
 	}
+
 	if !f.Changed("sort") && cfg.UI.Sort != "" {
 		opts.sortBy = cfg.UI.Sort
 	}
+
 	opts.sortSet = f.Changed("sort")
 	if !f.Changed("desc") && cfg.UI.SortDesc != nil {
 		opts.desc = *cfg.UI.SortDesc
 	}
+
 	opts.descSet = f.Changed("desc")
+
 	opts.groupBySet = f.Changed("group-by")
 	if !f.Changed("absolute-time") {
 		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
@@ -531,16 +656,21 @@ func (app *application) validateListOptions(opts listOptions) error {
 	if app.outputJSON && opts.absoluteSet {
 		return errListAbsoluteJSON
 	}
+
 	if err := validateListSummaryOptions(opts); err != nil {
 		return err
 	}
+
 	if opts.summary {
 		return nil
 	}
+
 	if opts.sortSet && strings.TrimSpace(opts.sortBy) == "" {
 		return fmt.Errorf("%w: empty value", errInvalidListSort)
 	}
+
 	_, err := listSortLess(normalizeListSort(opts.sortBy))
+
 	return err
 }
 
@@ -548,30 +678,33 @@ func validateListSummaryOptions(opts listOptions) error {
 	if opts.summary && (opts.absoluteSet || opts.sortSet || opts.descSet) {
 		return errListSummaryFlag
 	}
+
 	if (opts.groupBySet || opts.groupBy != "") && !opts.summary {
 		return errListGroupByWithoutSummary
 	}
+
 	if opts.groupBySet || opts.groupBy != "" {
 		switch opts.groupBy {
 		case "multiplexer-session", "project", "harness":
 			// valid
 		default:
-			return fmt.Errorf("%w: %q (expected multiplexer-session, project, or harness)", errUnsupportedGroupBy, opts.groupBy)
+			return fmt.Errorf(
+				"%w: %q (expected multiplexer-session, project, or harness)",
+				errUnsupportedGroupBy,
+				opts.groupBy,
+			)
 		}
 	}
+
 	return nil
 }
 
 func buildFilter(opts listOptions) (registry.Filter, error) {
 	f := registry.Filter{
-		Harness:            "",
-		Presence:           "",
-		Activity:           "",
 		MultiplexerSession: cmp.Or(opts.multiplexerSession, opts.tmuxSession),
 		Project:            opts.project,
 		ProjectSubtree:     opts.projectSubtree,
 		CWD:                opts.cwd,
-		MultiplexerKind:    "",
 		MultiplexerServer:  opts.multiplexerServer,
 		MultiplexerPane:    opts.multiplexerPane,
 	}
@@ -584,13 +717,16 @@ func buildFilter(opts listOptions) (registry.Filter, error) {
 			return f, fmt.Errorf("%w: %q", errInvalidMultiplexerKind, opts.multiplexerKind)
 		}
 	}
+
 	if opts.harness != "" {
 		h, e := catalog.Parse(opts.harness)
 		if e != nil {
 			return f, fmt.Errorf("normalize harness: %w", e)
 		}
+
 		f.Harness = h
 	}
+
 	if opts.presence != "" {
 		if strings.EqualFold(opts.presence, "all") {
 			f.Presence = ""
@@ -599,55 +735,80 @@ func buildFilter(opts listOptions) (registry.Filter, error) {
 			if e != nil {
 				return f, fmt.Errorf("normalize presence: %w", e)
 			}
+
 			f.Presence = p
 		}
 	}
+
 	if opts.activity != "" {
 		a, e := registry.NormalizeActivity(opts.activity)
 		if e != nil {
 			return f, fmt.Errorf("normalize activity: %w", e)
 		}
+
 		f.Activity = a
 	}
+
 	return f, nil
 }
 
-func (app *application) runListSessions(ctx context.Context, opts listOptions, f registry.Filter) error {
+func (app *application) runListSessions(
+	ctx context.Context,
+	opts listOptions,
+	f registry.Filter,
+) error {
 	ss, e := app.registryStore().List(ctx, f)
 	if e != nil {
 		return fmt.Errorf("listing sessions: %w", e)
 	}
+
 	ss = applyConfigFilter(ss, app.cfg.Filter, opts.harness)
 	if e = sortListSessions(ss, opts); e != nil {
 		return exitCode(e, exitCodeUsage)
 	}
+
 	if app.outputJSON {
 		return app.writeJSON(ss)
 	}
+
 	now := time.Now().UTC()
+
 	var displayIDs map[string]string
 	if !opts.full {
 		displayIDs = abbreviatedRegistryIDs(ss)
 	}
+
 	rows := make([][]string, 0, len(ss))
 	for _, s := range ss {
 		id := s.ID
 		if !opts.full {
 			id = displayIDs[s.ID]
 		}
+
 		rows = append(rows, []string{
-			id, string(s.Harness), sessionDisplayLabel(s), string(s.Presence()), listActivity(s),
-			watchMultiplexerLabel(s.Location), formatHumanPath(s.CWD), formatUpdatedAt(s.UpdatedAt, now, opts.absoluteTime),
+			id,
+			string(s.Harness),
+			sessionDisplayLabel(s),
+			string(s.Presence()),
+			listActivity(s),
+			watchMultiplexerLabel(
+				s.Location,
+			),
+			formatHumanPath(s.CWD),
+			formatUpdatedAt(s.UpdatedAt, now, opts.absoluteTime),
 		})
 	}
+
 	maxWidth := app.maxLineWidth()
 	if opts.full {
 		columns, fits := listFullTableColumns(rows, maxWidth)
 		if !fits {
 			return app.writeStackedHumanRows(columns, rows)
 		}
+
 		return app.writeWrappedHumanTable(columns, rows)
 	}
+
 	return app.writeHumanTable(listTableColumns(rows, maxWidth), rows)
 }
 
@@ -655,18 +816,25 @@ func sessionMatchesIgnorePaths(s registry.Session, paths []string) bool {
 	if s.CWD == "" || len(paths) == 0 {
 		return false
 	}
+
 	for _, pat := range paths {
 		if pathmatch.Match(s.CWD, pat) {
 			return true
 		}
 	}
+
 	return false
 }
 
-func applyConfigFilter(sessions []registry.Session, filter config.FilterConfig, agentExplicit string) []registry.Session {
+func applyConfigFilter(
+	sessions []registry.Session,
+	filter config.FilterConfig,
+	agentExplicit string,
+) []registry.Session {
 	if len(sessions) == 0 {
 		return sessions
 	}
+
 	ignoredHarnesses := make(map[string]struct{}, len(filter.IgnoreHarnesses))
 	for _, h := range filter.IgnoreHarnesses {
 		norm := strings.ToLower(strings.TrimSpace(h))
@@ -682,20 +850,34 @@ func applyConfigFilter(sessions []registry.Session, filter config.FilterConfig, 
 				continue
 			}
 		}
+
 		if sessionMatchesIgnorePaths(s, filter.IgnorePaths) {
 			continue
 		}
+
 		result = append(result, s)
 	}
+
 	return result
 }
 
 func listColumnMetrics(rows [][]string) ([]string, []int) {
-	headings := []string{"ID", "Agent", "Session", "Presence", "Activity", "Location", "CWD", "Updated"}
+	headings := []string{
+		"ID",
+		"Agent",
+		"Session",
+		"Presence",
+		"Activity",
+		"Location",
+		"CWD",
+		"Updated",
+	}
+
 	maxLen := make([]int, len(headings))
 	for i, h := range headings {
 		maxLen[i] = text.StringWidth(h)
 	}
+
 	for _, row := range rows {
 		for i, cell := range row {
 			if i < len(maxLen) {
@@ -703,6 +885,7 @@ func listColumnMetrics(rows [][]string) ([]string, []int) {
 			}
 		}
 	}
+
 	return headings, maxLen
 }
 
@@ -710,9 +893,11 @@ func listTableColumns(rows [][]string, maxWidth int) []humanColumn {
 	const (
 		maxLocationColumnWidth = 24
 	)
+
 	if maxWidth <= 0 {
 		maxWidth = humanLineWidth
 	}
+
 	headings, maxLen := listColumnMetrics(rows)
 
 	idWidth := maxLen[0]
@@ -730,6 +915,7 @@ func listTableColumns(rows [][]string, maxWidth int) []humanColumn {
 	available := maxWidth - fixedTotal
 
 	var sessionWidth, cwdWidth int
+
 	switch {
 	case available >= sessionNeeded+cwdNeeded:
 		sessionWidth = sessionNeeded
@@ -737,6 +923,7 @@ func listTableColumns(rows [][]string, maxWidth int) []humanColumn {
 	case available > 0:
 		totalNeeded := sessionNeeded + cwdNeeded
 		sessionWidth = max(len("Session"), (available*sessionNeeded)/totalNeeded)
+
 		cwdWidth = max(len("CWD"), available-sessionWidth)
 		if cwdWidth > cwdNeeded {
 			sessionWidth += cwdWidth - cwdNeeded
@@ -764,6 +951,7 @@ func listFullTableColumns(rows [][]string, maxWidth int) ([]humanColumn, bool) {
 		sessionMinWidth = 24
 		cwdMinWidth     = 20
 	)
+
 	headings, maxLen := listColumnMetrics(rows)
 	sessionNeeded := maxLen[2]
 	cwdNeeded := maxLen[6]
@@ -771,6 +959,7 @@ func listFullTableColumns(rows [][]string, maxWidth int) ([]humanColumn, bool) {
 	cwdWidth := min(cwdNeeded, max(len("CWD"), cwdMinWidth))
 	fixedWidth := maxLen[0] + maxLen[1] + maxLen[3] + maxLen[4] + maxLen[5] + maxLen[7]
 	available := maxWidth - fixedWidth - (len(headings)-1)*humanColumnGap
+
 	fits := available >= sessionWidth+cwdWidth
 	if fits {
 		sessionWidth, cwdWidth = allocateFullListWidths(
@@ -781,6 +970,7 @@ func listFullTableColumns(rows [][]string, maxWidth int) ([]humanColumn, bool) {
 			available,
 		)
 	}
+
 	return []humanColumn{
 		{heading: "ID", width: maxLen[0], wrap: wrapHumanIdentifier},
 		{heading: "Agent", width: maxLen[1]},
@@ -803,13 +993,16 @@ func allocateFullListWidths(
 	if available >= sessionNeeded+cwdNeeded {
 		return sessionNeeded, cwdNeeded
 	}
+
 	extra := available - sessionWidth - cwdWidth
 	sessionUnmet := sessionNeeded - sessionWidth
 	cwdUnmet := cwdNeeded - cwdWidth
+
 	totalUnmet := sessionUnmet + cwdUnmet
 	if extra <= 0 || totalUnmet == 0 {
 		return sessionWidth, cwdWidth
 	}
+
 	sessionAdd := min(sessionUnmet, extra*sessionUnmet/totalUnmet)
 	cwdAdd := min(cwdUnmet, extra-sessionAdd)
 	remaining := extra - sessionAdd - cwdAdd
@@ -817,6 +1010,7 @@ func allocateFullListWidths(
 	sessionAdd += additionalSession
 	remaining -= additionalSession
 	cwdAdd += min(cwdUnmet-cwdAdd, remaining)
+
 	return sessionWidth + sessionAdd, cwdWidth + cwdAdd
 }
 
@@ -824,6 +1018,7 @@ func listActivity(session registry.Session) string {
 	if session.Presence() == registry.PresenceGone {
 		return "-"
 	}
+
 	return appReportActivity(session)
 }
 
@@ -832,6 +1027,7 @@ func shortRegistryID(id string) string {
 	if separator < 0 || len(id)-separator-1 <= registryIDShortLength {
 		return id
 	}
+
 	return id[:separator+1] + id[separator+1:separator+1+registryIDShortLength]
 }
 
@@ -840,11 +1036,14 @@ func abbreviatedRegistryIDs(sessions []registry.Session) map[string]string {
 	if len(sessions) == 0 {
 		return nil
 	}
+
 	type item struct {
 		id     string
 		suffix string
 	}
+
 	byPrefix := make(map[string][]item)
+
 	for _, session := range sessions {
 		p, s := splitRegistryID(session.ID)
 		byPrefix[p] = append(byPrefix[p], item{id: session.ID, suffix: s})
@@ -859,32 +1058,40 @@ func abbreviatedRegistryIDs(sessions []registry.Session) map[string]string {
 			} else {
 				result[it.id] = prefix + it.suffix[:registryIDShortLength]
 			}
+
 			continue
 		}
+
 		slices.SortFunc(items, func(a, b item) int {
 			return strings.Compare(a.suffix, b.suffix)
 		})
+
 		for i, it := range items {
 			if len(it.suffix) <= registryIDShortLength {
 				result[it.id] = it.id
 				continue
 			}
+
 			length := registryIDShortLength
+
 			if i > 0 {
 				common := commonPrefixLength(it.suffix, items[i-1].suffix)
 				if common >= length {
 					length = min(common+1, len(it.suffix))
 				}
 			}
+
 			if i+1 < len(items) {
 				common := commonPrefixLength(it.suffix, items[i+1].suffix)
 				if common >= length {
 					length = min(common+1, len(it.suffix))
 				}
 			}
+
 			result[it.id] = prefix + it.suffix[:length]
 		}
 	}
+
 	return result
 }
 
@@ -893,6 +1100,7 @@ func splitRegistryID(id string) (string, string) {
 	if separator < 0 {
 		return "", id
 	}
+
 	return id[:separator+1], id[separator+1:]
 }
 
@@ -903,6 +1111,7 @@ func commonPrefixLength(left string, right string) int {
 			return index
 		}
 	}
+
 	return limit
 }
 
@@ -910,20 +1119,25 @@ func sessionDisplayLabel(session registry.Session) string {
 	if session.SessionID != "" {
 		return session.SessionID
 	}
+
 	if session.SessionPath != "" {
 		return formatSessionPathLabel(session.SessionPath)
 	}
+
 	if session.Location.PaneID != "" {
 		return session.Location.PaneID
 	}
+
 	if session.Process != nil && session.Process.PID > 0 {
 		return fmt.Sprintf("pid:%d", session.Process.PID)
 	}
+
 	return shortRegistryID(session.ID)
 }
 
 func formatSessionPathLabel(path string) string {
 	base := filepath.Base(path)
+
 	trimmed := base
 	for _, ext := range []string{".jsonl", ".json"} {
 		if cut, ok := strings.CutSuffix(trimmed, ext); ok {
@@ -931,31 +1145,49 @@ func formatSessionPathLabel(path string) string {
 			break
 		}
 	}
-	if separator := strings.LastIndexByte(trimmed, '_'); separator >= 0 && separator+1 < len(trimmed) {
+
+	if separator := strings.LastIndexByte(
+		trimmed,
+		'_',
+	); separator >= 0 &&
+		separator+1 < len(trimmed) {
 		suffix := trimmed[separator+1:]
 		if len(suffix) >= 8 || strings.Contains(suffix, "-") {
 			return suffix
 		}
 	}
+
 	return base
 }
 
-func (app *application) runListSummary(ctx context.Context, opts listOptions, f registry.Filter) error {
+func (app *application) runListSummary(
+	ctx context.Context,
+	opts listOptions,
+	f registry.Filter,
+) error {
 	groupBy := registry.SummaryGroupBy(opts.groupBy)
 	if groupBy == "" {
 		groupBy = registry.SummaryGroupByMultiplexerSession
 	}
-	s, e := app.registryStore().SummaryWithOptions(ctx, f, registry.SummaryOptions{GroupBy: groupBy})
+
+	s, e := app.registryStore().
+		SummaryWithOptions(ctx, f, registry.SummaryOptions{GroupBy: groupBy})
 	if e != nil {
 		return fmt.Errorf("summarize sessions: %w", e)
 	}
+
 	if app.outputJSON {
 		return app.writeJSON(s)
 	}
+
 	return app.writeSummaryTableForGroup(s, groupBy, opts.full)
 }
 
-func (app *application) writeSummaryTableForGroup(ss []registry.Summary, groupBy registry.SummaryGroupBy, full bool) error {
+func (app *application) writeSummaryTableForGroup(
+	ss []registry.Summary,
+	groupBy registry.SummaryGroupBy,
+	full bool,
+) error {
 	switch groupBy {
 	case registry.SummaryGroupByProject:
 		return app.writeProjectSummaryTable(ss, full)
@@ -974,17 +1206,24 @@ func (app *application) writeMultiplexerSummaryTable(ss []registry.Summary, full
 		summarySessionWidth = 20
 		summaryUnknownWidth = 6
 	)
+
 	labels := summaryTableLabels(ss)
+
 	rows := make([][]string, 0, len(ss))
 	for i, s := range ss {
-		row := append([]string{multiplexerSummaryKind(s), labels[i], s.MultiplexerServerID}, summaryCountCells(s)...)
+		row := append(
+			[]string{multiplexerSummaryKind(s), labels[i], s.MultiplexerServerID},
+			summaryCountCells(s)...,
+		)
 		rows = append(rows, row)
 	}
+
 	columns := append([]humanColumn{
 		{heading: "MUX", width: summaryMuxWidth},
 		{heading: "Session", width: summarySessionWidth, wrap: wrapHumanSession},
 		{heading: "Server", width: summaryUnknownWidth, wrap: wrapHumanIdentifier},
 	}, summaryCountColumns()...)
+
 	return app.renderSummaryColumnsAndRows(columns, rows, full)
 }
 
@@ -993,26 +1232,32 @@ func (app *application) writeProjectSummaryTable(ss []registry.Summary, full boo
 		summaryProjectWidth = 16
 		summaryPathWidth    = 24
 	)
+
 	rows := make([][]string, 0, len(ss))
 	for _, s := range ss {
 		projectLabel := s.GroupLabel
 		if projectLabel == "" {
 			projectLabel = s.Project
 		}
+
 		if projectLabel == "" {
 			projectLabel = "unknown"
 		}
+
 		projectPath := s.ProjectRoot
 		if projectPath == "" {
 			projectPath = "-"
 		}
+
 		row := append([]string{projectLabel, projectPath}, summaryCountCells(s)...)
 		rows = append(rows, row)
 	}
+
 	columns := append([]humanColumn{
 		{heading: "Project", width: summaryProjectWidth, wrap: wrapHumanSession},
 		{heading: "Root", width: summaryPathWidth, wrap: wrapHumanPath},
 	}, summaryCountColumns()...)
+
 	return app.renderSummaryColumnsAndRows(columns, rows, full)
 }
 
@@ -1020,21 +1265,26 @@ func (app *application) writeHarnessSummaryTable(ss []registry.Summary, full boo
 	const (
 		summaryAgentWidth = 12
 	)
+
 	rows := make([][]string, 0, len(ss))
 	for _, s := range ss {
 		agentLabel := s.GroupLabel
 		if agentLabel == "" {
 			agentLabel = string(s.Harness)
 		}
+
 		if agentLabel == "" {
 			agentLabel = "unknown"
 		}
+
 		row := append([]string{agentLabel}, summaryCountCells(s)...)
 		rows = append(rows, row)
 	}
+
 	columns := append([]humanColumn{
 		{heading: "Agent", width: summaryAgentWidth},
 	}, summaryCountColumns()...)
+
 	return app.renderSummaryColumnsAndRows(columns, rows, full)
 }
 
@@ -1058,6 +1308,7 @@ func summaryCountColumns() []humanColumn {
 		summaryCountWidth   = 5
 		summaryUnknownWidth = 6
 	)
+
 	return []humanColumn{
 		{heading: "Total", width: summaryCountWidth, align: text.AlignRight},
 		{heading: "Live", width: summaryCountWidth, align: text.AlignRight},
@@ -1072,18 +1323,28 @@ func summaryCountColumns() []humanColumn {
 	}
 }
 
-func (app *application) renderSummaryColumnsAndRows(columns []humanColumn, rows [][]string, full bool) error {
+func (app *application) renderSummaryColumnsAndRows(
+	columns []humanColumn,
+	rows [][]string,
+	full bool,
+) error {
 	for columnIndex := range columns {
 		for _, row := range rows {
-			columns[columnIndex].width = max(columns[columnIndex].width, text.StringWidth(row[columnIndex]))
+			columns[columnIndex].width = max(
+				columns[columnIndex].width,
+				text.StringWidth(row[columnIndex]),
+			)
 		}
 	}
+
 	if validateHumanColumns(columns, app.maxLineWidth()) != nil {
 		return app.writeStackedHumanRows(columns, rows)
 	}
+
 	if full {
 		return app.writeWrappedHumanTable(columns, rows)
 	}
+
 	return app.writeHumanTable(columns, rows)
 }
 
@@ -1099,6 +1360,7 @@ func summaryTableLabels(ss []registry.Summary) []string {
 			out = append(out, "unknown")
 		}
 	}
+
 	return out
 }
 
@@ -1118,31 +1380,104 @@ func (app *application) writeSessionDetails(session registry.Session) error {
 		{label: "Updated", value: session.UpdatedAt.Format(time.RFC3339)},
 	}
 	if session.Process != nil {
-		rows = append(rows, humanDetail{label: "Process", value: fmt.Sprintf("pid=%d executable=%s", session.Process.PID, session.Process.Executable)})
+		rows = append(
+			rows,
+			humanDetail{
+				label: "Process",
+				value: fmt.Sprintf(
+					"pid=%d executable=%s",
+					session.Process.PID,
+					session.Process.Executable,
+				),
+			},
+		)
 	}
+
 	return app.writeHumanDetails(rows)
 }
 
 func sortListSessions(ss []registry.Session, opts listOptions) error {
 	key := normalizeListSort(opts.sortBy)
+
 	compare, e := listSortLess(key)
 	if e != nil {
 		return e
 	}
+
 	sort.SliceStable(ss, func(i, j int) bool {
 		v := compare(ss[i], ss[j])
 		if opts.desc {
 			return v > 0
 		}
+
 		return v < 0
 	})
+
 	return nil
 }
 
 func listSortLess(k string) (sessionCompareFunc, error) {
-	if c, ok := map[string]sessionCompareFunc{"multiplexer": compareSessionMultiplexer, "tmux": compareSessionTmux, "updated": compareSessionUpdated, "presence-changed": func(a, b registry.Session) int { return a.PresenceChangedAt.Compare(b.PresenceChangedAt) }, "activity-changed": func(a, b registry.Session) int { return a.ActivityChangedAt.Compare(b.ActivityChangedAt) }, "created": compareSessionCreated, "harness": func(a, b registry.Session) int { return strings.Compare(string(a.Harness), string(b.Harness)) }, "presence": func(a, b registry.Session) int { return strings.Compare(string(a.Presence()), string(b.Presence())) }, "activity": func(a, b registry.Session) int { return strings.Compare(appReportActivity(a), appReportActivity(b)) }, "cwd": func(a, b registry.Session) int { return strings.Compare(a.CWD, b.CWD) }, "id": func(a, b registry.Session) int { return strings.Compare(a.ID, b.ID) }}[k]; ok {
+	if c, ok := map[string]sessionCompareFunc{
+		"multiplexer": compareSessionMultiplexer,
+		"tmux":        compareSessionTmux,
+		"updated":     compareSessionUpdated,
+		"presence-changed": func(a, b registry.Session) int {
+			return a.PresenceChangedAt.Compare(
+				b.PresenceChangedAt,
+			)
+		},
+		"activity-changed": func(a, b registry.Session) int {
+			return a.ActivityChangedAt.Compare(
+				b.ActivityChangedAt,
+			)
+		},
+		"created": compareSessionCreated,
+		"harness": func(a, b registry.Session) int {
+			return strings.Compare(
+				string(
+					a.Harness,
+				),
+				string(
+					b.Harness,
+				),
+			)
+		},
+		"presence": func(a, b registry.Session) int {
+			return strings.Compare(
+				string(
+					a.Presence(),
+				),
+				string(
+					b.Presence(),
+				),
+			)
+		},
+		"activity": func(a, b registry.Session) int {
+			return strings.Compare(
+				appReportActivity(
+					a,
+				),
+				appReportActivity(
+					b,
+				),
+			)
+		},
+		"cwd": func(a, b registry.Session) int {
+			return strings.Compare(
+				a.CWD,
+				b.CWD,
+			)
+		},
+		"id": func(a, b registry.Session) int {
+			return strings.Compare(
+				a.ID,
+				b.ID,
+			)
+		},
+	}[k]; ok {
 		return c, nil
 	}
+
 	return nil, fmt.Errorf("%w: %q", errInvalidListSort, k)
 }
 
@@ -1151,38 +1486,58 @@ func normalizeListSort(s string) string {
 	if s == "" {
 		return "updated"
 	}
+
 	return s
 }
 
-func compareSessionMultiplexer(a, b registry.Session) int {
-	if comparison := strings.Compare(string(a.Location.Kind), string(b.Location.Kind)); comparison != 0 {
+func compareSessionMultiplexer(a registry.Session, b registry.Session) int {
+	if comparison := strings.Compare(
+		string(a.Location.Kind),
+		string(b.Location.Kind),
+	); comparison != 0 {
 		return comparison
 	}
-	if comparison := strings.Compare(a.Location.SessionName, b.Location.SessionName); comparison != 0 {
+
+	if comparison := strings.Compare(
+		a.Location.SessionName,
+		b.Location.SessionName,
+	); comparison != 0 {
 		return comparison
 	}
-	if comparison := strings.Compare(multiplexerContainerLabel(a.Location), multiplexerContainerLabel(b.Location)); comparison != 0 {
+
+	if comparison := strings.Compare(
+		multiplexerContainerLabel(a.Location),
+		multiplexerContainerLabel(b.Location),
+	); comparison != 0 {
 		return comparison
 	}
+
 	if comparison := strings.Compare(a.Location.PaneID, b.Location.PaneID); comparison != 0 {
 		return comparison
 	}
+
 	return strings.Compare(a.ID, b.ID)
 }
 
-func compareSessionTmux(a, b registry.Session) int {
+func compareSessionTmux(a registry.Session, b registry.Session) int {
 	if c := strings.Compare(a.Location.SessionName, b.Location.SessionName); c != 0 {
 		return c
 	}
+
 	if c := strings.Compare(a.Location.WindowIndex, b.Location.WindowIndex); c != 0 {
 		return c
 	}
+
 	return strings.Compare(a.ID, b.ID)
 }
 
-func compareSessionUpdated(a, b registry.Session) int { return a.UpdatedAt.Compare(b.UpdatedAt) }
+func compareSessionUpdated(a registry.Session, b registry.Session) int {
+	return a.UpdatedAt.Compare(b.UpdatedAt)
+}
 
-func compareSessionCreated(a, b registry.Session) int { return a.CreatedAt.Compare(b.CreatedAt) }
+func compareSessionCreated(a registry.Session, b registry.Session) int {
+	return a.CreatedAt.Compare(b.CreatedAt)
+}
 
 func firstEnv(names ...string) string {
 	for _, n := range names {
@@ -1190,6 +1545,7 @@ func firstEnv(names ...string) string {
 			return v
 		}
 	}
+
 	return ""
 }
 func firstEnvInt(names ...string) int { v := firstEnv(names...); n, _ := strconv.Atoi(v); return n }
@@ -1197,56 +1553,71 @@ func findProjectRoot(start string) string {
 	if start == "" {
 		return ""
 	}
+
 	d, _ := filepath.Abs(start)
 	for {
 		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
 			return d
 		}
+
 		p := filepath.Dir(d)
 		if p == d {
 			return ""
 		}
+
 		d = p
 	}
 }
 
 func parseAttributes(values []string) (map[string]string, error) {
 	a := map[string]string{}
+
 	for _, v := range values {
 		k, x, ok := strings.Cut(v, "=")
 		if !ok || strings.TrimSpace(k) == "" {
 			return nil, fmt.Errorf("%w: must be key=value: %q", errInvalidAttribute, v)
 		}
+
 		a[strings.TrimSpace(k)] = x
 	}
+
 	return a, nil
 }
 
-func readStdinPayloadData(stdin io.Reader, storeRaw, defaultsOnly bool) (json.RawMessage, json.RawMessage, error) {
+func readStdinPayloadData(
+	stdin io.Reader,
+	storeRaw bool, defaultsOnly bool,
+) (json.RawMessage, json.RawMessage, error) {
 	if !storeRaw && !defaultsOnly {
 		return nil, nil, nil
 	}
+
 	d, err := readReportPayloadInput(stdin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read stdin payload: %w", err)
 	}
+
 	p, err := normalizeRawPayloadBytes(d)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode stdin payload: %w", err)
 	}
+
 	if storeRaw {
 		return p, p, nil
 	}
+
 	return nil, p, nil
 }
 
-func sessionLabel(name, id string) string {
+func sessionLabel(name string, id string) string {
 	if name != "" {
 		return name
 	}
+
 	if id != "" {
 		return id
 	}
+
 	return "-"
 }
 
@@ -1254,12 +1625,15 @@ func tmuxWindowLabel(location registry.Location) string {
 	if location.WindowIndex != "" && location.WindowName != "" {
 		return location.WindowIndex + ":" + location.WindowName
 	}
+
 	if location.WindowName != "" {
 		return location.WindowName
 	}
+
 	if location.WindowIndex != "" {
 		return location.WindowIndex
 	}
+
 	return "-"
 }
 
@@ -1271,25 +1645,31 @@ func multiplexerContainerLabel(location registry.Location) string {
 	if location.Kind == registry.MultiplexerTmux {
 		return tmuxWindowLabel(location)
 	}
+
 	var parts []string
 	if location.WorkspaceName != "" {
 		parts = append(parts, location.WorkspaceName)
 	} else if location.WorkspaceID != "" {
 		parts = append(parts, location.WorkspaceID)
 	}
+
 	tab := location.TabName
 	if tab == "" {
 		tab = location.TabID
 	}
+
 	if tab == "" {
 		tab = location.TabIndex
 	}
+
 	if tab != "" {
 		parts = append(parts, tab)
 	}
+
 	if len(parts) == 0 {
 		return "-"
 	}
+
 	return strings.Join(parts, "/")
 }
 
@@ -1301,17 +1681,20 @@ func multiplexerSummaryKind(summary registry.Summary) string {
 	return "unknown"
 }
 
-func formatUpdatedAt(t, now time.Time, absolute bool) string {
+func formatUpdatedAt(t time.Time, now time.Time, absolute bool) string {
 	if t.IsZero() {
 		return "-"
 	}
+
 	if absolute {
 		return t.Format(time.RFC3339)
 	}
+
 	d := now.Sub(t)
 	if d < time.Second {
 		return "just now"
 	}
+
 	return formatElapsed(d)
 }
 
@@ -1319,17 +1702,22 @@ func formatHumanPath(p string) string {
 	if p == "" {
 		return ""
 	}
+
 	h, e := os.UserHomeDir()
 	if e != nil {
 		return p
 	}
+
 	r, e := filepath.Rel(h, p)
-	if e != nil || filepath.IsAbs(r) || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+	if e != nil || filepath.IsAbs(r) || r == ".." ||
+		strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 		return p
 	}
+
 	if r == "." {
 		return "~"
 	}
+
 	return filepath.Join("~", r)
 }
 

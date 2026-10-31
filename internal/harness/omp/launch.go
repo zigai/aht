@@ -19,12 +19,17 @@ const (
 
 var errLaunchHookCount = errors.New("expected exactly one installed omp extension")
 
-func (ompHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (ompHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	agentDir := filepath.Join(paths.Root, "pi-agent")
+
 	modelsYAML, err := launchModelsYAML(model)
 	if err != nil {
 		return harness.LaunchPlan{}, err
 	}
+
 	selected := harness.LaunchProviderName + "/" + model.Model
 
 	return harness.LaunchPlan{
@@ -42,13 +47,25 @@ func (ompHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMode
 			if err != nil {
 				return nil, err
 			}
-			return []string{"-p", prompt, "--model", selected, "--auto-approve", "--max-time", "30s", "--hook", hook}, nil
+
+			return []string{
+				"-p",
+				prompt,
+				"--model",
+				selected,
+				"--auto-approve",
+				"--max-time",
+				"30s",
+				"--hook",
+				hook,
+			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			hook, err := installedHook(agentDir)
 			if err != nil {
 				return nil, err
 			}
+
 			return withPrompt([]string{"--model", selected, "--hook", hook}, prompt), nil
 		},
 		ShellTool: harness.LaunchTool{
@@ -63,9 +80,11 @@ func installedHook(agentDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find installed omp extension: %w", err)
 	}
+
 	if len(matches) != 1 {
 		return "", fmt.Errorf("%w: found %d under %s", errLaunchHookCount, len(matches), agentDir)
 	}
+
 	return matches[0], nil
 }
 
@@ -87,10 +106,12 @@ func launchModelsYAML(model harness.LaunchModel) ([]byte, error) {
 			},
 		},
 	}
+
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("encode omp models: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -98,5 +119,6 @@ func withPrompt(args []string, prompt string) []string {
 	if prompt == "" {
 		return args
 	}
+
 	return append(args, "--", prompt)
 }

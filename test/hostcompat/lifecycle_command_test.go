@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	compatibilityPrompt    = "Use the available shell tool exactly once to run printf aht-compat-marker, then reply done."
+	compatibilityPrompt = "Use the available shell tool exactly once to run printf " +
+		"aht-compat-marker, then reply done."
 	compatibilityMarker    = "aht-compat-marker"
 	compatibilityFinalText = "compat complete"
 )
@@ -21,6 +22,7 @@ func lifecycleShellCommand(id registry.Harness) string {
 	if id == registry.Harness("kimi-code") {
 		return "printf 'aht-compat-marker\\n'"
 	}
+
 	return "printf " + compatibilityMarker
 }
 
@@ -40,7 +42,7 @@ func (host *isolatedHost) scriptCallID(resumed bool) string {
 	}
 }
 
-func (host *isolatedHost) scriptShellRoundTrip(callID, command string, rejected bool) {
+func (host *isolatedHost) scriptShellRoundTrip(callID string, command string, rejected bool) {
 	host.callID = callID
 	host.provider.Reset(fakeprovider.ToolRoundTrip{
 		Call: fakeprovider.ToolCall{
@@ -61,10 +63,12 @@ func (host *isolatedHost) lifecycleCommand(t *testing.T) *exec.Cmd {
 
 func (host *isolatedHost) headlessCommand(t *testing.T, env []string) *exec.Cmd {
 	t.Helper()
+
 	args, err := host.launched.HeadlessArgs(compatibilityPrompt)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return host.command(t, env, args...)
 }
 
@@ -73,5 +77,6 @@ func (host *isolatedHost) command(t *testing.T, env []string, args ...string) *e
 	command := exec.CommandContext(t.Context(), host.launched.Executable, args...)
 	command.Env = env
 	command.Dir = host.launched.Work
+
 	return command
 }

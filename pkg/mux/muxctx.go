@@ -43,13 +43,17 @@ type ProcessRef struct {
 
 // Pane is transient native multiplexer inventory. Only Location is persisted.
 type Pane struct {
-	Location    registry.Location
-	Processes   []ProcessRef
-	ProcessTTY  string
-	Command     string
-	CWD         string
-	Title       string
-	Activity    *registry.Activity
+	Location registry.Location
+	//exhaustruct:optional
+	Processes []ProcessRef
+	//exhaustruct:optional
+	ProcessTTY string
+	Command    string
+	CWD        string
+	Title      string
+	//exhaustruct:optional
+	Activity *registry.Activity
+	//exhaustruct:optional
 	StateReason string
 }
 
@@ -67,13 +71,16 @@ type (
 func BoundBottomLines(text string, limit int) []string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
+
 	lines := strings.Split(text, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
+
 	if limit > 0 && len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}
+
 	return lines
 }
 
@@ -81,8 +88,11 @@ func BoundBottomLines(text string, limit int) []string {
 // For Zellij, bare numeric IDs gain a "terminal_" prefix.
 func NormalizePaneID(kind registry.MultiplexerKind, paneID string) string {
 	paneID = strings.TrimSpace(paneID)
-	if kind == registry.MultiplexerZellij && paneID != "" && !strings.HasPrefix(paneID, "terminal_") && !strings.HasPrefix(paneID, "plugin_") {
+	if kind == registry.MultiplexerZellij && paneID != "" &&
+		!strings.HasPrefix(paneID, "terminal_") &&
+		!strings.HasPrefix(paneID, "plugin_") {
 		return "terminal_" + paneID
 	}
+
 	return paneID
 }

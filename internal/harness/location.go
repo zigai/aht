@@ -62,10 +62,12 @@ func HomeDir() string {
 	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
 		return home
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(home)
 }
 
@@ -77,8 +79,13 @@ func (builder *LocationBuilder) Global(kind LocationKind, paths ...string) *Loca
 		if !filepath.IsAbs(path) {
 			continue
 		}
-		builder.locations = append(builder.locations, Location{Kind: kind, Scope: LocationScopeGlobal, Path: path})
+
+		builder.locations = append(
+			builder.locations,
+			Location{Kind: kind, Scope: LocationScopeGlobal, Path: path},
+		)
 	}
+
 	return builder
 }
 
@@ -89,9 +96,11 @@ func (builder *LocationBuilder) Home(kind LocationKind, relative ...string) *Loc
 	if home == "" {
 		return builder
 	}
+
 	for _, path := range relative {
 		builder.Global(kind, filepath.Join(home, path))
 	}
+
 	return builder
 }
 
@@ -101,9 +110,18 @@ func (builder *LocationBuilder) Project(kind LocationKind, relative ...string) *
 	if builder.projectDir == "" {
 		return builder
 	}
+
 	for _, path := range relative {
-		builder.locations = append(builder.locations, Location{Kind: kind, Scope: LocationScopeProject, Path: filepath.Join(builder.projectDir, path)})
+		builder.locations = append(
+			builder.locations,
+			Location{
+				Kind:  kind,
+				Scope: LocationScopeProject,
+				Path:  filepath.Join(builder.projectDir, path),
+			},
+		)
 	}
+
 	return builder
 }
 

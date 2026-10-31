@@ -85,62 +85,98 @@ type MatcherInspection struct {
 // rules as live tracking. Only the last 100 normalized lines are evaluated.
 // An explicit manifest fails on invalid input; ambient overrides retain the
 // tracker's bundled fallback policy. Custom harness names require an explicit manifest.
-func Inspect(ctx context.Context, harness registry.Harness, screen string, opts Options) (Inspection, error) {
+func Inspect(
+	ctx context.Context,
+	harness registry.Harness,
+	screen string,
+	opts Options,
+) (Inspection, error) {
 	var empty Inspection
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
 	}
+
 	if len(screen) > MaxScreenBytes {
 		return empty, ErrScreenTooLarge
 	}
+
 	if opts.ManifestPath != "" && opts.ConfigDir != "" {
 		return empty, ErrManifestOptions
 	}
-	var manifest agentstate.Manifest
-	var err error
+
+	var (
+		manifest agentstate.Manifest
+		err      error
+	)
 	if opts.ManifestPath != "" {
 		manifest, err = agentstate.LoadExplicitManifest(opts.ManifestPath, harness)
 	} else {
 		manifest, err = (agentstate.Loader{ConfigDir: opts.ConfigDir}).Load(harness)
 	}
+
 	if err != nil {
 		return empty, fmt.Errorf("load detection manifest: %w", err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("inspect screen: %w", err)
 	}
+
 	raw := manifest.Inspect(agentstate.NormalizeSnapshot(screen, opts.Title))
+
 	result := inspectionFromRaw(raw)
 	if opts.IncludeScreen {
 		result.Screen = screen
 	}
+
 	return result, nil
 }
 
 func inspectionFromRaw(raw agentstate.Inspection) Inspection {
 	decision := raw.Decision
+
 	result := Inspection{
-		Harness: raw.Harness, ManifestSource: raw.ManifestSource, ManifestVersion: raw.ManifestVersion,
-		Warning: raw.Warning, LinesEvaluated: raw.LinesEvaluated, Title: raw.Title,
+		Harness:         raw.Harness,
+		ManifestSource:  raw.ManifestSource,
+		ManifestVersion: raw.ManifestVersion,
+		Warning:         raw.Warning,
+		LinesEvaluated:  raw.LinesEvaluated,
+		Title:           raw.Title,
 		Decision: Decision{
-			Activity: decision.Activity, Detail: decision.Detail, Reason: decision.Reason, RuleID: decision.RuleID,
-			ManifestSource: decision.ManifestSource, ManifestVersion: decision.ManifestVersion,
-			Warning: decision.Warning, Evidence: make([]RuleEvidence, 0, len(decision.Evidence)),
+			Activity:        decision.Activity,
+			Detail:          decision.Detail,
+			Reason:          decision.Reason,
+			RuleID:          decision.RuleID,
+			ManifestSource:  decision.ManifestSource,
+			ManifestVersion: decision.ManifestVersion,
+			Warning:         decision.Warning,
+			Evidence:        make([]RuleEvidence, 0, len(decision.Evidence)),
 		},
-		WinningRule: raw.WinningRule, Candidates: make([]CandidateRule, 0, len(raw.Candidates)), Screen: "",
+		WinningRule: raw.WinningRule,
+		Candidates:  make([]CandidateRule, 0, len(raw.Candidates)),
+		Screen:      "",
 	}
 	for _, ev := range decision.Evidence {
 		result.Decision.Evidence = append(result.Decision.Evidence, RuleEvidence(ev))
 	}
+
 	for _, rule := range raw.Candidates {
 		candidate := CandidateRule{
-			ID: rule.ID, State: rule.State, Priority: rule.Priority, Region: rule.Region,
-			Matched: rule.Matched, Winner: rule.Winner, Reason: rule.Reason, Matchers: make([]MatcherInspection, 0, len(rule.Matchers)),
+			ID:       rule.ID,
+			State:    rule.State,
+			Priority: rule.Priority,
+			Region:   rule.Region,
+			Matched:  rule.Matched,
+			Winner:   rule.Winner,
+			Reason:   rule.Reason,
+			Matchers: make([]MatcherInspection, 0, len(rule.Matchers)),
 		}
 		for _, matcher := range rule.Matchers {
 			candidate.Matchers = append(candidate.Matchers, MatcherInspection(matcher))
 		}
+
 		result.Candidates = append(result.Candidates, candidate)
 	}
+
 	return result
 }

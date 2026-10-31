@@ -32,7 +32,12 @@ func (adapter testCatalogAdapter) Catalog(context.Context) ([]harness.CatalogSes
 	return adapter.sessions, adapter.err
 }
 
-func newTestCatalogAdapter(id registry.Harness, source string, sessions []harness.CatalogSession, err error) testCatalogAdapter {
+func newTestCatalogAdapter(
+	id registry.Harness,
+	source string,
+	sessions []harness.CatalogSession,
+	err error,
+) testCatalogAdapter {
 	return testCatalogAdapter{
 		BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 			ID: id, IntegrationSource: source, IntegrationVersion: 7,
@@ -44,19 +49,36 @@ func newTestCatalogAdapter(id registry.Harness, source string, sessions []harnes
 
 func TestNativeCatalogComposesPartialProviderResults(t *testing.T) {
 	t.Parallel()
+
 	providerFailure := errTestCatalogCommand
+
 	entries, err := nativeCatalog(t.Context(), []harness.Adapter{
-		newTestCatalogAdapter("one", "one-catalog", []harness.CatalogSession{{SessionID: "current", Current: true, Activity: registry.ActivityRunning}}, nil),
-		newTestCatalogAdapter("two", "two-catalog", []harness.CatalogSession{{SessionID: "saved", Current: false}}, providerFailure),
+		newTestCatalogAdapter(
+			"one",
+			"one-catalog",
+			[]harness.CatalogSession{
+				{SessionID: "current", Current: true, Activity: registry.ActivityRunning},
+			},
+			nil,
+		),
+		newTestCatalogAdapter(
+			"two",
+			"two-catalog",
+			[]harness.CatalogSession{{SessionID: "saved", Current: false}},
+			providerFailure,
+		),
 		newTestCatalogAdapter("three", "three-catalog", nil, harness.ErrCatalogUnavailable),
 	})
 	if !errors.Is(err, providerFailure) {
 		t.Fatalf("NativeCatalog() error = %v, want provider failure", err)
 	}
+
 	if len(entries) != 2 || entries[0].Harness != "one" || entries[1].Harness != "two" {
 		t.Fatalf("NativeCatalog() entries = %#v", entries)
 	}
-	if entries[0].Reporter.Integration != "one-catalog" || entries[0].Reporter.Version != 7 || !entries[0].Reporter.MultiSession {
+
+	if entries[0].Reporter.Integration != "one-catalog" || entries[0].Reporter.Version != 7 ||
+		!entries[0].Reporter.MultiSession {
 		t.Fatalf("native reporter = %#v", entries[0].Reporter)
 	}
 }
@@ -75,7 +97,10 @@ func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
 			Subject: registry.ObservationIdentity{SessionID: "native-session"},
 			Evidence: &registry.Report{
 				Reporter: registry.Reporter{Integration: "claude-hook"},
-				Event:    "UserPromptSubmit", Claim: &presence, Activity: &running, Process: &process,
+				Event:    "UserPromptSubmit",
+				Claim:    &presence,
+				Activity: &running,
+				Process:  &process,
 			},
 		},
 		{
@@ -88,16 +113,25 @@ func TestClaudeNativeActivitySurvivesConflictingScreenReading(t *testing.T) {
 		},
 	}
 
-	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	state, _, err := registry.NewReducer(Rules{}).
+		Apply(registry.State{}, observations, at.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(state.Sessions) != 1 {
 		t.Fatalf("session count = %d, want 1", len(state.Sessions))
 	}
+
 	for _, session := range state.Sessions {
-		if session.Activity() == nil || *session.Activity() != running || session.Decision() == nil || session.Decision().Authority != registry.AuthorityHook {
-			t.Fatalf("activity = %v, decision = %v, want running from Claude hook", session.Activity(), session.Decision())
+		if session.Activity() == nil || *session.Activity() != running ||
+			session.Decision() == nil ||
+			session.Decision().Authority != registry.AuthorityHook {
+			t.Fatalf(
+				"activity = %v, decision = %v, want running from Claude hook",
+				session.Activity(),
+				session.Decision(),
+			)
 		}
 	}
 }
@@ -128,19 +162,28 @@ func TestCrushScreenActivitySupersedesToolHookReport(t *testing.T) {
 		},
 	}
 
-	state, _, err := registry.NewReducer(Rules{}).Apply(registry.State{}, observations, at.Add(time.Minute))
+	state, _, err := registry.NewReducer(Rules{}).
+		Apply(registry.State{}, observations, at.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(state.Sessions) != 1 {
 		t.Fatalf("session count = %d, want 1", len(state.Sessions))
 	}
+
 	for _, session := range state.Sessions {
 		if session.SessionID != "native-session" {
 			t.Fatalf("session id = %q, want native identity from the hook", session.SessionID)
 		}
-		if session.Activity() == nil || *session.Activity() != idle || session.Decision() == nil || session.Decision().Authority != registry.AuthorityScreen {
-			t.Fatalf("activity = %v, decision = %v, want idle from the Crush screen", session.Activity(), session.Decision())
+
+		if session.Activity() == nil || *session.Activity() != idle || session.Decision() == nil ||
+			session.Decision().Authority != registry.AuthorityScreen {
+			t.Fatalf(
+				"activity = %v, decision = %v, want idle from the Crush screen",
+				session.Activity(),
+				session.Decision(),
+			)
 		}
 	}
 }
@@ -148,11 +191,25 @@ func TestCrushScreenActivitySupersedesToolHookReport(t *testing.T) {
 func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
 	t.Parallel()
 
-	activity := harness.ReportHookCommand("aht", registry.Harness("codex"), registry.ActivityRunning, "turn", "test")
-	if !strings.Contains(activity, "--activity running") || strings.Contains(activity, "--presence") {
+	activity := harness.ReportHookCommand(
+		"aht",
+		registry.Harness("codex"),
+		registry.ActivityRunning,
+		"turn",
+		"test",
+	)
+	if !strings.Contains(activity, "--activity running") ||
+		strings.Contains(activity, "--presence") {
 		t.Fatalf("activity command = %q", activity)
 	}
-	presence := harness.ReportHookCommand("aht", registry.Harness("codex"), registry.PresenceGone, "stop", "test")
+
+	presence := harness.ReportHookCommand(
+		"aht",
+		registry.Harness("codex"),
+		registry.PresenceGone,
+		"stop",
+		"test",
+	)
 	if !strings.Contains(presence, "--presence gone") || strings.Contains(presence, "--activity") {
 		t.Fatalf("presence command = %q", presence)
 	}
@@ -162,12 +219,21 @@ func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
 	t.Parallel()
 
 	deferredPanic := false
+
 	func() {
 		defer func() {
 			deferredPanic = recover() != nil
 		}()
-		_ = harness.ReportHookCommand("aht", registry.Harness("codex"), registry.Activity("bogus"), "turn", "test")
+
+		_ = harness.ReportHookCommand(
+			"aht",
+			registry.Harness("codex"),
+			registry.Activity("bogus"),
+			"turn",
+			"test",
+		)
 	}()
+
 	if !deferredPanic {
 		t.Fatal("ReportHookCommand accepted an invalid activity")
 	}
@@ -355,10 +421,22 @@ func TestParse(t *testing.T) {
 		{name: "codex", value: "codex", want: registry.Harness("codex")},
 		{name: "cursor alias binary", value: "cursor-agent", want: registry.Harness("cursor")},
 		{name: "cursor alias cli hyphen", value: "cursor-cli", want: registry.Harness("cursor")},
-		{name: "cursor alias cli underscore", value: "cursor_cli", want: registry.Harness("cursor")},
+		{
+			name:  "cursor alias cli underscore",
+			value: "cursor_cli",
+			want:  registry.Harness("cursor"),
+		},
 		{name: "copilot", value: "copilot", want: registry.Harness("copilot")},
-		{name: "copilot alias hyphen", value: "github-copilot-cli", want: registry.Harness("copilot")},
-		{name: "copilot alias underscore", value: "github_copilot", want: registry.Harness("copilot")},
+		{
+			name:  "copilot alias hyphen",
+			value: "github-copilot-cli",
+			want:  registry.Harness("copilot"),
+		},
+		{
+			name:  "copilot alias underscore",
+			value: "github_copilot",
+			want:  registry.Harness("copilot"),
+		},
 		{name: "cline", value: "cline", want: registry.Harness("cline")},
 		{name: "claude alias hyphen", value: "claude-code", want: registry.Harness("claude")},
 		{name: "claude alias underscore", value: "claude_code", want: registry.Harness("claude")},
@@ -394,7 +472,11 @@ func TestParse(t *testing.T) {
 		{name: "amp alias underscore", value: "amp_code", want: registry.Harness("amp")},
 		{name: "prime-agent", value: "prime-agent", want: registry.Harness("prime-agent")},
 		{name: "prime-agent alias short", value: "prime", want: registry.Harness("prime-agent")},
-		{name: "prime-agent alias compact", value: "primeagent", want: registry.Harness("prime-agent")},
+		{
+			name:  "prime-agent alias compact",
+			value: "primeagent",
+			want:  registry.Harness("prime-agent"),
+		},
 	}
 
 	for _, test := range tests {
@@ -405,6 +487,7 @@ func TestParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse returned error: %v", err)
 			}
+
 			if got != test.want {
 				t.Fatalf("expected %q, got %q", test.want, got)
 			}
@@ -447,7 +530,11 @@ func TestFromCommand(t *testing.T) {
 		{command: "amp", want: registry.Harness("amp"), wantOK: true},
 		{command: "qwen", want: registry.Harness("qwen"), wantOK: true},
 		{command: "prime-agent", want: registry.Harness("prime-agent"), wantOK: true},
-		{command: "/usr/local/bin/prime-agent", want: registry.Harness("prime-agent"), wantOK: true},
+		{
+			command: "/usr/local/bin/prime-agent",
+			want:    registry.Harness("prime-agent"),
+			wantOK:  true,
+		},
 		{command: "zsh", want: "", wantOK: false},
 	}
 
@@ -479,9 +566,11 @@ func TestPayloadDefaults(t *testing.T) {
 		wantAttrKV string
 	}{
 		{
-			name:       "claude",
-			harness:    registry.Harness("claude"),
-			payload:    `{"session_id":"claude-session","transcript_path":"/tmp/claude.jsonl","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup","model":"claude-sonnet-4-6"}`,
+			name:    "claude",
+			harness: registry.Harness("claude"),
+			payload: `{"session_id":"claude-session","transcript_path":"/tmp/` +
+				`claude.jsonl","cwd":"/tmp","hook_event_name":"SessionStart",` +
+				`"source":"startup","model":"claude-sonnet-4-6"}`,
 			wantID:     "claude-session",
 			wantPath:   "/tmp/claude.jsonl",
 			wantCWD:    "/tmp",
@@ -491,9 +580,11 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "claude-sonnet-4-6",
 		},
 		{
-			name:       "codex",
-			harness:    registry.Harness("codex"),
-			payload:    `{"session_id":"codex-session","transcript_path":"/tmp/codex.jsonl","cwd":"/tmp","hook_event_name":"UserPromptSubmit","model":"gpt-5-codex"}`,
+			name:    "codex",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"codex-session","transcript_path":"/tmp/` +
+				`codex.jsonl","cwd":"/tmp","hook_event_name":"UserPromptSubmi` +
+				`t","model":"gpt-5-codex"}`,
 			wantID:     "codex-session",
 			wantPath:   "/tmp/codex.jsonl",
 			wantCWD:    "/tmp",
@@ -503,9 +594,11 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "gpt-5-codex",
 		},
 		{
-			name:       "grok",
-			harness:    registry.Harness("grok"),
-			payload:    `{"sessionId":"grok-session","cwd":"/tmp","workspaceRoot":"/repo","hookEventName":"UserPromptSubmit","toolName":"run_terminal_command"}`,
+			name:    "grok",
+			harness: registry.Harness("grok"),
+			payload: `{"sessionId":"grok-session","cwd":"/tmp","workspaceRoot":"/` +
+				`repo","hookEventName":"UserPromptSubmit",` +
+				`"toolName":"run_terminal_command"}`,
 			wantID:     "grok-session",
 			wantPath:   "",
 			wantCWD:    "/tmp",
@@ -515,9 +608,10 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "run_terminal_command",
 		},
 		{
-			name:       "goose",
-			harness:    registry.Harness("goose"),
-			payload:    `{"event":"PreToolUse","session_id":"goose-session","working_dir":"/repo/goose","tool_name":"shell"}`,
+			name:    "goose",
+			harness: registry.Harness("goose"),
+			payload: `{"event":"PreToolUse","session_id":"goose-session",` +
+				`"working_dir":"/repo/goose","tool_name":"shell"}`,
 			wantID:     "goose-session",
 			wantPath:   "",
 			wantCWD:    "/repo/goose",
@@ -527,9 +621,14 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "shell",
 		},
 		{
-			name:       "cursor",
-			harness:    registry.Harness("cursor"),
-			payload:    `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":["/repo"],"hook_event_name":"beforeSubmitPrompt","model":"gpt-5.2","cursor_version":"1.7.2","composer_mode":"agent","is_background_agent":false}`,
+			name:    "cursor",
+			harness: registry.Harness("cursor"),
+			payload: `{"conversation_id":"cursor-conversation",` +
+				`"session_id":"cursor-session","transcript_path":"/tmp/` +
+				`cursor.jsonl","workspace_roots":["/repo"],` +
+				`"hook_event_name":"beforeSubmitPrompt","model":"gpt-5.2",` +
+				`"cursor_version":"1.7.2","composer_mode":"agent",` +
+				`"is_background_agent":false}`,
 			wantID:     "cursor-session",
 			wantPath:   "/tmp/cursor.jsonl",
 			wantCWD:    "/repo",
@@ -539,9 +638,11 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "gpt-5.2",
 		},
 		{
-			name:       "copilot",
-			harness:    registry.Harness("copilot"),
-			payload:    `{"sessionId":"copilot-session","timestamp":"2026-06-29T10:00:00Z","cwd":"/repo/copilot","toolName":"Bash"}`,
+			name:    "copilot",
+			harness: registry.Harness("copilot"),
+			payload: `{"sessionId":"copilot-session",` +
+				`"timestamp":"2026-06-29T10:00:00Z","cwd":"/repo/copilot",` +
+				`"toolName":"Bash"}`,
 			wantID:     "copilot-session",
 			wantPath:   "",
 			wantCWD:    "/repo/copilot",
@@ -551,11 +652,21 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "Bash",
 		},
 		{
-			name:       "cline",
-			harness:    registry.Harness("cline"),
-			payload:    `{"clineVersion":"3.2.1","hookName":"PreToolUse","taskId":"cline-task","sessionContext":{"rootSessionId":"cline-root"},"workspaceRoots":["/repo/cline"],"tool_call":{"name":"execute_command"}}`,
-			wantID:     "cline-root",
-			wantPath:   filepath.Join(os.Getenv("HOME"), ".cline", "data", "sessions", "cline-root", "cline-root.messages.json"),
+			name:    "cline",
+			harness: registry.Harness("cline"),
+			payload: `{"clineVersion":"3.2.1","hookName":"PreToolUse",` +
+				`"taskId":"cline-task","sessionContext":{"rootSessionId":"cli` +
+				`ne-root"},"workspaceRoots":["/repo/cline"],` +
+				`"tool_call":{"name":"execute_command"}}`,
+			wantID: "cline-root",
+			wantPath: filepath.Join(
+				os.Getenv("HOME"),
+				".cline",
+				"data",
+				"sessions",
+				"cline-root",
+				"cline-root.messages.json",
+			),
 			wantCWD:    "/repo/cline",
 			wantRoot:   "/repo/cline",
 			wantEvent:  "PreToolUse",
@@ -563,9 +674,12 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "execute_command",
 		},
 		{
-			name:       "kimi",
-			harness:    registry.Harness("kimi-code"),
-			payload:    `{"session_id":"session-no-index","cwd":"/tmp","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli","tool_name":"Bash","turn_id":7}`,
+			name:    "kimi",
+			harness: registry.Harness("kimi-code"),
+			payload: `{"session_id":"session-no-index","cwd":"/tmp",` +
+				`"hook_event_name":"PermissionRequest",` +
+				`"client_type":"kimi_code_cli","tool_name":"Bash",` +
+				`"turn_id":7}`,
 			wantID:     "session-no-index",
 			wantPath:   "",
 			wantCWD:    "/tmp",
@@ -575,9 +689,12 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "Bash",
 		},
 		{
-			name:       "agy",
-			harness:    registry.Harness("agy"),
-			payload:    `{"conversationId":"agy-session","transcriptPath":"/repo/.gemini/antigravity/transcript.jsonl","workspacePaths":["/repo"],"event":"PreToolUse","toolCall":{"name":"run_command","args":{"Cwd":"/repo/subdir"}}}`,
+			name:    "agy",
+			harness: registry.Harness("agy"),
+			payload: `{"conversationId":"agy-session","transcriptPath":"/repo/` +
+				`.gemini/antigravity/transcript.jsonl","workspacePaths":["/` +
+				`repo"],"event":"PreToolUse","toolCall":{"name":"run_command"` +
+				`,"args":{"Cwd":"/repo/subdir"}}}`,
 			wantID:     "agy-session",
 			wantPath:   "/repo/.gemini/antigravity/transcript.jsonl",
 			wantCWD:    "/repo/subdir",
@@ -587,9 +704,11 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "run_command",
 		},
 		{
-			name:       "droid",
-			harness:    registry.Harness("droid"),
-			payload:    `{"session_id":"droid-session","transcript_path":"/tmp/droid.jsonl","cwd":"/repo/droid","hook_event_name":"PreToolUse","tool_name":"Bash"}`,
+			name:    "droid",
+			harness: registry.Harness("droid"),
+			payload: `{"session_id":"droid-session","transcript_path":"/tmp/` +
+				`droid.jsonl","cwd":"/repo/droid",` +
+				`"hook_event_name":"PreToolUse","tool_name":"Bash"}`,
 			wantID:     "droid-session",
 			wantPath:   "/tmp/droid.jsonl",
 			wantCWD:    "/repo/droid",
@@ -599,9 +718,13 @@ func TestPayloadDefaults(t *testing.T) {
 			wantAttrKV: "Bash",
 		},
 		{
-			name:       "qwen",
-			harness:    registry.Harness("qwen"),
-			payload:    `{"session_id":"qwen-session","transcript_path":"/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl","cwd":"/repo","hook_event_name":"Notification","notification_type":"permission_prompt","permission_mode":"default"}`,
+			name:    "qwen",
+			harness: registry.Harness("qwen"),
+			payload: `{"session_id":"qwen-session","transcript_path":"/home/user/` +
+				`.qwen/projects/-repo/chats/qwen-session.jsonl","cwd":"/` +
+				`repo","hook_event_name":"Notification",` +
+				`"notification_type":"permission_prompt",` +
+				`"permission_mode":"default"}`,
 			wantID:     "qwen-session",
 			wantPath:   "/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl",
 			wantCWD:    "/repo",
@@ -620,6 +743,7 @@ func TestPayloadDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 			}
+
 			if got.SessionID != test.wantID ||
 				got.SessionPath != test.wantPath ||
 				got.CWD != test.wantCWD ||
@@ -627,8 +751,14 @@ func TestPayloadDefaults(t *testing.T) {
 				got.Event != test.wantEvent {
 				t.Fatalf("unexpected defaults: %#v", got)
 			}
+
 			if got.Attributes[test.wantAttr] != test.wantAttrKV {
-				t.Fatalf("expected attribute %s=%q, got %#v", test.wantAttr, test.wantAttrKV, got.Attributes)
+				t.Fatalf(
+					"expected attribute %s=%q, got %#v",
+					test.wantAttr,
+					test.wantAttrKV,
+					got.Attributes,
+				)
 			}
 		})
 	}
@@ -637,7 +767,10 @@ func TestPayloadDefaults(t *testing.T) {
 func TestPayloadDefaultsRejectsMalformedPayload(t *testing.T) {
 	t.Parallel()
 
-	if _, err := PayloadDefaults(registry.Harness("codex"), json.RawMessage(`"not-an-object"`)); err == nil {
+	if _, err := PayloadDefaults(
+		registry.Harness("codex"),
+		json.RawMessage(`"not-an-object"`),
+	); err == nil {
 		t.Fatal("PayloadDefaults accepted a non-object payload")
 	}
 }
@@ -653,7 +786,11 @@ func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 
 	got, err := PayloadDefaults(
 		registry.Harness("kimi-code"),
-		json.RawMessage(`{"session_id":"kimi-index-session","cwd":"/repo","hook_event_name":"SessionStart","client_type":"kimi_code_cli","source":"startup"}`),
+		json.RawMessage(
+			`{"session_id":"kimi-index-session","cwd":"/repo",`+
+				`"hook_event_name":"SessionStart",`+
+				`"client_type":"kimi_code_cli","source":"startup"}`,
+		),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error from PayloadDefaults: %v", err)
@@ -665,6 +802,7 @@ func TestKimiPayloadDefaultsUsesCurrentSessionDirectory(t *testing.T) {
 		got.Event != "SessionStart" {
 		t.Fatalf("unexpected defaults: %#v", got)
 	}
+
 	if got.Attributes["kimi_code_source"] != "startup" {
 		t.Fatalf("expected kimi_code_source=startup, got %#v", got.Attributes)
 	}
@@ -682,44 +820,59 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "claude accepts native hook payload",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
-			want:    true,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/` +
+				`user/.claude/projects/-repo/claude-session.jsonl","cwd":"/` +
+				`repo","hook_event_name":"Stop"}`,
+			want: true,
 		},
 		{
 			name:    "codex accepts native hook payload",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
-			want:    true,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/` +
+				`.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo",` +
+				`"hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			want: true,
 		},
 		{
 			name:    "codex accepts null transcript path",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"codex-session","transcript_path":null,"cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
-			want:    true,
+			payload: `{"session_id":"codex-session","transcript_path":null,` +
+				`"cwd":"/repo","hook_event_name":"Stop",` +
+				`"model":"gpt-5-codex"}`,
+			want: true,
 		},
 		{
 			name:    "codex accepts session end payload without model",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"codex-session","transcript_path":null,"cwd":"/repo","hook_event_name":"SessionEnd","reason":"other"}`,
-			want:    true,
+			payload: `{"session_id":"codex-session","transcript_path":null,` +
+				`"cwd":"/repo","hook_event_name":"SessionEnd",` +
+				`"reason":"other"}`,
+			want: true,
 		},
 		{
 			name:    "cursor accepts native hook payload",
 			harness: registry.Harness("cursor"),
-			payload: `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":null,"workspace_roots":["/repo"],"hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
-			want:    true,
+			payload: `{"conversation_id":"cursor-conversation",` +
+				`"session_id":"cursor-session","transcript_path":null,` +
+				`"workspace_roots":["/repo"],"hook_event_name":"sessionEnd",` +
+				`"cursor_version":"2026.06.15"}`,
+			want: true,
 		},
 		{
 			name:    "copilot accepts native hook payload",
 			harness: registry.Harness("copilot"),
-			payload: `{"sessionId":"copilot-session","timestamp":"2026-06-29T10:00:00Z","cwd":"/repo","toolName":"Bash"}`,
-			want:    true,
+			payload: `{"sessionId":"copilot-session",` +
+				`"timestamp":"2026-06-29T10:00:00Z","cwd":"/repo",` +
+				`"toolName":"Bash"}`,
+			want: true,
 		},
 		{
 			name:    "cline accepts native hook payload",
 			harness: registry.Harness("cline"),
-			payload: `{"hookName":"TaskStart","taskId":"cline-task","sessionContext":{"rootSessionId":"cline-root"},"workspaceRoots":["/repo"]}`,
-			want:    true,
+			payload: `{"hookName":"TaskStart","taskId":"cline-task",` +
+				`"sessionContext":{"rootSessionId":"cline-root"},` +
+				`"workspaceRoots":["/repo"]}`,
+			want: true,
 		},
 		{
 			name:    "grok accepts native hook payload",
@@ -742,8 +895,10 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "kimi-code accepts native hook payload",
 			harness: registry.Harness("kimi-code"),
-			payload: `{"session_id":"session-example","cwd":"/repo","hook_event_name":"PermissionRequest","client_type":"kimi_code_cli"}`,
-			want:    true,
+			payload: `{"session_id":"session-example","cwd":"/repo",` +
+				`"hook_event_name":"PermissionRequest",` +
+				`"client_type":"kimi_code_cli"}`,
+			want: true,
 		},
 		{
 			name:    "agy accepts native hook payload",
@@ -760,26 +915,33 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "droid accepts native hook payload",
 			harness: registry.Harness("droid"),
-			payload: `{"session_id":"droid-session","transcript_path":"/tmp/droid.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
-			want:    true,
+			payload: `{"session_id":"droid-session","transcript_path":"/tmp/` +
+				`droid.jsonl","cwd":"/repo","hook_event_name":"Stop"}`,
+			want: true,
 		},
 		{
 			name:    "claude rejects camel case hook payload",
 			harness: registry.Harness("claude"),
-			payload: `{"hookEventName":"stop","sessionId":"not-claude","cwd":"/repo","workspaceRoot":"/repo","promptId":"prompt"}`,
-			want:    false,
+			payload: `{"hookEventName":"stop","sessionId":"not-claude","cwd":"/` +
+				`repo","workspaceRoot":"/repo","promptId":"prompt"}`,
+			want: false,
 		},
 		{
 			name:    "claude accepts cursor-compatible common payload",
 			harness: registry.Harness("claude"),
-			payload: `{"conversation_id":"cursor-conversation","session_id":"cursor-session","transcript_path":null,"cwd":"/repo","hook_event_name":"sessionEnd","cursor_version":"2026.06.15","workspace_roots":["/repo"]}`,
-			want:    true,
+			payload: `{"conversation_id":"cursor-conversation",` +
+				`"session_id":"cursor-session","transcript_path":null,` +
+				`"cwd":"/repo","hook_event_name":"sessionEnd",` +
+				`"cursor_version":"2026.06.15","workspace_roots":["/repo"]}`,
+			want: true,
 		},
 		{
 			name:    "claude accepts configurable transcript path",
 			harness: registry.Harness("claude"),
-			payload: `{"session_id":"codex-session","transcript_path":"/home/user/.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo","hook_event_name":"Stop","model":"gpt-5-codex"}`,
-			want:    true,
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/` +
+				`.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo",` +
+				`"hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			want: true,
 		},
 		{
 			name:    "claude accepts null transcript path",
@@ -790,8 +952,11 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "codex accepts configurable transcript path",
 			harness: registry.Harness("codex"),
-			payload: `{"session_id":"claude-session","transcript_path":"/home/user/.claude/projects/-repo/claude-session.jsonl","cwd":"/repo","hook_event_name":"SessionStart","model":"claude-sonnet-4-6"}`,
-			want:    true,
+			payload: `{"session_id":"claude-session","transcript_path":"/home/` +
+				`user/.claude/projects/-repo/claude-session.jsonl","cwd":"/` +
+				`repo","hook_event_name":"SessionStart",` +
+				`"model":"claude-sonnet-4-6"}`,
+			want: true,
 		},
 		{
 			name:    "cursor rejects payload without cursor common fields",
@@ -802,14 +967,20 @@ func TestPayloadCompatible(t *testing.T) {
 		{
 			name:    "cursor rejects string workspace roots",
 			harness: registry.Harness("cursor"),
-			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":"/repo","hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
-			want:    false,
+			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/` +
+				`cursor.jsonl","workspace_roots":"/repo",` +
+				`"hook_event_name":"sessionEnd",` +
+				`"cursor_version":"2026.06.15"}`,
+			want: false,
 		},
 		{
 			name:    "cursor rejects blank workspace roots",
 			harness: registry.Harness("cursor"),
-			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/cursor.jsonl","workspace_roots":["  "],"hook_event_name":"sessionEnd","cursor_version":"2026.06.15"}`,
-			want:    false,
+			payload: `{"session_id":"cursor-session","transcript_path":"/tmp/` +
+				`cursor.jsonl","workspace_roots":["  "],` +
+				`"hook_event_name":"sessionEnd",` +
+				`"cursor_version":"2026.06.15"}`,
+			want: false,
 		},
 		{
 			name:    "copilot rejects payload without cwd",
@@ -974,21 +1145,30 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	if !ok {
 		t.Fatal("expected agy hook adapter")
 	}
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !reflect.DeepEqual(result.Response, test.wantResponse) {
 		t.Fatalf("expected response %#v, got %#v", test.wantResponse, result.Response)
 	}
+
 	if result.ReportOK != test.wantReport {
 		t.Fatalf("expected report ok %v, got %v", test.wantReport, result.ReportOK)
 	}
+
 	if result.ReportOK {
 		if result.Report.ActivityClaim() == nil {
 			t.Fatal("expected activity")
 		}
+
 		if *result.Report.ActivityClaim() != test.wantActivity {
-			t.Fatalf("expected activity %q, got %q", test.wantActivity, *result.Report.ActivityClaim())
+			t.Fatalf(
+				"expected activity %q, got %q",
+				test.wantActivity,
+				*result.Report.ActivityClaim(),
+			)
 		}
 	}
 }
@@ -996,15 +1176,26 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 func TestHandleHookUnsupportedHarness(t *testing.T) {
 	t.Parallel()
 
-	var rawPayload json.RawMessage
-	var payload map[string]any
-	if _, ok, err := HandleHook(t.Context(), registry.Harness("codex"), "Stop", rawPayload, payload, nil); ok || err != nil {
+	var (
+		rawPayload json.RawMessage
+		payload    map[string]any
+	)
+	if _, ok, err := HandleHook(
+		t.Context(),
+		registry.Harness("codex"),
+		"Stop",
+		rawPayload,
+		payload,
+		nil,
+	); ok ||
+		err != nil {
 		t.Fatalf("expected codex to have no managed hook adapter: supported=%v err=%v", ok, err)
 	}
 }
 
 func isolateLocationEnvironment(t *testing.T) string {
 	t.Helper()
+
 	for _, name := range []string{
 		"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "COPILOT_HOME",
 		"CLINE_DIR", "CLINE_DATA_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GOOSE_PATH_ROOT", "PI_CODING_AGENT_DIR",
@@ -1015,34 +1206,46 @@ func isolateLocationEnvironment(t *testing.T) string {
 	} {
 		t.Setenv(name, "")
 	}
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
 	return home
 }
 
 func globalLocationPaths(locations []harness.Location, kind harness.LocationKind) []string {
 	var paths []string
+
 	for _, location := range locations {
 		if location.Kind == kind && location.Scope == harness.LocationScopeGlobal {
 			paths = append(paths, location.Path)
 		}
 	}
+
 	return paths
 }
 
 func TestLocationsForUnknownHarness(t *testing.T) {
 	t.Parallel()
+
 	locations, ok := LocationsFor(registry.Harness("no-such-harness"), t.TempDir())
 	if ok || locations != nil {
 		t.Fatalf("LocationsFor(unknown) = %v, %t, want nil, false", locations, ok)
 	}
 }
 
-func checkLocationScope(t *testing.T, id registry.Harness, location harness.Location, projectDir string) {
+func checkLocationScope(
+	t *testing.T,
+	id registry.Harness,
+	location harness.Location,
+	projectDir string,
+) {
 	t.Helper()
+
 	if !filepath.IsAbs(location.Path) {
 		t.Errorf("%s: relative path %q", id, location.Path)
 	}
+
 	inProject := strings.HasPrefix(location.Path, projectDir+string(filepath.Separator))
 	switch location.Scope {
 	case harness.LocationScopeProject:
@@ -1059,26 +1262,36 @@ func checkLocationScope(t *testing.T, id registry.Harness, location harness.Loca
 func TestLocationsStayWithinTheirScope(t *testing.T) {
 	home := isolateLocationEnvironment(t)
 	projectDir := t.TempDir()
+
 	for _, adapter := range All() {
 		id := adapter.Definition().ID
+
 		locations, ok := LocationsFor(id, projectDir)
 		if !ok || len(locations) == 0 {
 			t.Errorf("%s: LocationsFor = %d locations, %t", id, len(locations), ok)
 			continue
 		}
+
 		seen := make(map[harness.Location]bool, len(locations))
 		for _, location := range locations {
 			if seen[location] {
 				t.Errorf("%s: duplicate location %+v", id, location)
 			}
+
 			seen[location] = true
 			checkLocationScope(t, id, location, projectDir)
 		}
 
 		withoutProject, _ := LocationsFor(id, "")
 		for _, location := range withoutProject {
-			if location.Scope != harness.LocationScopeGlobal || (!strings.HasPrefix(location.Path, home) && !strings.HasPrefix(location.Path, "/etc/")) {
-				t.Errorf("%s: %+v returned without a project directory or outside the isolated home %q", id, location, home)
+			if location.Scope != harness.LocationScopeGlobal ||
+				(!strings.HasPrefix(location.Path, home) && !strings.HasPrefix(location.Path, "/etc/")) {
+				t.Errorf(
+					"%s: %+v returned without a project directory or outside the isolated home %q",
+					id,
+					location,
+					home,
+				)
 			}
 		}
 	}
@@ -1091,9 +1304,11 @@ func withoutHome(t *testing.T) string {
 	isolateLocationEnvironment(t)
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
+
 	if home := harness.HomeDir(); home != "" {
 		t.Skipf("platform reports home directory %q without HOME", home)
 	}
+
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 
@@ -1103,22 +1318,27 @@ func withoutHome(t *testing.T) string {
 func TestLocationsOmitGlobalPathsWithoutHome(t *testing.T) {
 	projectDir := t.TempDir()
 	isolateLocationEnvironment(t)
+
 	withHome := map[string]bool{}
+
 	for _, adapter := range All() {
 		locations, _ := LocationsFor(adapter.Definition().ID, projectDir)
 		for _, location := range locations {
 			withHome[location.Path] = true
 		}
 	}
+
 	withoutHome(t)
 
 	for _, adapter := range All() {
 		id := adapter.Definition().ID
+
 		locations, _ := LocationsFor(id, projectDir)
 		for _, location := range locations {
 			if !filepath.IsAbs(location.Path) {
 				t.Errorf("%s: %+v is not absolute without a home directory", id, location)
 			}
+
 			if location.Scope == harness.LocationScopeGlobal && !withHome[location.Path] {
 				t.Errorf("%s: %+v resolved without a home directory or override", id, location)
 			}
@@ -1145,29 +1365,47 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 		{harness: registry.Harness("pi"), variable: "PI_CODING_AGENT_DIR"},
 		{harness: registry.Harness("kilo"), variable: "KILO_CONFIG_DIR"},
 		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_STATE_DIR"},
-		{harness: registry.Harness("openclaw"), variable: "OPENCLAW_CONFIG_PATH", value: func(dir string) string { return filepath.Join(dir, "custom.json") }},
+		{
+			harness: registry.Harness(
+				"openclaw",
+			),
+			variable: "OPENCLAW_CONFIG_PATH",
+			value: func(dir string) string {
+				return filepath.Join(
+					dir,
+					"custom.json",
+				)
+			},
+		},
 	} {
 		for _, knownHome := range []bool{true, false} {
 			name := string(test.harness) + "/" + test.variable
 			if !knownHome {
 				name += "/without home"
 			}
+
 			t.Run(name, func(t *testing.T) {
 				isolateLocationEnvironment(t)
+
 				if !knownHome {
 					t.Setenv("HOME", "")
 					t.Setenv("USERPROFILE", "")
 				}
+
 				override := t.TempDir()
+
 				value := override
 				if test.value != nil {
 					value = test.value(override)
 				}
+
 				t.Setenv(test.variable, value)
 				locations, _ := LocationsFor(test.harness, "")
+
 				config := globalLocationPaths(locations, harness.LocationKindConfig)
 				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
-					return !strings.HasPrefix(path, override+string(filepath.Separator)) && !strings.HasPrefix(path, "/etc/")
+					return !strings.HasPrefix(path, override+string(filepath.Separator)) &&
+						!strings.HasPrefix(path, "/etc/")
 				}) {
 					t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
 				}
@@ -1178,10 +1416,12 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 
 func TestAgySettingsUseApplicationDirectory(t *testing.T) {
 	home := isolateLocationEnvironment(t)
+
 	locations, ok := LocationsFor(registry.Harness("agy"), "")
 	if !ok {
 		t.Fatal("missing locations")
 	}
+
 	want := []string{filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")}
 	if got := globalLocationPaths(locations, harness.LocationKindConfig); !slices.Equal(got, want) {
 		t.Fatalf("settings locations = %v, want %v", got, want)
@@ -1192,10 +1432,22 @@ func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
 	isolateLocationEnvironment(t)
 	override := t.TempDir()
 	t.Setenv("CLINE_DIR", override)
+
 	locations, _ := LocationsFor(registry.Harness("cline"), "")
-	for _, kind := range []harness.LocationKind{harness.LocationKindSkills, harness.LocationKindCommands, harness.LocationKindInstructions} {
+	for _, kind := range []harness.LocationKind{
+		harness.LocationKindSkills,
+		harness.LocationKindCommands,
+		harness.LocationKindInstructions,
+	} {
 		got := globalLocationPaths(locations, kind)
-		if !slices.ContainsFunc(got, func(path string) bool { return filepath.Dir(path) == override }) || slices.ContainsFunc(got, func(path string) bool { return strings.Contains(path, ".cline") }) {
+		if !slices.ContainsFunc(
+			got,
+			func(path string) bool { return filepath.Dir(path) == override },
+		) ||
+			slices.ContainsFunc(
+				got,
+				func(path string) bool { return strings.Contains(path, ".cline") },
+			) {
 			t.Errorf("cline %s with CLINE_DIR = %v", kind, got)
 		}
 	}
@@ -1203,26 +1455,38 @@ func TestClineDirectoryHoldsRulesSkillsAndWorkflows(t *testing.T) {
 
 func writeDecoyFile(t *testing.T, workDir string, content string, elements ...string) {
 	t.Helper()
+
 	path := filepath.Join(append([]string{workDir}, elements...)...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func writeDecoyDatabase(t *testing.T, workDir string, schema string, row string, elements ...string) {
+func writeDecoyDatabase(
+	t *testing.T,
+	workDir string,
+	schema string,
+	row string,
+	elements ...string,
+) {
 	t.Helper()
+
 	path := filepath.Join(append([]string{workDir}, elements...)...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() { _ = db.Close() }()
+
 	for _, statement := range []string{schema, row} {
 		if _, err := db.ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
@@ -1237,11 +1501,27 @@ func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
 	}{
 		{registry.Harness("droid"), func(t *testing.T, workDir string) {
 			t.Helper()
-			writeDecoyFile(t, workDir, `{"type":"session_start","id":"abc","title":"Decoy"}`+"\n", ".factory", "sessions", "abc.jsonl")
+			writeDecoyFile(
+				t,
+				workDir,
+				`{"type":"session_start","id":"abc","title":"Decoy"}`+"\n",
+				".factory",
+				"sessions",
+				"abc.jsonl",
+			)
 		}},
 		{registry.Harness("grok"), func(t *testing.T, workDir string) {
 			t.Helper()
-			writeDecoyFile(t, workDir, `{"info":{"session_id":"abc"},"generated_title":"Decoy"}`, ".grok", "sessions", "group", "abc", "summary.json")
+			writeDecoyFile(
+				t,
+				workDir,
+				`{"info":{"session_id":"abc"},"generated_title":"Decoy"}`,
+				".grok",
+				"sessions",
+				"group",
+				"abc",
+				"summary.json",
+			)
 		}},
 		{registry.Harness("codex"), func(t *testing.T, workDir string) {
 			t.Helper()
@@ -1249,31 +1529,62 @@ func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
 		}},
 		{registry.Harness("hermes"), func(t *testing.T, workDir string) {
 			t.Helper()
-			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, title TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".hermes", "state.db")
+			writeDecoyDatabase(
+				t,
+				workDir,
+				"CREATE TABLE sessions (id TEXT, title TEXT)",
+				"INSERT INTO sessions VALUES ('abc', 'Decoy')",
+				".hermes",
+				"state.db",
+			)
 		}},
 		{registry.Harness("goose"), func(t *testing.T, workDir string) {
 			t.Helper()
-			writeDecoyDatabase(t, workDir, "CREATE TABLE sessions (id TEXT, description TEXT)", "INSERT INTO sessions VALUES ('abc', 'Decoy')", ".local", "share", "goose", "sessions", "sessions.db")
+			writeDecoyDatabase(
+				t,
+				workDir,
+				"CREATE TABLE sessions (id TEXT, description TEXT)",
+				"INSERT INTO sessions VALUES ('abc', 'Decoy')",
+				".local",
+				"share",
+				"goose",
+				"sessions",
+				"sessions.db",
+			)
 		}},
 		{registry.Harness("kilo"), func(t *testing.T, workDir string) {
 			t.Helper()
 			t.Setenv("PATH", "")
-			writeDecoyDatabase(t, workDir, "CREATE TABLE session (id TEXT, title TEXT)", "INSERT INTO session VALUES ('abc', 'Decoy')", ".local", "share", "kilo", "kilo.db")
+			writeDecoyDatabase(
+				t,
+				workDir,
+				"CREATE TABLE session (id TEXT, title TEXT)",
+				"INSERT INTO session VALUES ('abc', 'Decoy')",
+				".local",
+				"share",
+				"kilo",
+				"kilo.db",
+			)
 		}},
 	} {
 		t.Run(string(test.harness), func(t *testing.T) {
 			workDir := withoutHome(t)
 			test.plant(t, workDir)
+
 			adapter, ok := Find(test.harness)
 			if !ok {
 				t.Fatalf("adapter %s not found", test.harness)
 			}
+
 			reader, ok := adapter.(harness.TitleReader)
 			if !ok {
 				t.Fatalf("adapter %s has no title reader", test.harness)
 			}
 
-			titles, err := reader.SessionTitles(t.Context(), []registry.ObservationIdentity{{SessionID: testSessionID}})
+			titles, err := reader.SessionTitles(
+				t.Context(),
+				[]registry.ObservationIdentity{{SessionID: testSessionID}},
+			)
 			if err != nil || len(titles) != 1 || titles[0] != "" {
 				t.Fatalf("SessionTitles without a home = %q, %v, want one empty title", titles, err)
 			}
@@ -1297,7 +1608,17 @@ func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
 			payload: `{"session_id":"abc","cwd":"/repo","hook_event_name":"SessionStart"}`,
 			plant: func(t *testing.T, workDir string) {
 				t.Helper()
-				if err := os.MkdirAll(filepath.Join(workDir, ".kimi-code", "sessions", "wd", "abc"), 0o700); err != nil {
+
+				if err := os.MkdirAll(
+					filepath.Join(
+						workDir,
+						".kimi-code",
+						"sessions",
+						"wd",
+						"abc",
+					),
+					0o700,
+				); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -1310,8 +1631,13 @@ func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PayloadDefaults: %v", err)
 			}
+
 			if got.SessionID != testSessionID || got.SessionPath != "" {
-				t.Fatalf("PayloadDefaults without a home = %+v, want session %q and no path", got, testSessionID)
+				t.Fatalf(
+					"PayloadDefaults without a home = %+v, want session %q and no path",
+					got,
+					testSessionID,
+				)
 			}
 		})
 	}
@@ -1319,6 +1645,7 @@ func TestPayloadDefaultsOmitSessionPathWithoutHome(t *testing.T) {
 
 func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 	t.Parallel()
+
 	for _, test := range []struct {
 		harness    registry.Harness
 		event      string
@@ -1328,28 +1655,120 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 	}{
 		{"claude", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
 		{"claude", "Elicitation", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
-		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
-		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "idle_prompt", "claude_permission_mode": "bypassPermissions"}, nil},
-		{"claude", "Notification", registry.ActivityWaiting, map[string]string{"claude_notification_type": "agent_needs_input"}, nil},
+		{
+			"claude",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"claude_notification_type": "permission_prompt",
+			},
+			new(
+				registry.ActivityDetailPermission,
+			),
+		},
+		{
+			"claude",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"claude_notification_type": "idle_prompt",
+				"claude_permission_mode":   "bypassPermissions",
+			},
+			nil,
+		},
+		{
+			"claude",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"claude_notification_type": "agent_needs_input",
+			},
+			nil,
+		},
 		{"claude", "state", registry.ActivityWaiting, map[string]string{"claude_permission_mode": "plan"}, nil},
 		{"claude", "PermissionRequest", registry.ActivityRunning, nil, nil},
-		{"claude", "StopFailure", registry.ActivityFailed, map[string]string{"claude_error_type": "rate_limit"}, new(registry.ActivityDetailUsageLimit)},
-		{"claude", "PostToolUseFailure", registry.ActivityRunning, map[string]string{"claude_error_type": "rate_limit"}, nil},
+		{
+			"claude",
+			"StopFailure",
+			registry.ActivityFailed,
+			map[string]string{
+				"claude_error_type": "rate_limit",
+			},
+			new(
+				registry.ActivityDetailUsageLimit,
+			),
+		},
+		{
+			"claude",
+			"PostToolUseFailure",
+			registry.ActivityRunning,
+			map[string]string{
+				"claude_error_type": "rate_limit",
+			},
+			nil,
+		},
 		{"codex", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
 		{"copilot", "permissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
-		{"droid", "Notification", registry.ActivityWaiting, map[string]string{"droid_notification_type": "permission_prompt"}, new(registry.ActivityDetailPermission)},
+		{
+			"droid",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"droid_notification_type": "permission_prompt",
+			},
+			new(
+				registry.ActivityDetailPermission,
+			),
+		},
 		{"hermes", "pre_approval_request", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
-		{"amp", "thread.state", registry.ActivityWaiting, map[string]string{"amp_thread_state": "awaiting-approval"}, new(registry.ActivityDetailPermission)},
-		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_question"}, new(registry.ActivityDetailQuestion)},
-		{"agy", "PreToolUse", registry.ActivityWaiting, map[string]string{"agy_tool_name": "ask_permission"}, new(registry.ActivityDetailPermission)},
+		{
+			"amp",
+			"thread.state",
+			registry.ActivityWaiting,
+			map[string]string{
+				"amp_thread_state": "awaiting-approval",
+			},
+			new(
+				registry.ActivityDetailPermission,
+			),
+		},
+		{
+			"agy",
+			"PreToolUse",
+			registry.ActivityWaiting,
+			map[string]string{
+				"agy_tool_name": "ask_question",
+			},
+			new(
+				registry.ActivityDetailQuestion,
+			),
+		},
+		{
+			"agy",
+			"PreToolUse",
+			registry.ActivityWaiting,
+			map[string]string{
+				"agy_tool_name": "ask_permission",
+			},
+			new(
+				registry.ActivityDetailPermission,
+			),
+		},
 		{"opencode", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
 		{"opencode", "question.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
 		{"kilo", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
 		{"pi", "ui_prompt_start", registry.ActivityWaiting, nil, nil},
 	} {
 		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
-			report := &registry.Report{Event: test.event, Activity: &test.activity, Attributes: test.attributes}
-			observation := PrepareObservation(registry.Observation{Harness: test.harness, Evidence: report})
+			report := &registry.Report{
+				Event:      test.event,
+				Activity:   &test.activity,
+				Attributes: test.attributes,
+			}
+
+			observation := PrepareObservation(
+				registry.Observation{Harness: test.harness, Evidence: report},
+			)
 			if !reflect.DeepEqual(observation.Report().Detail, test.want) {
 				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
 			}

@@ -34,15 +34,31 @@ func (app *application) newWaitCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags.hasActivity = cmd.Flags().Changed("activity")
 			flags.hasPresence = cmd.Flags().Changed("presence")
+
 			return app.executeWait(cmd.Context(), args[0], flags)
 		},
 	}
 
 	cmdFlags := command.Flags()
-	cmdFlags.StringVar(&flags.activity, "activity", "", "wait for activity `<val>`: running, waiting, idle, failed, interrupted, unknown")
-	cmdFlags.StringVar(&flags.presence, "presence", "", "wait for presence `<val>`: live, gone (also met when the tracker removes the session), unknown")
+	cmdFlags.StringVar(
+		&flags.activity,
+		"activity",
+		"",
+		"wait for activity `<val>`: running, waiting, idle, failed, interrupted, unknown",
+	)
+	cmdFlags.StringVar(
+		&flags.presence,
+		"presence",
+		"",
+		"wait for presence `<val>`: live, gone (also met when the tracker removes the session), unknown",
+	)
 	cmdFlags.DurationVar(&flags.timeout, "timeout", 0, "maximum time to wait `<duration>`")
-	cmdFlags.DurationVar(&flags.stableFor, "stable-for", 0, "duration condition must hold continuously `<duration>`")
+	cmdFlags.DurationVar(
+		&flags.stableFor,
+		"stable-for",
+		0,
+		"duration condition must hold continuously `<duration>`",
+	)
 
 	return command
 }
@@ -60,22 +76,30 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 
 	if options.Timeout > 0 {
 		var cancel context.CancelFunc
+
 		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
 	}
+
 	session, err := app.resolveSession(ctx, sessionRef)
 	if err != nil {
 		return err
 	}
+
 	options.ID = session.ID
 
 	ahtClient := app.registryStore()
+
 	res, err := ahtClient.Wait(ctx, options)
 	if errors.Is(err, registry.ErrSessionNotFound) && options.Presence == registry.PresenceGone {
 		// The tracker removed the session between resolution and the first
 		// snapshot. Removal only follows the gone transition.
-		res, err = client.WaitResult{Session: removedWaitSession(session, time.Now().UTC()), Initial: true}, nil
+		res, err = client.WaitResult{
+			Session: removedWaitSession(session, time.Now().UTC()),
+			Initial: true,
+		}, nil
 	}
+
 	if err != nil {
 		return fmt.Errorf("waiting for session: %w", err)
 	}
@@ -83,6 +107,7 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 	if app.outputJSON {
 		return app.writeJSON(res.Session)
 	}
+
 	return app.writeSessionDetails(res.Session)
 }
 
@@ -90,8 +115,14 @@ func removedWaitSession(session registry.Session, at time.Time) registry.Session
 	if session.Presence() == registry.PresenceGone {
 		return session
 	}
-	session.Liveness = registry.Gone{At: at, Reason: "session_removed", Decision: session.Decision()}
+
+	session.Liveness = registry.Gone{
+		At:       at,
+		Reason:   "session_removed",
+		Decision: session.Decision(),
+	}
 	session.PresenceChangedAt = at
+
 	return session
 }
 
@@ -99,14 +130,26 @@ func parseWaitConditions(flags waitFlags) (client.WaitOptions, error) {
 	if !flags.hasActivity && !flags.hasPresence {
 		return client.WaitOptions{}, exitCode(client.ErrConditionRequired, exitCodeUsage)
 	}
+
 	if flags.timeout < 0 {
-		return client.WaitOptions{}, exitCode(fmt.Errorf("%w: timeout cannot be negative", client.ErrInvalidDuration), exitCodeUsage)
+		return client.WaitOptions{}, exitCode(
+			fmt.Errorf("%w: timeout cannot be negative", client.ErrInvalidDuration),
+			exitCodeUsage,
+		)
 	}
+
 	if flags.stableFor < 0 {
-		return client.WaitOptions{}, exitCode(fmt.Errorf("%w: stable-for cannot be negative", client.ErrInvalidDuration), exitCodeUsage)
+		return client.WaitOptions{}, exitCode(
+			fmt.Errorf("%w: stable-for cannot be negative", client.ErrInvalidDuration),
+			exitCodeUsage,
+		)
 	}
+
 	if flags.timeout > 0 && flags.stableFor > flags.timeout {
-		return client.WaitOptions{}, exitCode(fmt.Errorf("%w: stable-for duration cannot exceed timeout", client.ErrInvalidDuration), exitCodeUsage)
+		return client.WaitOptions{}, exitCode(
+			fmt.Errorf("%w: stable-for duration cannot exceed timeout", client.ErrInvalidDuration),
+			exitCodeUsage,
+		)
 	}
 
 	presence, err := parseTargetPresence(flags.presence, flags.hasPresence)
@@ -136,10 +179,12 @@ func parseTargetPresence(presence string, changed bool) (registry.Presence, erro
 	if !changed {
 		return "", nil
 	}
+
 	p, err := registry.NormalizePresence(presence)
 	if err != nil {
 		return "", exitCode(err, exitCodeUsage)
 	}
+
 	return p, nil
 }
 
@@ -147,16 +192,28 @@ func parseTargetActivity(activity string, changed bool) (registry.Activity, erro
 	if !changed {
 		return "", nil
 	}
+
 	a, err := registry.NormalizeActivity(activity)
 	if err != nil {
 		return "", exitCode(err, exitCodeUsage)
 	}
+
 	return a, nil
 }
 
 func validateConditionCombination(presence registry.Presence, activity registry.Activity) error {
-	if (presence == registry.PresenceGone || presence == registry.PresenceUnknown) && activity != "" {
-		return exitCode(fmt.Errorf("%w: presence %q cannot be combined with activity %q", client.ErrContradictoryCondition, presence, activity), exitCodeUsage)
+	if (presence == registry.PresenceGone || presence == registry.PresenceUnknown) &&
+		activity != "" {
+		return exitCode(
+			fmt.Errorf(
+				"%w: presence %q cannot be combined with activity %q",
+				client.ErrContradictoryCondition,
+				presence,
+				activity,
+			),
+			exitCodeUsage,
+		)
 	}
+
 	return nil
 }

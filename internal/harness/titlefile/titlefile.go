@@ -25,13 +25,16 @@ func Open(path string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("inspect title source: %w", err)
 	}
+
 	if !info.Mode().IsRegular() {
 		return nil, errSourceNotRegular
 	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open title source: %w", err)
 	}
+
 	return file, nil
 }
 
@@ -39,26 +42,32 @@ func ReadLine(ctx context.Context, reader *bufio.Reader) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("read title line: %w", err)
 	}
+
 	chunk, err := reader.ReadSlice('\n')
 	if len(chunk) > maxRecordBytes {
 		return nil, skipOversizedLine(ctx, reader, err)
 	}
+
 	if err == nil || (errors.Is(err, io.EOF) && len(chunk) > 0) {
 		return chunk, nil
 	}
+
 	if !errors.Is(err, bufio.ErrBufferFull) {
 		return nil, fmt.Errorf("read title line: %w", err)
 	}
+
 	return readLongLine(ctx, reader, chunk)
 }
 
 func readLongLine(ctx context.Context, reader *bufio.Reader, first []byte) ([]byte, error) {
 	line := append([]byte(nil), first...)
+
 	for {
 		chunk, err := reader.ReadSlice('\n')
 		if len(line)+len(chunk) > maxRecordBytes {
 			return nil, skipOversizedLine(ctx, reader, err)
 		}
+
 		line = append(line, chunk...)
 		switch {
 		case err == nil:
@@ -80,10 +89,13 @@ func skipOversizedLine(ctx context.Context, reader *bufio.Reader, readErr error)
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("discard oversized title line: %w", err)
 		}
+
 		_, readErr = reader.ReadSlice('\n')
 	}
+
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return fmt.Errorf("discard oversized title line: %w", readErr)
 	}
+
 	return ErrRecordTooLarge
 }

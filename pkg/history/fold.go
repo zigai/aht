@@ -29,6 +29,7 @@ func fold(text string) string {
 	if isASCII([]byte(text)) {
 		return text
 	}
+
 	return foldCaser.String(text)
 }
 
@@ -43,18 +44,22 @@ func foldRuneIndex(text string, foldedOffset int) int {
 	if foldedOffset <= 0 {
 		return 0
 	}
+
 	covered, index := 0, 0
+
 	for _, character := range text {
 		if character < utf8.RuneSelf {
 			covered++
 		} else {
 			covered += utf8.RuneCountInString(fold(string(character)))
 		}
+
 		index++
 		if covered >= foldedOffset {
 			return index
 		}
 	}
+
 	return index
 }
 
@@ -64,15 +69,19 @@ func foldRuneIndex(text string, foldedOffset int) int {
 func foldWithOffsets(text string) (string, []int) {
 	var folded strings.Builder
 	folded.Grow(len(text))
+
 	starts := make([]int, 0, len(text)+1)
 	for offset, character := range text {
 		mapped := fold(string(character))
 		folded.WriteString(mapped)
+
 		for range len(mapped) {
 			starts = append(starts, offset)
 		}
 	}
+
 	starts = append(starts, len(text))
+
 	return folded.String(), starts
 }
 
@@ -81,5 +90,6 @@ func foldWithOffsets(text string) (string, []int) {
 func originalEnd(text string, starts []int, end int) int {
 	start := starts[end-1]
 	_, size := utf8.DecodeRuneInString(text[start:])
+
 	return start + size
 }

@@ -55,7 +55,9 @@ func darwinTmuxServer(ctx context.Context, process unix.KinfoProc) (ServerProces
 	}
 	data, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, unix.EINVAL) {
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) ||
+			errors.Is(err, unix.EACCES) ||
+			errors.Is(err, unix.EINVAL) {
 			return zero, false, nil
 		}
 		return zero, false, fmt.Errorf("reading tmux process %d arguments: %w", pid, err)

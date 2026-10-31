@@ -45,7 +45,14 @@ func newReleaseClient(token string) *releaseClient {
 	client := *http.DefaultClient
 	client.Timeout = requestTimeout
 	client.CheckRedirect = checkRedirect
-	return &releaseClient{http: &client, githubBase: "https://api.github.com", npmBase: "https://registry.npmjs.org", pypiBase: "https://pypi.org/pypi", token: token}
+
+	return &releaseClient{
+		http:       &client,
+		githubBase: "https://api.github.com",
+		npmBase:    "https://registry.npmjs.org",
+		pypiBase:   "https://pypi.org/pypi",
+		token:      token,
+	}
 }
 
 func checkRedirect(req *http.Request, via []*http.Request) error {
@@ -56,6 +63,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	if req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme {
 		req.Header.Del("Authorization")
 	}
+
 	return nil
 }
 
@@ -64,29 +72,38 @@ func (c *releaseClient) get(ctx context.Context, target string) ([]byte, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+
 	req.Header.Set("User-Agent", "aht-compatibility")
+
 	if strings.HasPrefix(target, c.githubBase+"/") {
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-Github-Api-Version", "2026-03-10")
+
 		if c.token != "" {
 			req.Header.Set("Authorization", "Bearer "+c.token)
 		}
 	}
+
 	response, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", target, err)
 	}
+
 	defer func() { _ = response.Body.Close() }()
+
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: GET %s: HTTP %d", errCompatibility, target, response.StatusCode)
 	}
+
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxMetadataBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", target, err)
 	}
+
 	if len(body) > maxMetadataBytes {
 		return nil, fmt.Errorf("%w: response from %s exceeds size limit", errCompatibility, target)
 	}
+
 	return body, nil
 }
 
@@ -95,15 +112,20 @@ func (c *releaseClient) getJSON(ctx context.Context, target string, destination 
 	if err != nil {
 		return err
 	}
+
 	if err := json.Unmarshal(body, destination); err != nil {
 		return fmt.Errorf("decode %s: %w", target, err)
 	}
+
 	return nil
 }
 
 func (c *releaseClient) latest(ctx context.Context, spec harnessSpec) (string, error) {
-	var version string
-	var err error
+	var (
+		version string
+		err     error
+	)
+
 	switch spec.Source {
 	case "npm":
 		version, err = c.npmVersion(ctx, spec)
@@ -113,17 +135,21 @@ func (c *releaseClient) latest(ctx context.Context, spec harnessSpec) (string, e
 		version, err = c.githubVersion(ctx, spec)
 	case "channel":
 		var body []byte
+
 		body, err = c.get(ctx, spec.URL)
 		version = strings.TrimSpace(string(body))
 	default:
 		err = fmt.Errorf("%w: no release source for %s", errCompatibility, spec.ID)
 	}
+
 	if err != nil {
 		return "", err
 	}
+
 	if _, err := parseVersion(version); err != nil {
 		return "", err
 	}
+
 	return version, nil
 }
 
@@ -132,12 +158,18 @@ func (c *releaseClient) npmVersion(ctx context.Context, spec harnessSpec) (strin
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
-	if err := c.getJSON(ctx, c.npmBase+"/"+url.PathEscape(spec.Package)+"/latest", &data); err != nil {
+	if err := c.getJSON(
+		ctx,
+		c.npmBase+"/"+url.PathEscape(spec.Package)+"/latest",
+		&data,
+	); err != nil {
 		return "", err
 	}
+
 	if data.Name != spec.Package {
 		return "", fmt.Errorf("%w: npm package identity mismatch", errCompatibility)
 	}
+
 	return data.Version, nil
 }
 
@@ -154,14 +186,17 @@ func (c *releaseClient) pypiVersion(ctx context.Context, spec harnessSpec) (stri
 	if err := c.getJSON(ctx, c.pypiBase+"/"+spec.Package+"/json", &data); err != nil {
 		return "", err
 	}
+
 	if data.Info.Name != spec.Package {
 		return "", fmt.Errorf("%w: PyPI package identity mismatch", errCompatibility)
 	}
+
 	for _, file := range data.URLs {
 		if !file.Yanked {
 			return data.Info.Version, nil
 		}
 	}
+
 	return "", fmt.Errorf("%w: no non-yanked distribution", errCompatibility)
 }
 
@@ -172,13 +207,16 @@ func (c *releaseClient) supported(ctx context.Context, spec harnessSpec) (string
 	if err != nil {
 		return "", err
 	}
+
 	above, err := aboveMaximum(spec, version)
 	if err != nil {
 		return "", err
 	}
+
 	if above {
 		return spec.MaxVersion, nil
 	}
+
 	return version, nil
 }
 
@@ -192,81 +230,134 @@ func (c *releaseClient) githubVersion(ctx context.Context, spec harnessSpec) (st
 			State string `json:"state"`
 		} `json:"assets"`
 	}
-	if err := c.getJSON(ctx, c.githubBase+"/repos/"+spec.Repo+"/releases/latest", &data); err != nil {
+	if err := c.getJSON(
+		ctx,
+		c.githubBase+"/repos/"+spec.Repo+"/releases/latest",
+		&data,
+	); err != nil {
 		return "", err
 	}
+
 	if data.Draft || data.Prerelease {
 		return "", fmt.Errorf("%w: not a stable published release", errCompatibility)
 	}
+
 	for _, asset := range data.Assets {
 		if asset.Name == spec.Asset && asset.State == "uploaded" {
 			return data.TagName, nil
 		}
 	}
+
 	return "", fmt.Errorf("%w: release is missing %s", errCompatibility, spec.Asset)
 }
 
-func (c *releaseClient) restoreState(ctx context.Context, repository, branch, runID string) (releaseState, error) {
+func (c *releaseClient) restoreState(
+	ctx context.Context,
+	repository string, branch string, runID string,
+) (releaseState, error) {
 	state := emptyState()
 	if repository == "" || branch == "" {
-		return state, fmt.Errorf("%w: GITHUB_REPOSITORY and AHT_DEFAULT_BRANCH are required", errCompatibility)
+		return state, fmt.Errorf(
+			"%w: GITHUB_REPOSITORY and AHT_DEFAULT_BRANCH are required",
+			errCompatibility,
+		)
 	}
+
 	base := c.githubBase + "/repos/" + repository + "/actions"
+
 	restored, found, err := c.restoreArtifactState(ctx, base, stateArtifact, branch, runID)
 	if err != nil || found {
 		return restored, err
 	}
+
 	return state, nil
 }
 
-func (c *releaseClient) restoreArtifactState(ctx context.Context, base, name, branch, runID string) (releaseState, bool, error) {
+func (c *releaseClient) restoreArtifactState(
+	ctx context.Context,
+	base string, name string, branch string, runID string,
+) (releaseState, bool, error) {
 	state := emptyState()
+
 	for page := 1; page <= maxArtifactPages; page++ {
 		var data struct {
 			Artifacts []artifact `json:"artifacts"`
 		}
-		target := base + "/artifacts?name=" + name + "&per_page=" + strconv.Itoa(artifactPageSize) + "&page=" + strconv.Itoa(page)
+
+		target := base + "/artifacts?name=" + name + "&per_page=" + strconv.Itoa(
+			artifactPageSize,
+		) + "&page=" + strconv.Itoa(
+			page,
+		)
 		if err := c.getJSON(ctx, target, &data); err != nil {
 			return state, false, err
 		}
+
 		if data.Artifacts == nil {
-			return state, false, fmt.Errorf("%w: invalid artifact listing; refusing to reset release history", errCompatibility)
+			return state, false, fmt.Errorf(
+				"%w: invalid artifact listing; refusing to reset release history",
+				errCompatibility,
+			)
 		}
+
 		slices.SortFunc(data.Artifacts, func(a, b artifact) int {
 			return cmp.Compare(b.ID, a.ID)
 		})
+
 		for _, item := range data.Artifacts {
 			allowed, err := c.trustedArtifact(ctx, base, item, branch, runID)
 			if err != nil {
 				return state, false, err
 			}
+
 			if !allowed {
 				continue
 			}
+
 			body, err := c.get(ctx, base+"/artifacts/"+strconv.FormatInt(item.ID, 10)+"/zip")
 			if err != nil {
 				return state, false, err
 			}
+
 			restored, err := decodeStateArchive(body)
+
 			return restored, true, err
 		}
+
 		if len(data.Artifacts) < artifactPageSize {
 			return state, false, nil
 		}
 	}
-	return state, false, fmt.Errorf("%w: no usable state within artifact search limit", errCompatibility)
+
+	return state, false, fmt.Errorf(
+		"%w: no usable state within artifact search limit",
+		errCompatibility,
+	)
 }
 
-func (c *releaseClient) trustedArtifact(ctx context.Context, base string, item artifact, branch, runID string) (bool, error) {
-	if item.Expired || item.WorkflowRun.HeadBranch != branch || strconv.FormatInt(item.WorkflowRun.ID, 10) == runID {
+func (c *releaseClient) trustedArtifact(
+	ctx context.Context,
+	base string,
+	item artifact,
+	branch string, runID string,
+) (bool, error) {
+	if item.Expired || item.WorkflowRun.HeadBranch != branch ||
+		strconv.FormatInt(item.WorkflowRun.ID, 10) == runID {
 		return false, nil
 	}
+
 	var details struct {
 		Path  string `json:"path"`
 		Event string `json:"event"`
 	}
-	if err := c.getJSON(ctx, base+"/runs/"+strconv.FormatInt(item.WorkflowRun.ID, 10), &details); err != nil {
+	if err := c.getJSON(
+		ctx,
+		base+"/runs/"+strconv.FormatInt(item.WorkflowRun.ID, 10),
+		&details,
+	); err != nil {
 		return false, err
 	}
-	return details.Path == workflowPath && (details.Event == "schedule" || details.Event == "workflow_dispatch"), nil
+
+	return details.Path == workflowPath &&
+		(details.Event == "schedule" || details.Event == "workflow_dispatch"), nil
 }

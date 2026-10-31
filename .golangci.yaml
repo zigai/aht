@@ -10,7 +10,13 @@ formatters:
   enable:
     - goimports
     - gofumpt
+    - golines
   settings:
+    gofumpt:
+      extra:
+        balance-calls: true
+    golines:
+      max-len: 100
     goimports:
       local-prefixes:
         - github.com/zigai/aht/v2
@@ -69,6 +75,7 @@ linters:
     - interfacebloat
     - intrange
     - iotamixing
+    - lll
     - loggercheck
     - maintidx
     - makezero
@@ -113,6 +120,7 @@ linters:
     - wastedassign
     - whitespace
     - wrapcheck
+    - wsl_v5
     - zerologlint
 
   settings:
@@ -170,7 +178,11 @@ linters:
       min-complexity: 20
     goconst:
       min-occurrences: 16
+    lll:
+      line-length: 120
+      tab-width: 4
     gocritic:
+      enabled-tags: [diagnostic]
       settings:
         captLocal:
           paramsOnly: false
@@ -232,6 +244,8 @@ linters:
         - name: indent-error-flow
         - name: superfluous-else
         - name: modifies-parameter
+        - name: enforce-repeated-arg-type-style
+          arguments: ["full"]
         - name: unreachable-code
           disabled: true
         - name: redefines-builtin-id
@@ -249,24 +263,39 @@ linters:
       case:
         rules:
           json: snake
+          yaml: snake
+          toml: snake
     nolintlint:
-      allow-no-explanation: [funlen, gocognit, golines]
+      allow-no-explanation: [gocognit, golines]
       require-explanation: true
       require-specific: true
     gosec:
       excludes:
-        - G204 # exec.Command from $EDITOR is user-controlled by design
+        - G204 # subprocess launched with variable
         - G301 # directory perms
         - G302 # file perms
         - G304 # file path from variable
     exhaustruct_v5:
+      allow-empty-returns: true
+      # Types whose zero fields mean "use the default". Mark such types in
+      # this module with //exhaustruct:optional instead of listing them here.
       ignore-patterns:
-        - "github.com/urfave/cli/v3\\..*"
-        - "github.com/urfave/cli\\..*"
-        - "github.com/spf13/cobra\\..*"
-        - "github.com/spf13/pflag\\..*"
-        - "github.com/anthropics/anthropic-sdk-go.*"
-        - "github.com/openai/openai-go/v3.*"
+        - "^github\\.com/spf13/cobra\\..+$"
+        - "^github\\.com/spf13/pflag\\..+$"
+        - "^github\\.com/urfave/cli(/v[0-9]+)?\\..+$"
+        - "^net/http\\.(Client|Server|Transport)$"
+        - "^net\\.(Dialer|ListenConfig)$"
+        - "^net/url\\.URL$"
+        - "^crypto/tls\\.Config$"
+        - "^log/slog\\.HandlerOptions$"
+        - "^os/exec\\.Cmd$"
+        - "^syscall\\.SysProcAttr$"
+        - "^github\\.com/zigai/gotmux/tmux\\.Config$"
+        - "^github\\.com/zigai/gotmux/tmux\\.CaptureOptions$"
+        - "^github\\.com/zigai/gotmux/tmux\\.NewSessionOptions$"
+        - "^github\\.com/zigai/gotmux/tmux\\.RespawnOptions$"
+        - "^github\\.com/jedib0t/go-pretty/v6/table\\.ColumnConfig$"
+        - "^golang\\.org/x/sys/unix\\.PollFd$"
   exclusions:
     warn-unused: false
     presets: []
@@ -275,11 +304,6 @@ linters:
         linters: [forbidigo]
       - path: "main\\.go"
         linters: [mnd]
-
-      - path: "internal/cli/.*\\.go"
-        linters: [exhaustruct_v5]
-      - path: "internal/config/.*\\.go"
-        linters: [exhaustruct_v5]
       - path: "internal/install/.*\\.go"
         linters: [dupl]
 
@@ -287,16 +311,17 @@ linters:
         text: "string `Stop` has .* occurrences"
 
       - path: "_test\\.go"
-        linters: [cyclop, gocognit]
+        linters: [cyclop, gocognit, exhaustruct_v5]
+
+      # Test-helper packages (named like httptest) only build fixtures.
+      - path: "(^|/)[a-z0-9]+test/"
+        linters: [exhaustruct_v5]
 
       - path: "_test\\.go"
         linters: [goconst]
 
-      - path: "_test\\.go"
-        linters: [exhaustruct_v5]
-
       - path: ".*_test\\.go"
-        linters: [decorder, funcorder]
+        linters: [decorder, funcorder, dupl, maintidx]
 
 issues:
   max-issues-per-linter: 0

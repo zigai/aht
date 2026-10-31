@@ -56,6 +56,7 @@ type startInfo struct {
 
 func (app *application) newStartCommand() *cobra.Command {
 	var options startOptions
+
 	command := &cobra.Command{
 		Use:   "start <harness>",
 		Short: "Start a harness against the fake model provider",
@@ -71,21 +72,42 @@ func (app *application) newStartCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			if options.aht, err = resolveAHT(options.aht, options.noIntegration); err != nil {
 				return err
 			}
+
 			if options.root, err = rootDirectory(options.root, harnessID, time.Now()); err != nil {
 				return err
 			}
+
 			options.harness = harnessID
+
 			return app.runStart(cmd.Context(), options)
 		},
 	}
 	flags := command.Flags()
-	flags.StringVarP(&options.root, "root", "r", "", "launch root `<dir>` [default: new directory under the user cache directory]")
+	flags.StringVarP(
+		&options.root,
+		"root",
+		"r",
+		"",
+		"launch root `<dir>` [default: new directory under the user cache directory]",
+	)
 	flags.StringVarP(&options.prompt, "prompt", "p", "", "initial prompt `<text>`")
-	flags.StringVar(&options.aht, "aht", "", "aht executable `<path>` for the integration and tracker [default: aht on PATH]")
-	flags.BoolVar(&options.noIntegration, "no-integration", false, "skip the AHT integration and tracker")
+	flags.StringVar(
+		&options.aht,
+		"aht",
+		"",
+		"aht executable `<path>` for the integration and tracker [default: aht on PATH]",
+	)
+	flags.BoolVar(
+		&options.noIntegration,
+		"no-integration",
+		false,
+		"skip the AHT integration and tracker",
+	)
+
 	return command
 }
 
@@ -101,18 +123,25 @@ func (app *application) runStart(ctx context.Context, options startOptions) erro
 	if err != nil {
 		return fmt.Errorf("start fake provider: %w", err)
 	}
+
 	launched, term, err := startHarness(ctx, provider.URL(), options)
 	if err != nil {
 		return finish(err, provider.Close())
 	}
+
 	run := startRun{provider: provider, launched: launched, term: term}
 	if err := app.writeStart(run, options); err != nil {
 		return finish(err, run.close(ctx))
 	}
+
 	return finish(waitForExit(ctx, term), run.close(ctx))
 }
 
-func startHarness(ctx context.Context, providerURL string, options startOptions) (*launch.Harness, *launch.Terminal, error) {
+func startHarness(
+	ctx context.Context,
+	providerURL string,
+	options startOptions,
+) (*launch.Harness, *launch.Terminal, error) {
 	launched, err := launch.New(ctx, launch.Options{
 		Harness:    options.harness,
 		Root:       options.root,
@@ -126,38 +155,50 @@ func startHarness(ctx context.Context, providerURL string, options startOptions)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prepare launch: %w", err)
 	}
+
 	if options.aht != "" {
 		if err := launched.StartTracker(ctx); err != nil {
 			return nil, nil, finish(fmt.Errorf("start tracker: %w", err), launched.Close())
 		}
 	}
-	term, err := launched.StartTerminal(ctx, options.prompt, gotmux.Size{Width: terminalWidth, Height: terminalHeight})
+
+	term, err := launched.StartTerminal(
+		ctx,
+		options.prompt,
+		gotmux.Size{Width: terminalWidth, Height: terminalHeight},
+	)
 	if err != nil {
 		return nil, nil, finish(fmt.Errorf("start terminal: %w", err), launched.Close())
 	}
+
 	return launched, term, nil
 }
 
 func (run startRun) close(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), shutdownTimeout)
 	defer cancel()
+
 	return errors.Join(run.term.Close(ctx), run.launched.Close(), run.provider.Close())
 }
 
 func waitForExit(ctx context.Context, term *launch.Terminal) error {
 	ticker := time.NewTicker(exitPollInterval)
 	defer ticker.Stop()
+
 	for {
 		exited, err := term.Exited(ctx)
 		if ctx.Err() != nil {
 			return fmt.Errorf("wait for harness exit: %w", ctx.Err())
 		}
+
 		if err != nil {
 			return fmt.Errorf("check harness exit: %w", err)
 		}
+
 		if exited {
 			return nil
 		}
+
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("wait for harness exit: %w", ctx.Err())
@@ -176,11 +217,20 @@ func (app *application) writeStart(run startRun, options startOptions) error {
 		Inspect:     nil,
 	}
 	if options.aht != "" {
-		info.Inspect = []string{options.aht, "--store", run.launched.Store, "list", "--cwd", run.launched.Work}
+		info.Inspect = []string{
+			options.aht,
+			"--store",
+			run.launched.Store,
+			"list",
+			"--cwd",
+			run.launched.Work,
+		}
 	}
+
 	if app.outputJSON {
 		return app.writeJSON(info)
 	}
+
 	details := []detail{
 		{label: "Harness", value: string(info.Harness)},
 		{label: "Root", value: info.Root},
@@ -190,6 +240,7 @@ func (app *application) writeStart(run startRun, options startOptions) error {
 	if info.Inspect != nil {
 		details = append(details, detail{label: "Inspect", value: shellCommand(info.Inspect)})
 	}
+
 	return app.writeDetails(details)
 }
 
@@ -198,6 +249,7 @@ func shellCommand(argv []string) string {
 	for _, word := range argv {
 		quoted = append(quoted, harness.ShellQuote(word))
 	}
+
 	return strings.Join(quoted, " ")
 }
 
@@ -208,19 +260,30 @@ func launchableHarness(value string) (registry.Harness, error) {
 		if _, ok := adapter.(harness.Launchable); ok {
 			return harnessID, nil
 		}
+
 		err = fmt.Errorf("%w: %q", launch.ErrUnsupported, value)
 	}
-	return "", usageError{err: fmt.Errorf("%w; supported harnesses: %s", err, strings.Join(launchableHarnessNames(), ", "))}
+
+	return "", usageError{
+		err: fmt.Errorf(
+			"%w; supported harnesses: %s",
+			err,
+			strings.Join(launchableHarnessNames(), ", "),
+		),
+	}
 }
 
 func launchableHarnessNames() []string {
 	var names []string
+
 	for _, adapter := range catalog.All() {
 		if _, ok := adapter.(harness.Launchable); ok {
 			names = append(names, string(adapter.Definition().ID))
 		}
 	}
+
 	slices.Sort(names)
+
 	return names
 }
 
@@ -233,14 +296,19 @@ func resolveAHT(path string, noIntegration bool) (string, error) {
 	case path == "":
 		path = "aht"
 	}
+
 	resolved, err := exec.LookPath(path)
 	if err != nil {
-		return "", usageError{err: fmt.Errorf("find aht executable (pass --aht <path> or --no-integration): %w", err)}
+		return "", usageError{
+			err: fmt.Errorf("find aht executable (pass --aht <path> or --no-integration): %w", err),
+		}
 	}
+
 	absolute, err := filepath.Abs(resolved)
 	if err != nil {
 		return "", fmt.Errorf("resolve aht executable: %w", err)
 	}
+
 	return absolute, nil
 }
 
@@ -250,11 +318,19 @@ func rootDirectory(root string, harnessID registry.Harness, now time.Time) (stri
 		if err != nil {
 			return "", fmt.Errorf("resolve launch root: %w", err)
 		}
+
 		return absolute, nil
 	}
+
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("locate user cache directory: %w", err)
 	}
-	return filepath.Join(cache, "aht", "fakeprovider", string(harnessID)+"-"+now.Format(rootStamp)), nil
+
+	return filepath.Join(
+		cache,
+		"aht",
+		"fakeprovider",
+		string(harnessID)+"-"+now.Format(rootStamp),
+	), nil
 }

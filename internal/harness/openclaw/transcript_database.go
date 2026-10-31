@@ -8,6 +8,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
+//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 const nativeQuery = `SELECT s.session_id AS session_id, s.display_name AS title, '' AS cwd,
  s.created_at AS created, s.updated_at AS updated, CAST(m.seq AS TEXT) AS message_id, CAST(m.seq AS TEXT) AS message_order,
  '' AS role, m.event_json AS body, m.created_at AS timestamp
@@ -22,20 +23,25 @@ func readDatabaseRow(ctx context.Context, t *transcript.Decoder, row transcript.
 	if err != nil {
 		return fmt.Errorf("decode history row: %w", err)
 	}
+
 	if transcript.Str(r, "type") != "message" {
 		transcript.TreeRecord(ctx, t, r, 0)
 		return nil
 	}
+
 	timestamp := transcript.ParseTime(r["timestamp"])
 	if timestamp.IsZero() {
 		timestamp = transcript.StoredTime(row.Timestamp)
 	}
+
 	id := transcript.Str(r, "id")
 	if id == "" {
 		id = row.MessageID
 	}
+
 	message := transcript.Obj(r, "message")
 	t.CaptureModel(message)
 	t.Message(ctx, message, id, 0, timestamp)
+
 	return nil
 }

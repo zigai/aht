@@ -9,7 +9,10 @@ import (
 
 const openAICompatibleProvider = "openai-compatible"
 
-func (clineHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchModel) (harness.LaunchPlan, error) {
+func (clineHarness) LaunchPlan(
+	paths harness.LaunchPaths,
+	model harness.LaunchModel,
+) (harness.LaunchPlan, error) {
 	configDir := filepath.Join(paths.Root, "cline")
 	dataDir := filepath.Join(paths.Root, "cline-data")
 
@@ -29,19 +32,39 @@ func (clineHarness) LaunchPlan(paths harness.LaunchPaths, model harness.LaunchMo
 		}},
 		Headless: func(prompt string) ([]string, error) {
 			return []string{
-				"--config", configDir, "--data-dir", dataDir,
-				"--provider", openAICompatibleProvider, "--key", model.APIKey, "--model", model.Model,
-				"--auto-approve", "true", prompt,
+				"--config",
+				configDir,
+				"--data-dir",
+				dataDir,
+				"--provider",
+				openAICompatibleProvider,
+				"--key",
+				model.APIKey,
+				"--model",
+				model.Model,
+				"--auto-approve",
+				"true",
+				prompt,
 			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			args := []string{
-				"--tui", "--config", configDir, "--data-dir", dataDir,
-				"--provider", openAICompatibleProvider, "--key", model.APIKey, "--model", model.Model,
+				"--tui",
+				"--config",
+				configDir,
+				"--data-dir",
+				dataDir,
+				"--provider",
+				openAICompatibleProvider,
+				"--key",
+				model.APIKey,
+				"--model",
+				model.Model,
 			}
 			if prompt != "" {
 				args = append(args, prompt)
 			}
+
 			return args, nil
 		},
 		ShellTool: harness.LaunchTool{

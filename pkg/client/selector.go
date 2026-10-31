@@ -72,9 +72,16 @@ func (e *AmbiguousSessionError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
+
 	if len(e.Matches) > 0 {
-		return fmt.Sprintf("%v: %d sessions match (%s)", ErrAmbiguousSession, len(e.Matches), strings.Join(e.Matches, ", "))
+		return fmt.Sprintf(
+			"%v: %d sessions match (%s)",
+			ErrAmbiguousSession,
+			len(e.Matches),
+			strings.Join(e.Matches, ", "),
+		)
 	}
+
 	return ErrAmbiguousSession.Error()
 }
 
@@ -86,16 +93,13 @@ func (e *AmbiguousSessionError) Unwrap() error {
 // Filter returns a [registry.Filter] matching the non-reference criteria of the selector.
 func (s Selector) Filter() registry.Filter {
 	return registry.Filter{
-		Harness:            s.Harness,
-		Presence:           "",
-		Activity:           "",
-		MultiplexerSession: "",
-		Project:            s.Project,
-		ProjectSubtree:     s.ProjectSubtree,
-		CWD:                s.CWD,
-		MultiplexerKind:    s.MultiplexerKind,
-		MultiplexerServer:  s.MultiplexerServer,
-		MultiplexerPane:    s.MultiplexerPane,
+		Harness:           s.Harness,
+		Project:           s.Project,
+		ProjectSubtree:    s.ProjectSubtree,
+		CWD:               s.CWD,
+		MultiplexerKind:   s.MultiplexerKind,
+		MultiplexerServer: s.MultiplexerServer,
+		MultiplexerPane:   s.MultiplexerPane,
 	}
 }
 
@@ -104,18 +108,25 @@ func (c *Client) Resolve(ctx context.Context, selector Selector) (registry.Sessi
 	if c.configErr != nil {
 		return registry.Session{}, c.configErr
 	}
+
 	return Resolve(ctx, c, selector)
 }
 
 // Resolve finds a single session matching selector using the provided session lister.
-func Resolve(ctx context.Context, lister SessionLister, selector Selector) (registry.Session, error) {
+func Resolve(
+	ctx context.Context,
+	lister SessionLister,
+	selector Selector,
+) (registry.Session, error) {
 	if lister == nil {
 		return registry.Session{}, errSessionListerRequired
 	}
+
 	sessions, err := lister.List(ctx, selector.Filter())
 	if err != nil {
 		return registry.Session{}, fmt.Errorf("list sessions: %w", err)
 	}
+
 	return ResolveSessions(sessions, selector)
 }
 
@@ -126,6 +137,7 @@ func ResolveSessions(sessions []registry.Session, selector Selector) (registry.S
 	if selector.Reference == "" {
 		return resolveWithoutReference(qualified, selector)
 	}
+
 	return resolveWithReference(qualified, selector)
 }
 
@@ -136,6 +148,7 @@ func filterByQualifiers(sessions []registry.Session, selector Selector) []regist
 			qualified = append(qualified, s)
 		}
 	}
+
 	return qualified
 }
 
@@ -149,9 +162,11 @@ func matchesIDAndHarness(s registry.Session, selector Selector) bool {
 	if selector.ID != "" && s.ID != selector.ID {
 		return false
 	}
+
 	if selector.Harness != "" && s.Harness != selector.Harness {
 		return false
 	}
+
 	return true
 }
 
@@ -160,30 +175,40 @@ func matchesLocation(s registry.Session, selector Selector) bool {
 	if location.Empty() {
 		location = s.Location
 	}
+
 	if selector.MultiplexerKind != "" && location.Kind != selector.MultiplexerKind {
 		return false
 	}
+
 	if selector.MultiplexerServer != "" && !registry.MatchesServer(s, selector.MultiplexerServer) {
 		return false
 	}
+
 	if selector.MultiplexerPane != "" &&
 		s.Location.PaneID != selector.MultiplexerPane {
 		return false
 	}
+
 	return true
 }
 
 func matchesPaths(s registry.Session, selector Selector) bool {
-	if selector.Project != "" && !registry.MatchesProject(s, selector.Project, selector.ProjectSubtree) {
+	if selector.Project != "" &&
+		!registry.MatchesProject(s, selector.Project, selector.ProjectSubtree) {
 		return false
 	}
+
 	if selector.CWD != "" && !registry.PathsEqual(registry.SessionCWD(s), selector.CWD) {
 		return false
 	}
+
 	return true
 }
 
-func resolveWithoutReference(qualified []registry.Session, selector Selector) (registry.Session, error) {
+func resolveWithoutReference(
+	qualified []registry.Session,
+	selector Selector,
+) (registry.Session, error) {
 	switch len(qualified) {
 	case 0:
 		return registry.Session{}, ErrSessionNotFound
@@ -191,15 +216,24 @@ func resolveWithoutReference(qualified []registry.Session, selector Selector) (r
 		return qualified[0], nil
 	default:
 		ids := sessionIDs(qualified)
+
 		return registry.Session{}, &AmbiguousSessionError{
 			Selector: selector,
 			Matches:  ids,
-			Message:  fmt.Sprintf("%v: selector matched %d sessions (%s)", ErrAmbiguousSession, len(qualified), strings.Join(ids, ", ")),
+			Message: fmt.Sprintf(
+				"%v: selector matched %d sessions (%s)",
+				ErrAmbiguousSession,
+				len(qualified),
+				strings.Join(ids, ", "),
+			),
 		}
 	}
 }
 
-func resolveWithReference(qualified []registry.Session, selector Selector) (registry.Session, error) {
+func resolveWithReference(
+	qualified []registry.Session,
+	selector Selector,
+) (registry.Session, error) {
 	// Exact registry ID match always wins first.
 	for _, s := range qualified {
 		if s.ID == selector.Reference {
@@ -209,6 +243,7 @@ func resolveWithReference(qualified []registry.Session, selector Selector) (regi
 
 	// Otherwise, match by prefix, native session ID, or session path.
 	matches := make([]registry.Session, 0, 1)
+
 	for _, s := range qualified {
 		if matchesReferenceCandidate(s, selector.Reference) {
 			matches = append(matches, s)
@@ -222,10 +257,17 @@ func resolveWithReference(qualified []registry.Session, selector Selector) (regi
 		return matches[0], nil
 	default:
 		ids := sessionIDs(matches)
+
 		return registry.Session{}, &AmbiguousSessionError{
 			Selector: selector,
 			Matches:  ids,
-			Message:  fmt.Sprintf("%v: %q matches %d sessions (%s)", ErrAmbiguousSession, selector.Reference, len(matches), strings.Join(ids, ", ")),
+			Message: fmt.Sprintf(
+				"%v: %q matches %d sessions (%s)",
+				ErrAmbiguousSession,
+				selector.Reference,
+				len(matches),
+				strings.Join(ids, ", "),
+			),
 		}
 	}
 }
@@ -234,12 +276,16 @@ func matchesReferenceCandidate(s registry.Session, reference string) bool {
 	if strings.HasPrefix(s.ID, reference) {
 		return true
 	}
+
 	if s.SessionID != "" && s.SessionID == reference {
 		return true
 	}
-	if s.SessionPath != "" && (s.SessionPath == reference || registry.PathsEqual(s.SessionPath, reference)) {
+
+	if s.SessionPath != "" &&
+		(s.SessionPath == reference || registry.PathsEqual(s.SessionPath, reference)) {
 		return true
 	}
+
 	return false
 }
 
@@ -248,5 +294,6 @@ func sessionIDs(sessions []registry.Session) []string {
 	for i, s := range sessions {
 		ids[i] = s.ID
 	}
+
 	return ids
 }

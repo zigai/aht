@@ -17,19 +17,17 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 
 	result, err := Run(t.Context(), Options{
-		Harness:      registry.Harness("kimi-code"),
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
+		Harness: registry.Harness("kimi-code"),
+		Binary:  testInstallBinary,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+
 	if !result.Changed {
 		t.Fatal("expected kimi-code install to report changed")
 	}
+
 	if result.Path != filepath.Join(dir, "config.toml") {
 		t.Fatalf("unexpected path %q", result.Path)
 	}
@@ -38,8 +36,10 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading installed hooks: %v", err)
 	}
+
 	text := string(data)
 	requireKimiHookShape(t, text)
+
 	status, err := Inspect(t.Context(), registry.Harness("kimi-code"), testInstallBinary)
 	if err != nil || status.Status != ArtifactCurrent {
 		t.Fatalf("installed integration status = %+v, %v", status, err)
@@ -48,6 +48,7 @@ func TestInstallKimiCodeWritesHooks(t *testing.T) {
 
 func requireKimiHookShape(t *testing.T, text string) {
 	t.Helper()
+
 	for _, event := range []string{
 		hookEventSessionStart,
 		"UserPromptSubmit",
@@ -69,6 +70,7 @@ func requireKimiHookShape(t *testing.T, text string) {
 			t.Fatalf("expected %s hook in snippet: %s", event, text)
 		}
 	}
+
 	for _, want := range []string{
 		`matcher = "startup|resume"`,
 		`event = "SessionEnd"` + "\nmatcher = \"exit|archive\"",
@@ -91,13 +93,16 @@ func requireKimiHookShape(t *testing.T, text string) {
 		"--presence gone --event SessionEnd",
 		// Automatic compaction continues the running turn; only manual
 		// compaction, including manual-with-prompt, returns to idle.
-		`event = "PostCompact"` + "\nmatcher = \"^manual\"\ncommand = \"/usr/local/bin/aht report kimi-code --activity idle --event PostCompact",
+		`event = "PostCompact"` + "\nmatcher = \"^manual\"\ncommand = \"/usr/local/bin/aht report " +
+			"kimi-code --activity idle --event PostCompact",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in snippet: %s", want, text)
 		}
 	}
+
 	requireNoKimiSubagentHooks(t, text)
+
 	for _, forbidden := range []string{"statusMessage", "hooks =", "type ="} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unexpected unsupported Kimi hook field %q in snippet: %s", forbidden, text)
@@ -109,9 +114,14 @@ func requireKimiHookShape(t *testing.T, text string) {
 // the parent turn keeps running, never report the main session's activity.
 func requireNoKimiSubagentHooks(t *testing.T, text string) {
 	t.Helper()
+
 	for _, event := range []string{"SubagentStart", "SubagentStop"} {
 		if strings.Contains(text, `event = "`+event+`"`) {
-			t.Fatalf("expected no %s hook: subagent events do not describe the main turn: %s", event, text)
+			t.Fatalf(
+				"expected no %s hook: subagent events do not describe the main turn: %s",
+				event,
+				text,
+			)
 		}
 	}
 }
@@ -119,10 +129,12 @@ func requireNoKimiSubagentHooks(t *testing.T, text string) {
 func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KIMI_CODE_HOME", dir)
+
 	path := filepath.Join(dir, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("creating kimi-code dir: %v", err)
 	}
+
 	oldConfig := strings.Join([]string{
 		`default_model = "example-model"`,
 		"",
@@ -141,16 +153,13 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 	}
 
 	result, err := Run(t.Context(), Options{
-		Harness:      registry.Harness("kimi-code"),
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
+		Harness: registry.Harness("kimi-code"),
+		Binary:  testInstallBinary,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+
 	if !result.Changed {
 		t.Fatal("expected kimi-code install to replace old managed block")
 	}
@@ -159,27 +168,26 @@ func TestInstallKimiCodeReplacesManagedBlockAndPreservesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading installed hooks: %v", err)
 	}
+
 	text := string(data)
 	for _, want := range []string{`default_model = "example-model"`, "[thinking]", `enabled = true`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected preserved config %q in snippet: %s", want, text)
 		}
 	}
+
 	if strings.Contains(text, "old-aht") {
 		t.Fatalf("expected old managed hook to be removed: %s", text)
 	}
 
 	second, err := Run(t.Context(), Options{
-		Harness:      registry.Harness("kimi-code"),
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       false,
-		Force:        false,
-		UseShim:      false,
+		Harness: registry.Harness("kimi-code"),
+		Binary:  testInstallBinary,
 	})
 	if err != nil {
 		t.Fatalf("second Run returned error: %v", err)
 	}
+
 	if second.Changed {
 		t.Fatal("expected second kimi-code install to be idempotent")
 	}
@@ -190,51 +198,71 @@ func TestInstallKimiCodeDryRunDoesNotWrite(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", dir)
 
 	result, err := Run(t.Context(), Options{
-		Harness:      registry.Harness("kimi-code"),
-		Binary:       testInstallBinary,
-		TargetBinary: "",
-		DryRun:       true,
-		Force:        false,
-		UseShim:      false,
+		Harness: registry.Harness("kimi-code"),
+		Binary:  testInstallBinary,
+		DryRun:  true,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+
 	if !result.Changed {
 		t.Fatal("expected kimi-code dry-run to report changed")
 	}
+
 	if !strings.Contains(result.Snippet, `event = "`+hookEventSessionStart+`"`) {
 		t.Fatalf("expected dry-run snippet to include Kimi hooks: %s", result.Snippet)
 	}
+
 	if _, err := os.Stat(result.Path); err == nil {
 		t.Fatalf("expected dry-run not to write %s", result.Path)
 	}
 }
 
 func TestKimiCodeRefusesUnpairedManagedMarker(t *testing.T) {
-	managedBlock := kimiCodeManagedStart + "\n[[hooks]]\nevent = \"Stop\"\ncommand = \"aht report kimi-code\"\n" + kimiCodeManagedEnd + "\n"
+	managedBlock := kimiCodeManagedStart +
+		"\n[[hooks]]\nevent = \"Stop\"\ncommand = \"aht report kimi-code\"\n" +
+		kimiCodeManagedEnd +
+		"\n"
 	for _, test := range []struct {
 		name   string
 		action func(context.Context, Options) (Result, error)
 		config string
 	}{
-		{name: "install with lone start", action: Run, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n"},
-		{name: "install with lone start before block", action: Run, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock},
-		{name: "remove with lone start before block", action: Remove, config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock},
+		{
+			name:   "install with lone start",
+			action: Run,
+			config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n",
+		},
+		{
+			name:   "install with lone start before block",
+			action: Run,
+			config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock,
+		},
+		{
+			name:   "remove with lone start before block",
+			action: Remove,
+			config: kimiCodeManagedStart + "\ndefault_model = \"example-model\"\n\n" + managedBlock,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("KIMI_CODE_HOME", dir)
+
 			path := filepath.Join(dir, "config.toml")
 			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
 				t.Fatal(err)
 			}
 
-			_, err := test.action(t.Context(), Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary})
+			_, err := test.action(
+				t.Context(),
+				Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary},
+			)
 
 			if !errors.Is(err, errManagedBlockMarker) {
 				t.Fatalf("error = %v, want %v", err, errManagedBlockMarker)
 			}
+
 			if data, err := os.ReadFile(path); err != nil || string(data) != test.config {
 				t.Fatalf("config = %q, %v; want unchanged %q", data, err, test.config)
 			}
@@ -250,16 +278,21 @@ func TestInstallKimiCodeRefusesHooksItCannotExtend(t *testing.T) {
 		t.Run(config, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("KIMI_CODE_HOME", dir)
+
 			path := filepath.Join(dir, "config.toml")
 			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
 				t.Fatal(err)
 			}
 
-			_, err := Run(t.Context(), Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary})
+			_, err := Run(
+				t.Context(),
+				Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary},
+			)
 
 			if !errors.Is(err, errHookConfigShape) {
 				t.Fatalf("error = %v, want %v", err, errHookConfigShape)
 			}
+
 			if data, err := os.ReadFile(path); err != nil || string(data) != config {
 				t.Fatalf("config = %q, %v; want unchanged %q", data, err, config)
 			}

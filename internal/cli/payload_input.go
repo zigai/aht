@@ -41,6 +41,7 @@ func readReportPayloadInput(reader io.Reader) ([]byte, error) {
 	if err := json.Unmarshal(trimmed, &payload); err != nil {
 		return retainBoundedReportPayload(data)
 	}
+
 	delete(payload, "tool_input")
 	delete(payload, "tool_response")
 	delete(payload, "toolInput")
@@ -50,6 +51,7 @@ func readReportPayloadInput(reader io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encoding report payload: %w", err)
 	}
+
 	return retainBoundedReportPayload(data)
 }
 
@@ -57,6 +59,7 @@ func retainBoundedReportPayload(data []byte) ([]byte, error) {
 	if len(data) > maxPayloadInputBytes {
 		return nil, errPayloadInputTooLarge
 	}
+
 	return data, nil
 }
 
@@ -65,9 +68,11 @@ func readPayloadInputWithLimit(reader io.Reader, limit int, limitErr error) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("reading payload input: %w", err)
 	}
+
 	if len(data) > limit {
 		return nil, limitErr
 	}
+
 	return data, nil
 }
 
@@ -76,12 +81,15 @@ func normalizeRawPayloadBytes(data []byte) (json.RawMessage, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
+
 	if json.Valid(data) {
 		return json.RawMessage(data), nil
 	}
+
 	wrapped, err := json.Marshal(string(data))
 	if err != nil {
 		return nil, fmt.Errorf("encode raw payload: %w", err)
 	}
+
 	return json.RawMessage(wrapped), nil
 }

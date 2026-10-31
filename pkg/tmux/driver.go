@@ -42,8 +42,10 @@ func (d Driver) Current(ctx context.Context) (registry.Location, error) {
 		if errors.Is(err, ErrNotInTmux) {
 			return empty, nil
 		}
+
 		return empty, err
 	}
+
 	return location, nil
 }
 
@@ -54,22 +56,25 @@ func (d Driver) ListPanes(ctx context.Context) ([]mux.Pane, error) {
 	if lookPath == nil {
 		lookPath = exec.LookPath
 	}
+
 	if _, err := lookPath("tmux"); err != nil {
 		//nolint:nilerr // an optional unavailable multiplexer contributes no panes
 		return nil, nil
 	}
+
 	panes, err := ListPanesWithOptions(ctx, ListOptions{
 		Env:             Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
 		ServerProcesses: d.ServerProcesses,
-		SocketPaths:     nil,
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]mux.Pane, 0, len(panes))
 	for _, p := range panes {
 		result = append(result, p.ToMuxPane())
 	}
+
 	return result, nil
 }
 
@@ -80,10 +85,11 @@ func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnaps
 		PanePID:  pane.Location.PanePID,
 		PaneTTY:  pane.Location.PaneTTY,
 	}
+
 	return CapturePane(ctx, tmuxPane)
 }
 
 // SendInterrupt sends an interrupt signal to the target pane.
-func (d Driver) SendInterrupt(ctx context.Context, serverIdentity, paneID string) error {
+func (d Driver) SendInterrupt(ctx context.Context, serverIdentity string, paneID string) error {
 	return SendInterruptTo(ctx, serverIdentity, paneID)
 }

@@ -17,24 +17,30 @@ func FuzzDecodeTOMLLayers(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > maxConfigFileSize {
 			return
 		}
+
 		base := Defaults()
 		if err := DecodeTOML(data, &base); err != nil {
 			return
 		}
+
 		before := base
 		if err := DecodeTOML(nil, &base); err != nil {
 			t.Fatalf("seed=%q: empty layer failed: %v", data, err)
 		}
+
 		if diff := cmp.Diff(before, base); diff != "" {
 			t.Fatalf("seed=%q: empty layer changed config (-before +after):\n%s", data, diff)
 		}
+
 		if err := DecodeTOML([]byte("[ui]\nsort = \"created\"\n"), &base); err != nil {
 			t.Fatalf("seed=%q: later valid layer failed: %v", data, err)
 		}
+
 		if base.UI.Sort != "created" {
 			t.Fatalf("seed=%q: later sort did not win: %q", data, base.UI.Sort)
 		}

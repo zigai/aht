@@ -22,6 +22,7 @@ func crushDataHome(home string) string {
 	if value := strings.TrimSpace(os.Getenv("CRUSH_GLOBAL_DATA")); value != "" {
 		return value
 	}
+
 	if home == "" && os.Getenv("XDG_DATA_HOME") == "" {
 		return ""
 	}
@@ -43,9 +44,11 @@ func readProjects(path string) ([]crushProject, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("read Crush projects: %w", err)
 	}
+
 	var list struct {
 		Projects []crushProject `json:"projects"`
 	}
@@ -61,10 +64,12 @@ func (project crushProject) databasePath() string {
 	if dataDir == "" {
 		return ""
 	}
+
 	if !filepath.IsAbs(dataDir) {
 		if !filepath.IsAbs(project.Path) {
 			return ""
 		}
+
 		dataDir = filepath.Join(project.Path, dataDir)
 	}
 
@@ -73,12 +78,14 @@ func (project crushProject) databasePath() string {
 
 func projectDatabases(projects []crushProject) []string {
 	seen := make(map[string]bool, len(projects))
+
 	databases := make([]string, 0, len(projects))
 	for _, project := range projects {
 		database := project.databasePath()
 		if database == "" || seen[database] {
 			continue
 		}
+
 		seen[database] = true
 		databases = append(databases, database)
 	}

@@ -20,11 +20,12 @@ func (BaseAdapter) LifecycleDefaults(event string, attributes map[string]string)
 	return TranslateLifecycle(event, FirstAttribute(attributes, "source", "reason"))
 }
 
-func TranslateLifecycle(event, source string) LifecycleDefaults {
+func TranslateLifecycle(event string, source string) LifecycleDefaults {
 	result := LifecycleDefaults{Event: event, Lifecycle: "", Presence: ""}
 	switch normalizedLifecycleEvent(event) {
 	case "start":
 		result.Lifecycle = registry.NativeLifecycleStart
+
 		result.Presence = registry.PresenceLive
 		if strings.EqualFold(source, "resume") || strings.EqualFold(source, "resumed") {
 			result.Lifecycle = registry.NativeLifecycleResume
@@ -36,6 +37,7 @@ func TranslateLifecycle(event, source string) LifecycleDefaults {
 		result.Lifecycle = registry.NativeLifecycleEnd
 		result.Presence = registry.PresenceGone
 	}
+
 	return result
 }
 
@@ -45,6 +47,7 @@ func FirstAttribute(attributes map[string]string, keys ...string) string {
 			return value
 		}
 	}
+
 	return ""
 }
 

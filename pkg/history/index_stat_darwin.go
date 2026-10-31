@@ -11,5 +11,13 @@ func fileIdentity(info os.FileInfo) (string, string) {
 	if !ok {
 		return "", ""
 	}
-	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), fmt.Sprintf("%d:%d", stat.Ctimespec.Sec, stat.Ctimespec.Nsec)
+	return fmt.Sprintf(
+			"%d:%d",
+			stat.Dev,
+			stat.Ino,
+		), fmt.Sprintf(
+			"%d:%d",
+			stat.Ctimespec.Sec,
+			stat.Ctimespec.Nsec,
+		)
 }

@@ -39,7 +39,10 @@ func TestLaunchdStatusClassifiesMissingService(t *testing.T) {
 		{name: "cancellation", output: "Could not find service", cause: context.Canceled},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			running, _, err := backend.running(t.Context(), statusExecutor{output: []byte(test.output), err: test.cause})
+			running, _, err := backend.running(
+				t.Context(),
+				statusExecutor{output: []byte(test.output), err: test.cause},
+			)
 			if running {
 				t.Fatal("failed status command reported running")
 			}

@@ -48,7 +48,9 @@ var (
 	errSearchTime          = errors.New("invalid time")
 	errSearchOption        = errors.New("invalid option")
 	errRepeatedFlag        = errors.New("given more than once")
-	errSearchStream        = errors.New("--stream reports matches as they are found and cannot be combined with --sort, --limit, or --group-by")
+	errSearchStream        = errors.New(
+		"--stream reports matches as they are found and cannot be combined with --sort, --limit, or --group-by",
+	)
 )
 
 type singleFlagValue struct {
@@ -80,9 +82,10 @@ type searchOptions struct {
 type searchProgress struct {
 	app     *application
 	enabled bool
-	mu      sync.Mutex
-	last    time.Time
-	shown   bool
+	//exhaustruct:optional
+	mu    sync.Mutex
+	last  time.Time
+	shown bool
 }
 
 // excerptCell is one displayed rune of an excerpt and whether a match covers it.
@@ -102,16 +105,22 @@ func (value *singleFlagValue) Set(raw string) error {
 	if value.set {
 		return fmt.Errorf("flag --%s %w", value.name, errRepeatedFlag)
 	}
+
 	if err := value.Value.Set(raw); err != nil {
 		return fmt.Errorf("set flag --%s: %w", value.name, err)
 	}
+
 	value.set = true
+
 	return nil
 }
 
 func (app *application) newSearchCommand() *cobra.Command {
-	var options searchOptions
-	var sources []history.Source
+	var (
+		options searchOptions
+		sources []history.Source
+	)
+
 	command := &cobra.Command{
 		Use:   "search [text...]",
 		Short: "Search or list retained conversations across coding-agent harnesses",
@@ -119,24 +128,31 @@ func (app *application) newSearchCommand() *cobra.Command {
 			"Every text argument must appear in a conversation; --not excludes conversations.\n" +
 			"Matches are literal and case-insensitive by default; --regex and --word change matching.\n" +
 			"Without text, lists conversations selected by the filters.\n" +
-			"System and reasoning content are excluded. Results are ordered by --sort, most recent activity first by default.\n" +
-			"Unreadable history returns partial results with exit code 1; skipped malformed records are reported as warnings.",
+			"System and reasoning content are excluded. Results are " +
+			"ordered by --sort, most recent activity first by default.\n" +
+			"Unreadable history returns partial results with exit code " +
+			"1; skipped malformed records are reported as warnings.",
 		Example: "  aht search \"refresh token\"\n" +
 			"  aht search token refresh --not oauth --harness codex,claude --since 7d\n" +
 			"  aht search --dir ~/Projects/myapp --since 2w\n" +
 			"  aht search 'retry(ing)?' --regex --dir ~/Projects/myapp --format resume\n" +
 			"  aht search --group-by project --since 30d\n" +
 			"  aht search \"connection refused\" --include-tools --stream --json",
-		SilenceErrors: true, SilenceUsage: true,
-		Args: cobra.ArbitraryArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.ArbitraryArgs,
 		PreRunE: func(_ *cobra.Command, args []string) error {
 			options.query.Terms = args
+
 			var err error
+
 			sources, err = options.validate(time.Now())
 			if err != nil {
 				return exitCode(err, exitCodeUsage)
 			}
+
 			_, err = app.loadConfig()
+
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -144,35 +160,161 @@ func (app *application) newSearchCommand() *cobra.Command {
 		},
 	}
 	flags := command.Flags()
-	flags.StringSliceVar(&options.harnesses, "harness", nil, "filter by harness `<name,...>` (repeatable)")
-	flags.StringSliceVar(&options.harnesses, "agent", nil, "filter by harness `<name,...>` (alias for --harness)")
+	flags.StringSliceVar(
+		&options.harnesses,
+		"harness",
+		nil,
+		"filter by harness `<name,...>` (repeatable)",
+	)
+	flags.StringSliceVar(
+		&options.harnesses,
+		"agent",
+		nil,
+		"filter by harness `<name,...>` (alias for --harness)",
+	)
 	_ = flags.MarkHidden("agent")
-	flags.StringArrayVar(&options.query.Dirs, "dir", nil, "match recorded working directories or workspace roots under `<path>` (repeatable)")
-	flags.StringArrayVar(&options.query.ExcludeDirs, "exclude-dir", nil, "skip conversations under `<path>` (repeatable)")
-	flags.StringVar(&options.since, "since", "", "keep conversations active since `<when>`: a duration such as 12h or 7d, a date, or RFC3339")
-	flags.StringVar(&options.until, "until", "", "keep conversations started before `<when>`: a duration, a date, or RFC3339")
-	flags.StringVar(&options.presence, "presence", "", "keep conversations whose tracked session is `<live|gone>`")
-	flags.StringVar(&options.query.GitBranch, "branch", "", "keep conversations recorded on git branch `<name>`")
-	flags.StringVar(&options.query.Model, "model", "", "keep conversations whose model contains `<text>`")
-	flags.IntVar(&options.minMessages, "min-messages", 1, "keep conversations with at least `<count>` user and assistant messages")
-	flags.StringArrayVar(&options.query.Exclude, "not", nil, "exclude conversations containing `<text>` (repeatable)")
-	flags.BoolVar(&options.query.Regex, "regex", false, "treat text and --not values as Go regular expressions")
+	flags.StringArrayVar(
+		&options.query.Dirs,
+		"dir",
+		nil,
+		"match recorded working directories or workspace roots under `<path>` (repeatable)",
+	)
+	flags.StringArrayVar(
+		&options.query.ExcludeDirs,
+		"exclude-dir",
+		nil,
+		"skip conversations under `<path>` (repeatable)",
+	)
+	flags.StringVar(
+		&options.since,
+		"since",
+		"",
+		"keep conversations active since `<when>`: a duration such as 12h or 7d, a date, or RFC3339",
+	)
+	flags.StringVar(
+		&options.until,
+		"until",
+		"",
+		"keep conversations started before `<when>`: a duration, a date, or RFC3339",
+	)
+	flags.StringVar(
+		&options.presence,
+		"presence",
+		"",
+		"keep conversations whose tracked session is `<live|gone>`",
+	)
+	flags.StringVar(
+		&options.query.GitBranch,
+		"branch",
+		"",
+		"keep conversations recorded on git branch `<name>`",
+	)
+	flags.StringVar(
+		&options.query.Model,
+		"model",
+		"",
+		"keep conversations whose model contains `<text>`",
+	)
+	flags.IntVar(
+		&options.minMessages,
+		"min-messages",
+		1,
+		"keep conversations with at least `<count>` user and assistant messages",
+	)
+	flags.StringArrayVar(
+		&options.query.Exclude,
+		"not",
+		nil,
+		"exclude conversations containing `<text>` (repeatable)",
+	)
+	flags.BoolVar(
+		&options.query.Regex,
+		"regex",
+		false,
+		"treat text and --not values as Go regular expressions",
+	)
 	flags.BoolVar(&options.query.Word, "word", false, "match whole words only")
-	flags.BoolVar(&options.query.IncludeTools, "include-tools", false, "also search tool calls and tool output")
-	flags.BoolVar(&options.query.CaseSensitive, "case-sensitive", false, "match text with exact case")
-	flags.StringVar(&options.role, "role", "", "search only messages from this role `<user|agent|context|tool|all>` (default: user and agent)")
-	flags.IntVar(&options.query.Excerpts, "excerpts", 0, "show at most `<count>` excerpts per conversation (default 3)")
-	flags.StringVar(&options.sort, "sort", "", "order by `<updated|created|matches|messages>` (default updated)")
-	flags.IntVar(&options.query.Limit, "limit", 0, "return at most `<count>` conversations in sort order (0 means unlimited)")
-	flags.BoolVar(&options.stream, "stream", false, "print matches as they are found instead of sorted")
-	flags.StringVar(&options.groupBy, "group-by", "", "count conversations by `<project|harness|day>`")
+	flags.BoolVar(
+		&options.query.IncludeTools,
+		"include-tools",
+		false,
+		"also search tool calls and tool output",
+	)
+	flags.BoolVar(
+		&options.query.CaseSensitive,
+		"case-sensitive",
+		false,
+		"match text with exact case",
+	)
+	flags.StringVar(
+		&options.role,
+		"role",
+		"",
+		"search only messages from this role `<user|agent|context|tool|all>` (default: user and agent)",
+	)
+	flags.IntVar(
+		&options.query.Excerpts,
+		"excerpts",
+		0,
+		"show at most `<count>` excerpts per conversation (default 3)",
+	)
+	flags.StringVar(
+		&options.sort,
+		"sort",
+		"",
+		"order by `<updated|created|matches|messages>` (default updated)",
+	)
+	flags.IntVar(
+		&options.query.Limit,
+		"limit",
+		0,
+		"return at most `<count>` conversations in sort order (0 means unlimited)",
+	)
+	flags.BoolVar(
+		&options.stream,
+		"stream",
+		false,
+		"print matches as they are found instead of sorted",
+	)
+	flags.StringVar(
+		&options.groupBy,
+		"group-by",
+		"",
+		"count conversations by `<project|harness|day>`",
+	)
 	flags.StringVar(&options.format, "format", "", "print one `<id|path|resume>` per conversation")
-	flags.BoolVarP(&options.verbose, "verbose", "v", false, "show detailed file paths and all diagnostic warnings")
-	flags.StringArrayVar(&options.sources, "source", nil, "search only this native history `<agent=path>` (repeatable)")
-	for _, name := range []string{"since", "until", "presence", "branch", "model", "role", "sort", "group-by", "format", "min-messages", "excerpts", "limit"} {
+	flags.BoolVarP(
+		&options.verbose,
+		"verbose",
+		"v",
+		false,
+		"show detailed file paths and all diagnostic warnings",
+	)
+	flags.StringArrayVar(
+		&options.sources,
+		"source",
+		nil,
+		"search only this native history `<agent=path>` (repeatable)",
+	)
+
+	for _, name := range []string{
+		"since",
+		"until",
+		"presence",
+		"branch",
+		"model",
+		"role",
+		"sort",
+		"group-by",
+		"format",
+		"min-messages",
+		"excerpts",
+		"limit",
+	} {
 		flag := flags.Lookup(name)
 		flag.Value = &singleFlagValue{Value: flag.Value, name: name, set: false}
 	}
+
 	return command
 }
 
@@ -181,9 +323,11 @@ func (options *searchOptions) validate(now time.Time) ([]history.Source, error) 
 	if err := options.validateFilters(now); err != nil {
 		return nil, err
 	}
+
 	if err := options.validateOutput(); err != nil {
 		return nil, err
 	}
+
 	if options.listing {
 		if err := options.listQuery().Validate(); err != nil {
 			return nil, fmt.Errorf("search: %w", err)
@@ -192,10 +336,12 @@ func (options *searchOptions) validate(now time.Time) ([]history.Source, error) 
 		if err := options.validateRole(); err != nil {
 			return nil, err
 		}
+
 		if err := options.query.Validate(); err != nil {
 			return nil, fmt.Errorf("search: %w", err)
 		}
 	}
+
 	return options.validateSources()
 }
 
@@ -205,23 +351,33 @@ func (options *searchOptions) validateFilters(now time.Time) error {
 		if err != nil {
 			return fmt.Errorf("search harness: %w", err)
 		}
+
 		options.query.Harnesses = append(options.query.Harnesses, id)
 	}
+
 	var err error
 	if options.query.Since, err = parseSearchTime(options.since, now); err != nil {
 		return fmt.Errorf("search --since: %w", err)
 	}
+
 	if options.query.Until, err = parseSearchTime(options.until, now); err != nil {
 		return fmt.Errorf("search --until: %w", err)
 	}
+
 	switch options.presence {
 	case "", string(registry.PresenceLive), string(registry.PresenceGone):
 		options.query.Presence = registry.Presence(options.presence)
 	default:
-		return fmt.Errorf("search: %w --presence %q; choose live or gone", errSearchOption, options.presence)
+		return fmt.Errorf(
+			"search: %w --presence %q; choose live or gone",
+			errSearchOption,
+			options.presence,
+		)
 	}
+
 	options.query.MinMessages = options.minMessages
 	options.query.Sort = history.Sort(options.sort)
+
 	return nil
 }
 
@@ -229,19 +385,34 @@ func (options *searchOptions) validateOutput() error {
 	switch options.groupBy {
 	case "", "project", "harness", "day":
 	default:
-		return fmt.Errorf("search: %w --group-by %q; choose project, harness, or day", errSearchOption, options.groupBy)
+		return fmt.Errorf(
+			"search: %w --group-by %q; choose project, harness, or day",
+			errSearchOption,
+			options.groupBy,
+		)
 	}
+
 	switch options.format {
 	case "", "id", "path", "resume":
 	default:
-		return fmt.Errorf("search: %w --format %q; choose id, path, or resume", errSearchOption, options.format)
+		return fmt.Errorf(
+			"search: %w --format %q; choose id, path, or resume",
+			errSearchOption,
+			options.format,
+		)
 	}
+
 	if options.groupBy != "" && options.format != "" {
-		return fmt.Errorf("search: %w: --group-by and --format select different outputs", errSearchOption)
+		return fmt.Errorf(
+			"search: %w: --group-by and --format select different outputs",
+			errSearchOption,
+		)
 	}
+
 	if options.stream && (options.sort != "" || options.query.Limit != 0 || options.groupBy != "") {
 		return fmt.Errorf("search: %w", errSearchStream)
 	}
+
 	return nil
 }
 
@@ -252,17 +423,29 @@ func (options *searchOptions) validateSources() ([]history.Source, error) {
 	for _, value := range options.sources {
 		name, path, ok := strings.Cut(value, "=")
 		if !ok || path == "" {
-			return nil, fmt.Errorf("search: %w %q: expected agent=path, for example --source codex=/path/to/sessions", errSearchSource, value)
+			return nil, fmt.Errorf(
+				"search: %w %q: expected agent=path, for example --source codex=/path/to/sessions",
+				errSearchSource,
+				value,
+			)
 		}
+
 		id, err := harness.Parse(name)
 		if err != nil {
 			return nil, fmt.Errorf("search source: %w", err)
 		}
+
 		if len(options.query.Harnesses) > 0 && !slices.Contains(options.query.Harnesses, id) {
-			return nil, fmt.Errorf("search: %w: --source %q; see aht search --help", errSearchAgentConflict, value)
+			return nil, fmt.Errorf(
+				"search: %w: --source %q; see aht search --help",
+				errSearchAgentConflict,
+				value,
+			)
 		}
+
 		sources = append(sources, history.Source{Harness: id, Path: path})
 	}
+
 	return sources, nil
 }
 
@@ -270,6 +453,7 @@ func (options *searchOptions) validateRole() error {
 	if options.role == "" {
 		return nil
 	}
+
 	role := strings.ToLower(strings.TrimSpace(options.role))
 	switch role {
 	case "user", "context":
@@ -281,13 +465,22 @@ func (options *searchOptions) validateRole() error {
 	case "all":
 		options.query.Role = "all"
 	default:
-		return fmt.Errorf("search: %w %q; choose user, agent, context, tool, or all", errSearchRole, options.role)
+		return fmt.Errorf(
+			"search: %w %q; choose user, agent, context, tool, or all",
+			errSearchRole,
+			options.role,
+		)
 	}
+
 	return nil
 }
 
 func (options *searchOptions) listQuery() history.ListQuery {
-	return history.ListQuery{Filter: options.query.Filter, Sort: options.query.Sort, Limit: options.query.Limit}
+	return history.ListQuery{
+		Filter: options.query.Filter,
+		Sort:   options.query.Sort,
+		Limit:  options.query.Limit,
+	}
 }
 
 // parseSearchTime reads a relative duration before now, a local date, or an
@@ -297,20 +490,36 @@ func parseSearchTime(value string, now time.Time) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
-	if at, err := time.ParseInLocation(time.DateOnly, value, time.Local); err == nil { //nolint:gosmopolitan // --since dates are the user's local calendar days
+
+	if at, err := time.ParseInLocation(
+		time.DateOnly,
+		value,
+		time.Local, //nolint:gosmopolitan // --since dates are the user's local calendar day.
+	); err == nil {
 		return at, nil
 	}
+
 	if at, err := time.Parse(time.RFC3339, value); err == nil {
 		return at, nil
 	}
+
 	ago, err := config.ParseDuration(value)
 	if err != nil || ago <= 0 {
-		return time.Time{}, fmt.Errorf("%w %q: use a duration such as 12h or 7d, a date such as 2026-09-01, or RFC3339", errSearchTime, value)
+		return time.Time{}, fmt.Errorf(
+			"%w %q: use a duration such as 12h or 7d, a date such as 2026-09-01, or RFC3339",
+			errSearchTime,
+			value,
+		)
 	}
+
 	return now.Add(-ago), nil
 }
 
-func (app *application) runSearch(ctx context.Context, opts searchOptions, sources []history.Source) error {
+func (app *application) runSearch(
+	ctx context.Context,
+	opts searchOptions,
+	sources []history.Source,
+) error {
 	cfg := app.cfg
 	opts.query.IgnoreHarnesses = configuredIgnoreHarnesses(cfg.Filter.IgnoreHarnesses, sources)
 	opts.query.IgnorePaths = cfg.Filter.IgnorePaths
@@ -323,27 +532,42 @@ func (app *application) runSearch(ctx context.Context, opts searchOptions, sourc
 			app.warnf("warning: live status unavailable: %s\n", sanitizeHumanText(listErr.Error()))
 		}
 	}
+
 	progress := app.newSearchProgress()
+
 	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: progress.update}
 	if opts.stream {
 		return app.runSearchStream(ctx, catalog, opts, progress)
 	}
-	var result history.Result
-	var searchErr error
+
+	var (
+		result    history.Result
+		searchErr error
+	)
 	if opts.listing {
 		result, searchErr = catalog.List(ctx, opts.listQuery())
 	} else {
 		result, searchErr = catalog.Search(ctx, opts.query)
 	}
-	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
+	defer refreshSkippedHistory(
+		result,
+		func() error { return startHistoryRefresh(ctx, catalog.Sources) },
+	)
+
 	progress.clear()
+
 	if err := app.writeSearchOutput(result, searchErr, opts); err != nil {
 		return err
 	}
+
 	return searchFailure(searchErr)
 }
 
-func (app *application) writeSearchOutput(result history.Result, searchErr error, opts searchOptions) error {
+func (app *application) writeSearchOutput(
+	result history.Result,
+	searchErr error,
+	opts searchOptions,
+) error {
 	switch {
 	case opts.groupBy != "":
 		if err := app.writeSearchGroups(result.Matches, opts.groupBy); err != nil {
@@ -366,22 +590,36 @@ func (app *application) writeSearchOutput(result history.Result, searchErr error
 			return err
 		}
 	}
+
 	app.writeSearchDiagnostics(result, opts)
+
 	return nil
 }
 
-func (app *application) runSearchStream(ctx context.Context, catalog history.Catalog, opts searchOptions, progress *searchProgress) error {
+func (app *application) runSearchStream(
+	ctx context.Context,
+	catalog history.Catalog,
+	opts searchOptions,
+	progress *searchProgress,
+) error {
 	tty := app.isColorEnabled()
+
 	var writeErr error
+
 	count := 0
 	yield := func(match history.Match) bool {
 		progress.clear()
+
 		count++
 		writeErr = app.writeStreamMatch(match, opts, tty)
+
 		return writeErr == nil
 	}
-	var result history.Result
-	var searchErr error
+
+	var (
+		result    history.Result
+		searchErr error
+	)
 	if opts.listing {
 		// Listing has no text to stream; it streams the sorted listing instead.
 		result, searchErr = catalog.List(ctx, opts.listQuery())
@@ -393,17 +631,25 @@ func (app *application) runSearchStream(ctx context.Context, catalog history.Cat
 	} else {
 		result, searchErr = catalog.Stream(ctx, opts.query, yield)
 	}
-	defer refreshSkippedHistory(result, func() error { return startHistoryRefresh(ctx, catalog.Sources) })
+	defer refreshSkippedHistory(
+		result,
+		func() error { return startHistoryRefresh(ctx, catalog.Sources) },
+	)
+
 	progress.clear()
+
 	if writeErr != nil {
 		return writeErr
 	}
+
 	if count == 0 && !app.outputJSON && opts.format == "" {
 		if err := app.writeln(emptySearchMessage(searchErr, opts.listing)); err != nil {
 			return err
 		}
 	}
+
 	app.writeSearchDiagnostics(result, opts)
+
 	return searchFailure(searchErr)
 }
 
@@ -422,26 +668,36 @@ func (app *application) writeStreamMatch(match history.Match, opts searchOptions
 
 func (app *application) newSearchProgress() *searchProgress {
 	enabled := !app.outputJSON && terminalWidth(app.stderr) > 0
-	return &searchProgress{app: app, enabled: enabled, mu: sync.Mutex{}, last: time.Time{}, shown: false}
+	return &searchProgress{app: app, enabled: enabled, last: time.Time{}, shown: false}
 }
 
 func (p *searchProgress) update(progress history.Progress) {
 	if !p.enabled {
 		return
 	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	now := time.Now()
 	if now.Sub(p.last) < searchProgressInterval {
 		return
 	}
+
 	p.last = now
-	status := fmt.Sprintf("Scanning %s history %d/%d", progress.Source.Harness, progress.Done, progress.Total)
+
+	status := fmt.Sprintf(
+		"Scanning %s history %d/%d",
+		progress.Source.Harness,
+		progress.Done,
+		progress.Total,
+	)
 	if progress.Waiting {
 		status = "Waiting for the history index"
 	} else if progress.Refreshed > 0 {
 		status += fmt.Sprintf(", indexed %d changed", progress.Refreshed)
 	}
+
 	p.app.warnf("\r\x1b[2K%s", status)
 	p.shown = true
 }
@@ -449,6 +705,7 @@ func (p *searchProgress) update(progress history.Progress) {
 func (p *searchProgress) clear() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	if p.shown {
 		p.app.warnf("\r\x1b[2K")
 		p.shown = false
@@ -464,14 +721,17 @@ func configuredIgnoreHarnesses(configured []string, sources []history.Source) []
 	for _, source := range sources {
 		explicit = append(explicit, source.Harness)
 	}
+
 	ignored := make([]registry.Harness, 0, len(configured))
 	for _, name := range configured {
 		id, err := harness.Parse(name)
 		if err != nil || slices.Contains(explicit, id) {
 			continue
 		}
+
 		ignored = append(ignored, id)
 	}
+
 	return ignored
 }
 
@@ -496,17 +756,25 @@ func emptySearchMessage(searchErr error, listing bool) string {
 	if listing {
 		empty = "No conversations."
 	}
+
 	if searchErr != nil {
 		empty = strings.TrimSuffix(empty, ".") + "; some sources could not be searched."
 	}
+
 	return empty
 }
 
-func (app *application) writeSearchResults(matches []history.Match, searchErr error, opts searchOptions) error {
+func (app *application) writeSearchResults(
+	matches []history.Match,
+	searchErr error,
+	opts searchOptions,
+) error {
 	if len(matches) == 0 {
 		return app.writeln(emptySearchMessage(searchErr, false))
 	}
+
 	isTTY := app.isColorEnabled()
+
 	for _, match := range matches {
 		var err error
 		if isTTY {
@@ -514,23 +782,31 @@ func (app *application) writeSearchResults(matches []history.Match, searchErr er
 		} else {
 			err = app.writeSearchMatch(match)
 		}
+
 		if err != nil {
 			return err
 		}
 	}
+
 	if isTTY {
 		ruleWidth := min(maxRuleWidth, max(minRuleWidth, app.maxLineWidth()))
 		return app.writeln("\x1b[2m" + strings.Repeat("─", ruleWidth) + styleReset)
 	}
+
 	return nil
 }
 
 func (app *application) writeSearchDiagnostics(result history.Result, opts searchOptions) {
 	app.writeSearchIssues(result, opts.verbose)
+
 	if result.Truncated {
-		app.warnf("More matching conversations exist; increase or omit --limit, or narrow the filters.\n")
+		app.warnf(
+			"More matching conversations exist; increase or omit --limit, or narrow the filters.\n",
+		)
 	}
+
 	app.writeSearchUnsupported(result.Sources, opts)
+
 	if opts.verbose {
 		app.writeSearchRefresh(result)
 	}
@@ -540,59 +816,97 @@ func (app *application) writeSearchRefresh(result history.Result) {
 	if result.IndexUnavailable {
 		app.warnf("refresh: index unavailable; refresh totals are incomplete\n")
 	}
+
 	for _, refresh := range result.Refresh {
-		app.warnf("refresh: %s %s: checked=%d unchanged=%d skipped=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
-			refresh.Source.Harness, sanitizeHumanText(refresh.Source.Path), refresh.Checked, refresh.Unchanged, refresh.Skipped,
-			refresh.Resumed, refresh.Reparsed, refresh.BytesParsed, refresh.ParseTime, refresh.StoreTime)
+		app.warnf(
+			"refresh: %s %s: checked=%d unchanged=%d skipped=%d resumed=%d reparsed=%d bytes=%d parse=%s store=%s\n",
+			refresh.Source.Harness,
+			sanitizeHumanText(refresh.Source.Path),
+			refresh.Checked,
+			refresh.Unchanged,
+			refresh.Skipped,
+			refresh.Resumed,
+			refresh.Reparsed,
+			refresh.BytesParsed,
+			refresh.ParseTime,
+			refresh.StoreTime,
+		)
 	}
+
 	for _, file := range result.Reparsed {
-		app.warnf("reparsed: %s %s: bytes=%d reason=%s\n", file.Source.Harness, sanitizeHumanText(file.Path), file.Bytes, file.Reason)
+		app.warnf(
+			"reparsed: %s %s: bytes=%d reason=%s\n",
+			file.Source.Harness,
+			sanitizeHumanText(file.Path),
+			file.Bytes,
+			file.Reason,
+		)
 	}
 }
 
 func (app *application) writeSearchIssues(result history.Result, verbose bool) {
 	if !verbose && len(result.Issues) > maxSummarizedIssues {
 		records := 0
+
 		for _, issue := range result.Issues {
 			if issue.Record {
 				records++
 			}
 		}
+
 		if files := len(result.Issues) - records; files > 0 {
 			app.warnf("warning: %d histories could not be read (use --verbose to view)\n", files)
 		}
+
 		if records > 0 {
-			app.warnf("warning: skipped %d malformed history records (use --verbose to view)\n", records)
+			app.warnf(
+				"warning: skipped %d malformed history records (use --verbose to view)\n",
+				records,
+			)
 		}
 	} else {
 		for _, issue := range result.Issues {
-			app.warnf("warning: %s %s: %s\n", issue.Source.Harness, sanitizeHumanText(issue.Path), sanitizeHumanText(issue.Message))
+			app.warnf(
+				"warning: %s %s: %s\n",
+				issue.Source.Harness,
+				sanitizeHumanText(issue.Path),
+				sanitizeHumanText(issue.Message),
+			)
 		}
 	}
+
 	if verbose && result.OmittedIssues > 0 {
-		app.warnf("warning: %d history warnings omitted (outside query or diagnostic limit)\n", result.OmittedIssues)
+		app.warnf(
+			"warning: %d history warnings omitted (outside query or diagnostic limit)\n",
+			result.OmittedIssues,
+		)
 	}
 }
 
 func (app *application) writeSearchUnsupported(sources []history.SourceStatus, opts searchOptions) {
 	var unsupported []string
+
 	for _, source := range sources {
 		if source.Status != "unsupported" {
 			continue
 		}
+
 		requested := opts.verbose || slices.Contains(opts.query.Harnesses, source.Source.Harness)
 		for _, value := range opts.sources {
 			name, _, _ := strings.Cut(value, "=")
 			id, _ := harness.Parse(name)
 			requested = requested || id == source.Source.Harness
 		}
+
 		if !requested {
 			continue
 		}
+
 		if name := string(source.Source.Harness); !slices.Contains(unsupported, name) {
 			unsupported = append(unsupported, name)
 		}
 	}
+
 	if len(unsupported) > 0 {
 		app.warnf("History readers unavailable: %s.\n", strings.Join(unsupported, ", "))
 	}
@@ -606,6 +920,7 @@ func searchTitle(c history.Conversation) string {
 			return cleaned
 		}
 	}
+
 	return c.SessionID
 }
 
@@ -615,14 +930,17 @@ func resumeLine(match history.Match) string {
 	if len(match.ResumeCommand) == 0 {
 		return ""
 	}
+
 	quoted := make([]string, len(match.ResumeCommand))
 	for i, arg := range match.ResumeCommand {
 		quoted[i] = harnesspkg.ShellQuote(arg)
 	}
+
 	command := strings.Join(quoted, " ")
 	if match.Conversation.CWD == "" {
 		return command
 	}
+
 	return "cd " + harnesspkg.ShellQuote(match.Conversation.CWD) + " && " + command
 }
 
@@ -631,11 +949,13 @@ func pasteableResumeLine(match history.Match) string {
 	if strings.ContainsFunc(resume, isTerminalControl) {
 		return ""
 	}
+
 	return resume
 }
 
 func (app *application) writeSearchField(match history.Match, field string) error {
 	var value string
+
 	switch field {
 	case "id":
 		value = match.Conversation.SessionID
@@ -644,99 +964,161 @@ func (app *application) writeSearchField(match history.Match, field string) erro
 	case "resume":
 		value = resumeLine(match)
 	}
+
 	if value == "" {
 		return nil
 	}
+
 	if strings.ContainsFunc(value, isTerminalControl) {
-		app.warnf("The %s of %s contains control characters; use --json to read it.\n", field, sanitizeHumanText(match.Conversation.SessionID))
+		app.warnf(
+			"The %s of %s contains control characters; use --json to read it.\n",
+			field,
+			sanitizeHumanText(match.Conversation.SessionID),
+		)
+
 		return nil
 	}
+
 	return app.writeln(value)
 }
 
 func (app *application) writeSearchMatch(match history.Match) error {
 	c := match.Conversation
-	if err := app.writef("%s %s [%s]\n", c.Harness, sanitizeHumanText(c.SessionID), searchPresence(match.RegistryStates)); err != nil {
+	if err := app.writef(
+		"%s %s [%s]\n",
+		c.Harness,
+		sanitizeHumanText(c.SessionID),
+		searchPresence(match.RegistryStates),
+	); err != nil {
 		return err
 	}
+
 	details := []humanDetail{{label: "Title", value: searchTitle(c)}, {label: "CWD", value: c.CWD}}
 	for _, detail := range []humanDetail{{label: "Branch", value: c.GitBranch}, {label: "Model", value: c.Model}} {
 		if detail.value != "" {
 			details = append(details, detail)
 		}
 	}
+
 	details = append(details, humanDetail{label: "History", value: c.Path})
 	if !c.UpdatedAt.IsZero() {
-		details = append(details, humanDetail{label: "Updated", value: c.UpdatedAt.UTC().Format(time.RFC3339)})
+		details = append(
+			details,
+			humanDetail{label: "Updated", value: c.UpdatedAt.UTC().Format(time.RFC3339)},
+		)
 	}
+
 	if resume := pasteableResumeLine(match); resume != "" {
-		details = append(details, humanDetail{label: "Resume", value: resume, wrap: func(value string, _ int) []string { return []string{value} }})
+		details = append(
+			details,
+			humanDetail{
+				label: "Resume",
+				value: resume,
+				wrap:  func(value string, _ int) []string { return []string{value} },
+			},
+		)
 	}
+
 	if err := app.writeHumanDetails(details); err != nil {
 		return err
 	}
+
 	for _, excerpt := range match.Excerpts {
-		if err := app.writeHumanDetails([]humanDetail{{label: excerpt.Role, value: excerpt.Text}}); err != nil {
+		if err := app.writeHumanDetails(
+			[]humanDetail{{label: excerpt.Role, value: excerpt.Text}},
+		); err != nil {
 			return err
 		}
 	}
+
 	return app.writeln()
 }
 
 func (app *application) writeSearchMatchTTY(match history.Match, verbose bool) error {
 	c := match.Conversation
 	width := app.maxLineWidth()
+
 	var right strings.Builder
 	if searchPresence(match.RegistryStates) == "live (last observed)" {
 		right.WriteString("  \x1b[1;32m● live" + styleReset)
 	}
+
 	if !c.UpdatedAt.IsZero() {
-		right.WriteString("  \x1b[2m" + formatUpdatedAt(c.UpdatedAt, time.Now().UTC(), false) + styleReset)
+		right.WriteString(
+			"  \x1b[2m" + formatUpdatedAt(c.UpdatedAt, time.Now().UTC(), false) + styleReset,
+		)
 	}
+
 	prefix := fmt.Sprintf("\x1b[2m%-*s%s", harnessBadgeWidth, c.Harness, styleReset)
 	used := harnessBadgeWidth + humanColumnGap + text.StringWidth(right.String())
+
 	title := truncateHumanText(searchTitle(c), max(minRuleWidth, width-used))
-	if err := app.writef("%s  \x1b[1m%s%s%s\n", prefix, title, styleReset, right.String()); err != nil {
+	if err := app.writef(
+		"%s  \x1b[1m%s%s%s\n",
+		prefix,
+		title,
+		styleReset,
+		right.String(),
+	); err != nil {
 		return err
 	}
+
 	meta := []string{sanitizeHumanText(c.SessionID)}
 	for _, value := range []string{formatHumanPath(c.CWD), c.GitBranch, c.Model} {
 		if value != "" {
 			meta = append(meta, sanitizeHumanText(value))
 		}
 	}
-	if err := app.writef("  \x1b[2m%s%s\n", truncateHumanText(strings.Join(meta, " · "), max(minRuleWidth, width-metaIndentWidth)), styleReset); err != nil {
+
+	if err := app.writef(
+		"  \x1b[2m%s%s\n",
+		truncateHumanText(strings.Join(meta, " · "), max(minRuleWidth, width-metaIndentWidth)),
+		styleReset,
+	); err != nil {
 		return err
 	}
+
 	if verbose {
-		if err := app.writef("  \x1b[2mhistory: %s%s\n", sanitizeHumanText(c.Path), styleReset); err != nil {
+		if err := app.writef(
+			"  \x1b[2mhistory: %s%s\n",
+			sanitizeHumanText(c.Path),
+			styleReset,
+		); err != nil {
 			return err
 		}
 	}
+
 	if err := app.writeSearchExcerptsTTY(match.Excerpts, width); err != nil {
 		return err
 	}
+
 	if resume := pasteableResumeLine(match); resume != "" {
 		if err := app.writef("  \x1b[2mresume:%s %s\n", styleReset, resume); err != nil {
 			return err
 		}
 	}
+
 	return app.writeln()
 }
 
 func (app *application) writeSearchExcerptsTTY(excerpts []history.Excerpt, width int) error {
 	const branchWidth = 3
+
 	prefixWidth := branchWidth + maxRoleLabelWidth + 1
 	textWidth := max(minRuleWidth, width-prefixWidth)
+
 	for i, excerpt := range excerpts {
 		branch := "\x1b[2m├─" + styleReset + " "
+
 		continuation := "\x1b[2m│" + styleReset + strings.Repeat(" ", prefixWidth-1)
 		if i == len(excerpts)-1 {
 			branch = "\x1b[2m└─" + styleReset + " "
 			continuation = strings.Repeat(" ", prefixWidth)
 		}
+
 		role := excerpt.Role + ":"
 		styled := role
+
 		switch excerpt.Role {
 		case "user":
 			styled = "\x1b[1;33m" + role + styleReset
@@ -745,17 +1127,21 @@ func (app *application) writeSearchExcerptsTTY(excerpts []history.Excerpt, width
 		case "tool":
 			styled = "\x1b[2m" + role + styleReset
 		}
+
 		first := branch + styled + strings.Repeat(" ", max(1, maxRoleLabelWidth-len(role)+1))
+
 		for index, line := range highlightedLines(excerpt.Text, excerpt.Spans, textWidth) {
 			lead := continuation
 			if index == 0 {
 				lead = first
 			}
+
 			if err := app.writef("%s%s\n", lead, line); err != nil {
 				return err
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -766,28 +1152,43 @@ func highlightedLines(value string, spans []history.Span, width int) []string {
 	if len(lines) == 0 {
 		return []string{""}
 	}
+
 	return lines
 }
 
 func excerptCells(value string, spans []history.Span) []excerptCell {
 	cells := make([]excerptCell, 0, len(value))
+
 	span := 0
 	for offset, character := range value {
 		for span < len(spans) && spans[span].End <= offset {
 			span++
 		}
+
 		matched := span < len(spans) && spans[span].Start <= offset
+
 		if blankCharacter(character) {
 			character = ' '
 		}
+
 		if character == ' ' && (len(cells) == 0 || cells[len(cells)-1].character == ' ') {
 			continue
 		}
-		cells = append(cells, excerptCell{character: character, width: text.StringWidth(string(character)), match: matched})
+
+		cells = append(
+			cells,
+			excerptCell{
+				character: character,
+				width:     text.StringWidth(string(character)),
+				match:     matched,
+			},
+		)
 	}
+
 	for len(cells) > 0 && cells[len(cells)-1].character == ' ' {
 		cells = cells[:len(cells)-1]
 	}
+
 	return cells
 }
 
@@ -797,14 +1198,17 @@ func blankCharacter(character rune) bool {
 
 func wrapCells(cells []excerptCell, width int) []string {
 	var lines []string
+
 	for len(cells) > 0 {
 		end := lineBreak(cells, width)
 		lines = append(lines, renderCells(cells[:end]))
+
 		cells = cells[end:]
 		for len(cells) > 0 && cells[0].character == ' ' {
 			cells = cells[1:]
 		}
 	}
+
 	return lines
 }
 
@@ -814,17 +1218,21 @@ func lineBreak(cells []excerptCell, width int) int {
 		if cells[end].character == ' ' {
 			space = end
 		}
+
 		used += cells[end].width
 		end++
 	}
+
 	if end < len(cells) && space > 0 {
 		return space
 	}
+
 	return end
 }
 
 func renderCells(cells []excerptCell) string {
 	var line strings.Builder
+
 	highlighted := false
 	for _, cell := range cells {
 		if cell.match != highlighted {
@@ -833,13 +1241,17 @@ func renderCells(cells []excerptCell) string {
 			} else {
 				line.WriteString(styleReset)
 			}
+
 			highlighted = cell.match
 		}
+
 		line.WriteRune(cell.character)
 	}
+
 	if highlighted {
 		line.WriteString(styleReset)
 	}
+
 	return line.String()
 }
 
@@ -847,16 +1259,31 @@ func (app *application) writeSearchList(matches []history.Match) error {
 	if len(matches) == 0 {
 		return app.writeln("No conversations.")
 	}
+
 	now := time.Now().UTC()
+
 	rows := make([][]string, 0, len(matches))
 	for _, match := range matches {
 		c := match.Conversation
+
 		title := searchTitle(c)
 		if searchPresence(match.RegistryStates) == "live (last observed)" {
 			title = "● " + title
 		}
-		rows = append(rows, []string{string(c.Harness), sanitizeHumanText(c.SessionID), formatUpdatedAt(c.UpdatedAt, now, false), strconv.Itoa(c.Messages), title, formatHumanPath(c.CWD)})
+
+		rows = append(
+			rows,
+			[]string{
+				string(c.Harness),
+				sanitizeHumanText(c.SessionID),
+				formatUpdatedAt(c.UpdatedAt, now, false),
+				strconv.Itoa(c.Messages),
+				title,
+				formatHumanPath(c.CWD),
+			},
+		)
 	}
+
 	return app.writeHumanTable(searchListColumns(rows, app.maxLineWidth()), rows)
 }
 
@@ -864,35 +1291,44 @@ func (app *application) writeSearchList(matches []history.Match) error {
 // the remaining width between the title and the working directory.
 func searchListColumns(rows [][]string, maxWidth int) []humanColumn {
 	headings := []string{"Agent", "Session", "Updated", "Msgs", "Title", "CWD"}
+
 	widths := make([]int, len(headings))
 	for i, heading := range headings {
 		widths[i] = text.StringWidth(heading)
 	}
+
 	for _, row := range rows {
 		for i, cell := range row {
 			widths[i] = max(widths[i], text.StringWidth(cell))
 		}
 	}
+
 	fixed := widths[0] + widths[1] + widths[2] + widths[3] + (len(headings)-1)*humanColumnGap
 	available := max(minListColumnsWidth, maxWidth-fixed)
 	title := min(widths[4], max(minRuleWidth, available*searchTitleShare/searchShareTotal))
 	directory := min(widths[5], max(minRuleWidth, available-title))
 	title = min(widths[4], max(title, available-directory))
 	widths[4], widths[5] = title, directory
+
 	columns := make([]humanColumn, len(headings))
 	for i, heading := range headings {
-		columns[i] = humanColumn{heading: heading, width: widths[i], wrap: nil, align: text.AlignLeft}
+		columns[i] = humanColumn{heading: heading, width: widths[i], align: text.AlignLeft}
 	}
+
 	columns[3].align = text.AlignRight
 	columns[5].wrap = wrapHumanPath
+
 	return columns
 }
 
 func (app *application) writeSearchGroups(matches []history.Match, groupBy string) error {
 	counts := map[string]*searchGroup{}
+
 	for _, match := range matches {
 		c := match.Conversation
+
 		var key string
+
 		switch groupBy {
 		case "project":
 			key = formatHumanPath(cmp.Or(c.ProjectRoot, c.CWD))
@@ -900,46 +1336,70 @@ func (app *application) writeSearchGroups(matches []history.Match, groupBy strin
 			key = string(c.Harness)
 		case "day":
 			if !c.UpdatedAt.IsZero() {
-				key = c.UpdatedAt.Local().Format(time.DateOnly) //nolint:gosmopolitan // --group-by day buckets by the user's local calendar day
+				// --group-by day buckets by the user's local calendar day
+				//nolint:gosmopolitan // Intentional locale-sensitive behavior or Unicode fixture; see above.
+				local := c.UpdatedAt.Local()
+				key = local.Format(time.DateOnly)
 			}
 		}
+
 		key = cmp.Or(key, "-")
 		if counts[key] == nil {
 			counts[key] = &searchGroup{Group: key, Conversations: 0, Messages: 0}
 		}
+
 		counts[key].Conversations++
 		counts[key].Messages += c.Messages
 	}
+
 	groups := make([]searchGroup, 0, len(counts))
 	for _, group := range counts {
 		groups = append(groups, *group)
 	}
+
 	slices.SortFunc(groups, func(a, b searchGroup) int {
 		if groupBy == "day" {
 			return cmp.Compare(b.Group, a.Group)
 		}
+
 		return cmp.Or(cmp.Compare(b.Conversations, a.Conversations), cmp.Compare(a.Group, b.Group))
 	})
+
 	if app.outputJSON {
 		return app.writeJSONSafe(groups)
 	}
+
 	rows := make([][]string, 0, len(groups))
 	for _, group := range groups {
-		rows = append(rows, []string{sanitizeHumanText(group.Group), strconv.Itoa(group.Conversations), strconv.Itoa(group.Messages)})
+		rows = append(
+			rows,
+			[]string{
+				sanitizeHumanText(group.Group),
+				strconv.Itoa(group.Conversations),
+				strconv.Itoa(group.Messages),
+			},
+		)
 	}
+
 	heading := strings.ToUpper(groupBy[:1]) + groupBy[1:]
 	columns := []humanColumn{
 		{heading: heading, width: 0, wrap: wrapHumanPath, align: text.AlignLeft},
-		{heading: "Conversations", width: len("Conversations"), wrap: nil, align: text.AlignRight},
-		{heading: "Messages", width: len("Messages"), wrap: nil, align: text.AlignRight},
+		{heading: "Conversations", width: len("Conversations"), align: text.AlignRight},
+		{heading: "Messages", width: len("Messages"), align: text.AlignRight},
 	}
+
 	columns[0].width = len(heading)
 	for _, row := range rows {
 		columns[0].width = max(columns[0].width, text.StringWidth(row[0]))
 		columns[1].width = max(columns[1].width, len(row[1]))
 		columns[2].width = max(columns[2].width, len(row[2]))
 	}
-	columns[0].width = min(columns[0].width, max(minRuleWidth, app.maxLineWidth()-columns[1].width-columns[2].width-2*humanColumnGap))
+
+	columns[0].width = min(
+		columns[0].width,
+		max(minRuleWidth, app.maxLineWidth()-columns[1].width-columns[2].width-2*humanColumnGap),
+	)
+
 	return app.writeWrappedHumanTable(columns, rows)
 }
 
@@ -952,6 +1412,7 @@ func (app *application) writeSearchJSONLine(match history.Match) error {
 	if err != nil {
 		return fmt.Errorf("encode history match: %w", err)
 	}
+
 	return app.writeln(escapeBidi(string(data)))
 }
 
@@ -962,12 +1423,14 @@ func (app *application) writeJSONSafe(value any) error {
 	if err != nil {
 		return fmt.Errorf("encode history results: %w", err)
 	}
+
 	return app.writeln(escapeBidi(string(data)))
 }
 
 func escapeBidi(data string) string {
 	var safe strings.Builder
 	safe.Grow(len(data))
+
 	for _, character := range data {
 		if isBidiControl(character) {
 			quoted := strconv.QuoteRuneToASCII(character)
@@ -976,6 +1439,7 @@ func escapeBidi(data string) string {
 			safe.WriteRune(character)
 		}
 	}
+
 	return safe.String()
 }
 
@@ -985,12 +1449,15 @@ func searchPresence(evidence []history.RegistryState) string {
 		if state.Presence == registry.PresenceLive {
 			return "live (last observed)"
 		}
+
 		if state.Presence != registry.PresenceGone {
 			allGone = false
 		}
 	}
+
 	if allGone {
 		return "gone (last observed)"
 	}
+
 	return "unknown"
 }

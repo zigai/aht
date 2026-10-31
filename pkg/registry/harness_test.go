@@ -23,7 +23,8 @@ const (
 type fixtureRules struct{ authority Authority }
 
 func (fixtureRules) Known(id Harness) bool {
-	return id != "" && id != "invalid" && id != "unknown" && id != "not-a-harness" && id != "claude-code"
+	return id != "" && id != "invalid" && id != "unknown" && id != "not-a-harness" &&
+		id != "claude-code"
 }
 
 func (r fixtureRules) Policy(id Harness) Policy {
@@ -31,6 +32,14 @@ func (r fixtureRules) Policy(id Harness) Policy {
 	if authority == "" {
 		authority = AuthorityHook
 	}
+
 	reporter := string(id) + "-extension"
-	return Policy{Reporter: reporter, ExclusiveProcess: id != HarnessOpenClaw, Authority: authority, ScreenFallback: true, CatalogCreates: id == HarnessClaude}
+
+	return Policy{
+		Reporter:         reporter,
+		ExclusiveProcess: id != HarnessOpenClaw,
+		Authority:        authority,
+		ScreenFallback:   true,
+		CatalogCreates:   id == HarnessClaude,
+	}
 }

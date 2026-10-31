@@ -38,7 +38,11 @@ func (l *storeLock) Close() error {
 	removeErr := os.Remove(l.path)
 	if closeErr != nil {
 		if removeErr != nil {
-			return fmt.Errorf("closing store lock: %w; removing store lock: %v", closeErr, removeErr)
+			return fmt.Errorf(
+				"closing store lock: %w; removing store lock: %v",
+				closeErr,
+				removeErr,
+			)
 		}
 		return fmt.Errorf("closing store lock: %w", closeErr)
 	}

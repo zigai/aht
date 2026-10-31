@@ -11,6 +11,7 @@ type Hold struct {
 	Stage   Stage
 
 	done chan struct{}
+	//exhaustruct:optional
 	once sync.Once
 }
 
@@ -19,7 +20,6 @@ func newHold(request Request, stage Stage) *Hold {
 		Request: request.clone(),
 		Stage:   stage,
 		done:    make(chan struct{}),
-		once:    sync.Once{},
 	}
 }
 
@@ -39,6 +39,7 @@ func (h *Hold) finish() {
 
 func (s *Server) await(ctx context.Context, gen *session, hold *Hold) bool {
 	defer hold.finish()
+
 	select {
 	case s.holds <- hold:
 	case <-ctx.Done():
@@ -48,6 +49,7 @@ func (s *Server) await(ctx context.Context, gen *session, hold *Hold) bool {
 	case <-gen.abandoned:
 		return false
 	}
+
 	select {
 	case <-hold.done:
 		return true

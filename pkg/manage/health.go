@@ -43,7 +43,9 @@ var (
 	ErrHealthCorrupt = errors.New("invalid tracker health sidecar")
 
 	// ErrReconciliationIncomplete indicates that the tracker has not yet completed a successful cycle.
-	ErrReconciliationIncomplete = errors.New("tracker has not completed a successful reconciliation")
+	ErrReconciliationIncomplete = errors.New(
+		"tracker has not completed a successful reconciliation",
+	)
 )
 
 // HealthStatus indicates the operational state of tracker reconciliation.
@@ -92,6 +94,7 @@ func (m *Manager) HealthPath() string {
 	if storePath == "" {
 		storePath = registry.DefaultStorePath()
 	}
+
 	return storePath + ".observer-health.json"
 }
 
@@ -101,6 +104,7 @@ func (m *Manager) TrackerHealth(ctx context.Context) (TrackerHealth, error) {
 		var empty TrackerHealth
 		return empty, fmt.Errorf("tracker health: %w", err)
 	}
+
 	return ReadTrackerHealth(m.HealthPath(), time.Now().UTC(), 0)
 }
 
@@ -132,9 +136,11 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 				Fresh:                        false,
 				Age:                          0,
 				Status:                       HealthStatusMissing,
-				Message:                      "tracker health is missing; run aht manage tracker run --once or aht manage tracker enable",
+				Message: "tracker health is missing; run aht manage tracker run " +
+					"--once or aht manage tracker enable",
 			}, fmt.Errorf("%w: %s", ErrHealthMissing, path)
 		}
+
 		return TrackerHealth{
 			PID:                          0,
 			StartIdentity:                "",
@@ -202,14 +208,20 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 	return evaluateTrackerHealthFreshness(health, now, maxAge)
 }
 
-func evaluateTrackerHealthFreshness(health TrackerHealth, now time.Time, maxAge time.Duration) (TrackerHealth, error) {
+func evaluateTrackerHealthFreshness(
+	health TrackerHealth,
+	now time.Time,
+	maxAge time.Duration,
+) (TrackerHealth, error) {
 	if health.Degraded || health.LastEnumerationError != "" {
 		health.Status = HealthStatusDegraded
 		health.Fresh = false
+
 		health.Message = health.LastEnumerationError
 		if health.Message == "" {
 			health.Message = "tracker reports degraded reconciliation"
 		}
+
 		return health, fmt.Errorf("%w: %s", ErrHealthDegraded, health.Message)
 	}
 
@@ -217,6 +229,7 @@ func evaluateTrackerHealthFreshness(health TrackerHealth, now time.Time, maxAge 
 		health.Status = HealthStatusDegraded
 		health.Fresh = false
 		health.Message = "observer has not completed a successful reconciliation"
+
 		return health, fmt.Errorf("%w", ErrReconciliationIncomplete)
 	}
 
@@ -227,13 +240,21 @@ func evaluateTrackerHealthFreshness(health TrackerHealth, now time.Time, maxAge 
 	if age > effectiveMaxAge {
 		health.Fresh = false
 		health.Status = HealthStatusStale
-		health.Message = fmt.Sprintf("last reconciliation was %s ago (stale, limit %s)", age.Round(time.Second), effectiveMaxAge)
+		health.Message = fmt.Sprintf(
+			"last reconciliation was %s ago (stale, limit %s)",
+			age.Round(time.Second),
+			effectiveMaxAge,
+		)
+
 		return health, fmt.Errorf("%w: %s", ErrHealthStale, health.Message)
 	}
 
 	health.Fresh = true
 	health.Status = HealthStatusHealthy
-	health.Message = "last successful reconciliation at " + health.LastSuccessAt.Format(time.RFC3339)
+	health.Message = "last successful reconciliation at " + health.LastSuccessAt.Format(
+		time.RFC3339,
+	)
+
 	return health, nil
 }
 
@@ -241,6 +262,7 @@ func resolveEffectiveMaxAge(interval time.Duration, maxAge time.Duration) time.D
 	if maxAge > 0 {
 		return maxAge
 	}
+
 	const (
 		minEffectiveAge     = 2 * time.Minute
 		defaultEffectiveAge = 2 * time.Minute
@@ -251,24 +273,31 @@ func resolveEffectiveMaxAge(interval time.Duration, maxAge time.Duration) time.D
 		if effective < minEffectiveAge {
 			return minEffectiveAge
 		}
+
 		return effective
 	}
+
 	return defaultEffectiveAge
 }
 
 func readHealthFile(path string) ([]byte, error) {
 	const maxHealthBytes = 1 << 20
+
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open health sidecar: %w", err)
 	}
+
 	defer func() { _ = file.Close() }()
+
 	data, err := io.ReadAll(io.LimitReader(file, maxHealthBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read health sidecar: %w", err)
 	}
+
 	if len(data) > maxHealthBytes {
 		return nil, fmt.Errorf("%w: sidecar exceeds 1 MiB", ErrHealthCorrupt)
 	}
+
 	return data, nil
 }

@@ -26,15 +26,24 @@ func (app *application) newCapabilitiesCommand() *cobra.Command {
 			if options.harness != "" {
 				harnessID, err := harness.Parse(options.harness)
 				if err != nil {
-					return exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
+					return exitCode(
+						fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness),
+						exitCodeUsage,
+					)
 				}
+
 				caps, ok := harness.CapabilitiesFor(harnessID)
 				if !ok {
-					return exitCode(fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness), exitCodeUsage)
+					return exitCode(
+						fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness),
+						exitCodeUsage,
+					)
 				}
+
 				if app.outputJSON {
 					return app.writeJSON(caps)
 				}
+
 				return app.writeSingleHarnessCapabilities(caps)
 			}
 
@@ -42,10 +51,12 @@ func (app *application) newCapabilitiesCommand() *cobra.Command {
 			if app.outputJSON {
 				return app.writeJSON(all)
 			}
+
 			return app.writeCapabilitiesTable(all)
 		},
 	}
 	command.Flags().StringVar(&options.harness, "harness", "", "filter capabilities to `<harness>`")
+
 	return command
 }
 
@@ -59,6 +70,7 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 		capabilitySignalWidth    = 7
 		capabilityFeatureWidth   = 7
 	)
+
 	rows := make([][]string, 0, len(capabilities))
 	for _, c := range capabilities {
 		rows = append(rows, []string{
@@ -76,6 +88,7 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 			yesNo(c.ScreenSupport),
 		})
 	}
+
 	return app.writeHumanTable(
 		[]humanColumn{
 			{heading: "Harness", width: capabilityAgentWidth},
@@ -119,5 +132,6 @@ func yesNo(value bool) string {
 	if value {
 		return "yes"
 	}
+
 	return "no"
 }

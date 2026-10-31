@@ -18,10 +18,13 @@ func OnCancel(ctx context.Context, resource Closer) func() {
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(done)
+
 		_ = resource.Close()
 	})
+
 	return func() {
 		_ = resource.Close()
+
 		if !stop() {
 			<-done
 		}

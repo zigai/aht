@@ -11,7 +11,9 @@ import (
 	"github.com/zigai/strata/codec"
 )
 
-var errRefreshStatusInvalid = errors.New("history refresh status is stale or invalid; run aht manage history refresh")
+var errRefreshStatusInvalid = errors.New(
+	"history refresh status is stale or invalid; run aht manage history refresh",
+)
 
 // RefreshStatus describes the last completed explicit index refresh, including
 // partial refreshes. Searches do not publish status.
@@ -36,28 +38,35 @@ func (c Catalog) RefreshStatus(ctx context.Context) (RefreshStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return empty, fmt.Errorf("read history refresh status: %w", err)
 	}
+
 	path, err := historyIndexPath(c.IndexPath)
 	if err != nil {
 		return empty, err
 	}
+
 	data, err := os.ReadFile(path + ".refresh.json")
 	if err != nil {
 		return empty, fmt.Errorf("read history refresh status: %w", err)
 	}
+
 	var saved refreshStatusFile
 	if err = codec.NewJSON().Decode(data, &saved); err != nil {
 		return empty, fmt.Errorf("decode history refresh status: %w", err)
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return empty, fmt.Errorf("inspect history index for refresh status: %w", err)
 	}
+
 	if !saved.validForIndex(info) {
 		return empty, errRefreshStatusInvalid
 	}
+
 	if err = ctx.Err(); err != nil {
 		return empty, fmt.Errorf("read history refresh status: %w", err)
 	}
+
 	return saved.RefreshStatus, nil
 }
 
@@ -66,10 +75,12 @@ func (c Catalog) saveRefreshStatus(ctx context.Context, result Result, incomplet
 	if err != nil {
 		return err
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("inspect history index for refresh status: %w", err)
 	}
+
 	identity, _ := fileIdentity(info)
 	saved := refreshStatusFile{
 		CompletedAt:   time.Now().UTC(),
@@ -79,16 +90,24 @@ func (c Catalog) saveRefreshStatus(ctx context.Context, result Result, incomplet
 		IndexVersion:  indexVersion,
 		IndexIdentity: identity,
 	}
+
 	if err = ctx.Err(); err != nil {
 		return fmt.Errorf("save history refresh status: %w", err)
 	}
+
 	if err = strata.Save(path+".refresh.json", saved, strata.WithFileMode(0o600)); err != nil {
 		return fmt.Errorf("save history refresh status after committed refresh: %w", err)
 	}
+
 	return nil
 }
 
 func (saved refreshStatusFile) validForIndex(info os.FileInfo) bool {
 	identity, _ := fileIdentity(info)
-	return saved.IndexVersion == indexVersion && saved.IndexIdentity != "" && saved.IndexIdentity == identity && !saved.CompletedAt.IsZero() && saved.IssueCount >= 0 && info.Mode().IsRegular()
+
+	return saved.IndexVersion == indexVersion && saved.IndexIdentity != "" &&
+		saved.IndexIdentity == identity &&
+		!saved.CompletedAt.IsZero() &&
+		saved.IssueCount >= 0 &&
+		info.Mode().IsRegular()
 }

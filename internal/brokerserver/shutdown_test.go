@@ -29,38 +29,54 @@ func (l *failingListener) Accept() (net.Conn, error) {
 		//nolint:wrapcheck // This listener delegates the first accept unchanged and injects only the next failure.
 		return l.Listener.Accept()
 	}
+
 	<-l.fail
+
 	return nil, errAcceptFailed
 }
 
 func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 	path := shortStatePath(t)
 	socketPath := broker.SocketPath(path)
+
 	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var listenConfig net.ListenConfig
+
 	listener, err := listenConfig.Listen(t.Context(), "unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = listener.Close() })
+
 	fail := make(chan struct{})
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+
 	server := New(Options{Store: store, SocketPath: socketPath})
+
 	result := make(chan error, 1)
 	go func() {
 		result <- server.serve(ctx, &failingListener{Listener: listener, fail: fail})
 	}()
+
 	subscription, err := broker.NewClient(path).Subscribe(ctx, registry.Filter{})
+
 	close(fail)
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer subscription.Close()
+
 	<-subscription.Snapshots
+
 	select {
 	case err := <-result:
 		if !errors.Is(err, errAcceptFailed) {
@@ -69,6 +85,7 @@ func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Serve did not join active connections after accept failure")
 	}
+
 	select {
 	case _, ok := <-subscription.Snapshots:
 		if ok {

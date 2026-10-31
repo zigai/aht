@@ -43,6 +43,8 @@ type ServerProcessLister func(context.Context) ([]ServerProcess, error)
 
 // ListOptions controls pane discovery and is primarily useful for observer
 // injection and deterministic tests.
+//
+//exhaustruct:optional
 type ListOptions struct {
 	Env             Env
 	ServerProcesses ServerProcessLister
@@ -56,10 +58,15 @@ func (p Pane) ToMuxPane() mux.Pane {
 	location := p.Location
 	location.PanePID = p.PanePID
 	location.PaneTTY = p.PaneTTY
+
 	processes := make([]mux.ProcessRef, 0, 1)
 	if p.PanePID > 0 {
-		processes = append(processes, mux.ProcessRef{PID: p.PanePID, ProcessGroupID: 0, Command: "", CWD: ""})
+		processes = append(
+			processes,
+			mux.ProcessRef{PID: p.PanePID, ProcessGroupID: 0, Command: "", CWD: ""},
+		)
 	}
+
 	return mux.Pane{
 		Location:    location,
 		Processes:   processes,
@@ -78,24 +85,112 @@ func Current(ctx context.Context) (registry.Location, error) {
 
 func CurrentWithEnv(ctx context.Context, env Env) (registry.Location, error) {
 	if err := ctx.Err(); err != nil {
-		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, fmt.Errorf("current tmux location: %w", err)
+		return registry.Location{
+			Kind:            "",
+			ServerID:        "",
+			SessionID:       "",
+			SessionName:     "",
+			WorkspaceID:     "",
+			WorkspaceName:   "",
+			TabID:           "",
+			TabIndex:        "",
+			TabName:         "",
+			WindowID:        "",
+			WindowIndex:     "",
+			WindowName:      "",
+			PaneID:          "",
+			PaneIndex:       "",
+			PaneCurrentPath: "",
+			PanePID:         0,
+			PaneTTY:         "",
+			ClientTTY:       "",
+		}, fmt.Errorf(
+			"current tmux location: %w",
+			err,
+		)
 	}
+
 	if env.TMUX == "" && env.TMUXPane == "" {
-		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, ErrNotInTmux
+		return registry.Location{
+			Kind:            "",
+			ServerID:        "",
+			SessionID:       "",
+			SessionName:     "",
+			WorkspaceID:     "",
+			WorkspaceName:   "",
+			TabID:           "",
+			TabIndex:        "",
+			TabName:         "",
+			WindowID:        "",
+			WindowIndex:     "",
+			WindowName:      "",
+			PaneID:          "",
+			PaneIndex:       "",
+			PaneCurrentPath: "",
+			PanePID:         0,
+			PaneTTY:         "",
+			ClientTTY:       "",
+		}, ErrNotInTmux
 	}
 
 	info, err := gotmux.CurrentFrom(ctx, gotmux.TmuxVars{TMUX: env.TMUX, TMUXPane: env.TMUXPane})
 	if err == nil {
 		return locationFromCurrentInfo(info, tmuxServerSocket(env.TMUX)), nil
 	}
+
 	if contextErr := ctx.Err(); contextErr != nil {
-		return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, fmt.Errorf("current tmux location: %w", contextErr)
+		return registry.Location{
+			Kind:            "",
+			ServerID:        "",
+			SessionID:       "",
+			SessionName:     "",
+			WorkspaceID:     "",
+			WorkspaceName:   "",
+			TabID:           "",
+			TabIndex:        "",
+			TabName:         "",
+			WindowID:        "",
+			WindowIndex:     "",
+			WindowName:      "",
+			PaneID:          "",
+			PaneIndex:       "",
+			PaneCurrentPath: "",
+			PanePID:         0,
+			PaneTTY:         "",
+			ClientTTY:       "",
+		}, fmt.Errorf(
+			"current tmux location: %w",
+			contextErr,
+		)
 	}
+
 	if paneID := env.TMUXPane; paneID != "" {
 		return LocationFromEnv(env), nil
 	}
 
-	return registry.Location{Kind: "", ServerID: "", SessionID: "", SessionName: "", WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "", WindowID: "", WindowIndex: "", WindowName: "", PaneID: "", PaneIndex: "", PaneCurrentPath: "", PanePID: 0, PaneTTY: "", ClientTTY: ""}, fmt.Errorf("current tmux location: %w", err)
+	return registry.Location{
+		Kind:            "",
+		ServerID:        "",
+		SessionID:       "",
+		SessionName:     "",
+		WorkspaceID:     "",
+		WorkspaceName:   "",
+		TabID:           "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "",
+		WindowIndex:     "",
+		WindowName:      "",
+		PaneID:          "",
+		PaneIndex:       "",
+		PaneCurrentPath: "",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+	}, fmt.Errorf(
+		"current tmux location: %w",
+		err,
+	)
 }
 
 func LocationFromEnv(env Env) registry.Location {
@@ -124,7 +219,7 @@ func LocationFromEnv(env Env) registry.Location {
 }
 
 func ListPanes(ctx context.Context) ([]Pane, error) {
-	return ListPanesWithOptions(ctx, ListOptions{ //nolint:exhaustruct_v5 // nil discovery options use defaults
+	return ListPanesWithOptions(ctx, ListOptions{
 		Env: Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
 	})
 }
@@ -133,24 +228,29 @@ func PanePresence(ctx context.Context, location registry.Location) (registry.Pre
 	if location.ServerID == "" || location.PaneID == "" {
 		return registry.PresenceUnknown, nil
 	}
+
 	panes, err := queryServerPanesGotmux(ctx, serverSpec{Identity: location.ServerID})
 	if errors.Is(err, gotmux.ErrNoServer) {
 		return registry.PresenceGone, nil
 	}
+
 	if err != nil {
 		return registry.PresenceUnknown, err
 	}
+
 	for _, pane := range panes {
 		if pane.Location.PaneID == location.PaneID {
 			return registry.PresenceLive, nil
 		}
 	}
+
 	return registry.PresenceGone, nil
 }
 
 func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error) {
 	env := opts.Env
 	currentServerSocket := tmuxServerSocket(env.TMUX)
+
 	if opts.ServerProcesses == nil {
 		opts.ServerProcesses = listCurrentUserTmuxServers
 	}
@@ -159,25 +259,35 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error)
 	if err != nil {
 		return nil, err
 	}
-	var panes []Pane
-	var firstErr error
+
+	var (
+		panes    []Pane
+		firstErr error
+	)
+
 	seenPanes := make(map[string]struct{})
+
 	for _, server := range servers {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("list tmux panes: %w", err)
 		}
+
 		serverPanes, queryErr := queryServerPanesGotmux(ctx, server)
 		if queryErr != nil {
 			if err := ctx.Err(); err != nil {
 				return nil, fmt.Errorf("list tmux panes: %w", err)
 			}
+
 			if server.Identity == currentServerSocket && firstErr == nil {
 				firstErr = queryErr
 			}
+
 			continue
 		}
+
 		panes = appendCanonicalPanes(panes, serverPanes, server.Identity, seenPanes)
 	}
+
 	if len(panes) == 0 && firstErr != nil {
 		return nil, firstErr
 	}
@@ -186,25 +296,30 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error)
 }
 
 // SendInterruptTo sends an interrupt to a pane on the identified tmux server.
-func SendInterruptTo(ctx context.Context, serverIdentity, paneID string) error {
+func SendInterruptTo(ctx context.Context, serverIdentity string, paneID string) error {
 	if strings.TrimSpace(paneID) == "" {
 		return errMissingTmuxPaneID
 	}
+
 	cfg, err := gotmuxConfigForIdentity(serverIdentity)
 	if err != nil {
 		return err
 	}
+
 	server, err := gotmux.New(cfg)
 	if err != nil {
 		return fmt.Errorf("init tmux server: %w", err)
 	}
+
 	pane, err := server.PaneHandle(gotmux.PaneID(paneID))
 	if err != nil {
 		return fmt.Errorf("resolve tmux pane %s: %w", paneID, err)
 	}
+
 	if err := pane.SendKeys(ctx, gotmux.KeyCtrlC); err != nil {
 		return fmt.Errorf("send tmux interrupt: %w", err)
 	}
+
 	return nil
 }
 
@@ -212,8 +327,10 @@ func resolveCurrentSession(info gotmux.CurrentInfo) (string, string) {
 	if session, ok := info.Session.Get(); ok {
 		return string(session.ID), session.Name
 	}
+
 	id, _ := info.Pane.SessionID.Get()
 	name, _ := info.Pane.SessionName.Get()
+
 	return string(id), name
 }
 
@@ -222,7 +339,9 @@ func resolveCurrentWindow(info gotmux.CurrentInfo) (string, string, string) {
 	if windowID == "" {
 		windowID = string(info.Window.ID)
 	}
+
 	index := ""
+
 	name := info.Window.Name
 	if link, ok := info.Link.Get(); ok {
 		index = strconv.Itoa(link.Index)
@@ -232,9 +351,11 @@ func resolveCurrentWindow(info gotmux.CurrentInfo) (string, string, string) {
 	} else if windex, ok := info.Pane.WindowIndex.Get(); ok {
 		index = strconv.Itoa(windex)
 	}
+
 	if wname, ok := info.Pane.WindowName.Get(); ok && name == "" {
 		name = wname
 	}
+
 	return windowID, index, name
 }
 
@@ -251,6 +372,7 @@ func locationFromCurrentInfo(info gotmux.CurrentInfo, fallbackSocket string) reg
 	if serverSocket == "" {
 		serverSocket = info.Identity.Endpoint.SocketPath
 	}
+
 	if serverSocket == "" {
 		serverSocket = fallbackSocket
 	}
@@ -278,22 +400,27 @@ func paneFromGotmux(p gotmux.PaneInfo, fallbackIdentity string) Pane {
 	if sid, ok := p.SessionID.Get(); ok {
 		sessionID = string(sid)
 	}
+
 	sessionName := ""
 	if sname, ok := p.SessionName.Get(); ok {
 		sessionName = sname
 	}
+
 	windowIndex := ""
 	if windex, ok := p.WindowIndex.Get(); ok {
 		windowIndex = strconv.Itoa(windex)
 	}
+
 	windowName := ""
 	if wname, ok := p.WindowName.Get(); ok {
 		windowName = wname
 	}
+
 	serverIdentity := p.Handle().ServerIdentity().ReportedSocket
 	if serverIdentity == "" {
 		serverIdentity = fallbackIdentity
 	}
+
 	return Pane{
 		Location: registry.Location{
 			WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "",
@@ -321,35 +448,48 @@ func queryServerPanesGotmux(ctx context.Context, server serverSpec) ([]Pane, err
 	if err != nil {
 		return nil, err
 	}
+
 	s, err := gotmux.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init tmux server: %w", err)
 	}
+
 	paneInfos, err := s.Panes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list panes: %w", err)
 	}
+
 	serverPanes := make([]Pane, 0, len(paneInfos))
 	for _, p := range paneInfos {
 		serverPanes = append(serverPanes, paneFromGotmux(p, server.Identity))
 	}
+
 	return serverPanes, nil
 }
 
-func appendCanonicalPanes(panes, serverPanes []Pane, fallbackIdentity string, seen map[string]struct{}) []Pane {
+func appendCanonicalPanes(
+	panes []Pane, serverPanes []Pane,
+	fallbackIdentity string,
+	seen map[string]struct{},
+) []Pane {
 	for _, pane := range serverPanes {
 		if pane.Location.ServerID == "" {
 			pane.Location.ServerID = fallbackIdentity
 		}
+
 		pane.PanePID = pane.Location.PanePID
 		pane.PaneTTY = pane.Location.PaneTTY
+
 		key := pane.Location.ServerID + "\x00" + pane.Location.PaneID
 		if _, exists := seen[key]; exists {
 			continue
 		}
+
 		seen[key] = struct{}{}
+
 		panes = append(panes, pane)
 	}
+
 	return panes
 }
 
@@ -358,7 +498,10 @@ func tmuxServerSocket(tmuxEnv string) string {
 	if tmuxEnv == "" {
 		return ""
 	}
-	if hints, err := gotmux.ParseTmuxVars(gotmux.TmuxVars{TMUX: tmuxEnv, TMUXPane: ""}); err == nil {
+
+	if hints, err := gotmux.ParseTmuxVars(
+		gotmux.TmuxVars{TMUX: tmuxEnv, TMUXPane: ""},
+	); err == nil {
 		return hints.SocketPath
 	}
 

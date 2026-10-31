@@ -7,6 +7,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
+//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 const nativeQuery = `SELECT s.id AS session_id, s.name AS title, s.working_dir AS cwd,
  s.created_at AS created, s.updated_at AS updated, CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
  m.role AS role, m.content_json AS body, m.created_timestamp AS timestamp

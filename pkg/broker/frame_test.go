@@ -7,7 +7,9 @@ import (
 )
 
 func TestResponseFrameLimit(t *testing.T) {
-	_, err := readResponse(responseScanner(strings.NewReader(strings.Repeat(" ", MaxResponseBytes))))
+	_, err := readResponse(
+		responseScanner(strings.NewReader(strings.Repeat(" ", MaxResponseBytes))),
+	)
 	if !errors.Is(err, ErrProtocol) {
 		t.Fatalf("oversized frame error = %v, want ErrProtocol", err)
 	}

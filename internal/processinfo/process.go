@@ -45,6 +45,7 @@ func (e *UnsupportedError) Error() string {
 	if e.Platform == "" {
 		return "process enumeration is unsupported"
 	}
+
 	return "process enumeration is unsupported on " + e.Platform
 }
 

@@ -10,5 +10,12 @@ func (behaviorRules) Policy(id registry.Harness) registry.Policy {
 	if id == "claude" {
 		authority = registry.AuthorityScreen
 	}
-	return registry.Policy{ExclusiveProcess: true, Authority: authority, ScreenFallback: true, Reporter: string(id) + "-extension", CatalogCreates: id == "claude"}
+
+	return registry.Policy{
+		ExclusiveProcess: true,
+		Authority:        authority,
+		ScreenFallback:   true,
+		Reporter:         string(id) + "-extension",
+		CatalogCreates:   id == "claude",
+	}
 }
