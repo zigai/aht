@@ -15,7 +15,7 @@ const (
 	piIntegrationID       = "pi"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
-	integrationVersion    = 17
+	integrationVersion    = 18
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -52,6 +52,11 @@ func New() piHarness {
 		ScreenFallback:     true,
 	})}
 }
+
+// RetainNativeActivity keeps the last reported state after the report ages.
+// The extension refreshes running with a heartbeat, and every other state
+// changes only through a new native event.
+func (piHarness) RetainNativeActivity() bool { return true }
 
 func (piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := piAgentDir()

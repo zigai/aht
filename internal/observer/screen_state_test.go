@@ -160,12 +160,12 @@ func TestObserverTracksOmpScreenStateTransitions(t *testing.T) {
 func TestObserverRecordsUnknownWhenStaleIntegrationHasNoTmuxPane(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
-	process, pane := detectionProcessPane(197, "pi")
+	process, pane := detectionProcessPane(197, "omp")
 	identity := observerProcessIdentity(process)
 	presence := registry.PresenceLive
 	idle := registry.ActivityIdle
 	now := time.Now().UTC()
-	_, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("pi"), At: now.Add(-registry.IntegrationActivityLease - time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-pi"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "pi-extension"}, Event: "agent_settled", Claim: &presence, Activity: &idle, Process: identity}})
+	_, err := store.Observe(context.Background(), registry.Observation{Harness: registry.Harness("omp"), At: now.Add(-registry.IntegrationActivityLease - time.Second), Subject: registry.ObservationIdentity{SessionID: "stale-omp"}, Evidence: &registry.Report{Reporter: registry.Reporter{Integration: "omp-extension"}, Event: "agent_end", Claim: &presence, Activity: &idle, Process: identity}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ package install
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -205,6 +206,29 @@ func TestOmpRetryAndContinuationRemainRunning(t *testing.T) {
 				t.Fatalf("retry/continuation reported a terminal state: %v", invocations)
 			}
 		})
+	}
+}
+
+func TestPiContinuedRunStaysRunningUntilSettled(t *testing.T) {
+	capture := captureBinary(t)
+	t.Setenv("AHT_CAPTURE", capture.path)
+	module := generatedArtifactContent(t, registry.Harness("pi"), "aht-state.ts")
+	runNodeRuntime(t, "extension.ts", module, runtimeScript(t, "node/pi-continuation.mjs"), nil)
+	data, err := os.ReadFile(capture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var states []string
+	for _, args := range parseCapturedInvocations(string(data)) {
+		for index := 0; index+1 < len(args); index++ {
+			if args[index] == "--activity" || args[index] == "--presence" {
+				states = append(states, args[index+1])
+			}
+		}
+	}
+	want := []string{"idle", "running", "running", "idle", "gone"}
+	if !slices.Equal(states, want) {
+		t.Fatalf("reported states = %v, want %v", states, want)
 	}
 }
 

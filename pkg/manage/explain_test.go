@@ -65,7 +65,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 		PID:           1001,
 		PPID:          1,
 		StartIdentity: "boot:1001",
-		Executable:    "pi",
+		Executable:    "omp",
 		Foreground:    true,
 		TTY:           "/dev/pts/1",
 	}
@@ -73,7 +73,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 
 	session := registry.Session{
 		ID:       "s-fallback",
-		Harness:  registry.Harness("pi"),
+		Harness:  registry.Harness("omp"),
 		Process:  &process,
 		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PaneTTY: "/dev/pts/1"},
 		Observations: registry.Observations{
@@ -82,7 +82,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 				Activity:   &running,
 				Process:    process,
 				ObservedAt: now.Add(-35 * time.Second), // Stale (exceeds 30s lease)
-				Reporter:   registry.Reporter{Integration: "pi-extension"},
+				Reporter:   registry.Reporter{Integration: "omp-extension"},
 			},
 		},
 		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&running), nil),

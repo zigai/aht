@@ -154,7 +154,7 @@ type NativeEvent = {
   readonly status?: string | undefined;
   readonly kind?: string | undefined;
   readonly interrupted?: boolean | undefined;
-  readonly willContinue?: boolean | undefined;
+  readonly aborted?: boolean | undefined;
   readonly error?: string | { readonly message?: string | undefined } | undefined;
   readonly messages?: readonly unknown[] | undefined;
 };
@@ -174,7 +174,7 @@ function parseEvent(value: unknown): NativeEvent {
   return {
     type: stringField("type"), reason: stringField("reason"),
     status: stringField("status"), kind: stringField("kind"),
-    interrupted: fields.interrupted === true, willContinue: fields.willContinue === true,
+    interrupted: fields.interrupted === true, aborted: fields.aborted === true,
     error: typeof error === "string" ? error :
       typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
         ? { message: error.message } : undefined,
@@ -246,10 +246,7 @@ function addEvent(args: string[], value: unknown): void {
     args.push("--event", value);
   }
 }
-function resolveActivity(event: NativeEvent, willContinue = false): string {
-  if (willContinue) {
-    return "running";
-  }
+function resolveActivity(event: NativeEvent): string {
   const assistant = lastAssistantMessage(event?.messages);
   if (
     event?.error ||
@@ -264,6 +261,7 @@ function resolveActivity(event: NativeEvent, willContinue = false): string {
     event?.reason === "interrupted" ||
     event?.reason === "cancelled" ||
     event?.interrupted === true ||
+    event?.aborted === true ||
     assistant?.stopReason === "aborted" ||
     assistant?.stopReason === "cancelled"
   ) {
@@ -345,16 +343,14 @@ export default function (pi: ExtensionAPI) {
       report(lastTurnActivity, ctx, event);
       return;
     }
-    report(resolveActivity(event, false), ctx, event);
+    report(resolveActivity(event), ctx, event);
   });
 
-  on("agent_end", (event: NativeEvent, ctx: ExtensionContext) => {
-    const activity = resolveActivity(event, event?.willContinue === true);
-    lastTurnActivity = activity;
-    if (activity !== "running") {
-      stopHeartbeat();
-    }
-    report(activity, ctx, event);
+  // Retries, compaction, queued messages, and continuations requested by other
+  // extensions can start another run after agent_end, so only agent_settled
+  // ends the turn. agent_end records how this run ended.
+  on("agent_end", (event: NativeEvent) => {
+    lastTurnActivity = resolveActivity(event);
   });
 
   on("session_shutdown", async (event: NativeEvent, ctx: ExtensionContext) => {

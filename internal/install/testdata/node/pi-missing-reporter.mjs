@@ -6,4 +6,5 @@ const ctx = {
   sessionManager: { getSessionId: () => "pi-session", getSessionFile: () => "/tmp/pi.jsonl" },
 };
 hooks.get("agent_end")({ type: "agent_end", status: "failed" }, ctx);
+hooks.get("agent_settled")({ type: "agent_settled", aborted: false }, ctx);
 await new Promise((resolve) => setTimeout(resolve, 50));

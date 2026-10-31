@@ -14,4 +14,5 @@ hooks.get("agent_end")(
   },
   ctx,
 );
+hooks.get("agent_settled")?.({ aborted: "yes" }, ctx);
 await hooks.get("session_shutdown")({ type: "session_shutdown" }, ctx);

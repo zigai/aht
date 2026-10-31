@@ -461,8 +461,8 @@ func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
 		t.Fatalf("future integration evaluation = %#v", evaluation)
 	}
 	session.Observations.Native.ObservedAt = now.Add(-registry.IntegrationActivityLease - time.Second)
-	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || !detectScreenForTest(session, now) {
-		t.Fatalf("stale integration evaluation = %#v", evaluation)
+	if evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now); evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches || evaluation.Reason != "integration_report_stale" || detectScreenForTest(session, now) {
+		t.Fatalf("aged Pi extension report did not keep hook authority: %#v", evaluation)
 	}
 }
 

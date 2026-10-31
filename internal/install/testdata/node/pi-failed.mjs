@@ -9,4 +9,5 @@ hooks.get("agent_end")(
   { type: "agent_end", status: "failed", prompt: process.env.AHT_TEST_SENSITIVE_SENTINEL },
   ctx,
 );
+hooks.get("agent_settled")({ type: "agent_settled", aborted: false }, ctx);
 await hooks.get("session_shutdown")({ type: "session_shutdown" }, ctx);
