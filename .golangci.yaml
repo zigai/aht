@@ -17,6 +17,7 @@ formatters:
         balance-calls: true
     golines:
       max-len: 100
+      reformat-tags: false
     goimports:
       local-prefixes:
         - github.com/zigai/aht/v2
