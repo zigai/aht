@@ -84,6 +84,7 @@ func requireClaudeHookEvents(t *testing.T, config map[string]any) {
 	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
 	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
 	requireManualPostCompactIdle(t, hooks, "manual")
+	requireOnlyManualPreCompactRunning(t, hooks)
 
 	for _, event := range []string{"SessionStart", "FileChanged"} {
 		commands := requireTestHookMatcherCommands(t, hooks, event)
@@ -137,6 +138,18 @@ func requireCompactionKeepsTurnRunning(t *testing.T, hooks map[string]any, idleM
 	if !strings.Contains(compact, "--presence live --event SessionStart") ||
 		strings.Contains(compact, "--activity") {
 		t.Fatalf("SessionStart compact hook = %q, want presence-only report", compact)
+	}
+}
+
+// requireOnlyManualPreCompactRunning asserts that automatic compaction reports no
+// activity, because it can run between turns where no Stop returns the session to idle.
+func requireOnlyManualPreCompactRunning(t *testing.T, hooks map[string]any) {
+	t.Helper()
+
+	commands := requireTestHookMatcherCommands(t, hooks, "PreCompact")
+	if len(commands) != 1 ||
+		!strings.Contains(commands["manual"], "--activity running --event PreCompact") {
+		t.Fatalf("PreCompact hooks = %#v, want one running report matching manual", commands)
 	}
 }
 

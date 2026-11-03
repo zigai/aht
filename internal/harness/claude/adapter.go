@@ -213,9 +213,12 @@ func (claudeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 					// SubagentStart and SubagentStop describe child agents, including
 					// Claude Code's internal prompt-suggestion agents, not the main
 					// turn. Stop reports whether delegated work keeps the turn running.
+					// Automatic compaction either happens inside a turn that already
+					// runs or between turns, where no Stop would return the session to
+					// idle, so only manual compaction reports running.
 					{
 						Event:   "PreCompact",
-						Matcher: "",
+						Matcher: "manual",
 						Command: harness.ReportHookCommand(
 							binary,
 							registry.Harness("claude"),
