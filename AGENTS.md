@@ -100,6 +100,20 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
      must pass them without per-harness exceptions.
 7. Verify with `just check`.
 
+## Conventions
+
+- Predicate methods on adjectives drop `Is`: `Valid()`, not `IsValid()`.
+- Options variants keep the `*WithOptions` or `*WithEnv` suffix, each beside a plain base such as `Summary`.
+- `Find` returning `(T, bool)` is fine for keyed lookups.
+- Name options parameters `opts`.
+- Tests of test helpers and fixtures are fine here.
+
+## Harness behavior
+
+- aht supports OpenCode 2 only, from `@opencode/cli`. Kilo uses a different API and events, so keep its paths separate.
+- A Claude `Stop` with background shell tasks counts as running, even for never-ending watchers.
+- Pi reports idle only on `agent_settled`, not `agent_end`.
+
 ## Invariants and Simulation
 
 Registry, journal, and observer behavior is checked by named invariants and
