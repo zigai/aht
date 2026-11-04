@@ -25,8 +25,8 @@ let reportingDegraded = false;
 // millisecond timestamp. Seed across process restarts, as the OMP producer does.
 let reportSequence = Date.now() * 1000;
 
-function warnReporting(reason: string): void {
-  if (reportingDegraded && lastReportingFailure === reason) return;
+function recordReportingFailure(reason: string): string | undefined {
+  if (reportingDegraded && lastReportingFailure === reason) return undefined;
   lastReportingFailure = reason;
   reportingDegraded = true;
   const message = `aht: ${reason}. Session tracking may be stale.`;
@@ -38,6 +38,12 @@ function warnReporting(reason: string): void {
     // The session file can be on the same full/unavailable disk as AHT's store.
     // Keep the diagnostic in memory and still show it through the native UI.
   }
+  return message;
+}
+
+function warnReporting(reason: string): void {
+  const message = recordReportingFailure(reason);
+  if (message === undefined) return;
   if (reportingContext?.hasUI) {
     reportingContext.ui?.setStatus?.("aht", "aht: tracking degraded");
     reportingContext.ui?.notify(message, "warning");
@@ -76,7 +82,8 @@ function runCommand(args: string[]): Promise<void> {
       });
       const timeout = setTimeout(() => {
         failed = true;
-        warnReporting(`report timed out after ${commandTimeoutMs / 1000}s (disk or state lock may be busy)`);
+        // A busy machine causes this and the next report repairs it, so it stays out of the UI.
+        recordReportingFailure(`report timed out after ${commandTimeoutMs / 1000}s (disk or state lock may be busy)`);
         child.kill("SIGTERM");
         killTimer = setTimeout(() => child.kill("SIGKILL"), commandKillGraceMs);
       }, commandTimeoutMs);

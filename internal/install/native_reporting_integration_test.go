@@ -105,6 +105,23 @@ func TestPiReportingRetainsSafeNativeDiagnosticsAndRecovers(t *testing.T) {
 	}
 }
 
+func TestPiReportingTimeoutStaysOutOfUI(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "reporter")
+	writeTestFile(
+		t,
+		binary,
+		"#!"+requireRuntimeTool(t, "node")+"\n"+runtimeScript(t, "node/hanging-reporter.cjs"),
+		0o700,
+	)
+	runNodeRuntime(
+		t,
+		"extension.ts",
+		piReportingArtifact(t, binary),
+		runtimeScript(t, "node/pi-report-timeout.mjs"),
+		nil,
+	)
+}
+
 func TestPiReportingMissingBinaryAndUnwritableSessionAreNonfatal(t *testing.T) {
 	runNodeRuntime(
 		t,
