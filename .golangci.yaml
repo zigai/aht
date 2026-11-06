@@ -149,7 +149,14 @@ linters:
               desc: Registry tests may import only the shared registry checker core.
         adapter_consumers:
           list-mode: lax
-          files: ["**/internal/cli/*.go", "**/internal/fakeprovidercli/*.go", "**/pkg/history/*.go", "**/internal/observer/*.go", "**/internal/agentstate/*.go"]
+          files:
+            [
+              "**/internal/cli/*.go",
+              "**/internal/fakeprovidercli/*.go",
+              "**/pkg/history/*.go",
+              "**/internal/observer/*.go",
+              "**/internal/agentstate/*.go",
+            ]
           allow:
             - github.com/zigai/aht/v2/internal/harness/catalog$
             - github.com/zigai/aht/v2/internal/harness/transcript
@@ -332,8 +339,6 @@ linters:
         linters: [decorder, funcorder, dupl, maintidx, gosmopolitan]
       - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.gameops|\\.stryker-tmp|\\.cache)(/|$))"
         linters: [whitespace]
-
-
 
 issues:
   max-issues-per-linter: 0
