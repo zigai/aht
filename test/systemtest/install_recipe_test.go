@@ -48,8 +48,14 @@ esac
 			template := filepath.Join(dir, "new-aht")
 			writeRecipeExecutable(t, template, `#!/bin/sh
 set -eu
-printf '%s\n' "$*" > "$AHT_TEST_UPGRADE_CALLS"
-if [ "$AHT_TEST_FAIL_UPGRADE" = yes ]; then exit 8; fi
+case "$*" in
+ --version) printf 'aht test\n' ;;
+ 'manage upgrade')
+  printf '%s\n' "$*" >> "$AHT_TEST_UPGRADE_CALLS"
+  if [ "$AHT_TEST_FAIL_UPGRADE" = yes ]; then exit 8; fi
+  ;;
+ *) exit 9 ;;
+esac
 `)
 
 			calls := filepath.Join(dir, "calls")
