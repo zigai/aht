@@ -5,7 +5,7 @@ set -euo pipefail
 
 readonly INSTALL_DIR="${AHT_LINT_DIRECTORY:?Set a local installation directory}"
 readonly CHECKSUMS_FILE="$PWD/.github/golangci-lint-checksums.txt"
-VERSION=$(just --evaluate golangci_lint_version)
+VERSION=$(just --evaluate GOLANGCI_LINT_VERSION)
 readonly VERSION
 readonly NAME="golangci-lint-${VERSION#v}-$(go env GOOS)-$(go env GOARCH)"
 readonly ARCHIVE="$NAME.tar.gz"
