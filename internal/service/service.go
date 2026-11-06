@@ -205,7 +205,6 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 	return result, nil
 }
 
-//nolint:gocognit,cyclop // service installation coordinates platform manager and atomic file transitions
 func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result, error) {
 	backend, err := platformBackend(opts)
 	if err != nil {
@@ -213,15 +212,10 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 	}
 
 	result := backend.describe()
-	content, readErr := os.ReadFile(result.Path)
 
-	installed := readErr == nil
-	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-		return result, fmt.Errorf("read managed service: %w", readErr)
-	}
-
-	if installed && !isManaged(string(content)) {
-		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
+	content, installed, err := managedServiceDefinition(result.Path)
+	if err != nil {
+		return result, err
 	}
 
 	result.Installed = installed
@@ -231,7 +225,7 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 		return s.applyCurrent(ctx, opts, backend, result, update)
 	}
 
-	if installed && !result.Current && !update {
+	if installed && !update {
 		result.Message = "stale; run update"
 		return result, nil
 	}
@@ -246,20 +240,8 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 		return result, nil
 	}
 
-	if err := writeAtomic(result.Path, []byte(backend.content())); err != nil {
-		return result, s.rollbackDefinition(ctx, backend, result.Path, content, installed, err)
-	}
-
-	if err := backend.reload(ctx, s.executor); err != nil {
-		return result, s.rollbackDefinition(ctx, backend, result.Path, content, installed, err)
-	}
-
-	if installed {
-		if err := backend.restart(ctx, s.executor); err != nil {
-			return result, s.rollbackDefinition(ctx, backend, result.Path, content, true, err)
-		}
-	} else if err := backend.load(ctx, s.executor); err != nil {
-		return result, s.rollbackDefinition(ctx, backend, result.Path, content, false, err)
+	if err := s.publishDefinition(ctx, backend, result.Path, content, installed); err != nil {
+		return result, err
 	}
 
 	result.Installed, result.Current, result.Running, result.Changed = true, true, true, true
@@ -270,6 +252,32 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 	}
 
 	return result, nil
+}
+
+func (s *Service) publishDefinition(
+	ctx context.Context,
+	backend backend,
+	path string,
+	previous []byte,
+	installed bool,
+) error {
+	if err := writeAtomic(path, []byte(backend.content())); err != nil {
+		return s.rollbackDefinition(ctx, backend, path, previous, installed, err)
+	}
+
+	if err := backend.reload(ctx, s.executor); err != nil {
+		return s.rollbackDefinition(ctx, backend, path, previous, installed, err)
+	}
+
+	if installed {
+		if err := backend.restart(ctx, s.executor); err != nil {
+			return s.rollbackDefinition(ctx, backend, path, previous, true, err)
+		}
+	} else if err := backend.load(ctx, s.executor); err != nil {
+		return s.rollbackDefinition(ctx, backend, path, previous, false, err)
+	}
+
+	return nil
 }
 
 func (s *Service) applyCurrent(
@@ -367,6 +375,21 @@ func (s *Service) rollbackDefinition(
 	}
 
 	return errors.Join(failures...)
+}
+
+func managedServiceDefinition(path string) ([]byte, bool, error) {
+	content, err := os.ReadFile(path)
+	installed := err == nil
+
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("read managed service: %w", err)
+	}
+
+	if installed && !isManaged(string(content)) {
+		return nil, false, fmt.Errorf("%w: %s", ErrForeign, path)
+	}
+
+	return content, installed, nil
 }
 
 func writeAtomic(path string, content []byte) error {
