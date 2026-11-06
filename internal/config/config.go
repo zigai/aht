@@ -380,7 +380,10 @@ func (c *Config) validatePresence(meta *strata.Metadata) error {
 			err,
 		)
 		if meta != nil {
-			return meta.NewConfigError("ui.default_presence", valErr)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("ui.default_presence", valErr),
+			)
 		}
 
 		return valErr
@@ -397,7 +400,7 @@ func (c *Config) validateSort(meta *strata.Metadata) error {
 	norm, err := NormalizeSort(c.UI.Sort)
 	if err != nil {
 		if meta != nil {
-			return meta.NewConfigError("ui.sort", err)
+			return fmt.Errorf("validate configuration: %w", meta.NewConfigError("ui.sort", err))
 		}
 
 		return err
@@ -422,7 +425,10 @@ func (c *Config) validateTimeFormat(meta *strata.Metadata) error {
 		c.UI.TimeFormat,
 	)
 	if meta != nil {
-		return meta.NewConfigError("ui.time_format", valErr)
+		return fmt.Errorf(
+			"validate configuration: %w",
+			meta.NewConfigError("ui.time_format", valErr),
+		)
 	}
 
 	return valErr
@@ -441,7 +447,10 @@ func (c *Config) validateRetention(meta *strata.Metadata) error {
 			err,
 		)
 		if meta != nil {
-			return meta.NewConfigError("retention.tombstone_ttl", valErr)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("retention.tombstone_ttl", valErr),
+			)
 		}
 
 		return valErr
@@ -449,7 +458,10 @@ func (c *Config) validateRetention(meta *strata.Metadata) error {
 
 	if d <= 0 {
 		if meta != nil {
-			return meta.NewConfigError("retention.tombstone_ttl", ErrNonPositiveTTL)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("retention.tombstone_ttl", ErrNonPositiveTTL),
+			)
 		}
 
 		return ErrNonPositiveTTL
@@ -475,7 +487,10 @@ func (c *Config) validateInterval(meta *strata.Metadata) error {
 	if err != nil {
 		valErr := fmt.Errorf("invalid tracker.interval %q: %w", c.Tracker.Interval, err)
 		if meta != nil {
-			return meta.NewConfigError("tracker.interval", valErr)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("tracker.interval", valErr),
+			)
 		}
 
 		return valErr
@@ -483,7 +498,10 @@ func (c *Config) validateInterval(meta *strata.Metadata) error {
 
 	if d <= 0 {
 		if meta != nil {
-			return meta.NewConfigError("tracker.interval", ErrNonPositiveInterval)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("tracker.interval", ErrNonPositiveInterval),
+			)
 		}
 
 		return ErrNonPositiveInterval
@@ -501,7 +519,10 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 	if err != nil {
 		valErr := fmt.Errorf("invalid tracker.grace_period %q: %w", c.Tracker.GracePeriod, err)
 		if meta != nil {
-			return meta.NewConfigError("tracker.grace_period", valErr)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("tracker.grace_period", valErr),
+			)
 		}
 
 		return valErr
@@ -509,7 +530,10 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 
 	if d < 0 {
 		if meta != nil {
-			return meta.NewConfigError("tracker.grace_period", ErrNegativeGracePeriod)
+			return fmt.Errorf(
+				"validate configuration: %w",
+				meta.NewConfigError("tracker.grace_period", ErrNegativeGracePeriod),
+			)
 		}
 
 		return ErrNegativeGracePeriod

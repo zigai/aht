@@ -303,60 +303,96 @@ func TestValidationErrors(t *testing.T) {
 		name   string
 		toml   string
 		errSub string
+		key    string
+		cause  error
 	}{
 		{
 			name: "invalid presence",
 			toml: `[ui]
 default_presence = "bogus"`,
 			errSub: "invalid ui.default_presence",
+			key:    "ui.default_presence",
+			cause:  ErrInvalidPresence,
 		},
 		{
 			name: "invalid sort",
 			toml: `[ui]
 sort = "nonexistent"`,
 			errSub: "invalid ui.sort",
+			key:    "ui.sort",
+			cause:  ErrInvalidSort,
 		},
 		{
 			name: "invalid time format",
 			toml: `[ui]
 time_format = "rfc3339"`,
 			errSub: "invalid ui.time_format",
+			key:    "ui.time_format",
+			cause:  ErrInvalidTimeFormat,
 		},
 		{
 			name: "negative tombstone ttl",
 			toml: `[retention]
 tombstone_ttl = "-5s"`,
 			errSub: "retention.tombstone_ttl must be positive",
+			key:    "retention.tombstone_ttl",
+			cause:  ErrNonPositiveTTL,
 		},
 		{
 			name: "zero tombstone ttl",
 			toml: `[retention]
 tombstone_ttl = "0s"`,
 			errSub: "retention.tombstone_ttl must be positive",
+			key:    "retention.tombstone_ttl",
+			cause:  ErrNonPositiveTTL,
 		},
 		{
 			name: "invalid tombstone ttl unit",
 			toml: `[retention]
 tombstone_ttl = "10"`,
 			errSub: "missing unit suffix",
+			key:    "retention.tombstone_ttl",
+			cause:  ErrMissingUnitSuffix,
 		},
 		{
 			name: "negative tracker interval",
 			toml: `[tracker]
 interval = "-1s"`,
 			errSub: "tracker.interval must be positive",
+			key:    "tracker.interval",
+			cause:  ErrNonPositiveInterval,
 		},
 		{
 			name: "zero tracker interval",
 			toml: `[tracker]
 interval = "0s"`,
 			errSub: "tracker.interval must be positive",
+			key:    "tracker.interval",
+			cause:  ErrNonPositiveInterval,
 		},
 		{
 			name: "negative grace period",
 			toml: `[tracker]
 grace_period = "-10s"`,
 			errSub: "tracker.grace_period must be non-negative",
+			key:    "tracker.grace_period",
+			cause:  ErrNegativeGracePeriod,
+		},
+		{
+			name: "invalid tracker interval",
+			toml: `[tracker]
+interval = "bogus"`,
+			errSub: "invalid tracker.interval",
+			key:    "tracker.interval",
+			cause:  ErrInvalidDuration,
+		},
+		{
+			name: "invalid grace period",
+			toml: `[tracker]
+grace_period = "bogus"`,
+			errSub: "invalid tracker.grace_period",
+			key:    "tracker.grace_period",
+			cause:  ErrInvalidDuration,
 		},
 	}
 
@@ -376,6 +412,20 @@ grace_period = "-10s"`,
 
 			if !strings.Contains(err.Error(), tc.errSub) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.errSub)
+			}
+
+			if !errors.Is(err, tc.cause) {
+				t.Errorf("error %v does not wrap %v", err, tc.cause)
+			}
+
+			configErr, ok := errors.AsType[*strata.ConfigError](err)
+			if !ok {
+				t.Fatalf("expected strata.ConfigError, got %T: %v", err, err)
+			}
+
+			if configErr.Key != tc.key || configErr.Origin.Source != strata.SourceFile ||
+				configErr.Origin.Path != configPath {
+				t.Errorf("config error lost source: %+v", configErr)
 			}
 		})
 	}
