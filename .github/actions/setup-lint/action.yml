@@ -1,5 +1,5 @@
-name: Set up pinned golangci-lint
-description: Install the version selected by Justfile and cache its analysis output.
+name: Set up pinned lint tools
+description: Install lint tools selected by Justfile and cache Go analysis output.
 runs:
   using: composite
   steps:
@@ -8,6 +8,7 @@ runs:
       shell: bash
       run: |
         echo "version=$(just --evaluate GOLANGCI_LINT_VERSION)" >> "$GITHUB_OUTPUT"
+        echo "rumdl-version=$(just --evaluate RUMDL_VERSION)" >> "$GITHUB_OUTPUT"
         echo "directory=$HOME/.local/share/aht-ci/golangci-lint" >> "$GITHUB_OUTPUT"
         echo "analysis=$HOME/.cache/aht-golangci-lint" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@v6
@@ -36,3 +37,10 @@ runs:
         key: aht-lint-analysis-${{ runner.os }}-${{ runner.arch }}-${{ steps.tool.outputs.version }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yaml') }}-${{ github.sha }}
         restore-keys: |
           aht-lint-analysis-${{ runner.os }}-${{ runner.arch }}-${{ steps.tool.outputs.version }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yaml') }}-
+    - name: Install shell formatter
+      shell: bash
+      run: go install "mvdan.cc/sh/v3/cmd/shfmt@$(just --evaluate SHFMT_VERSION)"
+    - name: Install Markdown formatter
+      uses: extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d
+      with:
+        repo: rvben/rumdl@${{ steps.tool.outputs.rumdl-version }}

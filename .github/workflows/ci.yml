@@ -147,8 +147,12 @@ jobs:
       - name: Set up pinned linter
         uses: ./.github/actions/setup-lint
 
-      - name: Install tmux
-        run: brew install tmux
+      - name: Install shell and system tools
+        run: |
+          brew install tmux bash coreutils util-linux
+          echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix util-linux)/bin" >> "$GITHUB_PATH"
 
       - name: Lint
         run: just lint

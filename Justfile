@@ -1,3 +1,5 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
 INTEGRATION_TESTS := "^(TestChangesMetadataFailurePublishesNoSelection|TestChangesPinLastSuccessfulRelease|TestCleanupReconcilesCreationWhoseResponseWasLost|TestCurrentHarnessLifecycle|TestDetachedHistoryCommandReturnsWhileChildRunsWithoutTerminal|TestDetectionRechecksChangedBinaryRevision|TestDraftRetriesReuseOwnershipPreserveNotesAndCleanUp|TestForeignAndPublishedReleasesCannotBeDeleted|TestHTTPFailuresAndLimits|TestIssueSyncCommentsAndClosesResolvedIssue|TestIssueSyncIgnoresIssuesAndPullRequestsItDoesNotOwn|TestIssueSyncLeavesUnchangedIssueAndUpdatesStaleOne|TestIssueSyncOpensOneIssueForUntrackedRegression|TestIssuesCommandReadsFinishReport|TestListPanesIgnoresSocketsThatAreNotLiveSessions|TestLostPublicationResponseAndRerunsPreserveThePublishedRelease|TestMalformedArtifactListingCannotResetBaseline|TestMissingStateAndAPIFailureAreDifferent|TestMissingStateStartsEmpty|TestOnlyReadsRetryTransientFailures|TestPaginateFollowsNextLinks|TestPaginateRejectsForeignNextLink|TestPaginateRequiresWrappedField|TestPrereleaseTagsCreatePrereleases|TestPublicationFailureRemainsFailureAndDraftIsRemovable|TestPublishRefusesReleaseOwnedByAnotherRun|TestReadRecoversAfterTransientFailure|TestRedirectDoesNotForwardToken|TestRegressionsListTrackedFailuresForReleaseChecks|TestRegressionsRequireReadableState|TestReleaseCancelsWhileWaitingForCI|TestReleaseGateFailsOnLaterPageErrors|TestReleaseGateFollowsPagination|TestReleasePropagatesGateAPIErrors|TestReleaseRequiresNewestExactCommitCIAndEveryGate|TestReleaseRequiresTagAndCommitIdentity|TestReleaseSources|TestReleaseWaitsForNewestCIToComplete|TestReleaseWithoutAdapterIsNotChecked|TestRequestsAuthenticateAndEncodeJSON|TestRestoreOnlyTrustedDefaultBranchState|TestStatusErrorsCarryStatusAndMessage|TestSuccessfulStateServerEscapesJSON|TestSupportedCapDoesNotHideLatestRelease|TestUnauthorizedLookupIsNotAnAbsentDraft|TestUnknownCommandShowsUsage|TestWeeklyChangesSkipReleaseState|TestWorkflowOutputsAndStateRoundTrip)$"
 GOLANGCI_LINT_VERSION := "v2.15.0"
 GOLANGCI_LINT := 'GOFLAGS="${GOFLAGS:-} -trimpath=false" GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/golangci-lint}/source-positions" ' + env("AHT_GOLANGCI_LINT", "golangci-lint")
@@ -5,6 +7,8 @@ ACTIONLINT_VERSION := "v1.7.12"
 ACTIONLINT := "go run github.com/rhysd/actionlint/cmd/actionlint@" + ACTIONLINT_VERSION
 APIDIFF_VERSION := "v0.0.0-20260908205506-85c1c2202aba"
 APIDIFF := "go run golang.org/x/exp/cmd/apidiff@" + APIDIFF_VERSION
+SHFMT_VERSION := "v3.14.1"
+RUMDL_VERSION := "v0.3.0"
 
 # Run fast Go unit tests without live fixtures
 [positional-arguments]
@@ -75,7 +79,7 @@ fix: && format
 format:
     @{{ GOLANGCI_LINT }} run --fix --enable-only whitespace --issues-exit-code=0
     @{{ GOLANGCI_LINT }} fmt
-    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | grep -v /testdata/ | xargs -r -d '\n' shfmt -w
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 shfmt -f | while IFS= read -r file; do if [[ $file != */testdata/* ]]; then shfmt -w "$file"; fi; done
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt; done
     @just markdown fmt --exclude internal/install/testdata
 
@@ -131,7 +135,7 @@ clean: (remove "bin" "aht" "aht.exe" "dist" "coverage.out" "*.test" "*.prof" ".r
 formatcheck:
     @{{ GOLANGCI_LINT }} run --enable-only whitespace
     @{{ GOLANGCI_LINT }} fmt --diff
-    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | grep -v /testdata/ | xargs -r -d '\n' shfmt -d
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 shfmt -f | while IFS= read -r file; do if [[ $file != */testdata/* ]]; then shfmt -d "$file"; fi; done
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt --check; done
     @just markdown check --exclude internal/install/testdata
 
