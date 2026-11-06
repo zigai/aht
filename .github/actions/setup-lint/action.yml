@@ -44,3 +44,11 @@ runs:
       uses: extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d
       with:
         repo: rvben/rumdl@${{ steps.tool.outputs.rumdl-version }}
+    - name: Install data formatter
+      shell: bash
+      run: |
+        npm install --prefix "$RUNNER_TEMP/aht-formatters" --no-save --package-lock=false "oxfmt@$(just --evaluate OXFMT_VERSION)"
+        echo "$RUNNER_TEMP/aht-formatters/node_modules/.bin" >> "$GITHUB_PATH"
+    - name: Install EditorConfig checker
+      shell: bash
+      run: go install "github.com/editorconfig-checker/editorconfig-checker/v3/cmd/editorconfig-checker@$(just --evaluate EDITORCONFIG_CHECKER_VERSION)"

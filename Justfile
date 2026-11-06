@@ -9,6 +9,8 @@ APIDIFF_VERSION := "v0.0.0-20260908205506-85c1c2202aba"
 APIDIFF := "go run golang.org/x/exp/cmd/apidiff@" + APIDIFF_VERSION
 SHFMT_VERSION := "v3.14.1"
 RUMDL_VERSION := "v0.3.0"
+OXFMT_VERSION := "0.77.0"
+EDITORCONFIG_CHECKER_VERSION := "v3.11.3"
 
 # Run fast Go unit tests without live fixtures
 [positional-arguments]
