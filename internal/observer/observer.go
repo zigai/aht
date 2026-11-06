@@ -144,6 +144,18 @@ type pendingScreenDecision struct {
 	confirmations uint8
 }
 
+type cycleInventory struct {
+	processes     []processinfo.Process
+	processByPID  map[int]processinfo.Process
+	harnessByPID  map[int]registry.Harness
+	knownSessions []registry.Session
+}
+
+type trackedUpdate struct {
+	next    map[processKey]trackedProcess
+	retired []processKey
+}
+
 type Observer struct {
 	store                   Store
 	interval                time.Duration
@@ -176,21 +188,8 @@ type Observer struct {
 	continuous      bool
 }
 
-//nolint:cyclop // constructor applies defaults for each injectable observer dependency
 func New(opts Options) *Observer {
-	providedStorePath := opts.StorePath
-	storePath := opts.StorePath
-
-	store := opts.Store
-	if store == nil {
-		if storePath == "" {
-			storePath = registry.DefaultStorePath()
-		}
-
-		store = registry.NewJournal(storePath, catalog.Rules{})
-	} else if providedStorePath == "" {
-		storePath = ""
-	}
+	store, storePath := observerStore(opts)
 
 	processList := opts.ProcessList
 	if processList == nil {
@@ -222,15 +221,7 @@ func New(opts Options) *Observer {
 		errorWriter = os.Stderr
 	}
 
-	healthPath := opts.HealthPath
-	if healthPath == "" && storePath != "" {
-		healthPath = storePath + ".observer-health.json"
-	}
-
-	lockPath := ""
-	if storePath != "" {
-		lockPath = storePath + ".observer.lock"
-	}
+	healthPath, lockPath := observerStateFiles(opts.HealthPath, storePath)
 
 	catalogList := opts.CatalogList
 	if catalogList == nil {
@@ -364,7 +355,6 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) error {
 	}
 }
 
-//nolint:gocognit,cyclop,maintidx // one cycle correlates process, multiplexer, catalog, and terminal evidence
 func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	at := o.now().UTC()
 
@@ -394,23 +384,15 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 
 	panes, paneErr := o.paneList(ctx, processes)
 	if paneErr != nil {
-		result.Degraded = true
-		result.Error = paneErr.Error()
+		result = result.withDegradation(paneErr)
 	}
 
 	result.Panes = len(panes)
-	slices.SortStableFunc(panes, func(left, right mux.Pane) int {
-		return cmp.Compare(
-			multiplexerPriority(right.Location.Kind),
-			multiplexerPriority(left.Location.Kind),
-		)
-	})
-	paneCommandCounts := commandPaneCounts(panes)
+	sortPanesByPriority(panes)
 
 	catalogEntries, catalogErr := o.catalogList(ctx)
 	if catalogErr != nil {
-		result.Degraded = true
-		result.Error = catalogErr.Error()
+		result = result.withDegradation(catalogErr)
 	}
 
 	result.Catalog = len(catalogEntries)
@@ -427,178 +409,29 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	}
 
 	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalogEntries))
-	current := make(map[processKey]trackedProcess)
-	processByPID := make(map[int]processinfo.Process, len(processes))
-
-	harnessByPID := make(map[int]registry.Harness, len(processes))
-	for _, process := range processes {
-		if process.PID > 0 {
-			processByPID[process.PID] = process
-		}
-	}
-
-	catalogByPID := make(map[int]CatalogEntry)
-
-	catalogEntries = slices.Clone(catalogEntries)
-	for index, entry := range catalogEntries {
-		if !entry.Current || entry.ProcessPID <= 0 {
-			continue
-		}
-
-		if _, ok := catalogListedProcess(entry, processByPID); !ok {
-			// Keep the saved catalog identity and metadata, but not a stale PID claim.
-			catalogEntries[index].Current = false
-			catalogEntries[index].ProcessPID = 0
-
-			continue
-		}
-
-		catalogByPID[entry.ProcessPID] = entry
-	}
-
-	for _, process := range processes {
-		if process.PID <= 0 || process.StartIdentity == "" {
-			continue
-		}
-
-		harnessID, ok := resolveHarness(process)
-		if !ok {
-			continue
-		}
-
-		harnessByPID[process.PID] = harnessID
-	}
-
-	for _, process := range processes {
-		harnessID, ok := harnessByPID[process.PID]
-		if !ok || !IsAgentWrapper(process) {
-			continue
-		}
-
-		if launchesHarnessThroughWrappers(
-			process.PID,
-			harnessID,
-			processes,
-			processByPID,
-			harnessByPID,
-		) {
-			delete(harnessByPID, process.PID)
-		}
-	}
-
-	for _, process := range processes {
-		harnessID, ok := harnessByPID[process.PID]
-		if !ok {
-			continue
-		}
-
-		if hasAncestorHarness(process.PID, harnessID, processByPID, harnessByPID) {
-			delete(harnessByPID, process.PID)
-		}
-	}
+	processByPID := processesByPID(processes)
+	catalogEntries, catalogByPID := claimCurrentCatalogEntries(catalogEntries, processByPID)
+	harnessByPID := resolveHarnesses(processes)
+	pruneNestedHarnesses(processes, processByPID, harnessByPID)
 
 	o.holdUnconfirmedProcesses(knownSessions, catalogByPID, processByPID, harnessByPID, at)
 
-	for _, process := range processes {
-		harnessID, ok := harnessByPID[process.PID]
-		if !ok {
-			continue
-		}
-
-		key := processKey{harness: harnessID, pid: process.PID, start: process.StartIdentity}
-		current[key] = trackedProcess{process: process, missingSince: time.Time{}, missingCount: 0}
-		present := true
-
-		identity := registry.ObservationIdentity{
-			SessionID:   "",
-			SessionPath: "",
-			CWD:         "",
-			Attributes:  nil,
-		}
-		if entry, ok := catalogByPID[process.PID]; ok && entry.Harness == harnessID {
-			identity = registry.ObservationIdentity{
-				SessionID:   entry.SessionID,
-				SessionPath: entry.SessionPath,
-				CWD:         entry.CWD,
-				Attributes:  nil,
-			}
-		}
-
-		observations = append(
-			observations,
-			registry.Observation{
-				Harness:  harnessID,
-				At:       at,
-				Subject:  identity,
-				Evidence: &registry.Sighting{Process: *processIdentity(process), Present: present},
-			},
-		)
-		result.Present++
+	inventory := cycleInventory{
+		processes:     processes,
+		processByPID:  processByPID,
+		harnessByPID:  harnessByPID,
+		knownSessions: knownSessions,
 	}
 
-	locationPIDs := make(map[int]bool)
+	sightings, current := processSightings(inventory, catalogByPID, at)
+	observations = append(observations, sightings...)
+	result.Present += len(sightings)
 
-	for _, pane := range panes {
-		process, harnessID, ok := multiplexerPaneProcess(
-			pane,
-			processes,
-			processByPID,
-			harnessByPID,
-			paneCommandCounts,
-		)
-		if !ok {
-			continue
-		}
+	placements, locationPIDs, detectErr := o.paneObservations(ctx, inventory, panes, at)
+	observations = append(observations, placements...)
 
-		if locationPIDs[process.PID] {
-			continue
-		}
-
-		location := pane.Location
-		if location.PanePID == 0 && len(pane.Processes) > 0 {
-			location.PanePID = pane.Processes[0].PID
-		}
-
-		if location.PaneTTY == "" {
-			location.PaneTTY = pane.ProcessTTY
-		}
-
-		observations = append(
-			observations,
-			registry.Observation{
-				Harness: harnessID,
-				At:      at,
-				Subject: registry.ObservationIdentity{
-					SessionID:   "",
-					SessionPath: "",
-					CWD:         "",
-					Attributes:  nil,
-				},
-				Evidence: &registry.Placement{
-					Process:  *processIdentity(process),
-					Location: location,
-				},
-			},
-		)
-
-		screenObservation, detected, detectErr := o.detectScreenState(
-			ctx,
-			knownSessions,
-			harnessID,
-			process,
-			pane,
-			at,
-		)
-		if detected && o.screenDecisionReady(knownSessions, harnessID, process, screenObservation) {
-			observations = append(observations, screenObservation)
-		}
-
-		if detectErr != nil {
-			result.Degraded = true
-			result.Error = detectErr.Error()
-		}
-
-		locationPIDs[process.PID] = true
+	if detectErr != nil {
+		result = result.withDegradation(detectErr)
 	}
 
 	if paneErr == nil {
@@ -616,42 +449,101 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		)
 	}
 
-	for _, entry := range catalogEntries {
-		if entry.Harness == "" || entry.SessionID == "" {
-			continue
-		}
+	observations = append(observations, catalogObservations(catalogEntries, processByPID, at)...)
 
-		identity := registry.ObservationIdentity{
-			SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD,
-			Attributes: cloneAttributes(entry.Attributes),
-		}
-		metadata := &registry.Listing{
-			ResumeCommand: append([]string(nil), entry.ResumeCommand...),
-			CWD:           entry.CWD,
-			ProjectRoot:   entry.ProjectRoot,
-			ProcessPID:    entry.ProcessPID,
-			Current:       entry.Current,
+	gone, update := o.retireMissingProcesses(current, at)
+	observations = append(observations, gone...)
+	result.Gone += len(gone)
+
+	reconciled, reconcileErr := o.reconcileUnobservedSessions(ctx, knownSessions, processByPID, at)
+
+	observations = append(observations, reconciled...)
+	result.Gone += goneVerificationCount(reconciled)
+
+	if reconcileErr != nil {
+		result = result.withDegradation(reconcileErr)
+	}
+
+	o.prunePendingScreenDecisions(current)
+
+	return o.recordObservations(ctx, at, observations, update, result)
+}
+
+func (o *Observer) paneObservations(
+	ctx context.Context,
+	inventory cycleInventory,
+	panes []mux.Pane,
+	at time.Time,
+) ([]registry.Observation, map[int]bool, error) {
+	observations := make([]registry.Observation, 0, len(panes))
+	locationPIDs := make(map[int]bool)
+	paneCommandCounts := commandPaneCounts(panes)
+
+	var detectErr error
+
+	for _, pane := range panes {
+		process, harnessID, ok := multiplexerPaneProcess(
+			pane,
+			inventory.processes,
+			inventory.processByPID,
+			inventory.harnessByPID,
+			paneCommandCounts,
+		)
+		if !ok || locationPIDs[process.PID] {
+			continue
 		}
 
 		observations = append(
 			observations,
 			registry.Observation{
-				Harness:  entry.Harness,
-				At:       at,
-				Subject:  identity,
-				Evidence: metadata,
+				Harness: harnessID,
+				At:      at,
+				Subject: registry.ObservationIdentity{
+					SessionID:   "",
+					SessionPath: "",
+					CWD:         "",
+					Attributes:  nil,
+				},
+				Evidence: &registry.Placement{
+					Process:  *processIdentity(process),
+					Location: paneLocation(pane),
+				},
 			},
 		)
-		if report, ok := catalogActivityReport(entry, processByPID); ok {
-			observations = append(observations, catalog.PrepareObservation(registry.Observation{
-				Harness: entry.Harness, At: at, Subject: identity, Evidence: report,
-			}))
+
+		screenObservation, detected, err := o.detectScreenState(
+			ctx,
+			inventory.knownSessions,
+			harnessID,
+			process,
+			pane,
+			at,
+		)
+		if detected &&
+			o.screenDecisionReady(inventory.knownSessions, harnessID, process, screenObservation) {
+			observations = append(observations, screenObservation)
 		}
+
+		if err != nil {
+			detectErr = err
+		}
+
+		locationPIDs[process.PID] = true
 	}
 
-	retiredKeys := make([]processKey, 0)
-	nextTracked := make(map[processKey]trackedProcess, len(current)+len(o.tracked))
-	maps.Copy(nextTracked, current)
+	return observations, locationPIDs, detectErr
+}
+
+func (o *Observer) retireMissingProcesses(
+	current map[processKey]trackedProcess,
+	at time.Time,
+) ([]registry.Observation, trackedUpdate) {
+	observations := make([]registry.Observation, 0)
+	update := trackedUpdate{
+		next:    make(map[processKey]trackedProcess, len(current)+len(o.tracked)),
+		retired: make([]processKey, 0),
+	}
+	maps.Copy(update.next, current)
 
 	for key, old := range o.tracked {
 		if _, ok := current[key]; ok {
@@ -663,57 +555,50 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 			old.missingSince = at
 		}
 
-		eligible := o.grace > 0 && at.Sub(old.missingSince) >= o.grace
-		if o.grace == 0 {
-			eligible = old.missingCount >= defaultMissingSnapshots
-		}
+		update.next[key] = old
 
-		if eligible {
-			present := false
-			observations = append(
-				observations,
-				registry.Observation{
-					Harness: key.harness,
-					At:      at,
-					Subject: registry.ObservationIdentity{
-						SessionID:   "",
-						SessionPath: "",
-						CWD:         "",
-						Attributes:  nil,
-					},
-					Evidence: &registry.Sighting{
-						Process: *processIdentity(old.process),
-						Present: present,
-					},
-				},
-			)
-			result.Gone++
-			nextTracked[key] = old
-			retiredKeys = append(retiredKeys, key)
-
+		if !o.missingProcessRetired(old, at) {
 			continue
 		}
 
-		nextTracked[key] = old
+		observations = append(
+			observations,
+			registry.Observation{
+				Harness: key.harness,
+				At:      at,
+				Subject: registry.ObservationIdentity{
+					SessionID:   "",
+					SessionPath: "",
+					CWD:         "",
+					Attributes:  nil,
+				},
+				Evidence: &registry.Sighting{
+					Process: *processIdentity(old.process),
+					Present: false,
+				},
+			},
+		)
+		update.retired = append(update.retired, key)
 	}
 
-	reconciled, reconcileErr := o.reconcileUnobservedSessions(ctx, knownSessions, processByPID, at)
+	return observations, update
+}
 
-	observations = append(observations, reconciled...)
-	for _, observation := range reconciled {
-		if verification, ok := observation.Evidence.(*registry.Verification); !ok ||
-			verification.Presence == registry.PresenceGone {
-			result.Gone++
-		}
+func (o *Observer) missingProcessRetired(process trackedProcess, at time.Time) bool {
+	if o.grace == 0 {
+		return process.missingCount >= defaultMissingSnapshots
 	}
 
-	if reconcileErr != nil {
-		result.Degraded = true
-		result.Error = reconcileErr.Error()
-	}
+	return o.grace > 0 && at.Sub(process.missingSince) >= o.grace
+}
 
-	o.prunePendingScreenDecisions(current)
-
+func (o *Observer) recordObservations(
+	ctx context.Context,
+	at time.Time,
+	observations []registry.Observation,
+	update trackedUpdate,
+	result Result,
+) (Result, error) {
 	result.Observations = len(observations)
 	if len(observations) > 0 {
 		sessions, observeErr := o.observeBatch(ctx, observations)
@@ -722,21 +607,20 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 
 		if observeErr != nil {
 			if errors.Is(observeErr, registry.ErrObservationConflict) {
-				o.tracked = nextTracked
+				o.tracked = update.next
 			}
 
 			return o.failCycle(at, "registry", observeErr, "recording observations", result)
 		}
 	}
 
-	for _, key := range retiredKeys {
-		delete(nextTracked, key)
+	for _, key := range update.retired {
+		delete(update.next, key)
 	}
 
-	o.tracked = nextTracked
+	o.tracked = update.next
 	if err := o.recordCycleHealth(at, result); err != nil {
-		result.Degraded = true
-		result.Error = err.Error()
+		result = result.withDegradation(err)
 
 		return result, fmt.Errorf("recording observer health: %w", err)
 	}
@@ -802,6 +686,31 @@ func IsAgentWrapper(process processinfo.Process) bool {
 // An agent can itself look like a wrapper (pi runs as node), so only a chain of
 // wrappers counts as launching the descendant; agents nested behind other tools
 // belong to the outer agent.
+func observerStore(opts Options) (Store, string) {
+	if opts.Store != nil {
+		return opts.Store, opts.StorePath
+	}
+
+	storePath := opts.StorePath
+	if storePath == "" {
+		storePath = registry.DefaultStorePath()
+	}
+
+	return registry.NewJournal(storePath, catalog.Rules{}), storePath
+}
+
+func observerStateFiles(healthPath string, storePath string) (string, string) {
+	if storePath == "" {
+		return healthPath, ""
+	}
+
+	if healthPath == "" {
+		healthPath = storePath + ".observer-health.json"
+	}
+
+	return healthPath, storePath + ".observer.lock"
+}
+
 func launchesHarnessThroughWrappers(
 	wrapperPID int,
 	harnessID registry.Harness,
@@ -840,6 +749,220 @@ func joinObserverHealthError(primary error, healthErr error) error {
 	}
 
 	return errors.Join(primary, fmt.Errorf("recording observer health: %w", healthErr))
+}
+
+func sortPanesByPriority(panes []mux.Pane) {
+	slices.SortStableFunc(panes, func(left, right mux.Pane) int {
+		return cmp.Compare(
+			multiplexerPriority(right.Location.Kind),
+			multiplexerPriority(left.Location.Kind),
+		)
+	})
+}
+
+func processesByPID(processes []processinfo.Process) map[int]processinfo.Process {
+	processByPID := make(map[int]processinfo.Process, len(processes))
+	for _, process := range processes {
+		if process.PID > 0 {
+			processByPID[process.PID] = process
+		}
+	}
+
+	return processByPID
+}
+
+func claimCurrentCatalogEntries(
+	entries []CatalogEntry,
+	processByPID map[int]processinfo.Process,
+) ([]CatalogEntry, map[int]CatalogEntry) {
+	catalogByPID := make(map[int]CatalogEntry)
+
+	entries = slices.Clone(entries)
+	for index, entry := range entries {
+		if !entry.Current || entry.ProcessPID <= 0 {
+			continue
+		}
+
+		if _, ok := catalogListedProcess(entry, processByPID); !ok {
+			// Keep the saved catalog identity and metadata, but not a stale PID claim.
+			entries[index].Current = false
+			entries[index].ProcessPID = 0
+
+			continue
+		}
+
+		catalogByPID[entry.ProcessPID] = entry
+	}
+
+	return entries, catalogByPID
+}
+
+func resolveHarnesses(processes []processinfo.Process) map[int]registry.Harness {
+	harnessByPID := make(map[int]registry.Harness, len(processes))
+
+	for _, process := range processes {
+		if process.PID <= 0 || process.StartIdentity == "" {
+			continue
+		}
+
+		harnessID, ok := resolveHarness(process)
+		if !ok {
+			continue
+		}
+
+		harnessByPID[process.PID] = harnessID
+	}
+
+	return harnessByPID
+}
+
+func pruneNestedHarnesses(
+	processes []processinfo.Process,
+	processByPID map[int]processinfo.Process,
+	harnessByPID map[int]registry.Harness,
+) {
+	for _, process := range processes {
+		harnessID, ok := harnessByPID[process.PID]
+		if !ok || !IsAgentWrapper(process) {
+			continue
+		}
+
+		if launchesHarnessThroughWrappers(
+			process.PID,
+			harnessID,
+			processes,
+			processByPID,
+			harnessByPID,
+		) {
+			delete(harnessByPID, process.PID)
+		}
+	}
+
+	for _, process := range processes {
+		harnessID, ok := harnessByPID[process.PID]
+		if !ok {
+			continue
+		}
+
+		if hasAncestorHarness(process.PID, harnessID, processByPID, harnessByPID) {
+			delete(harnessByPID, process.PID)
+		}
+	}
+}
+
+func processSightings(
+	inventory cycleInventory,
+	catalogByPID map[int]CatalogEntry,
+	at time.Time,
+) ([]registry.Observation, map[processKey]trackedProcess) {
+	observations := make([]registry.Observation, 0, len(inventory.harnessByPID))
+	current := make(map[processKey]trackedProcess)
+
+	for _, process := range inventory.processes {
+		harnessID, ok := inventory.harnessByPID[process.PID]
+		if !ok {
+			continue
+		}
+
+		key := processKey{harness: harnessID, pid: process.PID, start: process.StartIdentity}
+		current[key] = trackedProcess{process: process, missingSince: time.Time{}, missingCount: 0}
+
+		identity := registry.ObservationIdentity{
+			SessionID:   "",
+			SessionPath: "",
+			CWD:         "",
+			Attributes:  nil,
+		}
+		if entry, ok := catalogByPID[process.PID]; ok && entry.Harness == harnessID {
+			identity = registry.ObservationIdentity{
+				SessionID:   entry.SessionID,
+				SessionPath: entry.SessionPath,
+				CWD:         entry.CWD,
+				Attributes:  nil,
+			}
+		}
+
+		observations = append(
+			observations,
+			registry.Observation{
+				Harness:  harnessID,
+				At:       at,
+				Subject:  identity,
+				Evidence: &registry.Sighting{Process: *processIdentity(process), Present: true},
+			},
+		)
+	}
+
+	return observations, current
+}
+
+func paneLocation(pane mux.Pane) registry.Location {
+	location := pane.Location
+	if location.PanePID == 0 && len(pane.Processes) > 0 {
+		location.PanePID = pane.Processes[0].PID
+	}
+
+	if location.PaneTTY == "" {
+		location.PaneTTY = pane.ProcessTTY
+	}
+
+	return location
+}
+
+func catalogObservations(
+	entries []CatalogEntry,
+	processByPID map[int]processinfo.Process,
+	at time.Time,
+) []registry.Observation {
+	observations := make([]registry.Observation, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.Harness == "" || entry.SessionID == "" {
+			continue
+		}
+
+		identity := registry.ObservationIdentity{
+			SessionID: entry.SessionID, SessionPath: entry.SessionPath, CWD: entry.CWD,
+			Attributes: cloneAttributes(entry.Attributes),
+		}
+		metadata := &registry.Listing{
+			ResumeCommand: append([]string(nil), entry.ResumeCommand...),
+			CWD:           entry.CWD,
+			ProjectRoot:   entry.ProjectRoot,
+			ProcessPID:    entry.ProcessPID,
+			Current:       entry.Current,
+		}
+
+		observations = append(
+			observations,
+			registry.Observation{
+				Harness:  entry.Harness,
+				At:       at,
+				Subject:  identity,
+				Evidence: metadata,
+			},
+		)
+		if report, ok := catalogActivityReport(entry, processByPID); ok {
+			observations = append(observations, catalog.PrepareObservation(registry.Observation{
+				Harness: entry.Harness, At: at, Subject: identity, Evidence: report,
+			}))
+		}
+	}
+
+	return observations
+}
+
+func goneVerificationCount(observations []registry.Observation) int {
+	count := 0
+
+	for _, observation := range observations {
+		if verification, ok := observation.Evidence.(*registry.Verification); !ok ||
+			verification.Presence == registry.PresenceGone {
+			count++
+		}
+	}
+
+	return count
 }
 
 // holdUnconfirmedProcesses removes processes matched only by command name from
@@ -1628,7 +1751,6 @@ func (o *Observer) releaseLock() {
 	_ = removeObserverLock(o.lockPath)
 }
 
-//nolint:cyclop // health persistence handles degraded categories and atomic writes
 func (o *Observer) recordHealth(
 	at time.Time,
 	degraded bool,
@@ -1636,7 +1758,32 @@ func (o *Observer) recordHealth(
 	err error,
 	result Result,
 ) error {
+	health, shouldWrite := o.updateHealth(at, degraded, category, err, result)
+	if !shouldWrite || o.healthPath == "" {
+		return nil
+	}
+
+	if err := o.writeHealth(health); err != nil {
+		return err
+	}
+
 	o.mu.Lock()
+	o.lastHealthWrite = at
+	o.mu.Unlock()
+
+	return nil
+}
+
+func (o *Observer) updateHealth(
+	at time.Time,
+	degraded bool,
+	category string,
+	err error,
+	result Result,
+) (Health, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
 	wasDegraded := o.health.Degraded
 
 	previousCategory := o.health.LastEnumerationErrorCategory
@@ -1663,17 +1810,15 @@ func (o *Observer) recordHealth(
 		o.health.LastEnumerationError = ""
 	}
 
-	health := o.health
 	// Rewrite only on a status or error-category change, or on the slow
 	// interval, so steady and persistently degraded cycles do not write.
 	shouldWrite := o.lastHealthWrite.IsZero() || at.Sub(o.lastHealthWrite) >= healthWriteInterval ||
 		degraded != wasDegraded || o.health.LastEnumerationErrorCategory != previousCategory
-	o.mu.Unlock()
 
-	if !shouldWrite || o.healthPath == "" {
-		return nil
-	}
+	return o.health, shouldWrite
+}
 
+func (o *Observer) writeHealth(health Health) error {
 	data, marshalErr := json.MarshalIndent(health, "", "  ")
 	if marshalErr != nil {
 		return fmt.Errorf("encoding observer health: %w", marshalErr)
@@ -1698,10 +1843,6 @@ func (o *Observer) recordHealth(
 
 		return errors.Join(fmt.Errorf("publishing observer health: %w", err), cleanupErr)
 	}
-
-	o.mu.Lock()
-	o.lastHealthWrite = at
-	o.mu.Unlock()
 
 	return nil
 }
@@ -1922,4 +2063,11 @@ func (r Result) String() string {
 	}
 
 	return result
+}
+
+func (r Result) withDegradation(err error) Result {
+	r.Degraded = true
+	r.Error = err.Error()
+
+	return r
 }

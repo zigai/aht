@@ -188,7 +188,6 @@ func processMatchingMultiplexerIdentity(
 	return selected, selectedHarness, selected.PID != 0
 }
 
-//nolint:cyclop // each multiplexer has different native identity guarantees
 func multiplexerIdentityMatches(process processinfo.Process, location registry.Location) bool {
 	if process.MultiplexerKind == "" || process.MultiplexerKind != string(location.Kind) {
 		return false
@@ -201,12 +200,7 @@ func multiplexerIdentityMatches(process processinfo.Process, location registry.L
 			return false
 		}
 	case registry.MultiplexerHerdr:
-		sameServer := process.MultiplexerServer != "" && location.ServerID != "" &&
-			process.MultiplexerServer == location.ServerID
-
-		sameSession := process.MultiplexerSession != "" && location.SessionName != "" &&
-			process.MultiplexerSession == location.SessionName
-		if !sameServer && !sameSession {
+		if !herdrIdentityMatches(process, location) {
 			return false
 		}
 	case registry.MultiplexerTmux:
@@ -220,6 +214,15 @@ func multiplexerIdentityMatches(process processinfo.Process, location registry.L
 		location.Kind,
 		location.PaneID,
 	)
+}
+
+func herdrIdentityMatches(process processinfo.Process, location registry.Location) bool {
+	sameServer := process.MultiplexerServer != "" && location.ServerID != "" &&
+		process.MultiplexerServer == location.ServerID
+	sameSession := process.MultiplexerSession != "" && location.SessionName != "" &&
+		process.MultiplexerSession == location.SessionName
+
+	return sameServer || sameSession
 }
 
 func foregroundPaneProcess(
