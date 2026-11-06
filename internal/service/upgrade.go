@@ -46,38 +46,31 @@ func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Resu
 
 	result.Installed = true
 
-	args, err := installedArguments(previous)
-	if err != nil {
-		return result, err
-	}
-
-	options, err := recoverOptions(args, binary)
-	if err != nil {
-		return result, err
-	}
-
-	b, err = platformBackend(options)
+	b, err = recoveredBackend(previous, binary)
 	if err != nil {
 		return result, err
 	}
 
 	result.Current = string(previous) == b.content()
 
-	result.Running, _, err = b.running(ctx, s.executor)
+	state, err := b.running(ctx, s.executor, false)
 	if err != nil {
 		return result, err
 	}
 
+	result.Running = state.Running
+	restart := state.Running || (state.Loaded && !result.Current)
+
 	if dryRun {
 		result.Message = "would update (stopped)"
-		if result.Running {
+		if restart {
 			result.Message = "would update and restart"
 		}
 
 		return result, nil
 	}
 
-	return s.upgradeDefinition(ctx, b, result, previous)
+	return s.upgradeDefinition(ctx, b, result, previous, restart)
 }
 
 func (s *Service) upgradeDefinition(
@@ -85,20 +78,21 @@ func (s *Service) upgradeDefinition(
 	b backend,
 	result Result,
 	previous []byte,
+	restart bool,
 ) (Result, error) {
 	if !result.Current {
-		if err := s.refreshUpgradeDefinition(ctx, b, result); err != nil {
-			return result, s.rollbackUpgrade(ctx, b, result, previous, err)
+		if err := s.refreshUpgradeDefinition(ctx, b, result, restart); err != nil {
+			return result, s.rollbackUpgrade(ctx, b, result, previous, restart, err)
 		}
 	}
 
-	if result.Running {
+	if restart {
 		if err := b.restart(ctx, s.executor); err != nil {
-			return result, s.rollbackUpgrade(ctx, b, result, previous, err)
+			return result, s.rollbackUpgrade(ctx, b, result, previous, restart, err)
 		}
 	}
 
-	result.Changed = !result.Current || result.Running
+	result.Changed = !result.Current || restart
 	result.Current = true
 
 	result.Message = "stopped (up to date)"
@@ -106,27 +100,27 @@ func (s *Service) upgradeDefinition(
 		result.Message = "stopped (updated)"
 	}
 
-	if result.Running {
+	if restart {
 		result.Message = "updated and restarted"
 	}
 
 	return result, nil
 }
 
-func (s *Service) refreshUpgradeDefinition(ctx context.Context, b backend, result Result) error {
+func (s *Service) refreshUpgradeDefinition(
+	ctx context.Context,
+	b backend,
+	result Result,
+	restart bool,
+) error {
 	if err := writeAtomic(result.Path, []byte(b.content())); err != nil {
 		return err
 	}
-	// launchd caches loaded definitions. Unload a stopped job so its next
-	// bootstrap reads the refreshed plist without starting it now.
-	if result.Platform == "darwin" && !result.Running {
-		if err := b.unload(ctx, s.executor); err != nil {
-			return fmt.Errorf("unload stopped tracker: %w", err)
-		}
-	}
 
-	if err := b.reload(ctx, s.executor); err != nil {
-		return fmt.Errorf("reload upgraded tracker: %w", err)
+	if !restart {
+		if err := b.reload(ctx, s.executor); err != nil {
+			return fmt.Errorf("reload upgraded tracker: %w", err)
+		}
 	}
 
 	return nil
@@ -137,10 +131,11 @@ func (s *Service) rollbackUpgrade(
 	b backend,
 	result Result,
 	previous []byte,
+	restart bool,
 	cause error,
 ) error {
-	// The normal install rollback starts the old service. An upgrade must never
-	// start a service that was stopped, including on a failed file/manager update.
+	// Upgrade restores the previous manager state: stopped systemd units stay
+	// stopped, while loaded launchd jobs must load the restored definition.
 	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), serviceRollbackTime)
 	defer cancel()
 
@@ -148,9 +143,11 @@ func (s *Service) rollbackUpgrade(
 		return errors.Join(cause, fmt.Errorf("restore service definition: %w", err))
 	}
 
-	failures := []error{cause, b.reload(rollbackCtx, s.executor)}
-	if result.Running {
+	failures := []error{cause}
+	if restart {
 		failures = append(failures, b.restart(rollbackCtx, s.executor))
+	} else {
+		failures = append(failures, b.reload(rollbackCtx, s.executor))
 	}
 
 	return errors.Join(failures...)
@@ -194,4 +191,23 @@ func recoverOptions(args []string, binary string) (Options, error) {
 	}
 
 	return options, nil
+}
+
+func recoveredBackend(previous []byte, binary string) (backend, error) {
+	args, err := installedArguments(previous)
+	if err != nil {
+		return nil, err
+	}
+
+	options, err := recoverOptions(args, binary)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := platformBackend(options)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
 }

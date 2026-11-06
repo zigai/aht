@@ -190,12 +190,12 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
 	}
 
-	running, message, err := backend.running(ctx, s.executor)
+	state, err := backend.running(ctx, s.executor, false)
 	if err != nil {
 		return result, err
 	}
 
-	result.Running, result.Message = running, message
+	result.Running, result.Message = state.Running, state.Message
 	if !result.Current {
 		result.Message = "stale; " + result.Message
 	} else if result.Running && result.Message == "" {
@@ -265,16 +265,18 @@ func (s *Service) publishDefinition(
 		return s.rollbackDefinition(ctx, backend, path, previous, installed, err)
 	}
 
-	if err := backend.reload(ctx, s.executor); err != nil {
-		return s.rollbackDefinition(ctx, backend, path, previous, installed, err)
-	}
-
 	if installed {
 		if err := backend.restart(ctx, s.executor); err != nil {
 			return s.rollbackDefinition(ctx, backend, path, previous, true, err)
 		}
-	} else if err := backend.load(ctx, s.executor); err != nil {
-		return s.rollbackDefinition(ctx, backend, path, previous, false, err)
+	} else {
+		if err := backend.reload(ctx, s.executor); err != nil {
+			return s.rollbackDefinition(ctx, backend, path, previous, false, err)
+		}
+
+		if err := backend.load(ctx, s.executor); err != nil {
+			return s.rollbackDefinition(ctx, backend, path, previous, false, err)
+		}
 	}
 
 	return nil
@@ -287,12 +289,14 @@ func (s *Service) applyCurrent(
 	result Result,
 	update bool,
 ) (Result, error) {
-	running, _, err := backend.running(ctx, s.executor)
+	state, err := backend.running(ctx, s.executor, !update)
 	if err != nil {
 		return result, err
 	}
 
-	if !running {
+	result.Running = state.Running
+
+	if !state.Loaded || (!update && !state.Enabled) {
 		if opts.DryRun {
 			result.Message = "would start"
 			return result, nil
@@ -307,7 +311,6 @@ func (s *Service) applyCurrent(
 		return result, nil
 	}
 
-	result.Running = true
 	// An unchanged service definition does not imply an unchanged executable.
 	// Explicit updates restart the tracker so an installed replacement takes effect.
 	if update {
@@ -346,13 +349,6 @@ func (s *Service) rollbackDefinition(
 	if previouslyInstalled {
 		if err := writeAtomic(path, previous); err != nil {
 			return errors.Join(cause, fmt.Errorf("restoring service definition: %w", err))
-		}
-
-		if err := backend.reload(rollbackCtx, s.executor); err != nil {
-			failures = append(
-				failures,
-				fmt.Errorf("reloading restored service definition: %w", err),
-			)
 		}
 
 		if err := backend.restart(rollbackCtx, s.executor); err != nil {

@@ -122,6 +122,10 @@ func (b *linuxBackend) load(ctx context.Context, executor CommandExecutor) error
 }
 
 func (b *linuxBackend) restart(ctx context.Context, executor CommandExecutor) error {
+	if err := b.reload(ctx, executor); err != nil {
+		return err
+	}
+
 	if output, err := executor.Run(
 		ctx,
 		"systemctl",
@@ -151,14 +155,37 @@ func (b *linuxBackend) unload(ctx context.Context, executor CommandExecutor) err
 func (b *linuxBackend) running(
 	ctx context.Context,
 	executor CommandExecutor,
-) (bool, string, error) {
+	checkEnabled bool,
+) (runtimeState, error) {
 	output, err := executor.Run(ctx, "systemctl", "--user", "is-active", "--quiet", linuxUnitName)
 	if err == nil {
-		return true, "running", nil
+		state := runtimeState{Running: true, Loaded: true, Enabled: false, Message: "running"}
+		if !checkEnabled {
+			return state, nil
+		}
+
+		output, err := executor.Run(
+			ctx,
+			"systemctl",
+			"--user",
+			"is-enabled",
+			"--quiet",
+			linuxUnitName,
+		)
+		if err == nil {
+			state.Enabled = true
+			return state, nil
+		}
+
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
+			return state, nil
+		}
+
+		return runtimeState{}, wrapManagerError("checking systemd service enablement", output, err)
 	}
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false, "", fmt.Errorf("checking systemd service status: %w", err)
+		return runtimeState{}, fmt.Errorf("checking systemd service status: %w", err)
 	}
 	// systemctl uses LSB status codes: 3 is inactive and 4 is an unknown unit.
 	const (
@@ -169,10 +196,15 @@ func (b *linuxBackend) running(
 		err,
 	); ok &&
 		(exitErr.ExitCode() == inactive || exitErr.ExitCode() == unknown) {
-		return false, "not running", nil
+		return runtimeState{
+			Running: false,
+			Loaded:  false,
+			Enabled: false,
+			Message: "not running",
+		}, nil
 	}
 
-	return false, "", wrapManagerError("checking systemd service status", output, err)
+	return runtimeState{}, wrapManagerError("checking systemd service status", output, err)
 }
 
 func systemdArg(value string) string {

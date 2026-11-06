@@ -159,20 +159,29 @@ func (b *darwinBackend) unload(ctx context.Context, executor CommandExecutor) er
 func (b *darwinBackend) running(
 	ctx context.Context,
 	executor CommandExecutor,
-) (bool, string, error) {
+	_ bool,
+) (runtimeState, error) {
 	output, err := executor.Run(ctx, "launchctl", "print", b.domain+"/"+darwinLabel)
 	if err == nil {
 		for line := range strings.Lines(string(output)) {
 			if state, ok := strings.CutPrefix(strings.TrimSpace(line), "state = "); ok {
-				return state == "running", state, nil
+				return runtimeState{
+					Running: state == "running",
+					Loaded:  true,
+					Enabled: true,
+					Message: state,
+				}, nil
 			}
 		}
 
-		return false, "", fmt.Errorf("%w: launchctl did not report a state", errInstalledArguments)
+		return runtimeState{}, fmt.Errorf(
+			"%w: launchctl did not report a state",
+			errInstalledArguments,
+		)
 	}
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false, "", fmt.Errorf("checking launchd service status: %w", err)
+		return runtimeState{}, fmt.Errorf("checking launchd service status: %w", err)
 	}
 	// Missing-service diagnostics are distinct from an unavailable GUI domain,
 	// insufficient privileges, or a failure to execute launchctl itself.
@@ -180,10 +189,15 @@ func (b *darwinBackend) running(
 		err,
 	); exited &&
 		strings.Contains(strings.ToLower(string(output)), "could not find service") {
-		return false, "not running", nil
+		return runtimeState{
+			Running: false,
+			Loaded:  false,
+			Enabled: false,
+			Message: "not running",
+		}, nil
 	}
 
-	return false, "", wrapManagerError("checking launchd service status", output, err)
+	return runtimeState{}, wrapManagerError("checking launchd service status", output, err)
 }
 
 func writePlistString(b *strings.Builder, value string) error {

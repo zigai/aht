@@ -73,10 +73,7 @@ func verifyLaunchAgentUpgrade(t *testing.T, state string) {
 		t.Fatalf("settings = %q, %v; want %q", got, err, want)
 	}
 
-	calls := []string{"print", "bootout"}
-	if state == "running" {
-		calls = append(calls, "bootstrap")
-	}
+	calls := []string{"print", "bootout", "bootstrap"}
 
 	if !reflect.DeepEqual(executor.calls, calls) {
 		t.Fatalf("calls = %v, want %v", executor.calls, calls)

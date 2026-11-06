@@ -147,7 +147,7 @@ func assertUpgradeManagerCalls(
 	t.Helper()
 
 	calls := [][]string{{"systemctl", "--user", "is-active", "--quiet", linuxUnitName}}
-	if !dryRun && stale {
+	if !dryRun && (stale || !stopped) {
 		calls = append(calls, []string{"systemctl", "--user", "daemon-reload"})
 	}
 
@@ -271,4 +271,33 @@ func TestUpgradeRollbackDoesNotStartStoppedTracker(t *testing.T) {
 			t.Fatalf("rollback started stopped tracker: %v", executor.calls)
 		}
 	}
+}
+
+func TestUpgradeReloadsCurrentUnitBeforeRestart(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	unit, err := RenderSystemdUnit(
+		Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: 7 * time.Second},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := systemdUnitPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The unit file was published by an upgrade that stopped before daemon-reload.
+	if err := writeAtomic(path, []byte(unit)); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := &upgradeExecutor{}
+
+	if _, err := New(executor).Upgrade(t.Context(), "/bin/aht", false); err != nil {
+		t.Fatal(err)
+	}
+
+	requireReloadBeforeRestart(t, executor.calls)
 }

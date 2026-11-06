@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -337,8 +338,9 @@ func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 		t.Fatalf("unexpected update result: %+v", result)
 	}
 
-	if len(executor.calls) != 2 || executor.calls[1][2] != "restart" {
-		t.Fatalf("manager calls = %#v, want status and restart", executor.calls)
+	if len(executor.calls) != 3 || executor.calls[1][2] != "daemon-reload" ||
+		executor.calls[2][2] != "restart" {
+		t.Fatalf("manager calls = %#v, want status, daemon-reload and restart", executor.calls)
 	}
 }
 
@@ -591,9 +593,9 @@ func TestStatusPropagatesManagerFailures(t *testing.T) {
 
 	backend := linuxBackend{}
 	for _, cause := range []error{exec.ErrNotFound, os.ErrPermission, errManagerTestFailure, context.Canceled} {
-		running, _, err := backend.running(t.Context(), &recordingExecutor{err: cause})
-		if running || !errors.Is(err, cause) {
-			t.Errorf("status for %v = (%v, %v), want original failure", cause, running, err)
+		state, err := backend.running(t.Context(), &recordingExecutor{err: cause}, false)
+		if state.Running || !errors.Is(err, cause) {
+			t.Errorf("status for %v = (%v, %v), want original failure", cause, state.Running, err)
 		}
 	}
 }
@@ -606,5 +608,49 @@ func TestExecutorPreservesCancellation(t *testing.T) {
 	_, err := (osCommandExecutor{}).Run(ctx, "sh", "-c", "exit 0")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("executor cancellation error = %v", err)
+	}
+}
+
+func TestUpdateReloadsCurrentUnitBeforeRestart(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: 7 * time.Second}
+
+	unit, err := RenderSystemdUnit(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := systemdUnitPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The unit file was published by an update that stopped before daemon-reload.
+	if err := writeAtomic(path, []byte(unit)); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := &recordingExecutor{}
+
+	if _, err := New(executor).Update(t.Context(), options); err != nil {
+		t.Fatal(err)
+	}
+
+	requireReloadBeforeRestart(t, executor.calls)
+}
+
+func requireReloadBeforeRestart(t *testing.T, calls [][]string) {
+	t.Helper()
+
+	reload := slices.IndexFunc(calls, func(call []string) bool {
+		return slices.Equal(call, []string{"systemctl", "--user", "daemon-reload"})
+	})
+	restart := slices.IndexFunc(calls, func(call []string) bool {
+		return slices.Equal(call, []string{"systemctl", "--user", "restart", linuxUnitName})
+	})
+
+	if restart < 0 || reload < 0 || reload > restart {
+		t.Fatalf("manager calls = %v, want daemon-reload before restart", calls)
 	}
 }
