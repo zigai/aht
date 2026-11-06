@@ -71,6 +71,13 @@ type preparedReport struct {
 	ignored bool
 }
 
+type reportState struct {
+	presence   registry.Presence
+	activity   registry.Activity
+	lifecycle  registry.NativeLifecycle
+	observedAt time.Time
+}
+
 type reportRuntimeContext struct {
 	tmux        registry.Location
 	multiplexer registry.Location
@@ -344,28 +351,14 @@ func (app *application) writeReportIgnored(
 	return app.writef("ignored %s report: %s\n", harnessID, detail)
 }
 
-//nolint:gocognit,cyclop // report preparation validates independent evidence dimensions in order
 func prepareReport(
 	stdin io.Reader,
 	opts reportOptions,
 	runtime reportRuntimeContext,
 ) (preparedReport, error) {
-	if opts.rawStdin && opts.rawDefaultsOnly {
-		return preparedReport{}, exitCode(errConflictingReportStdin, exitCodeUsage)
-	}
-
-	if strings.TrimSpace(opts.harness) == "" {
-		return preparedReport{}, exitCode(errMissingReportHarness, exitCodeUsage)
-	}
-
-	harnessID, err := catalog.Parse(opts.harness)
+	harnessID, attrs, err := parseReportTarget(opts)
 	if err != nil {
-		return preparedReport{}, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
-	}
-
-	attrs, err := parseAttributes(opts.attributes)
-	if err != nil {
-		return preparedReport{}, exitCode(err, exitCodeUsage)
+		return preparedReport{}, err
 	}
 
 	rawPayload, defaultsPayload, err := readStdinPayloadData(
@@ -388,76 +381,140 @@ func prepareReport(
 
 	applyPayloadDefaults(&opts, attrs, defaults)
 	applyReportRuntimeDefaults(&opts)
+	translateReportLifecycle(&opts, harnessID, attrs)
 
-	if !strings.EqualFold(opts.evidence, "process") {
-		translated := catalog.LifecycleFor(harnessID, opts.event, attrs)
-
-		opts.event = translated.Event
-		if opts.lifecycle == "" {
-			opts.lifecycle = string(translated.Lifecycle)
-		}
-
-		if opts.presence == "" {
-			opts.presence = string(translated.Presence)
-		}
+	state, err := normalizeReportState(opts, runtime.defaultObservedAt)
+	if err != nil {
+		return preparedReport{}, err
 	}
 
+	state.activity, err = catalog.ActivityFromPayload(
+		harnessID,
+		opts.event,
+		state.activity,
+		defaultsPayload,
+		state.observedAt,
+	)
+	if err != nil {
+		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
+	}
+
+	observation, err := buildReportObservation(harnessID, opts, runtime, attrs, rawPayload, state)
+	if err != nil {
+		return preparedReport{}, err
+	}
+
+	observation = catalog.PrepareObservation(observation)
+	if err := applyReportDetail(&observation, opts, state.activity, state.observedAt); err != nil {
+		return preparedReport{}, err
+	}
+
+	return preparedReport{harness: harnessID, observation: observation}, nil
+}
+
+func parseReportTarget(opts reportOptions) (registry.Harness, map[string]string, error) {
+	if opts.rawStdin && opts.rawDefaultsOnly {
+		return "", nil, exitCode(errConflictingReportStdin, exitCodeUsage)
+	}
+
+	if strings.TrimSpace(opts.harness) == "" {
+		return "", nil, exitCode(errMissingReportHarness, exitCodeUsage)
+	}
+
+	harnessID, err := catalog.Parse(opts.harness)
+	if err != nil {
+		return "", nil, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
+	}
+
+	attrs, err := parseAttributes(opts.attributes)
+	if err != nil {
+		return "", nil, exitCode(err, exitCodeUsage)
+	}
+
+	return harnessID, attrs, nil
+}
+
+func translateReportLifecycle(
+	opts *reportOptions,
+	harnessID registry.Harness,
+	attrs map[string]string,
+) {
+	if strings.EqualFold(opts.evidence, "process") {
+		return
+	}
+
+	translated := catalog.LifecycleFor(harnessID, opts.event, attrs)
+
+	opts.event = translated.Event
+	if opts.lifecycle == "" {
+		opts.lifecycle = string(translated.Lifecycle)
+	}
+
+	if opts.presence == "" {
+		opts.presence = string(translated.Presence)
+	}
+}
+
+func normalizeReportState(opts reportOptions, defaultObservedAt time.Time) (reportState, error) {
 	presence, err := registry.NormalizePresence(opts.presence)
 	if err != nil {
-		return preparedReport{}, exitCode(fmt.Errorf("normalize presence: %w", err), exitCodeUsage)
+		return reportState{}, exitCode(fmt.Errorf("normalize presence: %w", err), exitCodeUsage)
 	}
 
 	activity, err := registry.NormalizeActivity(opts.activity)
 	if err != nil {
-		return preparedReport{}, exitCode(fmt.Errorf("normalize activity: %w", err), exitCodeUsage)
+		return reportState{}, exitCode(fmt.Errorf("normalize activity: %w", err), exitCodeUsage)
 	}
 
 	if presence == registry.PresenceGone && activity != "" {
-		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
+		return reportState{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
 
 	lifecycle, err := normalizeReportLifecycle(opts.lifecycle)
 	if err != nil {
-		return preparedReport{}, exitCode(err, exitCodeUsage)
+		return reportState{}, exitCode(err, exitCodeUsage)
 	}
 
 	if lifecycle == registry.NativeLifecycleEnd && activity != "" {
-		return preparedReport{}, exitCode(errGonePresenceActivity, exitCodeUsage)
+		return reportState{}, exitCode(errGonePresenceActivity, exitCodeUsage)
 	}
 
 	observedAt, err := parseObservedAt(opts.observedAt)
 	if err != nil {
-		return preparedReport{}, exitCode(err, exitCodeUsage)
+		return reportState{}, exitCode(err, exitCodeUsage)
 	}
 
 	if observedAt.IsZero() {
-		observedAt = runtime.defaultObservedAt
+		observedAt = defaultObservedAt
 	}
 
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
 	}
 
-	activity, err = catalog.ActivityFromPayload(
-		harnessID,
-		opts.event,
-		activity,
-		defaultsPayload,
-		observedAt,
-	)
-	if err != nil {
-		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
-	}
+	return reportState{
+		presence:   presence,
+		activity:   activity,
+		lifecycle:  lifecycle,
+		observedAt: observedAt,
+	}, nil
+}
 
+func buildReportObservation(
+	harnessID registry.Harness,
+	opts reportOptions,
+	runtime reportRuntimeContext,
+	attrs map[string]string,
+	rawPayload json.RawMessage,
+	state reportState,
+) (registry.Observation, error) {
 	sequence, sequenceSet, err := parseReportSequence(opts.sequence)
 	if err != nil {
-		return preparedReport{}, exitCode(err, exitCodeUsage)
+		return registry.Observation{}, exitCode(err, exitCodeUsage)
 	}
 
-	if presence == "" && activity == "" && lifecycle == "" && opts.event == "" &&
-		opts.sessionID == "" &&
-		opts.sessionPath == "" {
-		return preparedReport{}, exitCode(errMissingReportIdentity, exitCodeUsage)
+	if !reportHasIdentity(opts, state) {
+		return registry.Observation{}, exitCode(errMissingReportIdentity, exitCodeUsage)
 	}
 
 	identity := registry.ObservationIdentity{
@@ -475,13 +532,13 @@ func prepareReport(
 			identity,
 			opts,
 			runtime.processes,
-			presence,
-			activity,
-			observedAt,
+			state.presence,
+			state.activity,
+			state.observedAt,
 			sequenceSet,
 		)
 		if err != nil {
-			return preparedReport{}, err
+			return registry.Observation{}, err
 		}
 	} else {
 		observation = nativeReportObservation(
@@ -491,10 +548,10 @@ func prepareReport(
 			runtime,
 			attrs,
 			rawPayload,
-			presence,
-			activity,
-			lifecycle,
-			observedAt,
+			state.presence,
+			state.activity,
+			state.lifecycle,
+			state.observedAt,
 		)
 		if sequenceSet {
 			observation.Report().Reporter.Sequence = &sequence
@@ -511,12 +568,14 @@ func prepareReport(
 		)
 	}
 
-	observation = catalog.PrepareObservation(observation)
-	if err := applyReportDetail(&observation, opts, activity, observedAt); err != nil {
-		return preparedReport{}, err
-	}
+	return observation, nil
+}
 
-	return preparedReport{harness: harnessID, observation: observation}, nil
+func reportHasIdentity(opts reportOptions, state reportState) bool {
+	return state.presence != "" || state.activity != "" || state.lifecycle != "" ||
+		opts.event != "" ||
+		opts.sessionID != "" ||
+		opts.sessionPath != ""
 }
 
 // processReportObservation validates sighting-only evidence before constructing it.

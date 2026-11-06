@@ -86,6 +86,19 @@ type explainedInfoResult struct {
 	Explanation explainResult    `json:"explanation"`
 }
 
+type configKeyOrigin struct {
+	Source   string `json:"source"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	RawValue string `json:"raw_value,omitempty"`
+}
+
+type configProvenance struct {
+	Config      config.Config              `json:"config"`
+	ActiveFiles []string                   `json:"active_files"`
+	Origins     map[string]configKeyOrigin `json:"origins"`
+}
+
 func (app *application) newSetupCommand() *cobra.Command {
 	options := integrationCommandOptions{}
 	serviceConfig := serviceOptions{interval: serviceDefaultInterval}
@@ -349,7 +362,6 @@ func (app *application) newStateCommand() *cobra.Command {
 	return command
 }
 
-//nolint:gocognit,cyclop // clean selection validation, age calculations, confirmation, and garbage collection
 func (app *application) newStateCleanCommand() *cobra.Command {
 	options := cleanOptions{}
 
@@ -362,59 +374,10 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := app.loadConfig()
-			if err != nil {
-				return err
-			}
-
-			options.ageSet = cmd.Flags().Changed("older-than")
-			if options.all && options.ageSet {
-				return exitCode(errCleanSelection, exitCodeUsage)
-			}
-
-			if !options.all && !options.ageSet && cfg.Retention.TombstoneTTL != "" {
-				d, err := config.TombstoneTTL(cfg)
-				if err != nil {
-					return fmt.Errorf("parsing tombstone TTL: %w", err)
-				}
-
-				options.olderThan = d
-				options.ageSet = true
-			}
-
-			if options.all == options.ageSet {
-				return exitCode(errCleanSelection, exitCodeUsage)
-			}
-
-			if options.olderThan < 0 {
-				return exitCode(errNegativeCleanAge, exitCodeUsage)
-			}
-
-			return nil
+			return app.prepareCleanOptions(cmd, &options)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if options.all && !yes {
-				stdin := app.stdin
-				if stdin == nil {
-					stdin = os.Stdin
-				}
-
-				confirmed, err := app.confirmAction(
-					cmd.Context(),
-					stdin,
-					"Delete all gone session records? [y/N]: ",
-					"--yes",
-				)
-				if err != nil {
-					return err
-				}
-
-				if !confirmed {
-					return exitCode(errCleanAllConfirmation, exitCodeGeneral)
-				}
-			}
-
-			return app.runRegistryClean(cmd.Context(), options)
+			return app.runStateClean(cmd.Context(), options, yes)
 		},
 	}
 	command.Flags().BoolVarP(&options.all, "all", "a", false, "delete every gone session record")
@@ -424,6 +387,63 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 		DurationVar(&options.olderThan, "older-than", 0, "delete gone records older than this `<duration>`")
 
 	return command
+}
+
+func (app *application) prepareCleanOptions(cmd *cobra.Command, options *cleanOptions) error {
+	cfg, err := app.loadConfig()
+	if err != nil {
+		return err
+	}
+
+	options.ageSet = cmd.Flags().Changed("older-than")
+	if options.all && options.ageSet {
+		return exitCode(errCleanSelection, exitCodeUsage)
+	}
+
+	if !options.all && !options.ageSet && cfg.Retention.TombstoneTTL != "" {
+		d, err := config.TombstoneTTL(cfg)
+		if err != nil {
+			return fmt.Errorf("parsing tombstone TTL: %w", err)
+		}
+
+		options.olderThan = d
+		options.ageSet = true
+	}
+
+	if options.all == options.ageSet {
+		return exitCode(errCleanSelection, exitCodeUsage)
+	}
+
+	if options.olderThan < 0 {
+		return exitCode(errNegativeCleanAge, exitCodeUsage)
+	}
+
+	return nil
+}
+
+func (app *application) runStateClean(ctx context.Context, options cleanOptions, yes bool) error {
+	if options.all && !yes {
+		stdin := app.stdin
+		if stdin == nil {
+			stdin = os.Stdin
+		}
+
+		confirmed, err := app.confirmAction(
+			ctx,
+			stdin,
+			"Delete all gone session records? [y/N]: ",
+			"--yes",
+		)
+		if err != nil {
+			return err
+		}
+
+		if !confirmed {
+			return exitCode(errCleanAllConfirmation, exitCodeGeneral)
+		}
+	}
+
+	return app.runRegistryClean(ctx, options)
 }
 
 func (app *application) runRegistryClean(ctx context.Context, opts cleanOptions) error {
@@ -732,7 +752,6 @@ func (app *application) newConfigPathCommand() *cobra.Command {
 	}
 }
 
-//nolint:gocognit,cyclop // display configuration with optional provenance
 func (app *application) newConfigShowCommand() *cobra.Command {
 	var showProvenance bool
 
@@ -747,120 +766,7 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 			return err
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg := app.cfg
-			if app.outputJSON {
-				if showProvenance && app.cfgMeta != nil {
-					type keyOrigin struct {
-						Source   string `json:"source"`
-						Path     string `json:"path,omitempty"`
-						Line     int    `json:"line,omitempty"`
-						RawValue string `json:"raw_value,omitempty"`
-					}
-
-					type provenanceResult struct {
-						Config      config.Config        `json:"config"`
-						ActiveFiles []string             `json:"active_files"`
-						Origins     map[string]keyOrigin `json:"origins"`
-					}
-
-					allConfigKeys := []string{
-						"ui.default_presence",
-						"ui.sort",
-						"ui.sort_desc",
-						"ui.absolute_time",
-						"ui.time_format",
-						"retention.tombstone_ttl",
-						"filter.ignore_harnesses",
-						"filter.ignore_paths",
-						"tracker.interval",
-						"tracker.grace_period",
-						"tracker.quiet",
-						"detection.manifests_dir",
-						"detection.screen_inspection",
-					}
-					origins := make(map[string]keyOrigin)
-
-					for _, k := range allConfigKeys {
-						if o, ok := app.cfgMeta.Where(k); ok {
-							origins[k] = keyOrigin{
-								Source:   string(o.Source),
-								Path:     o.Path,
-								Line:     o.Line,
-								RawValue: o.RawValue,
-							}
-						}
-					}
-
-					return app.writeJSON(provenanceResult{
-						Config:      cfg,
-						ActiveFiles: app.cfgMeta.ActiveFiles(),
-						Origins:     origins,
-					})
-				}
-
-				return app.writeJSON(cfg)
-			}
-
-			if showProvenance && app.cfgMeta != nil {
-				var b strings.Builder
-
-				active := app.cfgMeta.ActiveFiles()
-				if len(active) > 0 {
-					fmt.Fprintf(&b, "# Active configuration files (highest precedence last):\n")
-
-					for _, f := range active {
-						fmt.Fprintf(&b, "#   - %s\n", f)
-					}
-
-					fmt.Fprintf(&b, "\n")
-				}
-
-				allConfigKeys := []string{
-					"ui.default_presence",
-					"ui.sort",
-					"ui.sort_desc",
-					"ui.absolute_time",
-					"ui.time_format",
-					"retention.tombstone_ttl",
-					"filter.ignore_harnesses",
-					"filter.ignore_paths",
-					"tracker.interval",
-					"tracker.grace_period",
-					"tracker.quiet",
-					"detection.manifests_dir",
-					"detection.screen_inspection",
-				}
-				for _, k := range allConfigKeys {
-					if o, ok := app.cfgMeta.Where(k); ok {
-						switch {
-						case o.Line > 0:
-							fmt.Fprintf(&b, "# %s (from %s:%d)\n", k, o.Path, o.Line)
-						case o.Path != "":
-							fmt.Fprintf(&b, "# %s (from %s %s)\n", k, o.Source, o.Path)
-						default:
-							fmt.Fprintf(&b, "# %s (from %s)\n", k, o.Source)
-						}
-					}
-				}
-
-				fmt.Fprintf(&b, "\n")
-
-				data, err := toml.Marshal(cfg)
-				if err != nil {
-					return fmt.Errorf("encode config toml: %w", err)
-				}
-
-				b.Write(data)
-
-				return app.writef("%s", b.String())
-			}
-
-			data, err := toml.Marshal(cfg)
-			if err != nil {
-				return fmt.Errorf("encode config toml: %w", err)
-			}
-
-			return app.writef("%s", string(data))
+			return app.runConfigShow(showProvenance)
 		},
 	}
 	cmd.Flags().
@@ -869,7 +775,73 @@ func (app *application) newConfigShowCommand() *cobra.Command {
 	return cmd
 }
 
-//nolint:gocognit // manage config get command with JSON and provenance formatting
+func (app *application) runConfigShow(showProvenance bool) error {
+	if app.outputJSON {
+		if showProvenance && app.cfgMeta != nil {
+			return app.writeJSON(app.configWithProvenance())
+		}
+
+		return app.writeJSON(app.cfg)
+	}
+
+	var b strings.Builder
+
+	if showProvenance && app.cfgMeta != nil {
+		app.appendConfigProvenance(&b)
+	}
+
+	data, err := toml.Marshal(app.cfg)
+	if err != nil {
+		return fmt.Errorf("encode config toml: %w", err)
+	}
+
+	b.Write(data)
+
+	return app.writef("%s", b.String())
+}
+
+func (app *application) configWithProvenance() configProvenance {
+	origins := make(map[string]configKeyOrigin)
+
+	for _, key := range configKeys() {
+		if origin, ok := app.cfgMeta.Where(key); ok {
+			origins[key] = configKeyOrigin{
+				Source:   string(origin.Source),
+				Path:     origin.Path,
+				Line:     origin.Line,
+				RawValue: origin.RawValue,
+			}
+		}
+	}
+
+	return configProvenance{
+		Config:      app.cfg,
+		ActiveFiles: app.cfgMeta.ActiveFiles(),
+		Origins:     origins,
+	}
+}
+
+func (app *application) appendConfigProvenance(b *strings.Builder) {
+	active := app.cfgMeta.ActiveFiles()
+	if len(active) > 0 {
+		fmt.Fprintf(b, "# Active configuration files (highest precedence last):\n")
+
+		for _, file := range active {
+			fmt.Fprintf(b, "#   - %s\n", file)
+		}
+
+		fmt.Fprintf(b, "\n")
+	}
+
+	for _, key := range configKeys() {
+		if origin, ok := app.cfgMeta.Where(key); ok {
+			fmt.Fprintf(b, "# %s (from %s)\n", key, configOriginLabel(origin))
+		}
+	}
+
+	fmt.Fprintf(b, "\n")
+}
+
 func (app *application) newConfigGetCommand() *cobra.Command {
 	var showProvenance bool
 
@@ -884,46 +856,7 @@ func (app *application) newConfigGetCommand() *cobra.Command {
 			return err
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
-			key := args[0]
-
-			val, ok := getConfigValue(app.cfg, key)
-			if !ok {
-				return exitCode(fmt.Errorf("%w: %q", errUnknownConfigKey, key), exitCodeUsage)
-			}
-
-			if app.outputJSON {
-				res := map[string]any{
-					"key":   key,
-					"value": val,
-				}
-				if showProvenance && app.cfgMeta != nil {
-					if o, found := app.cfgMeta.Where(key); found {
-						res["origin"] = map[string]any{
-							"source":    string(o.Source),
-							"path":      o.Path,
-							"line":      o.Line,
-							"raw_value": o.RawValue,
-						}
-					}
-				}
-
-				return app.writeJSON(res)
-			}
-
-			if showProvenance && app.cfgMeta != nil {
-				if o, found := app.cfgMeta.Where(key); found {
-					switch {
-					case o.Line > 0:
-						return app.writef("%v (from %s:%d)\n", val, o.Path, o.Line)
-					case o.Path != "":
-						return app.writef("%v (from %s %s)\n", val, o.Source, o.Path)
-					default:
-						return app.writef("%v (from %s)\n", val, o.Source)
-					}
-				}
-			}
-
-			return app.writef("%v\n", val)
+			return app.runConfigGet(args[0], showProvenance)
 		},
 	}
 	cmd.Flags().
@@ -932,53 +865,85 @@ func (app *application) newConfigGetCommand() *cobra.Command {
 	return cmd
 }
 
-//nolint:cyclop // key mapping table
+func (app *application) runConfigGet(key string, showProvenance bool) error {
+	val, ok := getConfigValue(app.cfg, key)
+	if !ok {
+		return exitCode(fmt.Errorf("%w: %q", errUnknownConfigKey, key), exitCodeUsage)
+	}
+
+	if app.outputJSON {
+		return app.writeConfigValueJSON(key, val, showProvenance)
+	}
+
+	if showProvenance && app.cfgMeta != nil {
+		if origin, found := app.cfgMeta.Where(key); found {
+			return app.writef("%v (from %s)\n", val, configOriginLabel(origin))
+		}
+	}
+
+	return app.writef("%v\n", val)
+}
+
+func (app *application) writeConfigValueJSON(key string, val any, showProvenance bool) error {
+	result := map[string]any{"key": key, "value": val}
+	if showProvenance && app.cfgMeta != nil {
+		if origin, found := app.cfgMeta.Where(key); found {
+			result["origin"] = map[string]any{
+				"source": string(origin.Source), "path": origin.Path,
+				"line": origin.Line, "raw_value": origin.RawValue,
+			}
+		}
+	}
+
+	return app.writeJSON(result)
+}
+
 func getConfigValue(cfg config.Config, key string) (any, bool) {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "ui.default_presence":
-		return cfg.UI.DefaultPresence, true
-	case "ui.sort":
-		return cfg.UI.Sort, true
-	case "ui.sort_desc":
-		if cfg.UI.SortDesc != nil {
-			return *cfg.UI.SortDesc, true
-		}
+	values := map[string]any{
+		"ui.default_presence":         cfg.UI.DefaultPresence,
+		"ui.sort":                     cfg.UI.Sort,
+		"ui.sort_desc":                configBool(cfg.UI.SortDesc, false),
+		"ui.absolute_time":            configBool(cfg.UI.AbsoluteTime, false),
+		"ui.time_format":              cfg.UI.TimeFormat,
+		"retention.tombstone_ttl":     cfg.Retention.TombstoneTTL,
+		"filter.ignore_harnesses":     cfg.Filter.IgnoreHarnesses,
+		"filter.ignore_paths":         cfg.Filter.IgnorePaths,
+		"tracker.interval":            cfg.Tracker.Interval,
+		"tracker.grace_period":        cfg.Tracker.GracePeriod,
+		"tracker.quiet":               configBool(cfg.Tracker.Quiet, false),
+		"detection.manifests_dir":     cfg.Detection.ManifestsDir,
+		"detection.screen_inspection": configBool(cfg.Detection.ScreenInspection, true),
+	}
+	value, ok := values[strings.ToLower(strings.TrimSpace(key))]
 
-		return false, true
-	case "ui.absolute_time":
-		if cfg.UI.AbsoluteTime != nil {
-			return *cfg.UI.AbsoluteTime, true
-		}
+	return value, ok
+}
 
-		return false, true
-	case "ui.time_format":
-		return cfg.UI.TimeFormat, true
-	case "retention.tombstone_ttl":
-		return cfg.Retention.TombstoneTTL, true
-	case "filter.ignore_harnesses":
-		return cfg.Filter.IgnoreHarnesses, true
-	case "filter.ignore_paths":
-		return cfg.Filter.IgnorePaths, true
-	case "tracker.interval":
-		return cfg.Tracker.Interval, true
-	case "tracker.grace_period":
-		return cfg.Tracker.GracePeriod, true
-	case "tracker.quiet":
-		if cfg.Tracker.Quiet != nil {
-			return *cfg.Tracker.Quiet, true
-		}
+func configBool(value *bool, fallback bool) bool {
+	if value != nil {
+		return *value
+	}
 
-		return false, true
-	case "detection.manifests_dir":
-		return cfg.Detection.ManifestsDir, true
-	case "detection.screen_inspection":
-		if cfg.Detection.ScreenInspection != nil {
-			return *cfg.Detection.ScreenInspection, true
-		}
+	return fallback
+}
 
-		return true, true
+func configKeys() []string {
+	return []string{
+		"ui.default_presence", "ui.sort", "ui.sort_desc", "ui.absolute_time", "ui.time_format",
+		"retention.tombstone_ttl", "filter.ignore_harnesses", "filter.ignore_paths",
+		"tracker.interval", "tracker.grace_period", "tracker.quiet",
+		"detection.manifests_dir", "detection.screen_inspection",
+	}
+}
+
+func configOriginLabel(origin strata.Origin) string {
+	switch {
+	case origin.Line > 0:
+		return fmt.Sprintf("%s:%d", origin.Path, origin.Line)
+	case origin.Path != "":
+		return fmt.Sprintf("%s %s", origin.Source, origin.Path)
 	default:
-		return nil, false
+		return string(origin.Source)
 	}
 }
 
@@ -1097,7 +1062,6 @@ func ensureEditableConfigFile(path string) error {
 	return nil
 }
 
-//nolint:gocognit,cyclop // manage config init path, stdin template output, directory checks, and publication
 func (app *application) newConfigInitCommand() *cobra.Command {
 	var force bool
 
@@ -1107,64 +1071,81 @@ func (app *application) newConfigInitCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if app.noConfig {
-				return exitCode(errNoConfigDisallowsInit, exitCodeUsage)
-			}
-
-			if app.configPath == "-" && app.outputJSON {
-				return exitCode(errInitJSONTemplateConflict, exitCodeUsage)
-			}
-
-			if app.configPath == "-" {
-				return app.writef("%s", config.DefaultConfigTemplate())
-			}
-
-			path, err := app.configEditPath()
-			if err != nil {
-				return exitCode(err, exitCodeUsage)
-			}
-
-			info, err := os.Stat(path)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("%w %s: %w", config.ErrAccessConfig, path, err)
-			}
-
-			if err == nil && info.IsDir() {
-				return fmt.Errorf("%w: %s", config.ErrConfigIsDirectory, path)
-			}
-
-			if err == nil && !force {
-				if app.outputJSON {
-					return app.writeJSON(map[string]any{
-						"created": false,
-						"path":    path,
-						"message": "config file already exists (use --force to overwrite)",
-					})
-				}
-
-				app.warnf("config file already exists at %s (use --force to overwrite)\n", path)
-
-				return nil
-			}
-
-			if err := config.WriteConfigFile(path); err != nil {
-				return fmt.Errorf("init config: %w", err)
-			}
-
-			if app.outputJSON {
-				return app.writeJSON(map[string]any{
-					"created": true,
-					"path":    path,
-				})
-			}
-
-			app.warnf("created %s\n", path)
-
-			return nil
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return app.runConfigInit(force)
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing configuration file")
 
 	return cmd
+}
+
+func (app *application) runConfigInit(force bool) error {
+	if app.noConfig {
+		return exitCode(errNoConfigDisallowsInit, exitCodeUsage)
+	}
+
+	if app.configPath == "-" && app.outputJSON {
+		return exitCode(errInitJSONTemplateConflict, exitCodeUsage)
+	}
+
+	if app.configPath == "-" {
+		return app.writef("%s", config.DefaultConfigTemplate())
+	}
+
+	path, err := app.configEditPath()
+	if err != nil {
+		return exitCode(err, exitCodeUsage)
+	}
+
+	exists, err := configInitFileExists(path)
+	if err != nil {
+		return err
+	}
+
+	if exists && !force {
+		return app.reportConfigInit(path, false)
+	}
+
+	if err := config.WriteConfigFile(path); err != nil {
+		return fmt.Errorf("init config: %w", err)
+	}
+
+	return app.reportConfigInit(path, true)
+}
+
+func configInitFileExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("%w %s: %w", config.ErrAccessConfig, path, err)
+	}
+
+	if err == nil && info.IsDir() {
+		return false, fmt.Errorf("%w: %s", config.ErrConfigIsDirectory, path)
+	}
+
+	return err == nil, nil
+}
+
+func (app *application) reportConfigInit(path string, created bool) error {
+	if !created {
+		if app.outputJSON {
+			return app.writeJSON(map[string]any{
+				"created": false, "path": path,
+				"message": "config file already exists (use --force to overwrite)",
+			})
+		}
+
+		app.warnf("config file already exists at %s (use --force to overwrite)\n", path)
+
+		return nil
+	}
+
+	if app.outputJSON {
+		return app.writeJSON(map[string]any{"created": true, "path": path})
+	}
+
+	app.warnf("created %s\n", path)
+
+	return nil
 }

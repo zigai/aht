@@ -1031,7 +1031,6 @@ func shortRegistryID(id string) string {
 	return id[:separator+1] + id[separator+1:separator+1+registryIDShortLength]
 }
 
-//nolint:gocognit // prefix grouping and neighbor common prefix calculation
 func abbreviatedRegistryIDs(sessions []registry.Session) map[string]string {
 	if len(sessions) == 0 {
 		return nil
@@ -1050,49 +1049,49 @@ func abbreviatedRegistryIDs(sessions []registry.Session) map[string]string {
 	}
 
 	result := make(map[string]string, len(sessions))
+
 	for prefix, items := range byPrefix {
-		if len(items) == 1 {
-			it := items[0]
-			if len(it.suffix) <= registryIDShortLength {
-				result[it.id] = it.id
-			} else {
-				result[it.id] = prefix + it.suffix[:registryIDShortLength]
-			}
-
-			continue
-		}
-
 		slices.SortFunc(items, func(a, b item) int {
 			return strings.Compare(a.suffix, b.suffix)
 		})
 
 		for i, it := range items {
-			if len(it.suffix) <= registryIDShortLength {
-				result[it.id] = it.id
-				continue
-			}
-
-			length := registryIDShortLength
-
+			previous, next := "", ""
 			if i > 0 {
-				common := commonPrefixLength(it.suffix, items[i-1].suffix)
-				if common >= length {
-					length = min(common+1, len(it.suffix))
-				}
+				previous = items[i-1].suffix
 			}
 
 			if i+1 < len(items) {
-				common := commonPrefixLength(it.suffix, items[i+1].suffix)
-				if common >= length {
-					length = min(common+1, len(it.suffix))
-				}
+				next = items[i+1].suffix
 			}
 
-			result[it.id] = prefix + it.suffix[:length]
+			result[it.id] = abbreviatedRegistryID(it.id, prefix, it.suffix, previous, next)
 		}
 	}
 
 	return result
+}
+
+func abbreviatedRegistryID(
+	id string,
+	prefix string,
+	suffix string,
+	previous string,
+	next string,
+) string {
+	if len(suffix) <= registryIDShortLength {
+		return id
+	}
+
+	length := registryIDShortLength
+
+	for _, neighbor := range []string{previous, next} {
+		if common := commonPrefixLength(suffix, neighbor); common >= length {
+			length = min(common+1, len(suffix))
+		}
+	}
+
+	return prefix + suffix[:length]
 }
 
 func splitRegistryID(id string) (string, string) {

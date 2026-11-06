@@ -306,7 +306,6 @@ func snapshotWatchEvents(s []registry.Session, at time.Time) []watchEvent {
 	return o
 }
 
-//nolint:cyclop // event diffing compares each independent session dimension
 func diffWatchEvents(
 	p map[string]registry.Session,
 	n map[string]registry.Session,
@@ -321,33 +320,7 @@ func diffWatchEvents(
 			continue
 		}
 
-		if v.Presence() != old.Presence() {
-			changed := watchEventFromSession(watchActionPresenceChanged, v, at)
-			changed.PreviousPresence = old.Presence()
-
-			o = append(o, changed)
-			if v.Presence() == registry.PresenceGone {
-				o = append(o, watchEventFromSession(watchActionProcessGone, v, at))
-			}
-		}
-
-		if v.Presence() == registry.PresenceLive && v.Process != nil && old.Process == nil {
-			o = append(o, watchEventFromSession(watchActionProcessBound, v, at))
-		}
-
-		if !activityEqual(v.Activity(), old.Activity()) {
-			changed := watchEventFromSession(watchActionActivityChanged, v, at)
-			changed.PreviousActivity = old.Activity()
-			o = append(o, changed)
-		}
-
-		if !multiplexerLocationEqual(v.Location, old.Location) {
-			o = append(o, watchEventFromSession(watchActionLocationChanged, v, at))
-		}
-
-		if nativeEvent(v) != nativeEvent(old) {
-			o = append(o, watchEventFromSession(watchActionNativeEvent, v, at))
-		}
+		o = append(o, changedSessionWatchEvents(old, v, at)...)
 	}
 
 	for id, v := range p {
@@ -357,6 +330,44 @@ func diffWatchEvents(
 	}
 
 	sortWatchEvents(o)
+
+	return o
+}
+
+func changedSessionWatchEvents(
+	old registry.Session,
+	v registry.Session,
+	at time.Time,
+) []watchEvent {
+	o := []watchEvent{}
+
+	if v.Presence() != old.Presence() {
+		changed := watchEventFromSession(watchActionPresenceChanged, v, at)
+		changed.PreviousPresence = old.Presence()
+
+		o = append(o, changed)
+		if v.Presence() == registry.PresenceGone {
+			o = append(o, watchEventFromSession(watchActionProcessGone, v, at))
+		}
+	}
+
+	if v.Presence() == registry.PresenceLive && v.Process != nil && old.Process == nil {
+		o = append(o, watchEventFromSession(watchActionProcessBound, v, at))
+	}
+
+	if !activityEqual(v.Activity(), old.Activity()) {
+		changed := watchEventFromSession(watchActionActivityChanged, v, at)
+		changed.PreviousActivity = old.Activity()
+		o = append(o, changed)
+	}
+
+	if !multiplexerLocationEqual(v.Location, old.Location) {
+		o = append(o, watchEventFromSession(watchActionLocationChanged, v, at))
+	}
+
+	if nativeEvent(v) != nativeEvent(old) {
+		o = append(o, watchEventFromSession(watchActionNativeEvent, v, at))
+	}
 
 	return o
 }

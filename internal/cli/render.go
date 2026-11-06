@@ -50,7 +50,6 @@ func (app *application) writeWrappedHumanTable(columns []humanColumn, rows [][]s
 	return app.writeHumanTableRows(columns, rows, true)
 }
 
-//nolint:cyclop // standard human table formatting with validation and wrapping branches
 func (app *application) writeHumanTableRows(
 	columns []humanColumn,
 	rows [][]string,
@@ -85,6 +84,10 @@ func (app *application) writeHumanTableRows(
 		return app.writeDirectHumanTable(columns, rows)
 	}
 
+	return app.writePrettyHumanTable(columns, rows)
+}
+
+func (app *application) writePrettyHumanTable(columns []humanColumn, rows [][]string) error {
 	writer := prettytable.NewWriter()
 	style := prettytable.StyleDefault
 	style.Box.PaddingLeft = ""
@@ -130,7 +133,6 @@ func (app *application) writeHumanTableRows(
 	return nil
 }
 
-//nolint:gocognit,cyclop // fast-path direct table streaming without intermediate DOM allocations
 func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]string) error {
 	bw := bufio.NewWriter(app.stdout)
 	defer func() { _ = bw.Flush() }()
@@ -142,20 +144,7 @@ func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]st
 			headerBuf.WriteString("  ")
 		}
 
-		w := col.width
-
-		sw := text.StringWidth(col.heading)
-		if sw < w {
-			if col.align == text.AlignRight {
-				headerBuf.WriteString(strings.Repeat(" ", w-sw))
-				headerBuf.WriteString(col.heading)
-			} else {
-				headerBuf.WriteString(col.heading)
-				headerBuf.WriteString(strings.Repeat(" ", w-sw))
-			}
-		} else {
-			headerBuf.WriteString(col.heading)
-		}
+		writePaddedHumanCell(&headerBuf, col.heading, col.width, col.align)
 	}
 
 	headerLine := strings.TrimRight(headerBuf.String(), " ")
@@ -180,20 +169,7 @@ func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]st
 			}
 
 			col := columns[i]
-			textVal := truncateHumanText(cell, col.width)
-
-			sw := text.StringWidth(textVal)
-			if sw < col.width {
-				if col.align == text.AlignRight {
-					rowBuf.WriteString(strings.Repeat(" ", col.width-sw))
-					rowBuf.WriteString(textVal)
-				} else {
-					rowBuf.WriteString(textVal)
-					rowBuf.WriteString(strings.Repeat(" ", col.width-sw))
-				}
-			} else {
-				rowBuf.WriteString(textVal)
-			}
+			writePaddedHumanCell(&rowBuf, truncateHumanText(cell, col.width), col.width, col.align)
 		}
 
 		rowLine := strings.TrimRight(rowBuf.String(), " ")
@@ -207,6 +183,24 @@ func (app *application) writeDirectHumanTable(columns []humanColumn, rows [][]st
 	}
 
 	return nil
+}
+
+func writePaddedHumanCell(buf *strings.Builder, value string, width int, align text.Align) {
+	gap := width - text.StringWidth(value)
+	if gap <= 0 {
+		buf.WriteString(value)
+		return
+	}
+
+	if align == text.AlignRight {
+		buf.WriteString(strings.Repeat(" ", gap))
+		buf.WriteString(value)
+
+		return
+	}
+
+	buf.WriteString(value)
+	buf.WriteString(strings.Repeat(" ", gap))
 }
 
 func normalizeHumanTableLayout(rendered string) string {
