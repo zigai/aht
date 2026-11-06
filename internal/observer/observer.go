@@ -152,8 +152,9 @@ type cycleInventory struct {
 }
 
 type trackedUpdate struct {
-	next    map[processKey]trackedProcess
-	retired []processKey
+	next       map[processKey]trackedProcess
+	retired    []processKey
+	candidates map[processKey]time.Time
 }
 
 type Observer struct {
@@ -380,6 +381,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		return o.failCycle(at, "process-enumeration", err, "listing processes", result)
 	}
 
+	processes = slices.Clone(processes)
 	result.Processes = len(processes)
 
 	panes, paneErr := o.paneList(ctx, processes)
@@ -413,8 +415,15 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	catalogEntries, catalogByPID := claimCurrentCatalogEntries(catalogEntries, processByPID)
 	harnessByPID := resolveHarnesses(processes)
 	pruneNestedHarnesses(processes, processByPID, harnessByPID)
+	normalizeHarnessForeground(processes, processByPID, harnessByPID)
 
-	o.holdUnconfirmedProcesses(knownSessions, catalogByPID, processByPID, harnessByPID, at)
+	candidates := o.holdUnconfirmedProcesses(
+		knownSessions,
+		catalogByPID,
+		processByPID,
+		harnessByPID,
+		at,
+	)
 
 	inventory := cycleInventory{
 		processes:     processes,
@@ -452,6 +461,8 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	observations = append(observations, catalogObservations(catalogEntries, processByPID, at)...)
 
 	gone, update := o.retireMissingProcesses(current, at)
+	update.candidates = candidates
+
 	observations = append(observations, gone...)
 	result.Gone += len(gone)
 
@@ -489,27 +500,22 @@ func (o *Observer) paneObservations(
 			inventory.harnessByPID,
 			paneCommandCounts,
 		)
-		if !ok || locationPIDs[process.PID] {
-			continue
-		}
 
+		claimed := locationPIDs[process.PID]
 		observations = append(
 			observations,
-			registry.Observation{
-				Harness: harnessID,
-				At:      at,
-				Subject: registry.ObservationIdentity{
-					SessionID:   "",
-					SessionPath: "",
-					CWD:         "",
-					Attributes:  nil,
-				},
-				Evidence: &registry.Placement{
-					Process:  *processIdentity(process),
-					Location: paneLocation(pane),
-				},
-			},
+			panePlacementObservations(inventory, pane, process, ok, locationPIDs, at)...,
 		)
+
+		if !ok || claimed ||
+			nestedHarnessProcess(process, inventory.processByPID, inventory.harnessByPID) {
+			continue
+		}
+		// Only infer a foreground owner when controlling-TTY job-control metadata is unavailable.
+		if !process.Foreground && ((process.ProcessGroupID > 0 && process.TTY != "") ||
+			paneForegroundKnown(pane, inventory.processes)) {
+			continue
+		}
 
 		screenObservation, detected, err := o.detectScreenState(
 			ctx,
@@ -527,8 +533,6 @@ func (o *Observer) paneObservations(
 		if err != nil {
 			detectErr = err
 		}
-
-		locationPIDs[process.PID] = true
 	}
 
 	return observations, locationPIDs, detectErr
@@ -540,8 +544,9 @@ func (o *Observer) retireMissingProcesses(
 ) ([]registry.Observation, trackedUpdate) {
 	observations := make([]registry.Observation, 0)
 	update := trackedUpdate{
-		next:    make(map[processKey]trackedProcess, len(current)+len(o.tracked)),
-		retired: make([]processKey, 0),
+		next:       make(map[processKey]trackedProcess, len(current)+len(o.tracked)),
+		retired:    make([]processKey, 0),
+		candidates: nil,
 	}
 	maps.Copy(update.next, current)
 
@@ -619,6 +624,8 @@ func (o *Observer) recordObservations(
 	}
 
 	o.tracked = update.next
+
+	o.candidates = update.candidates
 	if err := o.recordCycleHealth(at, result); err != nil {
 		result = result.withDegradation(err)
 
@@ -933,6 +940,12 @@ func catalogObservations(
 			Current:       entry.Current,
 		}
 
+		if entry.Current {
+			if process, ok := catalogListedProcess(entry, processByPID); ok {
+				metadata.ProcessStartIdentity = process.StartIdentity
+			}
+		}
+
 		observations = append(
 			observations,
 			registry.Observation{
@@ -974,7 +987,7 @@ func (o *Observer) holdUnconfirmedProcesses(
 	processByPID map[int]processinfo.Process,
 	harnessByPID map[int]registry.Harness,
 	at time.Time,
-) {
+) map[processKey]time.Time {
 	pending := make(map[processKey]time.Time)
 
 	for pid, harnessID := range harnessByPID {
@@ -993,7 +1006,7 @@ func (o *Observer) holdUnconfirmedProcesses(
 		delete(harnessByPID, pid)
 	}
 
-	o.candidates = pending
+	return pending
 }
 
 // processConfirmed reports whether a harness process may create or update a
@@ -2070,4 +2083,38 @@ func (r Result) withDegradation(err error) Result {
 	r.Error = err.Error()
 
 	return r
+}
+
+func panePlacementObservations(
+	inventory cycleInventory, pane mux.Pane, process processinfo.Process, selected bool,
+	locationPIDs map[int]bool, at time.Time,
+) []registry.Observation {
+	var observations []registry.Observation
+
+	for _, candidate := range inventory.processes {
+		candidateHarness := inventory.harnessByPID[candidate.PID]
+		if candidateHarness == "" || locationPIDs[candidate.PID] ||
+			((!selected || candidate.PID != process.PID) &&
+				!processTiedToPane(candidate, pane, inventory.processByPID)) {
+			continue
+		}
+
+		observations = append(observations, registry.Observation{
+			Harness: candidateHarness,
+			Subject: registry.ObservationIdentity{
+				SessionID:   "",
+				SessionPath: "",
+				CWD:         "",
+				Attributes:  nil,
+			},
+			At: at,
+			Evidence: &registry.Placement{
+				Process:  *processIdentity(candidate),
+				Location: paneLocation(pane),
+			},
+		})
+		locationPIDs[candidate.PID] = true
+	}
+
+	return observations
 }

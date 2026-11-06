@@ -164,6 +164,108 @@ func multiplexerPaneProcess(
 	return empty, "", false
 }
 
+func processTiedToPane(
+	process processinfo.Process,
+	pane mux.Pane,
+	byPID map[int]processinfo.Process,
+) bool {
+	location := paneLocation(pane)
+	if location.PaneTTY != "" && process.TTY == location.PaneTTY {
+		return true
+	}
+
+	if process.PID == location.PanePID || processDescendsFrom(process, location.PanePID, byPID) {
+		return true
+	}
+
+	for _, reference := range pane.Processes {
+		if process.PID == reference.PID || processDescendsFrom(process, reference.PID, byPID) {
+			return true
+		}
+	}
+
+	return multiplexerIdentityMatches(process, location)
+}
+
+func processDescendsFrom(
+	process processinfo.Process,
+	rootPID int,
+	byPID map[int]processinfo.Process,
+) bool {
+	if rootPID <= 0 {
+		return false
+	}
+
+	for range len(byPID) {
+		if process.PPID == rootPID {
+			return true
+		}
+
+		parent, ok := byPID[process.PPID]
+		if !ok || parent.PID == process.PID {
+			break
+		}
+
+		process = parent
+	}
+
+	return false
+}
+
+func normalizeHarnessForeground(
+	processes []processinfo.Process,
+	byPID map[int]processinfo.Process,
+	harnessByPID map[int]registry.Harness,
+) {
+	for index, process := range processes {
+		if !process.Foreground || harnessByPID[process.PID] == "" {
+			continue
+		}
+
+		if nestedHarnessProcess(process, byPID, harnessByPID) {
+			// The kernel foreground flag covers a process group, including nested noninteractive agents.
+			processes[index].Foreground = false
+		}
+	}
+
+	for _, process := range processes {
+		byPID[process.PID] = process
+	}
+}
+
+func nestedHarnessProcess(
+	process processinfo.Process,
+	byPID map[int]processinfo.Process,
+	harnessByPID map[int]registry.Harness,
+) bool {
+	ancestor := process
+	for range len(byPID) {
+		parent, ok := byPID[ancestor.PPID]
+		if !ok || parent.PID == ancestor.PID || parent.PID == process.PID {
+			break
+		}
+
+		if harnessByPID[parent.PID] != "" {
+			return true
+		}
+
+		ancestor = parent
+	}
+
+	return false
+}
+
+func paneForegroundKnown(pane mux.Pane, processes []processinfo.Process) bool {
+	tty := paneLocation(pane).PaneTTY
+	for _, process := range processes {
+		if tty != "" && process.TTY == tty && (process.Foreground || process.ProcessGroupID > 0) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func processMatchingMultiplexerIdentity(
 	pane mux.Pane,
 	processes []processinfo.Process,
@@ -235,8 +337,9 @@ func foregroundPaneProcess(
 		selectedHarness registry.Harness
 	)
 
+	tty := paneLocation(pane).PaneTTY
 	for _, process := range processes {
-		if !process.Foreground || pane.ProcessTTY == "" || process.TTY != pane.ProcessTTY {
+		if !process.Foreground || tty == "" || process.TTY != tty {
 			continue
 		}
 

@@ -87,9 +87,22 @@ func TestObserverSeededWorld(t *testing.T) {
 	coverage := registrycheck.NewCoverage()
 	allPassed := true
 
+	seedCases := []uint64{2, 6, 8}
+
 	for seed := range seeds {
+		if seed != 2 && seed != 6 && seed != 8 {
+			seedCases = append(seedCases, seed)
+		}
+	}
+
+	for _, seed := range seedCases {
+		seedSteps := steps
+		if seed == 2 || seed == 6 || seed == 8 {
+			seedSteps = max(seedSteps, 160)
+		}
+
 		passed := t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) { runSimulationSeed(t, seed, steps, coverage) })
+			synctest.Test(t, func(t *testing.T) { runSimulationSeed(t, seed, seedSteps, coverage) })
 		})
 		allPassed = allPassed && passed
 	}
@@ -484,14 +497,14 @@ func (w *simulationWorld) report(ctx context.Context, event simulationEvent, slo
 		return nil
 	}
 
-	previousSequence, err := w.previousSequence(ctx, actor.sessionID)
-	if err != nil {
-		return err
-	}
-
 	report := w.makeReport(actor, event)
 	if report == nil {
 		return nil
+	}
+
+	previousSequence, err := w.previousSequence(ctx, actor.sessionID, report)
+	if err != nil {
+		return err
 	}
 
 	_, err = w.store.Observe(
@@ -550,7 +563,11 @@ func (w *simulationWorld) checkReplayedReport(
 	return nil
 }
 
-func (w *simulationWorld) previousSequence(ctx context.Context, sessionID string) (uint64, error) {
+func (w *simulationWorld) previousSequence(
+	ctx context.Context,
+	sessionID string,
+	report *registry.Report,
+) (uint64, error) {
 	sessions, err := w.store.List(ctx, registry.Filter{})
 	if err != nil {
 		return 0, fmt.Errorf("listing report sequence: %w", err)
@@ -558,7 +575,17 @@ func (w *simulationWorld) previousSequence(ctx context.Context, sessionID string
 
 	for _, session := range sessions {
 		if session.SessionID == sessionID && session.Observations.Native != nil &&
-			session.Observations.Native.Reporter.Sequence != nil {
+			session.Observations.Native.Reporter.Sequence != nil && report.Process != nil &&
+			session.Observations.Native.Process.Equal(*report.Process) {
+			lifecycle := report.Lifecycle
+			if session.Presence() == registry.PresenceGone && lifecycle != nil &&
+				(*lifecycle == registry.NativeLifecycleStart || *lifecycle == registry.NativeLifecycleResume) &&
+				time.Now().
+					After(session.Incarnation.TransitionAt) &&
+				time.Now().After(session.Incarnation.EvidenceAt) {
+				return 0, nil
+			}
+
 			return *session.Observations.Native.Reporter.Sequence, nil
 		}
 	}

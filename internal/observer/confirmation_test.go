@@ -3,6 +3,7 @@ package observer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -496,5 +497,68 @@ func TestObserverHealthFileWrittenOnStatusChangeOrSlowInterval(t *testing.T) {
 	// The slow interval refreshes an unchanged status.
 	if next := cycle(healthWriteInterval); next == recovered {
 		t.Fatal("health was not refreshed after the slow interval")
+	}
+}
+
+var errBatchWriteOnce = errors.New("observation batch write failed once")
+
+type failFirstBatchStore struct {
+	Store
+
+	failed bool
+}
+
+func (store *failFirstBatchStore) ObserveBatch(
+	ctx context.Context,
+	observations []registry.Observation,
+) ([]registry.Session, error) {
+	if !store.failed {
+		store.failed = true
+		return nil, errBatchWriteOnce
+	}
+
+	sessions, err := store.Store.ObserveBatch(ctx, observations)
+	if err != nil {
+		return nil, fmt.Errorf("delegate observation batch: %w", err)
+	}
+
+	return sessions, nil
+}
+
+func TestObserverRecordsConfirmedProcessAfterFailedWrite(t *testing.T) {
+	t.Parallel()
+	journal := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := &failFirstBatchStore{Store: journal}
+	process := agentProcess(4250)
+	fixture := &confirmationFixture{at: time.Now().UTC(), processes: []processinfo.Process{process}}
+	watcher := newConfirmationObserver(store, fixture, 3*time.Second)
+
+	for range 3 {
+		if result := continuousCycle(t, watcher); result.Observations != 0 {
+			t.Fatalf("process observed before confirmation: %#v", result)
+		}
+
+		fixture.advance(time.Second, process)
+	}
+
+	watcher.continuous = true
+	if _, err := watcher.runCycle(context.Background()); !errors.Is(err, errBatchWriteOnce) {
+		t.Fatalf("confirming cycle error = %v, want injected write failure", err)
+	}
+
+	fixture.advance(time.Second, process)
+	continuousCycle(t, watcher)
+
+	sessions, err := journal.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(sessions) != 1 || sessions[0].Process == nil || sessions[0].Process.PID != process.PID {
+		t.Fatalf(
+			"sessions after the write retry cycle = %#v, want one session for pid %d",
+			sessions,
+			process.PID,
+		)
 	}
 }

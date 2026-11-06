@@ -1068,7 +1068,24 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 		t.Fatal(err)
 	}
 
-	// 4. Agent end hook with interrupted activity
+	// 4. Process evidence belongs to the restarted incarnation.
+	_, err = store.Observe(context.Background(), registry.Observation{
+		Harness: registry.Harness("omp"),
+		At:      at.Add(2500 * time.Millisecond),
+		Subject: registry.ObservationIdentity{SessionID: "stale-session"},
+		Evidence: &registry.Sighting{
+			Process: registry.ProcessIdentity{
+				PID:           process.PID,
+				StartIdentity: process.StartIdentity,
+			},
+			Present: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Agent end hook with interrupted activity
 	_, err = store.Observe(
 		context.Background(),
 		registry.Observation{

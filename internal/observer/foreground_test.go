@@ -1,9 +1,15 @@
 package observer
 
 import (
+	"context"
+	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 	"github.com/zigai/aht/v2/pkg/tmux"
 )
@@ -120,4 +126,93 @@ func TestPaneProcessPrefersForegroundAgentOnControllingTTY(t *testing.T) {
 			ok,
 		)
 	}
+}
+
+func TestSuspendedHarnessKeepsPaneLocationWhenAnotherStarts(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	at := time.Now().UTC().Add(-time.Minute)
+
+	shell := processinfo.Process{
+		PID: 10, PPID: 1, ProcessGroupID: 10, StartIdentity: "boot:10",
+		Executable: "zsh", TTY: "/dev/pts/4", Args: []string{"zsh"},
+	}
+	claude := processinfo.Process{
+		PID: 21, PPID: 10, ProcessGroupID: 21, Foreground: true, StartIdentity: "boot:21",
+		Executable: "claude", CWD: "/work", TTY: "/dev/pts/4", Args: []string{"claude"},
+	}
+	pane := mux.Pane{
+		Location: registry.Location{
+			Kind:     registry.MultiplexerTmux,
+			ServerID: "default",
+			PaneID:   "%4",
+			PaneTTY:  "/dev/pts/4",
+			PanePID:  shell.PID,
+		},
+		Processes:  []mux.ProcessRef{{PID: shell.PID, ProcessGroupID: shell.PID, Command: "zsh"}},
+		ProcessTTY: "/dev/pts/4",
+		Command:    "claude",
+		CWD:        "/work",
+	}
+	processes := []processinfo.Process{shell, claude}
+	watcher := New(Options{
+		StorePath:   path,
+		Now:         func() time.Time { return at },
+		ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil },
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return []mux.Pane{pane}, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		LocationPresence: func(context.Context, registry.Location) (registry.Presence, error) {
+			return registry.PresenceLive, nil
+		},
+		DisableScreenInspection: true,
+		HealthPath:              path + ".health",
+	})
+
+	if _, err := watcher.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	location := sessionLocationForPID(t, path, claude.PID)
+	if location.PaneID != pane.Location.PaneID {
+		t.Fatalf("foreground claude location = %#v, want pane %s", location, pane.Location.PaneID)
+	}
+
+	// Ctrl-Z stops claude; codex then starts in the foreground of the same pane.
+	suspended := claude
+	suspended.Foreground = false
+	codex := processinfo.Process{
+		PID: 22, PPID: 10, ProcessGroupID: 22, Foreground: true, StartIdentity: "boot:22",
+		Executable: "codex", CWD: "/work", TTY: "/dev/pts/4", Args: []string{"codex"},
+	}
+	processes = []processinfo.Process{shell, suspended, codex}
+	pane.Command = "codex"
+	at = at.Add(time.Second)
+
+	if _, err := watcher.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	location = sessionLocationForPID(t, path, claude.PID)
+	if location.PaneID != pane.Location.PaneID {
+		t.Fatalf("suspended claude location = %#v, want pane %s", location, pane.Location.PaneID)
+	}
+}
+
+func sessionLocationForPID(t *testing.T, path string, pid int) registry.Location {
+	t.Helper()
+
+	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+		List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	index := slices.IndexFunc(sessions, func(session registry.Session) bool {
+		return session.Process != nil && session.Process.PID == pid
+	})
+	if index < 0 {
+		t.Fatalf("no session for pid %d: %#v", pid, sessions)
+	}
+
+	return sessions[index].Location
 }
