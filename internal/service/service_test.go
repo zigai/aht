@@ -397,7 +397,6 @@ func requireRetryableUpdateAfterManagerFailure(t *testing.T, failAt int) {
 	}
 
 	previous := []byte("# " + ManagedMarker + "\n# version: 2\nstale\n")
-	//nolint:gosec // The fixture mirrors systemd's intentionally world-readable user-unit mode.
 	if err := os.WriteFile(path, previous, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +564,7 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 func TestNormalizeOptionsResolvesBinaryFromPath(t *testing.T) {
 	binDir := t.TempDir()
 	binary := filepath.Join(binDir, "aht")
-	//nolint:gosec // This private fixture must be executable for executable-path lookup.
+
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}

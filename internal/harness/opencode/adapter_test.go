@@ -54,7 +54,6 @@ func runOpencodeDriverOutput(t *testing.T, driverSource string) string {
 	reporter := filepath.Join(dir, "reporter")
 	// Each invocation is a real subprocess. The driver deliberately ignores
 	// event promises, matching OpenCode's native event dispatch.
-	//nolint:gosec // test helper creates an executable reporter script
 	if err := os.WriteFile(
 		reporter,
 		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$AHT_CAPTURE\"\n"),
@@ -151,7 +150,7 @@ func TestPluginDefaultExportShape(t *testing.T) {
 
 	dir := t.TempDir()
 	reporter := filepath.Join(dir, "reporter")
-	//nolint:gosec // test helper creates an executable reporter script
+
 	if err := os.WriteFile(reporter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +209,7 @@ func TestOpencodeV2EventStateTransitions(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "reports")
 	reporter := filepath.Join(dir, "reporter")
-	//nolint:gosec // test helper creates an executable reporter script
+
 	if err := os.WriteFile(
 		reporter,
 		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$AHT_CAPTURE\"\n"),

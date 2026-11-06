@@ -191,7 +191,7 @@ if [ -n "$record" ]; then printf '%%s\n' "$record" >> %s; fi
 exec %s "$@"
 `, quote(evidence), quote(path+".real"))
 	// reason: G306; the launcher is an owner-only executable the native host runs.
-	if err := os.WriteFile( //nolint:gosec // Intentional local test-provider lifecycle; see above.
+	if err := os.WriteFile(
 		path,
 
 		[]byte(script),

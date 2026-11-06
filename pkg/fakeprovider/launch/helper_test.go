@@ -260,7 +260,7 @@ func fakeAHT(t *testing.T) string {
 	script := "#!/bin/sh\nexec " + shellQuote(
 		testExecutable(t),
 	) + " " + helperArgument + " aht \"$@\"\n"
-	if err := os.WriteFile( //nolint:gosec // reason: G306; the fake aht must be executable by the launch.
+	if err := os.WriteFile(
 		path,
 		[]byte(script),
 		0o700,

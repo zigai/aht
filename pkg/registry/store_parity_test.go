@@ -778,7 +778,7 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 	fileStore.setNowForTest(func() time.Time { return clock })
 	memoryStore.setNowForTest(func() time.Time { return clock })
 
-	generator := rand.New( //nolint:gosec // Reproducible property-test sequences are required.
+	generator := rand.New(
 		rand.NewPCG(seed, seed^0x9e3779b97f4a7c15),
 	)
 	replacementStep := generator.IntN(steps)

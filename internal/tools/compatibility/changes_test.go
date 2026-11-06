@@ -584,7 +584,6 @@ func TestCompatibilityUtilityProcess(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "output")
-			//nolint:gosec // re-executes current test binary with controlled flag in test helper
 			command := exec.CommandContext(
 				t.Context(),
 				os.Args[0],

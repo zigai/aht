@@ -25,7 +25,7 @@ func TestShutdownSurvivesEqualObservationTimestamps(t *testing.T) {
 	reporter := filepath.Join(dir, "reporter")
 	script := "#!" + node + "\nrequire('node:fs').appendFileSync(process.env.AHT_CAPTURE, " +
 		"JSON.stringify(process.argv.slice(2))+'\\n');\n"
-	//nolint:gosec // test helper creates an executable reporter script
+
 	if err := os.WriteFile(reporter, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
