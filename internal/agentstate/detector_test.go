@@ -95,7 +95,7 @@ func TestBundledManifestsClassifyTargetAgents(t *testing.T) {
 		},
 		{
 			registry.Harness("codex"),
-			"Operation cancelled by user", //nolint:misspell // Fixture mirrors Codex output.
+			"Operation cancelled by user",
 			registry.ActivityInterrupted,
 			"interrupted_prompt",
 		},

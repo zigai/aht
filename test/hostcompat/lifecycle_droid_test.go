@@ -227,7 +227,7 @@ func (session *droidRPCSession) observeTurnCompleted(
 
 	reason := "completed"
 	if session.interrupt {
-		reason = "cancelled" //nolint:misspell // reason: "cancelled" is the Droid agent_turn_completed reason value.
+		reason = "cancelled"
 	}
 
 	if session.completed || session.turnID == "" || notification["turnId"] != session.turnID ||

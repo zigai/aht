@@ -373,7 +373,7 @@ func NormalizeActivity(value string) (Activity, error) {
 		"paused",
 		"stopped",
 		"canceled",
-		"cancelled": //nolint:misspell // British spelling remains a supported input alias.
+		"cancelled":
 		return ActivityInterrupted, nil
 	case string(ActivityUnknown):
 		return ActivityUnknown, nil

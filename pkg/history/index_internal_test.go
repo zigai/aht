@@ -1369,7 +1369,7 @@ func TestIndexMatchesDirectScan(t *testing.T) {
 			SessionPath: filepath.Join(linked, "1.jsonl"),
 		},
 	}
-	//nolint:gosmopolitan // Exercise literal matching of multi-byte Unicode queries.
+
 	for _, text := range []string{
 		"needle",
 		"NEEDLE",
@@ -1999,7 +1999,7 @@ func mutateHistorySameSize(property *rapid.T, root *os.Root, path string, body [
 func parityFixture(t *testing.T) Catalog {
 	t.Helper()
 	root := t.TempDir()
-	//nolint:gosmopolitan,dupword // Intentional Unicode and repeated-token matching fixtures.
+	//nolint:dupword // Repeated-token matching fixture.
 	texts := []string{
 		"İSTANBUL NEEDLE élan 你好世界",
 		`a%b_c *?[ ] "quoted" AND OR NEAR`,

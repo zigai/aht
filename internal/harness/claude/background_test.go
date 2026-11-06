@@ -175,6 +175,5 @@ func TestCronScheduleRejectsUnsupportedSyntax(t *testing.T) {
 }
 
 func localNoon(month time.Month, day int) time.Time {
-	//nolint:gosmopolitan // Claude Code evaluates session crons in the local timezone.
 	return time.Date(2026, month, day, 12, 0, 0, 0, time.Local)
 }

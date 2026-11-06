@@ -1336,8 +1336,7 @@ func (app *application) writeSearchGroups(matches []history.Match, groupBy strin
 			key = string(c.Harness)
 		case "day":
 			if !c.UpdatedAt.IsZero() {
-				// --group-by day buckets by the user's local calendar day
-				//nolint:gosmopolitan // Intentional locale-sensitive behavior or Unicode fixture; see above.
+				//nolint:gosmopolitan // --group-by day buckets by the user's local calendar day.
 				local := c.UpdatedAt.Local()
 				key = local.Format(time.DateOnly)
 			}

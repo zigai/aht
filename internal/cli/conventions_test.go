@@ -233,7 +233,6 @@ func TestFilesystemWatchPreservesRequestedFilter(t *testing.T) {
 }
 
 func TestListColumnsPreservePrimaryValuesAndUseCellWidths(t *testing.T) {
-	//nolint:gosmopolitan // Test fixture intentionally uses multibyte CJK characters to verify cell width calculations.
 	row := []string{
 		"kimi-code:123456789abcdef",
 		"kimi-code",

@@ -1454,12 +1454,12 @@ func TestSearchCLIStreamsJSONLines(t *testing.T) {
 
 func TestHighlightedLinesWrapAndMarkSpans(t *testing.T) {
 	t.Parallel()
-	//nolint:gosmopolitan // Wide and multi-byte runes exercise display-width wrapping.
+
 	value := "İİ alpha\x1b  beta 你好 gamma"
 	start := strings.Index(value, "beta")
 	lines := highlightedLines(value, []history.Span{{Start: start, End: start + len("beta")}}, 10)
 	joined := strings.Join(lines, "|")
-	//nolint:gosmopolitan // Wide runes exercise display-width wrapping.
+
 	want := "İİ alpha|" + highlightStart + "beta" + styleReset + " 你好|gamma"
 	if joined != want {
 		t.Fatalf("lines = %q, want %q", joined, want)
@@ -1489,7 +1489,7 @@ func TestParseSearchTime(t *testing.T) {
 			0,
 			0,
 			0,
-			time.Local, //nolint:gosmopolitan // Bare dates are parsed in the user's local zone.
+			time.Local,
 		),
 	} {
 		got, err := parseSearchTime(value, now)
@@ -1563,7 +1563,7 @@ func TestSearchCLIGroupsByDayNewestFirst(t *testing.T) {
 
 	day := func(at time.Time) string {
 		return at.In(
-			time.Local, //nolint:gosmopolitan // matches --group-by day local buckets
+			time.Local,
 		).Format(
 			time.DateOnly,
 		)

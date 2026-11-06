@@ -196,7 +196,6 @@ func TestHumanTablesFallbackPreservesCompleteValues(t *testing.T) {
 
 	app := &application{stdout: &output}
 	// Test fixture intentionally uses multibyte CJK characters to verify wrapped table formatting.
-	//nolint:gosmopolitan // Intentional locale-sensitive behavior or Unicode fixture; see above.
 	cjkChar := "界"
 	value := strings.Repeat(cjkChar, 90)
 
@@ -216,7 +215,7 @@ func TestHumanTablesFallbackPreservesCompleteValues(t *testing.T) {
 
 func TestHumanWrappingUsesDisplayCells(t *testing.T) {
 	t.Parallel()
-	//nolint:gosmopolitan // Test table intentionally includes multibyte CJK fixtures to verify cell width wrapping.
+
 	for _, value := range []string{"界世界世界世", "ab界cd界ef", "é/é/界/世界", "📦/🌍/directory"} {
 		for _, width := range []int{2, 3, 5, 8} {
 			got := truncateHumanText(value, width)

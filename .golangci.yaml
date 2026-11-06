@@ -214,6 +214,8 @@ linters:
         - "0750"
     misspell:
       locale: US
+      # External formats (GitHub Actions, ACP, Droid) spell this value with two Ls.
+      ignore-rules: [cancelled]
     nakedret:
       max-func-lines: 5
     revive:
@@ -327,7 +329,7 @@ linters:
         linters: [goconst]
 
       - path: ".*_test\\.go"
-        linters: [decorder, funcorder, dupl, maintidx]
+        linters: [decorder, funcorder, dupl, maintidx, gosmopolitan]
       - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.gameops|\\.stryker-tmp|\\.cache)(/|$))"
         linters: [whitespace]
 

@@ -593,11 +593,11 @@ func TestResultOutcomes(t *testing.T) {
 		{"failure", "failure", "infrastructure"},
 		{
 			"success",
-			"cancelled", //nolint:misspell // GitHub Actions uses the external outcome "cancelled".
+			"cancelled",
 			"incomplete",
 		},
 		{
-			"cancelled", //nolint:misspell // GitHub Actions uses the external outcome "cancelled".
+			"cancelled",
 			"skipped",
 			"incomplete",
 		},

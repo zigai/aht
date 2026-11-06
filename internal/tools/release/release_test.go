@@ -342,7 +342,7 @@ func TestReleaseWaitsForNewestCIToComplete(t *testing.T) {
 	for _, conclusion := range []string{
 		"success",
 		"failure",
-		"cancelled", //nolint:misspell // reason: GitHub Actions uses the external conclusion "cancelled".
+		"cancelled",
 	} {
 		t.Run(conclusion, func(t *testing.T) {
 			f := newFixture(t)

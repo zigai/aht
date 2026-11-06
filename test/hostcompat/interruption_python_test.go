@@ -10,9 +10,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// reason: "cancelled" is the ACP prompt-turn stopReason value.
-//
-//nolint:misspell // Exact protocol spelling; see above.
+// ACP reports a cancelled prompt turn with this stopReason value.
 const acpCancelledStopReason = "cancelled"
 
 // ACP cancellation is a notification; the original prompt returns the cancellation stop reason:
