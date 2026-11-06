@@ -40,7 +40,7 @@ var (
 	// ErrContradictoryCondition means contradictory wait conditions were specified.
 	ErrContradictoryCondition = errors.New("contradictory wait conditions specified")
 
-	// ErrInvalidDuration means a duration was negative or stable-for exceeded timeout.
+	// ErrInvalidDuration means a duration was negative or stable-for reached timeout.
 	ErrInvalidDuration = errors.New("invalid wait duration")
 
 	// ErrSessionRequired means a canonical session ID was not provided.
@@ -136,8 +136,8 @@ func (o WaitOptions) validateDurations() error {
 		return fmt.Errorf("%w: stable-for cannot be negative", ErrInvalidDuration)
 	}
 
-	if o.Timeout > 0 && o.StableFor > o.Timeout {
-		return fmt.Errorf("%w: stable-for duration cannot exceed timeout", ErrInvalidDuration)
+	if o.Timeout > 0 && o.StableFor >= o.Timeout {
+		return fmt.Errorf("%w: stable-for duration must be less than timeout", ErrInvalidDuration)
 	}
 
 	return nil

@@ -97,6 +97,16 @@ func TestWaitValidation(t *testing.T) {
 			wantErr: client.ErrInvalidDuration,
 		},
 		{
+			name: "stable-for equals timeout",
+			options: client.WaitOptions{
+				ID:        "sess-1",
+				Activity:  client.ActivityIdle,
+				Timeout:   time.Second,
+				StableFor: time.Second,
+			},
+			wantErr: client.ErrInvalidDuration,
+		},
+		{
 			name:    "empty condition",
 			options: client.WaitOptions{ID: "sess-1"},
 			wantErr: client.ErrConditionRequired,
@@ -807,8 +817,11 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 
 	select {
 	case waitErr := <-waitErrCh:
-		if !client.IsUnavailable(waitErr) {
-			t.Fatalf("Wait() error after disconnect = %v, want IsUnavailable", waitErr)
+		if !client.StreamClosed(waitErr) || client.IsUnavailable(waitErr) {
+			t.Fatalf(
+				"Wait() error after disconnect = %v, want stream closed, not unavailable",
+				waitErr,
+			)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Wait() to return after broker disconnect")
