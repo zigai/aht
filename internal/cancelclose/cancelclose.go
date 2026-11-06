@@ -3,6 +3,7 @@ package cancelclose
 import (
 	"context"
 	"io"
+	"sync"
 )
 
 // Closer represents a resource whose Close method is safe for concurrent
@@ -22,11 +23,15 @@ func OnCancel(ctx context.Context, resource Closer) func() {
 		_ = resource.Close()
 	})
 
-	return func() {
-		_ = resource.Close()
+	var once sync.Once
 
-		if !stop() {
-			<-done
-		}
+	return func() {
+		once.Do(func() {
+			_ = resource.Close()
+
+			if !stop() {
+				<-done
+			}
+		})
 	}
 }
