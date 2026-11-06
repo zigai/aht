@@ -81,7 +81,7 @@ func Inspect(
 		return IntegrationStatus{}, err
 	}
 
-	if advisor != nil {
+	if advisor != nil && result.NextStep == "" {
 		result.NextStep = advisor.StatusNextStep(
 			nativeStatus == ArtifactCurrent,
 			nativeStatus == ArtifactStale,
@@ -124,19 +124,29 @@ func inspectIntegrationPlan(
 	plan harnesspkg.InstallPlan,
 	result *IntegrationStatus,
 ) error {
+	var missing, managed bool
+
 	for _, action := range plan.Actions {
-		statuses, err := inspectAction(ctx, action)
+		statuses, err := inspectAction(ctx, action, result.Harness)
 		if err != nil {
 			return err
 		}
 
 		for _, item := range statuses {
+			missing = missing || item.status == ArtifactMissing
+			managed = managed || item.status == ArtifactCurrent || item.status == ArtifactStale ||
+				item.status == ArtifactDisabled
 			mergeInspectedArtifact(result, item)
 
 			if result.Status == ArtifactForeign {
 				return nil
 			}
 		}
+	}
+
+	if missing && managed && result.Status != ArtifactDisabled {
+		result.Status = ArtifactPartial
+		result.Message = "managed integration is incomplete; install to repair missing artifacts"
 	}
 
 	return nil
@@ -193,18 +203,24 @@ func mergeInspectedArtifact(result *IntegrationStatus, item inspectedArtifact) {
 	case ArtifactForeign:
 		result.Status, result.Message = item.status, "foreign content at "+item.path
 	case ArtifactStale:
-		result.Status, result.Message = item.status, "stale artifact at "+item.path
+		if result.Status != ArtifactDisabled {
+			result.Status, result.Message = item.status, "stale artifact at "+item.path
+		}
 	case ArtifactMissing:
 		if result.Status == ArtifactCurrent {
 			result.Status, result.Message = item.status, "missing artifact at "+item.path
 		}
-	case ArtifactCurrent:
+	case ArtifactDisabled:
+		result.Status, result.Message = item.status, "disabled registration: "+item.path
+		result.NextStep = "enable " + item.path + " through the harness plugin settings; upgrade preserves disablement"
+	case ArtifactPartial, ArtifactCurrent:
 	}
 }
 
 func inspectAction(
 	ctx context.Context,
 	action harnesspkg.InstallAction,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
 	switch value := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
@@ -214,9 +230,9 @@ func inspectAction(
 	case harnesspkg.ManagedTextBlockAction:
 		return inspectSharedFile(value.Plan.Path)
 	case harnesspkg.RenderedFileAction:
-		return inspectOwnedPath(value.Plan.Path)
+		return inspectOwnedPath(value.Plan.Path, harnessID)
 	case harnesspkg.PluginDirectoryAction:
-		return inspectPluginAction(ctx, value.Plan)
+		return inspectPluginAction(ctx, value.Plan, harnessID)
 	case harnesspkg.NativeCatalogAction:
 		return []inspectedArtifact{{path: value.Label, status: ArtifactCurrent}}, nil
 	default:
@@ -251,10 +267,16 @@ func inspectCommandHooks(
 func inspectPluginAction(
 	ctx context.Context,
 	plan harnesspkg.PluginDirectoryInstallPlan,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	result, err := inspectOwnedPath(plan.Dir)
+	result, err := inspectOwnedPath(plan.Dir, harnessID)
 	if err != nil {
 		return result, err
+	}
+
+	result, err = inspectPluginFiles(ctx, plan, result)
+	if err != nil {
+		return nil, err
 	}
 
 	if plan.Registration != nil {
@@ -276,33 +298,12 @@ func inspectPluginAction(
 		return result, nil
 	}
 
-	manifest, err := readImportManifest(plan.ImportManifest.Path)
+	artifact, err := inspectPluginImportManifest(plan.ImportManifest)
 	if err != nil {
 		return nil, err
 	}
 
-	status := ArtifactMissing
-
-	for _, entry := range manifest.Imports {
-		if entry.name() != plan.ImportManifest.Name {
-			continue
-		}
-
-		status = ArtifactCurrent
-		if entry.source() != plan.ImportManifest.Source {
-			status = ArtifactStale
-		}
-
-		for _, component := range plan.ImportManifest.Components {
-			if !slices.Contains(entry.components(), component) {
-				status = ArtifactStale
-			}
-		}
-
-		break
-	}
-
-	return append(result, inspectedArtifact{path: plan.ImportManifest.Path, status: status}), nil
+	return append(result, artifact), nil
 }
 
 // inspectRetiredPlugins reports managed plugins at former locations as stale
@@ -344,8 +345,8 @@ func inspectSharedFile(path string) ([]inspectedArtifact, error) {
 	return []inspectedArtifact{{path: path, status: status}}, nil
 }
 
-func inspectOwnedPath(path string) ([]inspectedArtifact, error) {
-	status, err := ClassifyArtifact(path)
+func inspectOwnedPath(path string, harnessID registry.Harness) ([]inspectedArtifact, error) {
+	status, err := classifyArtifactForHarness(path, harnessID)
 	if err != nil {
 		return nil, err
 	}
@@ -374,4 +375,69 @@ func planPaths(plan harnesspkg.InstallPlan) []string {
 	}
 
 	return paths
+}
+
+func inspectPluginFiles(
+	ctx context.Context,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+	result []inspectedArtifact,
+) ([]inspectedArtifact, error) {
+	if result[0].status == ArtifactForeign {
+		missingMarker, err := registeredPluginMissingMarker(ctx, plan)
+		if err != nil {
+			return nil, err
+		}
+
+		if missingMarker {
+			result[0] = inspectedArtifact{
+				path:   filepath.Join(plan.Dir, plan.MarkerFile),
+				status: ArtifactMissing,
+			}
+		}
+	}
+
+	if result[0].status == ArtifactCurrent || result[0].status == ArtifactStale {
+		for _, file := range plan.Files {
+			path := filepath.Join(plan.Dir, file.Name)
+			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+				result = append(result, inspectedArtifact{path: path, status: ArtifactMissing})
+			} else if err != nil {
+				return nil, fmt.Errorf("checking required plugin file %s: %w", path, err)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func inspectPluginImportManifest(
+	plan *harnesspkg.ImportManifestInstallPlan,
+) (inspectedArtifact, error) {
+	manifest, err := readImportManifest(plan.Path)
+	if err != nil {
+		return inspectedArtifact{}, err
+	}
+
+	status := ArtifactMissing
+
+	for _, entry := range manifest.Imports {
+		if entry.name() != plan.Name {
+			continue
+		}
+
+		status = ArtifactCurrent
+		if entry.source() != plan.Source {
+			status = ArtifactStale
+		}
+
+		for _, component := range plan.Components {
+			if !slices.Contains(entry.components(), component) {
+				status = ArtifactStale
+			}
+		}
+
+		break
+	}
+
+	return inspectedArtifact{path: plan.Path, status: status}, nil
 }

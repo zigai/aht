@@ -608,7 +608,7 @@ func TestInspectDetectsAndInstallRepairsMissingPluginImport(t *testing.T) {
 	}
 
 	status, err := Inspect(t.Context(), registry.Harness("agy"), testInstallBinary)
-	if err != nil || status.Status != ArtifactMissing {
+	if err != nil || status.Status != ArtifactPartial {
 		t.Fatalf("missing import status = %+v, %v", status, err)
 	}
 

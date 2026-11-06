@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
@@ -23,6 +24,13 @@ type pluginDirectoryInstall struct {
 	snippetOrder []string
 	renameFile   func(string, string) error
 	removeTree   func(string) error
+}
+
+type pluginRecovery struct {
+	backups    []string
+	stages     []string
+	newest     string
+	newestInfo os.FileInfo
 }
 
 func renderInstallFiles(
@@ -112,6 +120,131 @@ func (plugin pluginDirectoryInstall) removeAll(path string) error {
 	}
 
 	return nil
+}
+
+func (plugin pluginDirectoryInstall) recover(dryRun bool) (bool, error) {
+	recovery, err := plugin.inspectRecovery()
+	if err != nil {
+		return false, err
+	}
+
+	pending := len(recovery.backups)+len(recovery.stages) > 0
+	if dryRun {
+		return pending, nil
+	}
+
+	parent := filepath.Dir(plugin.dir)
+
+	_, err = os.Lstat(plugin.dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("checking plugin recovery target: %w", err)
+	}
+
+	if errors.Is(err, os.ErrNotExist) && recovery.newest != "" {
+		if err := plugin.rename(recovery.newest, plugin.dir); err != nil {
+			return false, err
+		}
+
+		if err := syncDir(parent); err != nil {
+			return false, err
+		}
+	}
+
+	for _, path := range append(recovery.backups, recovery.stages...) {
+		if err := plugin.removeAll(path); err != nil {
+			return false, err
+		}
+	}
+
+	if pending {
+		return true, syncDir(parent)
+	}
+
+	return false, nil
+}
+
+func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
+	var recovery pluginRecovery
+
+	parent := filepath.Dir(plugin.dir)
+
+	entries, err := os.ReadDir(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return recovery, nil
+	}
+
+	if err != nil {
+		return recovery, fmt.Errorf("reading plugin recovery directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		backup := plugin.temporaryName(entry.Name(), "backup")
+		if !backup && !plugin.temporaryName(entry.Name(), "stage") {
+			continue
+		}
+
+		path := filepath.Join(parent, entry.Name())
+		if !backup {
+			recovery.stages = append(recovery.stages, path)
+			continue
+		}
+
+		if err := recovery.collectBackup(plugin, entry, path); err != nil {
+			return recovery, err
+		}
+	}
+
+	return recovery, nil
+}
+
+func (recovery *pluginRecovery) collectBackup(
+	plugin pluginDirectoryInstall,
+	entry os.DirEntry,
+	path string,
+) error {
+	contents, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("reading plugin backup: %w", err)
+	}
+
+	if len(contents) == 0 {
+		recovery.stages = append(recovery.stages, path)
+		return nil
+	}
+
+	candidate := plugin
+
+	candidate.dir = path
+	if err := candidate.ensureManaged(false); err != nil {
+		return err
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		return fmt.Errorf("checking plugin backup: %w", err)
+	}
+
+	recovery.backups = append(recovery.backups, path)
+	if recovery.newestInfo == nil || info.ModTime().After(recovery.newestInfo.ModTime()) {
+		recovery.newest, recovery.newestInfo = path, info
+	}
+
+	return nil
+}
+
+func (plugin pluginDirectoryInstall) temporaryName(name string, kind string) bool {
+	suffix, ok := strings.CutPrefix(name, "."+filepath.Base(plugin.dir)+"."+kind+"-")
+	if !ok {
+		return false
+	}
+	// MkdirTemp uses an unpadded decimal uint32, not an arbitrary wildcard.
+	number, err := strconv.ParseUint(suffix, 10, 32)
+
+	return err == nil && strconv.FormatUint(number, 10) == suffix
 }
 
 func (plugin pluginDirectoryInstall) ensureManaged(force bool) error {
@@ -354,6 +487,10 @@ func (plugin pluginDirectoryInstall) replace(stagedDir string) (func() error, fu
 		return plugin.commitReplacement(parent, backup, backupExists)
 	}
 
+	if err := syncDir(parent); err != nil {
+		return nil, nil, errors.Join(err, rollback())
+	}
+
 	return rollback, commit, nil
 }
 
@@ -373,6 +510,10 @@ func (plugin pluginDirectoryInstall) backupCurrent(parent string) (string, bool,
 		}
 
 		return backup, false, nil
+	}
+
+	if err := syncDir(parent); err != nil {
+		return "", false, errors.Join(err, plugin.restoreBackup(backup, true))
 	}
 
 	return backup, true, nil

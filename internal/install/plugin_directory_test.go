@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var (
@@ -237,5 +240,76 @@ func TestPluginDirectoryNeedsUpdateDetectsNestedStaleFiles(t *testing.T) {
 
 	if !changed {
 		t.Fatal("expected stale nested generated file to require plugin directory replacement")
+	}
+}
+
+func TestReinstallAfterInterruptedPluginReplaceLeavesOnlyPluginDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	plan := harnesspkg.PluginDirectoryInstallPlan{
+		Dir:        filepath.Join(root, "plugin"),
+		MarkerFile: "plugin.json",
+		Files: []harnesspkg.RenderedFileInstallSpec{
+			{Name: "plugin.json", Content: "{\"marker\":\"" + managedMarker + "\"}\n"},
+		},
+	}
+
+	if _, err := installPluginDirectory(
+		t.Context(),
+		Options{},
+		registry.Harness("test"),
+		plan,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := renderInstallFiles(plan.Files, "plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renames := 0
+	interrupted := newPluginDirectoryInstall(plan, files)
+	interrupted.renameFile = func(oldPath string, newPath string) error {
+		renames++
+		if renames == 2 {
+			panic("process killed between backup and install renames")
+		}
+
+		return os.Rename(oldPath, newPath)
+	}
+
+	func() {
+		defer func() { _ = recover() }()
+
+		_, _, _ = interrupted.installStaged()
+	}()
+
+	if renames != 2 {
+		t.Fatalf("interrupted install made %d renames, want the crash on the second", renames)
+	}
+
+	if _, err := installPluginDirectory(
+		t.Context(),
+		Options{},
+		registry.Harness("test"),
+		plan,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+
+	if len(names) != 1 || names[0] != "plugin" {
+		t.Fatalf("plugin parent after reinstall = %q, want only plugin", names)
 	}
 }

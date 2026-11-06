@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	ArtifactMissing ArtifactStatus = "missing"
-	ArtifactCurrent ArtifactStatus = "current"
-	ArtifactStale   ArtifactStatus = "stale"
-	ArtifactForeign ArtifactStatus = "foreign"
+	ArtifactMissing  ArtifactStatus = "missing"
+	ArtifactPartial  ArtifactStatus = "partial"
+	ArtifactDisabled ArtifactStatus = "disabled"
+	ArtifactCurrent  ArtifactStatus = "current"
+	ArtifactStale    ArtifactStatus = "stale"
+	ArtifactForeign  ArtifactStatus = "foreign"
 
 	managedIntegrationVersion = harnesspkg.IntegrationVersion
 	integrationCaptureGroups  = 2
@@ -37,12 +39,17 @@ var (
 )
 
 // ArtifactStatus describes whether a managed integration artifact is absent,
-// up to date, an older managed generation, or owned by somebody else.
+// incomplete, disabled, up to date, stale, or owned by somebody else.
 type ArtifactStatus string
 
 func (s ArtifactStatus) Valid() bool {
 	switch s {
-	case ArtifactMissing, ArtifactCurrent, ArtifactStale, ArtifactForeign:
+	case ArtifactMissing,
+		ArtifactPartial,
+		ArtifactDisabled,
+		ArtifactCurrent,
+		ArtifactStale,
+		ArtifactForeign:
 		return true
 	}
 

@@ -95,12 +95,16 @@ func (registration registration) Inspect(
 			continue
 		}
 
-		if report.Status == "enabled" && report.Source == "user" &&
-			report.Version == registration.version {
-			return harness.PluginRegistrationCurrent, nil
+		owned, err := registration.ownsPluginDirectory(pluginDir, report.Source)
+		if err != nil {
+			return harness.PluginRegistrationMissing, err
 		}
 
-		return harness.PluginRegistrationStale, nil
+		if !owned {
+			return harness.PluginRegistrationForeign, nil
+		}
+
+		return registration.reportState(report), nil
 	}
 
 	return harness.PluginRegistrationMissing, nil
@@ -192,4 +196,53 @@ func (registration registration) Remove(ctx context.Context, pluginDir string) e
 	}
 
 	return nil
+}
+
+func (registration registration) ownsPluginDirectory(
+	pluginDir string,
+	source string,
+) (bool, error) {
+	if source != "user" ||
+		filepath.Clean(
+			pluginDir,
+		) != filepath.Clean(
+			filepath.Join(hermesHome(), "plugins", registration.pluginID),
+		) {
+		return false, nil
+	}
+
+	if _, err := os.Lstat(filepath.Join(pluginDir, hermesMarkerFileName)); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("checking Hermes plugin marker: %w", err)
+	}
+
+	if _, err := os.Lstat(pluginDir); errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	} else if err != nil {
+		return false, fmt.Errorf("checking Hermes plugin directory: %w", err)
+	}
+	// A user-source name alone does not prove these are our files.
+	data, err := os.ReadFile(filepath.Join(pluginDir, "__init__.py"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("checking Hermes plugin source ownership: %w", err)
+	}
+
+	return strings.Contains(string(data), harness.ManagedMarker), nil
+}
+
+func (registration registration) reportState(report pluginReport) harness.PluginRegistrationState {
+	if report.Status == "disabled" || report.Status == "not enabled" {
+		return harness.PluginRegistrationDisabled
+	}
+
+	if report.Status == "enabled" && report.Version == registration.version {
+		return harness.PluginRegistrationCurrent
+	}
+
+	return harness.PluginRegistrationStale
 }

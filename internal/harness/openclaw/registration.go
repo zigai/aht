@@ -205,6 +205,10 @@ func (registration registration) classifyReport(
 		return harness.PluginRegistrationForeign
 	}
 
+	if report.Plugin.Status == "disabled" {
+		return harness.PluginRegistrationDisabled
+	}
+
 	version := report.Plugin.Version
 	if version == "" {
 		version = report.Install.Version

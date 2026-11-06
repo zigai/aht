@@ -320,6 +320,8 @@ func removeOwnedFiles(
 			return Result{}, fmt.Errorf("%w: %s", errForeignFile, path)
 		case ArtifactCurrent, ArtifactStale:
 			managed = append(managed, path)
+		case ArtifactPartial, ArtifactDisabled:
+			continue
 		}
 	}
 

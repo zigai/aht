@@ -36,6 +36,7 @@ const (
 	PluginRegistrationMissing PluginRegistrationState = iota
 	PluginRegistrationCurrent
 	PluginRegistrationStale
+	PluginRegistrationDisabled
 	PluginRegistrationForeign
 )
 

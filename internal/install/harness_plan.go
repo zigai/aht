@@ -587,23 +587,12 @@ func installPluginDirectory(
 	harness registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (Result, error) {
-	files, err := renderInstallFiles(plan.Files, "plugin")
+	plugin, pluginChanged, err := preparePluginDirectory(ctx, opts, plan)
 	if err != nil {
 		return Result{}, err
 	}
 
-	plugin := newPluginDirectoryInstall(plan, files)
-
-	if err := plugin.ensureManaged(opts.Force); err != nil {
-		return Result{}, err
-	}
-
-	pluginChanged, err := plugin.needsUpdate()
-	if err != nil {
-		return Result{}, err
-	}
-
-	if plan.Registration != nil {
+	if plan.Registration != nil && !opts.preserveRegistration {
 		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged)
 	}
 
@@ -1052,4 +1041,37 @@ func installMessage(label string, changed bool, dryRun bool) string {
 	}
 
 	return label + " installed"
+}
+
+func preparePluginDirectory(
+	ctx context.Context,
+	opts Options,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (pluginDirectoryInstall, bool, error) {
+	files, err := renderInstallFiles(plan.Files, "plugin")
+	if err != nil {
+		return pluginDirectoryInstall{}, false, err
+	}
+
+	plugin := newPluginDirectoryInstall(plan, files)
+
+	if _, err := plugin.recover(opts.DryRun); err != nil {
+		return pluginDirectoryInstall{}, false, err
+	}
+
+	missingMarker, err := registeredPluginMissingMarker(ctx, plan)
+	if err != nil {
+		return pluginDirectoryInstall{}, false, err
+	}
+
+	if err := plugin.ensureManaged(opts.Force || missingMarker); err != nil {
+		return pluginDirectoryInstall{}, false, err
+	}
+
+	pluginChanged, err := plugin.needsUpdate()
+	if err != nil {
+		return pluginDirectoryInstall{}, false, err
+	}
+
+	return plugin, pluginChanged, nil
 }

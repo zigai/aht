@@ -154,8 +154,8 @@ func TestUpgradeMovesAgyPluginFromLegacyDirectory(t *testing.T) {
 	nativePlugin := filepath.Join(home, ".gemini", "config", "plugins", agyPluginName)
 
 	status, err := Inspect(t.Context(), registry.Harness("agy"), testInstallBinary)
-	if err != nil || status.Status != ArtifactStale {
-		t.Fatalf("status with only the legacy install = %+v, %v; want stale", status, err)
+	if err != nil || status.Status != ArtifactPartial {
+		t.Fatalf("status with only the legacy install = %+v, %v; want partial", status, err)
 	}
 
 	requireAgyUpgrade(t, true, true)

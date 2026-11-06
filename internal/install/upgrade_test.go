@@ -141,7 +141,7 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 				t.Fatalf("target = %q, %v, %v", got, exists, err)
 			}
 
-			native, err := installedNative(registry.Harness("codex"), "/bin/new-aht")
+			native, err := installedNative(t.Context(), registry.Harness("codex"), "/bin/new-aht")
 			if err != nil || native {
 				t.Fatalf("shim migrated to native: %v, %v", native, err)
 			}
@@ -436,4 +436,39 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 	}
 
 	assertUpgradeArtifactsUntouched(t, before)
+}
+
+func TestUpgradeDoesNotSilentlySkipRegisteredPluginWithMissingDirectory(t *testing.T) {
+	isolateUpgradeHome(t)
+	installFakeOpenClawCLI(t)
+
+	id := registry.Harness("openclaw")
+
+	installed, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(installed.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := UpgradeHarness(t.Context(), id, "/bin/new-aht", false)
+
+	if _, statErr := os.Stat(filepath.Join(installed.Path, ".aht-managed")); statErr == nil {
+		return
+	}
+
+	for _, result := range results {
+		if result.Harness == string(id) && (result.Error != "" || result.NextStep != "") {
+			return
+		}
+	}
+
+	t.Fatalf(
+		"upgrade with registered plugin directory %s missing neither repaired it nor reported it: results=%+v err=%v",
+		installed.Path,
+		results,
+		err,
+	)
 }

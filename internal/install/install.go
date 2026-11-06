@@ -30,12 +30,13 @@ var allHarnesses = installableHarnesses()
 
 //exhaustruct:optional
 type Options struct {
-	Harness      registry.Harness
-	Binary       string
-	TargetBinary string
-	DryRun       bool
-	Force        bool
-	UseShim      bool
+	preserveRegistration bool
+	Harness              registry.Harness
+	Binary               string
+	TargetBinary         string
+	DryRun               bool
+	Force                bool
+	UseShim              bool
 }
 
 type Result struct {

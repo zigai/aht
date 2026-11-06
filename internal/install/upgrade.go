@@ -54,13 +54,24 @@ func UpgradeHarness(
 
 	options := Options{Harness: id, Binary: binary, DryRun: dryRun}
 
-	native, err := installedNative(id, binary)
+	plan, _, err := installPlanForHarness(id, binary)
+	if err != nil {
+		return nil, err
+	}
+
+	recovered, err := recoverPluginDirectories(plan, dryRun)
+	if err != nil {
+		var result Result
+		return appendUpgradeResult(nil, id, result, err), err
+	}
+
+	native, err := installedNative(ctx, id, binary)
 	if err != nil {
 		var result Result
 
 		results = appendUpgradeResult(results, id, result, err)
 		failures = append(failures, err)
-	} else if native {
+	} else if native || recovered {
 		result, installErr := upgradeNative(ctx, options)
 		results = appendUpgradeResult(results, id, result, installErr)
 		failures = append(failures, installErr)
@@ -111,6 +122,25 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 			return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
 		}
 
+		if state == harnesspkg.PluginRegistrationDisabled {
+			return Result{
+				Harness: string(
+					opts.Harness,
+				),
+				Path:    plugin.Plan.Dir,
+				Changed: false,
+				Snippet: "",
+				Error:   "",
+				Message: "registration disabled; preserved",
+				NextStep: "enable " + registration.Label() + " through the harness plugin settings; " +
+					"upgrade preserves disablement",
+			}, nil
+		}
+
+		if state == harnesspkg.PluginRegistrationMissing {
+			return Run(ctx, opts)
+		}
+
 		if !opts.DryRun {
 			if err := registration.EnsureMutable(plugin.Plan.Dir); err != nil {
 				return Result{}, fmt.Errorf("check %s for upgrade: %w", registration.Label(), err)
@@ -118,7 +148,7 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 		}
 		// Re-registering through Install can enable disabled plugins or grant new
 		// permissions. Refresh their local source while preserving native policy.
-		plugin.Plan.Registration = nil
+		opts.preserveRegistration = true
 
 		result, err := installPluginDirectory(ctx, opts, opts.Harness, plugin.Plan)
 		if result.Changed {
@@ -144,39 +174,30 @@ func appendUpgradeResult(results []Result, id registry.Harness, result Result, e
 	return append(results, result)
 }
 
-func installedNative(id registry.Harness, binary string) (bool, error) {
+func installedNative(ctx context.Context, id registry.Harness, binary string) (bool, error) {
 	plan, _, err := installPlanForHarness(id, binary)
 	if err != nil {
 		return false, err
 	}
 
-	paths := append(planPaths(plan), retiredPluginPaths(plan)...)
-	for _, path := range paths {
-		status, err := classifyArtifactForHarness(path, id)
-		if err != nil {
-			return false, err
-		}
-
-		if status == ArtifactCurrent || status == ArtifactStale {
-			return true, nil
-		}
+	if len(planPaths(plan)) == 0 {
+		return false, nil
 	}
 
-	return false, nil
-}
-
-func retiredPluginPaths(plan harnesspkg.InstallPlan) []string {
-	var paths []string
-
-	for _, action := range plan.Actions {
-		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
-			for _, retired := range plugin.Plan.Retired {
-				paths = append(paths, retired.Dir)
-			}
-		}
+	result := IntegrationStatus{
+		Harness:  id,
+		Status:   ArtifactCurrent,
+		Paths:    nil,
+		Message:  "",
+		NextStep: "",
+	}
+	if err := inspectIntegrationPlan(ctx, plan, &result); err != nil {
+		return false, err
 	}
 
-	return paths
+	return result.Status == ArtifactCurrent || result.Status == ArtifactStale ||
+		result.Status == ArtifactPartial ||
+		result.Status == ArtifactDisabled, nil
 }
 
 func installedShim(id registry.Harness) (string, bool, error) {
@@ -216,4 +237,23 @@ func installedShim(id registry.Harness) (string, bool, error) {
 	}
 
 	return "", true, fmt.Errorf("%w: cannot recover target from %s", errRecursiveShimTarget, path)
+}
+
+func recoverPluginDirectories(plan harnesspkg.InstallPlan, dryRun bool) (bool, error) {
+	recovered := false
+
+	for _, action := range plan.Actions {
+		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
+			directory := newPluginDirectoryInstall(plugin.Plan, nil)
+
+			changed, err := directory.recover(dryRun)
+			if err != nil {
+				return false, err
+			}
+
+			recovered = recovered || changed
+		}
+	}
+
+	return recovered, nil
 }

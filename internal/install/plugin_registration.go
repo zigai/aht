@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -183,6 +184,8 @@ func inspectRegistration(
 	switch state {
 	case harnesspkg.PluginRegistrationCurrent:
 		status = ArtifactCurrent
+	case harnesspkg.PluginRegistrationDisabled:
+		status = ArtifactDisabled
 	case harnesspkg.PluginRegistrationStale:
 		status = ArtifactStale
 	case harnesspkg.PluginRegistrationForeign:
@@ -191,4 +194,40 @@ func inspectRegistration(
 	}
 
 	return inspectedArtifact{path: registration.Label(), status: status}, nil
+}
+
+func registeredPluginMissingMarker(
+	ctx context.Context,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (bool, error) {
+	if plan.Registration == nil || plan.MarkerFile == "" {
+		return false, nil
+	}
+
+	info, err := os.Lstat(plan.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("checking registered plugin directory: %w", err)
+	}
+
+	if !info.IsDir() {
+		return false, nil
+	}
+
+	if _, err := os.Lstat(filepath.Join(plan.Dir, plan.MarkerFile)); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("checking registered plugin marker: %w", err)
+	}
+
+	registration, err := inspectRegistration(ctx, plan)
+	if err != nil {
+		return false, err
+	}
+
+	return registration.status == ArtifactCurrent || registration.status == ArtifactStale ||
+		registration.status == ArtifactDisabled, nil
 }
