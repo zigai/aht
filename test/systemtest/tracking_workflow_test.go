@@ -340,7 +340,9 @@ func startSystemTestCommand(
 		if process.command.ProcessState == nil && process.command.Process != nil &&
 			process.command.Process.Pid > 0 {
 			_ = syscall.Kill(-process.command.Process.Pid, syscall.SIGKILL)
-			<-process.done
+			if err := <-process.done; err != nil {
+				t.Logf("command exit after forced cleanup: %v", err)
+			}
 		}
 	})
 
@@ -393,10 +395,11 @@ func stopSystemTestCommand(t *testing.T, process *runningTestCommand) {
 		}
 	case <-timer.C:
 		_ = process.command.Process.Kill()
-		<-process.done
+		err := <-process.done
 		t.Fatalf(
-			"command did not stop: %q; stdout=%q stderr=%q",
+			"command did not stop: %q; wait=%v stdout=%q stderr=%q",
 			process.command.Args,
+			err,
 			process.stdout.String(),
 			process.stderr.String(),
 		)
@@ -483,7 +486,9 @@ func startJSONWatch(
 	t.Cleanup(func() {
 		if process.command.ProcessState == nil {
 			_ = process.command.Process.Kill()
-			<-process.done
+			if err := <-process.done; err != nil {
+				t.Logf("JSON watch exit after forced cleanup: %v", err)
+			}
 		}
 	})
 

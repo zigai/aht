@@ -244,7 +244,9 @@ func (host *isolatedHost) runHostCommand(t *testing.T, command *exec.Cmd) []byte
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 
 		if !finished {
-			<-wait
+			if err := <-wait; err != nil {
+				t.Logf("isolated host exit after forced cleanup: %v", err)
+			}
 		}
 
 		_ = logFile.Close()

@@ -377,9 +377,9 @@ func TestHistoryRefreshCancellationJoinsActiveWork(t *testing.T) {
 		synctest.Wait()
 
 		select {
-		case <-done:
+		case err := <-done:
 			close(release)
-			t.Fatal("indexer returned before active work stopped")
+			t.Fatalf("indexer returned before active work stopped: %v", err)
 		default:
 		}
 

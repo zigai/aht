@@ -791,7 +791,10 @@ func TestCloseReleasesHeldRequests(t *testing.T) {
 	}
 
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Logf("held request interrupted by Close: %v", err)
+		}
 	case <-time.After(waitTimeout):
 		t.Fatal("held client was not released by Close")
 	}

@@ -814,7 +814,9 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 		t.Fatal("timed out waiting for Wait() to return after broker disconnect")
 	}
 
-	<-serverErrCh
+	if err := <-serverErrCh; err != nil {
+		t.Fatalf("stop broker server: %v", err)
+	}
 }
 
 func TestWaitDurableWatchBehavior(t *testing.T) {

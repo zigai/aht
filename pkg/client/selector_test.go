@@ -461,7 +461,10 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	}
 
 	cancelServer()
-	<-serverErrors
+
+	if err := <-serverErrors; err != nil {
+		t.Fatalf("stop broker server: %v", err)
+	}
 }
 
 func setupTestSessionForStore(t *testing.T, store registry.Store) registry.Session {
