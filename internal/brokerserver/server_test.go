@@ -899,3 +899,64 @@ func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
 		t.Fatal("expected refusal while original listener exists")
 	}
 }
+
+func TestServerFreesClosedSubscriberSlot(t *testing.T) {
+	path := shortStatePath(t)
+
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	server := New(Options{
+		Store:          store,
+		SocketPath:     broker.SocketPath(path),
+		MaxConnections: 1,
+		Ready:          ready,
+	})
+
+	go func() { done <- server.Serve(ctx) }()
+
+	fixture := brokerAdversityFixture{path: path, store: store, cancel: cancel, done: done}
+	defer stopBrokerAdversityFixture(t, fixture)
+
+	select {
+	case err := <-done:
+		t.Fatalf("server exited before readiness: %v", err)
+	case <-ready:
+	}
+
+	client := broker.NewClient(path)
+
+	subscription, err := client.Subscribe(ctx, registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	subscription.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	ticker := time.NewTicker(20 * time.Millisecond)
+
+	defer ticker.Stop()
+
+	for {
+		listCtx, listCancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		_, err := client.List(listCtx, registry.Filter{})
+
+		listCancel()
+
+		if err == nil {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("list after closing the only subscriber still fails after 2s: %v", err)
+		}
+
+		<-ticker.C
+	}
+}

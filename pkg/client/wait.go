@@ -291,7 +291,7 @@ func (r *waitRun) replaceFailedStream(ctx context.Context, ok bool, err error) e
 
 	if !r.fallsBackToDurable(ok, err) {
 		if !ok {
-			return ErrUnavailable
+			return ErrStreamClosed
 		}
 
 		return waitError(publicError(err))
@@ -309,7 +309,7 @@ func (r *waitRun) fallsBackToDurable(ok bool, err error) bool {
 		return false
 	}
 
-	return !ok || IsUnavailable(err) || broker.IsUnavailable(err)
+	return !ok || IsUnavailable(err) || broker.IsUnavailable(err) || StreamClosed(err)
 }
 
 func (r *waitRun) observe(sessions []registry.Session) (WaitResult, bool, error) {
@@ -428,7 +428,7 @@ func (c *Client) startWatcher(ctx context.Context) (sessionWatcher, error) {
 			return w, nil
 		}
 
-		if !IsUnavailable(err) && !broker.IsUnavailable(err) {
+		if !IsUnavailable(err) && !broker.IsUnavailable(err) && !StreamClosed(err) {
 			return nil, publicError(err)
 		}
 

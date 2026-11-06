@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -680,4 +681,72 @@ func reportWithStdin(
 	}
 
 	return session
+}
+
+func TestReportSucceedsOnceWhenBrokerRecordsAndClosesBeforeReplying(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "sessions.json")
+
+	listener := listenFakeBroker(t)
+
+	applied := make(chan error, 1)
+
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			applied <- acceptErr
+			return
+		}
+
+		defer func() { _ = connection.Close() }()
+
+		var request broker.Request
+		if decodeErr := json.NewDecoder(connection).Decode(&request); decodeErr != nil {
+			applied <- decodeErr
+			return
+		}
+
+		_, observeErr := registry.NewJournal(storePath, catalog.Rules{}).
+			Observe(context.Background(), *request.Observation)
+		applied <- observeErr
+	}()
+
+	var stdout, stderr bytes.Buffer
+
+	reportErr := runTestCLI(
+		t.Context(),
+		[]string{
+			"--store", storePath, "--json", "report", "codex",
+			"--session-id", "s1",
+			"--event", "start",
+			"--activity", "running",
+			"--sequence", "5",
+			"--reporter", "probe",
+			"--no-tmux",
+		},
+		&stdout,
+		&stderr,
+	)
+
+	select {
+	case err := <-applied:
+		if err != nil {
+			t.Fatalf("fake broker did not record the report: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("report never reached the fake broker")
+	}
+
+	if reportErr != nil {
+		t.Fatalf("report after broker recorded it and closed: %v", reportErr)
+	}
+
+	sessions, err := registry.NewJournal(storePath, catalog.Rules{}).
+		List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(sessions) != 1 || sessions[0].SessionID != "s1" {
+		t.Fatalf("sessions = %+v, want only s1", sessions)
+	}
 }

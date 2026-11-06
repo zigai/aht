@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -67,4 +70,37 @@ func runTestCLIWithStdin(
 	}
 
 	return nil
+}
+
+func listenFakeBroker(t *testing.T) net.Listener {
+	t.Helper()
+
+	//nolint:usetesting // reason: t.TempDir paths can exceed the Unix socket path limit.
+	socketFile, err := os.CreateTemp("", "aht-broker-")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	socketPath := socketFile.Name()
+	_ = socketFile.Close()
+
+	if err := os.Remove(socketPath); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(broker.SocketPathEnv, socketPath)
+
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(t.Context(), "unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	})
+
+	return listener
 }

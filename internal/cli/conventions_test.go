@@ -212,12 +212,12 @@ func TestFilesystemWatchPreservesRequestedFilter(t *testing.T) {
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
 		return app.runFilesystemWatch(
 			ctx,
-			watchOptions{
+			newWatchUpdateProcessor(app, watchOptions{
 				filter: registry.Filter{Harness: registry.Harness("codex")},
 				format: watchFormatJSON,
 				ready:  ready,
 				now:    time.Now,
-			},
+			}),
 		)
 	})
 	watcher.stop(t)

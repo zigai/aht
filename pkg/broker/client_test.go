@@ -65,12 +65,12 @@ func TestIsUnavailable(t *testing.T) {
 		t.Fatal("IsUnavailable(other) = true, want false")
 	}
 
-	if !broker.IsUnavailable(io.EOF) {
-		t.Fatal("IsUnavailable(io.EOF) = false, want true")
+	if broker.IsUnavailable(io.EOF) {
+		t.Fatal("IsUnavailable(io.EOF) = true, want false")
 	}
 
-	if !broker.IsUnavailable(fmt.Errorf("reading broker response: %w", io.EOF)) {
-		t.Fatal("IsUnavailable(wrapped io.EOF) = false, want true")
+	if broker.IsUnavailable(fmt.Errorf("reading broker response: %w", io.EOF)) {
+		t.Fatal("IsUnavailable(wrapped io.EOF) = true, want false")
 	}
 }
 

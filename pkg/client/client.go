@@ -48,6 +48,10 @@ const (
 var (
 	// ErrUnavailable means no realtime AHT broker accepted the local connection.
 	ErrUnavailable = errors.New("aht broker unavailable")
+	// ErrBusy means the realtime broker refused a connection because all slots are occupied.
+	ErrBusy = broker.ErrBusy
+	// ErrStreamClosed means an established realtime subscription lost its transport.
+	ErrStreamClosed = broker.ErrStreamClosed
 	// ErrProtocol means the broker returned an invalid or incompatible response.
 	ErrProtocol         = errors.New("aht broker protocol error")
 	errHandlerRequired  = errors.New("watch handler is required")
@@ -398,6 +402,11 @@ func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrUnavailable)
 }
 
+// StreamClosed reports whether an established realtime subscription lost its transport.
+func StreamClosed(err error) bool {
+	return broker.StreamClosed(err)
+}
+
 func watchSnapshots(
 	ctx context.Context,
 	subscription *broker.Subscription,
@@ -431,7 +440,11 @@ func watchSnapshots(
 		}
 	}
 
-	return nil
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+
+	return ErrStreamClosed
 }
 
 func (e *OperationError) Error() string {

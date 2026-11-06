@@ -2,6 +2,7 @@ package broker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -266,15 +267,25 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	request.Filter = filter.NormalizePaths()
 
 	request = request.prepare()
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return nil, fmt.Errorf("sending subscribe request: %w", contextError(subscriptionCtx, err))
+
+	sendErr := json.NewEncoder(connection).Encode(request)
+	if sendErr != nil {
+		sendErr = contextError(subscriptionCtx, sendErr)
+		if !transportFailure(sendErr) {
+			return nil, fmt.Errorf("sending subscribe request: %w", sendErr)
+		}
 	}
 
 	decoder := responseScanner(connection)
 
 	first, err := readResponse(decoder)
 	if err != nil {
-		return nil, fmt.Errorf("reading subscribe response: %w", contextError(subscriptionCtx, err))
+		err = contextError(subscriptionCtx, err)
+		if transportFailure(err) {
+			err = fmt.Errorf("%w: %w", ErrStreamClosed, err)
+		}
+
+		return nil, fmt.Errorf("reading subscribe response: %w", err)
 	}
 
 	if err := validateResponse(request, first); err != nil {
@@ -310,10 +321,30 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	}, nil
 }
 
-// IsUnavailable reports whether err means no broker accepted the connection or
-// the broker closed it before delivering a response.
+// IsUnavailable reports whether err means no broker accepted the connection.
 func IsUnavailable(err error) bool {
-	return errors.Is(err, ErrUnavailable) || errors.Is(err, io.EOF)
+	return errors.Is(err, ErrUnavailable)
+}
+
+// StreamClosed reports whether an established subscription lost its transport.
+func StreamClosed(err error) bool {
+	return errors.Is(err, ErrStreamClosed)
+}
+
+// NoReply reports whether a sent request lost its transport before a reply.
+func NoReply(err error) bool {
+	return errors.Is(err, ErrNoReply)
+}
+
+func transportFailure(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	_, networkError := errors.AsType[net.Error](err)
+
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, net.ErrClosed) || networkError
 }
 
 func runSubscription(
@@ -330,6 +361,10 @@ func runSubscription(
 		response, err := readResponse(decoder)
 		if err != nil {
 			if ctx.Err() == nil {
+				if transportFailure(err) {
+					err = fmt.Errorf("%w: %w", ErrStreamClosed, err)
+				}
+
 				errorsChannel <- fmt.Errorf("reading subscription: %w", err)
 			}
 
@@ -380,13 +415,23 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 	defer cancelclose.OnCancel(ctx, connection)()
 
 	request = request.prepare()
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return Response{}, fmt.Errorf("sending broker request: %w", contextError(ctx, err))
+
+	sendErr := json.NewEncoder(connection).Encode(request)
+	if sendErr != nil {
+		sendErr = contextError(ctx, sendErr)
+		if !transportFailure(sendErr) {
+			return Response{}, fmt.Errorf("sending broker request: %w", sendErr)
+		}
 	}
 
 	response, err := readResponse(responseScanner(connection))
 	if err != nil {
-		return Response{}, fmt.Errorf("reading broker response: %w", contextError(ctx, err))
+		err = contextError(ctx, err)
+		if transportFailure(err) {
+			err = fmt.Errorf("%w: %w", ErrNoReply, err)
+		}
+
+		return Response{}, fmt.Errorf("reading broker response: %w", err)
 	}
 
 	if err := validateResponse(request, response); err != nil {
@@ -399,6 +444,13 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 func responseScanner(reader io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(nil, MaxResponseBytes)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if atEOF && len(data) > 0 && bytes.IndexByte(data, '\n') < 0 {
+			return 0, nil, io.ErrUnexpectedEOF
+		}
+
+		return bufio.ScanLines(data, atEOF)
+	})
 
 	return scanner
 }
@@ -406,6 +458,10 @@ func responseScanner(reader io.Reader) *bufio.Scanner {
 func readResponse(scanner *bufio.Scanner) (Response, error) {
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
+			if transportFailure(err) {
+				return Response{}, fmt.Errorf("reading response: %w", err)
+			}
+
 			return Response{}, fmt.Errorf("%w: reading response frame: %w", ErrProtocol, err)
 		}
 
@@ -473,6 +529,10 @@ func validateResponse(request Request, response Response) error {
 		return fmt.Errorf("%w: version %d", ErrProtocol, response.Version)
 	}
 
+	if connectionBusyResponse(response) {
+		return &RemoteError{Code: response.Error.Code, Message: response.Error.Message}
+	}
+
 	if response.ID != request.ID {
 		return fmt.Errorf(
 			"%w: response id %q does not match %q",
@@ -497,9 +557,11 @@ func (e *RemoteError) Error() string {
 	return e.Code + ": " + e.Message
 }
 
-// Unwrap classifies recognized registry failures without changing the wire error.
+// Unwrap classifies recognized broker and registry failures without changing the wire error.
 func (e *RemoteError) Unwrap() error {
 	switch e.Code {
+	case "busy":
+		return ErrBusy
 	case "not_found":
 		return registry.ErrSessionNotFound
 	case "observation_conflict":
@@ -515,4 +577,11 @@ func needsSnapshotFiltering(filter registry.Filter) bool {
 	return filter.Project != "" || filter.CWD != "" || filter.MultiplexerKind != "" ||
 		filter.MultiplexerServer != "" ||
 		filter.MultiplexerPane != ""
+}
+
+func connectionBusyResponse(response Response) bool {
+	return response.ID == "" && response.Type == "error" && response.Error != nil &&
+		response.Error.Code == "busy" && response.Error.Message != "" &&
+		response.Session == nil && response.Sessions == nil && response.Summaries == nil &&
+		response.Snapshot == nil && response.GC == nil && response.Reset == nil && response.Now.IsZero()
 }

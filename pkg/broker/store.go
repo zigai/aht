@@ -17,6 +17,8 @@ var (
 // Store routes operations through the realtime broker and falls back to the
 // durable snapshot when the broker is offline. The fallback keeps one-shot CLI
 // use functional; a running broker remains the authoritative hot path.
+// Observations alone may also be retried once after a sent request loses its
+// reply; equivalent accepted evidence makes that retry idempotent.
 type Store struct {
 	client   *Client
 	fallback *registry.Journal
@@ -42,7 +44,7 @@ func (s *Store) Observe(
 	observation registry.Observation,
 ) (registry.Session, error) {
 	session, err := s.client.Observe(ctx, observation)
-	if !IsUnavailable(err) {
+	if !IsUnavailable(err) && !NoReply(err) {
 		return session, err
 	}
 
@@ -59,7 +61,7 @@ func (s *Store) ObserveBatch(
 	observations []registry.Observation,
 ) ([]registry.Session, error) {
 	sessions, err := s.client.ObserveBatch(ctx, observations)
-	if !IsUnavailable(err) {
+	if !IsUnavailable(err) && !NoReply(err) {
 		return sessions, err
 	}
 

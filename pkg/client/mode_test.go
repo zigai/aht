@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -39,7 +40,7 @@ func TestInvalidModeRejectsOperations(t *testing.T) {
 	}
 }
 
-func TestModeAutoFallsBackWhenBrokerClosesConnection(t *testing.T) {
+func TestModeAutoReportsLostBrokerReply(t *testing.T) {
 	t.Parallel()
 
 	socketPath := brokerClosingConnections(t)
@@ -49,12 +50,12 @@ func TestModeAutoFallsBackWhenBrokerClosesConnection(t *testing.T) {
 	)
 
 	sessions, err := c.List(t.Context(), registry.Filter{})
-	if err != nil {
-		t.Fatalf("List() err = %v, want durable fallback", err)
+	if !errors.Is(err, broker.ErrNoReply) || client.IsUnavailable(err) {
+		t.Fatalf("List() err = %v, want ErrNoReply, not IsUnavailable", err)
 	}
 
 	if len(sessions) != 0 {
-		t.Fatalf("List() = %d sessions, want 0 durable sessions", len(sessions))
+		t.Fatalf("List() = %d sessions, want no sessions after a lost reply", len(sessions))
 	}
 }
 

@@ -30,6 +30,12 @@ const SocketPathEnv = "AHT_SOCKET"
 var (
 	// ErrUnavailable means no realtime broker accepted the local connection.
 	ErrUnavailable = errors.New("aht broker unavailable")
+	// ErrBusy means the broker refused a connection because all slots are occupied.
+	ErrBusy = errors.New("aht broker busy")
+	// ErrNoReply means a sent request lost its transport before a reply arrived.
+	ErrNoReply = errors.New("aht broker request sent without reply")
+	// ErrStreamClosed means an established subscription lost its transport.
+	ErrStreamClosed = errors.New("aht broker stream closed")
 	// ErrProtocol means the broker returned an invalid or incompatible frame.
 	ErrProtocol = errors.New("aht broker protocol error")
 )

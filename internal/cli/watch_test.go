@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -497,4 +500,179 @@ func TestFormatEmptyWatchSnapshotIsExplicit(t *testing.T) {
 
 		assertHumanLinesBounded(t, output)
 	}
+}
+
+func TestWatchEmitsTransitionsAcrossBrokerDropToFilesystem(t *testing.T) {
+	tests := []struct {
+		name       string
+		noSnapshot bool
+		wantLines  int
+	}{
+		{name: "default", noSnapshot: false, wantLines: 2},
+		{name: "no snapshot", noSnapshot: true, wantLines: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sessions.json")
+			store := registry.NewJournal(path, catalog.Rules{})
+
+			live := registry.PresenceLive
+			running := registry.ActivityRunning
+			observeWatchSession(t, store, &registry.Report{Claim: &live, Activity: &running})
+
+			before, err := store.List(t.Context(), registry.Filter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			gone := registry.PresenceGone
+			observeWatchSession(t, store, &registry.Report{Claim: &gone})
+
+			serveSnapshotThenClose(t, listenFakeBroker(t), before)
+
+			var stdout lockedBuffer
+
+			app := &application{
+				storePath:  path,
+				outputJSON: true,
+				stdout:     &stdout,
+				stderr:     &bytes.Buffer{},
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() {
+				options, prepareErr := app.prepareWatch(watchOptions{noSnapshot: tt.noSnapshot})
+				if prepareErr != nil {
+					done <- prepareErr
+					return
+				}
+
+				done <- app.runWatch(ctx, options)
+			}()
+
+			lines := waitWatchLines(&stdout, tt.wantLines, 5*time.Second)
+
+			cancel()
+
+			if err := <-done; err != nil {
+				t.Fatalf("watch: %v", err)
+			}
+
+			if len(lines) < tt.wantLines {
+				t.Fatalf("watch output after broker drop = %q, want %d events", lines, tt.wantLines)
+			}
+
+			var event watchEvent
+			if err := json.Unmarshal([]byte(lines[tt.wantLines-1]), &event); err != nil {
+				t.Fatal(err)
+			}
+
+			if event.Action != watchActionPresenceChanged ||
+				event.PreviousPresence != registry.PresenceLive ||
+				event.Presence != registry.PresenceGone {
+				t.Fatalf(
+					"event after broker drop = %s, want presence_changed live -> gone",
+					lines[tt.wantLines-1],
+				)
+			}
+		})
+	}
+}
+
+func observeWatchSession(t *testing.T, store registry.Store, report *registry.Report) {
+	t.Helper()
+
+	if _, err := store.Observe(
+		context.Background(),
+		registry.Observation{
+			Harness:  registry.Harness("codex"),
+			At:       time.Now(),
+			Subject:  registry.ObservationIdentity{SessionID: "w1"},
+			Evidence: report,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func serveSnapshotThenClose(t *testing.T, listener net.Listener, sessions []registry.Session) {
+	t.Helper()
+
+	served := make(chan struct{})
+
+	go func() {
+		defer close(served)
+
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+
+		defer func() { _ = connection.Close() }()
+
+		var request broker.Request
+		if err := json.NewDecoder(connection).Decode(&request); err != nil {
+			return
+		}
+
+		if err := json.NewEncoder(connection).Encode(broker.Response{
+			Version: broker.ProtocolVersion,
+			ID:      request.ID,
+			Type:    "snapshot",
+			Snapshot: &registry.StateSnapshot{
+				Revision:  1,
+				UpdatedAt: time.Now(),
+				Sessions:  sessions,
+			},
+		}); err != nil {
+			return
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+
+		<-served
+	})
+}
+
+func waitWatchLines(output *lockedBuffer, want int, timeout time.Duration) []string {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+		if lines[0] == "" {
+			lines = nil
+		}
+
+		if len(lines) >= want || time.Now().After(deadline) {
+			return lines
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// bytes.Buffer.Write always returns a nil error.
+	n, _ := b.buffer.Write(p)
+
+	return n, nil
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buffer.String()
 }

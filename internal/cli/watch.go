@@ -90,10 +90,11 @@ type watchEvent struct {
 	Location string `json:"location,omitempty"`
 }
 type watchUpdateProcessor struct {
-	app      *application
-	options  watchOptions
-	writer   *watchEventWriter
-	previous []registry.Session
+	app         *application
+	options     watchOptions
+	writer      *watchEventWriter
+	previous    []registry.Session
+	initialized bool
 }
 
 type watchEventWriter struct {
@@ -127,33 +128,27 @@ func (app *application) prepareWatch(opts watchOptions) (watchOptions, error) {
 func (app *application) runWatch(ctx context.Context, opts watchOptions) error {
 	ahtClient := client.New(client.Config{StorePath: app.resolvedStorePath()})
 
-	err := app.runBrokerWatch(ctx, opts, ahtClient)
+	processor := newWatchUpdateProcessor(app, opts)
+
+	err := app.runBrokerWatch(ctx, processor, ahtClient)
 	if err == nil {
 		return nil
 	}
 
-	if !client.IsUnavailable(err) {
+	if !client.IsUnavailable(err) && !client.StreamClosed(err) {
 		return fmt.Errorf("watching registry broker: %w", err)
 	}
 
-	return app.runFilesystemWatch(ctx, opts)
+	return app.runFilesystemWatch(ctx, processor)
 }
 
 func (app *application) runBrokerWatch(
 	ctx context.Context,
-	opts watchOptions,
+	processor *watchUpdateProcessor,
 	ahtClient *client.Client,
 ) error {
-	processor := newWatchUpdateProcessor(app, opts)
-	initialized := false
-
-	err := ahtClient.Watch(ctx, opts.filter, func(state registry.StateSnapshot) error {
-		first := !initialized
-		if first {
-			initialized = true
-		}
-
-		return processor.accept(state.Sessions, first)
+	err := ahtClient.Watch(ctx, processor.options.filter, func(state registry.StateSnapshot) error {
+		return processor.accept(state.Sessions)
 	})
 	if err != nil {
 		return fmt.Errorf("watching AHT state: %w", err)
@@ -162,24 +157,25 @@ func (app *application) runBrokerWatch(
 	return nil
 }
 
-func (app *application) runFilesystemWatch(ctx context.Context, opts watchOptions) error {
+func (app *application) runFilesystemWatch(
+	ctx context.Context,
+	processor *watchUpdateProcessor,
+) error {
 	s := app.store()
 	if _, _, e := watchTarget(s); e != nil {
 		return e
 	}
 
-	processor := newWatchUpdateProcessor(app, opts)
-
 	err := s.Watch(ctx, registry.WatchOptions{
-		Filter:            opts.filter,
-		Debounce:          opts.debounce,
+		Filter:            processor.options.filter,
+		Debounce:          processor.options.debounce,
 		ReconcileInterval: 0,
 	}, func(result registry.WatchResult) error {
 		if app.reportWatchResultError(result) {
 			return nil
 		}
 
-		return processor.accept(result.Sessions, result.Initial)
+		return processor.accept(result.Sessions)
 	})
 	if err != nil {
 		return fmt.Errorf("watching registry store: %w", err)
@@ -190,16 +186,17 @@ func (app *application) runFilesystemWatch(ctx context.Context, opts watchOption
 
 func newWatchUpdateProcessor(app *application, opts watchOptions) *watchUpdateProcessor {
 	return &watchUpdateProcessor{
-		app:      app,
-		options:  opts,
-		writer:   &watchEventWriter{app: app, format: opts.format},
-		previous: nil,
+		app:         app,
+		options:     opts,
+		writer:      &watchEventWriter{app: app, format: opts.format},
+		previous:    nil,
+		initialized: false,
 	}
 }
 
-func (p *watchUpdateProcessor) accept(rawSessions []registry.Session, initial bool) error {
+func (p *watchUpdateProcessor) accept(rawSessions []registry.Session) error {
 	currentSessions := applyConfigFilter(rawSessions, p.app.cfg.Filter, p.options.harness)
-	if initial {
+	if !p.initialized {
 		p.previous = currentSessions
 		if !p.options.noSnapshot {
 			if err := p.writer.write(snapshotWatchEvents(p.previous, p.options.now())); err != nil {
@@ -207,7 +204,10 @@ func (p *watchUpdateProcessor) accept(rawSessions []registry.Session, initial bo
 			}
 		}
 
-		notifyWatchReady(p.options.ready)
+		p.initialized = true
+		if p.options.ready != nil {
+			close(p.options.ready)
+		}
 
 		return nil
 	}
@@ -274,12 +274,6 @@ func watchTarget(s *registry.Journal) (string, string, error) {
 	}
 
 	return p, d, nil
-}
-
-func notifyWatchReady(c chan struct{}) {
-	if c != nil {
-		close(c)
-	}
 }
 
 func watchSessionMap(s []registry.Session) map[string]registry.Session {

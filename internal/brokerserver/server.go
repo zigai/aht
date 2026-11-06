@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -157,7 +158,10 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 				s.handleConnection(ctx, connection)
 			})
 		default:
-			_ = connection.Close()
+			cleanup := cancelclose.OnCancel(ctx, connection)
+			_ = s.writeResponse(connection, errorResponse("", "busy", broker.ErrBusy))
+
+			cleanup()
 		}
 	}
 
@@ -299,6 +303,24 @@ func (s *Server) serveSubscription(
 	connection net.Conn,
 	request broker.Request,
 ) {
+	ctx, cancel := context.WithCancel(ctx)
+	cleanup := cancelclose.OnCancel(ctx, connection)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		_, _ = io.Copy(io.Discard, connection)
+
+		cancel()
+	}()
+
+	defer func() {
+		cancel()
+		cleanup()
+		<-done
+	}()
+
 	state, err := s.store.State(ctx, request.Filter)
 	if err != nil {
 		_ = s.writeResponse(connection, operationErrorResponse(request.ID, err))

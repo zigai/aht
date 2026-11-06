@@ -88,6 +88,12 @@ var (
 	// ErrUnavailable means no realtime AHT broker accepted the local connection.
 	ErrUnavailable = client.ErrUnavailable
 
+	// ErrBusy means the realtime broker refused a connection because all slots are occupied.
+	ErrBusy = client.ErrBusy
+
+	// ErrStreamClosed means an established realtime subscription lost its transport.
+	ErrStreamClosed = client.ErrStreamClosed
+
 	// ErrProtocol means the broker returned an invalid or incompatible response.
 	ErrProtocol = client.ErrProtocol
 
@@ -389,6 +395,11 @@ func NewSubscription(
 // IsUnavailable reports whether err means that no realtime broker accepted the connection.
 func IsUnavailable(err error) bool {
 	return client.IsUnavailable(err)
+}
+
+// StreamClosed reports whether an established realtime subscription lost its transport.
+func StreamClosed(err error) bool {
+	return client.StreamClosed(err)
 }
 
 // Resolve finds a single session matching selector using the provided session lister.

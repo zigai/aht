@@ -159,7 +159,7 @@ func assertRegistryFailures(
 
 	idle := registry.ActivityIdle
 	observation.SetActivity(&idle)
-	observation.At = observation.At.Add(-time.Second)
+	// Time regressions are dropped; equal-time conflicting content is rejected.
 	_, err = c.Observe(t.Context(), observation)
 	assertRegistryError(t, err, registry.ErrObservationConflict, "observation_conflict", online)
 
