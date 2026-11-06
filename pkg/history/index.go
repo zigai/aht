@@ -83,7 +83,8 @@ var (
 	errIndexSchema = errors.New(
 		"unrecognized history index; choose a new IndexPath or remove the disposable AHT index",
 	)
-	errIndexWAL = errors.New("history index cannot use write-ahead logging")
+	errIndexWAL   = errors.New("history index cannot use write-ahead logging")
+	errNewerIndex = errors.New("history index was written by a newer build")
 )
 
 // indexedFile is one history's committed index entry. resumeID is its first
@@ -113,8 +114,8 @@ type historyIndex struct {
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
-// default cache under [os.UserCacheDir], whose unusable database is retained as
-// history-v1.sqlite.invalid and rebuilt once. An explicit path is never moved
+// default cache under [os.UserCacheDir], whose unusable database is deleted and
+// rebuilt once unless its own schema is newer. An explicit path is never moved
 // aside. Unusable indexes return ErrIndexUnavailable so searches can scan native
 // history; lock contention waits until the context is canceled.
 func openHistoryIndex(
@@ -139,7 +140,7 @@ func openHistoryIndex(
 		return nil, fmt.Errorf("open history index: %w", ctx.Err())
 	}
 
-	if !cached {
+	if !cached || errors.Is(err, errNewerIndex) {
 		return nil, indexUnavailable(err)
 	}
 	// The default cache is disposable: delete the unusable database and
@@ -270,7 +271,11 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 		return err
 	}
 
-	if appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion {
+	if appID == indexApplicationID && version > indexVersion {
+		return errNewerIndex
+	}
+
+	if rebuildableIndexSchema(appID, version) {
 		if err := index.validateSchemaTables(ctx, version); err != nil {
 			return err
 		}
@@ -350,9 +355,11 @@ func (index *historyIndex) createSchema(ctx context.Context, tx *indexTransactio
 	}
 
 	switch {
+	case appID == indexApplicationID && version > indexVersion:
+		return errNewerIndex
 	case version == indexVersion && appID == indexApplicationID:
 		return nil
-	case appID == indexApplicationID && version >= oldestIndexVersion && version < indexVersion:
+	case rebuildableIndexSchema(appID, version):
 		index.rebuilt = true
 
 		if _, err := tx.ExecContext(ctx, dropIndexSchema+indexSchema); err != nil {
@@ -747,4 +754,8 @@ func sourceSQL(sources []Source) (string, []any) {
 	}
 
 	return "(" + strings.Join(filters, " OR ") + ")", args
+}
+
+func rebuildableIndexSchema(appID int, version int) bool {
+	return appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion
 }

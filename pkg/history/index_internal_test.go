@@ -4320,3 +4320,71 @@ func BenchmarkHistorySourceSearch(b *testing.B) {
 		}
 	}
 }
+
+func TestOpeningNewerBuildIndexLeavesItUntouched(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+
+	path, err := historyIndexPath("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	newer := indexVersion + 1
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(t.Context(), fmt.Sprintf(
+		"PRAGMA application_id=%d; PRAGMA user_version=%d; "+
+			"CREATE TABLE files(path TEXT); INSERT INTO files VALUES('/newer/session.jsonl');",
+		indexApplicationID,
+		newer,
+	)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	index, _ := openHistoryIndex(t.Context(), "", nil, nil)
+	if index != nil {
+		if err := index.close(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = check.Close() }()
+
+	var version, files int
+	if err := check.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := check.QueryRowContext(t.Context(), "SELECT count(*) FROM files").
+		Scan(&files); err != nil {
+		t.Fatal(err)
+	}
+
+	if version != newer || files != 1 {
+		t.Fatalf(
+			"newer index after open: user_version=%d files=%d, want %d and 1",
+			version,
+			files,
+			newer,
+		)
+	}
+}
