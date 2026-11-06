@@ -7,8 +7,15 @@ state = "waiting"
 detail = "permission"
 priority = 300
 region = "bottom:30"
-any = ["Allow this command?", "Approve this action?", "Permission required", "Waiting for your approval"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+any = [
+    "Allow this command?",
+    "Approve this action?",
+    "Permission required",
+    "Waiting for your approval",
+]
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "question_prompt"
@@ -17,7 +24,9 @@ detail = "question"
 priority = 250
 region = "bottom:30"
 any = ["Waiting for input", "Select an option", "Answer the question"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "working_interruptible"
@@ -31,7 +40,9 @@ id = "custom_working"
 state = "running"
 priority = 210
 region = "bottom:20"
-regex_any = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_any = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "input_prompt"
@@ -40,16 +51,22 @@ priority = 100
 region = "bottom:12"
 any = ["Type a message", "Enter to send", "shift+enter for newline"]
 none = ["esc to interrupt"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "custom_input_prompt"
 state = "idle"
 priority = 110
 region = "bottom:12"
-regex_any = ['(?m)^.* · .* · .* · (?:low|medium|high|max)(?:\s+[0-9]+(?:\.[0-9]+)?%/[0-9]+[kKmM])?\s*$']
+regex_any = [
+    '(?m)^.* · .* · .* · (?:low|medium|high|max)(?:\s+[0-9]+(?:\.[0-9]+)?%/[0-9]+[kKmM])?\s*$',
+]
 none = ["esc to interrupt", "ctrl+c to interrupt"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "usage_limit_prompt"
@@ -59,7 +76,9 @@ priority = 360
 region = "bottom:30"
 any = ["Rate limit exceeded"]
 none = ["esc to interrupt"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "error_prompt"
@@ -69,7 +88,9 @@ priority = 350
 region = "bottom:30"
 any = ["API Error", "Failed to execute", "Rate limit exceeded", "Execution failed"]
 none = ["esc to interrupt"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
 
 [[rules]]
 id = "interrupted_prompt"
@@ -78,4 +99,6 @@ priority = 220
 region = "bottom:25"
 any = ["Interrupted by user", "Operation cancelled", "Session stopped"]
 none = ["esc to interrupt"]
-regex_none = ['(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$']
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]

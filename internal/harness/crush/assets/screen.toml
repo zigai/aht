@@ -8,7 +8,10 @@ detail = "permission"
 priority = 300
 region = "all"
 regex_all = ['(?m)^[^\n]*│[ \t]+Permission Required[ \t╱]*│[ \t]*$']
-regex_any = ['(?m)^[^\n]*│[ \t]+Allow[ \t]+Allow for Session[ \t]+Deny[ \t]*│[ \t]*$', '(?m)^[^\n]*│[ \t]+←/→ choose • enter confirm • esc exit[ \t]*│[ \t]*$']
+regex_any = [
+    '(?m)^[^\n]*│[ \t]+Allow[ \t]+Allow for Session[ \t]+Deny[ \t]*│[ \t]*$',
+    '(?m)^[^\n]*│[ \t]+←/→ choose • enter confirm • esc exit[ \t]*│[ \t]*$',
+]
 
 [[rules]]
 id = "question_prompt"
@@ -30,5 +33,11 @@ id = "input_prompt"
 state = "idle"
 priority = 100
 region = "bottom:2"
-any = ["ctrl+p commands", "shift+tab mode", "tab focus chat", "tab focus editor", "tab change focus"]
+any = [
+    "ctrl+p commands",
+    "shift+tab mode",
+    "tab focus chat",
+    "tab focus editor",
+    "tab change focus",
+]
 none = ["esc cancel", "press again to cancel", "esc clear queue"]

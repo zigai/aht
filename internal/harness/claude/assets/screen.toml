@@ -48,7 +48,13 @@ state = "failed"
 detail = "general"
 priority = 350
 region = "bottom:30"
-any = ["API Error", "Rate limit exceeded", "Failed to run", "Request failed", "Credit balance too low"]
+any = [
+    "API Error",
+    "Rate limit exceeded",
+    "Failed to run",
+    "Request failed",
+    "Credit balance too low",
+]
 none = ["esc to interrupt"]
 
 [[rules]]

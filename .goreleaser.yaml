@@ -48,7 +48,6 @@ archives:
     formats:
       - tar.gz
     files:
-
       - LICENSE
 
       - README.md
