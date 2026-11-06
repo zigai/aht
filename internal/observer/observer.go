@@ -303,7 +303,26 @@ func (o *Observer) RunWithResults(ctx context.Context, handle func(Result) error
 	return o.run(ctx, handle)
 }
 
-//nolint:funcorder // shared run loop stays beside its two exported entrypoints
+func (o *Observer) RunOnce(ctx context.Context) (Result, error) {
+	if ctx == nil {
+		return Result{}, errObserverContextNil
+	}
+
+	if err := o.acquireLock(); err != nil {
+		return Result{}, err
+	}
+	defer o.releaseLock()
+
+	return o.runCycle(ctx)
+}
+
+func (o *Observer) Health() Health {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	return o.health
+}
+
 func (o *Observer) run(ctx context.Context, handle func(Result) error) error {
 	if ctx == nil {
 		return errObserverContextNil
@@ -345,20 +364,7 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) error {
 	}
 }
 
-func (o *Observer) RunOnce(ctx context.Context) (Result, error) {
-	if ctx == nil {
-		return Result{}, errObserverContextNil
-	}
-
-	if err := o.acquireLock(); err != nil {
-		return Result{}, err
-	}
-	defer o.releaseLock()
-
-	return o.runCycle(ctx)
-}
-
-//nolint:gocognit,cyclop,funcorder,maintidx // one cycle correlates process, multiplexer, catalog, and terminal evidence
+//nolint:gocognit,cyclop,maintidx // one cycle correlates process, multiplexer, catalog, and terminal evidence
 func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	at := o.now().UTC()
 
@@ -738,7 +744,6 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	return result, nil
 }
 
-//nolint:funcorder // cycle failure finalization stays next to reconciliation
 func (o *Observer) failCycle(
 	at time.Time,
 	component string,
@@ -753,7 +758,6 @@ func (o *Observer) failCycle(
 	return result, joinObserverHealthError(fmt.Errorf("%s: %w", wrapMsg, err), healthErr)
 }
 
-//nolint:funcorder // cycle health handling stays next to reconciliation
 func (o *Observer) recordCycleHealth(at time.Time, result Result) error {
 	if result.Degraded {
 		return o.recordHealth(
@@ -841,8 +845,6 @@ func joinObserverHealthError(primary error, healthErr error) error {
 // holdUnconfirmedProcesses removes processes matched only by command name from
 // this cycle until they are confirmed, so short-lived commands that share a
 // harness executable name never become registry sessions.
-//
-//nolint:funcorder // confirmation runs as part of reconciliation near its call site
 func (o *Observer) holdUnconfirmedProcesses(
 	sessions []registry.Session,
 	catalogByPID map[int]CatalogEntry,
@@ -875,8 +877,6 @@ func (o *Observer) holdUnconfirmedProcesses(
 // registry session. A process is confirmed by an existing session for the same
 // process (native reports create one), by a current catalog entry, by earlier
 // tracking, or by running for the confirmation period.
-//
-//nolint:funcorder // confirmation runs as part of reconciliation near its call site
 func (o *Observer) processConfirmed(
 	key processKey,
 	sessions []registry.Session,
@@ -1292,7 +1292,6 @@ func unavailableScreenState(
 	return observation, true
 }
 
-//nolint:funcorder // state detection runs as part of reconciliation near its call site
 func (o *Observer) detectScreenState(
 	ctx context.Context,
 	sessions []registry.Session,
@@ -1351,7 +1350,6 @@ func (o *Observer) detectScreenState(
 	return o.captureScreenState(ctx, session, harnessID, identity, pane, at)
 }
 
-//nolint:funcorder // screen stabilization stays beside screen detection.
 func (o *Observer) screenDecisionReady(
 	sessions []registry.Session,
 	harnessID registry.Harness,
@@ -1405,7 +1403,6 @@ func (o *Observer) screenDecisionReady(
 	return true
 }
 
-//nolint:funcorder // screen stabilization stays beside screen detection.
 func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedProcess) {
 	for key := range o.screenPending {
 		if _, ok := current[key]; !ok {
@@ -1541,7 +1538,6 @@ func processIdentity(process processinfo.Process) *registry.ProcessIdentity {
 	}
 }
 
-//nolint:funcorder // private helpers are grouped with lock and reconciliation internals
 func (o *Observer) initializeTracked(ctx context.Context) error {
 	if o.initialized {
 		return nil
@@ -1585,7 +1581,6 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 	return nil
 }
 
-//nolint:funcorder // private helpers are grouped with lock and reconciliation internals
 func (o *Observer) acquireLock() error {
 	o.mu.Lock()
 	if o.running {
@@ -1618,7 +1613,6 @@ func (o *Observer) acquireLock() error {
 	return nil
 }
 
-//nolint:funcorder // private helpers are grouped with lock and reconciliation internals
 func (o *Observer) releaseLock() {
 	o.mu.Lock()
 	file := o.lockFile
@@ -1634,7 +1628,7 @@ func (o *Observer) releaseLock() {
 	_ = removeObserverLock(o.lockPath)
 }
 
-//nolint:cyclop,funcorder // health persistence handles degraded categories and atomic writes
+//nolint:cyclop // health persistence handles degraded categories and atomic writes
 func (o *Observer) recordHealth(
 	at time.Time,
 	degraded bool,
@@ -1710,13 +1704,6 @@ func (o *Observer) recordHealth(
 	o.mu.Unlock()
 
 	return nil
-}
-
-func (o *Observer) Health() Health {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	return o.health
 }
 
 func (o *Observer) isProcessTracked(session registry.Session) bool {

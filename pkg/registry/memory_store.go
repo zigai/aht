@@ -354,104 +354,10 @@ func (s *MemoryStore) WaitForRevision(
 	}
 }
 
-//nolint:funcorder // lock-scoped snapshot construction stays beside its callers
-func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
-	sessions := make([]Session, 0, len(s.snapshot.Sessions))
-	for _, stored := range s.snapshot.Sessions {
-		session := cloneSessionValue(stored)
-		session.SchemaVersion = storeSchemaVersion
-		sessions = append(sessions, session)
-	}
-
-	return StateSnapshot{
-		Revision:  s.revision,
-		UpdatedAt: s.snapshot.UpdatedAt,
-		Sessions:  FilterSessions(sessions, filter),
-	}
-}
-
 // Flush atomically persists the latest in-memory snapshot, including state
 // that is not visible to consumers.
 func (s *MemoryStore) Flush(ctx context.Context) error {
 	return s.persist(ctx, true)
-}
-
-// persist checkpoints the snapshot and truncates the journal. Unless force is
-// set, it writes only after a consumer-visible change or, for evidence-only
-// refreshes, once the background interval has elapsed since the last write.
-//
-//nolint:funcorder // persistence policy stays beside Flush
-func (s *MemoryStore) persist(ctx context.Context, force bool) error {
-	select {
-	case s.flush <- struct{}{}:
-		defer func() { <-s.flush }()
-	case <-ctx.Done():
-		return fmt.Errorf("waiting to flush registry: %w", ctx.Err())
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.owner == nil {
-		return nil
-	}
-
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
-	if err != nil {
-		return err
-	}
-
-	if err := s.consumeJournalLocked(ctx); err != nil {
-		return closeStoreLock(lock, err)
-	}
-
-	s.expireTombstonesLocked()
-
-	if !s.persistDueLocked(force) {
-		return closeStoreLock(lock, nil)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
-	}
-
-	if err := persistJournalSnapshot(s.path, s.snapshot); err != nil {
-		return closeStoreLock(lock, err)
-	}
-
-	s.persistedRevision = s.storageRevision
-	s.persistedAt = time.Now()
-
-	return closeStoreLock(lock, nil)
-}
-
-//nolint:funcorder // persistence policy stays beside Flush
-func (s *MemoryStore) persistDueLocked(force bool) bool {
-	if s.storageRevision <= s.persistedRevision {
-		return false
-	}
-
-	if force || s.visibleRevision > s.persistedRevision {
-		return true
-	}
-
-	return time.Since(s.persistedAt) >= s.backgroundPersistInterval
-}
-
-//nolint:funcorder // lock-scoped expiry stays beside persistence
-func (s *MemoryStore) expireTombstonesLocked() {
-	now := s.now().UTC()
-	if !hasExpiredTombstones(s.snapshot, now, s.tombstoneTTL) {
-		return
-	}
-
-	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
-	expireTombstones(&candidate, now, s.tombstoneTTL)
-	changes := stateChanges(
-		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
-		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
-	)
-	s.acceptSnapshotLocked(candidate, changes)
 }
 
 func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
@@ -513,6 +419,95 @@ func (s *MemoryStore) RunPersistence(
 			return fmt.Errorf("persisting registry snapshot: %w", err)
 		}
 	}
+}
+
+func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
+	sessions := make([]Session, 0, len(s.snapshot.Sessions))
+	for _, stored := range s.snapshot.Sessions {
+		session := cloneSessionValue(stored)
+		session.SchemaVersion = storeSchemaVersion
+		sessions = append(sessions, session)
+	}
+
+	return StateSnapshot{
+		Revision:  s.revision,
+		UpdatedAt: s.snapshot.UpdatedAt,
+		Sessions:  FilterSessions(sessions, filter),
+	}
+}
+
+// persist checkpoints the snapshot and truncates the journal. Unless force is
+// set, it writes only after a consumer-visible change or, for evidence-only
+// refreshes, once the background interval has elapsed since the last write.
+func (s *MemoryStore) persist(ctx context.Context, force bool) error {
+	select {
+	case s.flush <- struct{}{}:
+		defer func() { <-s.flush }()
+	case <-ctx.Done():
+		return fmt.Errorf("waiting to flush registry: %w", ctx.Err())
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.owner == nil {
+		return nil
+	}
+
+	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	if err != nil {
+		return err
+	}
+
+	if err := s.consumeJournalLocked(ctx); err != nil {
+		return closeStoreLock(lock, err)
+	}
+
+	s.expireTombstonesLocked()
+
+	if !s.persistDueLocked(force) {
+		return closeStoreLock(lock, nil)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
+	}
+
+	if err := persistJournalSnapshot(s.path, s.snapshot); err != nil {
+		return closeStoreLock(lock, err)
+	}
+
+	s.persistedRevision = s.storageRevision
+	s.persistedAt = time.Now()
+
+	return closeStoreLock(lock, nil)
+}
+
+func (s *MemoryStore) persistDueLocked(force bool) bool {
+	if s.storageRevision <= s.persistedRevision {
+		return false
+	}
+
+	if force || s.visibleRevision > s.persistedRevision {
+		return true
+	}
+
+	return time.Since(s.persistedAt) >= s.backgroundPersistInterval
+}
+
+func (s *MemoryStore) expireTombstonesLocked() {
+	now := s.now().UTC()
+	if !hasExpiredTombstones(s.snapshot, now, s.tombstoneTTL) {
+		return
+	}
+
+	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
+	expireTombstones(&candidate, now, s.tombstoneTTL)
+	changes := stateChanges(
+		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+	)
+	s.acceptSnapshotLocked(candidate, changes)
 }
 
 func validateNativePayloadChanges(previous snapshot, candidate snapshot) error {
