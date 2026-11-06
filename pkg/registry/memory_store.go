@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -93,16 +92,23 @@ func OpenMemoryStoreWithOptions(
 	}
 
 	fileStore := NewFileStore(path, rules)
-	if err := os.MkdirAll(filepath.Dir(fileStore.Path()), 0o700); err != nil {
+	if err := registryFSFor(
+		fileStore.Path(),
+	).MkdirAll(filepath.Dir(fileStore.Path()), 0o700); err != nil {
 		return nil, fmt.Errorf("creating state directory: %w", err)
 	}
 
-	owner, err := tryStoreLock(fileStore.Path() + ".owner.lock")
+	lock, err := openStoreLock(context.Background(), fileStore.Path()+".lock", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	loaded, err := fileStore.load(context.Background())
+	owner, err := tryStoreLock(fileStore.Path() + ".owner.lock")
+	if err != nil {
+		return nil, closeStoreLock(lock, err)
+	}
+
+	loaded, err := fileStore.loadLocked(context.Background(), lock)
 	if err != nil {
 		return nil, closeStoreLock(owner, err)
 	}

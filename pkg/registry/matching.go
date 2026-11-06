@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"path/filepath"
 	"time"
 )
@@ -29,9 +30,9 @@ func reconcileResumedProcessSession(
 			session.Location = provisional.Location
 		}
 
-		session.Incarnation.ObservedAt = maxTime(
-			session.Incarnation.ObservedAt,
-			provisional.Incarnation.ObservedAt,
+		session.Incarnation.EvidenceAt = maxTime(
+			session.Incarnation.EvidenceAt,
+			provisional.Incarnation.EvidenceAt,
 		)
 
 		delete(sessions, id)
@@ -43,9 +44,9 @@ func (r Reducer) retireConflictingProcessSessions(
 	observation Observation,
 	at time.Time,
 	receivedAt time.Time,
-) {
+) (Session, error) {
 	if observation.ProcessIdentity() == nil || !observation.ProcessIdentity().Complete() {
-		return
+		return Session{}, nil
 	}
 
 	for id, session := range sessions {
@@ -54,14 +55,16 @@ func (r Reducer) retireConflictingProcessSessions(
 			continue
 		}
 
-		if currentAt := session.Incarnation.ObservedAt; !currentAt.IsZero() &&
-			at.Before(currentAt) {
-			continue
+		transition := transitionIncarnation(session, observation, at, true)
+		if !transition.accepted {
+			if transition.ignored {
+				continue
+			}
+
+			return session, fmt.Errorf("%w: retired process evidence", errObservationDropped)
 		}
 
-		if session.Presence() != PresenceGone {
-			(lifecycleMachine{session: &session}).end(at)
-		}
+		(lifecycleMachine{session: &session}).commit(transition, at)
 
 		if nativeReplacement {
 			if gone, ok := session.Liveness.(Gone); ok {
@@ -84,6 +87,8 @@ func (r Reducer) retireConflictingProcessSessions(
 		session.UpdatedAt = maxTime(session.UpdatedAt, receivedAt)
 		sessions[id] = session
 	}
+
+	return Session{}, nil
 }
 
 func (r Reducer) conflictingSessionReplacement(
@@ -184,7 +189,7 @@ func findAndReconcileMatchingSession(
 	identityID := findIdentityMatchingSession(sessions, observation)
 
 	processID := findProcessMatchingSession(sessions, observation)
-	if preserveGoneIdentity(sessions, observation, identityID, processID) {
+	if preferNativeIdentity(sessions, observation, identityID, processID) {
 		return identityID
 	}
 
@@ -200,14 +205,7 @@ func findAndReconcileMatchingSession(
 		return identityID
 	}
 
-	if observation.Kind() == "listing" && observation.Listing() != nil &&
-		observation.Listing().ProcessPID > 0 {
-		return bestMatchingSessionID(sessions, observation.Harness, func(session Session) bool {
-			return session.Process != nil && session.Process.PID == observation.Listing().ProcessPID
-		})
-	}
-
-	return ""
+	return findListingMatchingSession(sessions, observation)
 }
 
 func reconcileIdentityProcessSessions(
@@ -222,7 +220,10 @@ func reconcileIdentityProcessSessions(
 			// The prior process terminated and the same session is being resumed
 			// or restarted under a new process. Retire the stale incarnation so
 			// the registry never retains two live sessions for one session_id.
-			(lifecycleMachine{session: &prior}).end(at)
+			(lifecycleMachine{session: &prior}).commit(
+				transitionIncarnation(prior, observation, at, true),
+				at,
+			)
 			prior.UpdatedAt = maxTime(prior.UpdatedAt, at)
 			sessions[identityID] = prior
 		}
@@ -240,7 +241,7 @@ func reconcileIdentityProcessSessions(
 	return false
 }
 
-func preserveGoneIdentity(
+func preferNativeIdentity(
 	sessions map[string]Session,
 	observation Observation,
 	identityID string,
@@ -248,7 +249,6 @@ func preserveGoneIdentity(
 ) bool {
 	return observation.Kind() == "report" && identityID != "" && processID != "" &&
 		identityID != processID && sessions[identityID].Process != nil &&
-		sessions[identityID].Presence() == PresenceGone &&
 		sessions[processID].IdentityState == IdentityProvisional &&
 		sessions[processID].Observations.Native == nil
 }
@@ -262,14 +262,21 @@ func findMatchingSession(sessions map[string]Session, observation Observation) s
 		return id
 	}
 
-	if observation.Kind() == "listing" && observation.Listing() != nil &&
-		observation.Listing().ProcessPID > 0 {
-		return bestMatchingSessionID(sessions, observation.Harness, func(session Session) bool {
-			return session.Process != nil && session.Process.PID == observation.Listing().ProcessPID
-		})
+	return findListingMatchingSession(sessions, observation)
+}
+
+func findListingMatchingSession(sessions map[string]Session, observation Observation) string {
+	listing := observation.Listing()
+	if observation.Kind() != "listing" || listing == nil || !listing.Current ||
+		listing.ProcessPID <= 0 {
+		return ""
 	}
 
-	return ""
+	return bestMatchingSessionID(sessions, observation.Harness, func(session Session) bool {
+		return session.Process != nil && session.Process.PID == listing.ProcessPID &&
+			(listing.ProcessStartIdentity == "" || session.Process.StartIdentity == listing.ProcessStartIdentity) &&
+			!observationIdentityConflicts(session, observation.Subject)
+	})
 }
 
 func findProcessMatchingSession(sessions map[string]Session, observation Observation) string {
@@ -374,23 +381,16 @@ func presenceMatchRank(presence Presence) int {
 func mergeProvisionalSession(target Session, provisional Session) Session {
 	target = mergeProvisionalMetadata(target, provisional)
 
-	if target.Presence() == PresenceUnknown && provisional.Presence() != PresenceUnknown {
-		if _, gone := provisional.Liveness.(Gone); gone {
-			target.Liveness = provisional.Liveness
-		} else {
-			target.setPresence(provisional.Presence())
-		}
-
-		target.PresenceChangedAt = provisional.PresenceChangedAt
+	if target.Process == nil || !target.Process.Complete() {
+		target.Observations = mergeObservations(target.Observations, provisional.Observations)
+	} else {
+		// Identity-only evidence cannot describe the process incarnation.
+		provisional.Observations.Native = nil
+		provisional.Observations.Process = nil
+		provisional.Observations.Screen = nil
+		target.Observations = mergeObservations(target.Observations, provisional.Observations)
 	}
 
-	if activityUnknown(target.Activity()) && !activityUnknown(provisional.Activity()) {
-		target.setActivity(clonePtr(provisional.Activity()))
-		target.ActivityChangedAt = provisional.ActivityChangedAt
-		target.setDecision(provisional.Decision())
-	}
-
-	target.Observations = mergeObservations(target.Observations, provisional.Observations)
 	if target.CreatedAt.IsZero() ||
 		(!provisional.CreatedAt.IsZero() && provisional.CreatedAt.Before(target.CreatedAt)) {
 		target.CreatedAt = provisional.CreatedAt
@@ -400,8 +400,6 @@ func mergeProvisionalSession(target Session, provisional Session) Session {
 	if target.SessionID != "" || target.SessionPath != "" {
 		target.IdentityState = IdentityIdentified
 	}
-
-	target.Incarnation = incarnationFromEvidence(target)
 
 	return target
 }
@@ -432,10 +430,6 @@ func mergeProvisionalMetadata(target Session, provisional Session) Session {
 	}
 
 	return target
-}
-
-func activityUnknown(activity *Activity) bool {
-	return activity == nil || *activity == ActivityUnknown
 }
 
 func mergeObservations(target Observations, provisional Observations) Observations {

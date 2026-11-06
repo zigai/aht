@@ -17,15 +17,24 @@ var (
 )
 
 type Session struct {
-	ID          string
-	Harness     string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	HasLiveness bool
-	Presence    string
-	Activity    string
-	ValidState  bool
-	NativeEnded bool
+	SessionPath        string
+	SessionID          string
+	Process            string
+	IncarnationProcess string
+	Incarnation        string
+	EvidenceAt         time.Time
+	DecisionAt         time.Time
+	TransitionAt       time.Time
+	PreviousProcess    string
+	ID                 string
+	Harness            string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	HasLiveness        bool
+	Presence           string
+	Activity           string
+	ValidState         bool
+	NativeEnded        bool
 }
 
 type Coverage struct {
@@ -38,6 +47,8 @@ func Sessions(sessions []Session) error {
 	var violations []error
 
 	seen := make(map[string]struct{}, len(sessions))
+	current := make(map[string]string)
+
 	for _, session := range sessions {
 		id := session.ID
 		// Mirrors the identity and time requirements of validateSnapshot.
@@ -58,6 +69,24 @@ func Sessions(sessions []Session) error {
 		seen[id] = struct{}{}
 
 		violations = append(violations, sessionStateViolations(session)...)
+		if session.SessionID != "" && session.Presence != "gone" {
+			key := session.Harness + "/" + session.SessionID
+			if previous := current[key]; previous != "" {
+				violations = append(
+					violations,
+					fmt.Errorf(
+						"%w: two nonterminal current sessions %q and %q",
+						ErrIdentity,
+						previous,
+						session.ID,
+					),
+				)
+			}
+
+			current[key] = session.ID
+		}
+
+		violations = append(violations, incarnationViolations(session)...)
 	}
 
 	return errors.Join(violations...)
@@ -107,6 +136,14 @@ func (c *Coverage) Missing(required ...string) []string {
 	return missing
 }
 
+func ProcessKey(pid int, start string) string {
+	if pid <= 0 || start == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("%d:%s", pid, start)
+}
+
 func sessionStateViolations(session Session) []error {
 	var violations []error
 
@@ -144,6 +181,40 @@ func sessionStateViolations(session Session) []error {
 				session.Activity,
 			),
 		)
+	}
+
+	return violations
+}
+
+func incarnationViolations(session Session) []error {
+	var violations []error
+
+	if session.Incarnation != "" {
+		expected := "unknown"
+
+		switch session.Incarnation {
+		case "live":
+			expected = "live"
+		case "ended", "exited":
+			expected = "gone"
+		case "starting":
+		default:
+			violations = append(
+				violations,
+				fmt.Errorf("%w: invalid incarnation %q", ErrLiveness, session.Incarnation),
+			)
+		}
+
+		if session.Presence != expected || session.Process != session.IncarnationProcess {
+			violations = append(
+				violations,
+				fmt.Errorf(
+					"%w: incarnation and liveness/process disagree for %q",
+					ErrLiveness,
+					session.ID,
+				),
+			)
+		}
 	}
 
 	return violations

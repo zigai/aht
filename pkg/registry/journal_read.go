@@ -2,8 +2,10 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -81,16 +83,22 @@ func (s *MemoryStore) drainLocked(ctx context.Context) error {
 }
 
 func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
+	baseline, err := s.journalBaseline()
+	if err != nil {
+		return err
+	}
+
 	entries, err := readJournal(s.path)
 	if err != nil {
 		return err
 	}
 
-	if len(entries) == 0 || entries[len(entries)-1].Sequence <= s.snapshot.JournalSequence {
+	if baseline.JournalSequence == s.snapshot.JournalSequence &&
+		(len(entries) == 0 || entries[len(entries)-1].Sequence <= baseline.JournalSequence) {
 		return nil
 	}
 
-	candidate, changes, err := s.reducer.replayJournal(ctx, s.snapshot, entries)
+	candidate, rejected, err := s.reducer.replayJournal(ctx, baseline, entries)
 	if err != nil {
 		return fmt.Errorf("reducing journal: %w", err)
 	}
@@ -99,7 +107,23 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 		return err
 	}
 
+	if len(rejected) > 0 {
+		// Checkpoint the rejection's memory-only evidence before discarding its
+		// journal entry; a restart must not accept what this owner rejected.
+		if err := persistJournalSnapshot(s.path, candidate); err != nil {
+			return err
+		}
+	}
+
+	changes := stateChanges(
+		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+	)
 	s.acceptSnapshotLocked(candidate, changes)
+
+	for _, err := range rejected {
+		slog.Warn("dropping rejected registry observation", "path", s.path, "error", err)
+	}
 
 	return nil
 }
@@ -143,6 +167,27 @@ func (s *MemoryStore) commandLocked(
 	ctx context.Context,
 	entry journalEntry,
 ) (journalResult, error) {
+	if entry.Reset {
+		candidate, result, err := resetJournalSnapshot(
+			ctx,
+			s.path,
+			s.now().UTC(),
+			s.snapshot.JournalSequence,
+			len(s.snapshot.Sessions),
+		)
+		if err != nil {
+			return journalResult{}, err
+		}
+
+		result.changes = stateChanges(
+			State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+			State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+		)
+		s.acceptSnapshotLocked(candidate, result.changes)
+
+		return result, nil
+	}
+
 	if err := s.consumeJournalLocked(ctx); err != nil {
 		return journalResult{}, err
 	}
@@ -208,4 +253,26 @@ func journalWorthy(entry journalEntry, result journalResult) bool {
 	}
 
 	return false
+}
+
+func (s *MemoryStore) journalBaseline() (snapshot, error) {
+	baseline := s.snapshot
+
+	data, err := readSnapshotFile(s.path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return snapshot{}, err
+	}
+
+	var header struct {
+		Sequence uint64 `json:"journal_sequence"`
+	}
+	if json.Unmarshal(data, &header) == nil && header.Sequence > baseline.JournalSequence {
+		// Only reset can publish a checkpoint ahead of the live owner's memory.
+		baseline, err = NewFileStore(s.path, s.reducer.rules).loadSnapshot()
+		if err != nil {
+			return snapshot{}, err
+		}
+	}
+
+	return baseline, nil
 }

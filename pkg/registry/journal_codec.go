@@ -7,13 +7,19 @@ import (
 	"time"
 )
 
-type journalWire struct {
+type journalWire[T any] struct {
 	Sequence     uint64         `json:"sequence"`
 	ReceivedAt   time.Time      `json:"received_at"`
-	Observations []Observation  `json:"observations,omitempty"`
+	Observations []T            `json:"observations,omitempty"`
 	Payloads     [][]byte       `json:"payloads,omitempty"`
 	DeleteAfter  *time.Duration `json:"delete_after,omitempty"`
 	Reset        bool           `json:"reset,omitempty"`
+}
+
+type decodedJournalEntry struct {
+	journalEntry
+
+	rejected map[int]error
 }
 
 func (entry journalEntry) MarshalJSON() ([]byte, error) {
@@ -30,7 +36,7 @@ func (entry journalEntry) MarshalJSON() ([]byte, error) {
 	}
 
 	data, err := json.Marshal(
-		journalWire{
+		journalWire[Observation]{
 			Sequence:     entry.Sequence,
 			ReceivedAt:   entry.ReceivedAt,
 			Observations: observations,
@@ -46,25 +52,54 @@ func (entry journalEntry) MarshalJSON() ([]byte, error) {
 	return data, nil
 }
 
-func (entry *journalEntry) UnmarshalJSON(data []byte) error {
-	var wire journalWire
+func decodeJournalEntry(data []byte) (decodedJournalEntry, error) {
+	var wire journalWire[json.RawMessage]
 	if err := json.Unmarshal(data, &wire); err != nil {
-		return fmt.Errorf("decoding journal command: %w", err)
+		return decodedJournalEntry{}, fmt.Errorf("decoding journal command: %w", err)
 	}
 
-	for index := range wire.Observations {
-		if index < len(wire.Payloads) {
-			wire.Observations[index].Report().Payload = wire.Payloads[index]
+	decoded := decodedJournalEntry{
+		Sequence:     wire.Sequence,
+		ReceivedAt:   wire.ReceivedAt,
+		Observations: make([]Observation, len(wire.Observations)),
+		DeleteAfter:  wire.DeleteAfter,
+		Reset:        wire.Reset,
+		rejected:     nil,
+	}
+	for index, raw := range wire.Observations {
+		observation := &decoded.Observations[index]
+		if err := json.Unmarshal(raw, observation); err != nil {
+			if decoded.rejected == nil {
+				decoded.rejected = make(map[int]error)
+			}
+
+			decoded.rejected[index] = fmt.Errorf("%w: %w", ErrInvalidObservation, err)
+
+			continue
+		}
+
+		if report, ok := observation.Evidence.(*Report); ok && report != nil &&
+			index < len(wire.Payloads) {
+			report.Payload = wire.Payloads[index]
 		}
 	}
 
-	*entry = journalEntry{
-		Sequence:     wire.Sequence,
-		ReceivedAt:   wire.ReceivedAt,
-		Observations: wire.Observations,
-		DeleteAfter:  wire.DeleteAfter,
-		Reset:        wire.Reset,
+	return decoded, nil
+}
+
+func (entry *journalEntry) UnmarshalJSON(data []byte) error {
+	decoded, err := decodeJournalEntry(data)
+	if err != nil {
+		return err
 	}
+
+	for index := range decoded.Observations {
+		if err := decoded.rejected[index]; err != nil {
+			return err
+		}
+	}
+
+	*entry = decoded.journalEntry
 
 	return nil
 }

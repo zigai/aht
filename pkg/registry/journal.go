@@ -20,6 +20,8 @@ var (
 	ErrStoreClosed     = errors.New("registry owner is closed")
 )
 
+var errJournalSequenceExhausted = errors.New("registry journal sequence exhausted")
+
 type Journal struct{ *FileStore }
 
 type journalEntry struct {
@@ -129,7 +131,7 @@ func (s *Journal) Reset(ctx context.Context) (ResetResult, error) {
 }
 
 func (s *Journal) transact(ctx context.Context, entry journalEntry) (journalResult, error) {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	if err := registryFSFor(s.path).MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return journalResult{}, fmt.Errorf("creating state directory: %w", err)
 	}
 
@@ -144,13 +146,14 @@ func (s *Journal) transact(ctx context.Context, entry journalEntry) (journalResu
 }
 
 func (s *Journal) transactLocked(ctx context.Context, entry journalEntry) (journalResult, error) {
+	if entry.Reset {
+		_, result, err := resetJournalSnapshot(ctx, s.path, entry.ReceivedAt, 0, -1)
+		return result, err
+	}
+
 	snap, err := s.loadSnapshot()
 	if err != nil {
-		if !entry.Reset {
-			return journalResult{}, err
-		}
-
-		snap = newSnapshot()
+		return journalResult{}, err
 	}
 
 	entries, err := readJournal(s.path)
@@ -243,13 +246,23 @@ func (r Reducer) applyJournalEntry(
 	return result, nil
 }
 
-func (r Reducer) foldJournal(ctx context.Context, snap *snapshot, entries []journalEntry) error {
+func (r Reducer) foldJournal(
+	ctx context.Context,
+	snap *snapshot,
+	entries []decodedJournalEntry,
+) error {
 	for _, entry := range entries {
 		if entry.Sequence <= snap.JournalSequence {
 			continue
 		}
 
-		if _, err := r.applyJournalEntry(ctx, snap, entry); err != nil {
+		for index := range entry.Observations {
+			if err := entry.rejected[index]; err != nil {
+				return err
+			}
+		}
+
+		if _, err := r.applyJournalEntry(ctx, snap, entry.journalEntry); err != nil {
 			return err
 		}
 	}
@@ -257,7 +270,7 @@ func (r Reducer) foldJournal(ctx context.Context, snap *snapshot, entries []jour
 	return nil
 }
 
-func readJournal(path string) ([]journalEntry, error) {
+func readJournal(path string) ([]decodedJournalEntry, error) {
 	data, err := readSnapshotFile(path + ".journal.jsonl")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -267,7 +280,7 @@ func readJournal(path string) ([]journalEntry, error) {
 		return nil, fmt.Errorf("reading journal: %w", err)
 	}
 
-	var entries []journalEntry
+	var entries []decodedJournalEntry
 
 	data = data[:bytes.LastIndexByte(data, '\n')+1]
 	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
@@ -275,8 +288,8 @@ func readJournal(path string) ([]journalEntry, error) {
 			continue
 		}
 
-		var entry journalEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+		entry, err := decodeJournalEntry(line)
+		if err != nil {
 			return nil, fmt.Errorf("%w: decoding journal: %w", ErrCorruptStore, err)
 		}
 
@@ -420,15 +433,191 @@ func journalAppendOffset(file registryFile) (int64, error) {
 func (r Reducer) replayJournal(
 	ctx context.Context,
 	previous snapshot,
-	entries []journalEntry,
-) (snapshot, []Change, error) {
-	candidate := cloneRegistrySnapshot(previous)
-	if err := r.foldJournal(ctx, &candidate, entries); err != nil {
+	entries []decodedJournalEntry,
+) (snapshot, []error, error) {
+	candidate := cloneRegistrySnapshotForMutation(previous)
+
+	var rejected []error
+
+	var err error
+
+	for _, replay := range entries {
+		entry := replay.journalEntry
+		if entry.Sequence <= candidate.JournalSequence {
+			continue
+		}
+
+		if entry.Reset || entry.DeleteAfter != nil {
+			if _, err := r.applyJournalEntry(ctx, &candidate, entry); err != nil {
+				return snapshot{}, nil, err
+			}
+
+			continue
+		}
+
+		var dropped []error
+
+		candidate, dropped, err = r.replayObservations(ctx, candidate, replay)
+		if err != nil {
+			return snapshot{}, nil, err
+		}
+
+		rejected = append(rejected, dropped...)
+
+		candidate.JournalSequence = entry.Sequence
+		candidate.UpdatedAt = maxTime(candidate.UpdatedAt, entry.ReceivedAt)
+	}
+
+	return candidate, rejected, nil
+}
+
+func resetJournalSnapshot(
+	ctx context.Context,
+	path string,
+	at time.Time,
+	sequence uint64,
+	cleared int,
+) (snapshot, journalResult, error) {
+	sequence, cleared, err := resetJournalPosition(path, sequence, cleared)
+	if err != nil {
+		return snapshot{}, journalResult{}, err
+	}
+
+	if sequence == ^uint64(0) {
+		return snapshot{}, journalResult{}, errJournalSequenceExhausted
+	}
+
+	snap := newSnapshot()
+	snap.JournalSequence = sequence + 1
+	snap.UpdatedAt = at
+	entry := journalEntry{
+		Sequence:     snap.JournalSequence,
+		ReceivedAt:   at,
+		Reset:        true,
+		Observations: nil,
+		DeleteAfter:  nil,
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return snapshot{}, journalResult{}, fmt.Errorf("encoding reset: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return snapshot{}, journalResult{}, fmt.Errorf("resetting registry: %w", err)
+	}
+
+	// Publish the reset before the checkpoint so crashes and a live owner
+	// cannot replay discarded entries or restore pre-reset memory.
+	if err := writeRegistryAtomic(path+".journal.jsonl", append(data, '\n')); err != nil {
+		return snapshot{}, journalResult{}, err
+	}
+
+	if err := persistJournalSnapshot(path, snap); err != nil {
+		return snapshot{}, journalResult{}, err
+	}
+
+	return snap, journalResult{
+		reset:    ResetResult{Cleared: cleared, Remaining: 0},
+		changes:  nil,
+		sessions: nil,
+		gc:       GCResult{Deleted: 0, Remaining: 0},
+		ended:    0,
+	}, nil
+}
+
+func (r Reducer) replayObservations(
+	ctx context.Context,
+	candidate snapshot,
+	replay decodedJournalEntry,
+) (snapshot, []error, error) {
+	var rejected []error
+
+	for index, observation := range replay.Observations {
+		if err := replay.rejected[index]; err != nil {
+			rejected = append(rejected, fmt.Errorf(
+				"journal sequence %d observation %d: %w", replay.Sequence, index, err,
+			))
+
+			continue
+		}
+
+		next, dropped, err := r.replayObservation(ctx, candidate, replay.journalEntry, observation)
+		if err != nil {
+			return snapshot{}, nil, err
+		}
+
+		for _, err := range dropped {
+			rejected = append(
+				rejected,
+				fmt.Errorf("journal sequence %d observation %d: %w", replay.Sequence, index, err),
+			)
+		}
+
+		candidate = next
+	}
+
+	return candidate, rejected, nil
+}
+
+func (r Reducer) replayObservation(
+	ctx context.Context,
+	candidate snapshot,
+	entry journalEntry,
+	observation Observation,
+) (snapshot, []error, error) {
+	next := cloneRegistrySnapshotForMutation(candidate)
+	single := entry
+
+	single.Observations = []Observation{observation}
+	if _, err := r.applyJournalEntry(ctx, &next, single); err != nil {
+		if errors.Is(err, ErrObservationConflict) || errors.Is(err, ErrInvalidObservation) ||
+			errors.Is(err, ErrUnknownHarness) {
+			return candidate, []error{err}, nil
+		}
+
 		return snapshot{}, nil, err
 	}
 
-	return candidate, stateChanges(
-		State{Sessions: previous.Sessions, UpdatedAt: previous.UpdatedAt},
-		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
-	), nil
+	dropped := next.dropped
+	next.dropped = nil
+
+	return next, dropped, nil
+}
+
+func resetJournalPosition(path string, sequence uint64, cleared int) (uint64, int, error) {
+	var header struct {
+		Sequence uint64                     `json:"journal_sequence"`
+		Sessions map[string]json.RawMessage `json:"sessions"`
+	}
+
+	data, err := readSnapshotFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrStoreTooLarge) {
+		return 0, 0, err
+	}
+
+	if json.Unmarshal(data, &header) == nil {
+		sequence = max(sequence, header.Sequence)
+		if cleared < 0 {
+			cleared = len(header.Sessions)
+		}
+	}
+
+	cleared = max(cleared, 0)
+
+	data, err = readSnapshotFile(path + ".journal.jsonl")
+	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrStoreTooLarge) {
+		return 0, 0, err
+	}
+
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		var header struct {
+			Sequence uint64 `json:"sequence"`
+		}
+		if json.Unmarshal(line, &header) == nil {
+			sequence = max(sequence, header.Sequence)
+		}
+	}
+
+	return sequence, cleared, nil
 }

@@ -2,8 +2,11 @@ package registry_test
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -455,8 +458,8 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 					},
 				},
 			)
-			if !errors.Is(err, registry.ErrObservationConflict) {
-				t.Fatalf("stale prior-incarnation callback error = %v, want conflict", err)
+			if err != nil {
+				t.Fatalf("stale prior-incarnation callback error = %v, want drop", err)
 			}
 
 			sessions, err := store.List(ctx, registry.Filter{})
@@ -790,5 +793,255 @@ func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *te
 
 	if !session.ActivityChangedAt.Equal(at) {
 		t.Fatalf("ActivityChangedAt = %s, want turn start %s", session.ActivityChangedAt, at)
+	}
+}
+
+func reducerProcess(pid int) registry.ProcessIdentity {
+	return registry.ProcessIdentity{
+		PID:            pid,
+		PPID:           1,
+		ProcessGroupID: pid,
+		StartIdentity:  "boot:" + strconv.Itoa(pid),
+		Executable:     "/usr/bin/codex",
+	}
+}
+
+func codexReport(
+	sessionID string,
+	at time.Time,
+	process *registry.ProcessIdentity,
+	activity registry.Activity,
+) registry.Observation {
+	return registry.Observation{
+		Harness: registry.Harness("codex"),
+		At:      at,
+		Subject: registry.ObservationIdentity{SessionID: sessionID},
+		Evidence: &registry.Report{
+			Reporter: registry.Reporter{Integration: "codex-extension"},
+			Event:    "turn",
+			Activity: &activity,
+			Process:  process,
+		},
+	}
+}
+
+func codexSighting(
+	at time.Time,
+	process registry.ProcessIdentity,
+	present bool,
+) registry.Observation {
+	return registry.Observation{
+		Harness:  registry.Harness("codex"),
+		At:       at,
+		Evidence: &registry.Sighting{Process: process, Present: present},
+	}
+}
+
+func applyObservations(
+	t *testing.T,
+	state registry.State,
+	receivedAt time.Time,
+	observations ...registry.Observation,
+) registry.State {
+	t.Helper()
+
+	next, _, err := registry.NewReducer(behaviorRules{}).Apply(state, observations, receivedAt)
+	if err != nil {
+		t.Fatalf("apply at %s: %v", receivedAt.Format(time.TimeOnly), err)
+	}
+
+	return next
+}
+
+func sessionWithProcess(t *testing.T, state registry.State, pid int) registry.Session {
+	t.Helper()
+
+	for _, session := range state.Sessions {
+		if session.Process != nil && session.Process.PID == pid &&
+			session.Presence() != registry.PresenceGone {
+			return session
+		}
+	}
+
+	t.Fatalf(
+		"no session that is not gone has process %d; sessions: %s",
+		pid,
+		describeSessions(state),
+	)
+
+	return registry.Session{}
+}
+
+func describeSessions(state registry.State) string {
+	descriptions := make([]string, 0, len(state.Sessions))
+	for _, session := range state.Sessions {
+		pid := 0
+		if session.Process != nil {
+			pid = session.Process.PID
+		}
+
+		descriptions = append(
+			descriptions,
+			fmt.Sprintf("{id %q pid %d %s}", session.SessionID, pid, session.Presence()),
+		)
+	}
+
+	slices.Sort(descriptions)
+
+	return strings.Join(descriptions, " ")
+}
+
+func sessionWithID(t *testing.T, state registry.State, sessionID string) registry.Session {
+	t.Helper()
+
+	for _, session := range state.Sessions {
+		if session.SessionID == sessionID {
+			return session
+		}
+	}
+
+	t.Fatalf("no session has id %q; sessions: %s", sessionID, describeSessions(state))
+
+	return registry.Session{}
+}
+
+func TestLateNativeEndNeverLeavesSessionLive(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	process := reducerProcess(100)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(
+		t,
+		state,
+		base,
+		codexReport("ended", base, &process, registry.ActivityRunning),
+	)
+	sightedAt := base.Add(10 * time.Second)
+	state = applyObservations(t, state, sightedAt, codexSighting(sightedAt, process, true))
+
+	end := registry.NativeLifecycleEnd
+	lateEnd := registry.Observation{
+		Harness: registry.Harness("codex"),
+		At:      base.Add(5 * time.Second),
+		Subject: registry.ObservationIdentity{SessionID: "ended"},
+		Evidence: &registry.Report{
+			Reporter:  registry.Reporter{Integration: "codex-extension"},
+			Event:     "session_end",
+			Lifecycle: &end,
+			Process:   &process,
+		},
+	}
+
+	next, _, err := registry.NewReducer(behaviorRules{}).
+		Apply(state, []registry.Observation{lateEnd}, base.Add(11*time.Second))
+	if err != nil {
+		// Rejecting the late end whole also keeps stored evidence and presence consistent.
+		next = state
+	}
+
+	session := sessionWithID(t, next, "ended")
+	ended := session.Observations.Native != nil && session.Observations.Native.Lifecycle != nil &&
+		*session.Observations.Native.Lifecycle == registry.NativeLifecycleEnd
+
+	if ended && session.Presence() != registry.PresenceGone {
+		t.Fatalf("session stores a native end but is %s with activity %v, want gone",
+			session.Presence(), registry.ActivityValue(session.Activity()))
+	}
+}
+
+func TestResumeFromNewProcessBeforeGoneScanRevivesSession(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	oldProcess, newProcess := reducerProcess(100), reducerProcess(200)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(
+		t,
+		state,
+		base,
+		codexReport("resumed", base, &oldProcess, registry.ActivityIdle),
+	)
+
+	// The observer notices the old process exit and the new process at the same scan.
+	scan := base.Add(10 * time.Second)
+	state = applyObservations(
+		t,
+		state,
+		scan,
+		codexSighting(scan, oldProcess, false),
+		codexSighting(scan, newProcess, true),
+	)
+
+	resume := codexReport("resumed", base.Add(9*time.Second), &newProcess, registry.ActivityIdle)
+	lifecycle := registry.NativeLifecycleResume
+	resume.Report().Lifecycle = &lifecycle
+	state = applyObservations(t, state, scan.Add(time.Second), resume)
+
+	session := sessionWithProcess(t, state, newProcess.PID)
+	if session.SessionID != "resumed" || session.Presence() != registry.PresenceLive {
+		t.Fatalf(
+			"new process session = id %q presence %s, want id resumed presence live",
+			session.SessionID,
+			session.Presence(),
+		)
+	}
+}
+
+func TestOutOfOrderObservationDoesNotBlockRestOfBatch(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	known, started := reducerProcess(100), reducerProcess(300)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(t, state, base, codexSighting(base, known, true))
+
+	// The wall clock stepped back an hour before the next observer scan.
+	stepped := base.Add(-time.Hour)
+	state = applyObservations(
+		t,
+		state,
+		stepped,
+		codexSighting(stepped, started, true),
+		codexSighting(stepped, known, false),
+	)
+
+	if session := sessionWithProcess(
+		t,
+		state,
+		started.PID,
+	); session.Presence() != registry.PresenceLive {
+		t.Fatalf("new process presence = %s, want live", session.Presence())
+	}
+}
+
+func TestProcessExitEndsSessionAfterFutureDatedReport(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	process := reducerProcess(100)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(t, state, base, codexSighting(base, process, true))
+	// A hook whose clock runs four minutes ahead.
+	state = applyObservations(
+		t,
+		state,
+		base,
+		codexReport("skewed", base.Add(4*time.Minute), &process, registry.ActivityRunning),
+	)
+	state = applyObservations(
+		t,
+		state,
+		base.Add(2*time.Second),
+		codexSighting(base.Add(2*time.Second), process, false),
+	)
+
+	if session := sessionWithID(t, state, "skewed"); session.Presence() != registry.PresenceGone {
+		t.Fatalf("session after its process exited: presence %s activity %v, want gone",
+			session.Presence(), registry.ActivityValue(session.Activity()))
 	}
 }

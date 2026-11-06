@@ -431,3 +431,77 @@ func TestNativeProcessIdentitySeedsObserverReconciliation(t *testing.T) {
 		)
 	}
 }
+
+func TestResumedProcessIsNotMarkedGoneByOlderTombstone(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	// A session known only by its native id, later verified gone.
+	state = applyObservations(
+		t,
+		state,
+		base,
+		codexReport("resumed", base, nil, registry.ActivityIdle),
+	)
+	state = applyObservations(t, state, base.Add(time.Second), registry.Observation{
+		Harness:  registry.Harness("codex"),
+		At:       base.Add(time.Second),
+		Subject:  registry.ObservationIdentity{SessionID: "resumed"},
+		Evidence: &registry.Verification{Presence: registry.PresenceGone, Reason: "no_process"},
+	})
+
+	process := reducerProcess(200)
+	placedAt := base.Add(time.Minute)
+	state = applyObservations(t, state, placedAt, registry.Observation{
+		Harness: registry.Harness("codex"),
+		At:      placedAt,
+		Evidence: &registry.Placement{
+			Process: process,
+			Location: registry.Location{
+				Kind:      registry.MultiplexerTmux,
+				ServerID:  "srv",
+				SessionID: "$1",
+				PaneID:    "%1",
+			},
+		},
+	})
+	state = applyObservations(t, state, placedAt.Add(time.Second),
+		codexReport("resumed", placedAt.Add(time.Second), &process, registry.ActivityRunning))
+
+	session := sessionWithProcess(t, state, process.PID)
+	if session.SessionID != "resumed" ||
+		registry.ActivityValue(session.Activity()) != registry.ActivityRunning {
+		t.Fatalf("resumed session = id %q activity %v, want id resumed activity running",
+			session.SessionID, registry.ActivityValue(session.Activity()))
+	}
+}
+
+func TestListingMatchedOnlyByPIDKeepsSessionID(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	process := reducerProcess(123)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(
+		t,
+		state,
+		base,
+		codexReport("first", base, &process, registry.ActivityRunning),
+	)
+	state = applyObservations(t, state, base.Add(time.Second), registry.Observation{
+		Harness:  registry.Harness("codex"),
+		At:       base.Add(time.Second),
+		Subject:  registry.ObservationIdentity{SessionID: "other"},
+		Evidence: &registry.Listing{ProcessPID: process.PID, Current: false},
+	})
+
+	if session := sessionWithProcess(t, state, process.PID); session.SessionID != "first" {
+		t.Fatalf(
+			"session id after a non-current listing for another id = %q, want first",
+			session.SessionID,
+		)
+	}
+}

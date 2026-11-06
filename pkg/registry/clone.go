@@ -70,8 +70,8 @@ func cloneRegistrySnapshot(source snapshot) snapshot {
 
 func cloneSessionValue(source Session) Session {
 	cloned := source
+	cloned.Incarnation.Previous = clonePtr(source.Incarnation.Previous)
 	cloned.Detail = clonePtr(source.Detail)
-	cloned.setActivity(clonePtr(source.Activity()))
 
 	cloned.ResumeCommand = append([]string(nil), source.ResumeCommand...)
 	if source.Process != nil {

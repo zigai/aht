@@ -1,0 +1,84 @@
+# 2026/11/06 20:29:22.233957 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw tombstone minutes: 1
+# 2026/11/06 20:29:22.233960 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native identities: 2
+# 2026/11/06 20:29:22.233962 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native name: "-"
+# 2026/11/06 20:29:22.233963 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native name: "-"
+# 2026/11/06 20:29:22.234053 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:29:22.234055 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:29:22.234073 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "end"
+# 2026/11/06 20:29:22.234073 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw session: 1
+# 2026/11/06 20:29:22.234074 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw process cwd: "/work/alpha"
+# 2026/11/06 20:29:22.234075 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "idle"
+# 2026/11/06 20:29:22.234076 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:29:22.234181 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:29:22.234182 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:29:22.234212 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "end"
+# 2026/11/06 20:29:22.234212 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw session: 1
+# 2026/11/06 20:29:22.234213 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "idle"
+# 2026/11/06 20:29:22.234213 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:29:22.234341 [TestStoreBackendsMatchIndependentStateModel/memory] Get disagrees with independent model (-model +store):
+#   registry.registryModelValue{
+#   	... // 2 identical fields
+#   	Process:        {PID: 101, StartIdentity: "native-1--:1", Executable: "/agent", CWD: "/work/alpha"},
+#   	CWD:            "/work/alpha",
+# - 	Sequence:       2,
+# + 	Sequence:       4,
+#   	Event:          "end",
+#   	NativeActivity: "",
+#   	NativeEnded:    true,
+#   }
+#
+v0.4.8#16197048259678048706
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x38e38e38e38e4
+0x3
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x38e38e38e38e4
+0x3
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

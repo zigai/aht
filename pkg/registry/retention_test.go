@@ -27,6 +27,13 @@ func storedSession(id string, pid int, sessionID string, createdAt time.Time) Se
 	process := retentionProcess(pid)
 
 	session.Process = &process
+
+	session.Incarnation = Incarnation{
+		State:        IncarnationLive,
+		Process:      process,
+		EvidenceAt:   createdAt,
+		TransitionAt: createdAt,
+	}
 	if sessionID != "" {
 		session.IdentityState = IdentityIdentified
 		session.SessionID = sessionID
@@ -40,6 +47,8 @@ func storedSession(id string, pid int, sessionID string, createdAt time.Time) Se
 func goneStoredSession(id string, pid int, sessionID string, goneAt time.Time) Session {
 	session := storedSession(id, pid, sessionID, goneAt.Add(-time.Minute))
 	session.Liveness = Gone{At: goneAt, Reason: "process_gone", Decision: nil}
+	session.Incarnation.State = IncarnationExited
+	session.Incarnation.TransitionAt = goneAt
 	session.PresenceChangedAt = goneAt
 	session.UpdatedAt = goneAt
 

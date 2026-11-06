@@ -292,9 +292,13 @@ func TestHistoryRefreshCoalescesTransitionsWithoutBlockingObserver(t *testing.T)
 			registry.ActivityRunning,
 			registry.ActivityIdle,
 		} {
+			if index > 0 {
+				time.Sleep(time.Second)
+			}
+
 			observation := registry.Observation{
 				Harness: registry.Harness("pi"),
-				At:      time.Now().Add(time.Duration(index) * time.Second),
+				At:      time.Now(),
 				Subject: registry.ObservationIdentity{SessionID: "sample"},
 				Evidence: &registry.Report{
 					Event:    "turn",

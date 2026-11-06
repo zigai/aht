@@ -2,7 +2,6 @@ package registry
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 )
@@ -90,7 +89,7 @@ func TestScreenStateIsAuthoritativeUnderScreenPolicy(t *testing.T) {
 func TestStaleIntegrationDoesNotSuppressScreenFallback(t *testing.T) {
 	t.Parallel()
 	store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})
-	at := time.Now().UTC()
+	at := time.Now().UTC().Add(-time.Minute)
 	process := ProcessIdentity{PID: 150, StartIdentity: "boot:150", Executable: "pi"}
 	presence := PresenceLive
 	idle := ActivityIdle
@@ -300,11 +299,8 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 			Subject:  ObservationIdentity{SessionID: "same"},
 			Evidence: (*Reading)(staleScreen),
 		},
-	); !errors.Is(
-		err,
-		ErrObservationConflict,
-	) {
-		t.Fatalf("stale old-process screen error = %v, want conflict", err)
+	); err != nil {
+		t.Fatalf("stale old-process screen error = %v, want drop", err)
 	}
 
 	session, err = store.Get(context.Background(), session.ID)

@@ -2,7 +2,9 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -38,10 +40,34 @@ func (r Reducer) applyObservationBatch(
 			continue
 		}
 
-		session, keep, err := r.reduceOne(snap.Sessions, observation, receivedAt)
+		candidate := maps.Clone(snap.Sessions)
+
+		session, keep, err := r.reduceOne(candidate, observation, receivedAt)
+		if errors.Is(err, errObservationDropped) {
+			snap.dropped = append(snap.dropped, err)
+
+			id := findMatchingSession(snap.Sessions, observation)
+			if id == "" && observation.ProcessIdentity() != nil {
+				id = bestMatchingSessionID(
+					snap.Sessions,
+					observation.Harness,
+					func(session Session) bool {
+						return session.Process != nil &&
+							session.Process.Equal(*observation.ProcessIdentity())
+					},
+				)
+			}
+
+			saved = append(saved, snap.Sessions[id])
+
+			continue
+		}
+
 		if err != nil {
 			return nil, 0, err
 		}
+
+		snap.Sessions = candidate
 
 		if keep {
 			saved = append(saved, session)
@@ -61,15 +87,17 @@ func (r Reducer) reduceOne(
 	var empty Session
 
 	at := observationTime(observation.At, receivedAt)
-	r.retireConflictingProcessSessions(sessions, observation, at, receivedAt)
-
-	id := findAndReconcileMatchingSession(sessions, observation, at)
-	if id == "" && observation.Kind() == "verification" {
-		return empty, false, nil
+	if prior, err := r.retireConflictingProcessSessions(
+		sessions,
+		observation,
+		at,
+		receivedAt,
+	); err != nil {
+		return prior, false, err
 	}
 
-	if id == "" && observation.Kind() == "listing" &&
-		(!r.rules.Policy(observation.Harness).CatalogCreates || !observation.Listing().Current) {
+	id := findAndReconcileMatchingSession(sessions, observation, at)
+	if id == "" && !r.observationCreatesSession(observation) {
 		return empty, false, nil
 	}
 
@@ -89,7 +117,7 @@ func (r Reducer) reduceOne(
 
 	session, err := r.reduceSession(sessions, session, observation, at, receivedAt)
 	if err != nil {
-		return Session{}, false, err
+		return session, false, err
 	}
 
 	sessions[session.ID] = session
@@ -103,21 +131,34 @@ func (r Reducer) reduceSession(
 	observation Observation,
 	at time.Time, receivedAt time.Time,
 ) (Session, error) {
-	at, err := sequencedObservationTime(session, observation, at)
+	// Sequence clocks must not become evidence for cross-process ordering.
+	transition := transitionIncarnation(session, observation, at, false)
+
+	baseline := session
+	if transition.reset {
+		baseline.Observations.Native = nil
+	}
+
+	// A stale lifecycle event still has to satisfy the reporter's sequence contract.
+	at, err := sequencedObservationTime(baseline, observation, at)
 	if err != nil {
 		return Session{}, err
 	}
 
-	resume := beginsIncarnation(session, observation, at)
-	if !acceptsReport(session, observation, at) {
+	if duplicateSequencedReport(baseline, observation) {
 		return session, nil
 	}
 
-	if err := r.applyObservation(&session, observation, at, receivedAt); err != nil {
-		return Session{}, err
+	if !transition.accepted {
+		return session, fmt.Errorf("%w: incarnation evidence", errObservationDropped)
 	}
 
-	if resume {
+	resumed := transition.reset && session.Incarnation.Process.Complete()
+	if err := r.applyObservation(&session, observation, at, receivedAt, transition); err != nil {
+		return session, err
+	}
+
+	if resumed {
 		reconcileResumedProcessSession(sessions, &session, observation)
 	}
 
@@ -161,16 +202,17 @@ func (r Reducer) applyObservation(
 	session *Session,
 	observation Observation,
 	at time.Time, receivedAt time.Time,
+	transition incarnationTransition,
 ) error {
-	if err := validateIncomingProcessTime(*session, observation, at); err != nil {
-		return err
-	}
-
-	if previous := sourceSlotTime(*session, observation); !previous.IsZero() {
+	if previous := sourceSlotTime(
+		*session,
+		observation,
+	); !transition.reset && !transition.terminal &&
+		!previous.IsZero() {
 		if at.Before(previous) {
 			return fmt.Errorf(
 				"%w: %s observation at %s precedes %s",
-				ErrObservationConflict,
+				errObservationDropped,
 				observation.Kind(),
 				at,
 				previous,
@@ -193,16 +235,12 @@ func (r Reducer) applyObservation(
 
 	previousPresence := session.Presence()
 	previousActivity := session.Activity()
-	resumesIncarnation := beginsIncarnation(*session, observation, at)
+	machine := lifecycleMachine{session: session}
+	machine.commit(transition, at)
 	storeObservation(session, observation, at)
 	applyIdentity(session, observation)
-	applyMetadata(session, observation, at)
+	applyMetadata(session, observation)
 
-	if resumesIncarnation {
-		(lifecycleMachine{session: session}).resume()
-	}
-
-	machine := lifecycleMachine{session: session}
 	machine.apply(observation, r.rules.Policy(session.Harness), at)
 	session.resolveDetail(r.rules.Policy(session.Harness), receivedAt)
 	session.SchemaVersion = storeSchemaVersion
@@ -219,25 +257,6 @@ func (r Reducer) applyObservation(
 	return nil
 }
 
-func validateIncomingProcessTime(session Session, observation Observation, at time.Time) error {
-	if observation.ProcessIdentity() == nil || session.Process == nil ||
-		session.Process.Equal(*observation.ProcessIdentity()) {
-		return nil
-	}
-
-	currentAt := session.Incarnation.ObservedAt
-	if currentAt.IsZero() || !at.Before(currentAt) {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"%w: process identity observation at %s precedes current process at %s",
-		ErrObservationConflict,
-		at,
-		currentAt,
-	)
-}
-
 func applyIdentity(session *Session, observation Observation) {
 	if observationHasIdentity(observation) {
 		session.IdentityState = IdentityIdentified
@@ -252,16 +271,11 @@ func applyIdentity(session *Session, observation Observation) {
 	}
 }
 
-func applyMetadata(session *Session, observation Observation, at time.Time) {
+func applyMetadata(session *Session, observation Observation) {
 	if observation.ProcessIdentity() != nil && observation.ProcessIdentity().Complete() {
 		process := *observation.ProcessIdentity()
-		if session.Process != nil && !session.Process.Equal(process) {
-			(lifecycleMachine{session: session}).processReplaced(process, at)
-		}
-
 		session.Process = &process
 
-		session.Incarnation.ObservedAt = maxTime(session.Incarnation.ObservedAt, at)
 		if process.CWD != "" {
 			session.CWD = process.CWD
 		}
@@ -441,4 +455,15 @@ func processOnlySession(session Session) bool {
 	return session.IdentityState == IdentityProvisional && session.Observations.Native == nil &&
 		session.SessionID == "" &&
 		session.SessionPath == ""
+}
+
+func (r Reducer) observationCreatesSession(observation Observation) bool {
+	switch observation.Kind() {
+	case "verification":
+		return false
+	case "listing":
+		return r.rules.Policy(observation.Harness).CatalogCreates && observation.Listing().Current
+	default:
+		return true
+	}
 }

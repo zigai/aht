@@ -441,3 +441,189 @@ func TestMemoryStoreJournalsEndedProcessBeforeLateReport(t *testing.T) {
 		t.Fatalf("disk replay recreated sessions the tracker rejected: %+v", sessions)
 	}
 }
+
+func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.json")
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	first, second := retentionProcess(100), retentionProcess(200)
+	running, idle := ActivityRunning, ActivityIdle
+
+	owner, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = owner.Close() })
+
+	now := base
+
+	owner.setNowForTest(func() time.Time { return now })
+
+	if _, err := owner.Observe(ctx, Observation{
+		Harness: HarnessCodex,
+		At:      base,
+		Subject: ObservationIdentity{SessionID: "shared"},
+		Evidence: &Report{
+			Reporter: Reporter{Integration: "codex-extension"},
+			Activity: &running,
+			Process:  &first,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := owner.Observe(ctx, Observation{
+		Harness:  HarnessCodex,
+		At:       base.Add(time.Second),
+		Evidence: &Sighting{Process: first, Present: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := owner.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// A heartbeat sighting the owner keeps only in memory.
+	now = base.Add(time.Minute)
+	if _, err := owner.Observe(ctx, Observation{
+		Harness:  HarnessCodex,
+		At:       now,
+		Evidence: &Sighting{Process: first, Present: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fallback := NewJournal(path, fixtureRules{})
+	fallback.setNowForTest(func() time.Time { return base.Add(61 * time.Second) })
+
+	if _, err := fallback.Observe(ctx, Observation{
+		Harness: HarnessCodex,
+		At:      base.Add(30 * time.Second),
+		Subject: ObservationIdentity{SessionID: "shared"},
+		Evidence: &Report{
+			Reporter: Reporter{Integration: "codex-extension"},
+			Activity: &idle,
+			Process:  &second,
+		},
+	}); err != nil {
+		t.Fatalf("fallback write rejected: %v", err)
+	}
+
+	if _, err := owner.State(ctx, Filter{}); err != nil {
+		t.Fatalf("owner State after fallback write: %v", err)
+	}
+
+	if _, err := owner.Observe(ctx, Observation{
+		Harness:  HarnessCodex,
+		At:       now,
+		Subject:  ObservationIdentity{SessionID: "unrelated"},
+		Evidence: &Report{Reporter: Reporter{Integration: "codex-extension"}, Activity: &running},
+	}); err != nil {
+		t.Fatalf("owner Observe after fallback write: %v", err)
+	}
+
+	if err := owner.Flush(ctx); err != nil {
+		t.Fatalf("owner Flush after fallback write: %v", err)
+	}
+}
+
+type allHarnessRules struct{ fixtureRules }
+
+func (allHarnessRules) Known(id Harness) bool { return id != "" }
+
+func TestJournalResetRecoversUnreadableJournal(t *testing.T) {
+	t.Parallel()
+
+	running := ActivityRunning
+	report := func(harness Harness) Observation {
+		return Observation{
+			Harness: harness,
+			At:      time.Now().UTC(),
+			Subject: ObservationIdentity{SessionID: "before-reset"},
+			Evidence: &Report{
+				Reporter: Reporter{Integration: "codex-extension"},
+				Activity: &running,
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		corrupt func(t *testing.T, path string)
+	}{
+		{
+			name: "corrupt journal line",
+			corrupt: func(t *testing.T, path string) {
+				t.Helper()
+
+				if _, err := NewJournal(
+					path,
+					fixtureRules{},
+				).Observe(t.Context(), report(HarnessCodex)); err != nil {
+					t.Fatal(err)
+				}
+
+				writeJournalForTest(t, path, []byte("{not json}\n"))
+			},
+		},
+		{
+			name: "journal entry for a harness this build does not know",
+			corrupt: func(t *testing.T, path string) {
+				t.Helper()
+
+				// While an owner holds the store, fallback writes stay in the journal.
+				owner, err := tryStoreLock(path + ".owner.lock")
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if _, err := NewJournal(
+					path,
+					allHarnessRules{},
+				).Observe(t.Context(), report("invalid")); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := owner.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "state.json")
+			test.corrupt(t, path)
+
+			store := NewJournal(path, fixtureRules{})
+			if _, err := store.Reset(t.Context()); err != nil {
+				t.Fatalf("Reset: %v", err)
+			}
+
+			sessions, err := store.List(t.Context(), Filter{})
+			if err != nil {
+				t.Fatalf("List after reset: %v", err)
+			}
+
+			if len(sessions) != 0 {
+				t.Fatalf("sessions after reset = %d, want 0", len(sessions))
+			}
+
+			owner, err := OpenMemoryStore(path, fixtureRules{})
+			if err != nil {
+				t.Fatalf("OpenMemoryStore after reset: %v", err)
+			}
+
+			if err := owner.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

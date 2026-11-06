@@ -215,6 +215,8 @@ type Listing struct {
 	//exhaustruct:optional
 	ProcessPID int `json:"process_pid,omitempty"`
 	//exhaustruct:optional
+	ProcessStartIdentity string `json:"process_start_identity,omitempty"`
+	//exhaustruct:optional
 	Current bool `json:"current"`
 }
 

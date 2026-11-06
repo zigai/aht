@@ -46,6 +46,10 @@ func storedSessionIdentityCorruption(id string, session Session) string {
 }
 
 func storedSessionStateCorruption(session Session) string {
+	if reason := storedIncarnationCorruption(session); reason != "" {
+		return reason
+	}
+
 	if session.Liveness == nil {
 		return "missing liveness"
 	}
@@ -54,6 +58,10 @@ func storedSessionStateCorruption(session Session) string {
 		return "invalid activity"
 	}
 
+	return storedSessionContextCorruption(session)
+}
+
+func storedSessionContextCorruption(session Session) string {
 	switch {
 	case session.Process != nil && !validStoredProcess(*session.Process, false):
 		return "invalid process identity"
@@ -151,4 +159,46 @@ func validStoredProcess(process ProcessIdentity, allowZero bool) bool {
 	}
 
 	return process.Complete() && process.PPID >= 0 && process.ProcessGroupID >= 0
+}
+
+func storedIncarnationCorruption(session Session) string {
+	current := session.Incarnation
+	if native := session.Observations.Native; native != nil && nativeEnded(native) &&
+		session.Presence() != PresenceGone {
+		return "native end is not terminal"
+	}
+
+	expected := PresenceUnknown
+
+	switch current.State {
+	case IncarnationStarting:
+	case IncarnationLive:
+		expected = PresenceLive
+	case IncarnationEnded, IncarnationExited:
+		expected = PresenceGone
+	default:
+		return "invalid incarnation state"
+	}
+
+	if session.Presence() != expected {
+		return "incarnation liveness mismatch"
+	}
+
+	if !incarnationProcessMatches(current, session.Process) {
+		return "incarnation process mismatch"
+	}
+
+	if current.Previous != nil && !current.Previous.Complete() {
+		return "invalid previous process identity"
+	}
+
+	return ""
+}
+
+func incarnationProcessMatches(current Incarnation, process *ProcessIdentity) bool {
+	if current.Process.Complete() != (process != nil && process.Complete()) {
+		return false
+	}
+
+	return !current.Process.Complete() || current.Process.Equal(*process)
 }

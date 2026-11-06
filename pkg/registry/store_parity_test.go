@@ -29,9 +29,10 @@ type registryModelValue struct {
 }
 
 type registryModelSession struct {
-	Value    registryModelValue
-	GoneAt   time.Time
-	NativeAt time.Time
+	Value      registryModelValue
+	GoneAt     time.Time
+	NativeAt   time.Time
+	EvidenceAt time.Time
 }
 
 type registryModelCommand struct {
@@ -231,8 +232,18 @@ func registryModelObservation(command registryModelCommand) Observation {
 func (machine *registryStateMachine) accept(command registryModelCommand) {
 	previous, exists := machine.sessions[command.ID]
 
+	at := command.At
+	if at.After(machine.clock) {
+		at = machine.clock
+	}
+
+	if exists && command.Kind == "end" && command.Process.Equal(previous.Value.Process) &&
+		at.Before(previous.EvidenceAt) {
+		return
+	}
+
 	revives := command.Kind == "start" || command.Kind == "resume" || command.Kind == "presence"
-	if exists && previous.Value.Presence == PresenceGone && !revives {
+	if exists && previous.Value.Presence == PresenceGone && !revives && command.Kind != "end" {
 		return
 	}
 
@@ -250,7 +261,11 @@ func (machine *registryStateMachine) accept(command registryModelCommand) {
 	current.Value.Event = command.Kind
 	current.Value.NativeEnded = command.Kind == "end"
 
-	current.NativeAt = command.At
+	current.NativeAt = at
+	if !exists || !command.Process.Equal(previous.Value.Process) || at.After(current.EvidenceAt) {
+		current.EvidenceAt = at
+	}
+
 	if command.Activity != "" {
 		current.Value.Activity = command.Activity
 		current.Value.NativeActivity = command.Activity
@@ -261,8 +276,11 @@ func (machine *registryStateMachine) accept(command registryModelCommand) {
 	if command.Kind == "end" {
 		current.Value.Presence = PresenceGone
 		current.Value.Activity = ""
+
 		current.Value.NativeActivity = ""
-		current.GoneAt = command.At
+		if previous.Value.Presence != PresenceGone {
+			current.GoneAt = at
+		}
 	}
 
 	machine.sessions[command.ID] = current
@@ -375,6 +393,11 @@ func (machine *registryStateMachine) screen(property *rapid.T) {
 		property.Fatal(err)
 	}
 
+	if previous.Value.Presence != PresenceGone {
+		previous.EvidenceAt = machine.clock
+		machine.sessions[id] = previous
+	}
+
 	if previous.Value.Presence != PresenceGone &&
 		(previous.Value.NativeActivity == "" ||
 			previous.Value.NativeActivity == ActivityUnknown ||
@@ -417,13 +440,16 @@ func (machine *registryStateMachine) processGone(property *rapid.T) {
 		property.Fatal(err)
 	}
 
-	if previous.Value.Presence != PresenceGone {
-		previous.GoneAt = machine.clock
+	if !observation.At.Before(previous.EvidenceAt) {
+		if previous.Value.Presence != PresenceGone {
+			previous.GoneAt = machine.clock
+		}
+
+		previous.Value.Presence = PresenceGone
+		previous.Value.Activity = ""
+		machine.sessions[id] = previous
 	}
 
-	previous.Value.Presence = PresenceGone
-	previous.Value.Activity = ""
-	machine.sessions[id] = previous
 	machine.expire()
 }
 
@@ -689,7 +715,7 @@ func registryModelProjection(session Session) registryModelValue {
 		Presence:    session.Presence(),
 		CWD:         session.CWD,
 		Process:     *session.Process,
-		NativeEnded: session.Incarnation.NativeEnded,
+		NativeEnded: nativeEnded(session.Observations.Native),
 	}
 	if activity := session.Activity(); activity != nil {
 		value.Activity = *activity
@@ -743,10 +769,24 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 		steps = 200
 	}
 
+	seedCases := []uint64{13, 21, 24, 25}
+
 	for seed := range seeds {
+		if seed != 13 && seed != 21 && seed != 24 && seed != 25 {
+			seedCases = append(seedCases, seed)
+		}
+	}
+
+	for _, seed := range seedCases {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			t.Parallel()
-			exerciseEquivalentStores(t, seed, steps, coverage)
+
+			seedSteps := steps
+			if seed == 13 || seed == 21 || seed == 24 || seed == 25 {
+				seedSteps = max(seedSteps, 200)
+			}
+
+			exerciseEquivalentStores(t, seed, seedSteps, coverage)
 		})
 	}
 }
@@ -838,6 +878,7 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 		}
 
 		observation := generatedObservation(generator, sequences, base, step)
+		beforeObservation := mustListParity(t, fileStore)
 		fileSession, fileErr := fileStore.Observe(t.Context(), observation)
 
 		memorySession, memoryErr := memoryStore.Observe(t.Context(), observation)
@@ -858,7 +899,15 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 		}
 
 		if fileErr == nil {
-			assertTerminalLifecycleOutcome(t, step, observation, fileSession, memorySession)
+			assertTerminalLifecycleOutcome(
+				t,
+				step,
+				observation,
+				clock,
+				beforeObservation,
+				fileSession,
+				memorySession,
+			)
 			assertEquivalent(t, fmt.Sprintf("step %d session", step), fileSession, memorySession)
 
 			if lifecycle := observation.Report().Lifecycle; observation.Kind() == "report" &&
@@ -1030,7 +1079,7 @@ func rejectedStaleSequence(t *testing.T, store Store, observation Observation) b
 		native := session.Observations.Native
 		if session.Harness == observation.Harness &&
 			session.SessionID == observation.Subject.SessionID &&
-			native != nil &&
+			native != nil && sameReportProcess(native, observation.Report()) &&
 			native.Reporter.Integration == observation.Report().Reporter.Integration &&
 			native.Reporter.Sequence != nil &&
 			*observation.Report().Reporter.Sequence <= *native.Reporter.Sequence {
@@ -1077,13 +1126,43 @@ func assertTerminalLifecycleOutcome(
 	t *testing.T,
 	step int,
 	obs Observation,
+	received time.Time,
+	before []Session,
 	fileS Session,
 	memS Session,
 ) {
 	t.Helper()
 
-	if obs.Report().Lifecycle == nil || *obs.Report().Lifecycle != NativeLifecycleEnd {
+	if obs.Kind() != "report" || !reportEnds(obs.Report()) {
 		return
+	}
+
+	for _, prior := range before {
+		if prior.ID != fileS.ID {
+			continue
+		}
+
+		if obs.ProcessIdentity() != nil && prior.Process != nil &&
+			!prior.Process.Equal(*obs.ProcessIdentity()) {
+			return
+		}
+
+		if observationTime(obs.At, received).Before(prior.Incarnation.EvidenceAt) {
+			assertEquivalent(
+				t,
+				fmt.Sprintf("step %d stale terminal file session", step),
+				prior,
+				fileS,
+			)
+			assertEquivalent(
+				t,
+				fmt.Sprintf("step %d stale terminal memory session", step),
+				prior,
+				memS,
+			)
+
+			return
+		}
 	}
 
 	if fileS.Presence() != PresenceGone || fileS.Activity() != nil {
@@ -1140,6 +1219,14 @@ func generatedObservation(
 	activity := []Activity{ActivityIdle, ActivityRunning, ActivityWaiting}[generator.IntN(3)]
 	harness := []Harness{HarnessClaude, HarnessCodex, HarnessOmp, HarnessPi}[generator.IntN(4)]
 	observedAt := base.Add(time.Duration(step) * time.Millisecond)
+
+	switch generator.IntN(8) {
+	case 0:
+		observedAt = observedAt.Add(-time.Minute)
+	case 1:
+		observedAt = observedAt.Add(2 * time.Hour)
+	}
+
 	pid := 100 + generator.IntN(8)
 	process := &ProcessIdentity{
 		PID:            pid,

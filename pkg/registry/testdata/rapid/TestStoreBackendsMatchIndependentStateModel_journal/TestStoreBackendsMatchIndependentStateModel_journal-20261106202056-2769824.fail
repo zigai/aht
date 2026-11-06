@@ -1,0 +1,113 @@
+# 2026/11/06 20:20:56.058495 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw tombstone minutes: 1
+# 2026/11/06 20:20:56.058510 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native identities: 2
+# 2026/11/06 20:20:56.058513 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native name: "-"
+# 2026/11/06 20:20:56.058515 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native name: "-"
+# 2026/11/06 20:20:56.058548 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:56.058549 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:56.058563 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "activity"
+# 2026/11/06 20:20:56.058564 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw session: 0
+# 2026/11/06 20:20:56.058564 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw process cwd: "/work/alpha"
+# 2026/11/06 20:20:56.058565 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity: "idle"
+# 2026/11/06 20:20:56.058566 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:56.058743 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:56.058745 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:56.058798 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "advance"
+# 2026/11/06 20:20:56.058799 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw elapsed minutes: 1
+# 2026/11/06 20:20:56.058978 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:56.058980 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:56.059018 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "screen"
+# 2026/11/06 20:20:56.059019 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw session: 0
+# 2026/11/06 20:20:56.059027 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw screen activity: "running"
+# 2026/11/06 20:20:56.059212 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:56.059213 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:56.059270 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "presence"
+# 2026/11/06 20:20:56.059271 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw session: 0
+# 2026/11/06 20:20:56.059272 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity: "idle"
+# 2026/11/06 20:20:56.059273 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:56.059467 [TestStoreBackendsMatchIndependentStateModel/journal] Get disagrees with independent model (-model +store):
+#   registry.registryModelValue{
+#   	Presence: "live",
+# - 	Activity: "idle",
+# + 	Activity: "running",
+#   	Process:  {PID: 100, StartIdentity: "native-0--:1", Executable: "/agent", CWD: "/work/alpha"},
+#   	CWD:      "/work/alpha",
+#   	... // 4 identical fields
+#   }
+#
+v0.4.8#17354699830565264464
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x9867f1f40f739
+0xc
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x6b74f03291620
+0x6
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

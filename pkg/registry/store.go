@@ -12,12 +12,11 @@ import (
 	"time"
 )
 
-const StoreSchemaVersion = 3
+const StoreSchemaVersion = 4
 
 const (
-	storeSchemaVersion      = StoreSchemaVersion
-	maxObservedAtFutureSkew = 5 * time.Minute
-	maxSnapshotBytes        = 64 << 20
+	storeSchemaVersion = StoreSchemaVersion
+	maxSnapshotBytes   = 64 << 20
 
 	// IntegrationActivityLease is the maximum age of a matching integration
 	// transition before multiplexer screen evidence becomes authoritative again.
@@ -35,6 +34,8 @@ var (
 	ErrCorruptStore  = errors.New("corrupt registry store")
 	ErrStoreTooLarge = errors.New("registry store exceeds size limit")
 
+	errObservationDropped = errors.New("observation ordering regression")
+
 	_ Store = (*Journal)(nil)
 )
 
@@ -44,6 +45,8 @@ type UnsupportedSchemaError struct {
 }
 
 type snapshot struct {
+	//exhaustruct:optional
+	dropped         []error
 	JournalSequence uint64             `json:"journal_sequence,omitempty"`
 	SchemaVersion   int                `json:"schema_version"`
 	UpdatedAt       time.Time          `json:"updated_at"`
@@ -294,6 +297,10 @@ func writeSnapshotAtomic(path string, snap snapshot) error {
 		return ErrStoreTooLarge
 	}
 
+	return writeRegistryAtomic(path, data)
+}
+
+func writeRegistryAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 
 	fs := registryFSFor(path)

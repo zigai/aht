@@ -1,0 +1,75 @@
+# 2026/11/06 20:23:43.981348 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw tombstone minutes: 1
+# 2026/11/06 20:23:43.981351 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native identities: 2
+# 2026/11/06 20:23:43.981352 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native name: "-"
+# 2026/11/06 20:23:43.981354 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw native name: "-"
+# 2026/11/06 20:23:43.981384 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:23:43.981399 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:23:43.981411 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "end"
+# 2026/11/06 20:23:43.981412 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw session: 0
+# 2026/11/06 20:23:43.981412 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw process cwd: "/work/alpha"
+# 2026/11/06 20:23:43.981413 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity: "idle"
+# 2026/11/06 20:23:43.981413 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:23:43.981582 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw presence filter: ""
+# 2026/11/06 20:23:43.981583 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw activity filter: ""
+# 2026/11/06 20:23:43.981623 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw action: "process-gone"
+# 2026/11/06 20:23:43.981625 [TestStoreBackendsMatchIndependentStateModel/journal] [rapid] draw session: 0
+# 2026/11/06 20:23:43.981812 [TestStoreBackendsMatchIndependentStateModel/journal] Get disagrees with independent model (-model +store):
+#   registry.registryModelValue{
+#   	... // 5 identical fields
+#   	Event:          "end",
+#   	NativeActivity: "",
+# - 	NativeEnded:    true,
+# + 	NativeEnded:    false,
+#   }
+#
+v0.4.8#17354699830565264500
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x38e38e38e38e4
+0x3
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x6b74f03291620
+0x7
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

@@ -1,0 +1,132 @@
+# 2026/11/06 20:20:59.581788 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw tombstone minutes: 1
+# 2026/11/06 20:20:59.581792 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native identities: 2
+# 2026/11/06 20:20:59.581793 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native name: "-"
+# 2026/11/06 20:20:59.581795 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw native name: "-"
+# 2026/11/06 20:20:59.581886 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:59.581888 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:59.581907 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "activity"
+# 2026/11/06 20:20:59.581907 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw session: 0
+# 2026/11/06 20:20:59.581908 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw process cwd: "/work/alpha"
+# 2026/11/06 20:20:59.581909 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "idle"
+# 2026/11/06 20:20:59.581910 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:59.582020 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:59.582021 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:59.582053 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "batch"
+# 2026/11/06 20:20:59.582053 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw first session: 1
+# 2026/11/06 20:20:59.582054 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw second session offset: 1
+# 2026/11/06 20:20:59.582054 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw process cwd: "/work/alpha"
+# 2026/11/06 20:20:59.582055 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "unknown"
+# 2026/11/06 20:20:59.582055 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:59.582057 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "idle"
+# 2026/11/06 20:20:59.582057 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:59.582243 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:59.582244 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:59.582295 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "screen"
+# 2026/11/06 20:20:59.582296 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw session: 1
+# 2026/11/06 20:20:59.582296 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw screen activity: "idle"
+# 2026/11/06 20:20:59.582504 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw presence filter: ""
+# 2026/11/06 20:20:59.582505 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity filter: ""
+# 2026/11/06 20:20:59.582578 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw action: "presence"
+# 2026/11/06 20:20:59.582579 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw session: 1
+# 2026/11/06 20:20:59.582579 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw activity: "idle"
+# 2026/11/06 20:20:59.582580 [TestStoreBackendsMatchIndependentStateModel/memory] [rapid] draw sequence increase: 0x2
+# 2026/11/06 20:20:59.582817 [TestStoreBackendsMatchIndependentStateModel/memory] Get disagrees with independent model (-model +store):
+#   registry.registryModelValue{
+#   	Presence: "live",
+# - 	Activity: "unknown",
+# + 	Activity: "idle",
+#   	Process:  {PID: 101, StartIdentity: "native-1--:1", Executable: "/agent", CWD: "/work/alpha"},
+#   	CWD:      "/work/alpha",
+#   	... // 4 identical fields
+#   }
+#
+v0.4.8#15078365771474390483
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1f2b5a0e61c3a6
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x9867f1f40f739
+0xc
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1084210842108
+0x6b74f03291620
+0x6
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

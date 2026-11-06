@@ -38,7 +38,7 @@ type nativeSequenceRunner struct {
 }
 
 func TestNativeEventSequencesPreserveRegistryProperties(t *testing.T) {
-	seeds, steps := uint64(2), 12
+	seeds, steps := uint64(8), 40
 	if testing.Short() {
 		seeds, steps = 1, 6
 	} else if os.Getenv("AHT_EXTENDED_PARITY") != "" {
@@ -107,6 +107,8 @@ func runNativeEventInput(t *testing.T, name string, input []byte, sequenced bool
 }
 
 func (runner *nativeSequenceRunner) exercise(rt *rapid.T, steps int) {
+	runner.incarnations(rt)
+
 	capabilities := runner.definition.Capabilities
 	if capabilities.SessionEnd {
 		runner.apply(rt, "session-a", nativeEventCase{event: "SessionEnd"}, nil, false)
@@ -238,7 +240,9 @@ func (runner *nativeSequenceRunner) observeEvent(
 		rt.Fatalf("registry invariant after %q: %v", event.event, err)
 	}
 
-	if stale && runner.sequenced && storedSequence(before, sessionID) > 0 && observeErr == nil {
+	if stale && runner.sequenced && storedSequence(before, sessionID) > 0 && observeErr == nil &&
+		!reflect.DeepEqual(before, after) &&
+		!startsFreshSequence(before, observation) {
 		rt.Fatalf(
 			"stale sequence %d accepted for %q",
 			storedSequence(before, sessionID),
@@ -495,7 +499,16 @@ func (runner *nativeSequenceRunner) assertCoverage(t *testing.T) {
 
 	capabilities := runner.definition.Capabilities
 
-	required := []string{"accepted"}
+	required := []string{
+		"accepted",
+		"delayed end",
+		"stale own-process end no-op",
+		"equal own-process end",
+		"fresh own-process end",
+		"stale own-process absence no-op",
+		"resume before scan",
+		"future report process exit",
+	}
 	if capabilities.SessionStart {
 		required = append(
 			required,
@@ -580,4 +593,186 @@ func lifecycleBytes(seed uint64) []byte {
 	}
 
 	return data
+}
+
+func (runner *nativeSequenceRunner) incarnations(rt *rapid.T) {
+	rt.Helper()
+
+	base := runner.base
+	gap := time.Duration(rapid.IntRange(2, 20).Draw(rt, "incarnation scan delay")) * time.Second
+	first := registry.ProcessIdentity{PID: 700, StartIdentity: "first"}
+	second := registry.ProcessIdentity{PID: 700, StartIdentity: "second"}
+	report := func(
+		at time.Time,
+		process registry.ProcessIdentity,
+		lifecycle *registry.NativeLifecycle,
+		sequence uint64,
+	) registry.Observation {
+		result := registry.Observation{
+			Harness: runner.id,
+			At:      at,
+			Subject: registry.ObservationIdentity{SessionID: "incarnation-property"},
+			Evidence: &registry.Report{
+				Reporter: registry.Reporter{
+					Integration: runner.definition.IntegrationSource,
+					Sequence:    &sequence,
+				},
+				Lifecycle: lifecycle,
+				Process:   &process,
+				Claim:     new(registry.PresenceLive),
+				Activity:  new(registry.ActivityRunning),
+			},
+		}
+		if lifecycle != nil && *lifecycle == registry.NativeLifecycleEnd {
+			result.Report().Activity = nil
+			result.Report().Claim = new(registry.PresenceGone)
+		}
+
+		return result
+	}
+	state := registry.State{Sessions: map[string]registry.Session{}}
+	apply := func(received time.Time, observation registry.Observation) registry.Session {
+		rt.Helper()
+
+		before := state
+
+		var err error
+
+		state, _, err = registry.NewReducer(Rules{}).
+			Apply(state, []registry.Observation{observation}, received)
+		if err != nil {
+			rt.Fatal(err)
+		}
+
+		sessions := make([]registry.Session, 0, len(state.Sessions))
+		for id, session := range state.Sessions {
+			sessions = append(sessions, session)
+
+			if prior, ok := before.Sessions[id]; ok {
+				if observation.At.After(received) {
+					observation.At = received
+				}
+
+				if err := registrycheck.Transition(prior, session, observation); err != nil {
+					rt.Fatal(err)
+				}
+			}
+		}
+
+		if err := registrycheck.Sessions(sessions); err != nil {
+			rt.Fatal(err)
+		}
+
+		for _, session := range sessions {
+			if session.SessionID == "incarnation-property" {
+				return session
+			}
+		}
+
+		rt.Fatal("native identity lost")
+
+		return registry.Session{}
+	}
+	apply(base, report(base, first, nil, 8))
+	scan := base.Add(gap)
+	beforeEnd := apply(
+		scan,
+		registry.Observation{
+			Harness:  runner.id,
+			At:       scan,
+			Evidence: &registry.Sighting{Process: first, Present: true},
+		},
+	)
+
+	stale := apply(scan, report(base.Add(time.Second), first, new(registry.NativeLifecycleEnd), 9))
+	if !reflect.DeepEqual(beforeEnd, stale) {
+		rt.Fatal("stale own-process end changed session")
+	}
+
+	runner.coverage.Hit("stale own-process end no-op")
+
+	for index, at := range []time.Time{scan, scan.Add(time.Second)} {
+		ended := apply(at, report(at, first, new(registry.NativeLifecycleEnd), uint64(9+index)))
+		if ended.Presence() != registry.PresenceGone || ended.Activity() != nil {
+			rt.Fatal("current own-process end left nonterminal session")
+		}
+	}
+
+	runner.coverage.Hit("equal own-process end")
+	runner.coverage.Hit("fresh own-process end")
+	runner.coverage.Hit("delayed end")
+
+	state = registry.State{Sessions: map[string]registry.Session{}}
+
+	apply(base, report(base, first, nil, 8))
+	apply(
+		scan.Add(time.Second),
+		registry.Observation{
+			Harness:  runner.id,
+			At:       scan,
+			Evidence: &registry.Sighting{Process: first, Present: false},
+		},
+	)
+
+	resumed := apply(
+		scan.Add(time.Second),
+		report(scan.Add(-time.Second), second, new(registry.NativeLifecycleResume), 1),
+	)
+	if resumed.Presence() != registry.PresenceLive || !resumed.Process.Equal(second) {
+		rt.Fatal("resume before scan lost")
+	}
+
+	runner.coverage.Hit("resume before scan")
+
+	future := apply(scan.Add(time.Second), report(scan.Add(4*time.Minute), second, nil, 2))
+	if future.Observations.Native.ObservedAt.After(scan.Add(time.Second)) {
+		rt.Fatal("future native report not clamped")
+	}
+
+	stale = apply(
+		scan.Add(2*time.Second),
+		registry.Observation{
+			Harness:  runner.id,
+			At:       scan,
+			Evidence: &registry.Sighting{Process: second, Present: false},
+		},
+	)
+	if !reflect.DeepEqual(future, stale) {
+		rt.Fatal("stale own-process absence changed session")
+	}
+
+	runner.coverage.Hit("stale own-process absence no-op")
+
+	exited := apply(
+		scan.Add(2*time.Second),
+		registry.Observation{
+			Harness:  runner.id,
+			At:       scan.Add(2 * time.Second),
+			Evidence: &registry.Sighting{Process: second, Present: false},
+		},
+	)
+	if exited.Presence() != registry.PresenceGone || exited.Activity() != nil {
+		rt.Fatal("future report blocked exit")
+	}
+
+	runner.coverage.Hit("future report process exit")
+}
+
+func startsFreshSequence(before []registry.Session, observation registry.Observation) bool {
+	lifecycle := observation.Report().Lifecycle
+	if lifecycle == nil ||
+		*lifecycle != registry.NativeLifecycleStart &&
+			*lifecycle != registry.NativeLifecycleResume {
+		return false
+	}
+
+	for _, session := range before {
+		if session.SessionID == observation.Subject.SessionID &&
+			session.Presence() == registry.PresenceGone &&
+			observation.At.After(session.Incarnation.TransitionAt) {
+			return true
+		}
+	}
+
+	return false
 }

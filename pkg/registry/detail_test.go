@@ -271,10 +271,7 @@ func TestDetailRejectsInvalidBatchAndIgnoresOlderReports(t *testing.T) {
 	if _, err := store.Observe(
 		t.Context(),
 		detailReport(at.Add(-time.Second), new(ActivityWaiting), new(ActivityDetailQuestion)),
-	); !errors.Is(
-		err,
-		ErrObservationConflict,
-	) {
+	); err != nil {
 		t.Fatal(err)
 	}
 

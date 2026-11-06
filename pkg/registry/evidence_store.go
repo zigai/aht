@@ -9,7 +9,7 @@ import (
 
 func observationTime(observedAt time.Time, receivedAt time.Time) time.Time {
 	observedAt = observedAt.UTC()
-	if observedAt.After(receivedAt.Add(maxObservedAtFutureSkew)) {
+	if observedAt.After(receivedAt) {
 		return receivedAt
 	}
 
@@ -77,8 +77,13 @@ func sequencedObservationTime(
 	previous := session.Observations.Native
 	if reporter == "" ||
 		previous == nil ||
+		!sameReportProcess(previous, observation.Report()) ||
 		strings.TrimSpace(previous.Reporter.Integration) != reporter {
 		return at, nil
+	}
+
+	if duplicateSequencedReport(session, observation) {
+		return previous.ObservedAt, nil
 	}
 
 	if err := validateSequenceOrder(
@@ -102,6 +107,23 @@ func sequencedObservationTime(
 	}
 
 	return at, nil
+}
+
+func duplicateSequencedReport(session Session, observation Observation) bool {
+	report := observation.Report()
+	previous := session.Observations.Native
+
+	return report != nil && previous != nil && sameReportProcess(previous, report) &&
+		report.Reporter.Sequence != nil &&
+		previous.Reporter.Sequence != nil &&
+		*report.Reporter.Sequence == *previous.Reporter.Sequence &&
+		strings.TrimSpace(report.Reporter.Integration) != "" &&
+		strings.TrimSpace(
+			report.Reporter.Integration,
+		) == strings.TrimSpace(
+			previous.Reporter.Integration,
+		) &&
+		observationEquivalent(session, observation, previous.ObservedAt)
 }
 
 func validateSequenceOrder(reporter string, previous *uint64, current *uint64) error {
@@ -159,12 +181,6 @@ func storeNativeObservation(session *Session, observation Observation, at time.T
 	var process ProcessIdentity
 	if observation.ProcessIdentity() != nil {
 		process = *observation.ProcessIdentity()
-	}
-
-	session.Incarnation.NativeEnded = observation.Report().Lifecycle != nil &&
-		*observation.Report().Lifecycle == NativeLifecycleEnd
-	if process.Complete() {
-		session.Incarnation.NativeProcess = process
 	}
 
 	reporter := observation.Report().Reporter
@@ -240,4 +256,12 @@ func storeScreenObservation(session *Session, observation Observation, at time.T
 	screen.Process = *observation.ProcessIdentity()
 	screen.ObservedAt = at
 	session.Observations.Screen = &screen
+}
+
+func sameReportProcess(previous *NativeObservation, report *Report) bool {
+	if report.Process == nil {
+		return true
+	}
+
+	return previous.Process.Equal(*report.Process)
 }

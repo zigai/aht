@@ -125,28 +125,7 @@ func TestPresenceVerificationInvariants(t *testing.T) {
 }
 
 func checkInvariantSessions(sessions []Session) error {
-	projected := make([]core.Session, len(sessions))
-	for index, session := range sessions {
-		var activity string
-		if value := session.Activity(); value != nil {
-			activity = string(*value)
-		}
-
-		projected[index] = core.Session{
-			ID:          session.ID,
-			Harness:     string(session.Harness),
-			CreatedAt:   session.CreatedAt,
-			UpdatedAt:   session.UpdatedAt,
-			HasLiveness: session.Liveness != nil,
-			Presence:    string(session.Presence()),
-			Activity:    activity,
-			ValidState: session.Presence().Valid() &&
-				(session.Activity() == nil || session.Activity().Valid()),
-			NativeEnded: session.Observations.Native != nil &&
-				session.Observations.Native.Lifecycle != nil &&
-				*session.Observations.Native.Lifecycle == NativeLifecycleEnd,
-		}
-	}
+	projected := projectInvariantSessions(sessions)
 
 	if err := core.Sessions(projected); err != nil {
 		return fmt.Errorf("registry sessions: %w", err)
@@ -229,12 +208,12 @@ func exclusiveProcessConflict(sessions []Session) error {
 				previous.Presence(),
 				previous.Observations.Native.ObservedAt,
 				previous.Observations.Native.Process.PID,
-				previous.Incarnation.ObservedAt,
+				previous.Incarnation.EvidenceAt,
 				session.ID,
 				session.Presence(),
 				session.Observations.Native.ObservedAt,
 				session.Observations.Native.Process.PID,
-				session.Incarnation.ObservedAt,
+				session.Incarnation.EvidenceAt,
 			)
 		}
 
@@ -341,7 +320,7 @@ func TestJournalReplayGuardAndGCInvariant(t *testing.T) {
 	entry := journalEntry{Sequence: snap.JournalSequence, ReceivedAt: clock, Reset: true}
 	if err := NewReducer(
 		fixtureRules{},
-	).foldJournal(context.Background(), &snap, []journalEntry{entry}); err != nil {
+	).foldJournal(context.Background(), &snap, []decodedJournalEntry{{journalEntry: entry}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -638,5 +617,467 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 
 	if !resumed {
 		t.Fatal("native resume did not restore old session")
+	}
+}
+
+func projectInvariantSessions(sessions []Session) []core.Session {
+	projected := make([]core.Session, len(sessions))
+	for index, session := range sessions {
+		var activity string
+		if value := session.Activity(); value != nil {
+			activity = string(*value)
+		}
+
+		var process string
+		if session.Process != nil {
+			process = core.ProcessKey(session.Process.PID, session.Process.StartIdentity)
+		}
+
+		var decisionAt time.Time
+		if decision := session.Decision(); decision != nil {
+			decisionAt = decision.ObservedAt
+		}
+
+		var previousProcess string
+		if session.Incarnation.Previous != nil {
+			previousProcess = core.ProcessKey(
+				session.Incarnation.Previous.PID,
+				session.Incarnation.Previous.StartIdentity,
+			)
+		}
+
+		projected[index] = core.Session{
+			TransitionAt:    session.Incarnation.TransitionAt,
+			PreviousProcess: previousProcess,
+			SessionID:       session.SessionID,
+			SessionPath:     session.SessionPath,
+			Process:         process,
+			IncarnationProcess: core.ProcessKey(
+				session.Incarnation.Process.PID,
+				session.Incarnation.Process.StartIdentity,
+			),
+			Incarnation: string(
+				session.Incarnation.State,
+			),
+			EvidenceAt:  session.Incarnation.EvidenceAt,
+			DecisionAt:  decisionAt,
+			ID:          session.ID,
+			Harness:     string(session.Harness),
+			CreatedAt:   session.CreatedAt,
+			UpdatedAt:   session.UpdatedAt,
+			HasLiveness: session.Liveness != nil,
+			Presence:    string(session.Presence()),
+			Activity:    activity,
+			ValidState: session.Presence().Valid() &&
+				(session.Activity() == nil || session.Activity().Valid()),
+			NativeEnded: session.Observations.Native != nil &&
+				session.Observations.Native.Lifecycle != nil &&
+				*session.Observations.Native.Lifecycle == NativeLifecycleEnd,
+		}
+	}
+
+	return projected
+}
+
+func TestIncarnationTransitionInvariants(t *testing.T) {
+	t.Parallel()
+
+	coverage := core.NewCoverage()
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	first := ProcessIdentity{PID: 901, StartIdentity: "boot:901"}
+	second := ProcessIdentity{PID: 901, StartIdentity: "boot:902"}
+	report := func(at time.Time, process *ProcessIdentity, lifecycle *NativeLifecycle, sequence uint64) Observation {
+		result := Observation{
+			Harness: HarnessPi,
+			At:      at,
+			Subject: ObservationIdentity{SessionID: "incarnation"},
+			Evidence: &Report{
+				Reporter: Reporter{
+					Integration: "pi-extension",
+					Sequence:    new(sequence),
+				},
+				Activity:  new(ActivityRunning),
+				Claim:     new(PresenceLive),
+				Process:   process,
+				Lifecycle: lifecycle,
+			},
+		}
+		if lifecycle != nil && *lifecycle == NativeLifecycleEnd {
+			result.Report().Activity = nil
+			result.Report().Claim = new(PresenceGone)
+		}
+
+		return result
+	}
+	sighting := func(at time.Time, process ProcessIdentity, present bool) Observation {
+		return Observation{
+			Harness:  HarnessPi,
+			At:       at,
+			Evidence: &Sighting{Process: process, Present: present},
+		}
+	}
+
+	for _, situation := range []string{
+		"delayed end",
+		"delayed absence",
+		"resume before scan",
+		"future report process exit",
+		"identity tombstone merge",
+		"ordering drop atomic matching",
+		"terminal time monotonic",
+		"replaced session end isolated",
+		"equivalent sequence replay",
+		"sequence content conflict",
+		"stale terminal sequence conflict",
+	} {
+		t.Run(situation, func(t *testing.T) {
+			state := State{Sessions: map[string]Session{}}
+			apply := func(received time.Time, observations ...Observation) Session {
+				t.Helper()
+
+				for _, observation := range observations {
+					before := state
+
+					var err error
+
+					state, _, err = NewReducer(
+						fixtureRules{},
+					).Apply(state, []Observation{observation}, received)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if err := checkInvariantSessions(mapSessions(state.Sessions)); err != nil {
+						t.Fatal(err)
+					}
+
+					for id, prior := range before.Sessions {
+						if current, ok := state.Sessions[id]; ok {
+							projected := projectInvariantSessions([]Session{prior, current})
+
+							process := ""
+							if value := observation.ProcessIdentity(); value != nil {
+								process = core.ProcessKey(value.PID, value.StartIdentity)
+							}
+
+							ends := observation.Kind() == "report" &&
+								reportEnds(observation.Report())
+							if err := core.Transition(projected[0], projected[1], core.Event{
+								Kind:        observation.Kind(),
+								Process:     process,
+								Harness:     string(observation.Harness),
+								SessionID:   observation.Subject.SessionID,
+								SessionPath: observation.Subject.SessionPath,
+								At:          observationTime(observation.At, received),
+								Ends:        ends,
+								Present:     observation.Present() != nil && *observation.Present(),
+							}); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+				}
+
+				for _, session := range state.Sessions {
+					if session.SessionID == "incarnation" {
+						return session
+					}
+				}
+
+				return Session{}
+			}
+
+			initial := report(base, &first, nil, 90)
+			if situation == "replaced session end isolated" {
+				initial.Report().Lifecycle = new(NativeLifecycleStart)
+			}
+
+			if situation == "identity tombstone merge" {
+				initial = report(base, nil, new(NativeLifecycleEnd), 90)
+			}
+
+			apply(base, initial)
+			scan := base.Add(10 * time.Second)
+
+			var current Session
+
+			switch situation {
+			case "replaced session end isolated":
+				replacement := report(base.Add(time.Second), &first, new(NativeLifecycleStart), 1)
+				replacement.Subject.SessionID = "replacement"
+				apply(scan, replacement)
+
+				var beforeReplacement Session
+
+				for _, session := range state.Sessions {
+					if session.SessionID == "replacement" {
+						beforeReplacement = cloneSessionValue(session)
+					}
+				}
+
+				current = apply(
+					scan,
+					report(base.Add(2*time.Second), &first, new(NativeLifecycleEnd), 91),
+				)
+				if current.Presence() != PresenceGone || current.Activity() != nil {
+					t.Fatal("replaced session end revived retired identity")
+				}
+
+				var liveReplacement bool
+
+				for _, session := range state.Sessions {
+					if session.SessionID == "replacement" {
+						liveReplacement = session.Presence() == PresenceLive &&
+							ActivityValue(session.Activity()) == ActivityRunning
+						if diff := cmp.Diff(beforeReplacement, session); diff != "" {
+							t.Fatalf(
+								"replaced session end mutated replacement (-before +after): %s",
+								diff,
+							)
+						}
+					}
+				}
+
+				if !liveReplacement {
+					t.Fatal("replaced session end terminated replacement")
+				}
+			case "delayed end", "delayed absence":
+				prior := cloneSessionValue(apply(scan, sighting(scan, first, true)))
+				terminal := func(at time.Time, sequence uint64) Observation {
+					if situation == "delayed absence" {
+						return sighting(at, first, false)
+					}
+
+					return report(at, &first, new(NativeLifecycleEnd), sequence)
+				}
+
+				stale := terminal(base.Add(time.Second), 91)
+				stale.Subject.CWD = "/stale"
+
+				current = apply(scan, stale)
+				if diff := cmp.Diff(prior, current); diff != "" {
+					t.Fatalf("stale terminal evidence changed session: %s", diff)
+				}
+
+				coverage.Hit("stale own-process terminal no-op")
+
+				for index, at := range []time.Time{scan, scan.Add(time.Second)} {
+					current = apply(at, terminal(at, uint64(91+index)))
+					if current.Presence() != PresenceGone || current.Activity() != nil {
+						t.Fatal("current terminal evidence did not terminate")
+					}
+				}
+
+				coverage.Hit("equal own-process terminal")
+				coverage.Hit("fresh own-process terminal")
+				coverage.Hit("terminal Gone no activity")
+			case "resume before scan":
+				apply(scan, sighting(scan, first, false), sighting(scan, second, true))
+
+				current = apply(
+					scan,
+					report(base.Add(9*time.Second), &second, new(NativeLifecycleResume), 1),
+				)
+				if current.Presence() != PresenceLive || !current.Process.Equal(second) ||
+					*current.Observations.Native.Reporter.Sequence != 1 {
+					t.Fatal("resume or fresh sequence baseline lost")
+				}
+
+				coverage.Hit("sequence baseline")
+
+				prior := cloneSessionValue(current)
+
+				current = apply(
+					scan.Add(time.Second),
+					report(scan.Add(time.Second), &first, new(NativeLifecycleStart), 100),
+				)
+				if diff := cmp.Diff(prior, current); diff != "" {
+					t.Fatalf("retired native start changed current: %s", diff)
+				}
+
+				coverage.Hit("retired process start ignored")
+
+				current = apply(
+					scan.Add(2*time.Second),
+					report(scan.Add(2*time.Second), &first, new(NativeLifecycleEnd), 101),
+				)
+				if diff := cmp.Diff(prior, current); diff != "" {
+					t.Fatalf("old process end changed current: %s", diff)
+				}
+
+				coverage.Hit("old process end ignored")
+			case "equivalent sequence replay":
+				before := cloneRegistrySnapshot(snapshot{Sessions: state.Sessions}).Sessions
+
+				after, changes, err := NewReducer(fixtureRules{}).
+					Apply(state, []Observation{initial}, scan)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if diff := cmp.Diff(before, after.Sessions); diff != "" {
+					t.Fatalf("equivalent sequence replay changed sessions: %s", diff)
+				}
+
+				if len(changes) != 0 {
+					t.Fatalf("equivalent sequence replay emitted changes: %v", changes)
+				}
+
+				if err := checkInvariantSessions(mapSessions(after.Sessions)); err != nil {
+					t.Fatal(err)
+				}
+			case "sequence content conflict", "stale terminal sequence conflict":
+				if situation == "stale terminal sequence conflict" {
+					apply(scan, sighting(scan, first, true))
+				}
+
+				before := State{
+					Sessions:  cloneRegistrySnapshot(snapshot{Sessions: state.Sessions}).Sessions,
+					UpdatedAt: state.UpdatedAt,
+				}
+				unrelated := report(base.Add(time.Second), nil, nil, 1)
+				unrelated.Subject.SessionID = "unrelated"
+				conflict := report(base, &first, nil, 90)
+
+				conflict.Report().Activity = new(ActivityIdle)
+				if situation == "stale terminal sequence conflict" {
+					conflict = report(base.Add(time.Second), &first, new(NativeLifecycleEnd), 90)
+				}
+
+				_, acceptedChanges, err := NewReducer(fixtureRules{}).
+					Apply(state, []Observation{unrelated}, scan)
+				if err != nil || len(acceptedChanges) == 0 {
+					t.Fatalf(
+						"atomicity setup did not produce an accepted change: %v, %v",
+						acceptedChanges,
+						err,
+					)
+				}
+
+				after, changes, err := NewReducer(fixtureRules{}).
+					Apply(state, []Observation{unrelated, conflict}, scan)
+				if !errors.Is(err, ErrObservationConflict) {
+					t.Fatalf(
+						"equal sequence content conflict = %v, want ErrObservationConflict",
+						err,
+					)
+				}
+
+				if diff := cmp.Diff(before, after); diff != "" {
+					t.Fatalf("sequence content conflict changed returned state: %s", diff)
+				}
+
+				if diff := cmp.Diff(before, state); diff != "" {
+					t.Fatalf("sequence content conflict changed input state: %s", diff)
+				}
+
+				if len(changes) != 0 {
+					t.Fatalf("sequence content conflict emitted changes: %v", changes)
+				}
+
+				if err := checkInvariantSessions(mapSessions(after.Sessions)); err != nil {
+					t.Fatal(err)
+				}
+			case "future report process exit":
+				current = apply(
+					base.Add(time.Second),
+					report(base.Add(4*time.Minute), &first, nil, 91),
+				)
+				if current.Observations.Native.ObservedAt.After(base.Add(time.Second)) {
+					t.Fatal("future report not clamped")
+				}
+
+				prior := cloneSessionValue(current)
+
+				current = apply(
+					base.Add(2*time.Second),
+					sighting(base.Add(-time.Second), first, false),
+				)
+				if diff := cmp.Diff(prior, current); diff != "" {
+					t.Fatalf("old exit changed session: %s", diff)
+				}
+
+				current = apply(
+					base.Add(2*time.Second),
+					sighting(base.Add(2*time.Second), first, false),
+				)
+				if current.Incarnation.State != IncarnationExited || current.Activity() != nil {
+					t.Fatal("fresh exit did not terminate")
+				}
+			case "identity tombstone merge":
+				apply(
+					scan,
+					Observation{
+						Harness:  HarnessPi,
+						At:       scan,
+						Evidence: &Placement{Process: second},
+					},
+				)
+
+				current = apply(
+					scan.Add(time.Second),
+					report(scan.Add(time.Second), &second, nil, 1),
+				)
+				if current.Presence() == PresenceGone ||
+					current.Incarnation.State == IncarnationEnded ||
+					*current.Observations.Native.Reporter.Sequence != 1 {
+					t.Fatal("identity tombstone contaminated process incarnation")
+				}
+
+				coverage.Hit("sequence baseline")
+			case "terminal time monotonic":
+				apply(scan, sighting(scan, first, false))
+
+				current = apply(scan, sighting(base.Add(time.Second), first, false))
+				if !current.Incarnation.TransitionAt.Equal(scan) {
+					t.Fatal("terminal time regressed")
+				}
+
+				current = apply(
+					scan,
+					report(base.Add(2*time.Second), &first, new(NativeLifecycleStart), 91),
+				)
+				if current.Presence() != PresenceGone {
+					t.Fatal("start before own exit revived session")
+				}
+			case "ordering drop atomic matching":
+				stale := report(base.Add(-time.Second), &first, nil, 1)
+				stale.Subject.SessionID = "conflicting"
+				apply(scan, stale)
+
+				if len(state.Sessions) != 1 {
+					t.Fatal("dropped observation changed matching")
+				}
+			}
+
+			coverage.Hit(situation)
+			coverage.Hit("one nonterminal current")
+		})
+	}
+
+	if missing := coverage.Missing(
+		"delayed end",
+		"delayed absence",
+		"resume before scan",
+		"future report process exit",
+		"sequence baseline",
+		"identity tombstone merge",
+		"terminal Gone no activity",
+		"stale own-process terminal no-op",
+		"equal own-process terminal",
+		"fresh own-process terminal",
+		"one nonterminal current",
+		"retired process start ignored",
+		"ordering drop atomic matching",
+		"terminal time monotonic",
+		"replaced session end isolated",
+		"old process end ignored",
+		"equivalent sequence replay",
+		"sequence content conflict",
+		"stale terminal sequence conflict",
+	); len(
+		missing,
+	) > 0 {
+		t.Fatalf("uncovered incarnation situations: %v", missing)
 	}
 }

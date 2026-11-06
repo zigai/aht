@@ -1,164 +1,376 @@
 package registry
 
-import (
-	"path/filepath"
-	"time"
-)
+import "time"
 
 const sessionReplacedReason = "session_replaced"
 
+const (
+	IncarnationStarting IncarnationState = "starting"
+	IncarnationLive     IncarnationState = "live"
+	IncarnationEnded    IncarnationState = "ended"
+	IncarnationExited   IncarnationState = "exited"
+)
+
+const (
+	incarnationContinue incarnationAction = iota
+	incarnationReject
+	incarnationIgnore
+	incarnationVerify
+	incarnationRetire
+	incarnationReplace
+	incarnationBind
+	incarnationResume
+)
+
+type IncarnationState string
+
 type Incarnation struct {
-	ObservedAt    time.Time       `json:"observed_at"`
-	NativeProcess ProcessIdentity `json:"native_process,omitzero"`
-	NativeEnded   bool            `json:"native_ended"`
+	State        IncarnationState `json:"state"`
+	Process      ProcessIdentity  `json:"process,omitzero"`
+	EvidenceAt   time.Time        `json:"evidence_at"`
+	TransitionAt time.Time        `json:"transition_at"`
+	Previous     *ProcessIdentity `json:"previous,omitempty"`
 }
 
-type lifecycleMachine struct {
-	session *Session
+type incarnationTransition struct {
+	next     Incarnation
+	reset    bool
+	terminal bool
+	accepted bool
+	ignored  bool
+}
+
+type lifecycleMachine struct{ session *Session }
+
+type incarnationInput struct {
+	current      Incarnation
+	process      *ProcessIdentity
+	report       *Report
+	verification *Verification
+	decision     *ActivityDecision
+	kind         string
+	at           time.Time
+	retire       bool
+	absent       bool
+	end          bool
+	start        bool
+	terminal     bool
+	different    bool
+}
+
+type incarnationAction uint8
+
+type incarnationRule struct {
+	matches func(incarnationInput) bool
+	action  incarnationAction
+}
+
+func transitionIncarnation(
+	session Session, observation Observation, at time.Time, retire bool,
+) incarnationTransition {
+	input := normalizeIncarnationInput(session, observation, at, retire)
+
+	rules := []incarnationRule{
+		{matches: incarnationInput.verificationRejected, action: incarnationReject},
+		{matches: incarnationInput.verifies, action: incarnationVerify},
+		{matches: incarnationInput.retirementIgnored, action: incarnationIgnore},
+		{matches: incarnationInput.retirementRejected, action: incarnationReject},
+		{matches: incarnationInput.retires, action: incarnationRetire},
+		{matches: incarnationInput.replacementRejected, action: incarnationReject},
+		{matches: incarnationInput.replaces, action: incarnationReplace},
+		{matches: incarnationInput.terminalStale, action: incarnationReject},
+		{matches: incarnationInput.bindsTerminalProcess, action: incarnationBind},
+		{matches: incarnationInput.resumesTerminal, action: incarnationResume},
+		{matches: incarnationInput.terminalRejected, action: incarnationReject},
+	}
+	for _, rule := range rules {
+		if rule.matches(input) {
+			return input.transition(rule.action)
+		}
+	}
+
+	return input.transition(incarnationContinue)
+}
+
+func normalizeIncarnationInput(
+	session Session, observation Observation, at time.Time, retire bool,
+) incarnationInput {
+	process := observation.ProcessIdentity()
+	report, _ := observation.Evidence.(*Report)
+	verification, _ := observation.Evidence.(*Verification)
+
+	return incarnationInput{
+		current:      session.Incarnation,
+		process:      process,
+		report:       report,
+		verification: verification,
+		decision:     session.Decision(),
+		kind:         observation.Kind(),
+		at:           at,
+		retire:       retire,
+		absent:       observation.Kind() == "sighting" && !*observation.Present(),
+		end:          report != nil && reportEnds(report),
+		start:        reportStarts(report),
+		terminal: session.Incarnation.State == IncarnationEnded ||
+			session.Incarnation.State == IncarnationExited,
+		different: process != nil && process.Complete() && session.Incarnation.Process.Complete() &&
+			!session.Incarnation.Process.Equal(*process),
+	}
+}
+
+func (input incarnationInput) verifies() bool { return input.verification != nil }
+
+func (input incarnationInput) verificationRejected() bool {
+	return input.verifies() && (input.terminal || input.current.Process.Complete() ||
+		input.at.Before(input.current.EvidenceAt) ||
+		input.decision != nil && input.at.Before(input.decision.ObservedAt))
+}
+
+func (input incarnationInput) retirementIgnored() bool { return input.retire && input.end }
+
+func (input incarnationInput) retirementRejected() bool {
+	return input.retire && input.at.Before(input.current.EvidenceAt)
+}
+
+func (input incarnationInput) retires() bool { return input.retire }
+
+func (input incarnationInput) replacementRejected() bool {
+	return input.different && (input.previousProcess() || input.end || input.kind == "reading" ||
+		input.kind == "placement" || input.absent || input.at.Before(input.current.EvidenceAt))
+}
+
+func (input incarnationInput) previousProcess() bool {
+	return input.current.Previous != nil && input.process != nil &&
+		input.current.Previous.Equal(*input.process)
+}
+
+func (input incarnationInput) replaces() bool { return input.different }
+
+func (input incarnationInput) terminalStale() bool {
+	return (input.end || input.absent) && input.at.Before(input.current.EvidenceAt)
+}
+
+func (input incarnationInput) bindsTerminalProcess() bool {
+	return input.terminal && !input.current.Process.Complete() && input.process != nil &&
+		input.process.Complete() && input.report != nil && !input.end && !input.at.Before(input.current.EvidenceAt)
+}
+
+func (input incarnationInput) resumesTerminal() bool {
+	return input.terminal && input.start &&
+		input.at.After(maxTime(input.current.EvidenceAt, input.current.TransitionAt))
+}
+
+func (input incarnationInput) terminalRejected() bool {
+	return input.terminal && !input.end && (input.report != nil || !input.absent)
+}
+
+func (input incarnationInput) transition(action incarnationAction) incarnationTransition {
+	result := incarnationTransition{
+		next: input.current, reset: false, terminal: false, accepted: true, ignored: false,
+	}
+
+	switch action {
+	case incarnationReject, incarnationIgnore:
+		result.accepted = false
+		result.ignored = action == incarnationIgnore
+
+		return result
+	case incarnationVerify:
+		result.next.State = IncarnationStarting
+		if input.verification.Presence == PresenceGone {
+			result.next.State = IncarnationExited
+			result.terminal = true
+		}
+
+		result.next.TransitionAt = input.at
+
+		return result
+	case incarnationRetire:
+		result.next.State = IncarnationExited
+		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
+		result.terminal = true
+
+		return result
+	case incarnationReplace:
+		result.reset = true
+		result.next = Incarnation{
+			State: IncarnationStarting, Process: *input.process, EvidenceAt: time.Time{},
+			TransitionAt: time.Time{}, Previous: new(input.current.Process),
+		}
+	case incarnationBind:
+		result.reset = true
+		result.next = Incarnation{
+			State: IncarnationLive, Process: *input.process, EvidenceAt: time.Time{},
+			TransitionAt: time.Time{}, Previous: nil,
+		}
+	case incarnationResume:
+		result.reset = true
+		result.next = Incarnation{
+			State: IncarnationStarting, Process: input.current.Process, EvidenceAt: time.Time{},
+			TransitionAt: time.Time{}, Previous: input.current.Previous,
+		}
+	case incarnationContinue:
+		if input.current.State == "" {
+			result.next.State = IncarnationStarting
+		}
+	}
+
+	return input.applyEvidence(result)
+}
+
+func (input incarnationInput) applyEvidence(result incarnationTransition) incarnationTransition {
+	if input.process != nil && input.process.Complete() {
+		result.next.Process = *input.process
+	}
+
+	if result.next.TransitionAt.IsZero() {
+		result.next.TransitionAt = input.at
+	}
+
+	switch {
+	case input.end:
+		result.next.State = IncarnationEnded
+		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
+		result.terminal = true
+	case input.absent:
+		result.next.State = IncarnationExited
+		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
+		result.terminal = true
+	case input.kind == "sighting":
+		result.next.State = IncarnationLive
+		result.next.TransitionAt = maxTime(result.next.TransitionAt, input.at)
+	case input.claimApplies(result.next):
+		result.next.State = IncarnationStarting
+		if *input.report.Claim == PresenceLive {
+			result.next.State = IncarnationLive
+		}
+
+		result.next.TransitionAt = input.at
+	case input.replacementReport(result):
+		result.next.State = IncarnationLive
+	}
+	// Exit scans are not evidence that the old process was still running.
+	if input.ownProcessEvidence(result.next) {
+		result.next.EvidenceAt = maxTime(result.next.EvidenceAt, input.at)
+	}
+
+	return result
+}
+
+func (input incarnationInput) claimApplies(next Incarnation) bool {
+	return input.report != nil && input.report.Claim != nil && !input.at.Before(next.TransitionAt)
+}
+
+func (input incarnationInput) ownProcessEvidence(next Incarnation) bool {
+	return input.report != nil && !next.Process.Complete() ||
+		input.process != nil && input.process.Equal(next.Process) && !input.absent
+}
+
+func reportStarts(report *Report) bool {
+	return report != nil && report.Lifecycle != nil &&
+		(*report.Lifecycle == NativeLifecycleStart || *report.Lifecycle == NativeLifecycleResume)
 }
 
 func (m lifecycleMachine) apply(observation Observation, policy Policy, at time.Time) {
 	switch evidence := observation.Evidence.(type) {
 	case *Report:
-		m.report(policy, at)
-	case *Sighting:
-		m.sighting(at)
+		if m.session.Observations.Native.Activity != nil && policy.Authority != AuthorityScreen &&
+			m.acceptsActivity(at) {
+			m.session.setActivity(clonePtr(m.session.Observations.Native.Activity))
+			m.session.setDecision(&ActivityDecision{
+				RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "",
+				Authority: AuthorityHook, Reason: evidence.Event,
+				Process: m.session.Observations.Native.Process, ObservedAt: at,
+			})
+		}
 	case *Reading:
 		m.reading(policy, at)
 	case *Verification:
 		m.verify(*evidence, at)
-	case *Placement, *Listing, nil:
+	case *Sighting, *Placement, *Listing, nil:
+	}
+}
+
+func (m lifecycleMachine) commit(transition incarnationTransition, at time.Time) {
+	if !transition.accepted {
+		return
+	}
+
+	previousPresence, previousActivity := m.session.Presence(), m.session.Activity()
+	defer func() {
+		if m.session.Presence() != previousPresence {
+			m.session.PresenceChangedAt = at
+		}
+
+		if !activityEqual(m.session.Activity(), previousActivity) {
+			m.session.ActivityChangedAt = at
+		}
+	}()
+
+	if transition.reset {
+		m.session.Observations.Native = nil
+		m.session.Observations.Screen = nil
+		m.session.Observations.Process = nil
+		m.session.Observations.Location = nil
+
+		m.session.Liveness = Unknown{Activity: ActivityUnknown, Decision: &ActivityDecision{
+			RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "",
+			Authority:  AuthorityProcess,
+			Reason:     "process_replaced",
+			Process:    transition.next.Process,
+			ObservedAt: at,
+		}}
+		if !transition.next.Process.Complete() {
+			m.session.setDecision(nil)
+		}
+	}
+
+	m.session.Incarnation = transition.next
+	if transition.next.Process.Complete() {
+		m.session.Process = new(transition.next.Process)
+	}
+
+	if transition.terminal {
+		if !m.replacedTombstone() {
+			m.session.Liveness = Gone{At: at, Reason: "process_gone", Decision: &ActivityDecision{
+				RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "",
+				Authority:  AuthorityProcess,
+				Reason:     "process_gone",
+				Process:    transition.next.Process,
+				ObservedAt: at,
+			}}
+		}
+
+		return
+	}
+
+	switch transition.next.State {
+	case IncarnationLive:
+		m.session.setPresence(PresenceLive)
+	case IncarnationStarting:
+		m.session.setPresence(PresenceUnknown)
+	case IncarnationEnded, IncarnationExited:
 	}
 }
 
 func (m lifecycleMachine) verify(verification Verification, at time.Time) {
-	if m.session.Presence() == PresenceGone ||
-		m.session.Process != nil && m.session.Process.Complete() {
-		return
-	}
-
-	latest := maxTime(m.session.PresenceChangedAt, m.session.Incarnation.ObservedAt)
-	if native := m.session.Observations.Native; native != nil {
-		latest = maxTime(latest, native.ObservedAt)
-	}
-
-	if decision := m.session.Decision(); decision != nil {
-		latest = maxTime(latest, decision.ObservedAt)
-	}
-
-	if at.Before(latest) {
-		return
-	}
-
-	var process ProcessIdentity
-
 	decision := &ActivityDecision{
-		Authority: AuthorityProcess, Reason: verification.Reason, ObservedAt: at,
-		RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "", Process: process,
+		RuleID:          "",
+		ManifestSource:  "",
+		ManifestVersion: 0,
+		FallbackReason:  "",
+		Process: ProcessIdentity{
+			PID: 0, PPID: 0, ProcessGroupID: 0, Foreground: false,
+			StartIdentity: "", Executable: "", CWD: "", TTY: "",
+		},
+		Authority:  AuthorityProcess,
+		Reason:     verification.Reason,
+		ObservedAt: at,
 	}
 	if verification.Presence == PresenceGone {
 		m.session.Liveness = Gone{At: at, Reason: verification.Reason, Decision: decision}
 	} else {
 		m.session.Liveness = Unknown{Activity: ActivityUnknown, Decision: decision}
-	}
-}
-
-func (m lifecycleMachine) report(policy Policy, at time.Time) {
-	native := m.session.Observations.Native
-	if native == nil {
-		return
-	}
-
-	if native.Lifecycle != nil {
-		switch *native.Lifecycle {
-		case NativeLifecycleEnd:
-			m.end(at)
-		case NativeLifecycleStart, NativeLifecycleResume:
-			m.start(at)
-		}
-	}
-
-	if native.Presence != nil {
-		m.claim(*native.Presence, at)
-	}
-
-	if native.Activity != nil && policy.Authority != AuthorityScreen && m.acceptsActivity(at) {
-		m.session.setActivity(clonePtr(native.Activity))
-		m.session.setDecision(
-			&ActivityDecision{
-				Authority:       AuthorityHook,
-				Reason:          native.Event,
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				FallbackReason:  "",
-				Process:         native.Process,
-				ObservedAt:      at,
-			},
-		)
-	}
-}
-
-func (m lifecycleMachine) start(at time.Time) {
-	if m.session.Presence() == PresenceGone && at.After(m.session.PresenceChangedAt) {
-		m.session.Liveness = Unknown{Activity: ActivityUnknown, Decision: m.session.Decision()}
-	}
-}
-
-func (m lifecycleMachine) resume() {
-	m.session.Liveness = Live{Activity: ActivityUnknown, Decision: m.session.Decision()}
-	m.session.Incarnation.NativeEnded = false
-}
-
-func (m lifecycleMachine) claim(presence Presence, at time.Time) {
-	switch presence {
-	case PresenceGone:
-		m.end(at)
-	case PresenceLive, PresenceUnknown:
-		if !m.session.Incarnation.NativeEnded && !at.Before(m.session.PresenceChangedAt) {
-			m.session.setPresence(presence)
-		}
-	}
-}
-
-func (m lifecycleMachine) sighting(at time.Time) {
-	process := m.session.Observations.Process
-	if process == nil {
-		return
-	}
-
-	if !process.Present {
-		if !at.Before(m.session.Incarnation.ObservedAt) {
-			m.end(at)
-		}
-
-		return
-	}
-
-	if !m.replacedTombstone() {
-		m.claim(PresenceLive, at)
-		return
-	}
-
-	if m.session.Decision().Process.Equal(process.Process) {
-		return
-	}
-
-	m.claim(PresenceLive, at)
-
-	if m.session.Presence() == PresenceLive {
-		m.session.setDecision(
-			&ActivityDecision{
-				Authority:       AuthorityProcess,
-				Reason:          "process_replaced",
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				FallbackReason:  "",
-				Process:         process.Process,
-				ObservedAt:      at,
-			},
-		)
 	}
 }
 
@@ -174,18 +386,11 @@ func (m lifecycleMachine) reading(policy Policy, at time.Time) {
 	}
 
 	m.session.setActivity(new(screen.Activity))
-	m.session.setDecision(
-		&ActivityDecision{
-			Authority:       screen.Authority,
-			Reason:          screen.Reason,
-			RuleID:          screen.RuleID,
-			ManifestSource:  screen.ManifestSource,
-			ManifestVersion: screen.ManifestVersion,
-			FallbackReason:  screen.FallbackReason,
-			Process:         screen.Process,
-			ObservedAt:      at,
-		},
-	)
+	m.session.setDecision(&ActivityDecision{
+		Authority: screen.Authority, Reason: screen.Reason, RuleID: screen.RuleID,
+		ManifestSource: screen.ManifestSource, ManifestVersion: screen.ManifestVersion,
+		FallbackReason: screen.FallbackReason, Process: screen.Process, ObservedAt: at,
+	})
 }
 
 func (m lifecycleMachine) acceptsActivity(at time.Time) bool {
@@ -193,121 +398,9 @@ func (m lifecycleMachine) acceptsActivity(at time.Time) bool {
 		(m.session.Decision() == nil || !at.Before(m.session.Decision().ObservedAt))
 }
 
-func (m lifecycleMachine) processReplaced(process ProcessIdentity, at time.Time) {
-	if !m.replacedTombstone() {
-		m.session.setActivity(new(ActivityUnknown))
-		m.session.setDecision(
-			&ActivityDecision{
-				Authority:       AuthorityProcess,
-				Reason:          "process_replaced",
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				FallbackReason:  "",
-				Process:         process,
-				ObservedAt:      at,
-			},
-		)
-	}
-
-	m.session.Observations.Screen = nil
-	m.session.Incarnation.ObservedAt = at
-}
-
 func (m lifecycleMachine) replacedTombstone() bool {
 	gone, ok := m.session.Liveness.(Gone)
-	decision := m.session.Decision()
-
-	return ok && gone.Reason == sessionReplacedReason && decision != nil &&
-		decision.Reason == sessionReplacedReason
-}
-
-func (m lifecycleMachine) end(at time.Time) {
-	if at.Before(m.session.PresenceChangedAt) {
-		return
-	}
-
-	if m.replacedTombstone() {
-		return
-	}
-
-	hadActivity := m.session.Activity() != nil
-	if m.session.Presence() != PresenceGone {
-		m.session.Liveness = Gone{At: at, Reason: "process_gone", Decision: m.session.Decision()}
-		m.session.PresenceChangedAt = at
-	}
-
-	if hadActivity {
-		m.session.ActivityChangedAt = at
-	}
-
-	var process ProcessIdentity
-	if m.session.Process != nil {
-		process = *m.session.Process
-	}
-
-	m.session.setDecision(
-		&ActivityDecision{
-			Authority:       AuthorityProcess,
-			Reason:          "process_gone",
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			FallbackReason:  "",
-			Process:         process,
-			ObservedAt:      at,
-		},
-	)
-}
-
-func acceptsReport(session Session, observation Observation, at time.Time) bool {
-	if observation.Kind() != "report" || session.Presence() != PresenceGone {
-		return true
-	}
-
-	if beginsIncarnation(session, observation, at) {
-		return true
-	}
-
-	lifecycle := observation.Report().Lifecycle
-
-	return lifecycle != nil &&
-		(*lifecycle == NativeLifecycleStart || *lifecycle == NativeLifecycleResume) &&
-		at.After(session.PresenceChangedAt)
-}
-
-func beginsIncarnation(session Session, observation Observation, at time.Time) bool {
-	if observation.Kind() != "report" || session.Presence() != PresenceGone ||
-		!canResumeIdentity(session, observation) {
-		return false
-	}
-
-	if !at.After(session.PresenceChangedAt) || at.Before(session.Incarnation.ObservedAt) ||
-		reportEnds(observation.Report()) {
-		return false
-	}
-
-	previous := session.Incarnation.NativeProcess
-	if !previous.Complete() && session.Process != nil {
-		previous = *session.Process
-	}
-
-	return previous.Complete() && !previous.Equal(*observation.ProcessIdentity())
-}
-
-func canResumeIdentity(session Session, observation Observation) bool {
-	process := observation.ProcessIdentity()
-	if process == nil || !process.Complete() ||
-		observationIdentityConflicts(session, observation.Subject) {
-		return false
-	}
-
-	if observation.Subject.SessionID != "" && observation.Subject.SessionID == session.SessionID {
-		return true
-	}
-
-	return observation.Subject.SessionPath != "" && session.SessionPath != "" &&
-		filepath.Clean(observation.Subject.SessionPath) == filepath.Clean(session.SessionPath)
+	return ok && gone.Reason == sessionReplacedReason
 }
 
 func reportEnds(report *Report) bool {
@@ -315,37 +408,6 @@ func reportEnds(report *Report) bool {
 		(report.Lifecycle != nil && *report.Lifecycle == NativeLifecycleEnd)
 }
 
-func incarnationFromEvidence(session Session) Incarnation {
-	var incarnation Incarnation
-	if native := session.Observations.Native; native != nil {
-		incarnation.NativeProcess = native.Process
-		incarnation.NativeEnded = native.Lifecycle != nil && *native.Lifecycle == NativeLifecycleEnd
-	}
-
-	if session.Process == nil {
-		return incarnation
-	}
-
-	collect := func(process ProcessIdentity, at time.Time) {
-		if process.Equal(*session.Process) {
-			incarnation.ObservedAt = maxTime(incarnation.ObservedAt, at)
-		}
-	}
-	if native := session.Observations.Native; native != nil {
-		collect(native.Process, native.ObservedAt)
-	}
-
-	if sighting := session.Observations.Process; sighting != nil {
-		collect(sighting.Process, sighting.ObservedAt)
-	}
-
-	if placement := session.Observations.Location; placement != nil {
-		collect(placement.Process, placement.ObservedAt)
-	}
-
-	if reading := session.Observations.Screen; reading != nil {
-		collect(reading.Process, reading.ObservedAt)
-	}
-
-	return incarnation
+func (input incarnationInput) replacementReport(result incarnationTransition) bool {
+	return result.reset && input.different && input.report != nil
 }
