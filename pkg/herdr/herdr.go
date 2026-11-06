@@ -158,7 +158,6 @@ func ListPanes(ctx context.Context) ([]mux.Pane, error) {
 	return ListPanesWithOptions(ctx, ListOptions{Run: nil, LookPath: nil})
 }
 
-//nolint:gocognit,cyclop // native session, snapshot, and process responses are intentionally joined here
 func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list herdr panes: %w", err)
@@ -197,58 +196,12 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 	var listErrors []error
 
 	for _, session := range sessions {
-		env := map[string]string{"HERDR_SESSION": session}
-
-		output, snapshotErr := opts.Run(ctx, env, "api", "snapshot")
-		if snapshotErr != nil {
-			listErrors = append(
-				listErrors,
-				fmt.Errorf("read herdr session %q snapshot: %w", session, snapshotErr),
-			)
-
-			continue
+		sessionPanes, sessionErrors, err := listSessionPanes(ctx, opts.Run, session)
+		if err != nil {
+			return nil, err
 		}
 
-		sessionPanes, parseErr := parseSnapshot(session, output)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-
-		for index := range sessionPanes {
-			processOutput, processErr := opts.Run(
-				ctx,
-				env,
-				"pane",
-				"process-info",
-				"--pane",
-				sessionPanes[index].Location.PaneID,
-			)
-			if processErr != nil {
-				listErrors = append(
-					listErrors,
-					fmt.Errorf("read herdr pane process info: %w", processErr),
-				)
-
-				continue
-			}
-
-			refs, processGroupID, parseProcessErr := parseProcessInfo(processOutput)
-			if parseProcessErr != nil {
-				return nil, parseProcessErr
-			}
-
-			sessionPanes[index].Processes = refs
-			if sessionPanes[index].Location.PanePID == 0 && len(refs) > 0 {
-				sessionPanes[index].Location.PanePID = refs[0].PID
-			}
-
-			for refIndex := range sessionPanes[index].Processes {
-				if sessionPanes[index].Processes[refIndex].ProcessGroupID == 0 {
-					sessionPanes[index].Processes[refIndex].ProcessGroupID = processGroupID
-				}
-			}
-		}
-
+		listErrors = append(listErrors, sessionErrors...)
 		panes = append(panes, sessionPanes...)
 	}
 
@@ -296,6 +249,71 @@ func (n herdrNamedItem) Key() string {
 
 func (n herdrNamedItem) DisplayName() string {
 	return cmp.Or(n.Label, n.Name, n.Title)
+}
+
+func listSessionPanes(
+	ctx context.Context,
+	run CommandRunner,
+	session string,
+) ([]mux.Pane, []error, error) {
+	env := map[string]string{"HERDR_SESSION": session}
+
+	output, err := run(ctx, env, "api", "snapshot")
+	if err != nil {
+		return nil, []error{fmt.Errorf("read herdr session %q snapshot: %w", session, err)}, nil
+	}
+
+	panes, err := parseSnapshot(session, output)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var listErrors []error
+
+	for index := range panes {
+		processOutput, processErr := run(
+			ctx,
+			env,
+			"pane",
+			"process-info",
+			"--pane",
+			panes[index].Location.PaneID,
+		)
+		if processErr != nil {
+			listErrors = append(
+				listErrors,
+				fmt.Errorf("read herdr pane process info: %w", processErr),
+			)
+
+			continue
+		}
+
+		if err := applyPaneProcessInfo(&panes[index], processOutput); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return panes, listErrors, nil
+}
+
+func applyPaneProcessInfo(pane *mux.Pane, output string) error {
+	refs, processGroupID, err := parseProcessInfo(output)
+	if err != nil {
+		return err
+	}
+
+	pane.Processes = refs
+	if pane.Location.PanePID == 0 && len(refs) > 0 {
+		pane.Location.PanePID = refs[0].PID
+	}
+
+	for index := range pane.Processes {
+		if pane.Processes[index].ProcessGroupID == 0 {
+			pane.Processes[index].ProcessGroupID = processGroupID
+		}
+	}
+
+	return nil
 }
 
 func parseSessions(output string) ([]string, error) {
@@ -381,7 +399,17 @@ func parseListSessions(output string) ([]string, bool) {
 	return sessions, true
 }
 
-//nolint:cyclop // pane location and metadata mapping evaluates multiple herdr attributes
+func snapshotNames(items []herdrNamedItem) map[string]string {
+	names := make(map[string]string, len(items))
+	for _, item := range items {
+		if key := item.Key(); key != "" {
+			names[key] = item.DisplayName()
+		}
+	}
+
+	return names
+}
+
 func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 	var resp struct {
 		herdrSnapshotData
@@ -414,19 +442,8 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 		}
 	}
 
-	workspaceNames := make(map[string]string, len(data.Workspaces))
-	for _, ws := range data.Workspaces {
-		if key := ws.Key(); key != "" {
-			workspaceNames[key] = ws.DisplayName()
-		}
-	}
-
-	tabNames := make(map[string]string, len(data.Tabs))
-	for _, tab := range data.Tabs {
-		if key := tab.Key(); key != "" {
-			tabNames[key] = tab.DisplayName()
-		}
-	}
+	workspaceNames := snapshotNames(data.Workspaces)
+	tabNames := snapshotNames(data.Tabs)
 
 	panes := make([]mux.Pane, 0, len(data.Panes))
 	for _, item := range data.Panes {
