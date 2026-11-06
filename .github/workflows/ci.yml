@@ -150,9 +150,7 @@ jobs:
       - name: Install shell and system tools
         run: |
           brew install tmux bash coreutils util-linux
-          echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix util-linux)/bin" >> "$GITHUB_PATH"
+          printf '%s\n' "$(brew --prefix bash)/bin" "$(brew --prefix coreutils)/libexec/gnubin" "$(brew --prefix util-linux)/bin" >> "$GITHUB_PATH"
 
       - name: Lint
         run: just lint
