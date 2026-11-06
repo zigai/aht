@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       version:
-        default: ''
+        default: ""
         type: string
       attempts:
         description: Lifecycle test attempts; a pass on any attempt counts as success
@@ -15,11 +15,11 @@ on:
         type: number
       artifact:
         description: Snapshot artifact containing the Linux-amd64 release build
-        default: ''
+        default: ""
         type: string
       release-tag:
         description: Published release binary and test source to exercise
-        default: ''
+        default: ""
         type: string
 
 permissions:
@@ -110,7 +110,7 @@ jobs:
         uses: actions/setup-node@v7
         with:
           # Current OpenClaw requires at least 24.22.1; runner caches may lag.
-          node-version: '>=24.22.1 <25'
+          node-version: ">=24.22.1 <25"
           check-latest: true
 
       - name: Set up uv

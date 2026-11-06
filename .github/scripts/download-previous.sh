@@ -9,4 +9,4 @@ tar -xzf "$PREVIOUS_DIR/release.tar.gz" -C "$PREVIOUS_DIR" aht
 chmod 0755 "$PREVIOUS_DIR/aht"
 echo "Previous published release: $PREVIOUS_TAG ($TARGET)"
 "$PREVIOUS_DIR/aht" --version
-echo "AHT_PREVIOUS_BINARY=$PREVIOUS_DIR/aht" >> "$GITHUB_ENV"
+echo "AHT_PREVIOUS_BINARY=$PREVIOUS_DIR/aht" >>"$GITHUB_ENV"

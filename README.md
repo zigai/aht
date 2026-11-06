@@ -65,12 +65,12 @@ AHT works without configuration. `aht manage config init` writes a commented
 `~/.config/aht/config.toml` with every setting and its default; `aht manage config --help`
 lists commands to inspect and change them.
 
-| Environment variable | Overrides | Default |
-| --- | --- | --- |
-| `AHT_CONFIG` | Configuration file (`--config` wins) | `~/.config/aht/config.toml` |
-| `AHT_STATE_DIR` | State directory | `$XDG_STATE_HOME/aht` or `~/.local/state/aht` |
-| `AHT_STORE` | Registry file (`--store` wins) | `state.json` in the state directory |
-| `AHT_SOCKET` | Tracker socket | Registry file path + `.sock` |
+| Environment variable | Overrides                            | Default                                       |
+| -------------------- | ------------------------------------ | --------------------------------------------- |
+| `AHT_CONFIG`         | Configuration file (`--config` wins) | `~/.config/aht/config.toml`                   |
+| `AHT_STATE_DIR`      | State directory                      | `$XDG_STATE_HOME/aht` or `~/.local/state/aht` |
+| `AHT_STORE`          | Registry file (`--store` wins)       | `state.json` in the state directory           |
+| `AHT_SOCKET`         | Tracker socket                       | Registry file path + `.sock`                  |
 
 ## Go library
 

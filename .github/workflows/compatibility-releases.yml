@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       harness:
-        description: 'Harness ID to check, or all'
+        description: "Harness ID to check, or all"
         default: all
         type: string
       force:
-        description: 'Retest the current stable version even if it was already checked'
+        description: "Retest the current stable version even if it was already checked"
         default: false
         type: boolean
 

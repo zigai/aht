@@ -6,3 +6,6 @@ coverage.out
 .agents/
 .claude/
 .DS_Store
+
+/bin/
+coverage/
