@@ -108,39 +108,10 @@ func (filter Filter) NormalizePaths() Filter {
 }
 
 // FilterSessions returns sessions matching filter in deterministic sort order.
-//
-//nolint:cyclop,gocognit // each filter dimension is intentionally independent
 func FilterSessions(sessions []Session, filter Filter) []Session {
 	filtered := make([]Session, 0, len(sessions))
 	for _, session := range sessions {
-		if filter.Harness != "" && session.Harness != filter.Harness {
-			continue
-		}
-
-		if filter.Presence != "" && session.Presence() != filter.Presence {
-			continue
-		}
-
-		if filter.Activity != "" &&
-			(session.Activity() == nil || *session.Activity() != filter.Activity) {
-			continue
-		}
-
-		if filter.MultiplexerSession != "" &&
-			session.Location.SessionName != filter.MultiplexerSession &&
-			session.Location.SessionID != filter.MultiplexerSession {
-			continue
-		}
-
-		if filter.CWD != "" && !PathsEqual(SessionCWD(session), filter.CWD) {
-			continue
-		}
-
-		if filter.Project != "" && !MatchesProject(session, filter.Project, filter.ProjectSubtree) {
-			continue
-		}
-
-		if !matchesFilterLocation(session, filter) {
+		if !matchesFilterState(session, filter) || !matchesFilterScope(session, filter) {
 			continue
 		}
 
@@ -173,6 +144,45 @@ func sessionIDForObservation(observation Observation) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 
 	return string(observation.Harness) + "-" + hex.EncodeToString(sum[:8])
+}
+
+func matchesFilterState(session Session, filter Filter) bool {
+	if filter.Harness != "" && session.Harness != filter.Harness {
+		return false
+	}
+
+	if filter.Presence != "" && session.Presence() != filter.Presence {
+		return false
+	}
+
+	if filter.Activity != "" &&
+		(session.Activity() == nil || *session.Activity() != filter.Activity) {
+		return false
+	}
+
+	return true
+}
+
+func matchesFilterScope(session Session, filter Filter) bool {
+	if filter.MultiplexerSession != "" &&
+		session.Location.SessionName != filter.MultiplexerSession &&
+		session.Location.SessionID != filter.MultiplexerSession {
+		return false
+	}
+
+	if filter.CWD != "" && !PathsEqual(SessionCWD(session), filter.CWD) {
+		return false
+	}
+
+	if filter.Project != "" && !MatchesProject(session, filter.Project, filter.ProjectSubtree) {
+		return false
+	}
+
+	if !matchesFilterLocation(session, filter) {
+		return false
+	}
+
+	return true
 }
 
 func matchesFilterLocation(session Session, filter Filter) bool {

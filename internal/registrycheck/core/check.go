@@ -34,7 +34,6 @@ type Coverage struct {
 	hits map[string]struct{}
 }
 
-//nolint:cyclop // Every independent invariant contributes a separate error.
 func Sessions(sessions []Session) error {
 	var violations []error
 
@@ -57,40 +56,8 @@ func Sessions(sessions []Session) error {
 		}
 
 		seen[id] = struct{}{}
-		if session.CreatedAt.IsZero() || session.UpdatedAt.IsZero() ||
-			session.UpdatedAt.Before(session.CreatedAt) {
-			violations = append(
-				violations,
-				fmt.Errorf("%w: session %q has invalid creation/update times", ErrTime, id),
-			)
-		}
 
-		if !session.HasLiveness || !session.ValidState {
-			violations = append(
-				violations,
-				fmt.Errorf("%w: session %q has invalid liveness", ErrLiveness, id),
-			)
-		}
-		// Gone.Activity() is nil, and the session codec rejects a gone activity value.
-		if session.Presence == "gone" && session.Activity != "" {
-			violations = append(
-				violations,
-				fmt.Errorf("%w: session %q has activity %s", errGoneActivity, id, session.Activity),
-			)
-		}
-		// lifecycleMachine.end clears activity and retains a gone tombstone.
-		if session.NativeEnded && (session.Presence != "gone" || session.Activity != "") {
-			violations = append(
-				violations,
-				fmt.Errorf(
-					"%w: session %q is %s with activity %s",
-					ErrNativeEnd,
-					id,
-					session.Presence,
-					session.Activity,
-				),
-			)
-		}
+		violations = append(violations, sessionStateViolations(session)...)
 	}
 
 	return errors.Join(violations...)
@@ -138,4 +105,46 @@ func (c *Coverage) Missing(required ...string) []string {
 	}
 
 	return missing
+}
+
+func sessionStateViolations(session Session) []error {
+	var violations []error
+
+	id := session.ID
+	if session.CreatedAt.IsZero() || session.UpdatedAt.IsZero() ||
+		session.UpdatedAt.Before(session.CreatedAt) {
+		violations = append(
+			violations,
+			fmt.Errorf("%w: session %q has invalid creation/update times", ErrTime, id),
+		)
+	}
+
+	if !session.HasLiveness || !session.ValidState {
+		violations = append(
+			violations,
+			fmt.Errorf("%w: session %q has invalid liveness", ErrLiveness, id),
+		)
+	}
+	// Gone.Activity() is nil, and the session codec rejects a gone activity value.
+	if session.Presence == "gone" && session.Activity != "" {
+		violations = append(
+			violations,
+			fmt.Errorf("%w: session %q has activity %s", errGoneActivity, id, session.Activity),
+		)
+	}
+	// lifecycleMachine.end clears activity and retains a gone tombstone.
+	if session.NativeEnded && (session.Presence != "gone" || session.Activity != "") {
+		violations = append(
+			violations,
+			fmt.Errorf(
+				"%w: session %q is %s with activity %s",
+				ErrNativeEnd,
+				id,
+				session.Presence,
+				session.Activity,
+			),
+		)
+	}
+
+	return violations
 }

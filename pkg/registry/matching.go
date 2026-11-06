@@ -176,7 +176,6 @@ func observationIdentityConflicts(session Session, identity ObservationIdentity)
 	return false
 }
 
-//nolint:cyclop // matching session discovery correlates native and provisional identities
 func findAndReconcileMatchingSession(
 	sessions map[string]Session,
 	observation Observation,
@@ -185,33 +184,12 @@ func findAndReconcileMatchingSession(
 	identityID := findIdentityMatchingSession(sessions, observation)
 
 	processID := findProcessMatchingSession(sessions, observation)
-	if observation.Kind() == "report" && identityID != "" && processID != "" &&
-		identityID != processID && sessions[identityID].Process != nil &&
-		sessions[identityID].Presence() == PresenceGone &&
-		sessions[processID].IdentityState == IdentityProvisional &&
-		sessions[processID].Observations.Native == nil {
+	if preserveGoneIdentity(sessions, observation, identityID, processID) {
 		return identityID
 	}
 
-	if identityID != "" && processID != "" && identityID != processID {
-		if prior := sessions[identityID]; prior.Process != nil &&
-			!prior.Process.Equal(*observation.ProcessIdentity()) {
-			// The prior process terminated and the same session is being resumed
-			// or restarted under a new process. Retire the stale incarnation so
-			// the registry never retains two live sessions for one session_id.
-			(lifecycleMachine{session: &prior}).end(at)
-			prior.UpdatedAt = maxTime(prior.UpdatedAt, at)
-			sessions[identityID] = prior
-		}
-
-		provisional := sessions[identityID]
-		if provisional.Process == nil {
-			target := mergeProvisionalSession(sessions[processID], provisional)
-			sessions[processID] = target
-			delete(sessions, identityID)
-
-			return processID
-		}
+	if reconcileIdentityProcessSessions(sessions, observation, at, identityID, processID) {
+		return processID
 	}
 
 	if processID != "" {
@@ -230,6 +208,49 @@ func findAndReconcileMatchingSession(
 	}
 
 	return ""
+}
+
+func reconcileIdentityProcessSessions(
+	sessions map[string]Session,
+	observation Observation,
+	at time.Time,
+	identityID string, processID string,
+) bool {
+	if identityID != "" && processID != "" && identityID != processID {
+		if prior := sessions[identityID]; prior.Process != nil &&
+			!prior.Process.Equal(*observation.ProcessIdentity()) {
+			// The prior process terminated and the same session is being resumed
+			// or restarted under a new process. Retire the stale incarnation so
+			// the registry never retains two live sessions for one session_id.
+			(lifecycleMachine{session: &prior}).end(at)
+			prior.UpdatedAt = maxTime(prior.UpdatedAt, at)
+			sessions[identityID] = prior
+		}
+
+		provisional := sessions[identityID]
+		if provisional.Process == nil {
+			target := mergeProvisionalSession(sessions[processID], provisional)
+			sessions[processID] = target
+			delete(sessions, identityID)
+
+			return true
+		}
+	}
+
+	return false
+}
+
+func preserveGoneIdentity(
+	sessions map[string]Session,
+	observation Observation,
+	identityID string,
+	processID string,
+) bool {
+	return observation.Kind() == "report" && identityID != "" && processID != "" &&
+		identityID != processID && sessions[identityID].Process != nil &&
+		sessions[identityID].Presence() == PresenceGone &&
+		sessions[processID].IdentityState == IdentityProvisional &&
+		sessions[processID].Observations.Native == nil
 }
 
 func findMatchingSession(sessions map[string]Session, observation Observation) string {
@@ -350,31 +371,8 @@ func presenceMatchRank(presence Presence) int {
 	}
 }
 
-//nolint:cyclop // each independent metadata dimension is merged only when missing
 func mergeProvisionalSession(target Session, provisional Session) Session {
-	if target.SessionID == "" {
-		target.SessionID = provisional.SessionID
-	}
-
-	if target.SessionPath == "" {
-		target.SessionPath = provisional.SessionPath
-	}
-
-	if len(target.ResumeCommand) == 0 {
-		target.ResumeCommand = append([]string(nil), provisional.ResumeCommand...)
-	}
-
-	if target.CWD == "" {
-		target.CWD = provisional.CWD
-	}
-
-	if target.ProjectRoot == "" {
-		target.ProjectRoot = provisional.ProjectRoot
-	}
-
-	if target.Location.Empty() {
-		target.Location = provisional.Location
-	}
+	target = mergeProvisionalMetadata(target, provisional)
 
 	if target.Presence() == PresenceUnknown && provisional.Presence() != PresenceUnknown {
 		if _, gone := provisional.Liveness.(Gone); gone {
@@ -408,11 +406,38 @@ func mergeProvisionalSession(target Session, provisional Session) Session {
 	return target
 }
 
+func mergeProvisionalMetadata(target Session, provisional Session) Session {
+	if target.SessionID == "" {
+		target.SessionID = provisional.SessionID
+	}
+
+	if target.SessionPath == "" {
+		target.SessionPath = provisional.SessionPath
+	}
+
+	if len(target.ResumeCommand) == 0 {
+		target.ResumeCommand = append([]string(nil), provisional.ResumeCommand...)
+	}
+
+	if target.CWD == "" {
+		target.CWD = provisional.CWD
+	}
+
+	if target.ProjectRoot == "" {
+		target.ProjectRoot = provisional.ProjectRoot
+	}
+
+	if target.Location.Empty() {
+		target.Location = provisional.Location
+	}
+
+	return target
+}
+
 func activityUnknown(activity *Activity) bool {
 	return activity == nil || *activity == ActivityUnknown
 }
 
-//nolint:cyclop // each evidence source has an independent newest-observation slot
 func mergeObservations(target Observations, provisional Observations) Observations {
 	if target.Native == nil ||
 		(provisional.Native != nil && provisional.Native.ObservedAt.After(target.Native.ObservedAt)) {
@@ -424,14 +449,18 @@ func mergeObservations(target Observations, provisional Observations) Observatio
 		target.Process = provisional.Process
 	}
 
-	if target.Location == nil ||
-		(provisional.Location != nil && provisional.Location.ObservedAt.After(target.Location.ObservedAt)) {
-		target.Location = provisional.Location
-	}
-
 	if target.Catalog == nil ||
 		(provisional.Catalog != nil && provisional.Catalog.ObservedAt.After(target.Catalog.ObservedAt)) {
 		target.Catalog = provisional.Catalog
+	}
+
+	return mergeTerminalObservations(target, provisional)
+}
+
+func mergeTerminalObservations(target Observations, provisional Observations) Observations {
+	if target.Location == nil ||
+		(provisional.Location != nil && provisional.Location.ObservedAt.After(target.Location.ObservedAt)) {
+		target.Location = provisional.Location
 	}
 
 	if target.Screen == nil ||
