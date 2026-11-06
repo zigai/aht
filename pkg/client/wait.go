@@ -17,6 +17,13 @@ const (
 	defaultFileWatchDebounce = 10 * time.Millisecond
 )
 
+const (
+	waitStepEvent waitStep = iota
+	waitStepStable
+	waitStepTimer
+	waitStepCanceled
+)
+
 var (
 	// ErrWaitTimeout means the wait operation timed out before the condition was satisfied.
 	ErrWaitTimeout = errors.New("wait condition timed out")
@@ -90,6 +97,21 @@ type durableSessionWatcher struct {
 	cancel context.CancelFunc
 	events chan watchEvent
 	done   chan struct{}
+}
+
+type waitStep int
+
+type waitRun struct {
+	client        *Client
+	opts          WaitOptions
+	stream        sessionWatcher
+	durable       bool
+	stableTimer   *time.Timer
+	stableTimerCh <-chan time.Time
+	stableReady   bool
+	candidate     *registry.Session
+	lastSeen      *registry.Session
+	seenInitial   bool
 }
 
 // Validate checks that WaitOptions has a session ID, valid durations, and at least one non-contradictory condition.
@@ -169,8 +191,6 @@ func emptyFilter() registry.Filter {
 // result is the last observed session with a Gone liveness whose reason is
 // "session_removed". For any other condition it returns ErrSessionDisappeared.
 // A session missing from the first snapshot returns registry.ErrSessionNotFound.
-//
-//nolint:cyclop,gocognit // Wait coordinates multiple lifecycle events: timers, context, stream, and condition matching.
 func (c *Client) Wait(ctx context.Context, opts WaitOptions) (WaitResult, error) {
 	if c.configErr != nil {
 		return WaitResult{}, c.configErr
@@ -193,143 +213,180 @@ func (c *Client) Wait(ctx context.Context, opts WaitOptions) (WaitResult, error)
 	}
 
 	_, durable := stream.(*durableSessionWatcher)
-	defer func() {
-		if stream != nil {
-			stream.Close()
-		}
-	}()
-
-	var (
-		stableTimer      *time.Timer
-		stableTimerCh    <-chan time.Time
-		candidateSession *registry.Session
-		lastSeen         *registry.Session
-	)
-
-	seenInitial := false
-	stableReady := false
-
-	resetStableTimer := func() {
-		stableReady = false
-
-		stopTimer(stableTimer)
-		stableTimer = nil
-		stableTimerCh = nil
-		candidateSession = nil
+	run := &waitRun{
+		client: c, opts: opts, stream: stream, durable: durable,
+		stableTimer: nil, stableTimerCh: nil, stableReady: false,
+		candidate: nil, lastSeen: nil, seenInitial: false,
 	}
 
-	defer func() {
-		stopTimer(stableTimer)
-	}()
+	defer run.close()
 
+	return run.loop(ctx)
+}
+
+func (r *waitRun) loop(ctx context.Context) (WaitResult, error) {
 	for {
-		if err := ctx.Err(); err != nil {
-			return WaitResult{}, waitError(err)
+		ev, ok, step := r.nextEvent(ctx)
+		switch step {
+		case waitStepCanceled:
+			return WaitResult{}, waitError(ctx.Err())
+		case waitStepStable:
+			return WaitResult{Session: *r.candidate, Initial: false}, nil
+		case waitStepTimer:
+			continue
+		case waitStepEvent:
 		}
 
-		var (
-			ev watchEvent
-			ok bool
-		)
-		// Consume already queued observations before accepting an elapsed stability
-		// timer. Otherwise select could return a stale match while a change waits.
-		select {
-		case ev, ok = <-stream.Events():
-		default:
-			if stableReady && candidateSession != nil {
-				return WaitResult{Session: *candidateSession, Initial: false}, nil
+		if !ok || ev.err != nil {
+			if err := r.replaceFailedStream(ctx, ok, ev.err); err != nil {
+				return WaitResult{}, err
 			}
 
-			select {
-			case <-ctx.Done():
-				return WaitResult{}, waitError(ctx.Err())
-			case <-stableTimerCh:
-				stableReady = true
-				stableTimerCh = nil
-
-				continue
-			case ev, ok = <-stream.Events():
-			}
+			continue
 		}
 
+		result, done, err := r.observe(ev.sessions)
+		if err != nil {
+			return WaitResult{}, err
+		}
+
+		if done {
+			return result, nil
+		}
+	}
+}
+
+func (r *waitRun) nextEvent(ctx context.Context) (watchEvent, bool, waitStep) {
+	if ctx.Err() != nil {
+		return watchEvent{}, false, waitStepCanceled
+	}
+
+	// Consume already queued observations before accepting an elapsed stability
+	// timer. Otherwise select could return a stale match while a change waits.
+	select {
+	case ev, ok := <-r.stream.Events():
+		return ev, ok, waitStepEvent
+	default:
+	}
+
+	if r.stableReady && r.candidate != nil {
+		return watchEvent{}, false, waitStepStable
+	}
+
+	select {
+	case <-ctx.Done():
+		return watchEvent{}, false, waitStepCanceled
+	case <-r.stableTimerCh:
+		r.stableReady = true
+		r.stableTimerCh = nil
+
+		return watchEvent{}, false, waitStepTimer
+	case ev, ok := <-r.stream.Events():
+		return ev, ok, waitStepEvent
+	}
+}
+
+func (r *waitRun) replaceFailedStream(ctx context.Context, ok bool, err error) error {
+	r.resetStable()
+
+	if !r.fallsBackToDurable(ok, err) {
 		if !ok {
-			resetStableTimer()
-
-			if c.mode == ModeAuto && !durable {
-				stream.Close()
-				stream = startDurableWatcher(ctx, c.storePath)
-				durable = true
-
-				continue
-			}
-
-			return WaitResult{}, ErrUnavailable
+			return ErrUnavailable
 		}
 
-		if ev.err != nil {
-			resetStableTimer()
+		return waitError(publicError(err))
+	}
 
-			if c.mode == ModeAuto && !durable &&
-				(IsUnavailable(ev.err) || broker.IsUnavailable(ev.err)) {
-				stream.Close()
-				stream = startDurableWatcher(ctx, c.storePath)
-				durable = true
+	r.stream.Close()
+	r.stream = startDurableWatcher(ctx, r.client.storePath)
+	r.durable = true
 
-				continue
-			}
+	return nil
+}
 
-			return WaitResult{}, waitError(publicError(ev.err))
+func (r *waitRun) fallsBackToDurable(ok bool, err error) bool {
+	if r.client.mode != ModeAuto || r.durable {
+		return false
+	}
+
+	return !ok || IsUnavailable(err) || broker.IsUnavailable(err)
+}
+
+func (r *waitRun) observe(sessions []registry.Session) (WaitResult, bool, error) {
+	isInitial := !r.seenInitial
+	r.seenInitial = true
+
+	current := r.currentSession(sessions)
+	if current == nil {
+		r.resetStable()
+		return WaitResult{}, false, registry.ErrSessionNotFound
+	}
+
+	r.lastSeen = current
+
+	matched, outcomeErr := evaluateCondition(*current, r.opts)
+	if outcomeErr != nil {
+		r.resetStable()
+		return WaitResult{}, false, outcomeErr
+	}
+
+	if !matched {
+		r.resetStable()
+		return WaitResult{}, false, nil
+	}
+
+	if r.opts.StableFor == 0 {
+		return WaitResult{Session: *current, Initial: isInitial}, true, nil
+	}
+
+	r.holdCandidate(current)
+
+	return WaitResult{}, false, nil
+}
+
+func (r *waitRun) currentSession(sessions []registry.Session) *registry.Session {
+	for i := range sessions {
+		if sessions[i].ID == r.opts.ID {
+			return &sessions[i]
 		}
+	}
 
-		isInitial := !seenInitial
-		seenInitial = true
+	if r.lastSeen == nil {
+		return nil
+	}
 
-		var currentSession *registry.Session
+	removed := removedSession(*r.lastSeen, time.Now().UTC())
 
-		for i := range ev.sessions {
-			if ev.sessions[i].ID == opts.ID {
-				currentSession = &ev.sessions[i]
-				break
-			}
-		}
+	return &removed
+}
 
-		if currentSession == nil {
-			if lastSeen == nil {
-				resetStableTimer()
-				return WaitResult{}, registry.ErrSessionNotFound
-			}
+func (r *waitRun) holdCandidate(current *registry.Session) {
+	if r.candidate != nil && !sameWaitProcess(r.candidate.Process, current.Process) {
+		r.resetStable()
+	}
 
-			removed := removedSession(*lastSeen, time.Now().UTC())
-			currentSession = &removed
-		}
+	r.candidate = current
 
-		lastSeen = currentSession
+	if r.stableTimer == nil {
+		r.stableTimer = time.NewTimer(r.opts.StableFor)
+		r.stableTimerCh = r.stableTimer.C
+	}
+}
 
-		matched, outcomeErr := evaluateCondition(*currentSession, opts)
-		if outcomeErr != nil {
-			resetStableTimer()
-			return WaitResult{}, outcomeErr
-		}
+func (r *waitRun) resetStable() {
+	r.stableReady = false
 
-		if matched {
-			if opts.StableFor == 0 {
-				return WaitResult{Session: *currentSession, Initial: isInitial}, nil
-			}
+	stopTimer(r.stableTimer)
+	r.stableTimer = nil
+	r.stableTimerCh = nil
+	r.candidate = nil
+}
 
-			if candidateSession != nil &&
-				!sameWaitProcess(candidateSession.Process, currentSession.Process) {
-				resetStableTimer()
-			}
+func (r *waitRun) close() {
+	stopTimer(r.stableTimer)
 
-			candidateSession = currentSession
-
-			if stableTimer == nil {
-				stableTimer = time.NewTimer(opts.StableFor)
-				stableTimerCh = stableTimer.C
-			}
-		} else {
-			resetStableTimer()
-		}
+	if r.stream != nil {
+		r.stream.Close()
 	}
 }
 
