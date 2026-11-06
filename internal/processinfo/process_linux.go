@@ -37,8 +37,6 @@ type linuxEnvironmentHints struct {
 
 // List returns a complete best-effort snapshot of processes owned by the
 // effective user. Processes which exit while being read are skipped.
-//
-//nolint:gocognit,cyclop // process enumeration intentionally handles transient proc entries inline
 func List(ctx context.Context) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("process listing context: %w", err)
@@ -61,46 +59,7 @@ func List(ctx context.Context) ([]Process, error) {
 
 	uid := uint32(euid)
 
-	processes := make([]Process, 0, len(entries))
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("process listing context: %w", err)
-		}
-
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 || !entry.IsDir() {
-			continue
-		}
-
-		dir := filepath.Join(procRoot, entry.Name())
-
-		info, err := os.Stat(dir)
-		if err != nil {
-			if isLinuxNotExist(err) {
-				continue
-			}
-
-			return nil, classifyProcessError(dir, err)
-		}
-
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || stat.Uid != uid {
-			continue
-		}
-
-		process, err := readLinuxProcess(dir, pid, boot)
-		if err != nil {
-			if isLinuxProcessExited(dir, pid, err) {
-				continue
-			}
-
-			return nil, err
-		}
-
-		processes = append(processes, process)
-	}
-
-	return processes, nil
+	return listLinuxProcessEntries(ctx, entries, boot, uid)
 }
 
 // Find returns the current-user process identified by pid. A false found
@@ -316,21 +275,71 @@ func splitLinuxArgs(data []byte) []string {
 	return args
 }
 
-//nolint:cyclop // proc stat validation checks each required field independently
+func listLinuxProcessEntries(
+	ctx context.Context,
+	entries []os.DirEntry,
+	boot string,
+	uid uint32,
+) ([]Process, error) {
+	processes := make([]Process, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("process listing context: %w", err)
+		}
+
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 || !entry.IsDir() {
+			continue
+		}
+
+		dir := filepath.Join(procRoot, entry.Name())
+
+		owned, err := linuxProcessOwned(dir, uid)
+		if err != nil {
+			return nil, err
+		}
+
+		if !owned {
+			continue
+		}
+
+		process, err := readLinuxProcess(dir, pid, boot)
+		if err != nil {
+			if isLinuxProcessExited(dir, pid, err) {
+				continue
+			}
+
+			return nil, err
+		}
+
+		processes = append(processes, process)
+	}
+
+	return processes, nil
+}
+
+func linuxProcessOwned(dir string, uid uint32) (bool, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		if isLinuxNotExist(err) {
+			return false, nil
+		}
+
+		return false, classifyProcessError(dir, err)
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+
+	return ok && stat.Uid == uid, nil
+}
+
 func parseLinuxStat(stat string) (Process, error) {
-	openParen := strings.IndexByte(stat, '(')
-
-	closeParen := strings.LastIndexByte(stat, ')')
-	if openParen <= 0 || closeParen < openParen || closeParen+2 >= len(stat) {
-		return Process{}, errMissingCommandDelimiter
+	pid, name, tail, err := parseLinuxStatHeader(stat)
+	if err != nil {
+		return Process{}, err
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(stat[:openParen]))
-	if err != nil || pid <= 0 {
-		return Process{}, errInvalidProcessID
-	}
-
-	fields := strings.Fields(stat[closeParen+2:])
+	fields := strings.Fields(tail)
 
 	const (
 		stateIndex  = 0
@@ -368,7 +377,7 @@ func parseLinuxStat(stat string) (Process, error) {
 
 	return Process{
 		PID:                pid,
-		Name:               stat[openParen+1 : closeParen],
+		Name:               name,
 		PPID:               ppid,
 		ProcessGroupID:     pgrp,
 		Foreground:         ttpgid > 0 && pgrp == ttpgid,
@@ -383,6 +392,22 @@ func parseLinuxStat(stat string) (Process, error) {
 		MultiplexerPane:    "",
 		Args:               nil,
 	}, nil
+}
+
+func parseLinuxStatHeader(stat string) (int, string, string, error) {
+	openParen := strings.IndexByte(stat, '(')
+	closeParen := strings.LastIndexByte(stat, ')')
+
+	if openParen <= 0 || closeParen < openParen || closeParen+2 >= len(stat) {
+		return 0, "", "", errMissingCommandDelimiter
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(stat[:openParen]))
+	if err != nil || pid <= 0 {
+		return 0, "", "", errInvalidProcessID
+	}
+
+	return pid, stat[openParen+1 : closeParen], stat[closeParen+2:], nil
 }
 
 func classifyProcessError(path string, err error) error {
