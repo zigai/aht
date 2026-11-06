@@ -79,6 +79,7 @@ fix: && format
 format:
     @{{ GOLANGCI_LINT }} run --fix --enable-only whitespace --issues-exit-code=0
     @{{ GOLANGCI_LINT }} fmt
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r oxfmt --no-error-on-unmatched-pattern '!**/*.md' '!**/testdata/**'
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 shfmt -f | while IFS= read -r file; do if [[ $file != */testdata/* ]]; then shfmt -w "$file"; fi; done
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt; done
     @just markdown fmt --exclude internal/install/testdata
@@ -135,9 +136,11 @@ clean: (remove "bin" "aht" "aht.exe" "dist" "coverage.out" "*.test" "*.prof" ".r
 formatcheck:
     @{{ GOLANGCI_LINT }} run --enable-only whitespace
     @{{ GOLANGCI_LINT }} fmt --diff
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r oxfmt --check --no-error-on-unmatched-pattern '!**/*.md' '!**/testdata/**'
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 shfmt -f | while IFS= read -r file; do if [[ $file != */testdata/* ]]; then shfmt -d "$file"; fi; done
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt --check; done
     @just markdown check --exclude internal/install/testdata
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r editorconfig-checker -disable-indent-size -disable-indentation -disable-max-line-length -disable-charset -exclude '(^|/)testdata/'
 
 # Run the workflow check checks
 workflow-check:
