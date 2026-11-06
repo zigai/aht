@@ -1,0 +1,6 @@
+{"type":"llm.request","agentId":"main","provider":"example","model":"example-model"}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}]},"meta":{"userMessageId":"prompt-one"}}}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]},"meta":{"model":{"provider":"agent-loop","model":"agent-loop"}}}}
+{"type":"human.agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]}}}
+{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"tool","content":[{"type":"text","text":"tool-only"}],"toolCallId":"call-one"}}}
+{"type":"context.append_message","agentId":"main","message":{"role":"user","content":[{"type":"text","text":"injected-only"}],"origin":{"kind":"injection","variant":"date_change"}}}

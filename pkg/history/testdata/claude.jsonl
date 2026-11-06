@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"native-session","cwd":"/work/project","uuid":"u1","message":{"role":"user","content":"Refresh Token"}}
+{"type":"user","sessionId":"native-session","message":{"role":"user","content":[{"type":"tool_result","content":"tool-only"}]}}
+{"type":"assistant","sessionId":"native-session","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]}}

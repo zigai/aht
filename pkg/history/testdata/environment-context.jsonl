@@ -1,0 +1,4 @@
+{"type":"session","id":"s","cwd":"/work"}
+{"type":"message","id":"u0","message":{"role":"user","content":"<environment_context><cwd>/work</cwd></environment_context>"}}
+{"type":"message","id":"u1","message":{"role":"user","content":"<environment_context>x</environment_context>\nRename the parser"}}
+{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"text","text":"first part"},{"type":"text","text":"second part"}]}}

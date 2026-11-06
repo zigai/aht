@@ -36,7 +36,6 @@ CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(body A
 CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
-//nolint:lll // multi-line SQL schema has exact bytes; no SQL fixture loader.
 const indexSchema = `
 CREATE TABLE directories (
  harness TEXT NOT NULL, root TEXT NOT NULL, path TEXT NOT NULL,
@@ -58,7 +57,8 @@ CREATE TABLE parts (
  role TEXT NOT NULL, body TEXT NOT NULL,
  message_id TEXT NOT NULL, line INTEGER NOT NULL, timestamp TEXT NOT NULL);
 ` + partIndexes + `
-CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='', contentless_delete=1, tokenize='trigram case_sensitive 1');
+CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='', contentless_delete=1,
+ tokenize='trigram case_sensitive 1');
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  DELETE FROM parts_fts WHERE rowid=old.id; END;
 PRAGMA application_id=0x41485431;

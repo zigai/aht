@@ -1,0 +1,6 @@
+{"type":"session","id":"report-session","cwd":"/work"}
+{"type":"message","id":"u1","message":{"role":"user","content":"Fix the login page"}}
+{"type":"message","id":"a1","message":{"role":"assistant","content":"Looking at the login page first."}}
+{"type":"message","id":"u2","message":{"role":"user","content":"Go on"}}
+{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"},{"type":"text","text":"Fixed the redirect."},{"type":"toolCall","name":"read","arguments":{"file":"tool-only"}},{"type":"text","text":"**Evidence**\n- shot.png"}]}}
+{"type":"message","id":"t1","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only output"}]}}

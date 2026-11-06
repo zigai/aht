@@ -1,0 +1,2 @@
+{"type":"session.start","data":{"sessionId":"native"}}
+{"type":"assistant.message","data":{"content":"Checking","toolRequests":[{"name":"bash","arguments":{"command":"request-only"},"toolCallId":"call"}]}}

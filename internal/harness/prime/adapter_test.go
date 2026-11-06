@@ -210,10 +210,13 @@ func TestObservableProcessRequiresPrimeWorkerExecutable(t *testing.T) {
 }
 
 func TestParseCatalog(t *testing.T) {
-	//nolint:lll // multi-line JSON fixture has exact bytes; no fixture loader.
 	data := []byte(`{"sessions":[
-		{"id":"active-route","activeSessionId":"active-route","sessionId":"durable","sessionFile":"/sessions/durable.jsonl","sessionName":"Native name","firstMessage":"First prompt","cwd":"/work/project","activity":"working","lifecycle":"live","runtimeKind":"subagent","workerPid":42,"rlmDepth":1,"parentSessionId":"parent","rlmChildId":"child"},
-		{"id":"saved","activeSessionId":"saved","sessionId":"saved","sessionFile":"/sessions/saved.jsonl","firstMessage":"Saved prompt","cwd":"/work/other","activity":"idle","lifecycle":"archived"}
+		{"id":"active-route","activeSessionId":"active-route","sessionId":"durable",
+		 "sessionFile":"/sessions/durable.jsonl","sessionName":"Native name","firstMessage":"First prompt",
+		 "cwd":"/work/project","activity":"working","lifecycle":"live","runtimeKind":"subagent",
+		 "workerPid":42,"rlmDepth":1,"parentSessionId":"parent","rlmChildId":"child"},
+		{"id":"saved","activeSessionId":"saved","sessionId":"saved","sessionFile":"/sessions/saved.jsonl",
+		 "firstMessage":"Saved prompt","cwd":"/work/other","activity":"idle","lifecycle":"archived"}
 	]}`)
 
 	sessions, err := parseCatalog(data)

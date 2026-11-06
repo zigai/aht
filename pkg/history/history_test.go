@@ -2,6 +2,7 @@ package history_test
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"os"
@@ -17,24 +18,56 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-const treeHistory = `{"type":"session","version":3,"id":"native-session","cwd":"/work/project/sub","timestamp":"2026-09-01T00:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"user","content":"Find the Refresh Token handler"}}
-{"type":"message","id":"a1","timestamp":"2026-09-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"},{"type":"text","text":"The refresh token handler is in auth.go"},{"type":"toolCall","name":"read","arguments":{"file":"tool-only"}}]}}
-{"type":"message","id":"t1","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only output"}]}}
-{"type":"message","id":"s1","message":{"role":"system","content":"system-only"}}
-{"type":"session_info","name":"Authentication work"}
-`
+var (
+	//go:embed testdata/tree.jsonl
+	treeHistory string
+
+	//go:embed testdata/tool.jsonl
+	toolHistory string
+
+	//go:embed testdata/claude.jsonl
+	claudeHistory string
+
+	//go:embed testdata/codex.jsonl
+	codexHistory string
+
+	//go:embed testdata/codex-rollout.jsonl
+	codexRolloutHistory string
+
+	//go:embed testdata/copilot-tool-requests.jsonl
+	copilotToolRequestHistory string
+
+	//go:embed testdata/environment-context.jsonl
+	environmentContextHistory string
+
+	//go:embed testdata/kimi-wire.jsonl
+	kimiWireHistory string
+
+	//go:embed testdata/kimi-wire-mirrored-tail.jsonl
+	kimiMirroredWireTail string
+
+	//go:embed testdata/qwen.jsonl
+	qwenHistory string
+
+	//go:embed testdata/qwen-other-session.jsonl
+	qwenOtherSessionHistory string
+
+	//go:embed testdata/qwen-system-only.jsonl
+	qwenSystemOnlyHistory string
+
+	//go:embed testdata/recently-created.jsonl
+	recentlyCreatedHistory string
+
+	//go:embed testdata/recently-updated.jsonl
+	recentlyUpdatedHistory string
+
+	//go:embed testdata/report.jsonl
+	reportHistory string
+)
 
 // toolHistory has a tool message newer than its searchable text, so searching
 // with tools can only change excerpts, never conversation metadata.
 //
-//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-const toolHistory = `{"type":"session","id":"tool-session","cwd":"/work/tools","timestamp":"2026-09-01T10:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"refresh token"}}
-{"type":"message","id":"a1","timestamp":"2026-09-01T10:02:00Z","message":{"role":"assistant","content":"refresh token handler"}}
-{"type":"message","id":"t1","timestamp":"2026-09-01T10:03:00Z","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only output"}]}}
-`
 
 func writeHistory(t *testing.T, root string, name string, body string) string {
 	t.Helper()
@@ -75,28 +108,11 @@ func searchFile(
 func TestNativeJSONLReaders(t *testing.T) {
 	t.Parallel()
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-	const claudeTranscript = `{"type":"user","sessionId":"native-session","cwd":"/work/project","uuid":"u1","message":{"role":"user","content":"Refresh Token"}}
-{"type":"user","sessionId":"native-session","message":{"role":"user","content":[{"type":"tool_result","content":"tool-only"}]}}
-{"type":"assistant","sessionId":"native-session","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"}]}}
-`
+	claudeTranscript := claudeHistory
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-	const codexTranscript = `{"type":"session_meta","payload":{"id":"native-session","cwd":"/work/project"}}
-{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Refresh Token"}]}}
-{"type":"event_msg","payload":{"type":"user_message","message":"Refresh Token"}}
-{"type":"response_item","payload":{"type":"function_call_output","call_id":"t1","output":"tool-only"}}
-{"type":"response_item","payload":{"type":"reasoning","summary":[{"text":"reasoning-only"}]}}
-{"type":"response_item","payload":{"type":"message","role":"assistant","channel":"analysis","content":[{"type":"output_text","text":"reasoning-only"}]}}
-`
+	codexTranscript := codexHistory
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-	const qwenTranscript = `{"uuid":"u1","parentUuid":null,"sessionId":"native-session","timestamp":"2026-09-01T00:00:01Z","type":"user","cwd":"/work/project","gitBranch":"main","message":{"role":"user","parts":[{"text":"Refresh Token"}]}}
-{"uuid":"s1","parentUuid":"u1","sessionId":"native-session","timestamp":"2026-09-01T00:00:02Z","type":"system","cwd":"/work/project","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"system-only"}}}
-{"uuid":"a1","parentUuid":"s1","sessionId":"native-session","timestamp":"2026-09-01T00:00:03Z","type":"assistant","cwd":"/work/project","model":"compat","message":{"role":"model","parts":[{"text":"reasoning-only","thought":true},{"functionCall":{"id":"c1","name":"run_shell_command","args":{"command":"tool-only"}}}]}}
-{"uuid":"t1","parentUuid":"a1","sessionId":"native-session","timestamp":"2026-09-01T00:00:04Z","type":"tool_result","cwd":"/work/project","message":{"role":"user","parts":[{"functionResponse":{"id":"c1","name":"run_shell_command","response":{"output":"tool-only"}}}]}}
-{"uuid":"n1","parentUuid":"t1","sessionId":"native-session","timestamp":"2026-09-01T00:00:05Z","type":"system","cwd":"/work/project","subtype":"custom_title","systemPayload":{"customTitle":"Authentication work","titleSource":"auto"}}
-`
+	qwenTranscript := qwenHistory
 
 	tests := []struct {
 		name       string
@@ -528,15 +544,6 @@ func TestUnicodeExcerptAndJSON(t *testing.T) {
 	}
 }
 
-//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-const kimiWireHistory = `{"type":"metadata","protocol_version":"1.5","created_at":1788220800000}
-{"type":"context.append_message","agentId":"main","time":1788220801000,"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}],"toolCalls":[]}}
-{"type":"context.append_loop_event","agentId":"main","time":1788220802000,"event":{"type":"content.part","stepUuid":"step-one","part":{"type":"text","text":"The refresh token handler is ready"}}}
-{"type":"context.append_loop_event","agentId":"main","event":{"type":"content.part","part":{"type":"think","think":"reasoning-only"}}}
-{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","toolCallId":"call-one","result":{"output":"tool-only"}}}
-{"type":"context.append_message","agentId":"main","message":{"role":"system","content":[{"type":"text","text":"system-only"}]}}
-`
-
 func TestKimiNativeDirectoryMetadata(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -623,15 +630,7 @@ func assertKimiNativeMetadata(t *testing.T, conversation history.Conversation) {
 	}
 }
 
-//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-const kimiMirroredWireHistory = kimiWireHistory +
-	`{"type":"llm.request","agentId":"main","provider":"example","model":"example-model"}
-{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}]},"meta":{"userMessageId":"prompt-one"}}}
-{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]},"meta":{"model":{"provider":"agent-loop","model":"agent-loop"}}}}
-{"type":"human.agent.message.appended","kind":"event","message":{"message":{"role":"assistant","content":[{"type":"text","text":"The refresh token handler is ready"}],"toolCalls":[]}}}
-{"type":"agent.message.appended","kind":"event","message":{"message":{"role":"tool","content":[{"type":"text","text":"tool-only"}],"toolCallId":"call-one"}}}
-{"type":"context.append_message","agentId":"main","message":{"role":"user","content":[{"type":"text","text":"injected-only"}],"origin":{"kind":"injection","variant":"date_change"}}}
-`
+var kimiMirroredWireHistory = kimiWireHistory + kimiMirroredWireTail
 
 func TestKimiWireMirrorsDoNotDuplicateMessages(t *testing.T) {
 	t.Parallel()
@@ -797,21 +796,17 @@ func TestQwenHistorySourcesAtDifferentDepths(t *testing.T) {
 func TestQwenSessionWithOnlySystemRecordsIsNotAnIssue(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
 	writeHistory(
 		t,
 		root,
 		"-work-project/chats/native-session.jsonl",
-		`{"uuid":"s1","parentUuid":null,"sessionId":"native-session","timestamp":"2026-09-01T00:00:00Z","type":"system","cwd":"/work/project","subtype":"slash_command","systemPayload":{"phase":"invocation","rawCommand":"/model"}}
-`,
+		qwenSystemOnlyHistory,
 	)
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
 	writeHistory(
 		t,
 		root,
 		"-work-project/chats/other-session.jsonl",
-		`{"uuid":"u1","parentUuid":null,"sessionId":"other-session","timestamp":"2026-09-01T00:00:00Z","type":"user","cwd":"/work/project","message":{"role":"user","parts":[{"text":"refresh token"}]}}
-`,
+		qwenOtherSessionHistory,
 	)
 	c := history.Catalog{
 		IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
@@ -920,10 +915,7 @@ func TestOpenClawRetainedArchives(t *testing.T) {
 func TestCopilotToolRequestsAreOptIn(t *testing.T) {
 	t.Parallel()
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-	const body = `{"type":"session.start","data":{"sessionId":"native"}}
-{"type":"assistant.message","data":{"content":"Checking","toolRequests":[{"name":"bash","arguments":{"command":"request-only"},"toolCallId":"call"}]}}
-`
+	body := copilotToolRequestHistory
 	if result := searchFile(
 		t,
 		registry.Harness("copilot"),
@@ -1221,22 +1213,9 @@ func TestToolExcerptsAreOptIn(t *testing.T) {
 func orderingSources(t *testing.T) []history.Source {
 	t.Helper()
 
-	const (
-		//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-		recentlyUpdated = `{"type":"session","id":"recently-updated","cwd":"/work/project","timestamp":"2026-09-19T00:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-19T00:00:01Z","message":{"role":"user","content":"refresh token"}}
-{"type":"message","id":"a1","timestamp":"2026-09-20T09:00:00Z","message":{"role":"assistant","content":"refresh token again"}}
-`
-		//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-		recentlyCreated = `{"type":"session","id":"recently-created","cwd":"/work/project","timestamp":"2026-09-20T08:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-20T08:00:01Z","message":{"role":"user","content":"refresh token"}}
-{"type":"message","id":"a1","timestamp":"2026-09-20T08:30:00Z","message":{"role":"assistant","content":"refresh token again"}}
-`
-	)
-
 	root := t.TempDir()
-	created := writeHistory(t, root, "a-recently-created.jsonl", recentlyCreated)
-	updated := writeHistory(t, root, "b-recently-updated.jsonl", recentlyUpdated)
+	created := writeHistory(t, root, "a-recently-created.jsonl", recentlyCreatedHistory)
+	updated := writeHistory(t, root, "b-recently-updated.jsonl", recentlyUpdatedHistory)
 
 	return []history.Source{
 		{Harness: registry.Harness("pi"), Path: created},
@@ -1347,12 +1326,7 @@ func searchQuery(t *testing.T, body string, query history.Query) history.Result 
 func TestConversationPromptAndMessageCount(t *testing.T) {
 	t.Parallel()
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-	body := `{"type":"session","id":"s","cwd":"/work"}
-{"type":"message","id":"u0","message":{"role":"user","content":"<environment_context><cwd>/work</cwd></environment_context>"}}
-{"type":"message","id":"u1","message":{"role":"user","content":"<environment_context>x</environment_context>\nRename the parser"}}
-{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"text","text":"first part"},{"type":"text","text":"second part"}]}}
-`
+	body := environmentContextHistory
 	result := searchQuery(t, body, history.Query{Terms: []string{"part"}})
 	requireMatches(t, result, nil, 1)
 
@@ -1480,14 +1454,11 @@ func TestResultsCarryNativeTitlesFromTitleFiles(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	sessions := filepath.Join(home, "sessions")
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
 	writeHistory(
 		t,
 		filepath.Join(sessions, "2026"),
 		"rollout-session.jsonl",
-		`{"type":"session_meta","payload":{"id":"native-session","cwd":"/work/project"}}
-{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Refresh Token"}]}}
-`,
+		codexRolloutHistory,
 	)
 	writeHistory(
 		t,
@@ -1558,15 +1529,6 @@ func TestDefaultSourcesAreAbsoluteWithPaddedHome(t *testing.T) {
 		}
 	}
 }
-
-//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
-const reportHistory = `{"type":"session","id":"report-session","cwd":"/work"}
-{"type":"message","id":"u1","message":{"role":"user","content":"Fix the login page"}}
-{"type":"message","id":"a1","message":{"role":"assistant","content":"Looking at the login page first."}}
-{"type":"message","id":"u2","message":{"role":"user","content":"Go on"}}
-{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning-only"},{"type":"text","text":"Fixed the redirect."},{"type":"toolCall","name":"read","arguments":{"file":"tool-only"}},{"type":"text","text":"**Evidence**\n- shot.png"}]}}
-{"type":"message","id":"t1","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only output"}]}}
-`
 
 func lastMessageCatalog(t *testing.T, body string) (history.Catalog, string) {
 	t.Helper()

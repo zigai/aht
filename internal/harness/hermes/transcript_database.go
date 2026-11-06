@@ -10,25 +10,26 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
-//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 const nativeQuery = `SELECT s.id AS session_id, s.title AS title, '' AS cwd,
- s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
+ s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated,
+ CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
  m.role AS role, m.content AS body, m.timestamp AS timestamp
  FROM sessions s JOIN messages m ON m.session_id=s.id`
 
-//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 const currentQueryFormat = `SELECT s.id AS session_id, s.title AS title, s.cwd AS cwd,
- s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated, CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
- m.role AS role, json_object('content',m.content,'tool_calls',m.tool_calls,'codex_message_items',m.codex_message_items,'project_root',s.git_repo_root%s) AS body,
+ s.started_at AS created, COALESCE(s.ended_at,s.started_at) AS updated,
+ CAST(m.id AS TEXT) AS message_id, CAST(m.id AS TEXT) AS message_order,
+ m.role AS role, json_object('content',m.content,'tool_calls',m.tool_calls,
+ 'codex_message_items',m.codex_message_items,'project_root',s.git_repo_root%s) AS body,
  m.timestamp AS timestamp FROM sessions s JOIN messages m ON m.session_id=s.id`
 
 func transcriptQuery(ctx context.Context, db *sql.DB) (string, transcript.RowReader, error) {
 	var current, branch, model bool
 
-	//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 	err := db.QueryRowContext(
 		ctx,
-		`SELECT EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='git_repo_root') AND EXISTS(SELECT 1 FROM pragma_table_info('messages') WHERE name='codex_message_items'),
+		`SELECT EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='git_repo_root')
+ AND EXISTS(SELECT 1 FROM pragma_table_info('messages') WHERE name='codex_message_items'),
  EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='git_branch'),
  EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='model')`,
 	).

@@ -58,60 +58,72 @@ func databasePath(t *testing.T, db *sql.DB) string {
 func TestNativeSQLiteReadersAndWAL(t *testing.T) {
 	t.Parallel()
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const gooseSQL = `CREATE TABLE sessions(id,name,working_dir,created_at,updated_at); CREATE TABLE messages(id,session_id,role,content_json,created_timestamp);
+	const gooseSQL = `CREATE TABLE sessions(id,name,working_dir,created_at,updated_at);
+ CREATE TABLE messages(id,session_id,role,content_json,created_timestamp);
 INSERT INTO sessions VALUES('native','title','/project','2026-09-01 00:00:00','2026-09-01 00:01:00');
 INSERT INTO messages VALUES(1,'native','user','[{"type":"text","text":"refresh token"}]',1);
-INSERT INTO messages VALUES(2,'native','assistant','[{"type":"toolResponse","toolResult":{"status":"success","value":{"content":[{"type":"text","text":"tool-only"}]}}}]',2);`
+INSERT INTO messages VALUES(2,'native','assistant',
+ '[{"type":"toolResponse","toolResult":{"status":"success","value":{"content":[{"type":"text","text":"tool-only"}]}}}]',
+ 2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const hermesSQL = `CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
-INSERT INTO sessions VALUES('native','title',1,2); INSERT INTO messages VALUES(1,'native','user','refresh token',1); INSERT INTO messages VALUES(2,'native','tool','tool-only',2);`
+	const hermesSQL = `CREATE TABLE sessions(id,title,started_at,ended_at);
+ CREATE TABLE messages(id,session_id,role,content,timestamp);
+INSERT INTO sessions VALUES('native','title',1,2); INSERT INTO messages VALUES(1,'native','user','refresh token',1);
+ INSERT INTO messages VALUES(2,'native','tool','tool-only',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const hermesCurrentSQL = `CREATE TABLE sessions(id,title,cwd,git_repo_root,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,tool_calls,codex_message_items,timestamp);
+	const hermesCurrentSQL = `CREATE TABLE sessions(id,title,cwd,git_repo_root,started_at,ended_at);
+ CREATE TABLE messages(id,session_id,role,content,tool_calls,codex_message_items,timestamp);
 INSERT INTO sessions VALUES('native','title','/project','/project',1,2);
-INSERT INTO messages VALUES(1,'native','assistant','','[{"function":{"name":"read","arguments":"tool-only"}}]','[{"type":"message","channel":"final","content":[{"type":"output_text","text":"refresh token"}]}]',1);`
+INSERT INTO messages VALUES(1,'native','assistant','','[{"function":{"name":"read","arguments":"tool-only"}}]',
+ '[{"type":"message","channel":"final","content":[{"type":"output_text","text":"refresh token"}]}]',1);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const grokSQL = `CREATE TABLE sessions(id,title,cwd_last,created_at,updated_at); CREATE TABLE messages(seq,session_id,role,message_json,created_at);
+	const grokSQL = `CREATE TABLE sessions(id,title,cwd_last,created_at,updated_at);
+ CREATE TABLE messages(seq,session_id,role,message_json,created_at);
 INSERT INTO sessions VALUES('native','title','/project',1,2);
 INSERT INTO messages VALUES(1,'native','user','{"role":"user","content":"refresh token"}',1);
-INSERT INTO messages VALUES(2,'native','tool','{"role":"tool","content":[{"type":"tool-result","output":{"type":"text","value":"tool-only"}}]}',2);`
+INSERT INTO messages VALUES(2,'native','tool',
+ '{"role":"tool","content":[{"type":"tool-result","output":{"type":"text","value":"tool-only"}}]}',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const opencodeV1SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE message(id,session_id,data); CREATE TABLE part(id,message_id,data,time_created);
-INSERT INTO session VALUES('native','title','/project',1,2); INSERT INTO message VALUES('m1','native','{"role":"assistant"}');
+	const opencodeV1SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated);
+ CREATE TABLE message(id,session_id,data); CREATE TABLE part(id,message_id,data,time_created);
+INSERT INTO session VALUES('native','title','/project',1,2);
+ INSERT INTO message VALUES('m1','native','{"role":"assistant"}');
 INSERT INTO part VALUES('p1','m1','{"type":"text","text":"refresh token"}',1);
 INSERT INTO part VALUES('p2','m1','{"type":"tool","tool":"read","state":{"output":"tool-only"}}',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const opencodeV2SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
+	const opencodeV2SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated);
+ CREATE TABLE session_message(id,session_id,type,data,time_created);
 INSERT INTO session VALUES('native','title','/project',1,2);
 INSERT INTO session_message VALUES('m1','native','user','{"text":"refresh token"}',1);
-INSERT INTO session_message VALUES('m2','native','assistant','{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`
+INSERT INTO session_message VALUES('m2','native','assistant',
+ '{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const kiloV2SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated); CREATE TABLE session_message(id,session_id,type,data,time_created);
+	const kiloV2SQL = `CREATE TABLE session(id,title,directory,time_created,time_updated);
+ CREATE TABLE session_message(id,session_id,type,data,time_created);
 INSERT INTO session VALUES('native','title','/project',1,2);
 INSERT INTO session_message VALUES('m1','native','user','{"text":"refresh token"}',1);
-INSERT INTO session_message VALUES('m2','native','assistant','{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`
+INSERT INTO session_message VALUES('m2','native','assistant',
+ '{"content":[{"type":"tool","name":"read","state":{"content":[{"type":"text","text":"tool-only"}]}}]}',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-	const openclawSQL = `CREATE TABLE session_windows(session_id,display_name,created_at,updated_at); CREATE TABLE transcript_events(session_id,seq,event_json,created_at);
+	const openclawSQL = `CREATE TABLE session_windows(session_id,display_name,created_at,updated_at);
+ CREATE TABLE transcript_events(session_id,seq,event_json,created_at);
 INSERT INTO session_windows VALUES('native','title',1,2);
 INSERT INTO transcript_events VALUES('native',1,'{"type":"session","id":"native","cwd":"/project"}',1);
-INSERT INTO transcript_events VALUES('native',2,'{"type":"message","message":{"role":"user","content":"refresh token"}}',1);
-INSERT INTO transcript_events VALUES('native',3,'{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only"}]}}',2);`
+INSERT INTO transcript_events VALUES('native',2,
+ '{"type":"message","message":{"role":"user","content":"refresh token"}}',1);
+INSERT INTO transcript_events VALUES('native',3,
+ '{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"tool-only"}]}}',2);`
 
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
 	const crushMessagesSQL = `
 INSERT INTO sessions VALUES('native',NULL,'title',1,2);
 INSERT INTO sessions VALUES('task-call',  'native','delegated task',1,2);
 INSERT INTO sessions VALUES('title-native','native','Generate a title',1,2);
 INSERT INTO messages VALUES('m1','native','user','[{"type":"text","data":{"text":"refresh token"}}]',NULL,1);
-INSERT INTO messages VALUES('m2','native','assistant','[{"type":"reasoning","data":{"thinking":"reasoning-only"}},{"type":"tool_call","data":{"id":"c1","name":"view","input":"{}"}}]','model-a',1);
-INSERT INTO messages VALUES('m3','native','tool','[{"type":"tool_result","data":{"tool_call_id":"c1","name":"view","content":"tool-only"}}]',NULL,2);
+INSERT INTO messages VALUES('m2','native','assistant',
+ '[{"type":"reasoning","data":{"thinking":"reasoning-only"}},{"type":"tool_call","data":{"id":"c1","name":"view",' ||
+ '"input":"{}"}}]','model-a',1);
+INSERT INTO messages VALUES('m3','native','tool',
+ '[{"type":"tool_result","data":{"tool_call_id":"c1","name":"view","content":"tool-only"}}]',NULL,2);
 INSERT INTO messages VALUES('m4','task-call','user','[{"type":"text","data":{"text":"refresh token"}}]',NULL,1);
 INSERT INTO messages VALUES('m5','title-native','user','[{"type":"text","data":{"text":"refresh token"}}]',NULL,1);`
 
@@ -182,8 +194,8 @@ INSERT INTO messages VALUES('m5','title-native','user','[{"type":"text","data":{
 	}
 }
 
-//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
-const crushDDL = `CREATE TABLE sessions(id TEXT PRIMARY KEY,parent_session_id TEXT,title TEXT,created_at INTEGER,updated_at INTEGER);
+const crushDDL = `CREATE TABLE sessions(id TEXT PRIMARY KEY,parent_session_id TEXT,title TEXT,created_at INTEGER,
+ updated_at INTEGER);
 CREATE TABLE messages(id TEXT PRIMARY KEY,session_id TEXT,role TEXT,parts TEXT,model TEXT,created_at INTEGER);`
 
 func TestCrushHistoryFindsRegisteredProjects(t *testing.T) {
@@ -192,11 +204,11 @@ func TestCrushHistoryFindsRegisteredProjects(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("CRUSH_GLOBAL_DATA", "")
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
 	writeCrushProject(t, home, project, crushDDL+`
 INSERT INTO sessions VALUES('native',NULL,'Token work',1,2);
 INSERT INTO messages VALUES('m1','native','user','[{"type":"text","data":{"text":"refresh token"}}]',NULL,1);
-INSERT INTO messages VALUES('m2','native','user','[{"type":"text","data":{"text":"hidden continuation","hidden":true}}]',NULL,2);`)
+INSERT INTO messages VALUES('m2','native','user',
+ '[{"type":"text","data":{"text":"hidden continuation","hidden":true}}]',NULL,2);`)
 
 	c := history.Catalog{
 		IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
@@ -235,13 +247,14 @@ INSERT INTO messages VALUES('m2','native','user','[{"type":"text","data":{"text"
 
 func TestCrushHistoryPreservesMessageIdentityAndOrder(t *testing.T) {
 	t.Parallel()
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
 	db := databaseFixture(t, "crush.db", crushDDL+`
 INSERT INTO sessions VALUES('native',NULL,'Session title',1,3);
 INSERT INTO messages VALUES('z-first','native','user','[{"type":"text","data":{"text":"first token prompt"}}]',NULL,2);
 INSERT INTO messages VALUES('a-next','native','user','[{"type":"text","data":{"text":"next token prompt"}}]',NULL,2);
-INSERT INTO messages VALUES('earlier','native','assistant','[{"type":"text","data":{"text":"earlier token response"}}]','old-model',1);
-INSERT INTO messages VALUES('latest','native','assistant','[{"type":"text","data":{"text":"latest token response"}}]','new-model',3);`)
+INSERT INTO messages VALUES('earlier','native','assistant','[{"type":"text","data":{"text":"earlier token response"}}]',
+ 'old-model',1);
+INSERT INTO messages VALUES('latest','native','assistant','[{"type":"text","data":{"text":"latest token response"}}]',
+ 'new-model',3);`)
 
 	sources := []history.Source{{Harness: registry.Harness("crush"), Path: databasePath(t, db)}}
 	for _, mode := range searchModes(t, sources) {

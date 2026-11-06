@@ -8,9 +8,9 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
-//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
 const nativeQuery = `SELECT s.session_id AS session_id, s.display_name AS title, '' AS cwd,
- s.created_at AS created, s.updated_at AS updated, CAST(m.seq AS TEXT) AS message_id, CAST(m.seq AS TEXT) AS message_order,
+ s.created_at AS created, s.updated_at AS updated,
+ CAST(m.seq AS TEXT) AS message_id, CAST(m.seq AS TEXT) AS message_order,
  '' AS role, m.event_json AS body, m.created_at AS timestamp
  FROM session_windows s JOIN transcript_events m ON m.session_id=s.session_id`
 

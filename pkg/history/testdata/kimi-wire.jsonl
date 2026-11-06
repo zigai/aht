@@ -1,0 +1,6 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1788220800000}
+{"type":"context.append_message","agentId":"main","time":1788220801000,"message":{"role":"user","content":[{"type":"text","text":"Refresh Token"}],"toolCalls":[]}}
+{"type":"context.append_loop_event","agentId":"main","time":1788220802000,"event":{"type":"content.part","stepUuid":"step-one","part":{"type":"text","text":"The refresh token handler is ready"}}}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"content.part","part":{"type":"think","think":"reasoning-only"}}}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","toolCallId":"call-one","result":{"output":"tool-only"}}}
+{"type":"context.append_message","agentId":"main","message":{"role":"system","content":[{"type":"text","text":"system-only"}]}}

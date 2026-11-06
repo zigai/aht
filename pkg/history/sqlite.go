@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	//nolint:lll // multi-line SQL query has exact bytes; no SQL fixture loader.
-	boundedSQLPrefix = `SELECT session_id, COALESCE(title,''), COALESCE(cwd,''), CAST(created AS TEXT), CAST(updated AS TEXT),
- message_id, COALESCE(role,''), CASE WHEN length(CAST(COALESCE(body,'') AS BLOB))<=? THEN COALESCE(body,'') END, CAST(timestamp AS TEXT)
+	boundedSQLPrefix = `SELECT session_id, COALESCE(title,''), COALESCE(cwd,''),
+ CAST(created AS TEXT), CAST(updated AS TEXT), message_id, COALESCE(role,''),
+ CASE WHEN length(CAST(COALESCE(body,'') AS BLOB))<=? THEN COALESCE(body,'') END, CAST(timestamp AS TEXT)
  FROM (`
 	boundedSQLSuffix = `) ORDER BY session_id, timestamp, message_order`
 )

@@ -1420,11 +1420,11 @@ func TestIndexRefreshesSidecarMetadata(t *testing.T) {
 
 func TestIndexRefreshesSQLiteWALUpdatesAndDeletes(t *testing.T) {
 	t.Parallel()
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
 	db := databaseFixture(
 		t,
 		"state.db",
-		`CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
+		`CREATE TABLE sessions(id,title,started_at,ended_at);
+ CREATE TABLE messages(id,session_id,role,content,timestamp);
 INSERT INTO sessions VALUES('s','title',1,2); INSERT INTO messages VALUES(1,'s','user','before',1);`,
 	)
 	c := history.Catalog{
@@ -1896,25 +1896,17 @@ func TestLimitedIndexMatchesSymlinkedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
 	created := writeHistory(
 		t,
 		symlinkRoot,
 		"a-recently-created.jsonl",
-		`{"type":"session","id":"recently-created","cwd":"/work/project","timestamp":"2026-09-20T08:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-20T08:00:01Z","message":{"role":"user","content":"refresh token"}}
-{"type":"message","id":"a1","timestamp":"2026-09-20T08:30:00Z","message":{"role":"assistant","content":"refresh token again"}}
-`,
+		recentlyCreatedHistory,
 	)
-	//nolint:lll // multi-line transcript has exact bytes; no fixture loader.
 	updated := writeHistory(
 		t,
 		symlinkRoot,
 		"b-recently-updated.jsonl",
-		`{"type":"session","id":"recently-updated","cwd":"/work/project","timestamp":"2026-09-19T00:00:00Z"}
-{"type":"message","id":"u1","timestamp":"2026-09-19T00:00:01Z","message":{"role":"user","content":"refresh token"}}
-{"type":"message","id":"a1","timestamp":"2026-09-20T09:00:00Z","message":{"role":"assistant","content":"refresh token again"}}
-`,
+		recentlyUpdatedHistory,
 	)
 	sources := []history.Source{
 		{Harness: registry.Harness("pi"), Path: created},
@@ -2197,11 +2189,11 @@ func TestTranscriptActivityFallbackForDocuments(t *testing.T) {
 
 func TestTranscriptActivityFallbackLeavesDatabaseTimesUnchanged(t *testing.T) {
 	t.Parallel()
-	//nolint:lll // multi-line SQL fixture has exact bytes; no fixture loader.
 	db := databaseFixture(
 		t,
 		"state.db",
-		`CREATE TABLE sessions(id,title,started_at,ended_at); CREATE TABLE messages(id,session_id,role,content,timestamp);
+		`CREATE TABLE sessions(id,title,started_at,ended_at);
+ CREATE TABLE messages(id,session_id,role,content,timestamp);
 INSERT INTO sessions VALUES('unknown','unknown','',''),('native','native',1,2);
 INSERT INTO messages VALUES(1,'unknown','user','needle',''),(2,'native','user','needle',1);`,
 	)
