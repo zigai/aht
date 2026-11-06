@@ -93,6 +93,7 @@ var hostContracts = []hostContract{
 			"https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference",
 			"https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions",
 			"https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills",
+			"https://github.com/github/copilot-sdk/blob/main/docs/features/hooks.md",
 		},
 	},
 	{

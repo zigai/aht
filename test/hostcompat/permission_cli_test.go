@@ -551,9 +551,10 @@ func runCopilotPermission(t *testing.T, host *isolatedHost, env []string, allow 
 		2,
 		"session.create",
 		map[string]any{
-			"model":             fakeModel,
-			"workingDirectory":  host.launched.Work,
-			"requestPermission": true,
+			"model":                 fakeModel,
+			"workingDirectory":      host.launched.Work,
+			"requestPermission":     true,
+			"enableConfigDiscovery": true,
 			"provider": map[string]any{
 				"type":    "openai",
 				"baseUrl": host.provider.URL() + "/v1",
