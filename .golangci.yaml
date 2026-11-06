@@ -21,6 +21,8 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/zigai/aht/v2
+  exclusions:
+    paths:
 
 linters:
   enable:
@@ -330,6 +332,10 @@ linters:
 
       - path: ".*_test\\.go"
         linters: [decorder, funcorder, dupl, maintidx]
+      - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.gameops|\\.stryker-tmp|\\.cache)(/|$))"
+        linters: [whitespace]
+
+
 
 issues:
   max-issues-per-linter: 0
