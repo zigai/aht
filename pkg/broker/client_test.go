@@ -14,6 +14,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -326,22 +327,8 @@ func startBrokerServer(t *testing.T) (*registry.MemoryStore, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Keep the socket below Darwin's path limit, independently of TMPDIR and the test name.
-	// Go 1.27.1's t.TempDir paths can exceed Unix socket limits; MkdirTemp isolates this protocol
-	// fixture and t.Cleanup removes it.
-	socketDir, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-broker-",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	t.Cleanup(func() {
-		if err := os.RemoveAll(socketDir); err != nil {
-			t.Error(err)
-		}
-	})
+	socketDir := testdir.Short(t, "aht-broker-")
 
 	socketPath := filepath.Join(socketDir, "broker.sock")
 	ready := make(chan struct{})

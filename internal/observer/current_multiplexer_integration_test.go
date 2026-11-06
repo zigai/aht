@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/herdr"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -30,17 +31,8 @@ func TestCurrentZellijDiscoveryAndCapture(t *testing.T) {
 	session := fmt.Sprintf("aht-zellij-%d", time.Now().UnixNano())
 	configDir := t.TempDir()
 
-	// reason: Zellij socket paths under t.TempDir can exceed the Unix socket path limit; cleanup is
-	// registered below.
-	socketDir, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-zellij-sock-",
-	)
-	if err != nil {
-		t.Fatalf("create short Zellij socket dir: %v", err)
-	}
+	socketDir := testdir.Short(t, "aht-zellij-sock-")
 
-	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 	t.Setenv("ZELLIJ_SOCKET_DIR", socketDir)
 	t.Setenv("ZELLIJ_CONFIG_DIR", configDir)
 
@@ -155,17 +147,8 @@ func TestCurrentHerdrDiscoveryAndCapture(t *testing.T) {
 
 	session := fmt.Sprintf("aht-herdr-%d", time.Now().UnixNano())
 
-	// reason: Herdr socket paths under t.TempDir exceed the Unix socket path limit; cleanup is
-	// registered below.
-	home, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-herdr-home-",
-	)
-	if err != nil {
-		t.Fatalf("create short Herdr home: %v", err)
-	}
+	home := testdir.Short(t, "aht-herdr-home-")
 
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 	t.Setenv("HERDR_SESSION", session)
 	logPath := filepath.Join(t.TempDir(), "herdr.log")

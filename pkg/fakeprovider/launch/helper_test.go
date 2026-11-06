@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -278,19 +279,7 @@ func shellQuote(value string) string {
 func shortRoot(t *testing.T) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp( //nolint:usetesting // reason: Unix socket paths in /tmp must stay short.
-		"/tmp",
-		"aht-launch-test-",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Error(err)
-		}
-	})
+	dir := testdir.Short(t, "aht-launch-test-")
 
 	return filepath.Join(dir, "root")
 }

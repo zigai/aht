@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 	"github.com/zigai/aht/v2/pkg/zellij"
@@ -26,9 +27,9 @@ var (
 )
 
 const (
-	contractDir = "contract_version_1"
-	//nolint:lll // multi-line JSON fixture has exact bytes; no fixture loader.
-	paneListJSON = `[{"id":7,"is_plugin":false,"title":"Codex","exited":false,"tab_id":3,"tab_position":1,"tab_name":"agents","pane_command":"codex","pane_cwd":"/repo"},
+	contractDir  = "contract_version_1"
+	paneListJSON = `[{"id":7,"is_plugin":false,"title":"Codex","exited":false,"tab_id":3,"tab_position":1,
+		"tab_name":"agents","pane_command":"codex","pane_cwd":"/repo"},
 		{"id":8,"is_plugin":true,"title":"status","exited":false},
 		{"id":9,"is_plugin":false,"title":"old","exited":true}]`
 )
@@ -46,20 +47,7 @@ type sessionServer struct {
 func shortSocketDir(t *testing.T) string {
 	t.Helper()
 
-	// reason: t.TempDir paths can exceed the Unix socket path limit; cleanup is registered below.
-	dir, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-zellij-",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("remove test socket directory: %v", err)
-		}
-	})
+	dir := testdir.Short(t, "aht-zellij-")
 
 	return dir
 }

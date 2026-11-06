@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -250,21 +251,7 @@ func startSystemTestAgent(
 func shortSystemTestRoot(t *testing.T, directories ...string) string {
 	t.Helper()
 
-	// reason: broker socket paths under t.TempDir and macOS TMPDIR exceed the Unix socket path limit;
-	// cleanup is registered below.
-	root, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-systest-",
-	)
-	if err != nil {
-		t.Fatalf("create system test root: %v", err)
-	}
-
-	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
-			t.Errorf("remove system test root: %v", err)
-		}
-	})
+	root := testdir.Short(t, "aht-systest-")
 
 	for _, directory := range directories {
 		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {

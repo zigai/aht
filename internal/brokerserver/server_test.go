@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -215,15 +216,7 @@ func receiveSnapshot(
 func shortStatePath(t *testing.T) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp( //nolint:usetesting // reason: t.TempDir paths are too long for a Unix socket on Darwin.
-		"",
-		"aht-broker-",
-	)
-	if err != nil {
-		t.Fatalf("creating temporary state directory: %v", err)
-	}
-
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := testdir.Short(t, "aht-broker-")
 
 	return filepath.Join(dir, "state")
 }
@@ -867,17 +860,7 @@ func assertBrokerParity(
 }
 
 func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
-	// reason: Unix domain socket paths in /tmp must stay short to prevent sockaddr_un overflow on
-	// macOS
-	tempDir, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"aht-busy-",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
+	tempDir := testdir.Short(t, "aht-busy-")
 
 	path := filepath.Join(tempDir, "busy.sock")
 

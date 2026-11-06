@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
@@ -180,15 +181,7 @@ func waitDiscovered(t *testing.T, found *discoveredSessions, session string) boo
 func isolateZellij(t *testing.T) string {
 	t.Helper()
 
-	// reason: Unix socket paths under t.TempDir exceed the 108 byte limit; cleanup is registered
-	// below.
-	root, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
-		"/tmp",
-		"azs-",
-	)
-	if err != nil {
-		t.Fatalf("create isolated Zellij root: %v", err)
-	}
+	root := testdir.Short(t, "azs-")
 
 	t.Cleanup(func() {
 		for range 100 {
