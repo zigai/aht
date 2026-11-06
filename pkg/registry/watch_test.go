@@ -165,6 +165,7 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 	defer cancel()
 
 	initial := make(chan struct{})
+	recreated := make(chan struct{})
 	results := make(chan registry.WatchResult, 8)
 
 	done := make(chan error, 1)
@@ -179,6 +180,12 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 
 			if result.Initial {
 				close(initial)
+				// Snapshot reads must not recreate the lock during directory removal.
+				select {
+				case <-recreated:
+				case <-ctx.Done():
+				}
+
 				return nil
 			}
 
@@ -199,6 +206,7 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 	}
 
 	replaceWatchTestFile(t, targetPath, replacementData)
+	close(recreated)
 	awaitWatchSessionID(t, results, replacement.ID)
 
 	added := observeWatchSession(t, target, "after-recreation")
