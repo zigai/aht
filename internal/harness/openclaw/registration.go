@@ -72,7 +72,6 @@ func (registration registration) Label() string {
 	return "OpenClaw plugin " + registration.pluginID
 }
 
-//nolint:cyclop // Classification checks independent native registration dimensions.
 func (registration registration) Inspect(
 	ctx context.Context,
 	pluginDir string,
@@ -113,22 +112,7 @@ func (registration registration) Inspect(
 			continue
 		}
 
-		if !sameCleanPath(report.Install.SourcePath, pluginDir) {
-			return harness.PluginRegistrationForeign, nil
-		}
-
-		version := report.Plugin.Version
-		if version == "" {
-			version = report.Install.Version
-		}
-
-		if report.Plugin.Status != "loaded" || report.Install.Source != "path" ||
-			version != registration.version ||
-			(registration.allowConversationAccess && !report.Policy.AllowConversationAccess) {
-			return harness.PluginRegistrationStale, nil
-		}
-
-		return harness.PluginRegistrationCurrent, nil
+		return registration.classifyReport(report, pluginDir), nil
 	}
 
 	return harness.PluginRegistrationMissing, nil
@@ -211,6 +195,28 @@ func (registration registration) Remove(ctx context.Context, pluginDir string) e
 	}
 
 	return nil
+}
+
+func (registration registration) classifyReport(
+	report inspectReport,
+	pluginDir string,
+) harness.PluginRegistrationState {
+	if !sameCleanPath(report.Install.SourcePath, pluginDir) {
+		return harness.PluginRegistrationForeign
+	}
+
+	version := report.Plugin.Version
+	if version == "" {
+		version = report.Install.Version
+	}
+
+	if report.Plugin.Status != "loaded" || report.Install.Source != "path" ||
+		version != registration.version ||
+		(registration.allowConversationAccess && !report.Policy.AllowConversationAccess) {
+		return harness.PluginRegistrationStale
+	}
+
+	return harness.PluginRegistrationCurrent
 }
 
 func decodeInspectReports(data []byte) ([]inspectReport, error) {

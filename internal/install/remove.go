@@ -388,7 +388,6 @@ func removeRetiredPlugins(
 	return changed, nil
 }
 
-//nolint:cyclop // removal handles both native registrations and import manifests
 func removePluginDirectory(
 	ctx context.Context,
 	opts Options,
@@ -417,16 +416,9 @@ func removePluginDirectory(
 		return removeRegisteredPlugin(ctx, opts, harnessID, plan, exists)
 	}
 
-	manifestChanged := false
-
-	var manifest importManifest
-	if plan.ImportManifest != nil {
-		manifest, err = readImportManifest(plan.ImportManifest.Path)
-		if err != nil {
-			return Result{}, err
-		}
-
-		manifest, manifestChanged = removeImport(manifest, plan.ImportManifest.Name)
+	manifest, manifestChanged, err := pluginRemovalManifest(plan)
+	if err != nil {
+		return Result{}, err
 	}
 
 	changed := exists || manifestChanged
@@ -437,6 +429,23 @@ func removePluginDirectory(
 	}
 
 	return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
+}
+
+func pluginRemovalManifest(
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (importManifest, bool, error) {
+	if plan.ImportManifest == nil {
+		return importManifest{}, false, nil
+	}
+
+	manifest, err := readImportManifest(plan.ImportManifest.Path)
+	if err != nil {
+		return importManifest{}, false, err
+	}
+
+	manifest, changed := removeImport(manifest, plan.ImportManifest.Name)
+
+	return manifest, changed, nil
 }
 
 func applyPluginRemoval(
