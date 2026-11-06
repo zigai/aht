@@ -61,7 +61,6 @@ func TestDroidRepairsWrappedHooksAndPreservesUserCommands(t *testing.T) {
 	}
 }
 
-//nolint:errcheck,forcetypeassert // test validates notification group map structure
 func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -79,8 +78,17 @@ func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 		t.Fatal("missing Notification hooks")
 	}
 
-	group := groups[0].(map[string]any)
-	ownedHook := group["hooks"].([]any)[0]
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Notification group = %#v, want object", groups[0])
+	}
+
+	ownedHooks, ok := group["hooks"].([]any)
+	if !ok || len(ownedHooks) == 0 {
+		t.Fatalf("Notification group hooks = %#v, want non-empty list", group["hooks"])
+	}
+
+	ownedHook := ownedHooks[0]
 	userHook := map[string]any{
 		"type":    "command",
 		"command": droidUserCommand,
@@ -147,14 +155,16 @@ func TestDroidNotificationMatchersUpgradeTogether(t *testing.T) {
 		{matcher: "permission_prompt", activity: "waiting"},
 		{matcher: "idle_prompt", activity: "idle"},
 	} {
-		group := groups[len(foreignGroups)+index].(map[string]any)
+		group, groupOK := groups[len(foreignGroups)+index].(map[string]any)
+		hooks, hooksOK := group["hooks"].([]any)
 
-		hooks, ok := group["hooks"].([]any)
-		if group["matcher"] != want.matcher || !ok || len(hooks) != 1 {
+		if !groupOK || group["matcher"] != want.matcher || !hooksOK || len(hooks) != 1 {
 			t.Fatalf("managed Notification group = %#v, want matcher %q", group, want.matcher)
 		}
 
-		command, _ := hooks[0].(map[string]any)["command"].(string)
+		hook, _ := hooks[0].(map[string]any)
+		command, _ := hook["command"].(string)
+
 		if !strings.Contains(command, "--activity "+want.activity) ||
 			!strings.Contains(command, "--reporter droid-hook") {
 			t.Fatalf("matcher %q command = %q", want.matcher, command)

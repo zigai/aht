@@ -99,9 +99,7 @@ func Start(options Options) (*Server, error) {
 		session:     newSession(script),
 		changed:     make(chan struct{}),
 	}
-	// Loopback test provider without timeouts: the test decides how long held requests and streams
-	// stay open.
-	//nolint:gosec // Intentional local test-provider lifecycle; see above.
+	//nolint:gosec // No timeouts: the test decides how long held requests and streams stay open.
 	server.httpServer = &http.Server{Handler: server}
 	go func() {
 		err := server.httpServer.Serve(listener)

@@ -602,7 +602,7 @@ func describeConfigError(check *DoctorCheck, explicit string, resolved string, e
 
 func configErrors(err error) []*strata.ConfigError {
 	// Walks the tree itself so joined errors yield every problem.
-	if problem, ok := err.(*strata.ConfigError); ok { //nolint:errorlint // Walk joined errors independently; see above.
+	if problem, ok := err.(*strata.ConfigError); ok { //nolint:errorlint // Matches only this tree node.
 		return []*strata.ConfigError{problem}
 	}
 

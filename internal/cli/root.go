@@ -1348,17 +1348,10 @@ func (app *application) renderSummaryColumnsAndRows(
 	return app.writeHumanTable(columns, rows)
 }
 
-//nolint:gocritic // label precedence is intentionally explicit for stable output
 func summaryTableLabels(ss []registry.Summary) []string {
 	out := make([]string, 0, len(ss))
 	for _, s := range ss {
-		if s.MultiplexerSessionName != "" {
-			out = append(out, s.MultiplexerSessionName)
-		} else if s.MultiplexerSessionID != "" {
-			out = append(out, s.MultiplexerSessionID)
-		} else {
-			out = append(out, "unknown")
-		}
+		out = append(out, cmp.Or(s.MultiplexerSessionName, s.MultiplexerSessionID, "unknown"))
 	}
 
 	return out

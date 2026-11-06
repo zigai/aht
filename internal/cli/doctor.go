@@ -365,10 +365,8 @@ func (app *application) doctorConfigStatus(path string, active []string, loadErr
 		return doctorConfigNotFound
 	}
 	// After a failed load, only the filesystem can tell an absent candidate from
-	// one that exists but was not loaded. The path is the user's own config
-	// location from flags or environment, stat'ed with that user's privileges,
-	// so no trusted root exists to confine it to and no privilege boundary is crossed.
-	if _, err := os.Stat( //nolint:gosec // G703: see comment above.
+	// one that exists but was not loaded.
+	if _, err := os.Stat( //nolint:gosec // G703: the user's own config path, read with their privileges.
 		path,
 	); errors.Is(
 		err,

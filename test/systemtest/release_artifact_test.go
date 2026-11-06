@@ -30,8 +30,7 @@ const (
 )
 
 type releaseArtifactExtra struct {
-	// GoReleaser writes artifacts.json extra fields with Go field names.
-	//nolint:tagliatelle // Preserve the external contract; see above.
+	//nolint:tagliatelle // GoReleaser writes artifacts.json extra fields with Go field names.
 	Format string `json:"Format"`
 }
 
