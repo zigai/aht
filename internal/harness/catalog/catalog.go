@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -171,7 +172,12 @@ func SupportedNames() []string {
 func EnvNames(harnessID registry.Harness, field harness.EnvField) []string {
 	names := genericEnvNames(field)
 	if adapter, ok := Find(harnessID); ok {
-		names = appendUnique(names, envNamesForField(adapter.Definition().Env, field)...)
+		native := envNamesForField(adapter.Definition().Env, field)
+		if field == harness.EnvProjectRoot {
+			return appendUnique(slices.Clone(native), names...)
+		}
+
+		names = appendUnique(names, native...)
 	}
 
 	return names

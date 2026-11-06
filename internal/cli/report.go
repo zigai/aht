@@ -44,7 +44,6 @@ type reportOptions struct {
 	cwd              string
 	cwdAuto          bool
 	projectRoot      string
-	projectRootAuto  bool
 	pid              int
 	ppid             int
 	processGroupID   int
@@ -110,10 +109,6 @@ func (app *application) newReportCommand() *cobra.Command {
 
 			if cmd.Flags().Changed("cwd") {
 				options.cwdAuto = false
-			}
-
-			if cmd.Flags().Changed("project-root") {
-				options.projectRootAuto = false
 			}
 
 			applyReportHarnessEnv(&options)
@@ -265,10 +260,6 @@ func applyReportHarnessEnv(opts *reportOptions) {
 		opts.sessionPath = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionPath)...)
 	}
 
-	if opts.projectRoot == "" {
-		opts.projectRoot = firstEnv(catalog.EnvNames(harnessID, harness.EnvProjectRoot)...)
-	}
-
 	if opts.pid <= 0 {
 		opts.pid = firstEnvInt(catalog.EnvNames(harnessID, harness.EnvPID)...)
 	}
@@ -379,6 +370,7 @@ func prepareReport(
 		return preparedReport{}, fmt.Errorf("derive payload defaults: %w", err)
 	}
 
+	opts.projectRoot = resolveReportProjectRoot(harnessID, opts.projectRoot, defaults, opts.cwd)
 	applyPayloadDefaults(&opts, attrs, defaults)
 	applyReportRuntimeDefaults(&opts)
 	translateReportLifecycle(&opts, harnessID, attrs)
@@ -1037,7 +1029,6 @@ func applyPayloadDefaults(opts *reportOptions, a map[string]string, d harness.Pa
 	}
 
 	applyCWDDefault(opts, d.CWD)
-	applyProjectRootDefault(opts, d.ProjectRoot)
 	maps.Copy(a, d.Attributes)
 }
 
@@ -1047,21 +1038,39 @@ func applyReportRuntimeDefaults(opts *reportOptions) {
 			opts.cwd = wd
 		}
 	}
-
-	if opts.projectRoot == "" && opts.projectRootAuto {
-		opts.projectRoot = findProjectRoot(opts.cwd)
-	}
 }
 
 func applyCWDDefault(opts *reportOptions, v string) {
 	if v != "" && opts.cwdAuto && opts.cwd == "" {
 		opts.cwd = v
-		opts.projectRoot = findProjectRoot(v)
 	}
 }
 
-func applyProjectRootDefault(opts *reportOptions, v string) {
-	if v != "" && opts.projectRootAuto && opts.projectRoot == "" {
-		opts.projectRoot = v
+func resolveReportProjectRoot(
+	harnessID registry.Harness,
+	projectRoot string,
+	payload harness.PayloadDefaults,
+	cwd string,
+) string {
+	if projectRoot != "" {
+		return projectRoot
 	}
+
+	if root := firstEnv(catalog.EnvNames(harnessID, harness.EnvProjectRoot)...); root != "" {
+		return root
+	}
+
+	if payload.ProjectRoot != "" {
+		return payload.ProjectRoot
+	}
+
+	if root := findProjectRoot(payload.CWD); root != "" {
+		return root
+	}
+
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+
+	return findProjectRoot(cwd)
 }

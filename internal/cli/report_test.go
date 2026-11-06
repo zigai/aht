@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -581,4 +583,101 @@ func startNamedProcess(t *testing.T, name string) int {
 	})
 
 	return cmd.Process.Pid
+}
+
+func TestReportKeepsExplicitProjectRootWhenPayloadCarriesCWD(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{name: "droid environment", env: map[string]string{"FACTORY_PROJECT_DIR": "/srv/project"}},
+		{name: "generic environment", env: map[string]string{"AHT_PROJECT_ROOT": "/srv/project"}},
+		{name: "flag", args: []string{"--project-root", "/srv/project"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+
+			payload, err := json.Marshal(map[string]string{
+				"session_id":      "droid-1",
+				"cwd":             t.TempDir(),
+				"hook_event_name": "SessionStart",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			args := append([]string{"--raw-stdin-defaults-only"}, tt.args...)
+
+			session := reportWithStdin(t, "droid", bytes.NewReader(payload), args...)
+			if session.ProjectRoot != "/srv/project" {
+				t.Fatalf("project root = %q, want /srv/project", session.ProjectRoot)
+			}
+		})
+	}
+}
+
+func TestReportDerivesProjectRootFromCWDWhenNoneIsGiven(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	work := filepath.Join(repo, "pkg", "sub")
+	if err := os.MkdirAll(work, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("cwd flag", func(t *testing.T) {
+		session := reportWithStdin(t, "codex", nil, "--session-id", "cwd-flag", "--cwd", work)
+		if session.ProjectRoot != repo {
+			t.Fatalf("project root = %q, want %q", session.ProjectRoot, repo)
+		}
+	})
+
+	t.Run("working directory", func(t *testing.T) {
+		t.Chdir(work)
+
+		session := reportWithStdin(t, "codex", nil, "--session-id", "working-directory")
+		if session.ProjectRoot != repo {
+			t.Fatalf("project root = %q, want %q", session.ProjectRoot, repo)
+		}
+	})
+}
+
+func reportWithStdin(
+	t *testing.T,
+	harnessID string,
+	stdin io.Reader,
+	extra ...string,
+) registry.Session {
+	t.Helper()
+
+	args := make([]string, 0, 8+len(extra))
+	args = append(
+		args,
+		"--store",
+		filepath.Join(t.TempDir(), "sessions.json"),
+		"--json",
+		"report",
+		harnessID,
+	)
+	args = append(args, "--event", "session_start", "--no-tmux")
+	args = append(args, extra...)
+
+	var stdout, stderr bytes.Buffer
+	if err := runTestCLIWithStdin(t.Context(), args, stdin, &stdout, &stderr); err != nil {
+		t.Fatalf("report: %v: %s", err, stderr.String())
+	}
+
+	var session registry.Session
+	if err := json.Unmarshal(stdout.Bytes(), &session); err != nil {
+		t.Fatalf("report output %q: %v", stdout.String(), err)
+	}
+
+	return session
 }
