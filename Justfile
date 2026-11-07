@@ -114,18 +114,23 @@ source-checks: (run-checks "formatcheck" "lockcheck" "workflow-check" "justfile-
 
 # Build the project with version info
 build:
-    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=dev -X github.com/zigai/aht/v2/internal/cli.commit=$(git rev-parse --short HEAD) -X github.com/zigai/aht/v2/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o bin/aht .
+    #!/usr/bin/env sh
+    set -e
+    version=$(git describe --tags --dirty)
+    commit=$(git rev-parse --short HEAD)
+    build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=${version} -X github.com/zigai/aht/v2/internal/cli.commit=${commit} -X github.com/zigai/aht/v2/internal/cli.date=${build_date}" -o bin/aht .
 
 # Install the binary and refresh existing integrations and background tracking
-install: && (report-install home_directory() / ".local/bin/aht")
+install: build && (report-install home_directory() / ".local/bin/aht")
     #!/usr/bin/env sh
     set -eu
-    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags='-s -w' .
+    install -Dm755 bin/aht "$HOME/.local/bin/aht"
     "$HOME/.local/bin/aht" manage upgrade
 
 # Install only the executable
-install-binary: && (report-install home_directory() / ".local/bin/aht")
-    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags='-s -w' .
+install-binary: build && (report-install home_directory() / ".local/bin/aht")
+    install -Dm755 bin/aht "$HOME/.local/bin/aht"
 
 # Install the fake model provider command
 install-fakeprovider: && (report-install home_directory() / ".local/bin/fakeprovider")

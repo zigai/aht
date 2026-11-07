@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -137,8 +138,7 @@ func TestVersionDefaultsToHumanOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if strings.TrimSpace(stdout.String()) == "" ||
-		strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
+	if !regexp.MustCompile(`^aht \S+ \([^(),\s]+(?:, dirty)?\)\n$`).MatchString(stdout.String()) {
 		t.Fatalf("version default output = %q", stdout.String())
 	}
 }

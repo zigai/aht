@@ -22,6 +22,7 @@ builds:
       - -X github.com/zigai/aht/v2/internal/cli.version={{.Version}}
       - -X github.com/zigai/aht/v2/internal/cli.commit={{.ShortCommit}}
       - -X github.com/zigai/aht/v2/internal/cli.date={{.Date}}
+      - -X github.com/zigai/aht/v2/internal/cli.dirty=false
   - id: fakeprovider
     main: ./cmd/fakeprovider
     binary: fakeprovider

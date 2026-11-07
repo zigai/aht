@@ -59,6 +59,7 @@ var (
 	version                   = "dev"
 	commit                    = "none"
 	date                      = "unknown"
+	dirty                     = ""
 	errInvalidAttribute       = errors.New("invalid attribute")
 	errInvalidListSort        = errors.New("invalid list sort")
 	errUnexpectedReportArg    = errors.New("unexpected report argument")
@@ -240,7 +241,7 @@ func (app *application) newRootCommand() *cobra.Command {
 					})
 				}
 
-				return app.writef("aht %s (commit: %s, built: %s)\n", version, commit, date)
+				return app.writef("%s\n", versionText())
 			}
 
 			if len(args) > 0 {
