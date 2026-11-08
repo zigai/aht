@@ -89,7 +89,7 @@ func TestNewRejectsMalformedServiceAddress(t *testing.T) {
 
 func TestStartTrackerWaitsForBrokerSocketUntilClose(t *testing.T) {
 	t.Parallel()
-	options := Options{Root: shortRoot(t), AHT: fakeAHT(t)}
+	options := Options{Root: shortRoot(t), AHT: testExecutable(t)}
 
 	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestStartTrackerReportsTrackerThatExits(t *testing.T) {
 	t.Parallel()
 	options := Options{
 		Root: shortRoot(t),
-		AHT:  fakeAHT(t),
+		AHT:  testExecutable(t),
 		Env:  []string{trackerModeEnv + "=exit"},
 	}
 

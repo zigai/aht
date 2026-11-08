@@ -350,7 +350,11 @@ func TestNewInstallsIntegrationBeforePlanFiles(t *testing.T) {
 		}},
 		Setup: [][]string{{helperArgument, "record", recordPath}},
 	}
-	options := Options{Root: root, AHT: fakeAHT(t), Env: []string{installLogEnv + "=" + installLog}}
+	options := Options{
+		Root: root,
+		AHT:  testExecutable(t),
+		Env:  []string{installLogEnv + "=" + installLog},
+	}
 
 	s, _, err := newFixtureHarness(t.Context(), t, plan, options)
 	if err != nil {

@@ -34,6 +34,10 @@ func TestMain(m *testing.M) {
 		os.Exit(runHelper(os.Args[2:]))
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "--store" {
+		os.Exit(runFakeAHT(os.Args[1:]))
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -96,8 +100,6 @@ func runHelper(args []string) int {
 		}
 
 		return recordHelper(args[1])
-	case "aht":
-		return runFakeAHT(args[1:])
 	}
 
 	return 2
@@ -294,24 +296,6 @@ func testExecutable(t *testing.T) string {
 
 	path, err := os.Executable()
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	return path
-}
-
-func fakeAHT(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "aht")
-
-	script := "#!/bin/sh\nexec " + shellQuote(
-		testExecutable(t),
-	) + " " + helperArgument + " aht \"$@\"\n"
-	if err := os.WriteFile(
-		path,
-		[]byte(script),
-		0o700,
-	); err != nil {
 		t.Fatal(err)
 	}
 

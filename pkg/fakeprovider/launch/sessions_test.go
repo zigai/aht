@@ -16,7 +16,7 @@ func TestSessionsKeepsWorkSessionsAndDropsRawPayload(t *testing.T) {
 	sessionsPath := filepath.Join(t.TempDir(), "sessions.json")
 	options := Options{
 		Root: t.TempDir(),
-		AHT:  fakeAHT(t),
+		AHT:  testExecutable(t),
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
@@ -53,7 +53,7 @@ func TestWaitForSessionReturnsWhenSessionAppears(t *testing.T) {
 	sessionsPath := filepath.Join(t.TempDir(), "sessions.json")
 	options := Options{
 		Root: t.TempDir(),
-		AHT:  fakeAHT(t),
+		AHT:  testExecutable(t),
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
@@ -100,7 +100,7 @@ func TestWaitForSessionTimeoutReportsLastSessions(t *testing.T) {
 	sessionsPath := filepath.Join(t.TempDir(), "sessions.json")
 	options := Options{
 		Root: t.TempDir(),
-		AHT:  fakeAHT(t),
+		AHT:  testExecutable(t),
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
