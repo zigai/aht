@@ -3,6 +3,7 @@
 package processinfo
 
 import (
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -231,33 +232,23 @@ func FuzzParseLinuxStat(f *testing.F) {
 	})
 }
 
-func TestScannerRefreshesExecAndPlacement(t *testing.T) {
+func TestLinuxProcessRefreshesExecAndPlacement(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	dir := writeScannerProcess(t, root, 100, "worker", "10", []string{"worker", "job", "agent"})
-
-	var scanner Scanner
-	defer scanner.Close()
-
+	dir := writeLinuxProcess(t, root, "worker", "10", []string{"worker", "job", "agent"})
 	include := func(process Process) bool {
 		return (len(process.Args) > 1 && process.Args[1] == "agent") ||
 			(process.Executable == "/usr/bin/interpreter" && slices.Contains(process.Args, "agent"))
 	}
-	allArgs := func(process Process) bool {
-		return process.Executable == "/usr/bin/interpreter" || include(process)
-	}
 
-	first, err := scanner.scan(t.Context(), root, "boot", []string{"PANE"}, include, allArgs)
+	var reader linuxProcessReader
+
+	first, err := reader.read(dir, 100, "boot", []string{"PANE"}, include)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(first) != 1 || !slices.Equal(first[0].Args, []string{"worker", "job"}) ||
-		first[0].Env != nil || first[0].CWD != "" {
-		t.Fatalf("unrelated process inventory = %#v", first)
-	}
-
-	replaceScannerLink(t, filepath.Join(dir, "exe"), "/usr/bin/interpreter")
+	replaceLinuxLink(t, filepath.Join(dir, "exe"), "/usr/bin/interpreter")
 
 	if err := os.WriteFile(
 		filepath.Join(dir, "cmdline"),
@@ -267,49 +258,48 @@ func TestScannerRefreshesExecAndPlacement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := scanner.scan(t.Context(), root, "boot", []string{"PANE"}, include, allArgs)
+	second, err := reader.read(dir, 100, "boot", []string{"PANE"}, include)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(second) != 1 || second[0].StartIdentity != "boot:10" ||
-		!maps.Equal(second[0].Env, map[string]string{"PANE": "7"}) ||
-		second[0].CWD != "/project/first" || second[0].TTY != "/dev/pts/7" {
+	if second.StartIdentity != "boot:10" ||
+		!maps.Equal(second.Env, map[string]string{"PANE": "7"}) ||
+		second.CWD != "/project/first" || second.TTY != "/dev/pts/7" {
 		t.Fatalf("same-PID agent exec = %#v", second)
 	}
 
-	replaceScannerLink(t, filepath.Join(dir, "cwd"), "/project/second")
-	replaceScannerLink(t, filepath.Join(dir, "fd", "0"), "/dev/pts/8")
+	replaceLinuxLink(t, filepath.Join(dir, "cwd"), "/project/second")
+	replaceLinuxLink(t, filepath.Join(dir, "fd", "0"), "/dev/pts/8")
 
 	if err := os.WriteFile(filepath.Join(dir, "environ"), []byte("PANE=8\x00"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	third, err := scanner.scan(t.Context(), root, "boot", []string{"PANE"}, include, allArgs)
+	third, err := reader.read(dir, 100, "boot", []string{"PANE"}, include)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(third) != 1 || third[0].CWD != "/project/second" || third[0].TTY != "/dev/pts/8" ||
-		!maps.Equal(third[0].Env, map[string]string{"PANE": "8"}) {
+	if third.CWD != "/project/second" || third.TTY != "/dev/pts/8" ||
+		!maps.Equal(third.Env, map[string]string{"PANE": "8"}) {
 		t.Fatalf("agent placement update = %#v", third)
 	}
 
-	if !slices.Equal(first[0].Args, []string{"worker", "job"}) ||
-		!maps.Equal(second[0].Env, map[string]string{"PANE": "7"}) {
+	if !slices.Equal(first.Args, []string{"worker", "job", "agent"}) ||
+		!maps.Equal(second.Env, map[string]string{"PANE": "7"}) {
 		t.Fatalf("previous snapshots changed: %#v, %#v", first, second)
 	}
 }
 
-func TestScannerReplacesReusedPID(t *testing.T) {
+func TestLinuxProcessReadsReusedPID(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	dir := writeScannerProcess(t, root, 100, "first", "10", []string{"first"})
+	dir := writeLinuxProcess(t, root, "first", "10", []string{"first"})
 
-	var scanner Scanner
-	defer scanner.Close()
+	var reader linuxProcessReader
 
-	first, err := scanner.scan(t.Context(), root, "boot", nil, nil, nil)
+	first, err := reader.read(dir, 100, "boot", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,69 +308,71 @@ func TestScannerReplacesReusedPID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeScannerProcess(t, root, 100, "second", "20", []string{"second", "changed"})
+	writeLinuxProcess(t, root, "second", "20", []string{"second", "changed"})
 
-	second, err := scanner.scan(t.Context(), root, "boot", nil, nil, nil)
+	second, err := reader.read(dir, 100, "boot", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(first) != 1 || len(second) != 1 || first[0].StartIdentity != "boot:10" ||
-		second[0].StartIdentity != "boot:20" || second[0].Name != "second" ||
-		!slices.Equal(second[0].Args, []string{"second", "changed"}) {
+	if first.StartIdentity != "boot:10" || second.StartIdentity != "boot:20" ||
+		second.Name != "second" ||
+		!slices.Equal(second.Args, []string{"second", "changed"}) {
 		t.Fatalf("PID reuse inventories = %#v, %#v", first, second)
 	}
 }
 
-func TestScannerReadsLongArgumentsAndEmptyPrefixes(t *testing.T) {
+func TestLinuxProcessDiscardsIdentityChangedDuringRead(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	long := strings.Repeat("x", 9000)
-	writeScannerProcess(t, root, 100, "interpreter", "10", []string{"interpreter", long, "agent"})
-	writeScannerProcess(
-		t,
-		root,
-		200,
-		"worker",
-		"20",
-		[]string{"", "first", "", "second", "ignored"},
-	)
 
-	var scanner Scanner
-	defer scanner.Close()
+	for _, reuse := range []bool{false, true} {
+		t.Run(strconv.FormatBool(reuse), func(t *testing.T) {
+			root := t.TempDir()
+			dir := writeLinuxProcess(t, root, "first", "10", []string{"first"})
+			include := func(Process) bool {
+				if err := os.Rename(dir, filepath.Join(root, "retired")); err != nil {
+					t.Fatal(err)
+				}
 
-	allArgs := func(process Process) bool {
-		return process.Executable == "/usr/bin/interpreter"
-	}
+				if reuse {
+					writeLinuxProcess(t, root, "second", "20", []string{"second"})
 
-	processes, err := scanner.scan(
-		t.Context(),
-		root,
-		"boot",
-		nil,
-		func(Process) bool { return false },
-		allArgs,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+					if err := os.WriteFile(
+						filepath.Join(dir, "environ"),
+						[]byte("PANE=8\x00"),
+						0o600,
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
 
-	if len(processes) != 2 ||
-		!slices.Equal(processes[0].Args, []string{"interpreter", long, "agent"}) ||
-		!slices.Equal(processes[1].Args, []string{"first", "second"}) {
-		t.Fatalf("argument inventories = %#v", processes)
+				return true
+			}
+
+			var reader linuxProcessReader
+
+			process, err := reader.read(dir, 100, "boot", []string{"PANE"}, include)
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf(
+					"changed process = %#v, error = %v, want a disappeared identity",
+					process,
+					err,
+				)
+			}
+		})
 	}
 }
 
-func writeScannerProcess(
+func writeLinuxProcess(
 	t *testing.T,
 	root string,
-	pid int,
 	name string,
 	start string,
 	args []string,
 ) string {
 	t.Helper()
+
+	const pid = 100
 
 	dir := filepath.Join(root, strconv.Itoa(pid))
 	if err := os.MkdirAll(filepath.Join(dir, "fd"), 0o700); err != nil {
@@ -416,7 +408,7 @@ func writeScannerProcess(
 	return dir
 }
 
-func replaceScannerLink(t *testing.T, path string, target string) {
+func replaceLinuxLink(t *testing.T, path string, target string) {
 	t.Helper()
 
 	if err := os.Remove(path); err != nil {

@@ -26,7 +26,7 @@ func isTmuxServerArgs(args []string) bool {
 			return true
 		}
 
-		if index != 0 || !IsBinaryName(base) {
+		if index != 0 || !isBinaryName(base) {
 			continue
 		}
 

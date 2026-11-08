@@ -13,7 +13,7 @@ type serverSpec struct {
 	Identity string
 }
 
-func IsBinaryName(name string) bool {
+func isBinaryName(name string) bool {
 	base := filepath.Base(name)
 	if base == "tmux" || base == "tmux:" || strings.HasPrefix(base, "tmux: server") {
 		return true
@@ -102,7 +102,7 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	}
 
 	base := filepath.Base(args[0])
-	if !IsBinaryName(base) {
+	if !isBinaryName(base) {
 		return serverSpec{}, false
 	}
 	// Some tmux builds expose a bare -d daemon process marker rather than a

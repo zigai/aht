@@ -174,6 +174,11 @@ func (r *linuxProcessReader) read(
 	envKeys []string,
 	includeEnv func(Process) bool,
 ) (Process, error) {
+	before, err := os.Stat(dir)
+	if err != nil {
+		return Process{}, classifyProcessError(dir, err)
+	}
+
 	statPath := filepath.Join(dir, "stat")
 
 	data, err := os.ReadFile(statPath)
@@ -207,7 +212,22 @@ func (r *linuxProcessReader) read(
 		info.Env = r.readEnvironment(filepath.Join(dir, "environ"), envKeys)
 	}
 
+	after, err := os.Stat(dir)
+	if err != nil {
+		return Process{}, classifyProcessError(dir, err)
+	}
+
+	if !sameOwnedLinuxProcess(before, after) {
+		return Process{}, fmt.Errorf("process identity changed at %s: %w", dir, os.ErrNotExist)
+	}
+
 	return info, nil
+}
+
+func sameOwnedLinuxProcess(before os.FileInfo, after os.FileInfo) bool {
+	owner, ok := after.Sys().(*syscall.Stat_t)
+
+	return os.SameFile(before, after) && ok && int(owner.Uid) == os.Geteuid()
 }
 
 func (r *linuxProcessReader) readEnvironment(path string, keys []string) map[string]string {

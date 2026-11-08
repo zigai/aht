@@ -172,57 +172,39 @@ func nestedHarnessProcess(
 	return false
 }
 
-func (o *Observer) paneForegroundKnown(
-	ctx context.Context,
-	pane mux.Pane,
-	processes []processinfo.Process,
-) (bool, error) {
+func paneForegroundKnown(pane mux.Pane, processes []processinfo.Process) bool {
 	tty := paneLocation(pane).PaneTTY
 	if tty == "" {
-		return false, nil
+		return false
 	}
 
 	for _, process := range processes {
-		if process.TTY == "" && o.processDetails != nil {
-			detailed, found, err := o.processDetails(ctx, process.PID)
-			if err != nil {
-				return false, err
-			}
-
-			if found {
-				process = detailed
-			}
-		}
-
 		if process.TTY == tty && (process.Foreground || process.ProcessGroupID > 0) {
-			return true, nil
+			return true
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 func (o *Observer) foregroundCandidate(
-	ctx context.Context,
 	pane mux.Pane,
 	process processinfo.Process,
 	processes []processinfo.Process,
-) (bool, error) {
+) bool {
 	if o.disableScreenInspection && pane.Activity == nil {
-		return false, nil
+		return false
 	}
 
 	if process.Foreground {
-		return true, nil
+		return true
 	}
 
 	if process.ProcessGroupID > 0 && process.TTY != "" {
-		return false, nil
+		return false
 	}
 
-	known, err := o.paneForegroundKnown(ctx, pane, processes)
-
-	return !known, err
+	return !paneForegroundKnown(pane, processes)
 }
 
 func processMatchingMultiplexerIdentity(
