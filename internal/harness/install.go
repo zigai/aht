@@ -191,6 +191,24 @@ type ImportManifestInstallPlan struct {
 	Components []string
 }
 
+// NativeCatalog returns the first catalog when every action is a native catalog.
+func (plan InstallPlan) NativeCatalog() (NativeCatalogAction, bool) {
+	var first NativeCatalogAction
+
+	for index, action := range plan.Actions {
+		native, ok := action.(NativeCatalogAction)
+		if !ok {
+			return NativeCatalogAction{Label: ""}, false
+		}
+
+		if index == 0 {
+			first = native
+		}
+	}
+
+	return first, len(plan.Actions) > 0
+}
+
 func (JSONCommandHooksAction) installAction() {}
 
 func (JSONMergeAction) installAction() {}

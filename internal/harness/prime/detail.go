@@ -13,10 +13,3 @@ func (primeHarness) ActivityDetail(
 
 	return nil
 }
-
-func (primeHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: true},
-		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-	}
-}

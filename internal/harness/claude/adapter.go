@@ -20,6 +20,16 @@ type claudeHarness struct{ harness.BaseAdapter }
 
 func New() claudeHarness {
 	return claudeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@anthropic-ai/claude-code",
+			Directory: "claude",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
+			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
+		},
+		ScreenManifest:   screenManifest,
 		PayloadOmissions: []string{"tool_input", "tool_response"},
 		ExclusiveProcess: true, CatalogCreates: true,
 		RetainNativeActivity: true,

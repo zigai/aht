@@ -23,10 +23,3 @@ func (qwenHarness) ActivityDetail(
 
 	return nil
 }
-
-func (qwenHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: true},
-		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-	}
-}

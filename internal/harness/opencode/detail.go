@@ -19,10 +19,3 @@ func (opencodeHarness) ActivityDetail(
 
 	return nil
 }
-
-func (opencodeHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
-		Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
-	}
-}

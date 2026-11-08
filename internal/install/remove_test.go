@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -30,13 +31,13 @@ func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
 
-	for _, harnessID := range Harnesses() {
+	for _, harnessID := range catalog.Harnesses() {
 		result, err := Run(t.Context(), Options{Harness: harnessID, Binary: testInstallBinary})
 		if err != nil {
 			t.Fatalf("install %s: %v", harnessID, err)
 		}
 
-		if noInstallRequiredHarness(harnessID) {
+		if noInstallRequiredHarness(t, harnessID) {
 			if result.Changed || result.Message != "no setup required" || result.Path == "" {
 				t.Fatalf("install %s no-op result = %+v", harnessID, result)
 			}

@@ -20,6 +20,12 @@ type grokHarness struct{ harness.BaseAdapter }
 
 func New() grokHarness {
 	return grokHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionChannel,
+			URL:       "https://x.ai/cli/stable",
+			Directory: "grok",
+			Install:   distributionInstall,
+		},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("grok"),
 		Aliases:          []string{"grok-build", "grok_build"},

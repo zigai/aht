@@ -6,16 +6,6 @@ import (
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (agyHarness) Distribution() harness.Distribution {
-	return harness.Distribution{
-		Source:    harness.DistributionGitHub,
-		Repo:      "google-antigravity/antigravity-cli",
-		Asset:     "agy_cli_linux_x64.tar.gz",
-		Directory: "agy",
-		Install:   distributionInstall,
-	}
-}
-
 func distributionInstall(version string, work string, bin string) []harness.DistributionCommand {
 	asset := filepath.Join(work, "agy_cli_linux_x64.tar.gz")
 

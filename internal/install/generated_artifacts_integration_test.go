@@ -38,8 +38,8 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 		seenHarnesses[artifact.harness] = true
 	}
 
-	for _, harness := range Harnesses() {
-		if noInstallRequiredHarness(harness) {
+	for _, harness := range catalog.Harnesses() {
+		if noInstallRequiredHarness(t, harness) {
 			continue
 		}
 
@@ -127,14 +127,9 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 	artifacts := make([]generatedArtifact, 0)
 
 	for _, adapter := range catalog.All() {
-		installer, ok := adapter.(harnesspkg.Installable)
-		if !ok {
-			continue
-		}
-
 		harness := adapter.Definition().ID
 
-		plan, err := installer.InstallPlan(binary.command)
+		plan, err := adapter.InstallPlan(binary.command)
 		if err != nil {
 			t.Fatalf("plan %s integration: %v", harness, err)
 		}
@@ -261,12 +256,7 @@ func generatedCommandHook(t *testing.T, harness registry.Harness) string {
 		t.Fatalf("find harness %s", harness)
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		t.Fatalf("harness %s is not installable", harness)
-	}
-
-	plan, err := installer.InstallPlan(captureBinaryCommand(t))
+	plan, err := adapter.InstallPlan(captureBinaryCommand(t))
 	if err != nil {
 		t.Fatalf("plan %s integration: %v", harness, err)
 	}

@@ -26,6 +26,16 @@ type hermesHarness struct{ harness.BaseAdapter }
 
 func New() hermesHarness {
 	return hermesHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:        harness.DistributionPyPI,
+			Package:       "hermes-agent",
+			Directory:     "hermes",
+			PackageExtras: "[acp]",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		Env:              harness.EnvKeys{Config: []string{"HERMES_HOME", "HERMES_MANAGED"}},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("hermes"),

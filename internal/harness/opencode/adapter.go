@@ -24,6 +24,17 @@ type opencodeHarness struct{ harness.BaseAdapter }
 
 func New() opencodeHarness {
 	return opencodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@opencode/cli",
+			Directory: "opencode",
+			Family:    harness.FamilyPartPlugin,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+		},
+		ScreenManifest:   screenManifest,
 		ExclusiveProcess: true,
 		ID:               registry.Harness("opencode"),
 		Aliases:          []string{"open-code", "open_code"},

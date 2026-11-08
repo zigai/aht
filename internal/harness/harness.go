@@ -72,6 +72,9 @@ type Definition struct {
 	ProcessNames              []string
 	Env                       EnvKeys
 	Capabilities              Capabilities
+	Distribution              Distribution
+	DetailCapabilities        registry.DetailCapabilities
+	ScreenManifest            string
 	IntegrationVersion        int
 	IntegrationSource         string
 	StateAuthority            registry.Authority
@@ -83,6 +86,13 @@ type Definition struct {
 
 type Adapter interface {
 	Definition() Definition
+	// InstallPlan returns ErrHomeUnknown when the target needs an unknown home.
+	InstallPlan(binary string) (InstallPlan, error)
+	ResumeCommand(sessionID string, sessionPath string) []string
+	Transcript() transcript.Reader
+	// Locations omits project locations when projectDir is empty.
+	Locations(projectDir string) []Location
+	LifecycleDefaults(event string, attributes map[string]string) LifecycleDefaults
 }
 
 // CatalogSession is one session returned by a harness-native catalog. Activity
@@ -106,30 +116,9 @@ type CatalogProvider interface {
 	Catalog(ctx context.Context) ([]CatalogSession, error)
 }
 
-type ScreenManifestProvider interface {
-	ScreenManifest() string
-}
-
-// Installable adapters describe the files an integration manages. InstallPlan
-// returns [ErrHomeUnknown] when the target lies under a home directory that is
-// not known.
-type Installable interface {
-	InstallPlan(binary string) (InstallPlan, error)
-}
-
-// NoInstallRequired marks adapters whose native integration is built into the
-// harness and therefore needs no managed artifact or setup command.
-type NoInstallRequired interface {
-	NoInstallRequired()
-}
-
 type InstallAdvisor interface {
 	InstallNextStep(changed bool, dryRun bool) string
 	StatusNextStep(current bool, stale bool) string
-}
-
-type Resumable interface {
-	ResumeCommand(sessionID string, sessionPath string) []string
 }
 
 type PayloadAdapter interface {
@@ -156,20 +145,8 @@ type ActivityDetailer interface {
 	) *registry.ActivityDetail
 }
 
-type DetailCapabilityProvider interface {
-	DetailCapabilities() registry.DetailCapabilities
-}
-
 type ProcessFilter interface {
 	ObservableProcess(process processinfo.Process) bool
-}
-
-type DistributionProvider interface {
-	Distribution() Distribution
-}
-
-type TranscriptProvider interface {
-	Transcript() transcript.Reader
 }
 
 type BaseAdapter struct {
@@ -194,6 +171,9 @@ func cloneDefinition(definition Definition) Definition {
 		ProcessNames:              slices.Clone(definition.ProcessNames),
 		Env:                       cloneEnvKeys(definition.Env),
 		Capabilities:              definition.Capabilities,
+		Distribution:              definition.Distribution,
+		DetailCapabilities:        definition.DetailCapabilities,
+		ScreenManifest:            definition.ScreenManifest,
 		IntegrationVersion:        definition.IntegrationVersion,
 		IntegrationSource:         definition.IntegrationSource,
 		StateAuthority:            definition.StateAuthority,

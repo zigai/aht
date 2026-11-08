@@ -8,14 +8,6 @@ import (
 
 const primeInstallerURL = "https://app.primeintellect.ai/prime-agent/install.sh"
 
-func (primeHarness) Distribution() harness.Distribution {
-	return harness.Distribution{
-		Source:    harness.DistributionChannel,
-		URL:       "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
-		Directory: "prime", Install: distributionInstall,
-	}
-}
-
 func distributionInstall(version string, work string, bin string) []harness.DistributionCommand {
 	installer := filepath.Join(work, "prime-agent-install.sh")
 

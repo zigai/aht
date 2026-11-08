@@ -132,12 +132,7 @@ func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.
 		t.Fatal("Hermes adapter not found")
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		t.Fatal("Hermes adapter is not installable")
-	}
-
-	plan, err := installer.InstallPlan(testInstallBinary)
+	plan, err := adapter.InstallPlan(testInstallBinary)
 	if err != nil {
 		t.Fatalf("plan Hermes integration: %v", err)
 	}

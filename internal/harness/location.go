@@ -35,13 +35,6 @@ type Location struct {
 	Path  string
 }
 
-// LocationProvider is an optional adapter capability that lists the documented
-// user-facing configuration locations. Project locations are relative to
-// projectDir and are omitted when it is empty.
-type LocationProvider interface {
-	Locations(projectDir string) []Location
-}
-
 // LocationBuilder collects the locations an adapter reports.
 type LocationBuilder struct {
 	projectDir string

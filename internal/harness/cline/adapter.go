@@ -27,6 +27,11 @@ type clineHarness struct{ harness.BaseAdapter }
 
 func New() clineHarness {
 	return clineHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "cline",
+			Directory: "cline",
+		},
 		Env: harness.EnvKeys{
 			Config: []string{
 				"CLINE_DIR",

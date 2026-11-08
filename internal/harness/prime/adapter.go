@@ -64,6 +64,15 @@ type catalogRecord struct {
 
 func New() primeHarness {
 	return primeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionChannel,
+			URL:       "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
+			Directory: "prime", Install: distributionInstall,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: true},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		ID:           registry.Harness("prime-agent"),
 		Aliases:      []string{"prime", "primeagent", "prime_agent"},
 		ProcessNames: []string{primeAgentCommand},
@@ -90,8 +99,6 @@ func (primeHarness) InstallPlan(string) (harness.InstallPlan, error) {
 		Label: primeNativeCatalogLabel,
 	}}}, nil
 }
-
-func (primeHarness) NoInstallRequired() {}
 
 func (primeHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 	if sessionPath != "" {

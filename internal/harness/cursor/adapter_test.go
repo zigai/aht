@@ -30,7 +30,7 @@ func TestDistributionExposesBinaryInSuppliedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, step := range New().Distribution().Install("", work, bin) {
+	for _, step := range New().Definition().Distribution.Install("", work, bin) {
 		if step.Name == "curl" {
 			continue
 		}

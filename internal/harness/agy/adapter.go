@@ -30,6 +30,17 @@ type agyHarness struct{ harness.BaseAdapter }
 
 func New() agyHarness {
 	return agyHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionGitHub,
+			Repo:      "google-antigravity/antigravity-cli",
+			Asset:     "agy_cli_linux_x64.tar.gz",
+			Directory: "agy",
+			Install:   distributionInstall,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("agy"),
 		Aliases: []string{

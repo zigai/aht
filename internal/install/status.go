@@ -44,16 +44,14 @@ func Inspect(
 		return IntegrationStatus{}, err
 	}
 
-	if noInstallRequiredHarness(harnessID) {
-		if action, ok := nativeCatalogAction(plan); ok {
-			return IntegrationStatus{
-				Harness:  harnessID,
-				Status:   ArtifactCurrent,
-				Paths:    []string{action.Label},
-				Message:  "no setup required",
-				NextStep: "",
-			}, nil
-		}
+	if action, native := plan.NativeCatalog(); native {
+		return IntegrationStatus{
+			Harness:  harnessID,
+			Status:   ArtifactCurrent,
+			Paths:    []string{action.Label},
+			Message:  "no setup required",
+			NextStep: "",
+		}, nil
 	}
 
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(harnessID))
@@ -100,18 +98,13 @@ func installPlanForHarness(
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errUnsupportedHarness, harnessID)
-	}
-
 	if !utf8.ValidString(binary) {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("%w: %q", errBinaryEncoding, binary)
 	}
 
 	advisor, _ := adapter.(harnesspkg.InstallAdvisor)
 
-	plan, err := installer.InstallPlan(binary)
+	plan, err := adapter.InstallPlan(binary)
 	if err != nil {
 		return harnesspkg.InstallPlan{}, nil, fmt.Errorf("plan %s integration: %w", harnessID, err)
 	}

@@ -370,12 +370,7 @@ func runGeneratedNativeTitleWatchers(
 		t.Fatal("missing Claude adapter")
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		t.Fatal("expected installable native watcher adapter")
-	}
-
-	plan, err := installer.InstallPlan(binary)
+	plan, err := adapter.InstallPlan(binary)
 	if err != nil {
 		t.Fatalf("plan Claude integration: %v", err)
 	}
@@ -430,12 +425,7 @@ func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
 		t.Fatalf("find harness %s", h)
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		t.Fatalf("harness %s is not installable", h)
-	}
-
-	plan, err := installer.InstallPlan(binary)
+	plan, err := adapter.InstallPlan(binary)
 	if err != nil {
 		t.Fatalf("plan %s integration: %v", h, err)
 	}

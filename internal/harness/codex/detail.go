@@ -15,10 +15,3 @@ func (codexHarness) ActivityDetail(
 
 	return nil
 }
-
-func (codexHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
-		Screen: registry.DetailSupport{Permission: true, Question: false, UsageLimit: true},
-	}
-}

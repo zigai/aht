@@ -25,6 +25,11 @@ type openclawHarness struct{ harness.BaseAdapter }
 
 func New() openclawHarness {
 	return openclawHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "openclaw",
+			Directory: "openclaw",
+		},
 		Env: harness.EnvKeys{
 			Config: []string{
 				"OPENCLAW_HOME",

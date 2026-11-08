@@ -16,7 +16,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -353,8 +352,8 @@ func loadBundled(harnessID registry.Harness) (Manifest, error) {
 		)
 	}
 
-	provider, ok := adapter.(harness.ScreenManifestProvider)
-	if !ok {
+	screenManifest := adapter.Definition().ScreenManifest
+	if screenManifest == "" {
 		return Manifest{}, fmt.Errorf(
 			"reading bundled manifest for %s: %w",
 			harnessID,
@@ -362,7 +361,7 @@ func loadBundled(harnessID registry.Harness) (Manifest, error) {
 		)
 	}
 
-	manifest, err := ParseManifest([]byte(provider.ScreenManifest()), harnessID)
+	manifest, err := ParseManifest([]byte(screenManifest), harnessID)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("loading bundled manifest for %s: %w", harnessID, err)
 	}

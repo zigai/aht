@@ -88,9 +88,17 @@ func TestCapabilitiesJSONCompatibility(t *testing.T) {
 	}
 
 	expectedFields := []string{
-		"harness", "session_start", "session_end", "running_idle", "waiting_permission",
-		"process_identity", "native_catalog", "installable",
-		"resumable", "title_lookup", "screen_support", "screen_fallback", "authority",
+		"harness",
+		"session_start",
+		"session_end",
+		"running_idle",
+		"waiting_permission",
+		"process_identity",
+		"native_catalog",
+		"title_lookup",
+		"screen_support",
+		"screen_fallback",
+		"authority",
 	}
 	for _, field := range expectedFields {
 		if _, ok := raw[field]; !ok {

@@ -54,7 +54,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	t.Setenv("AGY_CLI_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 
-	harnesses := Harnesses()
+	harnesses := catalog.Harnesses()
 
 	results := make([]Result, 0, len(harnesses))
 	for _, h := range harnesses {
@@ -81,25 +81,17 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	}
 }
 
-func TestInstallPlansMatchHarnessCatalog(t *testing.T) {
-	t.Parallel()
+func noInstallRequiredHarness(t *testing.T, harnessID registry.Harness) bool {
+	t.Helper()
 
-	for _, adapter := range catalog.All() {
-		if _, ok := adapter.(harnesspkg.Installable); !ok {
-			t.Fatalf("harness %q has no install plan", adapter.Definition().ID)
-		}
+	plan, _, err := installPlanForHarness(harnessID, testInstallBinary)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for _, harness := range Harnesses() {
-		adapter, ok := catalog.Find(harness)
-		if !ok {
-			t.Fatalf("Harnesses contains unknown harness %q", harness)
-		}
+	_, native := plan.NativeCatalog()
 
-		if _, installable := adapter.(harnesspkg.Installable); !installable {
-			t.Fatalf("Harnesses contains %q without install plan", harness)
-		}
-	}
+	return native
 }
 
 // withoutHome clears the whole environment, so no home directory and no
@@ -123,7 +115,7 @@ func withoutHome(t *testing.T) string {
 func TestInstallPlansWithoutHomeFailOrStayAbsolute(t *testing.T) {
 	withoutHome(t)
 
-	for _, harness := range Harnesses() {
+	for _, harness := range catalog.Harnesses() {
 		t.Run(string(harness), func(t *testing.T) {
 			plan, _, err := installPlanForHarness(harness, testInstallBinary)
 			if err != nil {

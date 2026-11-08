@@ -75,7 +75,6 @@ type releaseIntegrationStatus struct {
 
 type releaseIntegrationCapability struct {
 	Harness            string `json:"harness"`
-	Installable        bool   `json:"installable"`
 	IntegrationVersion int    `json:"integration_version"`
 }
 
@@ -806,10 +805,6 @@ func releaseInstallableCatalog(t *testing.T, binary string, environment []string
 	catalog := make(map[string]int)
 
 	for _, capability := range capabilities {
-		if !capability.Installable {
-			continue
-		}
-
 		if capability.Harness == "" || capability.IntegrationVersion <= 0 {
 			t.Fatalf("invalid installable capability from %q: %+v", binary, capability)
 		}

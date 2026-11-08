@@ -23,6 +23,15 @@ type ampHarness struct{ harness.BaseAdapter }
 
 func New() ampHarness {
 	return ampHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@ampcode/cli",
+			Directory: "amp",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("amp"),
 		Aliases:          []string{"ampcode", "amp-code", "amp_code"},

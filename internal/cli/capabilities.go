@@ -83,8 +83,6 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 			yesNo(c.WaitingPermission),
 			yesNo(c.ProcessIdentity),
 			yesNo(c.NativeCatalog),
-			yesNo(c.Installable),
-			yesNo(c.Resumable),
 			yesNo(c.ScreenSupport),
 		})
 	}
@@ -99,8 +97,6 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 			{heading: "Wait", width: capabilityWaitingWidth},
 			{heading: "Process", width: capabilitySignalWidth},
 			{heading: "Catalog", width: capabilitySignalWidth},
-			{heading: "Install", width: capabilityFeatureWidth},
-			{heading: "Resume", width: capabilityFeatureWidth},
 			{heading: "Screen", width: capabilityFeatureWidth},
 		},
 		rows,
@@ -119,8 +115,6 @@ func (app *application) writeSingleHarnessCapabilities(c harness.Capabilities) e
 		{label: "Waiting permission", value: yesNo(c.WaitingPermission)},
 		{label: "Process identity", value: yesNo(c.ProcessIdentity)},
 		{label: "Native catalog", value: yesNo(c.NativeCatalog)},
-		{label: "Installable", value: yesNo(c.Installable)},
-		{label: "Resumable", value: yesNo(c.Resumable)},
 		{label: "Screen support", value: yesNo(c.ScreenSupport)},
 		{label: "Screen fallback", value: yesNo(c.ScreenFallback)},
 	})

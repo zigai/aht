@@ -25,6 +25,17 @@ type ompHarness struct{ harness.BaseAdapter }
 
 func New() ompHarness {
 	return ompHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@oh-my-pi/pi-coding-agent",
+			Directory: "omp",
+			Family:    harness.FamilyTreeExtension,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
+		},
+		ScreenManifest: screenManifest,
 		Env: harness.EnvKeys{
 			Config: []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"},
 		},

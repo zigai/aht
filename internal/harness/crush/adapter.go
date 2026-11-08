@@ -31,6 +31,16 @@ type hookPayload struct {
 
 func New() crushHarness {
 	return crushHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@charmland/crush",
+			Directory: "crush",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
+		},
+		ScreenManifest:   screenManifest,
 		ExclusiveProcess: true,
 		ID:               registry.Harness("crush"),
 		ProcessNames:     []string{"crush"},

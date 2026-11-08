@@ -29,6 +29,11 @@ type hookPayload struct {
 
 func New() cursorHarness {
 	return cursorHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionWeekly,
+			Directory: "cursor",
+			Install:   distributionInstall,
+		},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("cursor"),
 		Aliases:          []string{"cursor-agent", "cursor_agent", "cursor-cli", "cursor_cli"},

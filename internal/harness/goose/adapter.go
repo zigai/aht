@@ -24,6 +24,13 @@ type goosePayload struct {
 
 func New() gooseHarness {
 	return gooseHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionGitHub,
+			Repo:      "aaif-goose/goose",
+			Asset:     "download_cli.sh",
+			Directory: "goose",
+			Install:   distributionInstall,
+		},
 		Env:              harness.EnvKeys{Config: []string{"GOOSE_PATH_ROOT"}},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("goose"),

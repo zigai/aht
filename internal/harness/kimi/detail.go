@@ -13,10 +13,3 @@ func (kimiCodeHarness) ActivityDetail(
 
 	return nil
 }
-
-func (kimiCodeHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
-		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-	}
-}

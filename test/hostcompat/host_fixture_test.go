@@ -18,7 +18,6 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/internal/testtmux"
@@ -133,7 +132,12 @@ func (host *isolatedHost) assertIntegrationCurrent(t *testing.T) {
 	}
 
 	if adapter, ok := catalog.Find(host.contract.ID); ok {
-		if _, native := adapter.(harness.NoInstallRequired); native {
+		plan, err := adapter.InstallPlan(host.aht)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, native := plan.NativeCatalog(); native {
 			return
 		}
 	}

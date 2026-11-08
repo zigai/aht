@@ -6,15 +6,6 @@ import (
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (grokHarness) Distribution() harness.Distribution {
-	return harness.Distribution{
-		Source:    harness.DistributionChannel,
-		URL:       "https://x.ai/cli/stable",
-		Directory: "grok",
-		Install:   distributionInstall,
-	}
-}
-
 func distributionInstall(version string, work string, bin string) []harness.DistributionCommand {
 	script := filepath.Join(work, "install-grok.sh")
 

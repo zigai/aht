@@ -6,14 +6,6 @@ import (
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (cursorHarness) Distribution() harness.Distribution {
-	return harness.Distribution{
-		Source:    harness.DistributionWeekly,
-		Directory: "cursor",
-		Install:   distributionInstall,
-	}
-}
-
 func distributionInstall(_ string, work string, bin string) []harness.DistributionCommand {
 	script := filepath.Join(work, "install-cursor.sh")
 

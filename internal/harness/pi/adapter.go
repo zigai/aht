@@ -24,6 +24,17 @@ type piHarness struct{ harness.BaseAdapter }
 
 func New() piHarness {
 	return piHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@earendil-works/pi-coding-agent",
+			Directory: "pi",
+			Family:    harness.FamilyTreeExtension,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
+		},
+		ScreenManifest:   screenManifest,
 		ExclusiveProcess: true,
 		// The extension refreshes running with a heartbeat, and every other state
 		// changes only through a new native event.

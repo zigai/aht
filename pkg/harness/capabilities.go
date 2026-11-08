@@ -16,8 +16,6 @@ type Capabilities struct {
 	WaitingPermission  bool                        `json:"waiting_permission"`
 	ProcessIdentity    bool                        `json:"process_identity"`
 	NativeCatalog      bool                        `json:"native_catalog"`
-	Installable        bool                        `json:"installable"`
-	Resumable          bool                        `json:"resumable"`
 	TitleLookup        bool                        `json:"title_lookup"`
 	ScreenSupport      bool                        `json:"screen_support"`
 	ScreenFallback     bool                        `json:"screen_fallback"`
@@ -39,8 +37,6 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 			WaitingPermission:  false,
 			ProcessIdentity:    false,
 			NativeCatalog:      false,
-			Installable:        false,
-			Resumable:          false,
 			TitleLookup:        false,
 			ScreenSupport:      false,
 			ScreenFallback:     false,
@@ -63,8 +59,6 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 	}
 
 	definition := adapter.Definition()
-	_, isInstallable := adapter.(harness.Installable)
-	_, isResumable := adapter.(harness.Resumable)
 	_, hasTitleLookup := adapter.(harness.TitleReader)
 	_, hasNativeCatalog := adapter.(harness.CatalogProvider)
 	screenSupport := catalog.SupportsScreen(harnessID)
@@ -79,8 +73,6 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 		WaitingPermission:  definition.Capabilities.WaitingPermission,
 		ProcessIdentity:    definition.Capabilities.ProcessIdentity,
 		NativeCatalog:      hasNativeCatalog,
-		Installable:        isInstallable,
-		Resumable:          isResumable,
 		TitleLookup:        hasTitleLookup,
 		ScreenSupport:      screenSupport,
 		ScreenFallback:     policy.ScreenFallback,

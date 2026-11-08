@@ -21,6 +21,15 @@ type copilotHarness struct{ harness.BaseAdapter }
 
 func New() copilotHarness {
 	return copilotHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@github/copilot",
+			Directory: "copilot",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		Env: harness.EnvKeys{Config: []string{"COPILOT_HOME"}},
 		PayloadOmissions: []string{
 			"toolInput",

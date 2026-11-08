@@ -120,9 +120,7 @@ func SupportsScreen(harnessID registry.Harness) bool {
 		return false
 	}
 
-	provider, ok := adapter.(harness.ScreenManifestProvider)
-
-	return ok && provider.ScreenManifest() != ""
+	return adapter.Definition().ScreenManifest != ""
 }
 
 func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) {
@@ -280,28 +278,18 @@ func ResumeCommandFor(harnessID registry.Harness, sessionID string, sessionPath 
 		return nil
 	}
 
-	resumable, ok := adapter.(harness.Resumable)
-	if !ok {
-		return nil
-	}
-
-	return resumable.ResumeCommand(sessionID, sessionPath)
+	return adapter.ResumeCommand(sessionID, sessionPath)
 }
 
 // LocationsFor lists the documented configuration locations of a harness. It
-// reports false when the harness is unknown or does not expose locations.
+// reports false when the harness is unknown.
 func LocationsFor(harnessID registry.Harness, projectDir string) ([]harness.Location, bool) {
 	adapter, ok := Find(harnessID)
 	if !ok {
 		return nil, false
 	}
 
-	provider, ok := adapter.(harness.LocationProvider)
-	if !ok {
-		return nil, false
-	}
-
-	return provider.Locations(projectDir), true
+	return adapter.Locations(projectDir), true
 }
 
 func WithResumeCommand(observation registry.Observation) registry.Observation {
@@ -380,9 +368,7 @@ func LifecycleFor(
 	attributes map[string]string,
 ) harness.LifecycleDefaults {
 	if adapter, ok := Find(id); ok {
-		if translator, ok := adapter.(harness.LifecycleAdapter); ok {
-			return translator.LifecycleDefaults(event, attributes)
-		}
+		return adapter.LifecycleDefaults(event, attributes)
 	}
 
 	return harness.TranslateLifecycle(event, "")
@@ -412,9 +398,7 @@ func PrepareObservation(observation registry.Observation) registry.Observation {
 
 func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 	if adapter, ok := Find(id); ok {
-		if provider, ok := adapter.(harness.DetailCapabilityProvider); ok {
-			return provider.DetailCapabilities()
-		}
+		return adapter.Definition().DetailCapabilities
 	}
 
 	return registry.DetailCapabilities{

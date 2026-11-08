@@ -20,10 +20,3 @@ func (agyHarness) ActivityDetail(
 
 	return nil
 }
-
-func (agyHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
-		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-	}
-}

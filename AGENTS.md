@@ -34,34 +34,34 @@ must leave a building tree. `internal/harness/amp` is a compact reference adapte
    - `ID: registry.Harness("<name>")`, `Aliases`, `ProcessNames`, and `Env` keys
      for native session id/path/project root/pid/event variables.
    - `Capabilities` reflecting what the native API actually exposes.
+   - `Distribution` with `Directory` equal to the adapter folder name, and
+     `DetailCapabilities` for native and screen detail support.
    - `IntegrationSource`: the reporter name generated integrations pass as
      `--reporter`. `IntegrationVersion`: the adapter's generated-artifact version.
    - `StateAuthority` (`registry.AuthorityHook` or `registry.AuthorityScreen`)
      and `ScreenFallback`. Activity authority is decided only by
      `registry.ActivityAuthority`; do not add authority logic elsewhere.
+     Set `ScreenManifest` for screen authority or screen fallback.
    - `ExclusiveProcess: true` unless one process hosts several native sessions.
      `CatalogCreates: true` only if native catalog listings may create sessions.
-2. Implement only the optional capabilities the native surface supports, as
-   methods on the adapter type:
+2. Implement the required methods on the adapter type:
    - `InstallPlan` (+ `InstallNextStep`/`StatusNextStep`) for managed hooks,
      plugins, or extensions; templates live in `assets/`. Build command hooks
      with `harness.CommandHookSpecs` and render templates with
      `harness.RenderScriptTemplate`.
-   - `ResumeCommand`, `PayloadCompatible`/`PayloadDefaults`, `HandleHook` for
-     request/response hooks, `ObservableProcess`, and `RunWire` where applicable.
+   - `ResumeCommand` for native resume identities.
    - `LifecycleEventAttribute` and `LifecycleSourceAttributes` in the
      `Definition` when native event names or resume sources live in attributes
      the generic mapping in `internal/harness/lifecycle.go` does not read.
    - `transcript.go`: `Transcript() transcript.Reader` for history search. Reuse
      the shared grammars in `internal/harness/transcript` before writing a parser.
-   - `title.go`: `SessionTitles`. Reuse the transcript parser when titles come
-     from the same native files.
-   - `manifest.go` + `assets/screen.toml`: `ScreenManifest` for screen authority
-     or screen fallback.
-   - `distribution.go`: `Distribution()` with `Directory` equal to the adapter
-     folder name. The architecture test derives name ownership from it.
+   - `distribution.go` for custom distribution install commands when needed.
+     The architecture test derives name ownership from `Definition.Distribution`.
    - `locations.go`: `Locations(projectDir)` with the config, instruction,
      skill, command, and MCP paths the native docs name. Every adapter needs it.
+   - Optional, where supported: `PayloadCompatible`/`PayloadDefaults`,
+     `HandleHook`, `ObservableProcess`, and `SessionTitles`. Reuse the
+     transcript parser when titles come from the same native files.
    - When the harness supports a custom model endpoint, add a launch plan in
      `pkg/fakeprovider/launch/<name>.go` and register it in that package's
      table. The `fakeprovider` command and `test/hostcompat` launch harnesses

@@ -18,6 +18,15 @@ type droidHarness struct{ harness.BaseAdapter }
 
 func New() droidHarness {
 	return droidHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "droid",
+			Directory: "droid",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		PayloadOmissions: []string{"tool_input", "tool_response"},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("droid"),

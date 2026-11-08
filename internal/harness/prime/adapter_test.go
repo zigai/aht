@@ -16,7 +16,7 @@ import (
 )
 
 func TestDistributionInstallUsesPinnedOfficialInstaller(t *testing.T) {
-	distribution := New().Distribution()
+	distribution := New().Definition().Distribution
 	if distribution.Source != "channel" || distribution.Directory != "prime" ||
 		distribution.Install == nil {
 		t.Fatalf("Distribution() = %#v", distribution)
@@ -221,7 +221,7 @@ func TestQuotaParkedActivityDetail(t *testing.T) {
 		t.Fatalf("ActivityDetail() = %v", detail)
 	}
 
-	capabilities := New().DetailCapabilities()
+	capabilities := New().Definition().DetailCapabilities
 	if !capabilities.Native.UsageLimit || capabilities.Native.Permission ||
 		capabilities.Native.Question {
 		t.Fatalf("DetailCapabilities() = %#v", capabilities)

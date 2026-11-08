@@ -26,6 +26,16 @@ type kiloHarness struct{ harness.BaseAdapter }
 
 func New() kiloHarness {
 	return kiloHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@kilocode/cli",
+			Directory: "kilo",
+			Family:    harness.FamilyPartPlugin,
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("kilo"),
 		Aliases:          []string{"kilocode", "kilo-code", "kilo_code"},

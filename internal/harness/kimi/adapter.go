@@ -34,6 +34,15 @@ type hookPayload struct {
 
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@moonshot-ai/kimi-code",
+			Directory: "kimi",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+		},
 		Env:          harness.EnvKeys{Config: []string{"KIMI_CODE_HOME"}},
 		ID:           registry.Harness("kimi-code"),
 		Aliases:      []string{"kimi", "kimi_code", "kimicode"},

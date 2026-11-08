@@ -19,7 +19,6 @@ import (
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/internal/config"
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/internal/processinfo"
@@ -417,7 +416,8 @@ func (m *Manager) checkIntegrations(
 		id := adapter.Definition().ID
 		check := newDoctorCheck(doctorGroupIntegrations, string(id))
 
-		if _, ok := adapter.(harnesspkg.NoInstallRequired); ok {
+		plan, planErr := adapter.InstallPlan(m.config.Binary)
+		if _, native := plan.NativeCatalog(); planErr == nil && native {
 			if includeAll {
 				check.Status, check.Message = DoctorStatusInfo, "No setup required"
 				checks = append(checks, check)

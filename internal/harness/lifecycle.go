@@ -12,10 +12,6 @@ type LifecycleDefaults struct {
 	Presence  registry.Presence
 }
 
-type LifecycleAdapter interface {
-	LifecycleDefaults(event string, attributes map[string]string) LifecycleDefaults
-}
-
 func (adapter BaseAdapter) LifecycleDefaults(
 	event string,
 	attributes map[string]string,

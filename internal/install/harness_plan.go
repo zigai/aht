@@ -28,10 +28,8 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	if noInstallRequiredHarness(opts.Harness) {
-		if action, ok := nativeCatalogAction(plan); ok {
-			return noInstallRequiredResult(opts.Harness, action.Label), nil
-		}
+	if action, native := plan.NativeCatalog(); native {
+		return noInstallRequiredResult(opts.Harness, action.Label), nil
 	}
 
 	if opts.UseShim && installPlanHasShim(plan) {
@@ -55,16 +53,6 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
-}
-
-func nativeCatalogAction(plan harnesspkg.InstallPlan) (harnesspkg.NativeCatalogAction, bool) {
-	for _, action := range plan.Actions {
-		if native, ok := action.(harnesspkg.NativeCatalogAction); ok {
-			return native, true
-		}
-	}
-
-	return harnesspkg.NativeCatalogAction{Label: ""}, false
 }
 
 func installPlanHasShim(plan harnesspkg.InstallPlan) bool {

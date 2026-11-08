@@ -7,9 +7,7 @@ import (
 
 func DistributionFor(id registry.Harness) harness.Distribution {
 	if adapter, ok := Find(id); ok {
-		if provider, ok := adapter.(harness.DistributionProvider); ok {
-			return provider.Distribution()
-		}
+		return adapter.Definition().Distribution
 	}
 
 	return harness.Distribution{}

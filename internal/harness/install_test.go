@@ -13,6 +13,55 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+func TestInstallPlanNativeCatalog(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		actions []harness.InstallAction
+		want    bool
+	}{
+		{name: "empty", actions: nil, want: false},
+		{
+			name:    "native catalog",
+			actions: []harness.InstallAction{harness.NativeCatalogAction{Label: "sessions"}},
+			want:    true,
+		},
+		{
+			name: "multiple catalogs",
+			actions: []harness.InstallAction{
+				harness.NativeCatalogAction{Label: "sessions"},
+				harness.NativeCatalogAction{Label: "threads"},
+			},
+			want: true,
+		},
+		{name: "managed action", actions: []harness.InstallAction{harness.ShimAction{}}, want: false},
+		{
+			name:    "catalog then managed action",
+			actions: []harness.InstallAction{harness.NativeCatalogAction{Label: "sessions"}, harness.ShimAction{}},
+			want:    false,
+		},
+		{
+			name:    "managed action then catalog",
+			actions: []harness.InstallAction{harness.ShimAction{}, harness.NativeCatalogAction{Label: "sessions"}},
+			want:    false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan := harness.InstallPlan{Actions: test.actions}
+
+			catalog, got := plan.NativeCatalog()
+			if got != test.want {
+				t.Fatalf("NativeCatalog() supported = %t, want %t", got, test.want)
+			}
+
+			if got && catalog.Label != "sessions" {
+				t.Fatalf("NativeCatalog() label = %q, want sessions", catalog.Label)
+			}
+		})
+	}
+}
+
 func TestRenderScriptTemplateExpandsQueueAndLeavesNoPlaceholders(t *testing.T) {
 	t.Parallel()
 

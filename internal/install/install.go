@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -24,8 +22,6 @@ var (
 	errBinaryEncoding     = errors.New("aht binary path is not valid UTF-8")
 	errManagedBlockMarker = errors.New("managed block markers are not paired")
 )
-
-var allHarnesses = installableHarnesses()
 
 //exhaustruct:optional
 type Options struct {
@@ -48,11 +44,6 @@ type Result struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// Harnesses returns a snapshot of the installable harness catalog.
-func Harnesses() []registry.Harness {
-	return slices.Clone(allHarnesses)
-}
-
 // Run installs one integration while honoring caller cancellation.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -64,28 +55,6 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	return installHarnessAdapter(ctx, opts)
-}
-
-func installableHarnesses() []registry.Harness {
-	harnesses := make([]registry.Harness, 0, len(catalog.All()))
-	for _, adapter := range catalog.All() {
-		if _, ok := adapter.(harnesspkg.Installable); ok {
-			harnesses = append(harnesses, adapter.Definition().ID)
-		}
-	}
-
-	return harnesses
-}
-
-func noInstallRequiredHarness(harnessID registry.Harness) bool {
-	adapter, ok := catalog.Find(harnessID)
-	if !ok {
-		return false
-	}
-
-	_, ok = adapter.(harnesspkg.NoInstallRequired)
-
-	return ok
 }
 
 func fileNeedsUpdate(path string, content string, force bool) (bool, error) {

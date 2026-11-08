@@ -28,10 +28,8 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	if noInstallRequiredHarness(opts.Harness) {
-		if action, ok := nativeCatalogAction(plan); ok {
-			return noInstallRequiredResult(opts.Harness, action.Label), nil
-		}
+	if action, native := plan.NativeCatalog(); native {
+		return noInstallRequiredResult(opts.Harness, action.Label), nil
 	}
 
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(opts.Harness))

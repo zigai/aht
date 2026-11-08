@@ -95,12 +95,7 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 		t.Fatal("OpenClaw adapter not found")
 	}
 
-	installer, ok := adapter.(harnesspkg.Installable)
-	if !ok {
-		t.Fatal("OpenClaw adapter is not installable")
-	}
-
-	plan, err := installer.InstallPlan(testInstallBinary)
+	plan, err := adapter.InstallPlan(testInstallBinary)
 	if err != nil {
 		t.Fatalf("plan OpenClaw integration: %v", err)
 	}

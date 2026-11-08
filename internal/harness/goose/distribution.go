@@ -6,16 +6,6 @@ import (
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (gooseHarness) Distribution() harness.Distribution {
-	return harness.Distribution{
-		Source:    harness.DistributionGitHub,
-		Repo:      "aaif-goose/goose",
-		Asset:     "download_cli.sh",
-		Directory: "goose",
-		Install:   distributionInstall,
-	}
-}
-
 func distributionInstall(version string, work string, bin string) []harness.DistributionCommand {
 	asset := filepath.Join(work, "download_cli.sh")
 

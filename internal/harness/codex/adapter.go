@@ -21,6 +21,16 @@ type codexHarness struct{ harness.BaseAdapter }
 
 func New() codexHarness {
 	return codexHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Distribution: harness.Distribution{
+			Source:    harness.DistributionNPM,
+			Package:   "@openai/codex",
+			Directory: "codex",
+		},
+		DetailCapabilities: registry.DetailCapabilities{
+			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
+			Screen: registry.DetailSupport{Permission: true, Question: false, UsageLimit: true},
+		},
+		ScreenManifest:       screenManifest,
 		PayloadOmissions:     []string{"tool_input", "tool_response"},
 		ExclusiveProcess:     true,
 		RetainNativeActivity: true,

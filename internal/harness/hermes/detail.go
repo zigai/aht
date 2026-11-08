@@ -15,10 +15,3 @@ func (hermesHarness) ActivityDetail(
 
 	return nil
 }
-
-func (hermesHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
-		Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
-	}
-}

@@ -13,6 +13,7 @@ import (
 	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/v2/internal/config"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -120,7 +121,7 @@ func New(cfg Config) *Manager {
 
 // InstallableHarnesses returns the harnesses with managed integrations.
 func InstallableHarnesses() []registry.Harness {
-	return install.Harnesses()
+	return catalog.Harnesses()
 }
 
 // InstallIntegration idempotently installs or updates one harness integration.

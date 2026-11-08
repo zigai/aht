@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/amp"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -18,10 +19,15 @@ import (
 var errTestCatalogCommand = errors.New("catalog command failed")
 
 type testCatalogAdapter struct {
-	harness.BaseAdapter
+	harness.Adapter
 
-	sessions []harness.CatalogSession
-	err      error
+	definition harness.Definition
+	sessions   []harness.CatalogSession
+	err        error
+}
+
+func (adapter testCatalogAdapter) Definition() harness.Definition {
+	return adapter.definition
 }
 
 func (adapter testCatalogAdapter) Catalog(context.Context) ([]harness.CatalogSession, error) {
@@ -35,9 +41,10 @@ func newTestCatalogAdapter(
 	err error,
 ) testCatalogAdapter {
 	return testCatalogAdapter{
-		BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Adapter: amp.New(),
+		definition: harness.Definition{
 			ID: id, IntegrationSource: source, IntegrationVersion: 7,
-		}),
+		},
 		sessions: sessions,
 		err:      err,
 	}
@@ -138,6 +145,21 @@ func TestNativeDetailsOmitUnsupportedAdapters(t *testing.T) {
 	}
 }
 
+func TestScreenManifestMatchesAuthority(t *testing.T) {
+	t.Parallel()
+
+	for _, adapter := range All() {
+		definition := adapter.Definition()
+		needsScreen := definition.StateAuthority == registry.AuthorityScreen ||
+			definition.ScreenFallback
+
+		if hasManifest := definition.ScreenManifest != ""; hasManifest != needsScreen {
+			t.Errorf("%s: screen manifest present = %t, screen authority or fallback = %t",
+				definition.ID, hasManifest, needsScreen)
+		}
+	}
+}
+
 func TestLocationsForUnknownHarness(t *testing.T) {
 	t.Parallel()
 
@@ -184,16 +206,15 @@ func TestLocationsStayWithinTheirScope(t *testing.T) {
 
 	for _, adapter := range All() {
 		id := adapter.Definition().ID
-		if reader, ok := adapter.(harness.TranscriptProvider); ok {
-			sources, err := reader.Transcript().Sources(home)
-			if err != nil {
-				t.Fatal(err)
-			}
 
-			for _, path := range sources {
-				if !strings.HasPrefix(path, home+string(filepath.Separator)) {
-					t.Errorf("%s: history source %q outside isolated home %q", id, path, home)
-				}
+		sources, err := adapter.Transcript().Sources(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, path := range sources {
+			if !strings.HasPrefix(path, home+string(filepath.Separator)) {
+				t.Errorf("%s: history source %q outside isolated home %q", id, path, home)
 			}
 		}
 
@@ -291,10 +312,6 @@ func TestResumeCommandFor(t *testing.T) {
 	for _, adapter := range All() {
 		def := adapter.Definition()
 		t.Run(string(def.ID), func(t *testing.T) {
-			if _, ok := adapter.(harness.Resumable); !ok {
-				t.Skipf("%s has no resume capability", def.ID)
-			}
-
 			if args := ResumeCommandFor(def.ID, "", ""); args != nil {
 				t.Fatalf("resume without a native identity = %v, want nil", args)
 			}

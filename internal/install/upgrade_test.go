@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -197,7 +198,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	installFakeHermesCLI(t)
 	installFakeCodexCLI(t)
 
-	for _, id := range artifactHarnesses() {
+	for _, id := range artifactHarnesses(t) {
 		// pi and omp intentionally share the explicit PI_CODING_AGENT_DIR; exercise
 		// one at a time to verify that ownership does not select the other adapter.
 		t.Run(string(id), func(t *testing.T) {
@@ -239,11 +240,13 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 	}
 }
 
-func artifactHarnesses() []registry.Harness {
+func artifactHarnesses(t *testing.T) []registry.Harness {
+	t.Helper()
+
 	var result []registry.Harness
 
-	for _, id := range Harnesses() {
-		if !noInstallRequiredHarness(id) {
+	for _, id := range catalog.Harnesses() {
+		if !noInstallRequiredHarness(t, id) {
 			result = append(result, id)
 		}
 	}

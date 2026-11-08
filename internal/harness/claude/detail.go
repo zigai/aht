@@ -19,13 +19,6 @@ func (claudeHarness) ActivityDetail(
 	return hookActivityDetail(event, activity, attributes["claude_notification_type"])
 }
 
-func (claudeHarness) DetailCapabilities() registry.DetailCapabilities {
-	return registry.DetailCapabilities{
-		Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
-		Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
-	}
-}
-
 func hookActivityDetail(
 	event string,
 	activity registry.Activity,

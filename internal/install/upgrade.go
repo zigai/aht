@@ -11,6 +11,7 @@ import (
 	"github.com/google/shlex"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -21,7 +22,7 @@ func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) 
 
 	var failures []error
 
-	for _, id := range Harnesses() {
+	for _, id := range catalog.Harnesses() {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			break
