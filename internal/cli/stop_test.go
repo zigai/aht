@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -19,9 +20,14 @@ import (
 )
 
 func TestStopRevalidatesInterpretedHarness(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "read line", "pi")
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf ready; read line", "pi")
 
 	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +40,11 @@ func TestStopRevalidatesInterpretedHarness(t *testing.T) {
 		_ = input.Close()
 		_ = cmd.Wait()
 	})
+
+	var ready [len("ready")]byte
+	if _, err := io.ReadFull(output, ready[:]); err != nil {
+		t.Fatalf("wait for interpreted process: %v", err)
+	}
 
 	proc, found, err := processinfo.Find(t.Context(), cmd.Process.Pid)
 	if err != nil || !found {
