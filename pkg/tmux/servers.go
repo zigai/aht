@@ -13,6 +13,17 @@ type serverSpec struct {
 	Identity string
 }
 
+func IsBinaryName(name string) bool {
+	base := filepath.Base(name)
+	if base == "tmux" || base == "tmux:" || strings.HasPrefix(base, "tmux: server") {
+		return true
+	}
+
+	clean := strings.TrimSuffix(strings.TrimSuffix(base, ".bin"), ".real")
+
+	return clean == "tmux" || clean == "tmux:"
+}
+
 func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("discover tmux servers: %w", err)
@@ -91,7 +102,7 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	}
 
 	base := filepath.Base(args[0])
-	if !isTmuxBinaryName(base) {
+	if !IsBinaryName(base) {
 		return serverSpec{}, false
 	}
 	// Some tmux builds expose a bare -d daemon process marker rather than a
@@ -114,15 +125,4 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	}
 
 	return serverSpec{Identity: "default"}, true
-}
-
-func isTmuxBinaryName(name string) bool {
-	base := filepath.Base(name)
-	if base == "tmux" || base == "tmux:" || strings.HasPrefix(base, "tmux: server") {
-		return true
-	}
-
-	clean := strings.TrimSuffix(strings.TrimSuffix(base, ".bin"), ".real")
-
-	return clean == "tmux" || clean == "tmux:"
 }

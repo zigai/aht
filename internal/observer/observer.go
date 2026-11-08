@@ -21,6 +21,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 const (
@@ -146,6 +147,8 @@ type Observer struct {
 	grace                   time.Duration
 	healthPath              string
 	processList             ProcessLister
+	processDetails          func(context.Context, int) (processinfo.Process, bool, error)
+	processClose            func()
 	paneList                func(context.Context, []processinfo.Process) ([]mux.Pane, error)
 	locationPresence        func(context.Context, registry.Location) (registry.Presence, error)
 	catalogList             CatalogLister
@@ -176,16 +179,25 @@ func New(opts Options) *Observer {
 	store, storePath := observerStore(opts)
 
 	processList := opts.ProcessList
+
+	var (
+		processDetails func(context.Context, int) (processinfo.Process, bool, error)
+		processClose   func()
+	)
+
 	if processList == nil {
-		processList = func(ctx context.Context) ([]processinfo.Process, error) {
-			return processinfo.ListWithEnv(ctx,
-				append(drivers.EnvKeys(), processinfo.ChildRoleEnv),
-				func(process processinfo.Process) bool {
-					_, ok := catalog.ResolveProcess(process)
-					return ok
-				},
-			)
+		var scanner processinfo.Scanner
+
+		keys := append(drivers.EnvKeys(), processinfo.ChildRoleEnv)
+		includeEnv := func(process processinfo.Process) bool {
+			_, ok := catalog.ResolveProcess(process)
+			return ok
 		}
+		processList = func(ctx context.Context) ([]processinfo.Process, error) {
+			return scanner.List(ctx, keys, includeEnv, allProcessArguments)
+		}
+		processDetails = scanner.Details
+		processClose = scanner.Close
 	}
 
 	paneList := listMultiplexerPanes
@@ -239,6 +251,8 @@ func New(opts Options) *Observer {
 		grace:                   opts.GracePeriod,
 		healthPath:              healthPath,
 		processList:             processList,
+		processDetails:          processDetails,
+		processClose:            processClose,
 		paneList:                paneList,
 		locationPresence:        checkLocation,
 		catalogList:             catalogList,
@@ -276,6 +290,14 @@ func New(opts Options) *Observer {
 		running:         false,
 		continuous:      false,
 	}
+}
+
+func allProcessArguments(process processinfo.Process) bool {
+	_, agent := catalog.ResolveProcess(process)
+
+	return agent || catalog.IsWrapper(process) ||
+		tmux.IsBinaryName(process.Executable) ||
+		(len(process.Args) > 0 && tmux.IsBinaryName(process.Args[0]))
 }
 
 func (o *Observer) Run(ctx context.Context) error {
@@ -505,9 +527,15 @@ func (o *Observer) paneObservations(
 			nestedHarnessProcess(process, inventory.tree, inventory.harnessByPID) {
 			continue
 		}
+
 		// Only infer a foreground owner when controlling-TTY job-control metadata is unavailable.
-		if !process.Foreground && ((process.ProcessGroupID > 0 && process.TTY != "") ||
-			paneForegroundKnown(pane, inventory.processes)) {
+		infer, err := o.foregroundCandidate(ctx, pane, process, inventory.processes)
+		if err != nil {
+			detectErr = errors.Join(detectErr, err)
+			continue
+		}
+
+		if !infer {
 			continue
 		}
 
@@ -1517,7 +1545,12 @@ func (o *Observer) acquireLock() error {
 
 func (o *Observer) releaseLock() error {
 	o.mu.Lock()
+
 	file := o.lockFile
+	if o.processClose != nil {
+		o.processClose()
+	}
+
 	o.lockFile = nil
 	o.running = false
 	o.mu.Unlock()
