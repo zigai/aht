@@ -88,6 +88,21 @@ var adaptersByID = func() map[registry.Harness]harness.Adapter {
 	return byID
 }()
 
+var harnessesByCommand = func() map[string]registry.Harness {
+	byCommand := make(map[string]registry.Harness, len(adapters))
+	for _, adapter := range adapters {
+		definition := adapter.Definition()
+		for _, name := range definition.ProcessNames {
+			normalized := normalizeToken(name)
+			if _, exists := byCommand[normalized]; !exists {
+				byCommand[normalized] = definition.ID
+			}
+		}
+	}
+
+	return byCommand
+}()
+
 // NativeCatalogEntry associates one native catalog row with the adapter that
 // supplied it. Reporter identity comes from the adapter definition rather than
 // provider output.
@@ -171,16 +186,8 @@ func EnvNames(harnessID registry.Harness, field harness.EnvField) []string {
 }
 
 func FromCommand(command string) (registry.Harness, bool) {
-	normalized := normalizeToken(filepath.Base(command))
-
-	for _, adapter := range adapters {
-		definition := adapter.Definition()
-		if containsNormalizedToken(definition.ProcessNames, normalized) {
-			return definition.ID, true
-		}
-	}
-
-	return "", false
+	harnessID, ok := harnessesByCommand[normalizeToken(filepath.Base(command))]
+	return harnessID, ok
 }
 
 func ProcessNames(harnessID registry.Harness) []string {
