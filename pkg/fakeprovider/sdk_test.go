@@ -410,20 +410,25 @@ func (c *responsesConversation) stream(
 		event := events.Current()
 		switch typed := event.AsAny().(type) {
 		case responses.ResponseOutputItemAddedEvent:
-			if onContent != nil {
-				onContent()
-				onContent = nil
+			if typed.Item.Type != "function_call" {
+				continue
 			}
 		case responses.ResponseTextDeltaEvent:
 			deltas += typed.Delta
 		case responses.ResponseCompletedEvent:
 			completed = &typed.Response
+			continue
 		case nil:
 			return responses.Response{}, fmt.Errorf(
 				"%w: unknown event %q",
 				errSDKStream,
 				event.Type,
 			)
+		}
+
+		if onContent != nil {
+			onContent()
+			onContent = nil
 		}
 	}
 

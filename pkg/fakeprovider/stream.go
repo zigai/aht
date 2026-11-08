@@ -277,7 +277,7 @@ func responsesStream(out *eventWriter, model string, reply Reply, calls []callJS
 				OutputIndex:    index,
 				Item:           item,
 			},
-			true,
+			false,
 		)
 		out.add(
 			"response.output_text.delta",
@@ -289,7 +289,7 @@ func responsesStream(out *eventWriter, model string, reply Reply, calls []callJS
 				ContentIndex:   0,
 				Delta:          reply.Text,
 			},
-			false,
+			true,
 		)
 		out.add(
 			"response.output_text.done",
