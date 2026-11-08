@@ -12,7 +12,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -48,7 +48,7 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		t,
 		command.Env,
 		"--model",
-		harness.LaunchProviderName,
+		launch.ProviderName,
 		"--always-approve",
 		"--disable-web-search",
 		"--no-memory",

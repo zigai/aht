@@ -1,4 +1,4 @@
-package openclaw
+package launch
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const (
@@ -20,28 +18,28 @@ const (
 
 var errNotTCPAddress = errors.New("reserved local address is not TCP")
 
-func (openclawHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func openclawPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	port, err := reserveLocalPort()
 	if err != nil {
-		return harness.LaunchPlan{}, err
+		return Plan{}, err
 	}
 
 	gatewayAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	modelRef := harness.LaunchProviderName + "/" + model.Model
+	modelRef := ProviderName + "/" + model.Model
 
-	return harness.LaunchPlan{
-		Executable: openclawCommand,
-		Protocol:   harness.LaunchProtocolOpenAIChat,
-		Files: []harness.LaunchFile{{
+	return Plan{
+		Executable: "openclaw",
+		Protocol:   ProtocolOpenAIChat,
+		Files: []File{{
 			Path: filepath.Join(paths.Home, ".openclaw", "openclaw.json"),
 			Update: func(existing []byte) ([]byte, error) {
 				return openclawLaunchConfig(existing, paths.Work, model, port)
 			},
 		}},
-		Services: []harness.LaunchService{
+		Services: []Service{
 			{
 				Args: []string{
 					"gateway",
@@ -61,7 +59,7 @@ func (openclawHarness) LaunchPlan(
 				"agent",
 				"--session-id",
 				openclawLaunchSession,
-				"--model",
+				modelFlag,
 				modelRef,
 				"--message",
 				prompt,
@@ -77,7 +75,7 @@ func (openclawHarness) LaunchPlan(
 
 			return args, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "exec",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command}
@@ -109,7 +107,7 @@ func reserveLocalPort() (int, error) {
 func openclawLaunchConfig(
 	existing []byte,
 	work string,
-	model harness.LaunchModel,
+	model Model,
 	port int,
 ) ([]byte, error) {
 	settings := make(map[string]any)
@@ -121,9 +119,9 @@ func openclawLaunchConfig(
 
 	defaults := mapValue(mapValue(settings, "agents"), "defaults")
 	defaults["workspace"] = work
-	defaults["model"] = map[string]any{"primary": harness.LaunchProviderName + "/" + model.Model}
+	defaults["model"] = map[string]any{"primary": ProviderName + "/" + model.Model}
 	providers := mapValue(mapValue(settings, "models"), "providers")
-	providers[harness.LaunchProviderName] = map[string]any{
+	providers[ProviderName] = map[string]any{
 		"baseUrl": model.Endpoint + "/v1",
 		"apiKey":  model.APIKey,
 		"api":     "openai-completions",
@@ -141,7 +139,7 @@ func openclawLaunchConfig(
 		},
 	}
 	plugins := mapValue(settings, "plugins")
-	plugins["allow"] = []string{openclawPluginName}
+	plugins["allow"] = []string{"aht-state"}
 	entries := mapValue(plugins, "entries")
 	entries["fireworks"] = map[string]any{"enabled": false}
 	entries["perplexity"] = map[string]any{"enabled": false}

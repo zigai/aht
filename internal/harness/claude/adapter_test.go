@@ -10,22 +10,9 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/internal/harness/claude"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-func TestTitleRequestRecognition(t *testing.T) {
-	testharness.CheckTitleRequests(t, claude.New(), map[string]bool{
-		`{"system":[{"type":"text","text":"You are naming a coding session so the user ca` +
-			`n pick it out of a long list of sessions. The title is short."}],"messages":[{"r` +
-			`ole":"user","content":"<session>Refine the parser</session>"}]}`: true,
-		`{"messages":[{"role":"user","content":"Write the title in the predominant langua` +
-			`ge"}]}`: false,
-		`{"system":"Help with code","messages":[{"role":"user","content":"You are naming ` +
-			`a coding session so the user can pick it out of a long list of sessions."}]}`: false,
-	})
-}
 
 func TestPayloadDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

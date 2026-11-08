@@ -1,39 +1,37 @@
-package opencode
+package launch
 
 import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
-const launchModelName = "AHT fakeprovider"
+const opencodeModelName = "AHT fakeprovider"
 
-func (opencodeHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func opencodePlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	configDir := filepath.Join(paths.Root, "opencode")
 
-	configJSON, err := launchConfigJSON(model)
+	configJSON, err := opencodeConfigJSON(model)
 	if err != nil {
-		return harness.LaunchPlan{}, err
+		return Plan{}, err
 	}
 
-	selected := harness.LaunchProviderName + "/" + model.Model
+	selected := ProviderName + "/" + model.Model
 
-	return harness.LaunchPlan{
+	return Plan{
 		Executable: "opencode",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env:        []string{"OPENCODE_CONFIG_DIR=" + configDir},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(configDir, "opencode.json"),
 			Update: func([]byte) ([]byte, error) { return configJSON, nil },
 		}},
 		Setup: [][]string{{"service", "set", "disabled", "true"}, {"debug", "config"}},
 		Headless: func(prompt string) ([]string, error) {
-			return []string{"run", "--model", selected, "--auto", prompt}, nil
+			return []string{"run", modelFlag, selected, "--auto", prompt}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			if prompt == "" {
@@ -42,17 +40,17 @@ func (opencodeHarness) LaunchPlan(
 
 			return []string{"--prompt", prompt}, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name:      "shell",
 			Arguments: func(command string) map[string]any { return map[string]any{"command": command} },
 		},
 	}, nil
 }
 
-func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
+func opencodeConfigJSON(model Model) ([]byte, error) {
 	config := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
-		"model":   harness.LaunchProviderName + "/" + model.Model,
+		"model":   ProviderName + "/" + model.Model,
 		// Native V2 agents.<id>.disabled removes the auxiliary title agent:
 		// https://opencode.ai/v2/docs/agents#disabled
 		// Its background model call would consume the deterministic tool script
@@ -60,14 +58,14 @@ func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
 		// launches; normal installations keep native title generation enabled.
 		"agents": map[string]any{"title": map[string]any{"disabled": true}},
 		"provider": map[string]any{
-			harness.LaunchProviderName: map[string]any{
+			ProviderName: map[string]any{
 				"npm":  "@ai-sdk/openai-compatible",
-				"name": launchModelName,
+				"name": opencodeModelName,
 				"options": map[string]any{
 					"baseURL": model.Endpoint + "/v1",
 					"apiKey":  model.APIKey,
 				},
-				"models": map[string]any{model.Model: map[string]any{"name": launchModelName}},
+				"models": map[string]any{model.Model: map[string]any{"name": opencodeModelName}},
 			},
 		},
 	}

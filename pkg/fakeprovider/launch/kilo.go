@@ -1,68 +1,66 @@
-package kilo
+package launch
 
 import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
-const launchModelName = "AHT fakeprovider"
+const kiloModelName = "AHT fakeprovider"
 
-func (kiloHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func kiloPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	configDir := filepath.Join(paths.Root, "kilo")
 
-	configJSON, err := launchConfigJSON(model)
+	configJSON, err := kiloConfigJSON(model)
 	if err != nil {
-		return harness.LaunchPlan{}, err
+		return Plan{}, err
 	}
 
-	selected := harness.LaunchProviderName + "/" + model.Model
+	selected := ProviderName + "/" + model.Model
 
-	return harness.LaunchPlan{
-		TitleRequests: []harness.TitleRequest{
+	return Plan{
+		TitleRequests: []TitleRequest{
 			{Role: "system", Prefix: "You are a title generator."},
 		},
 		Executable: "kilo",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env:        []string{"KILO_CONFIG_DIR=" + configDir},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(configDir, "opencode.json"),
 			Update: func([]byte) ([]byte, error) { return configJSON, nil },
 		}},
 		Headless: func(prompt string) ([]string, error) {
-			return []string{"run", "--model", selected, "--auto", "--dir", paths.Work, prompt}, nil
+			return []string{"run", modelFlag, selected, "--auto", "--dir", paths.Work, prompt}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return []string{"--model", selected}, nil
+				return []string{modelFlag, selected}, nil
 			}
 
-			return []string{"--model", selected, "--prompt", prompt}, nil
+			return []string{modelFlag, selected, "--prompt", prompt}, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name:      "bash",
 			Arguments: func(command string) map[string]any { return map[string]any{"command": command} },
 		},
 	}, nil
 }
 
-func launchConfigJSON(model harness.LaunchModel) ([]byte, error) {
+func kiloConfigJSON(model Model) ([]byte, error) {
 	config := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
 		"provider": map[string]any{
-			harness.LaunchProviderName: map[string]any{
+			ProviderName: map[string]any{
 				"npm":  "@ai-sdk/openai-compatible",
-				"name": launchModelName,
+				"name": kiloModelName,
 				"options": map[string]any{
 					"baseURL": model.Endpoint + "/v1",
 					"apiKey":  model.APIKey,
 				},
-				"models": map[string]any{model.Model: map[string]any{"name": launchModelName}},
+				"models": map[string]any{model.Model: map[string]any{"name": kiloModelName}},
 			},
 		},
 	}

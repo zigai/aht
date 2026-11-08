@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
 // Both native RPC implementations await session.abort before acknowledging abort.
@@ -65,7 +65,7 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--mode",
 			"rpc",
 			"--provider",
-			harness.LaunchProviderName,
+			launch.ProviderName,
 			"--model",
 			fakeModel,
 		}
@@ -83,7 +83,7 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--mode",
 			"rpc",
 			"--model",
-			harness.LaunchProviderName + "/" + fakeModel,
+			launch.ProviderName + "/" + fakeModel,
 			"--hook",
 			hooks[0],
 		}

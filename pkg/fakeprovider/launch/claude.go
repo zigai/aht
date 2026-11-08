@@ -1,33 +1,31 @@
-package claude
+package launch
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const claudeKeySuffixLength = 20
 
-var errEmptyPrompt = errors.New("claude headless run needs a prompt")
+var errClaudeEmptyPrompt = errors.New("claude headless run needs a prompt")
 
-func (claudeHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func claudePlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	configDir := filepath.Join(paths.Root, "claude")
 
-	return harness.LaunchPlan{
-		TitleRequests: []harness.TitleRequest{
+	return Plan{
+		TitleRequests: []TitleRequest{
 			{
 				Role:   "system",
 				Prefix: "You are naming a coding session so the user can pick it out of a long list of sessions.",
 			},
 		},
-		Executable: claudeCommand,
-		Protocol:   harness.LaunchProtocolAnthropicMessages,
+		Executable: "claude",
+		Protocol:   ProtocolAnthropicMessages,
 		Env: []string{
 			"CLAUDE_CONFIG_DIR=" + configDir,
 			"ANTHROPIC_BASE_URL=" + model.Endpoint,
@@ -35,7 +33,7 @@ func (claudeHarness) LaunchPlan(
 			"ANTHROPIC_API_KEY=" + model.APIKey,
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path: filepath.Join(configDir, ".claude.json"),
 			Update: func(existing []byte) ([]byte, error) {
 				return launchState(existing, paths.Work, model.APIKey)
@@ -43,13 +41,13 @@ func (claudeHarness) LaunchPlan(
 		}},
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return nil, errEmptyPrompt
+				return nil, errClaudeEmptyPrompt
 			}
 
 			return []string{
 				"-p",
 				prompt,
-				"--model",
+				modelFlag,
 				model.Model,
 				"--allowedTools",
 				"Bash",
@@ -57,14 +55,14 @@ func (claudeHarness) LaunchPlan(
 			}, nil
 		},
 		Interactive: func(prompt string) ([]string, error) {
-			args := []string{"--model", model.Model}
+			args := []string{modelFlag, model.Model}
 			if prompt != "" {
 				args = append(args, prompt)
 			}
 
 			return args, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "Bash",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command}

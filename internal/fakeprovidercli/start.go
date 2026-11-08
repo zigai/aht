@@ -162,7 +162,7 @@ func startHarness(
 
 	if options.aht != "" {
 		if err := launched.StartTracker(ctx); err != nil {
-			return nil, nil, finish(fmt.Errorf("start tracker: %w", err), launched.Close())
+			return nil, nil, finish(fmt.Errorf("start tracker: %w", err), launched.Close(ctx))
 		}
 	}
 
@@ -172,7 +172,7 @@ func startHarness(
 		gotmux.Size{Width: terminalWidth, Height: terminalHeight},
 	)
 	if err != nil {
-		return nil, nil, finish(fmt.Errorf("start terminal: %w", err), launched.Close())
+		return nil, nil, finish(fmt.Errorf("start terminal: %w", err), launched.Close(ctx))
 	}
 
 	return launched, term, nil
@@ -182,7 +182,7 @@ func (run startRun) close(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), shutdownTimeout)
 	defer cancel()
 
-	return errors.Join(run.term.Close(ctx), run.launched.Close(), run.provider.Close())
+	return errors.Join(run.term.Close(ctx), run.launched.Close(ctx), run.provider.Close())
 }
 
 func waitForExit(ctx context.Context, term *launch.Terminal) error {
@@ -260,8 +260,7 @@ func shellCommand(argv []string) string {
 func launchableHarness(value string) (registry.Harness, error) {
 	harnessID, err := catalog.Parse(value)
 	if err == nil {
-		adapter, _ := catalog.Find(harnessID)
-		if _, ok := adapter.(harness.Launchable); ok {
+		if launch.Supported(harnessID) {
 			return harnessID, nil
 		}
 
@@ -281,7 +280,7 @@ func launchableHarnessNames() []string {
 	var names []string
 
 	for _, adapter := range catalog.All() {
-		if _, ok := adapter.(harness.Launchable); ok {
+		if launch.Supported(adapter.Definition().ID) {
 			names = append(names, string(adapter.Definition().ID))
 		}
 	}

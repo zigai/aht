@@ -1,11 +1,9 @@
-package hermes
+package launch
 
 import (
 	"errors"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const customProvider = "custom"
@@ -14,10 +12,10 @@ var errHermesInitialPrompt = errors.New(
 	"hermes chat takes no initial prompt on the command line; use -q for a one-shot query",
 )
 
-func (hermesHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func hermesPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	home := filepath.Join(paths.Root, "hermes")
 	config := fmt.Sprintf(
 		"model:\n  default: %q\n  provider: %s\n  base_url: %q\n  "+
@@ -26,19 +24,18 @@ func (hermesHarness) LaunchPlan(
 		model.Model,
 		customProvider,
 		model.Endpoint+"/v1",
-		model.APIKey,
-		hermesPluginName,
+		model.APIKey, "aht-state",
 	)
 
-	return harness.LaunchPlan{
-		TitleRequests: []harness.TitleRequest{{Role: "system", Prefix: "You name chat sessions."}},
-		Executable:    hermesCommand,
-		Protocol:      harness.LaunchProtocolOpenAIChat,
+	return Plan{
+		TitleRequests: []TitleRequest{{Role: "system", Prefix: "You name chat sessions."}},
+		Executable:    "hermes",
+		Protocol:      ProtocolOpenAIChat,
 		Env: []string{
 			"HERMES_HOME=" + home,
 			"OPENAI_API_KEY=" + model.APIKey,
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(home, "config.yaml"),
 			Update: func([]byte) ([]byte, error) { return []byte(config), nil },
 		}},
@@ -48,7 +45,7 @@ func (hermesHarness) LaunchPlan(
 				prompt,
 				"--provider",
 				customProvider,
-				"--model",
+				modelFlag,
 				model.Model,
 				"--yolo",
 				"--accept-hooks",
@@ -59,9 +56,9 @@ func (hermesHarness) LaunchPlan(
 				return nil, errHermesInitialPrompt
 			}
 
-			return []string{"chat", "--provider", customProvider, "--model", model.Model}, nil
+			return []string{"chat", "--provider", customProvider, modelFlag, model.Model}, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "terminal",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command}

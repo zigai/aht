@@ -25,9 +25,9 @@ extension, hook, or plugin documentation. Before adding or changing a harness:
 
 ## Adding a Harness
 
-Everything harness-specific lives in one adapter package. Deleting
-`internal/harness/<name>/` and its catalog line must leave a building tree with
-no remaining references. `internal/harness/amp` is a compact reference adapter.
+Harness integrations live in one adapter package; fakeprovider launch plans live
+in `pkg/fakeprovider/launch/<name>.go`. Deleting both and their catalog/table entries
+must leave a building tree. `internal/harness/amp` is a compact reference adapter.
 
 1. Create `internal/harness/<name>/adapter.go` with `New()` returning a type that
    embeds `harness.BaseAdapter` built from a `harness.Definition`:
@@ -58,13 +58,14 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
      from the same native files.
    - `manifest.go` + `assets/screen.toml`: `ScreenManifest` for screen authority
      or screen fallback.
-   - `launch.go`: `LaunchPlan` when the harness can use a custom model
-     endpoint. `pkg/fakeprovider/launch`, the `fakeprovider` command, and
-     `test/hostcompat` launch the harness only through it.
    - `distribution.go`: `Distribution()` with `Directory` equal to the adapter
      folder name. The architecture test derives name ownership from it.
    - `locations.go`: `Locations(projectDir)` with the config, instruction,
      skill, command, and MCP paths the native docs name. Every adapter needs it.
+   - When the harness supports a custom model endpoint, add a launch plan in
+     `pkg/fakeprovider/launch/<name>.go` and register it in that package's
+     table. The `fakeprovider` command and `test/hostcompat` launch harnesses
+     only through this package.
 3. Generated integrations report with
    `aht report <name> --reporter <IntegrationSource> --reporter-version <version>`,
    plus `--sequence` for ordered reporters and `--multi-session` when one process

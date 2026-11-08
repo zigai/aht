@@ -8,14 +8,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func TestCloseStopsProcessesThatLeftTheHarnessProcessGroup(t *testing.T) {
 	t.Parallel()
 	pidFile := filepath.Join(t.TempDir(), "detached.pid")
-	plan := harness.LaunchPlan{
+	plan := Plan{
 		Executable: "/bin/sh",
 		Setup: [][]string{
 			{
@@ -50,7 +48,7 @@ func TestCloseStopsProcessesThatLeftTheHarnessProcessGroup(t *testing.T) {
 		t.Fatalf("detached process is not running before Close: %v", err)
 	}
 
-	if err := s.Close(); err != nil {
+	if err := s.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,29 +1,27 @@
-package qwen
+package launch
 
 import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
-func (qwenHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
-	common := []string{"--auth-type", "openai", "--model", model.Model}
+func qwenPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
+	common := []string{"--auth-type", "openai", modelFlag, model.Model}
 
-	return harness.LaunchPlan{
+	return Plan{
 		Executable: "qwen",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env: []string{
 			"OPENAI_API_KEY=" + model.APIKey,
 			"OPENAI_BASE_URL=" + model.Endpoint + "/v1",
 			"OPENAI_MODEL=" + model.Model,
 			"QWEN_DISABLE_AUTO_TITLE=1",
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(paths.Home, ".qwen", "settings.json"),
 			Update: launchSettings,
 		}},
@@ -37,7 +35,7 @@ func (qwenHarness) LaunchPlan(
 
 			return append([]string{"-i", prompt}, common...), nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name:      "run_shell_command",
 			Arguments: func(command string) map[string]any { return map[string]any{"command": command} },
 		},

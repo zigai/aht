@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -17,14 +18,13 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var errLaunchRefused = errors.New("launch refused by fixture")
 
-func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
+func TestProviderUsesLaunchTitleRecognition(t *testing.T) {
 	titleRequest, err := TitleRequestFor(registry.Harness("kilo"))
 	if err != nil {
 		t.Fatal(err)
@@ -41,14 +41,20 @@ func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
 		}
 	})
 
-	for _, body := range []string{
-		`{"messages":[{"role":"system","content":"You are a title generator. You output O` +
+	for _, test := range []struct {
+		body string
+		want string
+	}{
+		{body: `{"messages":[{"role":"system","content":"You are a title generator. You output O` +
 			`NLY a thread title. Nothing else."},{"role":"user","content":"Refine the parser"` +
-			`}]}`,
-		`{"messages":[{"role":"user","content":"Explain the phrase You are a title generator."}]}`,
+			`}]}`, want: "Fake session"},
+		{
+			body: `{"messages":[{"role":"user","content":"Explain the phrase You are a title generator."}]}`,
+			want: "Explain the phrase You are a title generator.",
+		},
 	} {
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			server.URL()+"/v1/chat/completions", strings.NewReader(body))
+			server.URL()+"/v1/chat/completions", strings.NewReader(test.body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +64,14 @@ func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		var reply struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
 			t.Error(err)
 		}
 
@@ -68,6 +81,10 @@ func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
 
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("provider status = %d", response.StatusCode)
+		}
+
+		if len(reply.Choices) != 1 || reply.Choices[0].Message.Content != test.want {
+			t.Fatalf("reply = %+v, want %q", reply, test.want)
 		}
 	}
 
@@ -79,6 +96,10 @@ func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
 	if len(requests) != 1 ||
 		requests[0].UserText != "Explain the phrase You are a title generator." || len(server.SideRequests()) != 1 {
 		t.Fatalf("conversation = %+v, side = %+v", requests, server.SideRequests())
+	}
+
+	if requests[0].Index != 0 {
+		t.Fatalf("title request consumed the conversation script: %+v", requests)
 	}
 }
 
@@ -207,7 +228,7 @@ func TestNewRejectsNonEmptyRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, Options{Root: root})
+	_, _, err := newFixtureHarness(t.Context(), t, Plan{}, Options{Root: root})
 	if !errors.Is(err, errRootNotEmpty) {
 		t.Fatalf("New() error = %v, want errRootNotEmpty", err)
 	}
@@ -216,8 +237,8 @@ func TestNewRejectsNonEmptyRoot(t *testing.T) {
 func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "root")
-	plan := harness.LaunchPlan{
-		Protocol: harness.LaunchProtocolOpenAIChat,
+	plan := Plan{
+		Protocol: ProtocolOpenAIChat,
 		Env:      []string{"FIXTURE_HOME=" + filepath.Join(root, "plan"), "FIXTURE_PLAN=yes"},
 	}
 	options := Options{
@@ -233,7 +254,7 @@ func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 
 	assertRootLayout(t, s)
 
-	wantPaths := harness.LaunchPaths{
+	wantPaths := Paths{
 		Root: root,
 		Home: filepath.Join(root, "home"),
 		Work: filepath.Join(root, "work"),
@@ -242,7 +263,7 @@ func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 		t.Errorf("plan paths = %+v, want %+v", planner.paths, wantPaths)
 	}
 
-	wantModel := harness.LaunchModel{Endpoint: "http://127.0.0.1:9", Model: "fake", APIKey: "fake"}
+	wantModel := Model{Endpoint: "http://127.0.0.1:9", Model: "fake", APIKey: "fake"}
 	if planner.model != wantModel {
 		t.Errorf("plan model = %+v, want %+v", planner.model, wantModel)
 	}
@@ -320,8 +341,8 @@ func TestNewInstallsIntegrationBeforePlanFiles(t *testing.T) {
 	installLog := filepath.Join(t.TempDir(), "install.log")
 	recordPath := filepath.Join(t.TempDir(), "record.txt")
 	integration := filepath.Join(root, "home", ".fake-integration")
-	plan := harness.LaunchPlan{
-		Files: []harness.LaunchFile{{
+	plan := Plan{
+		Files: []File{{
 			Path: integration,
 			Update: func(existing []byte) ([]byte, error) {
 				return append(slices.Clone(existing), "configured\n"...), nil
@@ -371,7 +392,7 @@ func TestNewInstallsIntegrationBeforePlanFiles(t *testing.T) {
 func TestNewReportsSetupFailure(t *testing.T) {
 	t.Parallel()
 
-	plan := harness.LaunchPlan{Setup: [][]string{{helperArgument, "exit"}}}
+	plan := Plan{Setup: [][]string{{helperArgument, "exit"}}}
 	_, _, err := newFixtureHarness(t.Context(), t, plan, Options{})
 
 	exitErr, ok := errors.AsType[*exec.ExitError](err)
@@ -414,7 +435,7 @@ func TestNewWithoutPlanLaunchesNothing(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
+		if err := s.Close(t.Context()); err != nil {
 			t.Error(err)
 		}
 	})
@@ -446,7 +467,7 @@ func TestNewWithoutPlanLaunchesNothing(t *testing.T) {
 func TestHeadlessAndInteractiveArgs(t *testing.T) {
 	t.Parallel()
 
-	plan := harness.LaunchPlan{
+	plan := Plan{
 		Headless: func(prompt string) ([]string, error) {
 			return []string{helperArgument, "record", prompt}, nil
 		},
@@ -487,7 +508,7 @@ func TestHeadlessAndInteractiveArgs(t *testing.T) {
 		t.Fatalf("InteractiveArgs() error = %v, want the plan's own error", err)
 	}
 
-	withoutHeadless, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, Options{})
+	withoutHeadless, _, err := newFixtureHarness(t.Context(), t, Plan{}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +521,7 @@ func TestHeadlessAndInteractiveArgs(t *testing.T) {
 func TestCommandCancellationKillsProcessGroup(t *testing.T) {
 	t.Parallel()
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, Options{})
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

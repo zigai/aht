@@ -1,4 +1,4 @@
-package codex
+package launch
 
 import (
 	"errors"
@@ -6,37 +6,35 @@ import (
 	"path/filepath"
 
 	"github.com/pelletier/go-toml/v2"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 var (
-	errEmptyPrompt  = errors.New("codex headless run needs a prompt")
-	errLaunchConfig = errors.New("codex config conflicts with the fake provider")
+	errCodexEmptyPrompt  = errors.New("codex headless run needs a prompt")
+	errCodexLaunchConfig = errors.New("codex config conflicts with the fake provider")
 )
 
-func (codexHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func codexPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	home := filepath.Join(paths.Root, "codex")
 
-	return harness.LaunchPlan{
-		Executable: codexCommand,
-		Protocol:   harness.LaunchProtocolOpenAIResponses,
+	return Plan{
+		Executable: "codex",
+		Protocol:   ProtocolOpenAIResponses,
 		Env: []string{
 			"CODEX_HOME=" + home,
 			"AHT_FAKEPROVIDER_API_KEY=" + model.APIKey,
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path: filepath.Join(home, "config.toml"),
 			Update: func(existing []byte) ([]byte, error) {
-				return launchConfig(existing, model)
+				return codexConfig(existing, model)
 			},
 		}},
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return nil, errEmptyPrompt
+				return nil, errCodexEmptyPrompt
 			}
 
 			return []string{
@@ -57,7 +55,7 @@ func (codexHarness) LaunchPlan(
 
 			return args, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "exec_command",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"cmd": command}
@@ -66,7 +64,7 @@ func (codexHarness) LaunchPlan(
 	}, nil
 }
 
-func launchConfig(existing []byte, model harness.LaunchModel) ([]byte, error) {
+func codexConfig(existing []byte, model Model) ([]byte, error) {
 	config := make(map[string]any)
 	if err := toml.Unmarshal(existing, &config); err != nil {
 		return nil, fmt.Errorf("decode codex config: %w", err)
@@ -77,13 +75,13 @@ func launchConfig(existing []byte, model harness.LaunchModel) ([]byte, error) {
 	if value, ok := config["model_providers"]; ok {
 		table, ok := value.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("%w: model_providers is %T", errLaunchConfig, value)
+			return nil, fmt.Errorf("%w: model_providers is %T", errCodexLaunchConfig, value)
 		}
 
 		providers = table
 	}
 
-	providers[harness.LaunchProviderName] = map[string]any{
+	providers[ProviderName] = map[string]any{
 		"name":                 "AHT fakeprovider",
 		"base_url":             model.Endpoint + "/v1",
 		"env_key":              "AHT_FAKEPROVIDER_API_KEY",
@@ -91,7 +89,7 @@ func launchConfig(existing []byte, model harness.LaunchModel) ([]byte, error) {
 		"requires_openai_auth": false,
 	}
 	config["model"] = model.Model
-	config["model_provider"] = harness.LaunchProviderName
+	config["model_provider"] = ProviderName
 	config["model_providers"] = providers
 
 	content, err := toml.Marshal(config)

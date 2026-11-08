@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
 // The native abort endpoint ends the active turn, not the durable session.
@@ -32,7 +32,7 @@ func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 	serverPermissionJSON(t, client, sessionURL+"/prompt_async"+query, http.MethodPost,
 		map[string]any{
 			"model": map[string]string{
-				"providerID": harness.LaunchProviderName,
+				"providerID": launch.ProviderName,
 				"modelID":    fakeModel,
 			},
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},

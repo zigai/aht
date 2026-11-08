@@ -8,11 +8,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const droidLaunchModelID = "custom:" + harness.LaunchProviderName + "-0"
+const droidLaunchModelID = "custom:" + launch.ProviderName + "-0"
 
 // The public SDK's JsonRpcEnvelopeSchema requires type and factoryApiVersion;
 // factoryProtocolVersion is optional, not a client-selected compatibility pin.

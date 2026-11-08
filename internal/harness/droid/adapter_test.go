@@ -10,16 +10,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestTitleRequestRecognition(t *testing.T) {
-	testharness.CheckTitleRequests(t, New(), map[string]bool{
-		`{"system":"Provider preamble\nYou are a helper that generates concise session ti` +
-			`tles for a session picker.","messages":[{"role":"user","content":"Refine the par` +
-			`ser"}]}`: true,
-		`{"messages":[{"role":"user","content":"You are a helper that generates concise s` +
-			`ession titles for a session picker."}]}`: false,
-	})
-}
-
 func TestPayloadDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

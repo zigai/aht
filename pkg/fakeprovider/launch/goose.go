@@ -1,20 +1,18 @@
-package goose
+package launch
 
 import (
 	"errors"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
-var errEmptyPrompt = errors.New("goose headless run needs a prompt")
+var errGooseEmptyPrompt = errors.New("goose headless run needs a prompt")
 
-func (gooseHarness) LaunchPlan(
-	_ harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
-	return harness.LaunchPlan{
-		Executable: gooseCommand,
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+func goosePlan(
+	_ Paths,
+	model Model,
+) (Plan, error) {
+	return Plan{
+		Executable: "goose",
+		Protocol:   ProtocolOpenAIChat,
 		Env: []string{
 			"GOOSE_PROVIDER=openai",
 			"GOOSE_MODEL=" + model.Model,
@@ -30,7 +28,7 @@ func (gooseHarness) LaunchPlan(
 		},
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return nil, errEmptyPrompt
+				return nil, errGooseEmptyPrompt
 			}
 
 			return []string{
@@ -39,7 +37,7 @@ func (gooseHarness) LaunchPlan(
 				prompt,
 				"--provider",
 				"openai",
-				"--model",
+				modelFlag,
 				model.Model,
 				"--max-turns",
 				"2",
@@ -48,7 +46,7 @@ func (gooseHarness) LaunchPlan(
 		},
 		Interactive: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return []string{"session", "--provider", "openai", "--model", model.Model}, nil
+				return []string{"session", "--provider", "openai", modelFlag, model.Model}, nil
 			}
 
 			return []string{
@@ -58,11 +56,11 @@ func (gooseHarness) LaunchPlan(
 				"--interactive",
 				"--provider",
 				"openai",
-				"--model",
+				modelFlag,
 				model.Model,
 			}, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "shell",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command}

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
 func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
@@ -79,7 +79,7 @@ func runPiPermission(t *testing.T, host *isolatedHost, allow bool) {
 		"--mode",
 		"rpc",
 		"--provider",
-		harness.LaunchProviderName,
+		launch.ProviderName,
 		"--model",
 		fakeModel,
 		"--extension",
@@ -231,7 +231,7 @@ func runOmpPermission(t *testing.T, host *isolatedHost, allow bool) {
 			"--mode",
 			"rpc",
 			"--model",
-			harness.LaunchProviderName + "/" + fakeModel,
+			launch.ProviderName + "/" + fakeModel,
 			"--approval-mode",
 			"always-ask",
 		},

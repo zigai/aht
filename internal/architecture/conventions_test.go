@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -29,7 +30,7 @@ func TestAdapterNamesStayOwned(t *testing.T) {
 	}
 
 	visitProductionGo(t, func(path string, data []byte) {
-		if path == "pkg/aht/harnesses.go" {
+		if path == "pkg/aht/harnesses.go" || strings.HasPrefix(path, "pkg/fakeprovider/launch/") {
 			return
 		}
 
@@ -159,6 +160,15 @@ func isStringLiteral(expr ast.Expr, want string) bool {
 
 func visitProductionGo(t *testing.T, visit func(string, []byte)) {
 	t.Helper()
+	visitGo(t, func(path string, data []byte) {
+		if !strings.HasSuffix(path, "_test.go") {
+			visit(path, data)
+		}
+	})
+}
+
+func visitGo(t *testing.T, visit func(string, []byte)) {
+	t.Helper()
 
 	rootFS, err := os.OpenRoot(filepath.Join("..", ".."))
 	if err != nil {
@@ -184,7 +194,7 @@ func visitProductionGo(t *testing.T, visit func(string, []byte)) {
 			return nil
 		}
 
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 
@@ -200,4 +210,80 @@ func visitProductionGo(t *testing.T, visit func(string, []byte)) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestSourcesSupportLinuxOrDarwin(t *testing.T) {
+	t.Parallel()
+	visitGo(t, func(path string, data []byte) {
+		if strings.HasSuffix(path, "_other.go") || strings.HasSuffix(path, "_other_test.go") {
+			t.Errorf("%s is a platform fallback; use linux or darwin sources", path)
+		}
+
+		set := token.NewFileSet()
+
+		file, err := parser.ParseFile(set, path, data, parser.PackageClauseOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var expr constraint.Expr
+
+		for line := range strings.Lines(string(data[:set.Position(file.Package).Offset])) {
+			if !constraint.IsGoBuild(line) && !constraint.IsPlusBuild(line) {
+				continue
+			}
+
+			parsed, err := constraint.Parse(line)
+			if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+
+			if expr == nil {
+				expr = parsed
+			} else {
+				expr = &constraint.AndExpr{X: expr, Y: parsed}
+			}
+		}
+
+		if expr != nil && !constraintSupports(expr, "linux") &&
+			!constraintSupports(expr, "darwin") {
+			t.Errorf("%s has a build constraint excluding linux and darwin: %s", path, expr)
+		}
+	})
+}
+
+func constraintSupports(expr constraint.Expr, platform string) bool {
+	tags := make(map[string]bool)
+	for name := range strings.FieldsSeq("aix android darwin dragonfly freebsd hurd illumos ios js linux " +
+		"nacl netbsd openbsd plan9 solaris wasip1 windows zos") {
+		tags[name] = name == platform
+	}
+
+	tags["unix"] = true
+
+	return constraintMatches(expr, tags)
+}
+
+func constraintMatches(expr constraint.Expr, tags map[string]bool) bool {
+	unknown := ""
+
+	result := expr.Eval(func(tag string) bool {
+		value, found := tags[tag]
+		if !found {
+			unknown = tag
+		}
+
+		return value
+	})
+	if unknown == "" {
+		return result
+	}
+
+	tags[unknown] = false
+	without := constraintMatches(expr, tags)
+	tags[unknown] = true
+	with := constraintMatches(expr, tags)
+	delete(tags, unknown)
+
+	return without || with
 }

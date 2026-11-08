@@ -13,8 +13,6 @@ import (
 	"time"
 
 	gotmux "github.com/zigai/gotmux/tmux"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func registerTerminalCleanup(t *testing.T, term *Terminal) {
@@ -146,7 +144,7 @@ func TestTerminalReportsExitedProgram(t *testing.T) {
 func TestStartTerminalRunsHarnessWithLaunchEnvironmentOnly(t *testing.T) {
 	t.Setenv("AHT_LAUNCH_TEST_LEAK", "leaked")
 	ctx := t.Context()
-	plan := harness.LaunchPlan{
+	plan := Plan{
 		Executable: "/bin/sh",
 		Interactive: func(string) ([]string, error) {
 			return []string{

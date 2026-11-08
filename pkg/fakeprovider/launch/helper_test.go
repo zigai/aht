@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -228,15 +227,15 @@ func fakeInstall(args []string) int {
 }
 
 type fakePlanner struct {
-	plan  harness.LaunchPlan
-	paths harness.LaunchPaths
-	model harness.LaunchModel
+	plan  Plan
+	paths Paths
+	model Model
 }
 
 func (p *fakePlanner) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	p.paths = paths
 	p.model = model
 
@@ -246,26 +245,26 @@ func (p *fakePlanner) LaunchPlan(
 func newFixtureHarness(
 	ctx context.Context,
 	t *testing.T,
-	plan harness.LaunchPlan,
-	options Options,
+	plan Plan,
+	opts Options,
 ) (*Harness, *fakePlanner, error) {
 	t.Helper()
 
-	if options.Root == "" {
-		options.Root = filepath.Join(t.TempDir(), "root")
+	if opts.Root == "" {
+		opts.Root = filepath.Join(t.TempDir(), "root")
 	}
 
-	if options.Endpoint == "" {
-		options.Endpoint = "http://127.0.0.1:9"
+	if opts.Endpoint == "" {
+		opts.Endpoint = "http://127.0.0.1:9"
 	}
 
-	if options.Harness == "" {
-		options.Harness = registry.Harness("fixture")
+	if opts.Harness == "" {
+		opts.Harness = registry.Harness("fixture")
 	}
 
-	if _, set := envValue(options.Env, installLogEnv); !set {
-		options.Env = append(
-			slices.Clone(options.Env),
+	if _, set := envValue(opts.Env, installLogEnv); !set {
+		opts.Env = append(
+			slices.Clone(opts.Env),
 			installLogEnv+"="+filepath.Join(t.TempDir(), "install.log"),
 		)
 	}
@@ -276,13 +275,13 @@ func newFixtureHarness(
 
 	planner := &fakePlanner{plan: plan}
 
-	s, err := newHarness(ctx, options, planner)
+	s, err := newHarness(ctx, opts, planner.LaunchPlan)
 	if err != nil {
 		return nil, planner, err
 	}
 
 	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
+		if err := s.Close(ctx); err != nil {
 			t.Error(err)
 		}
 	})

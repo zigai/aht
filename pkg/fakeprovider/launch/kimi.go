@@ -1,11 +1,9 @@
-package kimi
+package launch
 
 import (
 	"errors"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 var (
@@ -15,12 +13,12 @@ var (
 	)
 )
 
-func (kimiCodeHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func kimiPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	home := filepath.Join(paths.Root, "kimi")
-	provider := harness.LaunchProviderName
+	provider := ProviderName
 	header := fmt.Sprintf(`default_model = %[1]q
 telemetry = false
 auto_session_title = false
@@ -38,11 +36,11 @@ capabilities = ["tool_use"]
 
 `, provider, model.Endpoint+"/v1", model.APIKey, model.Model)
 
-	return harness.LaunchPlan{
-		Executable: kimiCommand,
-		Protocol:   harness.LaunchProtocolOpenAIResponses,
+	return Plan{
+		Executable: "kimi",
+		Protocol:   ProtocolOpenAIResponses,
 		Env:        []string{"KIMI_CODE_HOME=" + home},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path: filepath.Join(home, "config.toml"),
 			Update: func(existing []byte) ([]byte, error) {
 				if existing == nil {
@@ -60,9 +58,9 @@ capabilities = ["tool_use"]
 				return nil, errKimiInitialPrompt
 			}
 
-			return []string{"--model", provider}, nil
+			return []string{modelFlag, provider}, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "Bash",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command}

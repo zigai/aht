@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -47,7 +46,7 @@ var rootDirectories = []string{"home", "work", "tmp", "config", "data", "state",
 
 // Options configures a Harness.
 type Options struct {
-	// Harness selects the adapter whose launch plan runs.
+	// Harness selects the launch plan.
 	Harness registry.Harness
 	// Root must be absolute and missing or empty.
 	Root string
@@ -65,13 +64,6 @@ type Options struct {
 	Env []string
 }
 
-// Tool is the native shell tool a scripted model can call.
-type Tool struct {
-	Name string
-	// Arguments builds the native tool input that runs command.
-	Arguments func(command string) map[string]any
-}
-
 // Harness is one harness launch prepared under Root.
 type Harness struct {
 	ID         registry.Harness
@@ -80,47 +72,47 @@ type Harness struct {
 	Work       string
 	Store      string
 	Executable string
-	Protocol   harness.LaunchProtocol
+	Protocol   Protocol
 	// Env is the complete environment of every process the launch starts.
 	Env       []string
 	ShellTool Tool
 
-	plan     harness.LaunchPlan
+	plan     Plan
 	aht      string
 	services []*process
 	tracker  *process
 }
 
 // New prepares Root and starts the plan's services.
-func New(ctx context.Context, options Options) (*Harness, error) {
-	adapter, found := catalog.Find(options.Harness)
+func New(ctx context.Context, opts Options) (*Harness, error) {
+	adapter, found := catalog.Find(opts.Harness)
 	if !found {
-		return nil, fmt.Errorf("%w: harness %q", ErrUnsupported, options.Harness)
+		return nil, fmt.Errorf("%w: harness %q", ErrUnsupported, opts.Harness)
 	}
 
-	planner, _ := adapter.(harness.Launchable)
+	planner := plans[adapter.Definition().ID]
 
-	return newHarness(ctx, options, planner)
+	return newHarness(ctx, opts, planner)
 }
 
 func newHarness(
 	ctx context.Context,
-	options Options,
-	planner harness.Launchable,
+	opts Options,
+	planner func(Paths, Model) (Plan, error),
 ) (*Harness, error) {
-	if err := options.validate(planner != nil); err != nil {
+	if err := opts.validate(planner != nil); err != nil {
 		return nil, err
 	}
 
-	root := filepath.Clean(options.Root)
+	root := filepath.Clean(opts.Root)
 	if err := checkRoot(root); err != nil {
 		return nil, err
 	}
 
 	aht := ""
 
-	if options.AHT != "" {
-		resolved, err := resolveExecutable(options.AHT)
+	if opts.AHT != "" {
+		resolved, err := resolveExecutable(opts.AHT)
 		if err != nil {
 			return nil, err
 		}
@@ -128,37 +120,37 @@ func newHarness(
 		aht = resolved
 	}
 
-	paths := harness.LaunchPaths{
+	paths := Paths{
 		Root: root,
 		Home: filepath.Join(root, "home"),
 		Work: filepath.Join(root, "work"),
 	}
 
-	var plan harness.LaunchPlan
+	var plan Plan
 
 	if planner != nil {
-		model := harness.LaunchModel{
-			Endpoint: options.Endpoint,
-			Model:    cmp.Or(options.Model, defaultModel),
-			APIKey:   cmp.Or(options.APIKey, defaultAPIKey),
+		model := Model{
+			Endpoint: opts.Endpoint,
+			Model:    cmp.Or(opts.Model, defaultModel),
+			APIKey:   cmp.Or(opts.APIKey, defaultAPIKey),
 		}
 
 		var err error
 
-		plan, err = planner.LaunchPlan(paths, model)
+		plan, err = planner(paths, model)
 		if err != nil {
-			return nil, fmt.Errorf("launch plan for %q: %w", options.Harness, err)
+			return nil, fmt.Errorf("launch plan for %q: %w", opts.Harness, err)
 		}
 	}
 
 	store := filepath.Join(root, "sessions.json")
 
-	env, err := mergeEnvironment(commonEnvironment(root, store), plan.Env, options.Env)
+	env, err := mergeEnvironment(commonEnvironment(root, store), plan.Env, opts.Env)
 	if err != nil {
 		return nil, err
 	}
 
-	executable, err := chooseExecutable(options, plan, planner != nil)
+	executable, err := chooseExecutable(opts, plan, planner != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +160,7 @@ func newHarness(
 	}
 
 	h := &Harness{
-		ID:         options.Harness,
+		ID:         opts.Harness,
 		Root:       root,
 		Home:       paths.Home,
 		Work:       paths.Work,
@@ -176,31 +168,31 @@ func newHarness(
 		Executable: executable,
 		Protocol:   plan.Protocol,
 		Env:        env,
-		ShellTool:  Tool{Name: plan.ShellTool.Name, Arguments: plan.ShellTool.Arguments},
+		ShellTool:  plan.ShellTool,
 		plan:       plan,
 		aht:        aht,
 		services:   nil,
 		tracker:    nil,
 	}
 	if err := h.prepare(ctx); err != nil {
-		return nil, errors.Join(err, h.Close())
+		return nil, errors.Join(err, h.Close(ctx))
 	}
 
 	return h, nil
 }
 
-func chooseExecutable(options Options, plan harness.LaunchPlan, hasPlan bool) (string, error) {
-	name := cmp.Or(options.Executable, plan.Executable)
+func chooseExecutable(opts Options, plan Plan, hasPlan bool) (string, error) {
+	name := cmp.Or(opts.Executable, plan.Executable)
 	if name == "" {
 		if !hasPlan {
 			return "", fmt.Errorf(
 				"%w: harness %q has no launch plan and no executable",
 				ErrUnsupported,
-				options.Harness,
+				opts.Harness,
 			)
 		}
 
-		return "", fmt.Errorf("launch plan for %q: %w", options.Harness, errNoExecutable)
+		return "", fmt.Errorf("launch plan for %q: %w", opts.Harness, errNoExecutable)
 	}
 
 	return resolveExecutable(name)
@@ -247,14 +239,15 @@ func (h *Harness) InteractiveArgs(prompt string) ([]string, error) {
 }
 
 // Close stops every process of the launch and leaves Root on disk.
-func (h *Harness) Close() error {
+// Cleanup retains ctx's values but continues after cancellation.
+func (h *Harness) Close(ctx context.Context) error {
 	errs := []error{h.stopTracker()}
 	for _, process := range slices.Backward(h.services) {
 		errs = append(errs, process.stop())
 	}
 
 	h.services = nil
-	errs = append(errs, h.stopStrays())
+	errs = append(errs, h.stopStrays(context.WithoutCancel(ctx)))
 
 	return errors.Join(errs...)
 }

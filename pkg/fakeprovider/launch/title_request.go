@@ -1,4 +1,4 @@
-package harness
+package launch
 
 import "strings"
 
@@ -14,7 +14,7 @@ type TitleRequest struct {
 	Tool     string
 }
 
-func (plan LaunchPlan) TitleRequest(value map[string]any) bool {
+func (plan Plan) TitleRequest(value map[string]any) bool {
 	for _, rule := range plan.TitleRequests {
 		if rule.Tool != "" {
 			for _, item := range requestObjects(value["tools"]) {

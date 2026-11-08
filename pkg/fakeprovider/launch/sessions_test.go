@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -21,7 +20,7 @@ func TestSessionsKeepsWorkSessionsAndDropsRawPayload(t *testing.T) {
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, options)
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +57,7 @@ func TestWaitForSessionReturnsWhenSessionAppears(t *testing.T) {
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, options)
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestWaitForSessionTimeoutReportsLastSessions(t *testing.T) {
 		Env:  []string{sessionsFileEnv + "=" + sessionsPath},
 	}
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, options)
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}

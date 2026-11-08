@@ -10,6 +10,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -587,8 +588,7 @@ func assertAdapterContract(t *testing.T, adapter harness.Adapter) {
 		return
 	}
 
-	if _, launchable := adapter.(harness.Launchable); contract.Level == compatibilityLevelLifecycle &&
-		!launchable {
+	if contract.Level == compatibilityLevelLifecycle && !launch.Supported(id) {
 		t.Errorf("lifecycle host contract %s has no launch plan", id)
 	}
 }

@@ -6,13 +6,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 var errFileOutsideRoot = errors.New("launch file must be an absolute path inside the root")
 
-func applyFiles(root string, files []harness.LaunchFile) error {
+func applyFiles(root string, files []File) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -25,7 +23,7 @@ func applyFiles(root string, files []harness.LaunchFile) error {
 	return errors.Join(writeFiles(dir, root, files), dir.Close())
 }
 
-func writeFiles(dir *os.Root, root string, files []harness.LaunchFile) error {
+func writeFiles(dir *os.Root, root string, files []File) error {
 	for _, file := range files {
 		if err := writeFile(dir, root, file); err != nil {
 			return err
@@ -35,7 +33,7 @@ func writeFiles(dir *os.Root, root string, files []harness.LaunchFile) error {
 	return nil
 }
 
-func writeFile(dir *os.Root, root string, file harness.LaunchFile) error {
+func writeFile(dir *os.Root, root string, file File) error {
 	name, err := relativeFilePath(root, file.Path)
 	if err != nil {
 		return err

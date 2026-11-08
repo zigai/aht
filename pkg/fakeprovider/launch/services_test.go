@@ -8,14 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func TestCloseStopsServicesAndKeepsRoot(t *testing.T) {
 	t.Parallel()
 	address := freeAddress(t)
-	plan := harness.LaunchPlan{Services: []harness.LaunchService{{
+	plan := Plan{Services: []Service{{
 		Args:    []string{helperArgument, "listen", address},
 		Address: address,
 	}}}
@@ -29,7 +27,7 @@ func TestCloseStopsServicesAndKeepsRoot(t *testing.T) {
 		t.Fatal("service does not accept connections after New returned")
 	}
 
-	if err := s.Close(); err != nil {
+	if err := s.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,7 +43,7 @@ func TestCloseStopsServicesAndKeepsRoot(t *testing.T) {
 func TestNewStopsStartedServicesWhenLaterServiceExits(t *testing.T) {
 	t.Parallel()
 	address := freeAddress(t)
-	plan := harness.LaunchPlan{Services: []harness.LaunchService{
+	plan := Plan{Services: []Service{
 		{Args: []string{helperArgument, "listen", address}, Address: address},
 		{Args: []string{helperArgument, "exit"}, Address: freeAddress(t)},
 	}}
@@ -66,7 +64,7 @@ func TestNewReportsServiceThatNeverListens(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
 
-	plan := harness.LaunchPlan{Services: []harness.LaunchService{{
+	plan := Plan{Services: []Service{{
 		Args:    []string{helperArgument, "sleep"},
 		Address: freeAddress(t),
 	}}}
@@ -80,7 +78,7 @@ func TestNewReportsServiceThatNeverListens(t *testing.T) {
 func TestNewRejectsMalformedServiceAddress(t *testing.T) {
 	t.Parallel()
 
-	plan := harness.LaunchPlan{Services: []harness.LaunchService{{
+	plan := Plan{Services: []Service{{
 		Args:    []string{helperArgument, "sleep"},
 		Address: "no-port",
 	}}}
@@ -93,7 +91,7 @@ func TestStartTrackerWaitsForBrokerSocketUntilClose(t *testing.T) {
 	t.Parallel()
 	options := Options{Root: shortRoot(t), AHT: fakeAHT(t)}
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, options)
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +111,7 @@ func TestStartTrackerWaitsForBrokerSocketUntilClose(t *testing.T) {
 		t.Fatalf("%s is not a socket", socket)
 	}
 
-	if err := s.Close(); err != nil {
+	if err := s.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +131,7 @@ func TestStartTrackerReportsTrackerThatExits(t *testing.T) {
 		Env:  []string{trackerModeEnv + "=exit"},
 	}
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, options)
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +148,7 @@ func TestStartTrackerReportsTrackerThatExits(t *testing.T) {
 func TestStartTrackerRequiresAHT(t *testing.T) {
 	t.Parallel()
 
-	s, _, err := newFixtureHarness(t.Context(), t, harness.LaunchPlan{}, Options{})
+	s, _, err := newFixtureHarness(t.Context(), t, Plan{}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

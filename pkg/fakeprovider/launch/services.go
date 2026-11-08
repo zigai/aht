@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/broker"
 )
@@ -43,7 +42,7 @@ func (h *Harness) StartTracker(ctx context.Context) error {
 func (h *Harness) startService(
 	ctx context.Context,
 	index int,
-	spec harness.LaunchService,
+	spec Service,
 ) error {
 	name := "service-" + strconv.Itoa(index)
 

@@ -1,18 +1,16 @@
-package opencode
+package launch
 
 import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func TestLaunchDisablesAuxiliaryTitleRequests(t *testing.T) {
 	root := t.TempDir()
-	model := harness.LaunchModel{Endpoint: "http://127.0.0.1:1234", APIKey: "fake", Model: "fake"}
+	model := Model{Endpoint: "http://127.0.0.1:1234", APIKey: "fake", Model: "fake"}
 
-	plan, err := New().LaunchPlan(harness.LaunchPaths{Root: root}, model)
+	plan, err := opencodePlan(Paths{Root: root}, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +41,7 @@ func TestLaunchDisablesAuxiliaryTitleRequests(t *testing.T) {
 				t.Fatalf("scratch launch must disable only the auxiliary title agent: %s", data)
 			}
 
-			if config.Model != harness.LaunchProviderName+"/fake" {
+			if config.Model != ProviderName+"/fake" {
 				t.Fatalf("primary model changed: %s", data)
 			}
 		}

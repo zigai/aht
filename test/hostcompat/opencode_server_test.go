@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
 // OpenCode 2 serves its HTTP API under /api behind basic auth; the operations
@@ -173,7 +173,7 @@ func (server *openCodeServer) startTurn(
 
 	body := map[string]any{
 		"location": map[string]string{"directory": host.launched.Work},
-		"model":    map[string]string{"id": fakeModel, "providerID": harness.LaunchProviderName},
+		"model":    map[string]string{"id": fakeModel, "providerID": launch.ProviderName},
 	}
 	if permissions != nil {
 		body["permissions"] = permissions

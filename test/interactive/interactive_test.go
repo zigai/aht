@@ -49,7 +49,7 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		if err := launched.Close(); err != nil {
+		if err := launched.Close(t.Context()); err != nil {
 			t.Error(err)
 		}
 	})

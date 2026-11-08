@@ -1,4 +1,4 @@
-package copilot
+package launch
 
 import (
 	"encoding/json"
@@ -6,22 +6,20 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 var (
-	errEmptyPrompt  = errors.New("copilot headless run needs a prompt")
-	errLaunchConfig = errors.New("copilot config conflicts with the launch trust list")
+	errCopilotEmptyPrompt  = errors.New("copilot headless run needs a prompt")
+	errCopilotLaunchConfig = errors.New("copilot config conflicts with the launch trust list")
 )
 
-func (copilotHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
-	return harness.LaunchPlan{
+func copilotPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
+	return Plan{
 		Executable: "copilot",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env: []string{
 			"COPILOT_HOME=" + filepath.Join(paths.Root, "copilot"),
 			"COPILOT_PROVIDER_BASE_URL=" + model.Endpoint + "/v1",
@@ -30,15 +28,15 @@ func (copilotHarness) LaunchPlan(
 			"COPILOT_MODEL=gpt-4",
 			"COPILOT_PROVIDER_WIRE_MODEL=" + model.Model,
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path: filepath.Join(paths.Root, "copilot", "config.json"),
 			Update: func(existing []byte) ([]byte, error) {
-				return launchConfig(existing, paths.Work)
+				return copilotConfig(existing, paths.Work)
 			},
 		}},
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
-				return nil, errEmptyPrompt
+				return nil, errCopilotEmptyPrompt
 			}
 
 			return []string{"-p", prompt, "--allow-all", "--no-auto-update", "--stream", "off"}, nil
@@ -51,7 +49,7 @@ func (copilotHarness) LaunchPlan(
 
 			return args, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "bash",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{"command": command, "description": "Run a command"}
@@ -60,7 +58,7 @@ func (copilotHarness) LaunchPlan(
 	}, nil
 }
 
-func launchConfig(existing []byte, work string) ([]byte, error) {
+func copilotConfig(existing []byte, work string) ([]byte, error) {
 	config := make(map[string]any)
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &config); err != nil {
@@ -73,7 +71,7 @@ func launchConfig(existing []byte, work string) ([]byte, error) {
 	if value, ok := config["trusted_folders"]; ok {
 		list, ok := value.([]any)
 		if !ok {
-			return nil, fmt.Errorf("%w: trusted_folders is %T", errLaunchConfig, value)
+			return nil, fmt.Errorf("%w: trusted_folders is %T", errCopilotLaunchConfig, value)
 		}
 
 		folders = list

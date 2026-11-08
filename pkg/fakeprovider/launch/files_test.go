@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 var errFixtureUpdate = errors.New("fixture update refused")
@@ -26,7 +24,7 @@ func TestApplyFilesMergesInOrderWithPermissions(t *testing.T) {
 		}
 	}
 
-	files := []harness.LaunchFile{
+	files := []File{
 		{Path: nested, Update: record("first\n")},
 		{Path: nested, Update: record("second\n")},
 	}
@@ -84,7 +82,7 @@ func TestApplyFilesRejectsPathsOutsideRoot(t *testing.T) {
 	for name, path := range paths {
 		update := func([]byte) ([]byte, error) { return []byte("x"), nil }
 
-		err := applyFiles(root, []harness.LaunchFile{{Path: path, Update: update}})
+		err := applyFiles(root, []File{{Path: path, Update: update}})
 		if !errors.Is(err, errFileOutsideRoot) {
 			t.Errorf("%s: applyFiles(%q) error = %v, want errFileOutsideRoot", name, path, err)
 		}
@@ -116,7 +114,7 @@ func TestApplyFilesRejectsSymlinkEscape(t *testing.T) {
 	path := filepath.Join(root, "link", "app.json")
 
 	update := func([]byte) ([]byte, error) { return []byte("x"), nil }
-	if err := applyFiles(root, []harness.LaunchFile{{Path: path, Update: update}}); err == nil {
+	if err := applyFiles(root, []File{{Path: path, Update: update}}); err == nil {
 		t.Fatal("applyFiles() through a symlink to outside the root succeeded")
 	}
 
@@ -129,7 +127,7 @@ func TestApplyFilesPropagatesUpdateErrors(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 
-	files := []harness.LaunchFile{{
+	files := []File{{
 		Path:   filepath.Join(root, "app.json"),
 		Update: func([]byte) ([]byte, error) { return nil, errFixtureUpdate },
 	}}
@@ -146,7 +144,7 @@ func TestApplyFilesRequiresUpdate(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 
-	files := []harness.LaunchFile{{Path: filepath.Join(root, "app.json")}}
+	files := []File{{Path: filepath.Join(root, "app.json")}}
 	if err := applyFiles(root, files); !errors.Is(err, errNoFileUpdate) {
 		t.Fatalf("applyFiles() error = %v, want errNoFileUpdate", err)
 	}

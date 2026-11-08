@@ -1,42 +1,40 @@
-package droid
+package launch
 
 import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const (
-	droidLaunchModelID         = "custom:" + harness.LaunchProviderName + "-0"
+	droidLaunchModelID         = "custom:" + ProviderName + "-0"
 	droidLaunchMaxOutputTokens = 4096
 	droidShellTimeoutSeconds   = 5
 )
 
-func (droidHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func droidPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	factoryDir := filepath.Join(paths.Home, ".factory")
 
-	return harness.LaunchPlan{
-		TitleRequests: []harness.TitleRequest{
+	return Plan{
+		TitleRequests: []TitleRequest{
 			{
 				Role:     "system",
 				Contains: "You are a helper that generates concise session titles for a session picker.",
 			},
 		},
-		Executable: droidCommand,
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Executable: "droid",
+		Protocol:   ProtocolOpenAIChat,
 		Env: []string{
 			"FACTORY_CONFIG_DIR=" + factoryDir,
 			"FACTORY_DROID_AUTO_UPDATE_ENABLED=false",
 			"FACTORY_AIRGAP_ENABLED=true",
 			"FACTORY_API_KEY=" + model.APIKey,
 		},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path: filepath.Join(factoryDir, "settings.json"),
 			Update: func(existing []byte) ([]byte, error) {
 				trustRoot, err := filepath.EvalSymlinks(paths.Work)
@@ -58,7 +56,7 @@ func (droidHarness) LaunchPlan(
 
 			return args, nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name: "Execute",
 			Arguments: func(command string) map[string]any {
 				return map[string]any{
@@ -88,7 +86,7 @@ func droidRPCArguments(work string) []string {
 
 func droidLaunchSettings(
 	existing []byte,
-	model harness.LaunchModel,
+	model Model,
 	trustRoot string,
 ) ([]byte, error) {
 	settings := make(map[string]any)
@@ -99,11 +97,11 @@ func droidLaunchSettings(
 	}
 
 	settings["model"] = droidLaunchModelID
-	trustedFolders := mapValue(settings, "trustedFolders")
+	trustedFolders := droidMapValue(settings, "trustedFolders")
 	trustedFolders[trustRoot] = map[string]any{"trustedAt": time.Now().UTC().Format(time.RFC3339)}
 	settings["customModels"] = []any{map[string]any{
 		"model":           model.Model,
-		"displayName":     harness.LaunchProviderName,
+		"displayName":     ProviderName,
 		"baseUrl":         model.Endpoint + "/v1",
 		"apiKey":          model.APIKey,
 		"provider":        "generic-chat-completion-api",
@@ -118,7 +116,7 @@ func droidLaunchSettings(
 	return data, nil
 }
 
-func mapValue(parent map[string]any, key string) map[string]any {
+func droidMapValue(parent map[string]any, key string) map[string]any {
 	value, ok := parent[key].(map[string]any)
 	if ok {
 		return value

@@ -77,7 +77,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string, hold bo
 	}
 
 	t.Cleanup(func() {
-		if err := launched.Close(); err != nil {
+		if err := launched.Close(t.Context()); err != nil {
 			t.Error(err)
 		}
 	})

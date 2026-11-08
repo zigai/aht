@@ -2,51 +2,20 @@ package launch
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
-	"time"
 )
 
-const (
-	// linuxProcFS is the kernel process interface, independent of temporary directories.
-	linuxProcFS    = "/proc"
-	strayTermGrace = 3 * time.Second
-	strayKillGrace = 2 * time.Second
-)
+// linuxProcFS is the kernel process interface, independent of temporary directories.
+const linuxProcFS = "/proc"
 
-var errStraysSurvived = errors.New("launched processes survived SIGKILL")
-
-func (h *Harness) stopStrays() error {
-	marker := []byte("AHT_STORE=" + h.Store)
-
-	pids := launchProcesses(marker)
-	if len(pids) == 0 {
-		return nil
-	}
-
-	signalAll(pids, syscall.SIGTERM)
-
-	if waitGone(marker, strayTermGrace) {
-		return nil
-	}
-
-	signalAll(launchProcesses(marker), syscall.SIGKILL)
-
-	if waitGone(marker, strayKillGrace) {
-		return nil
-	}
-
-	return fmt.Errorf("%w: %v", errStraysSurvived, launchProcesses(marker))
-}
-
-func launchProcesses(marker []byte) []int {
+func launchProcesses(_ context.Context, marker []byte) ([]int, error) {
 	entries, err := os.ReadDir(linuxProcFS)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list launch processes: %w", err)
 	}
 
 	self := os.Getpid()
@@ -72,24 +41,5 @@ func launchProcesses(marker []byte) []int {
 		}
 	}
 
-	return pids
-}
-
-func signalAll(pids []int, signal syscall.Signal) {
-	for _, pid := range pids {
-		_ = syscall.Kill(pid, signal)
-	}
-}
-
-func waitGone(marker []byte, grace time.Duration) bool {
-	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		if len(launchProcesses(marker)) == 0 {
-			return true
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	return len(launchProcesses(marker)) == 0
+	return pids, nil
 }

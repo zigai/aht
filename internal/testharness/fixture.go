@@ -4,7 +4,6 @@ package testharness
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -96,27 +95,6 @@ func Isolate(t *testing.T, adapters ...harness.Adapter) string {
 	t.Setenv("HOME", home)
 
 	return home
-}
-
-func CheckTitleRequests(t *testing.T, adapter harness.Launchable, cases map[string]bool) {
-	t.Helper()
-
-	plan, err := adapter.LaunchPlan(harness.LaunchPaths{Root: "", Home: "", Work: ""},
-		harness.LaunchModel{Endpoint: "", Model: "", APIKey: ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for body, want := range cases {
-		var value map[string]any
-		if err := json.Unmarshal([]byte(body), &value); err != nil {
-			t.Fatal(err)
-		}
-
-		if got := plan.TitleRequest(value); got != want {
-			t.Errorf("title request %s = %t, want %t", body, got, want)
-		}
-	}
 }
 
 func AwaitHold(

@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
 // Both hosts publish these HTTP operations in their native SDK. Polling the
@@ -76,7 +76,7 @@ func runServerPermission(
 	serverPermissionJSON(t, client, sessionURL+"/prompt_async"+query, http.MethodPost,
 		map[string]any{
 			"model": map[string]string{
-				"providerID": harness.LaunchProviderName,
+				"providerID": launch.ProviderName,
 				"modelID":    fakeModel,
 			},
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},

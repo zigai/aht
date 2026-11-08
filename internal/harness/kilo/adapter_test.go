@@ -58,18 +58,6 @@ func TestHistorySourcesFollowDatabaseOverride(t *testing.T) {
 	}
 }
 
-func TestTitleRequestRecognition(t *testing.T) {
-	testharness.CheckTitleRequests(t, New(), map[string]bool{
-		`{"messages":[{"role":"system","content":"You are a title generator. You output O` +
-			`NLY a thread title. Nothing else."},{"role":"user","content":"Refine the parser"` +
-			`}]}`: true,
-		`{"messages":[{"role":"system","content":"Help with code"},{"role":"user","conten` +
-			`t":"Explain the phrase You are a title generator."}]}`: false,
-		`{"messages":[{"role":"user","content":"You are a title generator. Explain the wo` +
-			`rding."}]}`: false,
-	})
-}
-
 func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 	for _, test := range []struct {
 		harness  registry.Harness

@@ -1,4 +1,4 @@
-package omp
+package launch
 
 import (
 	"errors"
@@ -6,40 +6,38 @@ import (
 	"path/filepath"
 
 	"go.yaml.in/yaml/v3"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const (
-	launchModelName     = "AHT fakeprovider"
-	launchContextWindow = 32000
-	launchMaxTokens     = 4096
+	ompModelName     = "AHT fakeprovider"
+	ompContextWindow = 32000
+	ompMaxTokens     = 4096
 )
 
 var errLaunchHookCount = errors.New("expected exactly one installed omp extension")
 
-func (ompHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func ompPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	agentDir := filepath.Join(paths.Root, "pi-agent")
 
 	modelsYAML, err := launchModelsYAML(model)
 	if err != nil {
-		return harness.LaunchPlan{}, err
+		return Plan{}, err
 	}
 
-	selected := harness.LaunchProviderName + "/" + model.Model
+	selected := ProviderName + "/" + model.Model
 
-	return harness.LaunchPlan{
-		TitleRequests: []harness.TitleRequest{
+	return Plan{
+		TitleRequests: []TitleRequest{
 			{Role: "system", Prefix: "You name coding-agent sessions."},
 			{Role: "user", Prefix: "<title-request>", Suffix: "</title-request>"},
 		},
 		Executable: "omp",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env:        []string{"PI_CODING_AGENT_DIR=" + agentDir, "OMP_SKIP_SETUP=1"},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(agentDir, "models.yml"),
 			Update: func([]byte) ([]byte, error) { return modelsYAML, nil },
 		}},
@@ -52,7 +50,7 @@ func (ompHarness) LaunchPlan(
 			return []string{
 				"-p",
 				prompt,
-				"--model",
+				modelFlag,
 				selected,
 				"--auto-approve",
 				"--max-time",
@@ -67,9 +65,9 @@ func (ompHarness) LaunchPlan(
 				return nil, err
 			}
 
-			return withPrompt([]string{"--model", selected, "--hook", hook}, prompt), nil
+			return withPrompt([]string{modelFlag, selected, "--hook", hook}, prompt), nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name:      "bash",
 			Arguments: func(command string) map[string]any { return map[string]any{"command": command} },
 		},
@@ -89,20 +87,20 @@ func installedHook(agentDir string) (string, error) {
 	return matches[0], nil
 }
 
-func launchModelsYAML(model harness.LaunchModel) ([]byte, error) {
+func launchModelsYAML(model Model) ([]byte, error) {
 	config := map[string]any{
 		"providers": map[string]any{
-			harness.LaunchProviderName: map[string]any{
+			ProviderName: map[string]any{
 				"baseUrl": model.Endpoint + "/v1",
 				"api":     "openai-completions",
 				"apiKey":  model.APIKey,
 				"models": []any{map[string]any{
 					"id":            model.Model,
-					"name":          launchModelName,
+					"name":          ompModelName,
 					"reasoning":     false,
 					"input":         []string{"text"},
-					"contextWindow": launchContextWindow,
-					"maxTokens":     launchMaxTokens,
+					"contextWindow": ompContextWindow,
+					"maxTokens":     ompMaxTokens,
 				}},
 			},
 		},
@@ -114,12 +112,4 @@ func launchModelsYAML(model harness.LaunchModel) ([]byte, error) {
 	}
 
 	return data, nil
-}
-
-func withPrompt(args []string, prompt string) []string {
-	if prompt == "" {
-		return args
-	}
-
-	return append(args, "--", prompt)
 }

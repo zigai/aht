@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
+	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -20,7 +20,7 @@ const (
 )
 
 func (host *isolatedHost) scriptCallID(resumed bool) string {
-	anthropic := host.launched.Protocol == harness.LaunchProtocolAnthropicMessages
+	anthropic := host.launched.Protocol == launch.ProtocolAnthropicMessages
 	switch {
 	case resumed && anthropic:
 		return "tool_resume"

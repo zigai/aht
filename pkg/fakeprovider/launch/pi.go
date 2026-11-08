@@ -1,11 +1,9 @@
-package pi
+package launch
 
 import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const (
@@ -14,22 +12,22 @@ const (
 	launchMaxTokens     = 4096
 )
 
-func (piHarness) LaunchPlan(
-	paths harness.LaunchPaths,
-	model harness.LaunchModel,
-) (harness.LaunchPlan, error) {
+func piPlan(
+	paths Paths,
+	model Model,
+) (Plan, error) {
 	agentDir := filepath.Join(paths.Root, "pi-agent")
 
 	modelsJSON, err := launchModelsJSON(model)
 	if err != nil {
-		return harness.LaunchPlan{}, err
+		return Plan{}, err
 	}
 
-	return harness.LaunchPlan{
+	return Plan{
 		Executable: "pi",
-		Protocol:   harness.LaunchProtocolOpenAIChat,
+		Protocol:   ProtocolOpenAIChat,
 		Env:        []string{"PI_CODING_AGENT_DIR=" + agentDir},
-		Files: []harness.LaunchFile{{
+		Files: []File{{
 			Path:   filepath.Join(agentDir, "models.json"),
 			Update: func([]byte) ([]byte, error) { return modelsJSON, nil },
 		}},
@@ -38,8 +36,8 @@ func (piHarness) LaunchPlan(
 				"--mode",
 				"rpc",
 				"--provider",
-				harness.LaunchProviderName,
-				"--model",
+				ProviderName,
+				modelFlag,
 				model.Model,
 				"--approve",
 				"--no-skills",
@@ -49,8 +47,8 @@ func (piHarness) LaunchPlan(
 			return withPrompt(
 				[]string{
 					"--provider",
-					harness.LaunchProviderName,
-					"--model",
+					ProviderName,
+					modelFlag,
 					model.Model,
 					"--approve",
 					"--no-skills",
@@ -58,17 +56,17 @@ func (piHarness) LaunchPlan(
 				prompt,
 			), nil
 		},
-		ShellTool: harness.LaunchTool{
+		ShellTool: Tool{
 			Name:      "bash",
 			Arguments: func(command string) map[string]any { return map[string]any{"command": command} },
 		},
 	}, nil
 }
 
-func launchModelsJSON(model harness.LaunchModel) ([]byte, error) {
+func launchModelsJSON(model Model) ([]byte, error) {
 	config := map[string]any{
 		"providers": map[string]any{
-			harness.LaunchProviderName: map[string]any{
+			ProviderName: map[string]any{
 				"baseUrl": model.Endpoint + "/v1",
 				"api":     "openai-completions",
 				"apiKey":  model.APIKey,
