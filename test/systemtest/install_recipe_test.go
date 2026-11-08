@@ -21,6 +21,11 @@ func TestInstallRecipeUsesInstalledBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	justfile, err := os.ReadFile(filepath.Join(root, "Justfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, test := range []struct {
 		name, recipe             string
 		failInstall, failUpgrade bool
@@ -32,17 +37,33 @@ func TestInstallRecipeUsesInstalledBinary(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "Justfile"), justfile, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
 			bin := filepath.Join(dir, "tools")
 			writeRecipeExecutable(t, filepath.Join(bin, "go"), `#!/bin/sh
 set -eu
 case "$1" in
- install)
-  if [ "$AHT_TEST_FAIL_INSTALL" = yes ]; then exit 7; fi
-  mkdir -p "$GOBIN"
-  cp "$AHT_TEST_NEW_BINARY" "$GOBIN/aht"
+ build)
+  while [ "$1" != -o ]; do shift; done
+  mkdir -p "$(dirname "$2")"
+  cp "$AHT_TEST_NEW_BINARY" "$2"
   ;;
  *) exit 9 ;;
 esac
+`)
+			writeRecipeExecutable(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf 'test\\n'\n")
+
+			install, err := exec.LookPath("install")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			writeRecipeExecutable(t, filepath.Join(bin, "install"), `#!/bin/sh
+set -eu
+if [ "$AHT_TEST_FAIL_INSTALL" = yes ]; then exit 7; fi
+exec "$AHT_TEST_INSTALL" "$@"
 `)
 			writeRecipeExecutable(t, filepath.Join(bin, "aht"), "#!/bin/sh\nexit 99\n")
 			template := filepath.Join(dir, "new-aht")
@@ -63,7 +84,7 @@ esac
 				t.Context(),
 				just,
 				"--justfile",
-				filepath.Join(root, "Justfile"),
+				filepath.Join(dir, "Justfile"),
 				test.recipe,
 			)
 			command.Env = append(os.Environ(),
@@ -72,6 +93,7 @@ esac
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 				"AHT_TEST_NEW_BINARY="+template,
 				"AHT_TEST_UPGRADE_CALLS="+calls,
+				"AHT_TEST_INSTALL="+install,
 				"AHT_TEST_FAIL_INSTALL="+recipeBool(test.failInstall),
 				"AHT_TEST_FAIL_UPGRADE="+recipeBool(test.failUpgrade),
 			)
