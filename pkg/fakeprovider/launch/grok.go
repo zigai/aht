@@ -32,10 +32,8 @@ func grokPlan(
 				Suffix:   "</system-reminder>",
 			},
 			{
-				Role:     "user",
-				Prefix:   "<system-reminder>",
-				Contains: "Write an ultra-short dashboard line that captures the AGENT'S REPLY for the last turn only",
-				Suffix:   "</system-reminder>",
+				Role:   "system",
+				Prefix: "Write an ultra-short dashboard line that captures the AGENT'S REPLY to the user's message.",
 			},
 		},
 		Executable: "grok",

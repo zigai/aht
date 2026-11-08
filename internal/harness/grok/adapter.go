@@ -13,7 +13,7 @@ import (
 const (
 	grokHookFileName      = "aht-state.json"
 	grokIntegrationSource = "grok-hook"
-	integrationVersion    = 15
+	integrationVersion    = 16
 )
 
 type grokHarness struct{ harness.BaseAdapter }
@@ -139,6 +139,7 @@ func grokHookConfig(binary string, definition harness.Definition) map[string]any
 		// compaction returns the session to idle.
 		{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
 		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "StopCancelled", Transition: harness.HookActivityInterrupted},
 		{Event: "StopFailure", Transition: harness.HookActivityFailed},
 		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
 	})

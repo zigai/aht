@@ -1167,6 +1167,7 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 		"PreCompact",
 		"PostCompact",
 		hookEventStop,
+		"StopCancelled",
 		"StopFailure",
 		"SessionEnd",
 	} {
@@ -1177,6 +1178,11 @@ func TestInstallGrokWritesHooks(t *testing.T) {
 
 	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
 	requireManualPostCompactIdle(t, hooks, "manual")
+
+	command := requireTestHookCommand(t, hooks, "StopCancelled")
+	if !strings.Contains(command, "--activity interrupted --event StopCancelled") {
+		t.Fatalf("StopCancelled command = %q", command)
+	}
 
 	text := string(data)
 	if !strings.Contains(text, "--raw-stdin") || !strings.Contains(text, "--quiet") {
