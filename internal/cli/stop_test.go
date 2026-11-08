@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -20,7 +21,12 @@ import (
 )
 
 func TestStopRevalidatesInterpretedHarness(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf ready; read line", "pi")
+	script := filepath.Join(t.TempDir(), "pi")
+	if err := os.WriteFile(script, []byte("printf ready; read line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", script)
 
 	input, err := cmd.StdinPipe()
 	if err != nil {
