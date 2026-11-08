@@ -137,7 +137,7 @@ func TestClientWatchYieldsRealtimeRevisions(t *testing.T) {
 		t.Fatal("broker did not become ready")
 	}
 
-	watchClient := client.New(client.Config{StorePath: storePath})
+	watchClient := client.New(client.Config{StorePath: storePath, Mode: client.ModeRealtimeOnly})
 	watchErrors := make(chan error, 1)
 	snapshots := make(chan registry.StateSnapshot, 2)
 
