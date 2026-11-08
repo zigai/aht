@@ -51,11 +51,13 @@ func (r Reducer) retireConflictingProcessSessions(
 		return nil
 	}
 
-	for id, session := range sessions {
-		replace, nativeReplacement := r.conflictingSessionReplacement(session, observation)
+	for id := range sessions {
+		replace, nativeReplacement := r.conflictingSessionReplacement(sessions[id], observation)
 		if !replace {
 			continue
 		}
+
+		session := sessions[id]
 
 		transition := transitionIncarnation(session, observation, at, true)
 		if !transition.accepted {
