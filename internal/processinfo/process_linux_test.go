@@ -68,7 +68,9 @@ func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	process, err := readLinuxProcess(dir, 123, "boot", []string{"ZELLIJ_PANE_ID"})
+	var reader linuxProcessReader
+
+	process, err := reader.read(dir, 123, "boot", []string{"ZELLIJ_PANE_ID"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +79,53 @@ func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 		t.Fatalf("environment = %#v, want %#v", process.Env, want)
 	}
 
-	process, err = readLinuxProcess(dir, 123, "boot", nil)
+	process, err = reader.read(dir, 123, "boot", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if process.Env != nil {
 		t.Fatalf("environment read without requested keys: %#v", process.Env)
+	}
+}
+
+func TestLinuxEnvironmentReaderKeepsSnapshotsIndependent(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "environ")
+	keys := []string{"PANE"}
+
+	var reader linuxProcessReader
+
+	if err := os.WriteFile(path, []byte("PANE=41\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first := reader.readEnvironment(path, keys)
+	if err := os.WriteFile(path, []byte("PANE=42\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	second := reader.readEnvironment(path, keys)
+	if !maps.Equal(first, map[string]string{"PANE": "41"}) ||
+		!maps.Equal(second, map[string]string{"PANE": "42"}) {
+		t.Fatalf("environment snapshots = %#v, %#v", first, second)
+	}
+
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if empty := reader.readEnvironment(path, keys); empty != nil {
+		t.Fatalf("empty environment retained values: %#v", empty)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if missing := reader.readEnvironment(path, keys); missing != nil {
+		t.Fatalf("missing environment retained values: %#v", missing)
 	}
 }
 

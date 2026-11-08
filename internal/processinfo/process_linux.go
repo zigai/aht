@@ -3,6 +3,7 @@
 package processinfo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -30,6 +31,10 @@ var (
 	errInvalidForegroundGroup  = errors.New("invalid foreground process group id")
 	errInvalidProcessStartTime = errors.New("invalid process start time")
 )
+
+type linuxProcessReader struct {
+	environment bytes.Buffer
+}
 
 // List returns a complete best-effort snapshot of processes owned by the
 // effective user. Processes which exit while being read are skipped.
@@ -96,7 +101,9 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 		return zero, false, nil
 	}
 
-	process, err := readLinuxProcess(dir, pid, boot, nil)
+	var reader linuxProcessReader
+
+	process, err := reader.read(dir, pid, boot, nil)
 	if err != nil {
 		if isLinuxProcessExited(dir, pid, err) {
 			return zero, false, nil
@@ -156,7 +163,12 @@ func linuxBootIdentity() (string, error) {
 	return boot, nil
 }
 
-func readLinuxProcess(dir string, pid int, boot string, envKeys []string) (Process, error) {
+func (r *linuxProcessReader) read(
+	dir string,
+	pid int,
+	boot string,
+	envKeys []string,
+) (Process, error) {
 	statPath := filepath.Join(dir, "stat")
 
 	data, err := os.ReadFile(statPath)
@@ -187,12 +199,26 @@ func readLinuxProcess(dir string, pid int, boot string, envKeys []string) (Proce
 	}
 
 	if len(envKeys) > 0 {
-		if environ, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
-			info.Env = parseEnvironment(environ, envKeys)
-		}
+		info.Env = r.readEnvironment(filepath.Join(dir, "environ"), envKeys)
 	}
 
 	return info, nil
+}
+
+func (r *linuxProcessReader) readEnvironment(path string, keys []string) map[string]string {
+	r.environment.Reset()
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := r.environment.ReadFrom(file); err != nil {
+		return nil
+	}
+
+	return parseEnvironment(r.environment.Bytes(), keys)
 }
 
 func readLinuxLink(path string) string {
@@ -234,6 +260,9 @@ func listLinuxProcessEntries(
 	envKeys []string,
 ) ([]Process, error) {
 	processes := make([]Process, 0, len(entries))
+
+	var reader linuxProcessReader
+
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("process listing context: %w", err)
@@ -255,7 +284,7 @@ func listLinuxProcessEntries(
 			continue
 		}
 
-		process, err := readLinuxProcess(dir, pid, boot, envKeys)
+		process, err := reader.read(dir, pid, boot, envKeys)
 		if err != nil {
 			if isLinuxProcessExited(dir, pid, err) {
 				continue
