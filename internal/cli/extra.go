@@ -121,7 +121,12 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.BoolVar(&o.once, "once", false, "run one reconciliation cycle")
-	flags.DurationVar(&o.interval, "interval", o.interval, "reconciliation `<duration>`")
+	flags.DurationVar(
+		&o.interval,
+		"interval",
+		o.interval,
+		"reconciliation `<duration>`, slower while session state is unchanged",
+	)
 	flags.DurationVar(&o.grace, "grace-period", o.grace, "absence grace `<duration>`")
 	flags.BoolVarP(&o.quiet, "quiet", "q", false, "suppress human cycle output and diagnostics")
 	flags.BoolVar(

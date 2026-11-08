@@ -26,6 +26,7 @@ import (
 
 const (
 	defaultObserverInterval = time.Second
+	idleObserverInterval    = 20 * time.Second
 	defaultMissingSnapshots = 2
 	// defaultProcessConfirmation is how long a process found only by command
 	// name must keep running before it becomes a registry session.
@@ -109,6 +110,16 @@ type Result struct {
 	Changed      int       `json:"changed"`
 	Degraded     bool      `json:"degraded"`
 	Error        string    `json:"error,omitempty"`
+}
+
+type revisionReader interface {
+	Revision() uint64
+}
+
+type pollSchedule struct {
+	source   revisionReader
+	revision uint64
+	known    bool
 }
 
 type processKey struct {
@@ -330,6 +341,23 @@ func (o *Observer) Health() Health {
 	return o.health
 }
 
+func (o *Observer) nextInterval(schedule *pollSchedule, cycleErr error) time.Duration {
+	if cycleErr != nil || schedule.source == nil {
+		return o.interval
+	}
+
+	revision := schedule.source.Revision()
+	unchanged := schedule.known && revision == schedule.revision
+	schedule.revision = revision
+	schedule.known = true
+
+	if !unchanged || len(o.candidates) > 0 || len(o.screenPending) > 0 {
+		return o.interval
+	}
+
+	return max(o.interval, idleObserverInterval)
+}
+
 func (o *Observer) run(ctx context.Context, handle func(Result) error) (err error) {
 	if ctx == nil {
 		return errObserverContextNil
@@ -342,6 +370,10 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) (err erro
 
 	o.continuous = true
 	defer func() { o.continuous = false }()
+
+	var schedule pollSchedule
+
+	schedule.source, _ = o.store.(revisionReader)
 
 	for {
 		result, err := o.runCycle(ctx)
@@ -361,7 +393,7 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) (err erro
 			}
 		}
 
-		timer := time.NewTimer(o.interval)
+		timer := time.NewTimer(o.nextInterval(&schedule, err))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

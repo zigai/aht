@@ -306,6 +306,13 @@ func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResu
 	return result.gc, err
 }
 
+func (s *MemoryStore) Revision() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.revision
+}
+
 // State returns the latest effective state and its monotonic revision.
 func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, error) {
 	if err := ctx.Err(); err != nil {

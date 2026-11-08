@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -1119,4 +1120,235 @@ func TestRunWithResultsStreamsEveryCycle(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("result count = %d, want 1", len(results))
 	}
+}
+
+func TestObserverSlowsUnchangedPollingAndResumesAfterReports(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store, err := registry.OpenMemoryStore(
+			filepath.Join(t.TempDir(), "state.json"),
+			catalog.Rules{},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() { _ = store.Close() })
+
+		base := 300 * time.Millisecond
+		watcher := New(Options{
+			Store:       store,
+			Interval:    base,
+			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
+			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+			CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+			Quiet:       true,
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		cycles := make(chan Result)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- watcher.RunWithResults(ctx, func(result Result) error {
+				select {
+				case cycles <- result:
+				case <-ctx.Done():
+				}
+
+				return nil
+			})
+		}()
+
+		t.Cleanup(func() {
+			cancel()
+
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+
+		first := <-cycles
+
+		second := <-cycles
+		if second.ObservedAt.Sub(first.ObservedAt) != base {
+			t.Fatalf(
+				"initial poll spacing = %s, want configured %s",
+				second.ObservedAt.Sub(first.ObservedAt),
+				base,
+			)
+		}
+
+		synctest.Wait()
+		time.Sleep(2 * base)
+		synctest.Wait()
+
+		select {
+		case result := <-cycles:
+			t.Fatalf(
+				"unchanged inventory was polled again at %s",
+				result.ObservedAt.Sub(second.ObservedAt),
+			)
+		default:
+		}
+
+		presence := registry.PresenceLive
+		activity := registry.ActivityIdle
+		start := registry.NativeLifecycleStart
+
+		_, err = store.Observe(ctx, registry.Observation{
+			Harness: registry.Harness("codex"),
+			At:      time.Now(),
+			Subject: registry.ObservationIdentity{SessionID: "sample"},
+			Evidence: &registry.Report{
+				Event:     "session_start",
+				Lifecycle: &start,
+				Claim:     &presence,
+				Activity:  &activity,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		changed := <-cycles
+
+		resumed := <-cycles
+		if resumed.ObservedAt.Sub(changed.ObservedAt) != base {
+			t.Fatalf(
+				"poll spacing after a native report = %s, want configured %s",
+				resumed.ObservedAt.Sub(changed.ObservedAt),
+				base,
+			)
+		}
+	})
+}
+
+func TestObserverIdlePollingHonorsLongerConfiguredInterval(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store, err := registry.OpenMemoryStore(
+			filepath.Join(t.TempDir(), "state.json"),
+			catalog.Rules{},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() { _ = store.Close() })
+
+		base := 4 * idleObserverInterval
+		watcher := New(Options{
+			Store:       store,
+			Interval:    base,
+			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
+			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+			CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+			Quiet:       true,
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		cycles := make(chan Result)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- watcher.RunWithResults(ctx, func(result Result) error {
+				select {
+				case cycles <- result:
+				case <-ctx.Done():
+				}
+
+				return nil
+			})
+		}()
+
+		t.Cleanup(func() {
+			cancel()
+
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+
+		first := <-cycles
+
+		second := <-cycles
+		if second.ObservedAt.Sub(first.ObservedAt) != base {
+			t.Fatalf(
+				"initial poll spacing = %s, want configured %s",
+				second.ObservedAt.Sub(first.ObservedAt),
+				base,
+			)
+		}
+
+		synctest.Wait()
+		time.Sleep(base / 2)
+		synctest.Wait()
+
+		select {
+		case result := <-cycles:
+			t.Fatalf(
+				"idle policy accelerated configured polling to %s",
+				result.ObservedAt.Sub(second.ObservedAt),
+			)
+		default:
+		}
+	})
+}
+
+func TestObserverKeepsConfiguredPollingAfterDiscoveryFailures(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store, err := registry.OpenMemoryStore(
+			filepath.Join(t.TempDir(), "state.json"),
+			catalog.Rules{},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() { _ = store.Close() })
+
+		base := 300 * time.Millisecond
+		watcher := New(Options{
+			Store:       store,
+			Interval:    base,
+			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, os.ErrPermission },
+			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+			CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+			Quiet:       true,
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		cycles := make(chan Result)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- watcher.RunWithResults(ctx, func(result Result) error {
+				select {
+				case cycles <- result:
+				case <-ctx.Done():
+				}
+
+				return nil
+			})
+		}()
+
+		t.Cleanup(func() {
+			cancel()
+
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+
+		<-cycles
+		second := <-cycles
+
+		third := <-cycles
+		if third.ObservedAt.Sub(second.ObservedAt) != base {
+			t.Fatalf(
+				"poll spacing after failed discovery = %s, want configured %s",
+				third.ObservedAt.Sub(second.ObservedAt),
+				base,
+			)
+		}
+	})
 }

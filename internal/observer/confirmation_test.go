@@ -334,10 +334,6 @@ func statIdentity(t *testing.T, path string) fileIdentity {
 	return fileIdentity{inode: stat.Ino, modTime: info.ModTime(), size: info.Size()}
 }
 
-// TestTrackerSteadyStateDoesNotRewriteState runs the tracker with a virtual clock at
-// the default 300 ms interval with unchanged live sessions and fails if
-// heartbeat cycles rewrite the snapshot, append the journal, or rewrite the
-// observer health file.
 func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -451,14 +447,8 @@ func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 			)
 		}
 
-		cyclesBefore := watcher.Health().Cycles
-
-		time.Sleep(3 * time.Second)
+		time.Sleep(idleObserverInterval + watcher.interval)
 		synctest.Wait()
-
-		if cycles := watcher.Health().Cycles - cyclesBefore; cycles < 8 {
-			t.Fatalf("tracker ran %d cycles in 3s, want at least 8", cycles)
-		}
 
 		for file, before := range map[string]fileIdentity{
 			path:                           snapshot,

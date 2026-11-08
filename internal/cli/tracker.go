@@ -71,7 +71,7 @@ func (app *application) newTrackerEnableCommand() *cobra.Command {
 		&options.interval,
 		"interval",
 		options.interval,
-		"reconciliation `<duration>`",
+		"reconciliation `<duration>`, slower while session state is unchanged",
 	)
 	flags.DurationVar(&options.grace, "grace-period", options.grace, "absence grace `<duration>`")
 	flags.BoolVarP(&dryRun, "dry-run", "n", false, "show changes without writing")
