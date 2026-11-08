@@ -43,28 +43,38 @@ type isolatedHost struct {
 func newIsolatedHost(t *testing.T, contract hostContract, oracle string, hold bool) *isolatedHost {
 	t.Helper()
 
-	titleRequest, err := launch.TitleRequestFor(contract.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var provider *fakeprovider.Server
 
-	provider, err := fakeprovider.Start(fakeprovider.Options{Hold: hold, SideRequest: titleRequest})
-	if err != nil {
-		t.Fatal(err)
-	}
+	endpoint := ""
 
-	t.Cleanup(func() {
-		if err := provider.Close(); err != nil {
-			t.Error(err)
+	if contract.Level == compatibilityLevelLifecycle {
+		titleRequest, err := launch.TitleRequestFor(contract.ID)
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
+
+		provider, err = fakeprovider.Start(
+			fakeprovider.Options{Hold: hold, SideRequest: titleRequest},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() {
+			if err := provider.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+
+		endpoint = provider.URL()
+	}
 
 	aht, nativeEvents := stageOracle(t, oracle)
 
 	launched, err := launch.New(t.Context(), launch.Options{
 		Harness:    contract.ID,
 		Root:       filepath.Join(t.TempDir(), "root"),
-		Endpoint:   provider.URL(),
+		Endpoint:   endpoint,
 		Model:      fakeModel,
 		APIKey:     fakeAPIKey,
 		AHT:        aht,

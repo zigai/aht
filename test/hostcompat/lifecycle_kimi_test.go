@@ -11,10 +11,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness/kimi"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 var errKimiPermission = errors.New("invalid Kimi ACP permission request")
+
+var kimiReporterVersion = kimi.New().Definition().IntegrationVersion
 
 func (host *isolatedHost) runKimiACP(
 	t *testing.T,
@@ -162,7 +165,7 @@ func kimiNativeSession(session registry.Session, sessionID string) bool {
 
 	return native != nil && native.SessionID == sessionID && session.SessionID == sessionID &&
 		native.Reporter.Integration == "kimi-code-hook" &&
-		native.Reporter.Version == 15 &&
+		native.Reporter.Version == kimiReporterVersion &&
 		native.Reporter.MultiSession &&
 
 		native.Attributes["kimi_code_client_type"] == "kimi_code_cli" &&
@@ -541,7 +544,8 @@ func TestKimiNativeOracleRejectsUnrelatedAndSubagentEvidence(t *testing.T) {
 				n.Reporter.Integration = "other-hook"
 			},
 		},
-		{name: "old generation", change: func(n *registry.NativeObservation) { n.Reporter.Version = 14 }},
+		{name: "old generation", change: func(n *registry.NativeObservation) { n.Reporter.Version-- }},
+		{name: "future generation", change: func(n *registry.NativeObservation) { n.Reporter.Version++ }},
 		{name: "exclusive process", change: func(n *registry.NativeObservation) { n.Reporter.MultiSession = false }},
 		{
 			name: "child agent",
@@ -558,7 +562,7 @@ func TestKimiNativeOracleRejectsUnrelatedAndSubagentEvidence(t *testing.T) {
 					SessionID: "foreground",
 					Reporter: registry.Reporter{
 						Integration:  "kimi-code-hook",
-						Version:      15,
+						Version:      kimiReporterVersion,
 						MultiSession: true,
 					},
 					Attributes: map[string]string{
