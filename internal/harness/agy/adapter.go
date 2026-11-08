@@ -1,13 +1,15 @@
 package agy
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zigai/aht/v2/internal/processinfo"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -16,22 +18,20 @@ import (
 const (
 	agyCommand                     = "agy"
 	agyPluginName                  = "aht-state"
-	agyMarkerFileName              = ".aht-managed"
 	agyImportManifestName          = "import_manifest.json"
 	agyImportSource                = "antigravity"
 	agyImportComponent             = "hooks"
-	agyIntegrationID               = "agy"
 	agyHookSource                  = "agy-hook"
 	agyHookAdditionalAttributeKeys = 3
-	integrationVersion             = 10
+	integrationVersion             = 12
 )
 
 type agyHarness struct{ harness.BaseAdapter }
 
 func New() agyHarness {
 	return agyHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true, CatalogCreates: false,
-		ID: registry.Harness("agy"),
+		ExclusiveProcess: true,
+		ID:               registry.Harness("agy"),
 		Aliases: []string{
 			"antigravity",
 			"antigravity-cli",
@@ -40,34 +40,23 @@ func New() agyHarness {
 			"google_antigravity",
 		},
 		ProcessNames: []string{"agy", "antigravity-cli"},
-		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
-		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      false,
-			SessionEnd:        false,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  agyHookSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
-func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	configDir := agyConfigDir()
 	if configDir == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
+
+	definition := adapter.Definition()
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
@@ -75,26 +64,11 @@ func (agyHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				Dir:   filepath.Join(configDir, "plugins", agyPluginName),
 				Label: "agy plugin",
 				Files: []harness.RenderedFileInstallSpec{
-					{
-						Name:        "plugin.json",
-						Content:     "",
-						JSONContent: map[string]any{"name": agyPluginName},
-					},
-					{
-						Name:        "hooks.json",
-						Content:     "",
-						JSONContent: agyHookConfig(binary),
-					},
-					{
-						Name:        agyMarkerFileName,
-						Content:     agyMarkerContent(),
-						JSONContent: nil,
-					},
+					{Name: "plugin.json", JSONContent: map[string]any{"name": agyPluginName}},
+					{Name: "hooks.json", JSONContent: agyHookConfig(binary, definition.ID)},
 				},
-				SnippetOrder:   []string{"plugin.json", "hooks.json", agyMarkerFileName},
-				MarkerFile:     agyMarkerFileName,
+				Identity:       definition.Identity(),
 				ImportManifest: agyImportManifest(configDir),
-				Registration:   nil,
 				Retired:        []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
 			}},
 			harness.ShimAction{},
@@ -119,12 +93,7 @@ func agyRetiredPlugin() harness.PluginDirectoryInstallPlan {
 	return harness.PluginDirectoryInstallPlan{
 		Dir:            filepath.Join(dir, "plugins", agyPluginName),
 		Label:          "agy plugin",
-		Files:          nil,
-		SnippetOrder:   nil,
-		MarkerFile:     agyMarkerFileName,
 		ImportManifest: agyImportManifest(dir),
-		Registration:   nil,
-		Retired:        nil,
 	}
 }
 
@@ -159,56 +128,27 @@ func (agyHarness) HandleHook(
 	return agyHandleHook(invocation), nil
 }
 
-func agyHookConfig(binary string) map[string]any {
+func agyHookConfig(binary string, id registry.Harness) map[string]any {
+	handler := func(event string) map[string]any {
+		return map[string]any{
+			"type":    harness.HookTypeCommand,
+			"command": harness.NativeHookCommand(binary, id, event),
+			"timeout": float64(harness.HookTimeoutSeconds),
+		}
+	}
+	toolGroup := func(event string) map[string]any {
+		return map[string]any{"matcher": "*", "hooks": []any{handler(event)}}
+	}
+
 	return map[string]any{
 		agyPluginName: map[string]any{
-			"PreInvocation":  []any{agyHookHandler(binary, "PreInvocation")},
-			"PostInvocation": []any{agyHookHandler(binary, "PostInvocation")},
-			harness.HookEventPreToolUse: []any{
-				agyToolHookGroup(binary, harness.HookEventPreToolUse),
-			},
-			harness.HookEventPostToolUse: []any{
-				agyToolHookGroup(binary, harness.HookEventPostToolUse),
-			},
-			harness.HookEventStop: []any{agyHookHandler(binary, harness.HookEventStop)},
+			"PreInvocation":  []any{handler("PreInvocation")},
+			"PostInvocation": []any{handler("PostInvocation")},
+			"PreToolUse":     []any{toolGroup("PreToolUse")},
+			"PostToolUse":    []any{toolGroup("PostToolUse")},
+			"Stop":           []any{handler("Stop")},
 		},
 	}
-}
-
-func agyToolHookGroup(binary string, event string) map[string]any {
-	return map[string]any{
-		"matcher": "*",
-		"hooks": []any{
-			agyHookHandler(binary, event),
-		},
-	}
-}
-
-func agyHookHandler(binary string, event string) map[string]any {
-	return map[string]any{
-		"type":    harness.HookTypeCommand,
-		"command": agyHookCommand(binary, event),
-		"timeout": float64(harness.HookTimeoutSeconds),
-	}
-}
-
-func agyHookCommand(binary string, event string) string {
-	return strings.Join([]string{
-		harness.ShellQuote(binary),
-		"--json",
-		"hook",
-		string(registry.Harness("agy")),
-		"--event", harness.ShellQuote(event),
-	}, " ")
-}
-
-func agyMarkerContent() string {
-	return strings.Join([]string{
-		harness.ManagedMarker,
-		"AHT_INTEGRATION_ID=" + agyIntegrationID,
-		"AHT_INTEGRATION_VERSION=" + strconv.Itoa(integrationVersion),
-		"AHT_SOURCE=" + agyHookSource,
-	}, "\n")
 }
 
 func agyConfigDir() string {
@@ -241,7 +181,7 @@ func agyGeminiDir() string {
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	workspacePath := harness.FirstArrayString(payload, "workspacePaths", "workspace_paths")
 	toolCWD := harness.NestedString(payload, "toolCall", "args", "Cwd")
-	cwd := harness.FirstNonEmpty(toolCWD, workspacePath)
+	cwd := cmp.Or(toolCWD, workspacePath)
 
 	attributes := make(map[string]string)
 	harness.AddAttributeString(
@@ -277,8 +217,8 @@ func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 }
 
 func agyHookEvent(payload map[string]any, explicitEvent string) string {
-	return harness.FirstNonEmpty(
-		explicitEvent,
+	return cmp.Or(
+		strings.TrimSpace(explicitEvent),
 		harness.PayloadStringAny(payload, "hookEventName", "hook_event_name", "event"),
 	)
 }
@@ -316,11 +256,8 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 			Attributes:  defaults.Attributes,
 		},
 		Evidence: &registry.Report{
-			DetailObservedAt: nil,
-			Lifecycle:        nil,
-			Claim:            nil,
-			Process:          nil,
-			Location:         nil,
+			Lifecycle: nil,
+
 			Reporter: registry.Reporter{
 				Sequence:     nil,
 				Integration:  agyHookSource,
@@ -329,6 +266,17 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 			},
 			Event:    invocation.Event,
 			Activity: activity,
+
+			Attributes: agyHookAttributes(
+				defaults.Attributes,
+				invocation.Event,
+			),
+			DetailObservedAt: nil,
+
+			Claim:    nil,
+			Process:  nil,
+			Location: nil,
+
 			Listing: &registry.Listing{
 				ResumeCommand: agyResumeCommand(defaults.SessionID),
 				CWD:           defaults.CWD,
@@ -336,9 +284,9 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 				ProcessPID:    0,
 				Current:       false,
 			},
-			Attributes: agyHookAttributes(defaults.Attributes, invocation.Event),
-			Payload:    invocation.RawPayload,
-			Detail:     nil,
+
+			Payload: invocation.RawPayload,
+			Detail:  nil,
 		},
 	}, true
 }
@@ -357,13 +305,13 @@ func agyActivityForHook(event string, payload map[string]any) *registry.Activity
 	switch event {
 	case "PreInvocation", "PostInvocation":
 		activity = registry.ActivityRunning
-	case harness.HookEventPreToolUse:
+	case "PreToolUse":
 		if isAgyInputWaitingTool(payload) {
 			activity = registry.ActivityWaiting
 		} else {
 			activity = registry.ActivityRunning
 		}
-	case harness.HookEventPostToolUse:
+	case "PostToolUse":
 		if _, ok := payload["toolCall"].(map[string]any); !ok {
 			return nil
 		}
@@ -384,7 +332,7 @@ func agyActivityForHook(event string, payload map[string]any) *registry.Activity
 
 func agyHookResponse(event string) map[string]any {
 	switch event {
-	case harness.HookEventPreToolUse:
+	case "PreToolUse":
 		return map[string]any{"decision": "allow"}
 	default:
 		return map[string]any{}
@@ -409,4 +357,15 @@ func isAgyInputWaitingTool(payload map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func (agyHarness) ObservableProcess(process processinfo.Process) bool {
+	// Electron child processes share the application executable but do not own agent sessions.
+	for _, arg := range process.Args {
+		if strings.HasPrefix(arg, "--type=") {
+			return false
+		}
+	}
+
+	return true
 }

@@ -1,15 +1,15 @@
 package catalog
 
-import "github.com/zigai/aht/v2/pkg/registry"
+import (
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
+	"github.com/zigai/aht/v2/pkg/registry"
+)
 
 type Rules struct{}
 
-type detailReporters interface {
-	DetailReporters() []string
-}
-
-type nativeActivityRetainer interface {
-	RetainNativeActivity() bool
+func (Rules) SamePane(a registry.Location, b registry.Location) bool {
+	driver, ok := drivers.Find(a.Kind)
+	return ok && driver.SamePane(a, b)
 }
 
 func (Rules) Known(id registry.Harness) bool {
@@ -27,7 +27,6 @@ func (Rules) Policy(id registry.Harness) registry.Policy {
 			RetainNativeActivity: false,
 			Reporter:             "",
 			CatalogCreates:       false,
-			DetailReporters:      nil,
 			Details: registry.DetailCapabilities{
 				Native: registry.DetailSupport{
 					Permission: false,
@@ -43,23 +42,12 @@ func (Rules) Policy(id registry.Harness) registry.Policy {
 
 	definition := adapter.Definition()
 
-	retainNativeActivity := false
-	if retainer, ok := adapter.(nativeActivityRetainer); ok {
-		retainNativeActivity = retainer.RetainNativeActivity()
-	}
-
-	var reporters []string
-	if provider, ok := adapter.(detailReporters); ok {
-		reporters = provider.DetailReporters()
-	}
-
 	return registry.Policy{
-		DetailReporters:      reporters,
 		Details:              DetailCapabilitiesFor(id),
 		ExclusiveProcess:     definition.ExclusiveProcess,
 		Authority:            definition.StateAuthority,
 		ScreenFallback:       definition.ScreenFallback,
-		RetainNativeActivity: retainNativeActivity,
+		RetainNativeActivity: definition.RetainNativeActivity,
 		Reporter:             definition.IntegrationSource,
 		CatalogCreates:       definition.CatalogCreates,
 	}

@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 var (
@@ -22,7 +21,7 @@ func (copilotHarness) LaunchPlan(
 ) (harness.LaunchPlan, error) {
 	return harness.LaunchPlan{
 		Executable: "copilot",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"COPILOT_HOME=" + filepath.Join(paths.Root, "copilot"),
 			"COPILOT_PROVIDER_BASE_URL=" + model.Endpoint + "/v1",
@@ -37,8 +36,6 @@ func (copilotHarness) LaunchPlan(
 				return launchConfig(existing, paths.Work)
 			},
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
 				return nil, errEmptyPrompt

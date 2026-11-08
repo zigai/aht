@@ -115,7 +115,7 @@ function report(eventName, event, ctx, transition) {
     "--event", eventName, "--observed-at", new Date().toISOString(),
     "--sequence", String(++reportSequence),
     "--quiet", "--no-tmux",
-    "--reporter", "openclaw-plugin",
+    "--reporter", {{SOURCE}},
     "--reporter-version", String(integrationVersion),
   ];
   if (transition.lifecycle) args.push("--lifecycle", transition.lifecycle);

@@ -7,15 +7,19 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
+	gotmux "github.com/zigai/gotmux/tmux"
+
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestLocationFromEnvBuildsMinimalLocation(t *testing.T) {
 	t.Parallel()
 
-	location := LocationFromEnv(Env{TMUX: "/tmp/tmux-1000/default,123,0", TMUXPane: "%4"})
+	location := locationFromEnv(Env{TMUX: "/tmp/tmux-1000/default,123,0", TMUXPane: "%4"})
 	if (location.Kind != registry.MultiplexerTmux) ||
 		location.ServerID != "/tmp/tmux-1000/default" ||
 		location.PaneID != "%4" {
@@ -136,9 +140,9 @@ func TestListPanesWithOptionsDoesNotProbeMissingDefaultServer(t *testing.T) {
 	t.Parallel()
 
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		SocketPaths:     []string{},
-		Env:             Env{TMUX: "", TMUXPane: ""},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
+		SocketPaths: []string{},
+		Env:         Env{TMUX: "", TMUXPane: ""},
+		Processes:   []processinfo.Process{},
 	})
 	if err != nil || len(panes) != 0 {
 		t.Fatalf("no-server discovery = panes %#v, error %v", panes, err)
@@ -151,10 +155,12 @@ func TestListPanesWithOptionsIgnoresUnreachableDiscoveredServer(t *testing.T) {
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
 		SocketPaths: []string{},
 		Env:         Env{TMUX: "", TMUXPane: ""},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			return []ServerProcess{
-				{PID: 42, Args: []string{"tmux", "-S", "/tmp/stale.sock", "new-session", "-d"}},
-			}, nil
+		Processes: []processinfo.Process{
+			{
+				PID:  42,
+				Name: "tmux: server",
+				Args: []string{"tmux", "-S", "/tmp/stale.sock", "new-session", "-d"},
+			},
 		},
 	})
 	if err != nil || len(panes) != 0 {
@@ -162,18 +168,95 @@ func TestListPanesWithOptionsIgnoresUnreachableDiscoveredServer(t *testing.T) {
 	}
 }
 
-func TestListPanesWithOptionsReportsUnreachableCurrentServer(t *testing.T) {
+func TestListPanesWithOptionsIgnoresUnreachableCurrentServer(t *testing.T) {
 	t.Parallel()
 
 	const socket = "/tmp/current-unreachable.sock"
 
 	panes, err := ListPanesWithOptions(context.Background(), ListOptions{
-		SocketPaths:     []string{},
-		Env:             Env{TMUX: socket + ",123,0", TMUXPane: "%1"},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) { return nil, nil },
+		SocketPaths: []string{},
+		Env:         Env{TMUX: socket + ",123,0", TMUXPane: "%1"},
+		Processes:   []processinfo.Process{},
 	})
-	if err == nil || len(panes) != 0 {
+	if err != nil || len(panes) != 0 {
 		t.Fatalf("current-server discovery = panes %#v, error %v", panes, err)
+	}
+}
+
+func TestListPanesWithOptionsPreservesEndpointErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name             string
+		partial, current bool
+	}{
+		{name: "outside all failed"},
+		{name: "outside partial", partial: true},
+		{name: "inside all failed", current: true},
+		{name: "inside partial", partial: true, current: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := ListOptions{
+				SocketPaths: []string{
+					"/sample/denied",
+					"/sample/broken",
+					"/sample/stale",
+					"/sample/live",
+				},
+				Processes: []processinfo.Process{},
+			}
+			if test.current {
+				opts.Env.TMUX = "/sample/denied,123,0"
+			}
+
+			panes, err := listPanesWithOptions(
+				t.Context(),
+				opts,
+				func(_ context.Context, server serverSpec) ([]Pane, error) {
+					switch server.Identity {
+					case "/sample/denied":
+						return nil, os.ErrPermission
+					case "/sample/broken":
+						return nil, gotmux.ErrInvalidArgument
+					case "/sample/stale":
+						return nil, errors.Join(gotmux.ErrNoServer)
+					default:
+						if test.partial {
+							return []Pane{
+								{
+									Location: registry.Location{
+										Kind:   registry.MultiplexerTmux,
+										PaneID: "%1",
+									},
+								},
+							}, nil
+						}
+
+						return nil, nil
+					}
+				},
+			)
+			if !errors.Is(err, os.ErrPermission) || !errors.Is(err, gotmux.ErrInvalidArgument) {
+				t.Fatalf("endpoint failures lost: %v", err)
+			}
+
+			if !strings.Contains(err.Error(), "/sample/denied") ||
+				!strings.Contains(err.Error(), "/sample/broken") ||
+				strings.Contains(err.Error(), "/sample/stale") {
+				t.Fatalf("error endpoint identities = %v", err)
+			}
+
+			want := 0
+			if test.partial {
+				want = 1
+			}
+
+			if len(panes) != want {
+				t.Fatalf("successful panes = %v, want %d", panes, want)
+			}
+		})
 	}
 }
 
@@ -216,11 +299,9 @@ func TestDiscoverServersCombinesSocketAndProcessCandidates(t *testing.T) {
 	servers, err := discoverServers(t.Context(), ListOptions{
 		Env:         Env{TMUX: "/tmp/current.sock,123,0"},
 		SocketPaths: []string{"/tmp/current.sock", "/tmp/named.sock", "/tmp/named.sock"},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			return []ServerProcess{
-				{Args: []string{"tmux", "-S", "/tmp/current.sock"}},
-				{Args: []string{"tmux", "-S/tmp/custom.sock"}},
-			}, nil
+		Processes: []processinfo.Process{
+			{PID: 10, Name: "tmux: server", Args: []string{"tmux", "-S", "/tmp/current.sock"}},
+			{PID: 11, Name: "tmux: server", Args: []string{"tmux", "-S/tmp/custom.sock"}},
 		},
 	})
 	if err != nil {
@@ -253,11 +334,9 @@ func TestDiscoverServersQueriesServerFoundByPathAndNameOnce(t *testing.T) {
 			filepath.Join(socketDirectory, "default"),
 			filepath.Join(socketDirectory, "named"),
 		},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			return []ServerProcess{
-				{PID: 10, Args: []string{"tmux"}},
-				{PID: 11, Args: []string{"tmux", "-L", "named"}},
-			}, nil
+		Processes: []processinfo.Process{
+			{PID: 10, Name: "tmux: server", Args: []string{"tmux"}},
+			{PID: 11, Name: "tmux: server", Args: []string{"tmux", "-L", "named"}},
 		},
 	})
 	if err != nil {
@@ -282,14 +361,11 @@ func TestListPanesPreservesDiscoveryCancellation(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	cancel()
 
 	_, err := ListPanesWithOptions(ctx, ListOptions{
 		SocketPaths: []string{},
-		ServerProcesses: func(context.Context) ([]ServerProcess, error) {
-			cancel()
-			return nil, nil
-		},
+		Processes:   []processinfo.Process{},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled discovery = %v, want cancellation", err)

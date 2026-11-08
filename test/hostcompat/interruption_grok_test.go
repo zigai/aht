@@ -13,7 +13,7 @@ import (
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Grok 1.0.3 advertises ACP session/close and acknowledges it, but neither
@@ -44,7 +44,18 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 	nativePath := filepath.Join(nativeDir, "grok")
 	copyExecutable(t, sourcePath, nativePath)
 
-	pane := host.startGrokPane(t, command, nativePath)
+	nativeCommand := host.command(
+		t,
+		command.Env,
+		"--model",
+		harness.LaunchProviderName,
+		"--always-approve",
+		"--disable-web-search",
+		"--no-memory",
+		compatibilityPrompt,
+	)
+	nativeCommand.Path = nativePath
+	pane := host.startNativePane(t, nativeCommand)
 	t.Cleanup(func() {
 		if t.Failed() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -59,17 +70,10 @@ func (host *isolatedHost) runGrokInterruption(t *testing.T, command *exec.Cmd) {
 		}
 	})
 
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first native Grok provider request step = %d, want 0", hold.Request.Index)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("native Grok did not reach its first active provider request")
-	}
+	host.awaitHold(t, nil, 0)
 
 	host.waitForActiveSession(t)
-	cancelAndQuitGrok(t, pane)
+	host.cancelAndQuitGrok(t, pane)
 	waitForGrokExit(t, pane)
 
 	if count := len(host.provider.Requests()); count != 1 {
@@ -90,14 +94,24 @@ func captureGrokPane(t *testing.T, pane gotmux.Pane) string {
 	return string(out)
 }
 
-func cancelAndQuitGrok(t *testing.T, pane gotmux.Pane) {
+func (host *isolatedHost) cancelAndQuitGrok(t *testing.T, pane gotmux.Pane) {
 	t.Helper()
 
 	if err := pane.SendKeys(t.Context(), gotmux.KeyEscape); err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	host.waitForObservation(
+		t,
+		"native interruption before quitting",
+		func(session registry.Session) bool {
+			native := session.Observations.Native
+
+			return native != nil && native.Activity != nil &&
+				*native.Activity == registry.ActivityInterrupted &&
+				effectiveActivityMatches(session, registry.ActivityInterrupted)
+		},
+	)
 
 	beforeQuit := captureGrokPane(t, pane)
 	if err := pane.SendKeys(t.Context(), gotmux.Key("C-q")); err != nil {
@@ -154,45 +168,4 @@ func waitForGrokExit(t *testing.T, pane gotmux.Pane) {
 
 		time.Sleep(25 * time.Millisecond)
 	}
-}
-
-func (host *isolatedHost) startGrokPane(
-	t *testing.T,
-	command *exec.Cmd,
-	nativePath string,
-) gotmux.Pane {
-	t.Helper()
-	server := testtmux.New(t, gotmux.NewSessionOptions{
-		Name: "grok", Size: gotmux.Size{Width: 160, Height: 45}, Program: gotmux.Exec("/bin/sh"),
-	})
-
-	panes, err := server.Tmux.Panes(t.Context())
-	if err != nil || len(panes) != 1 {
-		t.Fatalf("native Grok initial pane: count=%d error=%v", len(panes), err)
-	}
-
-	pane := panes[0].Handle()
-	if err := pane.Options().SetRemainOnExit(t.Context(), gotmux.RemainOn); err != nil {
-		t.Fatal(err)
-	}
-
-	args := append([]string{"-i"}, command.Env...)
-
-	args = append(
-		args,
-		nativePath,
-		"--model",
-		harness.LaunchProviderName,
-		"--always-approve",
-		"--disable-web-search",
-		"--no-memory",
-		compatibilityPrompt,
-	)
-	if err := pane.Respawn(t.Context(), gotmux.RespawnOptions{
-		Dir: host.launched.Work, Program: gotmux.Exec("env", args...), KillRunning: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	return pane
 }

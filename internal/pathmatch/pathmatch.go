@@ -26,6 +26,19 @@ func Match(path string, pattern string) bool {
 	return matchPrefixOrWildcard(cleanPath, pattern)
 }
 
+// MatchAny reports whether any of paths matches any of patterns.
+func MatchAny(patterns []string, paths ...string) bool {
+	for _, pattern := range patterns {
+		for _, path := range paths {
+			if Match(path, pattern) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func matchGlobPattern(cleanPath string, cleanPattern string, pattern string) bool {
 	if matched, err := filepath.Match(pattern, cleanPath); err == nil && matched {
 		return true

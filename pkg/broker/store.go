@@ -31,13 +31,10 @@ func NewStore(storePath string) *Store {
 
 func NewStoreForSocket(storePath string, socketPath string) *Store {
 	return &Store{
-		client:   NewClientForSocket(socketPath),
+		client:   NewClient(socketPath),
 		fallback: registry.NewJournal(storePath, catalog.Rules{}),
 	}
 }
-
-// Client returns the realtime client used by the store.
-func (s *Store) Client() *Client { return s.client }
 
 func (s *Store) Observe(
 	ctx context.Context,
@@ -103,11 +100,7 @@ func (s *Store) Get(ctx context.Context, id string) (registry.Session, error) {
 
 // Summary returns filtered multiplexer-session summaries from broker or fallback.
 func (s *Store) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return s.SummaryWithOptions(
-		ctx,
-		filter,
-		registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession},
-	)
+	return s.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: ""})
 }
 
 // SummaryWithOptions returns filtered summaries with options from broker or fallback.

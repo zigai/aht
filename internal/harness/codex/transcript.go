@@ -209,7 +209,7 @@ func typedUserItem(payload transcript.Record) transcript.Record {
 	return item
 }
 
-func (codexHarness) TranscriptProjection(
+func transcriptProjection(
 	ctx context.Context,
 	file *os.File,
 	size int64,
@@ -383,20 +383,15 @@ func readResponseItem(
 
 func (codexHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"rollout-*.jsonl"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            readTranscriptRecord,
-		FastRecord:        readFastRecord,
-		Document:          nil,
-		Query:             nil,
-		LocalTitles:       true,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		Patterns: []string{
+			"rollout-*.jsonl",
+		},
+		Sources:     transcriptSources,
+		Record:      readTranscriptRecord,
+		FastRecord:  readFastRecord,
+		UserParts:   userPromptParts,
+		LocalTitles: true,
+		Projection:  transcriptProjection,
 	}
 }
 

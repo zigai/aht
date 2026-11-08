@@ -323,7 +323,7 @@ func TestJournalCrashPoints(t *testing.T) {
 				ReceivedAt: base,
 				Observations: []Observation{
 					{
-						Harness:  HarnessPi,
+						Harness:  harnessSecondary,
 						At:       base,
 						Subject:  ObservationIdentity{SessionID: "one"},
 						Evidence: &Report{Activity: new(ActivityRunning)},
@@ -337,13 +337,13 @@ func TestJournalCrashPoints(t *testing.T) {
 				ReceivedAt: base.Add(time.Second),
 				Observations: []Observation{
 					{
-						Harness:  HarnessPi,
+						Harness:  harnessSecondary,
 						At:       base.Add(time.Second),
 						Subject:  ObservationIdentity{SessionID: "two"},
 						Evidence: &Report{Activity: new(ActivityWaiting)},
 					},
 					{
-						Harness:  HarnessPi,
+						Harness:  harnessSecondary,
 						At:       base.Add(time.Second),
 						Subject:  ObservationIdentity{SessionID: "three"},
 						Evidence: &Report{Activity: new(ActivityRunning)},
@@ -366,7 +366,7 @@ func TestJournalCrashPoints(t *testing.T) {
 					ReceivedAt: base.Add(4 * time.Second),
 					Observations: []Observation{
 						{
-							Harness:  HarnessPi,
+							Harness:  harnessSecondary,
 							At:       base.Add(4 * time.Second),
 							Subject:  ObservationIdentity{SessionID: "four"},
 							Evidence: &Report{Activity: new(ActivityRunning)},
@@ -407,7 +407,7 @@ func testJournalCrashSequence(t *testing.T, mode string, ops []crashOperation) {
 	t.Cleanup(func() { registryFSByDir.Delete(dir) })
 
 	if mode == "append" {
-		owner, err := tryStoreLock(scenario.path + ".owner.lock")
+		owner, err := tryStoreLock(ownerLockPath(scenario.path))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -421,7 +421,7 @@ func testJournalCrashSequence(t *testing.T, mode string, ops []crashOperation) {
 
 	for index, op := range ops {
 		if mode == "mixed" && index%2 == 0 {
-			owner, err := tryStoreLock(scenario.path + ".owner.lock")
+			owner, err := tryStoreLock(ownerLockPath(scenario.path))
 			if err != nil {
 				t.Fatal(err)
 			}

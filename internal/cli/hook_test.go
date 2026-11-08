@@ -168,11 +168,11 @@ func TestManagedHookRejectsOversizedPayload(t *testing.T) {
 
 	err := app.runManagedHook(
 		context.Background(),
-		strings.NewReader(strings.Repeat("x", maxPayloadInputBytes+1)),
+		strings.NewReader(strings.Repeat("x", (1<<20)+1)),
 		"agy",
 		managedHookOptions{event: "PreInvocation"},
 	)
-	if !errors.Is(err, errPayloadInputTooLarge) {
-		t.Fatalf("error = %v, want %v", err, errPayloadInputTooLarge)
+	if err == nil || !strings.Contains(err.Error(), "payload exceeds 1 MiB limit") {
+		t.Fatalf("expected retained payload limit error, got %v", err)
 	}
 }

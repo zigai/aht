@@ -227,7 +227,6 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 			Now:         func() time.Time { return at },
 			ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil },
 			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
-			HealthPath:  path + ".health",
 		},
 	)
 
@@ -673,12 +672,12 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	healthPath := filepath.Join(blockedParent, "health.json")
+	storePath := filepath.Join(blockedParent, "state.json")
 	at := time.Now().UTC()
 
 	watcher := New(Options{
 		Store:       registry.NewJournal(filepath.Join(root, "sessions.json"), catalog.Rules{}),
-		HealthPath:  healthPath,
+		StorePath:   storePath,
 		Now:         func() time.Time { return at },
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
@@ -702,7 +701,7 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 		t.Fatalf("health write retry error = %v", err)
 	}
 
-	if _, err := os.Stat(healthPath); err != nil {
+	if _, err := os.Stat(HealthPath(storePath)); err != nil {
 		t.Fatalf("health file was not retried: %v", err)
 	}
 }
@@ -730,7 +729,6 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 		},
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		HealthPath:  path + ".health",
 	}
 	if _, err := New(options).RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
@@ -809,7 +807,6 @@ func TestObserverMarksHookCreatedDeadProcessGoneInOneCycle(t *testing.T) {
 		},
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		HealthPath:  path + ".health",
 	}
 
 	result, err := New(options).RunOnce(context.Background())
@@ -847,7 +844,6 @@ func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPID(t *testing.T) {
 			},
 			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 			CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-			HealthPath:  path + ".health",
 		}
 	}
 
@@ -925,7 +921,6 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 		},
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		HealthPath:  path + ".health",
 	}
 
 	result, err := New(options).RunOnce(context.Background())
@@ -972,7 +967,6 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 		},
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		HealthPath:  path + ".health",
 	}
 
 	result, err := New(options).RunOnce(context.Background())

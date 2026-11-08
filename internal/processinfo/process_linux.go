@@ -31,13 +31,14 @@ var (
 	errInvalidProcessStartTime = errors.New("invalid process start time")
 )
 
-type linuxEnvironmentHints struct {
-	agent, herdrPane, herdrServer, herdrSession, zellijPane, zellijSession string
-}
-
 // List returns a complete best-effort snapshot of processes owned by the
 // effective user. Processes which exit while being read are skipped.
 func List(ctx context.Context) ([]Process, error) {
+	return ListWithEnv(ctx, nil)
+}
+
+// ListWithEnv is List that also records the values of envKeys in Process.Env.
+func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("process listing context: %w", err)
 	}
@@ -59,7 +60,7 @@ func List(ctx context.Context) ([]Process, error) {
 
 	uid := uint32(euid)
 
-	return listLinuxProcessEntries(ctx, entries, boot, uid)
+	return listLinuxProcessEntries(ctx, entries, boot, uid, envKeys)
 }
 
 // Find returns the current-user process identified by pid. A false found
@@ -95,7 +96,7 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 		return zero, false, nil
 	}
 
-	process, err := readLinuxProcess(dir, pid, boot)
+	process, err := readLinuxProcess(dir, pid, boot, nil)
 	if err != nil {
 		if isLinuxProcessExited(dir, pid, err) {
 			return zero, false, nil
@@ -109,26 +110,12 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 
 // StartIdentity returns a boot-qualified process start identity for pid.
 func StartIdentity(ctx context.Context, pid int) string {
-	if pid <= 0 || ctx.Err() != nil {
+	process, found, err := Find(ctx, pid)
+	if err != nil || !found {
 		return ""
 	}
 
-	bootID, err := os.ReadFile(filepath.Join(procRoot, "sys", "kernel", "random", "boot_id"))
-	if err != nil {
-		return ""
-	}
-
-	data, err := os.ReadFile(fmt.Sprintf("%s/%d/stat", procRoot, pid))
-	if err != nil {
-		return ""
-	}
-
-	start := linuxStartTimeFromStat(string(data))
-	if start == "" {
-		return ""
-	}
-
-	return strings.TrimSpace(string(bootID)) + ":" + start
+	return process.StartIdentity
 }
 
 // CommandName returns the executable command name for pid on Linux.
@@ -169,7 +156,7 @@ func linuxBootIdentity() (string, error) {
 	return boot, nil
 }
 
-func readLinuxProcess(dir string, pid int, boot string) (Process, error) {
+func readLinuxProcess(dir string, pid int, boot string, envKeys []string) (Process, error) {
 	statPath := filepath.Join(dir, "stat")
 
 	data, err := os.ReadFile(statPath)
@@ -199,20 +186,9 @@ func readLinuxProcess(dir string, pid int, boot string) (Process, error) {
 		info.Args = splitLinuxArgs(args)
 	}
 
-	if environ, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
-		hints := parseLinuxEnvironmentHints(environ)
-
-		info.AgentHint = hints.agent
-		switch {
-		case hints.herdrPane != "":
-			info.MultiplexerKind = "herdr"
-			info.MultiplexerServer = hints.herdrServer
-			info.MultiplexerSession = hints.herdrSession
-			info.MultiplexerPane = hints.herdrPane
-		case hints.zellijPane != "":
-			info.MultiplexerKind = "zellij"
-			info.MultiplexerSession = hints.zellijSession
-			info.MultiplexerPane = hints.zellijPane
+	if len(envKeys) > 0 {
+		if environ, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
+			info.Env = parseEnvironment(environ, envKeys)
 		}
 	}
 
@@ -231,31 +207,6 @@ func readLinuxLink(path string) string {
 func isLinuxTTY(path string) bool {
 	return path == "/dev/tty" || strings.HasPrefix(path, "/dev/pts/") ||
 		strings.HasPrefix(path, "/dev/tty")
-}
-
-func parseLinuxEnvironmentHints(data []byte) linuxEnvironmentHints {
-	var hints linuxEnvironmentHints
-
-	remaining := map[string]*string{
-		"AHT_AGENT":           &hints.agent,
-		"HERDR_PANE_ID":       &hints.herdrPane,
-		"HERDR_SOCKET_PATH":   &hints.herdrServer,
-		"HERDR_SESSION":       &hints.herdrSession,
-		"ZELLIJ_PANE_ID":      &hints.zellijPane,
-		"ZELLIJ_SESSION_NAME": &hints.zellijSession,
-	}
-
-	for entry := range strings.SplitSeq(string(data), "\x00") {
-		key, value, ok := strings.Cut(entry, "=")
-		if target := remaining[key]; ok && target != nil {
-			// Retain only recognized values, not the entire environment buffer.
-			*target = strings.Clone(strings.TrimSpace(value))
-			// The first occurrence wins, including an explicitly empty value.
-			delete(remaining, key)
-		}
-	}
-
-	return hints
 }
 
 func splitLinuxArgs(data []byte) []string {
@@ -280,6 +231,7 @@ func listLinuxProcessEntries(
 	entries []os.DirEntry,
 	boot string,
 	uid uint32,
+	envKeys []string,
 ) ([]Process, error) {
 	processes := make([]Process, 0, len(entries))
 	for _, entry := range entries {
@@ -303,7 +255,7 @@ func listLinuxProcessEntries(
 			continue
 		}
 
-		process, err := readLinuxProcess(dir, pid, boot)
+		process, err := readLinuxProcess(dir, pid, boot, envKeys)
 		if err != nil {
 			if isLinuxProcessExited(dir, pid, err) {
 				continue
@@ -376,21 +328,17 @@ func parseLinuxStat(stat string) (Process, error) {
 	}
 
 	return Process{
-		PID:                pid,
-		Name:               name,
-		PPID:               ppid,
-		ProcessGroupID:     pgrp,
-		Foreground:         ttpgid > 0 && pgrp == ttpgid,
-		StartIdentity:      fields[startIndex],
-		Executable:         "",
-		CWD:                "",
-		TTY:                "",
-		AgentHint:          "",
-		MultiplexerKind:    "",
-		MultiplexerServer:  "",
-		MultiplexerSession: "",
-		MultiplexerPane:    "",
-		Args:               nil,
+		PID:            pid,
+		Name:           name,
+		PPID:           ppid,
+		ProcessGroupID: pgrp,
+		Foreground:     ttpgid > 0 && pgrp == ttpgid,
+		StartIdentity:  fields[startIndex],
+		Executable:     "",
+		CWD:            "",
+		TTY:            "",
+		Env:            nil,
+		Args:           nil,
 	}, nil
 }
 
@@ -420,26 +368,6 @@ func classifyProcessError(path string, err error) error {
 	}
 
 	return &TableError{Path: path, Err: err}
-}
-
-func linuxStartTimeFromStat(stat string) string {
-	closeParen := strings.LastIndexByte(stat, ')')
-	if closeParen < 0 || closeParen+2 >= len(stat) {
-		return ""
-	}
-
-	fields := strings.Fields(stat[closeParen+2:])
-
-	const startTimeFieldIndexAfterComm = 19
-	if len(fields) <= startTimeFieldIndexAfterComm {
-		return ""
-	}
-
-	if _, err := strconv.ParseUint(fields[startTimeFieldIndexAfterComm], 10, 64); err != nil {
-		return ""
-	}
-
-	return fields[startTimeFieldIndexAfterComm]
 }
 
 func isLinuxNotExist(err error) bool {

@@ -21,16 +21,14 @@ func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Resu
 		return Result{}, fmt.Errorf("upgrade service: %w", err)
 	}
 
-	b, err := platformBackend(
-		Options{Binary: binary, StorePath: "/", Interval: 0, GracePeriod: 0, DryRun: dryRun},
-	)
+	path, err := definitionPath()
 	if err != nil {
 		return Result{}, err
 	}
 
-	result := b.describe()
+	result := describeDefinition(path)
 
-	previous, err := os.ReadFile(result.Path)
+	previous, err := os.ReadFile(result.ManagedPath)
 	if errors.Is(err, os.ErrNotExist) {
 		result.Message = "not installed; skipped"
 		return result, nil
@@ -41,19 +39,19 @@ func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Resu
 	}
 
 	if !isManaged(string(previous)) {
-		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
+		return result, fmt.Errorf("%w: %s", ErrForeign, result.ManagedPath)
 	}
 
 	result.Installed = true
 
-	b, err = recoveredBackend(previous, binary)
+	b, err := recoveredBackend(previous, binary)
 	if err != nil {
 		return result, err
 	}
 
 	result.Current = string(previous) == b.content()
 
-	state, err := b.running(ctx, s.executor, false)
+	state, err := b.running(ctx, s.executor)
 	if err != nil {
 		return result, err
 	}
@@ -113,7 +111,7 @@ func (s *Service) refreshUpgradeDefinition(
 	result Result,
 	restart bool,
 ) error {
-	if err := writeAtomic(result.Path, []byte(b.content())); err != nil {
+	if err := writeAtomic(result.ManagedPath, []byte(b.content())); err != nil {
 		return err
 	}
 
@@ -139,7 +137,7 @@ func (s *Service) rollbackUpgrade(
 	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), serviceRollbackTime)
 	defer cancel()
 
-	if err := writeAtomic(result.Path, previous); err != nil {
+	if err := writeAtomic(result.ManagedPath, previous); err != nil {
 		return errors.Join(cause, fmt.Errorf("restore service definition: %w", err))
 	}
 
@@ -180,7 +178,7 @@ func recoverOptions(args []string, binary string) (Options, error) {
 			} else {
 				options.GracePeriod = value
 			}
-		case "manage", "tracker", "run", "observe", "monitor", "--quiet":
+		case "manage", "tracker", "run", "--quiet":
 		default:
 			return options, fmt.Errorf("%w: unsupported argument %q", errInstalledArguments, flag)
 		}

@@ -112,13 +112,17 @@ func (app *application) newStartCommand() *cobra.Command {
 }
 
 func (app *application) runStart(ctx context.Context, options startOptions) error {
+	titleRequest, err := launch.TitleRequestFor(options.harness)
+	if err != nil {
+		return fmt.Errorf("prepare native title recognition: %w", err)
+	}
 	//nolint:contextcheck // The provider serves until Close, so its lifetime is not bound to the command context.
 	provider, err := fakeprovider.Start(fakeprovider.Options{
 		Address:     "",
 		Model:       "",
 		Script:      fakeprovider.Echo(),
 		Hold:        false,
-		SideMarkers: nil,
+		SideRequest: titleRequest,
 	})
 	if err != nil {
 		return fmt.Errorf("start fake provider: %w", err)

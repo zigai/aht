@@ -8,8 +8,77 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestPersistedShimOwnershipAcrossManagement(t *testing.T) {
+	for _, operation := range []string{"install", "status", "upgrade", "remove"} {
+		t.Run(operation, func(t *testing.T) {
+			isolateUpgradeHome(t)
+
+			path := filepath.Join(registry.DefaultStateDir(), "shims", "opencode")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			content := "#!/bin/sh\n# " + harness.ManagedMarker + "\n" +
+				"# AHT_INTEGRATION_ID=opencode-shim\n# AHT_INTEGRATION_VERSION=1\n" +
+				"# AHT_SOURCE=opencode-shim\naht_bin='/bin/old-aht'\nharness_bin='/custom/native'\n"
+			if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			opts := Options{
+				Harness: registry.Harness("opencode"), Binary: "/bin/new-aht",
+				TargetBinary: "/custom/native", UseShim: true,
+			}
+
+			switch operation {
+			case "install":
+				result, err := Run(t.Context(), opts)
+				if err != nil || !result.Changed {
+					t.Fatalf("install = %+v, %v", result, err)
+				}
+			case "status":
+				status, err := Inspect(t.Context(), opts.Harness, opts.Binary)
+				if err != nil || status.Status != ArtifactStale {
+					t.Fatalf("status = %+v, %v", status, err)
+				}
+			case "upgrade":
+				results, err := Upgrade(t.Context(), opts.Binary, false)
+				if err != nil || len(results) != 1 || results[0].Error != "" ||
+					!results[0].Changed {
+					t.Fatalf("upgrade = %+v, %v", results, err)
+				}
+			case "remove":
+				result, err := Remove(t.Context(), opts)
+				if err != nil || !result.Changed {
+					t.Fatalf("remove = %+v, %v", result, err)
+				}
+
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("removed shim still exists: %v", err)
+				}
+
+				return
+			}
+
+			if operation != "status" {
+				data, err := os.ReadFile(path)
+				if err != nil ||
+					!strings.Contains(string(data), "AHT_INTEGRATION_ID=opencode-shim\n") {
+					t.Fatalf("updated shim = %s, %v", data, err)
+				}
+
+				target, exists, err := installedShim(opts.Harness)
+				if err != nil || !exists || target != "/custom/native" {
+					t.Fatalf("shim target = %q, %v, %v", target, exists, err)
+				}
+			}
+		})
+	}
+}
 
 func TestInstallShimRequiresForceForForeignFile(t *testing.T) {
 	dir := t.TempDir()
@@ -179,7 +248,7 @@ func TestInstallShimResolvesTargetOutsideManagedShimDir(t *testing.T) {
 
 	if err := writeExecutableTestFile(
 		shimPath,
-		[]byte("#!/bin/sh\n# "+managedMarker+"\n"),
+		[]byte("#!/bin/sh\n# "+managedMarker+"\n# AHT_INTEGRATION_ID=opencode-shim\n"),
 	); err != nil {
 		t.Fatalf("writing existing shim: %v", err)
 	}

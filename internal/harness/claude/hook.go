@@ -26,7 +26,7 @@ func (claudeHarness) HandleHook(
 		event = harness.PayloadString(invocation.Payload, "hook_event_name")
 	}
 
-	if event != harness.HookEventSessionStart && event != "FileChanged" {
+	if event != "SessionStart" && event != "FileChanged" {
 		return result, nil
 	}
 
@@ -42,7 +42,7 @@ func (claudeHarness) HandleHook(
 		}
 	} else {
 		result.Response["hookSpecificOutput"] = map[string]any{
-			"hookEventName": harness.HookEventSessionStart,
+			"hookEventName": "SessionStart",
 			"watchPaths":    []string{path},
 		}
 	}

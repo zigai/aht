@@ -10,7 +10,6 @@ import (
 	"strconv"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const (
@@ -35,15 +34,13 @@ func (openclawHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: openclawCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
-		Env:        nil,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Files: []harness.LaunchFile{{
 			Path: filepath.Join(paths.Home, ".openclaw", "openclaw.json"),
 			Update: func(existing []byte) ([]byte, error) {
 				return openclawLaunchConfig(existing, paths.Work, model, port)
 			},
 		}},
-		Setup: nil,
 		Services: []harness.LaunchService{
 			{
 				Args: []string{

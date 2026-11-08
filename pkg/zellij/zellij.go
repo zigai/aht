@@ -16,14 +16,13 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const defaultCaptureLines = 100
+const (
+	defaultCaptureLines = 100
+	envSessionName      = "ZELLIJ_SESSION_NAME"
+	envPaneID           = "ZELLIJ_PANE_ID"
+)
 
 var errPaneRequired = errors.New("zellij session and pane are required")
-
-type Env struct {
-	SessionName string
-	PaneID      string
-}
 
 // CommandRunner runs zellij with args. A runner should pass [SocketDir] of ctx
 // as ZELLIJ_SOCKET_DIR so the command reaches only the targeted session.
@@ -64,40 +63,6 @@ type paneRecord struct {
 func SocketDir(ctx context.Context) string {
 	dir, _ := ctx.Value(socketDirKey{}).(string)
 	return dir
-}
-
-func Current() registry.Location {
-	return CurrentWithEnv(
-		Env{SessionName: os.Getenv("ZELLIJ_SESSION_NAME"), PaneID: os.Getenv("ZELLIJ_PANE_ID")},
-	)
-}
-
-func CurrentWithEnv(env Env) registry.Location {
-	if strings.TrimSpace(env.SessionName) == "" || strings.TrimSpace(env.PaneID) == "" {
-		var empty registry.Location
-		return empty
-	}
-
-	return registry.Location{
-		ServerID:        "",
-		SessionID:       "",
-		WorkspaceID:     "",
-		WorkspaceName:   "",
-		TabID:           "",
-		TabIndex:        "",
-		TabName:         "",
-		WindowID:        "",
-		WindowIndex:     "",
-		WindowName:      "",
-		PaneIndex:       "",
-		PaneCurrentPath: "",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-		Kind:            registry.MultiplexerZellij,
-		SessionName:     env.SessionName,
-		PaneID:          mux.NormalizePaneID(registry.MultiplexerZellij, env.PaneID),
-	}
 }
 
 // withRunner fills in the zellij runner. It reports false when zellij is not
@@ -341,4 +306,45 @@ func runZellij(ctx context.Context, args ...string) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func locationFromEnv(env func(string) string) registry.Location {
+	sessionName, paneID := env(envSessionName), env(envPaneID)
+	if strings.TrimSpace(sessionName) == "" || strings.TrimSpace(paneID) == "" {
+		var empty registry.Location
+		return empty
+	}
+
+	return registry.Location{
+		ServerID:        "",
+		SessionID:       "",
+		WorkspaceID:     "",
+		WorkspaceName:   "",
+		TabID:           "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "",
+		WindowIndex:     "",
+		WindowName:      "",
+		PaneIndex:       "",
+		PaneCurrentPath: "",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+		Kind:            registry.MultiplexerZellij,
+		SessionName:     sessionName,
+		PaneID:          normalizePaneID(paneID),
+	}
+}
+
+// normalizePaneID gives a bare numeric pane id from ZELLIJ_PANE_ID the
+// "terminal_" prefix that list-panes and dump-screen use.
+func normalizePaneID(paneID string) string {
+	paneID = strings.TrimSpace(paneID)
+	if paneID != "" && !strings.HasPrefix(paneID, "terminal_") &&
+		!strings.HasPrefix(paneID, "plugin_") {
+		return "terminal_" + paneID
+	}
+
+	return paneID
 }

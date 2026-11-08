@@ -1,9 +1,13 @@
 package observer
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -16,17 +20,28 @@ func TestResolveHarnessIdentifiesSessionProcesses(t *testing.T) {
 		want    registry.Harness
 	}{
 		{
-			name: "scoped agent hint",
+			name: "session with tracker words",
 			process: processinfo.Process{
-				Executable: "/usr/bin/fence",
-				AgentHint:  "claude",
-				Args: []string{
-					"fence",
-					"--",
-					"node",
-				},
+				Executable: "/usr/bin/codex",
+				Args:       []string{"codex", "manage", "tracker", "run"},
 			},
-			want: "claude",
+			want: "codex",
+		},
+		{
+			name: "session with a type argument",
+			process: processinfo.Process{
+				Executable: "/usr/bin/codex",
+				Args:       []string{"codex", "--type=utility"},
+			},
+			want: "codex",
+		},
+		{
+			name: "session in a directory named like a fixture",
+			process: processinfo.Process{
+				Executable: "/work/aht-systest-example/codex",
+				CWD:        "/work/aht-systest-example",
+			},
+			want: "codex",
 		},
 		{
 			name: "omp headless session",
@@ -65,7 +80,8 @@ func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 		{
 			name: "test fixture",
 			process: processinfo.Process{
-				Executable: "/tmp/aht-systest-12345/codex",
+				Executable: "/work/fixtures/codex",
+				Env:        map[string]string{processinfo.ChildRoleEnv: "fixture"},
 				Args:       []string{"/tmp/aht-systest-12345/codex", "--store", "/tmp/aht-systest-12345/state.json"},
 			},
 		},
@@ -74,6 +90,7 @@ func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 			process: processinfo.Process{
 				Executable: "/home/test/bin/codex",
 				Args:       []string{"codex", "manage", "tracker", "run", "--quiet"},
+				Env:        map[string]string{processinfo.ChildRoleEnv: "tracker"},
 			},
 		},
 		{
@@ -116,55 +133,31 @@ func TestResolveHarnessIgnoresNonSessionProcesses(t *testing.T) {
 	}
 }
 
-func TestResolveHarnessScansKnownWrappers(t *testing.T) {
+func TestObserverFindsHarnessBehindWrapper(t *testing.T) {
 	t.Parallel()
 
-	for _, wrapper := range []string{"env", "fence", "bwrap", "bubblewrap", "mise", "nix-shell", "nix", "direnv"} {
-		t.Run(wrapper, func(t *testing.T) {
-			t.Parallel()
-
-			process := processinfo.Process{
-				Executable: "/usr/bin/" + wrapper,
-				Args:       []string{wrapper, "--wrapper-option", "value", "--", "/usr/bin/codex"},
-			}
-
-			harness, ok := resolveHarness(process)
-			if !ok || harness != registry.Harness("codex") {
-				t.Fatalf("resolveHarness = %q, %v; want Codex behind %s", harness, ok, wrapper)
-			}
-		})
+	process := processinfo.Process{
+		PID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/env",
+		Args: []string{"env", "AGENT_MODE=1", "--", "/usr/bin/codex"},
 	}
-}
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
 
-func TestHasAncestorHarness(t *testing.T) {
-	t.Parallel()
-
-	processes := map[int]processinfo.Process{
-		10: {PID: 10, PPID: 1},
-		20: {PID: 20, PPID: 10},
-		30: {PID: 30, PPID: 20},
-		40: {PID: 40, PPID: 1},
+	watcher := New(Options{
+		Store: store,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return []processinfo.Process{process}, nil
+		},
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+	if _, err := watcher.RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 
-	harnessByPID := map[int]registry.Harness{
-		10: registry.Harness("claude"),
-		20: registry.Harness("claude"),
-		30: registry.Harness("claude"),
-		40: registry.Harness("codex"),
-	}
-	if hasAncestorHarness(10, registry.Harness("claude"), processes, harnessByPID) {
-		t.Fatal("PID 10 unexpectedly has ancestor with same harness")
-	}
-
-	if !hasAncestorHarness(20, registry.Harness("claude"), processes, harnessByPID) {
-		t.Fatal("PID 20 should have PID 10 as ancestor with same harness")
-	}
-
-	if !hasAncestorHarness(30, registry.Harness("claude"), processes, harnessByPID) {
-		t.Fatal("PID 30 should have ancestor with same harness")
-	}
-
-	if hasAncestorHarness(40, registry.Harness("codex"), processes, harnessByPID) {
-		t.Fatal("PID 40 should not have ancestor with same harness")
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil || len(sessions) != 1 || sessions[0].Harness != "codex" ||
+		sessions[0].Process == nil ||
+		sessions[0].Process.PID != process.PID {
+		t.Fatalf("wrapper session=%#v err=%v", sessions, err)
 	}
 }

@@ -1,11 +1,88 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/zigai/strata"
 )
+
+// EditPath returns the config file that edits apply to: path when set, then
+// $AHT_CONFIG, then the user config file.
+func EditPath(path string) (string, error) {
+	if path == "-" {
+		return "", ErrStdinNotEditable
+	}
+
+	options := []strata.Option{strata.WithFormats(".toml")}
+	if path != "" {
+		options = append(options, strata.WithPath(path))
+	} else if env := strings.TrimSpace(os.Getenv(ConfigEnv)); env != "" {
+		options = append(options, strata.WithOptionalPath(env))
+	} else {
+		options = append(options, strata.WithAppName("aht"))
+	}
+
+	resolved, err := strata.EditPath(options...)
+	if err != nil {
+		return "", fmt.Errorf("select config edit path: %w", err)
+	}
+
+	return resolved, nil
+}
+
+// FileExists reports whether a config file exists at path.
+func FileExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("%w %s: %w", ErrAccessConfig, path, err)
+	}
+
+	if err == nil && info.IsDir() {
+		return false, fmt.Errorf("%w: %s", ErrConfigIsDirectory, path)
+	}
+
+	return err == nil, nil
+}
+
+// Set writes key = value to the config file at path, creating the file from
+// the default template when it is missing. A key or value that would leave the
+// file invalid returns ErrInvalidSetting and leaves the file unchanged.
+func Set(path string, key string, value string) error {
+	if _, err := EnsureConfigFile(path); err != nil {
+		return fmt.Errorf("ensure config file %s: %w", path, err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
+
+	updated, err := strata.SetBytes(".toml", data, key, value)
+	if err != nil {
+		return fmt.Errorf("%w: set key %q: %w", ErrInvalidSetting, key, err)
+	}
+
+	_, err = strata.Load[Config](
+		strata.WithPath("-"),
+		strata.WithStdin(bytes.NewReader(updated)),
+		strata.WithFormats(".toml"),
+		strata.WithStrict(),
+	)
+	if err != nil {
+		return fmt.Errorf("%w: updated configuration is invalid: %w", ErrInvalidSetting, err)
+	}
+
+	if err := strata.Set[Config](path, key, value); err != nil {
+		return fmt.Errorf("%w: set key %q: %w", ErrInvalidSetting, key, err)
+	}
+
+	return nil
+}
 
 // publishConfigFile publishes complete, synced contents in one directory entry
 // operation. Linking a temporary file gives ensure-only creation O_EXCL semantics

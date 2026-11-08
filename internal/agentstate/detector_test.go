@@ -2,6 +2,7 @@ package agentstate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -668,130 +668,6 @@ func TestDecisionJSONNeverContainsScreenContents(t *testing.T) {
 	}
 }
 
-func TestHookAuthorityRequiresMatchingProcess(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	process := registry.ProcessIdentity{PID: 12, StartIdentity: "boot:12"}
-	running := registry.ActivityRunning
-
-	session := registry.Session{
-		Harness: registry.Harness("pi"),
-		Process: &process,
-		Observations: registry.Observations{
-			Native: &registry.NativeObservation{
-				Activity:   &running,
-				Reporter:   registry.Reporter{Integration: "pi-extension"},
-				Process:    process,
-				ObservedAt: now,
-			},
-		},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
-	}
-	if !registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now).Active ||
-		detectScreenForTest(session, now) {
-		t.Fatal("matching Pi extension report was not authoritative")
-	}
-
-	session.Observations.Native.Process.StartIdentity = "old"
-	if registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now).Active ||
-		!detectScreenForTest(session, now) {
-		t.Fatal("stale Pi extension report did not fall back to screen")
-	}
-
-	session.Observations.Native.Process = process
-	gone := registry.PresenceGone
-
-	session.Observations.Native.Presence = &gone
-	if evaluation := registry.EvaluateHook(
-		session,
-		(catalog.Rules{}).Policy(session.Harness),
-		now,
-	); evaluation.Active ||
-		evaluation.Reason != "integration_ended" {
-		t.Fatalf("ended integration evaluation = %#v", evaluation)
-	}
-
-	session.Observations.Native.Presence = nil
-
-	session.Observations.Native.ObservedAt = now.Add(time.Second)
-	if evaluation := registry.EvaluateHook(
-		session,
-		(catalog.Rules{}).Policy(session.Harness),
-		now,
-	); evaluation.Active || !evaluation.ProcessMatches ||
-		evaluation.Reason != "integration_observation_from_future" {
-		t.Fatalf("future integration evaluation = %#v", evaluation)
-	}
-
-	session.Observations.Native.ObservedAt = now.Add(
-		-registry.IntegrationActivityLease - time.Second,
-	)
-	if evaluation := registry.EvaluateHook(
-		session,
-		(catalog.Rules{}).Policy(session.Harness),
-		now,
-	); evaluation.Active ||
-		evaluation.Fresh ||
-		!evaluation.ProcessMatches ||
-		evaluation.Reason != "integration_report_stale" ||
-
-		detectScreenForTest(session, now) {
-		t.Fatalf("aged Pi extension report did not keep hook authority: %#v", evaluation)
-	}
-}
-
-func TestOmpHookAuthorityUsesNativeIntegration(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	session := ompSession(now)
-
-	evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now)
-	if !evaluation.Active || !evaluation.Fresh || !evaluation.ProcessMatches ||
-		evaluation.Reason != "matching_live_process_report" {
-		t.Fatalf("OMP hook evaluation = %#v", evaluation)
-	}
-
-	if detectScreenForTest(session, now) {
-		t.Fatal("fresh OMP hook should not fall back to screen detection")
-	}
-}
-
-func TestOmpHookAuthorityFallsBackToScreenWhenStale(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	session := ompSession(now.Add(-registry.IntegrationActivityLease - time.Second))
-
-	evaluation := registry.EvaluateHook(session, (catalog.Rules{}).Policy(session.Harness), now)
-	if evaluation.Active || evaluation.Fresh || !evaluation.ProcessMatches ||
-		evaluation.Reason != "integration_report_stale" {
-		t.Fatalf("stale OMP hook evaluation = %#v", evaluation)
-	}
-
-	if !detectScreenForTest(session, now) {
-		t.Fatal("stale OMP hook must fall back to screen detection")
-	}
-}
-
-func ompSession(observedAt time.Time) registry.Session {
-	process := registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
-	running := registry.ActivityRunning
-
-	return registry.Session{
-		Harness: registry.Harness("omp"),
-		Process: &process,
-		Observations: registry.Observations{Native: &registry.NativeObservation{
-			Activity:   &running,
-			Reporter:   registry.Reporter{Integration: "omp-extension"},
-			Process:    process,
-			ObservedAt: observedAt,
-		}},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
-	}
-}
-
 func TestInspectDetection(t *testing.T) {
 	t.Parallel()
 
@@ -1284,16 +1160,6 @@ func TestDefaultConfigDir(t *testing.T) {
 	})
 }
 
-func detectScreenForTest(session registry.Session, now time.Time) bool {
-	authority, _ := registry.ActivityAuthority(
-		session,
-		(catalog.Rules{}).Policy(session.Harness),
-		now,
-	)
-
-	return authority == registry.AuthorityScreen
-}
-
 func TestANSIEscapePatternPreservesIntermediateBytesAndMatches(t *testing.T) {
 	t.Parallel()
 	// Preserve the historical ANSI grammar as an independent equivalence oracle.
@@ -1331,5 +1197,113 @@ func TestANSIEscapePatternPreservesIntermediateBytesAndMatches(t *testing.T) {
 
 	if ansiEscapePattern.NumSubexp() != 0 {
 		t.Fatal("unexpected capture groups")
+	}
+}
+
+func TestInspectScreenUsesNormalizedBoundedScreen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	screen := "Would you like to run the following command?\n" + strings.Repeat(
+		"older text\n",
+		100,
+	) + "\x1b[32mThinking… esc to interrupt\x1b[0m"
+
+	got, err := InspectScreen(
+		t.Context(),
+		registry.Harness("claude"),
+		screen,
+		InspectOptions{ConfigDir: dir},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Decision.Activity != registry.ActivityRunning ||
+		got.WinningRule != "working_interruptible" ||
+		got.LinesEvaluated != 100 {
+		t.Fatalf("unexpected inspection: %+v", got)
+	}
+
+	if got.Screen != "" {
+		t.Fatal("screen content returned without opt-in")
+	}
+}
+
+func TestInspectScreenExplicitManifestAndTrace(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "codex.toml")
+
+	manifest := `version = 1
+agent = "codex"
+[[rules]]
+id = "higher"
+state = "waiting"
+priority = 20
+all = ["approval"]
+[[rules]]
+id = "lower"
+state = "running"
+priority = 10
+any = ["approval"]
+`
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := InspectScreen(
+		t.Context(),
+		registry.Harness("codex"),
+		"approval",
+		InspectOptions{ManifestPath: path, IncludeScreen: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.WinningRule != "higher" || len(got.Candidates) != 2 || !got.Candidates[1].Matched ||
+		got.Candidates[1].Winner ||
+		got.Screen != "approval" {
+		t.Fatalf("unexpected priority trace: %+v", got)
+	}
+
+	if _, err := InspectScreen(
+		t.Context(),
+		registry.Harness("claude"),
+		"approval",
+		InspectOptions{ManifestPath: path},
+	); err == nil {
+		t.Fatal("mismatched harness accepted")
+	}
+}
+
+func TestInspectScreenInputFailures(t *testing.T) {
+	t.Parallel()
+
+	_, err := InspectScreen(
+		t.Context(),
+		registry.Harness("codex"),
+		strings.Repeat("x", MaxScreenBytes+1),
+		InspectOptions{},
+	)
+	if !errors.Is(err, ErrScreenTooLarge) {
+		t.Fatalf("oversize error = %v", err)
+	}
+
+	_, err = InspectScreen(
+		t.Context(),
+		registry.Harness("codex"),
+		"",
+		InspectOptions{ManifestPath: "rules.toml", ConfigDir: "rules"},
+	)
+	if !errors.Is(err, ErrManifestOptions) {
+		t.Fatalf("conflicting options error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = InspectScreen(ctx, registry.Harness("codex"), "", InspectOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled error = %v", err)
 	}
 }

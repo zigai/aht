@@ -25,15 +25,7 @@ func TestSelectorExactIDVsPrefixPrecedence(t *testing.T) {
 
 	// Exact match must win over prefix match
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "claude-1000",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "claude-1000",
 	})
 	if err != nil {
 		t.Fatalf("expected exact match, got error: %v", err)
@@ -45,15 +37,7 @@ func TestSelectorExactIDVsPrefixPrecedence(t *testing.T) {
 
 	// Ambiguous prefix matching both sessions must return ErrAmbiguousSession
 	_, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "claude-10",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "claude-10",
 	})
 	if !errors.Is(err, client.ErrAmbiguousSession) {
 		t.Fatalf("expected ErrAmbiguousSession, got: %v", err)
@@ -72,15 +56,7 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 
 	// Match by native session ID
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "native-token-123",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "native-token-123",
 	})
 	if err != nil {
 		t.Fatalf("resolve by native ID failed: %v", err)
@@ -103,15 +79,7 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 	}
 
 	resolved, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         dirtySessionPath,
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: dirtySessionPath,
 	})
 	if err != nil {
 		t.Fatalf("resolve by normalized path failed: %v", err)
@@ -132,31 +100,15 @@ func TestSelectorNoMatchAndAmbiguity(t *testing.T) {
 
 	// No match returns ErrSessionNotFound
 	_, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "nonexistent",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "nonexistent",
 	})
-	if !errors.Is(err, registry.ErrSessionNotFound) || !errors.Is(err, client.ErrSessionNotFound) {
+	if !errors.Is(err, registry.ErrSessionNotFound) {
 		t.Fatalf("expected ErrSessionNotFound, got: %v", err)
 	}
 
 	// Ambiguity with multiple prefix matches
 	_, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "session",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "session",
 	})
 	if !errors.Is(err, client.ErrAmbiguousSession) {
 		t.Fatalf("expected ErrAmbiguousSession, got: %v", err)
@@ -173,15 +125,9 @@ func TestSelectorTwoServersWithSamePane(t *testing.T) {
 
 	// Bare %0 must be rejected as ambiguous across two servers
 	_, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "%0",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			MultiplexerPane: "%0",
+		},
 	})
 	if !errors.Is(err, client.ErrAmbiguousSession) {
 		t.Fatalf("expected ErrAmbiguousSession for bare %%0 across servers, got: %v", err)
@@ -189,15 +135,10 @@ func TestSelectorTwoServersWithSamePane(t *testing.T) {
 
 	// Server-qualified pane %0 must resolve uniquely
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "/tmp/tmux-1.sock",
-		MultiplexerPane:   "%0",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			MultiplexerServer: "/tmp/tmux-1.sock",
+			MultiplexerPane:   "%0",
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected unique resolution with server qualifier, got: %v", err)
@@ -219,15 +160,9 @@ func TestSelectorCrossMultiplexerPanes(t *testing.T) {
 
 	// Bare %0 is ambiguous across multiplexer kinds
 	_, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "%0",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			MultiplexerPane: "%0",
+		},
 	})
 	if !errors.Is(err, client.ErrAmbiguousSession) {
 		t.Fatalf("expected ErrAmbiguousSession across multiplexers, got: %v", err)
@@ -235,15 +170,10 @@ func TestSelectorCrossMultiplexerPanes(t *testing.T) {
 
 	// Kind-qualified pane %0 resolves uniquely
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   client.MultiplexerTmux,
-		MultiplexerServer: "",
-		MultiplexerPane:   "%0",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			MultiplexerKind: registry.MultiplexerTmux,
+			MultiplexerPane: "%0",
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected unique resolution for tmux, got: %v", err)
@@ -254,15 +184,10 @@ func TestSelectorCrossMultiplexerPanes(t *testing.T) {
 	}
 
 	resolved, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   client.MultiplexerZellij,
-		MultiplexerServer: "",
-		MultiplexerPane:   "%0",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			MultiplexerKind: registry.MultiplexerZellij,
+			MultiplexerPane: "%0",
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected unique resolution for zellij, got: %v", err)
@@ -292,15 +217,9 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 	}
 
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           dirtyProj,
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			Project: dirtyProj,
+		},
 	})
 	if err != nil {
 		t.Fatalf("exact project match failed: %v", err)
@@ -312,15 +231,9 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 
 	// Non-matching exact project
 	_, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           tempDir,
-		ProjectSubtree:    false,
-		CWD:               "",
+		Filter: registry.Filter{
+			Project: tempDir,
+		},
 	})
 	if !errors.Is(err, registry.ErrSessionNotFound) {
 		t.Fatalf("expected ErrSessionNotFound for non-matching exact project, got: %v", err)
@@ -328,15 +241,10 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 
 	// Subtree matching with parent directory matches
 	resolved, err = client.ResolveSessions(sessions, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           tempDir,
-		ProjectSubtree:    true,
-		CWD:               "",
+		Filter: registry.Filter{
+			Project:        tempDir,
+			ProjectSubtree: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("subtree match failed: %v", err)
@@ -369,15 +277,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 	})
 
 	resolved, err := durableClient.Resolve(t.Context(), client.Selector{
-		ID:                "",
-		Reference:         "sess-durable-1",
-		Harness:           "",
-		MultiplexerKind:   "",
-		MultiplexerServer: "",
-		MultiplexerPane:   "",
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
+		Reference: "sess-durable-1",
 	})
 	if err != nil {
 		t.Fatalf("durable resolve failed: %v", err)
@@ -442,15 +342,14 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	}
 
 	resolved, err := realtimeClient.Resolve(t.Context(), client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           client.Harness("claude"),
-		MultiplexerKind:   client.MultiplexerTmux,
-		MultiplexerServer: "/tmp/tmux-main.sock",
-		MultiplexerPane:   "%42",
-		Project:           "/tmp/project",
-		ProjectSubtree:    false,
-		CWD:               "/tmp/project",
+		Filter: registry.Filter{
+			Harness:           registry.Harness("claude"),
+			MultiplexerKind:   registry.MultiplexerTmux,
+			MultiplexerServer: "/tmp/tmux-main.sock",
+			MultiplexerPane:   "%42",
+			Project:           "/tmp/project",
+			CWD:               "/tmp/project",
+		},
 	})
 	if err != nil {
 		t.Fatalf("realtime resolve failed: %v", err)
@@ -542,7 +441,7 @@ func testSessionWithID(id string, harness string, sessionID string) registry.Ses
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(nil),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 }

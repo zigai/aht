@@ -193,3 +193,29 @@ func TestPaginateRequiresWrappedField(t *testing.T) {
 		t.Fatal("accepted a response without the listed field")
 	}
 }
+
+func TestDownloadDoesNotForwardTokenAcrossOrigins(t *testing.T) {
+	destination := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "" {
+				t.Error("forwarded token to artifact storage")
+			}
+
+			_, _ = fmt.Fprint(w, "state")
+		}),
+	)
+	t.Cleanup(destination.Close)
+
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fixture-token" {
+			t.Error("missing API token")
+		}
+
+		http.Redirect(w, r, destination.URL, http.StatusFound)
+	})
+
+	body, err := client.Download(t.Context(), "/artifact")
+	if err != nil || string(body) != "state" {
+		t.Fatalf("redirect = %q, %v", body, err)
+	}
+}

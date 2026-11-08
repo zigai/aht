@@ -28,7 +28,6 @@ const (
 
 var (
 	ErrAlreadyRunning = errors.New("aht broker is already running")
-	ErrUnsupported    = errors.New("aht broker is unsupported on this platform")
 
 	errContextNil          = errors.New("broker context is nil")
 	errStoreNil            = errors.New("broker store is nil")
@@ -159,7 +158,7 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 			})
 		default:
 			cleanup := cancelclose.OnCancel(ctx, connection)
-			_ = s.writeResponse(connection, errorResponse("", "busy", broker.ErrBusy))
+			_ = s.writeResponse(connection, errorResponse("", broker.CodeBusy, broker.ErrBusy))
 
 			cleanup()
 		}
@@ -184,12 +183,12 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 
 	var request broker.Request
 	if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-		_ = s.writeResponse(connection, errorResponse(request.ID, "invalid_json", err))
+		_ = s.writeResponse(connection, errorResponse(request.ID, broker.CodeInvalidJSON, err))
 		return
 	}
 
 	if err := validateRequest(request); err != nil {
-		_ = s.writeResponse(connection, errorResponse(request.ID, "invalid_request", err))
+		_ = s.writeResponse(connection, errorResponse(request.ID, broker.CodeInvalidRequest, err))
 		return
 	}
 
@@ -251,7 +250,7 @@ func validateRequest(request broker.Request) error {
 }
 
 func (s *Server) execute(ctx context.Context, request broker.Request) broker.Response {
-	response := newResponse(request.ID, "result")
+	response := newResponse(request.ID, broker.ResponseResult)
 
 	var err error
 
@@ -273,12 +272,11 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 		session, err = s.store.Get(ctx, request.SessionID)
 		response.Session = &session
 	case broker.MethodSummary:
-		opts := request.SummaryOptions
-		if opts.GroupBy == "" {
-			opts.GroupBy = registry.SummaryGroupByMultiplexerSession
-		}
-
-		response.Summaries, err = s.store.SummaryWithOptions(ctx, request.Filter, opts)
+		response.Summaries, err = s.store.SummaryWithOptions(
+			ctx,
+			request.Filter,
+			request.SummaryOptions,
+		)
 	case broker.MethodGC:
 		var result registry.GCResult
 
@@ -345,7 +343,7 @@ func (s *Server) serveSubscription(
 			}
 
 			if errors.Is(waitErr, context.DeadlineExceeded) {
-				response := newResponse(request.ID, "heartbeat")
+				response := newResponse(request.ID, broker.ResponseHeartbeat)
 
 				response.Now = time.Now().UTC()
 				if err := s.writeResponse(connection, response); err != nil {
@@ -369,14 +367,14 @@ func (s *Server) serveSubscription(
 }
 
 func snapshotResponse(id string, state registry.StateSnapshot) broker.Response {
-	response := newResponse(id, "snapshot")
+	response := newResponse(id, broker.ResponseSnapshot)
 	response.Snapshot = &state
 
 	return response
 }
 
 func errorResponse(id string, code string, err error) broker.Response {
-	response := newResponse(id, "error")
+	response := newResponse(id, broker.ResponseError)
 	response.Error = &broker.Error{Code: code, Message: err.Error()}
 
 	return response
@@ -399,20 +397,7 @@ func newResponse(id string, responseType string) broker.Response {
 }
 
 func operationErrorResponse(id string, err error) broker.Response {
-	code := "operation_failed"
-
-	switch {
-	case errors.Is(err, registry.ErrSessionNotFound):
-		code = "not_found"
-	case errors.Is(err, registry.ErrObservationConflict):
-		code = "observation_conflict"
-	case errors.Is(err, registry.ErrProcessEnded):
-		code = "process_ended"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		code = "canceled"
-	}
-
-	return errorResponse(id, code, err)
+	return errorResponse(id, broker.ErrorCode(err), err)
 }
 
 func (s *Server) writeResponse(connection net.Conn, response broker.Response) error {
@@ -423,19 +408,14 @@ func (s *Server) writeResponse(connection net.Conn, response broker.Response) er
 
 	if len(encoded) >= broker.MaxResponseBytes {
 		encoded, err = json.Marshal(
-			errorResponse(response.ID, "response_too_large", errResponseTooLarge),
+			errorResponse(response.ID, broker.CodeResponseTooLarge, errResponseTooLarge),
 		)
 		if err != nil {
 			return fmt.Errorf("encoding oversized-response error: %w", err)
 		}
 	}
 
-	timeout := s.writeTimeout
-	if timeout <= 0 {
-		timeout = writeTimeout
-	}
-
-	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+	if err := connection.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
 		return fmt.Errorf("setting broker write deadline: %w", err)
 	}
 

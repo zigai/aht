@@ -2,10 +2,11 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/pkg/harness"
 )
@@ -15,21 +16,19 @@ func TestManageCapabilitiesTable(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	code := executeCLI(
-		context.Background(),
-		[]string{"manage", "capabilities"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-	)
+	code := executeCLI(t.Context(), []string{"manage", "capabilities"}, nil, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d; stderr = %s", code, stderr.String())
 	}
 
-	output := stdout.String()
-	for _, expected := range []string{"pi", "codex", "claude"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("output missing expected token %q:\n%s", expected, output)
+	capabilities := harness.AllCapabilities()
+	if len(capabilities) == 0 {
+		t.Fatal("catalog has no capabilities")
+	}
+
+	for _, capability := range capabilities {
+		if !strings.Contains(stdout.String(), string(capability.Harness)) {
+			t.Errorf("table omits %s: %s", capability.Harness, stdout.String())
 		}
 	}
 }
@@ -40,106 +39,78 @@ func TestManageCapabilitiesJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
 	code := executeCLI(
-		context.Background(),
+		t.Context(),
 		[]string{"--json", "manage", "capabilities"},
-		strings.NewReader(""),
+		nil,
 		&stdout,
 		&stderr,
 	)
 	if code != 0 {
-		t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d; stderr = %s", code, stderr.String())
 	}
 
-	var caps []harness.Capabilities
-	if err := json.Unmarshal(stdout.Bytes(), &caps); err != nil {
-		t.Fatalf("failed to decode JSON capabilities: %v\noutput: %s", err, stdout.String())
+	var got []harness.Capabilities
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
 	}
 
-	if len(caps) == 0 {
-		t.Fatal("empty capabilities slice returned")
+	want := harness.AllCapabilities()
+	if len(want) == 0 {
+		t.Fatal("catalog has no capabilities")
 	}
 
-	foundPi := false
-
-	for _, c := range caps {
-		if c.Harness == "pi" {
-			foundPi = true
-
-			if c.Authority != "hook" {
-				t.Fatalf("Pi authority = %q, want hook", c.Authority)
-			}
-		}
-	}
-
-	if !foundPi {
-		t.Fatal("pi capability missing from list")
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("CLI capabilities differ from the library (-want +got):\n%s", diff)
 	}
 }
 
 func TestManageCapabilitiesSingleHarness(t *testing.T) {
 	t.Parallel()
-	t.Run("human details", func(t *testing.T) {
-		t.Parallel()
 
-		var stdout, stderr bytes.Buffer
+	capabilities := harness.AllCapabilities()
+	if len(capabilities) == 0 {
+		t.Fatal("catalog has no capabilities")
+	}
 
-		code := executeCLI(
-			context.Background(),
-			[]string{"manage", "capabilities", "--harness", "pi"},
-			strings.NewReader(""),
-			&stdout,
-			&stderr,
-		)
-		if code != 0 {
-			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
-		}
+	for _, capability := range capabilities {
+		t.Run(string(capability.Harness), func(t *testing.T) {
+			t.Parallel()
 
-		output := stdout.String()
-		for _, expected := range []string{
-			"Harness:",
-			"pi",
-			"Authority:",
-			"hook",
-			"Installable:",
-			"yes",
-			"Resumable:",
-			"yes",
-		} {
-			if !strings.Contains(output, expected) {
-				t.Errorf("single harness output missing %q:\n%s", expected, output)
+			var stdout, stderr bytes.Buffer
+
+			args := []string{
+				"--json",
+				"manage",
+				"capabilities",
+				"--harness",
+				string(capability.Harness),
 			}
-		}
-	})
+			if code := executeCLI(t.Context(), args, nil, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit code = %d; stderr = %s", code, stderr.String())
+			}
 
-	t.Run("json object", func(t *testing.T) {
-		t.Parallel()
+			var got harness.Capabilities
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
 
-		var stdout, stderr bytes.Buffer
+			if diff := cmp.Diff(capability, got); diff != "" {
+				t.Fatalf("filtered capabilities (-want +got):\n%s", diff)
+			}
 
-		code := executeCLI(
-			context.Background(),
-			[]string{"--json", "manage", "capabilities", "--harness", "codex"},
-			strings.NewReader(""),
-			&stdout,
-			&stderr,
-		)
-		if code != 0 {
-			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
-		}
+			stdout.Reset()
 
-		var c harness.Capabilities
-		if err := json.Unmarshal(stdout.Bytes(), &c); err != nil {
-			t.Fatalf(
-				"failed to decode single capability JSON: %v\noutput: %s",
-				err,
-				stdout.String(),
-			)
-		}
+			if code := executeCLI(t.Context(), args[1:], nil, &stdout, &stderr); code != 0 {
+				t.Fatalf("human capabilities exit code = %d; stderr = %s", code, stderr.String())
+			}
 
-		if c.Harness != "codex" || c.Authority != "hook" || !c.ScreenSupport {
-			t.Fatalf("unexpected codex capabilities: %+v", c)
-		}
-	})
+			for _, value := range []string{"Harness:", string(capability.Harness), "Authority:", capability.Authority} {
+				if !strings.Contains(stdout.String(), value) {
+					t.Errorf("human capabilities omit %q: %s", value, stdout.String())
+				}
+			}
+		})
+	}
 
 	t.Run("invalid harness exits usage code 2", func(t *testing.T) {
 		t.Parallel()
@@ -147,18 +118,15 @@ func TestManageCapabilitiesSingleHarness(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 
 		code := executeCLI(
-			context.Background(),
+			t.Context(),
 			[]string{"manage", "capabilities", "--harness", "invalid-harness"},
-			strings.NewReader(""),
+			nil,
 			&stdout,
 			&stderr,
 		)
-		if code != exitCodeUsage {
-			t.Fatalf("exit code = %d, want %d", code, exitCodeUsage)
-		}
-
-		if !strings.Contains(stderr.String(), "unknown harness") {
-			t.Fatalf("stderr = %q, want unknown harness error", stderr.String())
+		if code != exitCodeUsage || stdout.Len() != 0 ||
+			!strings.Contains(stderr.String(), "unknown harness") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout.String(), stderr.String())
 		}
 	})
 }

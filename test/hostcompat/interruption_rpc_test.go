@@ -5,10 +5,8 @@ package hostcompat
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Both native RPC implementations await session.abort before acknowledging abort.
@@ -33,23 +31,14 @@ func runRPCInterruption(t *testing.T, host *isolatedHost, env []string) {
 		},
 	)
 
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first active RPC request step = %d", hold.Request.Index)
-		}
-	case <-process.done:
-		t.Fatalf("RPC host exited before active provider request: %v", process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatal("RPC host did not reach active provider request")
-	}
+	host.awaitHold(t, process, 0)
 
 	host.waitForActiveSession(t)
 	// Deliberately never release the held model response: no tool call has yet
 	// been delivered, and this command must cancel actual in-flight model IO.
 	sendPermissionJSON(t, input, map[string]any{"id": "interruption-abort", "type": "abort"})
 
-	abort := rpcAbortProgress{terminalEnd: host.contract.ID == registry.Harness("omp")}
+	abort := rpcAbortProgress{terminalEnd: host.contract.InterruptionDriver == driverExtensionRPC}
 	for !abort.acknowledged || !abort.ended || !abort.settled {
 		abort.observe(t, next())
 	}
@@ -70,8 +59,8 @@ func runRPCInterruption(t *testing.T, host *isolatedHost, env []string) {
 func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 	t.Helper()
 
-	switch host.contract.ID {
-	case registry.Harness("pi"):
+	switch host.contract.InterruptionDriver {
+	case driverCompletionRPC:
 		return []string{
 			"--mode",
 			"rpc",
@@ -80,7 +69,7 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--model",
 			fakeModel,
 		}
-	case registry.Harness("omp"):
+	case driverExtensionRPC:
 		// The launch has configured the isolated model and installed the hook.
 		// Preserve its explicit managed extension loading without print-mode flags.
 		hooks, err := filepath.Glob(
@@ -98,6 +87,19 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--hook",
 			hooks[0],
 		}
+	case driverProcess,
+		driverExecRPC,
+		driverACP,
+		driverPythonACP,
+		driverExecutionServer,
+		driverPluginServer,
+		driverTerminalQuit,
+		driverTerminalDialog,
+		driverCLIACP,
+		driverControlCLI,
+		driverAppServer,
+		driverSDKCLI:
+		fallthrough
 	default:
 		t.Fatalf("unsupported native RPC interruption host %s", host.contract.ID)
 		return nil

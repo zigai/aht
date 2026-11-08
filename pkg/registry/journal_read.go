@@ -16,7 +16,7 @@ func (s *FileStore) load(ctx context.Context) (snapshot, error) {
 		return newSnapshot(), nil
 	}
 
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -33,7 +33,7 @@ func (s *FileStore) Verify(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	lock, err := openExistingStoreLock(ctx, s.path+".lock")
+	lock, err := openExistingStoreLock(ctx, storeLockPath(s.path))
 	if err != nil {
 		return 0, err
 	}
@@ -69,7 +69,7 @@ func (s *MemoryStore) drainLocked(ctx context.Context) error {
 		return ErrStoreClosed
 	}
 
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalR
 		return journalResult{}, ErrStoreClosed
 	}
 
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
 	if err != nil {
 		return journalResult{}, err
 	}
@@ -247,7 +247,7 @@ func journalWorthy(entry journalEntry, result journalResult) bool {
 	}
 
 	for index := range entry.Observations {
-		if entry.Observations[index].Kind() == "report" {
+		if entry.Observations[index].Kind() == EvidenceReport {
 			return true
 		}
 	}

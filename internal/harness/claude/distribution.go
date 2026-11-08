@@ -6,15 +6,8 @@ import (
 
 func (claudeHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "npm",
-		Package:       "@anthropic-ai/claude-code",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "claude",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
+		Source:    harness.DistributionNPM,
+		Package:   "@anthropic-ai/claude-code",
+		Directory: "claude",
 	}
 }

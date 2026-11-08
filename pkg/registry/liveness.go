@@ -25,10 +25,16 @@ func (Unknown) liveness() {}
 func (Live) liveness()    {}
 func (Gone) liveness()    {}
 
-func NewLiveness(presence Presence, activity Activity, decision *ActivityDecision) Liveness {
+func NewLiveness(
+	presence Presence,
+	activity Activity,
+	decision *ActivityDecision,
+	at time.Time,
+	reason string,
+) Liveness {
 	switch presence {
 	case PresenceGone:
-		return Gone{At: time.Time{}, Reason: "", Decision: decision}
+		return Gone{At: at, Reason: reason, Decision: decision}
 	case PresenceLive:
 		return Live{Activity: activity, Decision: decision}
 	case PresenceUnknown:
@@ -90,7 +96,7 @@ func (s Session) Decision() *ActivityDecision {
 }
 
 func (s *Session) setPresence(presence Presence) {
-	s.Liveness = NewLiveness(presence, ActivityValue(s.Activity()), s.Decision())
+	s.Liveness = NewLiveness(presence, ActivityValue(s.Activity()), s.Decision(), time.Time{}, "")
 }
 
 func (s *Session) setActivity(activity *Activity) {
@@ -98,7 +104,7 @@ func (s *Session) setActivity(activity *Activity) {
 		return
 	}
 
-	s.Liveness = NewLiveness(s.Presence(), ActivityValue(activity), s.Decision())
+	s.Liveness = NewLiveness(s.Presence(), ActivityValue(activity), s.Decision(), time.Time{}, "")
 }
 
 func (s *Session) setDecision(decision *ActivityDecision) {
@@ -109,5 +115,5 @@ func (s *Session) setDecision(decision *ActivityDecision) {
 		return
 	}
 
-	s.Liveness = NewLiveness(s.Presence(), ActivityValue(s.Activity()), decision)
+	s.Liveness = NewLiveness(s.Presence(), ActivityValue(s.Activity()), decision, time.Time{}, "")
 }

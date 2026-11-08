@@ -11,185 +11,94 @@ import (
 )
 
 const (
-	codexCommand           = "codex"
-	codexIntegrationSource = "codex-hook"
+	codexCommand               = "codex"
+	codexIntegrationSource     = "codex-hook"
+	integrationVersion         = 16
+	terminalHookTimeoutSeconds = 3
 )
 
 type codexHarness struct{ harness.BaseAdapter }
 
-type hookPayload struct {
-	SessionID      string  `json:"session_id"      validate:"required,notblank"`
-	TranscriptPath *string `json:"transcript_path" validate:"omitempty"`
-	CWD            string  `json:"cwd"             validate:"required,notblank"`
-	HookEventName  string  `json:"hook_event_name" validate:"required,notblank"`
-	Model          string  `json:"model"           validate:"omitempty"`
-}
-
 func New() codexHarness {
 	return codexHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true,
-		CatalogCreates:   false,
-		ID:               registry.Harness("codex"),
-		Aliases:          nil,
-		ProcessNames:     []string{"codex"},
+		PayloadOmissions:     []string{"tool_input", "tool_response"},
+		ExclusiveProcess:     true,
+		RetainNativeActivity: true,
+		ID:                   registry.Harness("codex"),
+		ProcessNames:         []string{"codex"},
 		Env: harness.EnvKeys{
+			Config:      []string{"CODEX_HOME", "CODEX_SQLITE_HOME"},
 			SessionID:   []string{"CODEX_SESSION_ID"},
 			SessionPath: []string{"CODEX_SESSION_PATH"},
-			ProjectRoot: nil,
 			PID:         []string{"CODEX_PID"},
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  codexIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     true,
+		LifecycleEventAttribute:   "codex_hook_event",
+		LifecycleSourceAttributes: []string{"codex_start_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         codexIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
+		ScreenFallback:            true,
 	})}
 }
 
-func (codexHarness) RetainNativeActivity() bool { return true }
-
-func (codexHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter codexHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := codexHome()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
 	plan := harness.JSONCommandHookInstallPlan{
-		Path:              filepath.Join(base, "hooks.json"),
-		Source:            codexIntegrationSource,
-		Label:             "codex hooks",
-		ConfigLabel:       "codex config",
-		StatusMessage:     "Recording agent session",
-		OmitStatusMessage: false,
-		HooksAtRoot:       false,
-		Hooks: []harness.CommandHookInstallSpec{
+		HooksKey:      "hooks",
+		Path:          filepath.Join(base, "hooks.json"),
+		Source:        codexIntegrationSource,
+		Label:         "codex hooks",
+		ConfigLabel:   "codex config",
+		StatusMessage: "Recording agent session",
+		Hooks: harness.CommandHookSpecs(binary, adapter.Definition(), []harness.CommandHook{
 			{
-				Event:   harness.HookEventSessionStart,
-				Matcher: "startup|resume|clear",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityIdle,
-					harness.HookEventSessionStart,
-					codexIntegrationSource,
-				),
+				Event:      "SessionStart",
+				Matcher:    "startup|resume|clear",
+				Transition: harness.HookActivityIdle,
 			},
 			// Automatic compaction also fires SessionStart inside a turn that
 			// keeps running, so compaction reports presence without activity.
 			{
-				Event:   harness.HookEventSessionStart,
-				Matcher: "compact",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.PresenceLive,
-					harness.HookEventSessionStart,
-					codexIntegrationSource,
-				),
+				Event:      "SessionStart",
+				Matcher:    "compact",
+				Transition: harness.HookPresenceLive,
 			},
+			{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+			{Event: "PermissionRequest", Matcher: "*", Transition: harness.HookActivityWaiting},
 			{
-				Event:   harness.HookEventUserPromptSubmit,
-				Matcher: "",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityRunning,
-					harness.HookEventUserPromptSubmit,
-					codexIntegrationSource,
-				),
+				Event:      "PostToolUse",
+				Transition: harness.HookActivityRunning,
+				Stdin:      harness.ReportStdinDefaults,
 			},
-			{
-				Event:   "PermissionRequest",
-				Matcher: "*",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityWaiting,
-					"PermissionRequest",
-					codexIntegrationSource,
-				),
-			},
-			{
-				Event:   harness.HookEventPostToolUse,
-				Matcher: "",
-				Command: harness.RawStdinDefaultsReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityRunning,
-					harness.HookEventPostToolUse,
-					codexIntegrationSource,
-				),
-			},
-			{
-				Event:   "PreCompact",
-				Matcher: "",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityRunning,
-					"PreCompact",
-					codexIntegrationSource,
-				),
-			},
+			{Event: "PreCompact", Transition: harness.HookActivityRunning},
 			// Automatic compaction continues the running turn; only manual
 			// compaction returns the session to idle.
-			{
-				Event:   "PostCompact",
-				Matcher: "manual",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityIdle,
-					"PostCompact",
-					codexIntegrationSource,
-				),
-			},
+			{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
 			// SubagentStart and SubagentStop describe child agents inside the
 			// parent turn, which keeps running until Stop.
+			{Event: "Stop", Transition: harness.HookActivityIdle},
 			{
-				Event:   harness.HookEventStop,
-				Matcher: "",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityIdle,
-					harness.HookEventStop,
-					codexIntegrationSource,
-				),
+				Event:      "Interrupt",
+				Transition: harness.HookActivityInterrupted,
+				Timeout:    terminalHookTimeoutSeconds,
 			},
 			{
-				Event:   "Interrupt",
-				Matcher: "",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.ActivityInterrupted,
-					"Interrupt",
-					codexIntegrationSource,
-				),
+				Event:      "SessionEnd",
+				Matcher:    "other",
+				Transition: harness.HookPresenceGone,
+				Timeout:    terminalHookTimeoutSeconds,
 			},
-			{
-				Event:   harness.HookEventSessionEnd,
-				Matcher: "other",
-				Command: harness.ReportHookCommand(
-					binary,
-					registry.Harness("codex"),
-					registry.PresenceGone,
-					harness.HookEventSessionEnd,
-					codexIntegrationSource,
-				),
-			},
-		},
-		Trust: nil,
+		}),
 	}
 	plan.Trust = hookTrust{path: plan.Path, hooks: plan.Hooks}
 
@@ -210,7 +119,7 @@ func (codexHarness) ResumeCommand(sessionID string, _ string) []string {
 }
 
 func (codexHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
-	return harness.PayloadValidator[hookPayload]()(rawPayload)
+	return harness.PayloadValidator[harness.CommandHookPayload]()(rawPayload)
 }
 
 func (codexHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
@@ -246,7 +155,6 @@ func (codexHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 		SessionID:   harness.PayloadString(payload, "session_id"),
 		SessionPath: harness.PayloadString(payload, "transcript_path"),
 		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
 	}, nil
@@ -263,27 +171,4 @@ func codexHome() string {
 	}
 
 	return filepath.Join(home, ".codex")
-}
-
-func (codexHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["codex_hook_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "codex_start_source", "source", "reason"),
-	)
-}
-
-func (codexHarness) HookTimeoutSeconds(event string) int {
-	const terminalTimeoutSeconds = 3
-	if event == harness.HookEventSessionEnd || event == "Interrupt" {
-		return terminalTimeoutSeconds
-	}
-
-	return harness.HookTimeoutSeconds
 }

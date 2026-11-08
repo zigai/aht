@@ -1,22 +1,19 @@
 package kilo
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
-
+	"github.com/zigai/aht/v2/internal/command"
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -25,17 +22,7 @@ const (
 	maxKiloDatabasePathOutputBytes = 4 << 10
 )
 
-var (
-	errKiloDatabaseNotRegular         = errors.New("kilo database is not a regular file")
-	errKiloMultipleDatabasesMatch     = errors.New("multiple Kilo databases match session")
-	errKiloDatabasePathOutputTooLarge = errors.New("kilo database path output exceeds 4 KiB")
-)
-
-type kiloDatabasePathOutput struct {
-	bytes.Buffer
-
-	exceeded bool
-}
+var errKiloMultipleDatabasesMatch = errors.New("multiple Kilo databases match session")
 
 type kiloTitleLookup struct {
 	titles    []string
@@ -90,7 +77,7 @@ func (lookup *kiloTitleLookup) readDatabase(
 	path string,
 	identities []registry.ObservationIdentity,
 ) {
-	db, err := openKiloSessionDatabase(path)
+	db, err := transcript.OpenDatabase(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
@@ -109,36 +96,6 @@ func (lookup *kiloTitleLookup) readDatabase(
 	if err := db.Close(); err != nil {
 		lookup.failures = append(lookup.failures, fmt.Errorf("close Kilo database: %w", err))
 	}
-}
-
-func openKiloSessionDatabase(path string) (*sql.DB, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect Kilo database: %w", err)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("inspect Kilo database: %w", err)
-	}
-
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %q", errKiloDatabaseNotRegular, path)
-	}
-
-	var databaseURL url.URL
-
-	databaseURL.Scheme = "file"
-	databaseURL.Path = path
-	databaseURL.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", databaseURL.String())
-	if err != nil {
-		return nil, fmt.Errorf("open Kilo database: %w", err)
-	}
-
-	db.SetMaxOpenConns(1)
-
-	return db, nil
 }
 
 func (lookup *kiloTitleLookup) readTitles(
@@ -192,6 +149,11 @@ func (lookup *kiloTitleLookup) recordTitle(index int, sessionID string, title st
 }
 
 func kiloDatabasePaths(ctx context.Context) ([]string, error) {
+	paths := kiloPaths(harness.HomeDir())
+	if paths.database == "" {
+		return nil, nil
+	}
+
 	binary, err := exec.LookPath(kiloCommand)
 	if err == nil {
 		return kiloCommandDatabasePath(ctx, binary)
@@ -201,37 +163,24 @@ func kiloDatabasePaths(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("resolve Kilo database path: %w", ctx.Err())
 	}
 
-	return kiloFallbackDatabasePaths()
+	return []string{paths.database}, nil
 }
 
 func kiloCommandDatabasePath(ctx context.Context, binary string) ([]string, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, kiloTitleTimeout)
-	defer cancel()
-
-	command := exec.CommandContext(requestCtx, binary, "db", "path")
-
-	var output kiloDatabasePathOutput
-
-	command.Stdout = &output
-
-	command.Stderr = io.Discard
-	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("resolve Kilo database path: %w", ctx.Err())
-		}
-
-		if requestCtx.Err() != nil {
-			return nil, fmt.Errorf("resolve Kilo database path: %w", requestCtx.Err())
-		}
-
-		if output.exceeded {
-			return nil, errKiloDatabasePathOutputTooLarge
-		}
-
+	output, err := command.RunWithLimits(
+		ctx,
+		kiloTitleTimeout,
+		maxKiloDatabasePathOutputBytes,
+		binary,
+		nil,
+		"db",
+		"path",
+	)
+	if err != nil {
 		return nil, fmt.Errorf("resolve Kilo database path: %w", err)
 	}
 
-	path := strings.TrimSpace(output.String())
+	path := strings.TrimSpace(string(output))
 	if path == "" || path == ":memory:" {
 		return nil, nil
 	}
@@ -246,55 +195,4 @@ func kiloCommandDatabasePath(ctx context.Context, binary string) ([]string, erro
 	}
 
 	return []string{path}, nil
-}
-
-func kiloFallbackDatabasePaths() ([]string, error) {
-	name := "kilo.db"
-
-	if path := strings.TrimSpace(os.Getenv("KILO_DB")); path != "" {
-		if path == ":memory:" {
-			return nil, nil
-		}
-
-		if filepath.IsAbs(path) {
-			return []string{path}, nil
-		}
-
-		name = path
-	}
-
-	dir := kiloDataDir()
-	if dir == "" {
-		return nil, nil
-	}
-
-	return []string{filepath.Join(dir, name)}, nil
-}
-
-func (output *kiloDatabasePathOutput) Write(data []byte) (int, error) {
-	if len(data) > maxKiloDatabasePathOutputBytes-output.Len() {
-		output.exceeded = true
-		return 0, errKiloDatabasePathOutputTooLarge
-	}
-
-	n, err := output.Buffer.Write(data)
-	if err != nil {
-		return n, fmt.Errorf("buffer Kilo database path output: %w", err)
-	}
-
-	return n, nil
-}
-
-func kiloDataDir() string {
-	data := os.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		home := harness.HomeDir()
-		if home == "" {
-			return ""
-		}
-
-		data = filepath.Join(home, ".local", "share")
-	}
-
-	return filepath.Join(data, "kilo")
 }

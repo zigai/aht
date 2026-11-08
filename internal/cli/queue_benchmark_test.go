@@ -6,22 +6,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/reporting"
+
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func BenchmarkPrepareReport(b *testing.B) {
-	options := reportOptions{
-		harness:   "codex",
-		sessionID: "benchmark",
-		event:     "turn_start",
-		activity:  "running",
+	options := reporting.Options{
+		Harness:   "codex",
+		SessionID: "benchmark",
+		Event:     "turn_start",
+		Activity:  "running",
 	}
 	for b.Loop() {
-		if _, err := prepareReport(
+		if _, err := reporting.Prepare(
 			nil,
 			options,
-			reportRuntimeContext{defaultObservedAt: time.Now().UTC()},
+			reporting.Runtime{DefaultObservedAt: time.Now().UTC()},
 		); err != nil {
 			b.Fatal(err)
 		}

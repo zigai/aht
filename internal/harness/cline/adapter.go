@@ -1,9 +1,9 @@
 package cline
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,9 +16,8 @@ import (
 const (
 	clineCommand           = "cline"
 	clinePluginName        = "aht-state"
-	clineMarkerFileName    = ".aht-managed"
 	clineIntegrationSource = "cline-plugin"
-	integrationVersion     = 11
+	integrationVersion     = 12
 )
 
 //go:embed assets/index.js.tmpl
@@ -28,52 +27,44 @@ type clineHarness struct{ harness.BaseAdapter }
 
 func New() clineHarness {
 	return clineHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true,
-		CatalogCreates:   false,
-		ID:               registry.Harness("cline"),
-		Aliases:          nil,
-		ProcessNames:     []string{"cline"},
 		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
+			Config: []string{
+				"CLINE_DIR",
+				"CLINE_DATA_DIR",
+				"CLINE_SESSION_DATA_DIR",
+				"CLINE_GLOBAL_SETTINGS_PATH",
+				"CLINE_MCP_SETTINGS_PATH",
+			},
 		},
+		ExclusiveProcess: true,
+		ID:               registry.Harness("cline"),
+		ProcessNames:     []string{"cline"},
 		Capabilities: harness.Capabilities{
-			SessionStart:      false,
-			SessionEnd:        false,
-			RunningIdle:       true,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
+			RunningIdle: true,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  clineIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
-func (clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := clineConfigDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(base, "plugins", clinePluginName)
+	definition := adapter.Definition()
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
 			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-				Dir:   dir,
+				Dir:   filepath.Join(base, "plugins", clinePluginName),
 				Label: "Cline plugin",
 				Files: []harness.RenderedFileInstallSpec{
-					{Name: "package.json", Content: "", JSONContent: map[string]any{
+					{Name: "package.json", JSONContent: map[string]any{
 						"name":    clinePluginName,
-						"version": "0.0." + version,
+						"version": "0.0." + strconv.Itoa(integrationVersion),
 						"private": true,
 						"type":    "module",
 						"cline": map[string]any{"plugins": []any{map[string]any{
@@ -81,21 +72,15 @@ func (clineHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 						}}},
 					}},
 					{
-						Name:        "index.js",
-						Content:     renderClinePlugin(binary, version),
-						JSONContent: nil,
-					},
-					{
-						Name:        clineMarkerFileName,
-						Content:     clineMarkerContent(version),
-						JSONContent: nil,
+						Name: "index.js",
+						Content: harness.RenderScriptTemplate(
+							clinePluginTemplate,
+							binary,
+							definition,
+						),
 					},
 				},
-				SnippetOrder:   []string{"package.json", "index.js", clineMarkerFileName},
-				MarkerFile:     clineMarkerFileName,
-				ImportManifest: nil,
-				Retired:        nil,
-				Registration:   nil,
+				Identity: definition.Identity(),
 			}},
 		},
 	}, nil
@@ -114,15 +99,15 @@ func (clineHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	sessionID := harness.FirstNonEmpty(
+	sessionID := cmp.Or(
 		harness.NestedString(payload, "sessionContext", "rootSessionId"),
 		harness.PayloadString(payload, "taskId"),
 	)
-	projectRoot := harness.FirstNonEmpty(
+	projectRoot := cmp.Or(
 		harness.NestedString(payload, "workspaceInfo", "rootPath"),
 		harness.FirstArrayString(payload, "workspaceRoots"),
 	)
-	cwd := harness.FirstNonEmpty(harness.PayloadString(payload, "cwd"), projectRoot)
+	cwd := cmp.Or(harness.PayloadString(payload, "cwd"), projectRoot)
 
 	attributes := make(map[string]string)
 	harness.AddAttributeString(
@@ -153,7 +138,7 @@ func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 	harness.AddAttributeString(
 		attributes,
 		"cline_tool_name",
-		harness.FirstNonEmpty(harness.NestedString(payload, "tool_call", "name"),
+		cmp.Or(harness.NestedString(payload, "tool_call", "name"),
 			harness.NestedString(payload, "tool_result", "name")),
 	)
 	harness.AddAttributeString(attributes, "cline_reason", harness.PayloadString(payload, "reason"))
@@ -168,31 +153,13 @@ func (clineHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 	}, nil
 }
 
-func renderClinePlugin(binary string, version string) string {
-	replacer := strings.NewReplacer(
-		"{{BINARY}}", harness.ScriptString(binary),
-		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
-	)
-
-	return replacer.Replace(clinePluginTemplate)
-}
-
-func clineMarkerContent(version string) string {
-	return fmt.Sprintf(
-		"%s\nAHT_INTEGRATION_ID=cline\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n",
-		harness.ManagedMarker,
-		version,
-		clineIntegrationSource,
-	)
-}
-
 func clinePayloadValidator(rawPayload json.RawMessage) bool {
 	payload, ok := harness.PayloadObject(rawPayload)
 	if !ok {
 		return false
 	}
 
-	return harness.FirstNonEmpty(
+	return cmp.Or(
 		harness.NestedString(payload, "sessionContext", "rootSessionId"),
 		harness.PayloadString(payload, "taskId"),
 	) != "" &&

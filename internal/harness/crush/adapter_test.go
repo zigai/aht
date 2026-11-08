@@ -3,8 +3,6 @@ package crush
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const preToolUsePayload = `{"event":"PreToolUse","session_id":"native-session","cwd":"/` +
@@ -59,7 +57,7 @@ func TestPayloadDefaultsCarryNativeIdentity(t *testing.T) {
 	}
 
 	if defaults.SessionID != "native-session" || defaults.CWD != "/work/project" ||
-		defaults.Event != harness.HookEventPreToolUse {
+		defaults.Event != "PreToolUse" {
 		t.Fatalf("defaults = %+v", defaults)
 	}
 
@@ -72,9 +70,9 @@ func TestToolUseIsNotASessionLifecycleEvent(t *testing.T) {
 	t.Parallel()
 
 	defaults := New().LifecycleDefaults(
-		harness.HookEventPreToolUse,
+		"PreToolUse",
 		map[string]string{
-			"crush_hook_event": harness.HookEventPreToolUse,
+			"crush_hook_event": "PreToolUse",
 		},
 	)
 	if defaults.Lifecycle != "" || defaults.Presence != "" {

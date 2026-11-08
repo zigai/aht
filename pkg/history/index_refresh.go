@@ -13,13 +13,11 @@ import (
 	"os"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-
-	"golang.org/x/sys/unix"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const (
@@ -171,18 +169,18 @@ func fileKey(source Source, path string) string { return string(source.Harness) 
 // each file before reading its matches.
 func (index *historyIndex) scanFiles(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	files []historyFile,
 	status *SourceStatus,
 ) {
 	if index.unavailable != nil {
-		s.indexErr = index.unavailable
+		s.failure(source, source.Path, index.unavailable)
 		return
 	}
 
 	if s.mode != modeRefresh {
-		if err := index.prepareQuery(ctx, s); err != nil {
+		if err := index.prepareQuery(ctx, s.queryPlan); err != nil {
 			index.report(s, source, source.Path, err)
 			return
 		}
@@ -203,8 +201,8 @@ func (index *historyIndex) scanFiles(
 		Waiting:          false,
 	}
 	defer func() {
-		s.result.Refresh = append(
-			s.result.Refresh,
+		s.refresh = append(
+			s.refresh,
 			SourceRefresh{Source: source, RefreshStats: progress.Refresh.snapshot()},
 		)
 	}()
@@ -239,7 +237,7 @@ func (index *historyIndex) scanFiles(
 
 func (index *historyIndex) pendFamily(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	file historyFile,
 	jobs chan<- *refreshJob,
@@ -285,7 +283,7 @@ func startRefreshWorkers(ctx context.Context, workers int) (chan *refreshJob, *s
 // an opened transcript. Check effective read access as well: cached content must
 // not hide permission failures, including ACLs or changed process credentials.
 // A miss is parsed, which rechecks the opened file's identity.
-func (index *historyIndex) unchanged(s *search, source Source, file historyFile) bool {
+func (index *historyIndex) unchanged(s *indexScan, source Source, file historyFile) bool {
 	stored, exists := index.files[fileKey(source, file.path)]
 	if !exists {
 		return false
@@ -303,10 +301,10 @@ func (index *historyIndex) unchanged(s *search, source Source, file historyFile)
 	stamp := stampFile(info) + "|" + transcriptExtra(s.sourceMetadata, source, file.path)
 
 	return stamp == stored.stamp &&
-		unix.Faccessat(unix.AT_FDCWD, file.path, unix.R_OK, unix.AT_EACCESS) == nil
+		readable(file.path)
 }
 
-func (index *historyIndex) newJob(s *search, source Source, file historyFile) *refreshJob {
+func (index *historyIndex) newJob(s *indexScan, source Source, file historyFile) *refreshJob {
 	previous, exists := index.files[fileKey(source, file.path)]
 
 	resumeID := previous.resumeID
@@ -329,7 +327,7 @@ func (index *historyIndex) newJob(s *search, source Source, file historyFile) *r
 }
 
 func (index *historyIndex) pend(
-	s *search,
+	s *indexScan,
 	source Source,
 	file historyFile,
 	jobs chan<- *refreshJob,
@@ -355,7 +353,7 @@ func (index *historyIndex) pend(
 // each file before reading its committed matches.
 func (index *historyIndex) finish(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	pending pendingFile,
 	status *SourceStatus,
@@ -391,7 +389,7 @@ func (index *historyIndex) finish(
 // index entry can be read.
 func (index *historyIndex) settle(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	pending pendingFile,
 	status *SourceStatus,
@@ -447,7 +445,7 @@ func (index *historyIndex) settle(
 	}
 
 	if index.unavailable != nil {
-		s.indexErr = index.unavailable
+		s.failure(source, source.Path, index.unavailable)
 		return settled, false
 	}
 
@@ -472,7 +470,7 @@ func (index *historyIndex) settle(
 
 func (index *historyIndex) settleParsed(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	job *refreshJob,
 	result refreshResult,
 	progress *Progress,
@@ -551,7 +549,7 @@ func (index *historyIndex) storeBatch(
 
 func (index *historyIndex) flushRefresh(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	batch *refreshBatch,
 	progress *Progress,
 ) {
@@ -611,7 +609,7 @@ func (index *historyIndex) flushRefresh(
 // visit reads a stored history and its children from the committed index.
 func (index *historyIndex) visit(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	parent settledFile,
 	children []settledFile,
@@ -643,11 +641,11 @@ func (index *historyIndex) visit(
 
 func (index *historyIndex) visitGroup(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	group []groupFile,
 ) {
-	if err := index.matches(ctx, s, group); err != nil {
+	if err := index.matches(ctx, s.queryPlan, group, s.keep); err != nil {
 		index.report(s, source, group[0].file.path, err)
 		return
 	}
@@ -659,7 +657,7 @@ func (index *historyIndex) visitGroup(
 
 func (index *historyIndex) reportGroupIssues(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	source Source,
 	group []groupFile,
 ) error {
@@ -695,7 +693,7 @@ func (index *historyIndex) reportGroupIssues(
 
 func (index *historyIndex) selectIssueMetadata(
 	ctx context.Context,
-	s *search,
+	s *indexScan,
 	group []groupFile,
 ) (map[string]bool, error) {
 	fresh := slices.ContainsFunc(group, func(member groupFile) bool { return member.changed })
@@ -746,13 +744,8 @@ func (index *historyIndex) selectIssueMetadata(
 
 // report keeps failures that disable the index, so the search can restart
 // against native history, and records every other failure as a diagnostic.
-func (index *historyIndex) report(s *search, source Source, path string, err error) {
-	if errors.Is(err, ErrIndexUnavailable) {
-		s.indexErr = errors.Join(s.indexErr, err)
-		return
-	}
-
-	s.fileIssue(source, path, err)
+func (index *historyIndex) report(s *indexScan, source Source, path string, err error) {
+	s.failure(source, path, err)
 }
 
 // parseRefresh reads one history into an indexWriter without touching the
@@ -768,11 +761,13 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 
 	started := time.Now()
 	writer := newIndexWriter()
-	reader := new(search)
-	reader.mode = modeRefresh
-	reader.sourceMetadata = job.metadata
-	reader.writer = writer
-	reader.reset()
+	reader := &parser{
+		sourceMetadata: job.metadata,
+		writer:         writer,
+		sink:           writer,
+		selected:       func(*transcript) bool { return true },
+		includeTools:   false,
+	}
 
 	buffer := newFileIssueBuffer()
 
@@ -795,10 +790,19 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		return result
 	}
 
-	reader.reportScopedIssues(buffer)
-	result.issues = append(reader.result.Issues, result.issues...)
+	for _, issues := range buffer.issues {
+		for _, issue := range issues {
+			var omitted int
 
-	result.omitted = reader.result.OmittedIssues
+			result.issues, omitted = retainIssue(result.issues, issue)
+			result.omitted += omitted
+		}
+	}
+
+	for _, omitted := range buffer.omitted {
+		result.omitted += omitted
+	}
+
 	if result.skipped {
 		return result
 	}
@@ -832,7 +836,7 @@ func (job *refreshJob) isCurrent(stamp string) bool {
 func parseDatabaseRefresh(
 	ctx context.Context,
 	job *refreshJob,
-	reader *search,
+	reader *parser,
 	buffer *fileIssueBuffer,
 ) (refreshResult, bool) {
 	var result refreshResult
@@ -855,7 +859,7 @@ func parseDatabaseRefresh(
 func parseTranscriptRefresh(
 	ctx context.Context,
 	job *refreshJob,
-	reader *search,
+	reader *parser,
 	writer *indexWriter,
 	buffer *fileIssueBuffer,
 ) (refreshResult, bool) {
@@ -872,6 +876,7 @@ func parseTranscriptRefresh(
 	result, ok := parseOpenTranscript(ctx, job, reader, writer, file, buffer)
 	if result.skipped {
 		reader.writer = nil
+		reader.sink = discardTranscript{}
 		reader.checkTranscriptFormat(ctx, source, path, file, buffer)
 	}
 
@@ -886,7 +891,7 @@ func parseTranscriptRefresh(
 }
 
 func (job *refreshJob) lacksTerms(ctx context.Context, file *os.File) (bool, error) {
-	if strings.HasSuffix(job.file.path, ".zst") {
+	if catalog.TranscriptFor(job.source.Harness).Format(job.file.path) == native.FormatCompressed {
 		return false, nil
 	}
 
@@ -898,7 +903,7 @@ func (job *refreshJob) lacksTerms(ctx context.Context, file *os.File) (bool, err
 func parseOpenTranscript(
 	ctx context.Context,
 	job *refreshJob,
-	reader *search,
+	reader *parser,
 	writer *indexWriter,
 	file *os.File,
 	buffer *fileIssueBuffer,
@@ -936,7 +941,7 @@ func parseOpenTranscript(
 	}
 
 	if t := reader.scanTranscript(ctx, source, path, file, buffer); t != nil {
-		reader.add(ctx, t)
+		reader.sink.conversation(ctx, t)
 	}
 
 	if err := writer.checkSnapshot(file, info); err != nil {
@@ -958,8 +963,7 @@ func (writer *indexWriter) prepareTranscript(
 	writer.checkpoint.Extra = extra
 	writer.checkpoint.Size = info.Size()
 
-	if catalog.TranscriptFor(job.source.Harness).Document != nil ||
-		strings.HasSuffix(job.file.path, ".zst") {
+	if catalog.TranscriptFor(job.source.Harness).Format(job.file.path) != native.FormatJSONL {
 		return nil
 	}
 
@@ -1129,7 +1133,7 @@ func (index *historyIndex) writeConversations(
 	ctx context.Context,
 	fileID int64, resumeID int64,
 	writer *indexWriter,
-) (int64, error) {
+) (_ int64, err error) {
 	insert, err := index.tx.PrepareContext(
 		ctx,
 		"INSERT INTO parts(conversation_id,role,body,message_id,line,timestamp) VALUES(?,?,?,?,?,?)",
@@ -1137,14 +1141,14 @@ func (index *historyIndex) writeConversations(
 	if err != nil {
 		return 0, fmt.Errorf("prepare history indexing: %w", err)
 	}
-	defer func() { _ = insert.Close() }()
+	defer func() { err = errors.Join(err, insert.Close()) }()
 
 	fullText, err := index.tx.PrepareContext(ctx, "INSERT INTO parts_fts(rowid,folded) VALUES(?,?)")
 	if err != nil {
 		return 0, fmt.Errorf("prepare full-text indexing: %w", err)
 	}
 
-	defer func() { _ = fullText.Close() }()
+	defer func() { err = errors.Join(err, fullText.Close()) }()
 
 	var first int64
 	if writer.resume != nil {
@@ -1245,7 +1249,7 @@ func (index *historyIndex) insertParts(
 		inserted, err := insert.ExecContext(
 			ctx,
 			conversationID,
-			part.Role,
+			string(part.Role),
 			part.Text,
 			part.MessageID,
 			part.Line,
@@ -1300,16 +1304,17 @@ func (index *historyIndex) saveRefresh(
 			return indexedFile{}, fmt.Errorf("decode previous index issues: %w", err)
 		}
 		// Existing diagnostics precede newly appended lines, preserving the cap.
-		merged := new(search)
-		merged.reset()
-		merged.result.Issues = oldIssues
+		merged := oldIssues
+		omitted += previous.omitted
 
-		merged.result.OmittedIssues = previous.omitted
 		for _, issue := range issues {
-			merged.recordIssue(issue)
+			var dropped int
+
+			merged, dropped = retainIssue(merged, issue)
+			omitted += dropped
 		}
 
-		issues, omitted = merged.result.Issues, merged.result.OmittedIssues+omitted
+		issues = merged
 	}
 
 	checkpoint, err := json.Marshal(writer.checkpoint)
@@ -1409,7 +1414,7 @@ func (writer *indexWriter) current() *bufferedConversation {
 }
 
 func (writer *indexWriter) append(part Excerpt) {
-	if part.Role == "tool" {
+	if !indexedRole(part.Role) {
 		return
 	}
 

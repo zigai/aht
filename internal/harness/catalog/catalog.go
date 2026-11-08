@@ -78,9 +78,11 @@ var adaptersByID = func() map[registry.Harness]harness.Adapter {
 	byID := make(map[registry.Harness]harness.Adapter, len(adapters))
 	for _, adapter := range adapters {
 		id := adapter.Definition().ID
-		if _, exists := byID[id]; !exists {
-			byID[id] = adapter
+		if _, exists := byID[id]; exists {
+			panic(fmt.Sprintf("duplicate harness ID %q", id))
 		}
+
+		byID[id] = adapter
 	}
 
 	return byID
@@ -134,10 +136,12 @@ func ProcessFilterFor(harnessID registry.Harness) (harness.ProcessFilter, bool) 
 	return filter, ok
 }
 
+// IntegrationVersionFor returns the generated-artifact version of a harness,
+// or zero when the harness is unknown.
 func IntegrationVersionFor(harnessID registry.Harness) int {
 	adapter, ok := Find(harnessID)
 	if !ok {
-		return harness.IntegrationVersion
+		return 0
 	}
 
 	return adapter.Definition().IntegrationVersion
@@ -160,27 +164,12 @@ func Parse(value string) (registry.Harness, error) {
 	return "", fmt.Errorf("%w %q", registry.ErrUnknownHarness, value)
 }
 
-func SupportedNames() []string {
-	names := make([]string, 0, len(adapters))
-	for _, adapter := range adapters {
-		names = append(names, string(adapter.Definition().ID))
-	}
-
-	return names
-}
-
 func EnvNames(harnessID registry.Harness, field harness.EnvField) []string {
-	names := genericEnvNames(field)
 	if adapter, ok := Find(harnessID); ok {
-		native := envNamesForField(adapter.Definition().Env, field)
-		if field == harness.EnvProjectRoot {
-			return appendUnique(slices.Clone(native), names...)
-		}
-
-		names = appendUnique(names, native...)
+		return slices.Clone(envNamesForField(adapter.Definition().Env, field))
 	}
 
-	return names
+	return nil
 }
 
 func FromCommand(command string) (registry.Harness, bool) {
@@ -400,11 +389,11 @@ func LifecycleFor(
 }
 
 func PrepareObservation(observation registry.Observation) registry.Observation {
-	if observation.Kind() != "report" {
+	report := observation.Report()
+	if report == nil {
 		return observation
 	}
 
-	report := observation.Report()
 	defaults := LifecycleFor(observation.Harness, report.Event, report.Attributes)
 
 	report.Event = defaults.Event
@@ -423,8 +412,8 @@ func PrepareObservation(observation registry.Observation) registry.Observation {
 
 func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 	if adapter, ok := Find(id); ok {
-		if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
-			return detailAdapter.DetailCapabilities()
+		if provider, ok := adapter.(harness.DetailCapabilityProvider); ok {
+			return provider.DetailCapabilities()
 		}
 	}
 
@@ -434,14 +423,12 @@ func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 	}
 }
 
-func HookTimeoutSecondsFor(id registry.Harness, event string) int {
-	if adapter, ok := Find(id); ok {
-		if policy, ok := adapter.(interface{ HookTimeoutSeconds(event string) int }); ok {
-			return policy.HookTimeoutSeconds(event)
-		}
+func PayloadOmissions(harnessID registry.Harness) []string {
+	if adapter, ok := Find(harnessID); ok {
+		return slices.Clone(adapter.Definition().PayloadOmissions)
 	}
 
-	return harness.HookTimeoutSeconds
+	return nil
 }
 
 func nativeCatalog(ctx context.Context, sources []harness.Adapter) ([]NativeCatalogEntry, error) {
@@ -499,23 +486,6 @@ func cloneCatalogAttributes(attributes map[string]string) map[string]string {
 	return cloned
 }
 
-func genericEnvNames(field harness.EnvField) []string {
-	switch field {
-	case harness.EnvSessionID:
-		return []string{"AHT_SESSION_ID", "AGENT_SESSION_ID"}
-	case harness.EnvSessionPath:
-		return []string{"AHT_SESSION_PATH", "AGENT_SESSION_PATH"}
-	case harness.EnvProjectRoot:
-		return []string{"AHT_PROJECT_ROOT", "PROJECT_ROOT"}
-	case harness.EnvPID:
-		return []string{"AHT_PID", "AGENT_PID"}
-	case harness.EnvEvent:
-		return []string{"AHT_EVENT", "AGENT_EVENT"}
-	default:
-		return nil
-	}
-}
-
 func envNamesForField(keys harness.EnvKeys, field harness.EnvField) []string {
 	switch field {
 	case harness.EnvSessionID:
@@ -531,24 +501,6 @@ func envNamesForField(keys harness.EnvKeys, field harness.EnvField) []string {
 	default:
 		return nil
 	}
-}
-
-func appendUnique(values []string, next ...string) []string {
-	seen := make(map[string]struct{}, len(values)+len(next))
-	for _, value := range values {
-		seen[value] = struct{}{}
-	}
-
-	for _, value := range next {
-		if _, ok := seen[value]; ok {
-			continue
-		}
-
-		seen[value] = struct{}{}
-		values = append(values, value)
-	}
-
-	return values
 }
 
 func normalizeToken(value string) string {
@@ -576,8 +528,8 @@ func prepareDetail(observation registry.Observation) {
 		return
 	}
 
-	if detailAdapter, ok := adapter.(harness.ActivityDetailAdapter); ok {
-		report.Detail = detailAdapter.ActivityDetail(
+	if detailer, ok := adapter.(harness.ActivityDetailer); ok {
+		report.Detail = detailer.ActivityDetail(
 			report.Event,
 			*report.Activity,
 			report.Attributes,

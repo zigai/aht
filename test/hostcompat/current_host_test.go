@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -27,19 +28,19 @@ func TestCurrentHarnessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oracle := buildCompatibilityOracle(t)
+	oracle := testharness.Build(t)
 	host := newIsolatedHost(t, contract, oracle, true)
 	host.assertIntegrationCurrent(t)
 	host.assertVersion(t)
 	host.assertHostLoadsIntegration(t)
 
 	if contract.Level == compatibilityLevelDiscovery {
-		t.Logf(
+		t.Skipf(
 			"%s discovery-only: installation, current integration, and "+
 				"installed version checked; no lifecycle, interruption, "+
 				"permission, or resume claim. Scope: %s",
 			contract.ID,
-			discoveryScope(contract.ID),
+			contract.Scope,
 		)
 
 		return
@@ -94,27 +95,31 @@ func (host *isolatedHost) runLifecycle(t *testing.T) {
 func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 
-	switch host.contract.ID {
-	case registry.Harness("droid"):
+	switch host.contract.InterruptionDriver {
+	case driverExecRPC:
 		host.runDroidRPC(t, command.Env, nil, true)
-	case registry.Harness("kimi-code"):
+	case driverACP:
 		host.runKimiACP(t, command, nil, true)
-	case registry.Harness("opencode"):
+	case driverExecutionServer:
 		host.runOpenCodeInterruption(t, command.Env)
-	case registry.Harness("kilo"):
+	case driverPluginServer:
 		host.runServerInterruption(t, command.Env)
-	case registry.Harness("pi"), registry.Harness("omp"):
+	case driverCompletionRPC, driverExtensionRPC:
 		runRPCInterruption(t, host, command.Env)
-	case registry.Harness("hermes"):
+	case driverPythonACP:
 		runPythonInterruption(t, host, command.Env)
-	case registry.Harness("cline"):
+	case driverCLIACP:
 		runCLIInterruption(t, host, command.Env)
-	case registry.Harness("grok"):
+	case driverTerminalQuit:
 		host.runGrokInterruption(t, command)
-	case registry.Harness("qwen"):
+	case driverTerminalDialog:
 		host.runQwenTUI(t, command, true)
-	default:
+	case driverProcess:
 		host.runHostCommand(t, command)
+	case driverControlCLI, driverAppServer, driverSDKCLI:
+		fallthrough
+	default:
+		t.Fatalf("unsupported interruption driver %q", host.contract.InterruptionDriver)
 	}
 }
 
@@ -163,7 +168,7 @@ func (host *isolatedHost) continueOrInterrupt(
 		return
 	}
 
-	if host.contract.ID == registry.Harness("openclaw") {
+	if host.contract.Resume == resumeGateway {
 		host.interruptOpenClaw(t)
 		return
 	}
@@ -193,18 +198,31 @@ func (host *isolatedHost) waitForSession(t *testing.T, hostOutput []byte) {
 func (host *isolatedHost) runNativeDriver(t *testing.T, command *exec.Cmd) ([]byte, bool) {
 	t.Helper()
 
-	switch host.contract.ID {
-	case registry.Harness("droid"):
+	switch host.contract.LifecycleDriver {
+	case driverExecRPC:
 		return host.runDroidRPC(t, command.Env, nil, false), true
-	case registry.Harness("kimi-code"):
+	case driverACP:
 		host.runKimiACP(t, command, nil, false)
 		return nil, true
-	case registry.Harness("pi"):
+	case driverCompletionRPC:
 		host.runPiCompletion(t, command)
 		return nil, true
-	case registry.Harness("qwen"):
+	case driverTerminalDialog:
 		return host.runQwenTUI(t, command, false), true
+	case driverProcess:
+		return nil, false
+	case driverExtensionRPC,
+		driverPythonACP,
+		driverExecutionServer,
+		driverPluginServer,
+		driverTerminalQuit,
+		driverCLIACP,
+		driverControlCLI,
+		driverAppServer,
+		driverSDKCLI:
+		fallthrough
 	default:
+		t.Fatalf("unsupported lifecycle driver %q", host.contract.LifecycleDriver)
 		return nil, false
 	}
 }

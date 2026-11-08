@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 package brokerserver
 
 import (
@@ -143,7 +141,7 @@ func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 		t.Fatalf("socket mode = %o, want 600", info.Mode().Perm())
 	}
 
-	client := broker.NewClient(path)
+	client := broker.NewClient(broker.SocketPath(path))
 
 	subscription, err := client.Subscribe(ctx, registry.Filter{Presence: registry.PresenceLive})
 	if err != nil {
@@ -293,7 +291,7 @@ func TestServer_RejectsProtocolAdversity(t *testing.T) {
 		})
 	}
 
-	if err := broker.NewClient(fixture.path).Ping(t.Context()); err != nil {
+	if err := broker.NewClient(broker.SocketPath(fixture.path)).Ping(t.Context()); err != nil {
 		t.Fatalf("broker did not serve a valid request after adversity: %v", err)
 	}
 
@@ -344,7 +342,7 @@ func TestServer_BoundsSlowSubscriber(t *testing.T) {
 	clientCtx, cancelClient := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelClient()
 
-	client := broker.NewClient(fixture.path)
+	client := broker.NewClient(broker.SocketPath(fixture.path))
 	if err := client.Ping(clientCtx); err != nil {
 		t.Fatalf("slow subscriber blocked another client: %v", err)
 	}
@@ -682,7 +680,7 @@ func BenchmarkBrokerObserveRoundTrip(b *testing.B) {
 
 	<-ready
 
-	client := broker.NewClient(path)
+	client := broker.NewClient(broker.SocketPath(path))
 	running := registry.ActivityRunning
 	sequence := uint64(0)
 	observation := registry.Observation{
@@ -742,7 +740,7 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 
 	<-ready
 
-	client := broker.NewClient(path)
+	client := broker.NewClient(broker.SocketPath(path))
 	running := registry.ActivityRunning
 
 	obs1 := registry.Observation{
@@ -929,7 +927,7 @@ func TestServerFreesClosedSubscriberSlot(t *testing.T) {
 	case <-ready:
 	}
 
-	client := broker.NewClient(path)
+	client := broker.NewClient(broker.SocketPath(path))
 
 	subscription, err := client.Subscribe(ctx, registry.Filter{})
 	if err != nil {

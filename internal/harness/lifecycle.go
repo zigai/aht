@@ -16,8 +16,20 @@ type LifecycleAdapter interface {
 	LifecycleDefaults(event string, attributes map[string]string) LifecycleDefaults
 }
 
-func (BaseAdapter) LifecycleDefaults(event string, attributes map[string]string) LifecycleDefaults {
-	return TranslateLifecycle(event, FirstAttribute(attributes, "source", "reason"))
+func (adapter BaseAdapter) LifecycleDefaults(
+	event string,
+	attributes map[string]string,
+) LifecycleDefaults {
+	if event == "" && adapter.definition.LifecycleEventAttribute != "" {
+		event = attributes[adapter.definition.LifecycleEventAttribute]
+	}
+
+	sources := adapter.definition.LifecycleSourceAttributes
+	if len(sources) == 0 {
+		sources = []string{"source", "reason"}
+	}
+
+	return TranslateLifecycle(event, FirstAttribute(attributes, sources...))
 }
 
 func TranslateLifecycle(event string, source string) LifecycleDefaults {

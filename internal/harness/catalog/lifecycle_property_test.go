@@ -42,10 +42,11 @@ func TestNativeEventSequencesPreserveRegistryProperties(t *testing.T) {
 	if testing.Short() {
 		seeds, steps = 1, 6
 	} else if os.Getenv("AHT_EXTENDED_PARITY") != "" {
-		seeds, steps = 8, 40
+		seeds, steps = 16, 160
 	}
 
-	for _, name := range SupportedNames() {
+	for _, id := range Harnesses() {
+		name := string(id)
 		t.Run(name, func(t *testing.T) {
 			for index := range seeds {
 				seed := lifecycleSeed(name, index)
@@ -58,7 +59,8 @@ func TestNativeEventSequencesPreserveRegistryProperties(t *testing.T) {
 }
 
 func FuzzNativeEventSequences(f *testing.F) {
-	for _, name := range SupportedNames() {
+	for _, id := range Harnesses() {
+		name := string(id)
 		f.Add(name, lifecycleBytes(lifecycleSeed(name, 0)))
 	}
 

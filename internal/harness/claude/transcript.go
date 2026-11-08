@@ -223,20 +223,12 @@ func captureToolResults(
 
 func (claudeHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"*.jsonl"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            readTranscriptRecord,
-		FastRecord:        readFastRecord,
-		Document:          nil,
-		Query:             nil,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            subagentParent,
+		Patterns:   []string{"*.jsonl"},
+		Sources:    transcriptSources,
+		Record:     readTranscriptRecord,
+		FastRecord: readFastRecord,
+		UserParts:  userPromptParts,
+		Parent:     subagentParent,
 	}
 }
 

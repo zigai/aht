@@ -4,19 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
+
+	"github.com/jedib0t/go-pretty/v6/text"
 )
 
-const defaultWatchDebounce = 100 * time.Millisecond
 const (
 	watchFormatTable = "table"
 	watchFormatPlain = "plain"
@@ -44,20 +42,16 @@ const (
 )
 
 var (
-	errWatchFormatJSONConflict    = errors.New("--format cannot be used with --json")
-	errWatchStateDirectoryMissing = errors.New("watching store: state directory does not exist")
-	errWatchStateDirectoryNotDir  = errors.New("watching store: state directory is not a directory")
-	errInvalidWatchFormat         = errors.New("invalid watch format")
+	errWatchFormatJSONConflict = errors.New("--format cannot be used with --json")
+	errInvalidWatchFormat      = errors.New("invalid watch format")
 )
 
 //exhaustruct:optional
 type watchOptions struct {
 	filter     registry.Filter
-	harness    string
 	noSnapshot bool
 	format     string
 	formatSet  bool
-	debounce   time.Duration
 	now        func() time.Time
 	ready      chan struct{}
 }
@@ -126,59 +120,13 @@ func (app *application) prepareWatch(opts watchOptions) (watchOptions, error) {
 }
 
 func (app *application) runWatch(ctx context.Context, opts watchOptions) error {
-	ahtClient := client.New(client.Config{StorePath: app.resolvedStorePath()})
-
 	processor := newWatchUpdateProcessor(app, opts)
 
-	err := app.runBrokerWatch(ctx, processor, ahtClient)
-	if err == nil {
-		return nil
-	}
-
-	if !client.IsUnavailable(err) && !client.StreamClosed(err) {
-		return fmt.Errorf("watching registry broker: %w", err)
-	}
-
-	return app.runFilesystemWatch(ctx, processor)
-}
-
-func (app *application) runBrokerWatch(
-	ctx context.Context,
-	processor *watchUpdateProcessor,
-	ahtClient *client.Client,
-) error {
-	err := ahtClient.Watch(ctx, processor.options.filter, func(state registry.StateSnapshot) error {
+	err := app.registryStore().Watch(ctx, opts.filter, func(state registry.StateSnapshot) error {
 		return processor.accept(state.Sessions)
 	})
 	if err != nil {
 		return fmt.Errorf("watching AHT state: %w", err)
-	}
-
-	return nil
-}
-
-func (app *application) runFilesystemWatch(
-	ctx context.Context,
-	processor *watchUpdateProcessor,
-) error {
-	s := app.store()
-	if _, _, e := watchTarget(s); e != nil {
-		return e
-	}
-
-	err := s.Watch(ctx, registry.WatchOptions{
-		Filter:            processor.options.filter,
-		Debounce:          processor.options.debounce,
-		ReconcileInterval: 0,
-	}, func(result registry.WatchResult) error {
-		if app.reportWatchResultError(result) {
-			return nil
-		}
-
-		return processor.accept(result.Sessions)
-	})
-	if err != nil {
-		return fmt.Errorf("watching registry store: %w", err)
 	}
 
 	return nil
@@ -195,7 +143,7 @@ func newWatchUpdateProcessor(app *application, opts watchOptions) *watchUpdatePr
 }
 
 func (p *watchUpdateProcessor) accept(rawSessions []registry.Session) error {
-	currentSessions := applyConfigFilter(rawSessions, p.app.cfg.Filter, p.options.harness)
+	currentSessions := applyConfigFilter(rawSessions, p.app.cfg.Filter, p.options.filter.Harness)
 	if !p.initialized {
 		p.previous = currentSessions
 		if !p.options.noSnapshot {
@@ -226,23 +174,9 @@ func (p *watchUpdateProcessor) accept(rawSessions []registry.Session) error {
 	return nil
 }
 
-func (app *application) reportWatchResultError(result registry.WatchResult) bool {
-	if result.Err == nil {
-		return false
-	}
-
-	app.warnf("watch warning: %v\n", result.Err)
-
-	return true
-}
-
 func normalizeWatchOptions(opts watchOptions) watchOptions {
 	if strings.TrimSpace(opts.format) == "" {
 		opts.format = watchFormatTable
-	}
-
-	if opts.debounce <= 0 {
-		opts.debounce = defaultWatchDebounce
 	}
 
 	if opts.now == nil {
@@ -250,30 +184,6 @@ func normalizeWatchOptions(opts watchOptions) watchOptions {
 	}
 
 	return opts
-}
-
-func watchTarget(s *registry.Journal) (string, string, error) {
-	p, e := filepath.Abs(s.Path())
-	if e != nil {
-		return "", "", fmt.Errorf("resolve watch target: %w", e)
-	}
-
-	d := filepath.Dir(p)
-
-	i, e := os.Stat(d)
-	if e != nil {
-		if os.IsNotExist(e) {
-			return "", "", fmt.Errorf("%w: %s", errWatchStateDirectoryMissing, d)
-		}
-
-		return "", "", fmt.Errorf("stat watch state directory: %w", e)
-	}
-
-	if !i.IsDir() {
-		return "", "", fmt.Errorf("%w: %s", errWatchStateDirectoryNotDir, d)
-	}
-
-	return p, d, nil
 }
 
 func watchSessionMap(s []registry.Session) map[string]registry.Session {
@@ -355,7 +265,7 @@ func changedSessionWatchEvents(
 		o = append(o, changed)
 	}
 
-	if !multiplexerLocationEqual(v.Location, old.Location) {
+	if !v.Location.SameAddress(old.Location) {
 		o = append(o, watchEventFromSession(watchActionLocationChanged, v, at))
 	}
 
@@ -372,18 +282,6 @@ func activityEqual(a *registry.Activity, b *registry.Activity) bool {
 	}
 
 	return *a == *b
-}
-
-func multiplexerLocationEqual(a registry.Location, b registry.Location) bool {
-	a.WindowName, b.WindowName = "", ""
-	a.TabName, b.TabName = "", ""
-	a.WorkspaceName, b.WorkspaceName = "", ""
-	a.PaneCurrentPath, b.PaneCurrentPath = "", ""
-	a.PanePID, b.PanePID = 0, 0
-	a.PaneTTY, b.PaneTTY = "", ""
-	a.ClientTTY, b.ClientTTY = "", ""
-
-	return a == b
 }
 
 func nativeEvent(s registry.Session) string {
@@ -514,7 +412,7 @@ func (w *watchEventWriter) writeTableEvent(event watchEvent) error {
 			{label: "Event", value: event.Action},
 			{label: "Agent", value: string(event.Harness)},
 			{label: "Presence", value: string(event.Presence)},
-			{label: "Activity", value: activityString(event.Activity)},
+			{label: "Activity", value: formatActivity(event.Activity)},
 			{label: "Session", value: label, wrap: wrapHumanSession},
 		})
 	}
@@ -578,4 +476,55 @@ func formatWatchTableEvent(e watchEvent) string {
 		formatActivity(e.Activity),
 		sanitizeHumanText(e.Label),
 	)
+}
+
+func (app *application) newWatchCommand() *cobra.Command {
+	options := listOptions{}
+
+	var (
+		noSnapshot  bool
+		watchFormat string
+		prepared    watchOptions
+	)
+
+	command := &cobra.Command{
+		Use:           "watch",
+		Short:         "Stream session changes",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := app.loadConfig()
+			if err != nil {
+				return err
+			}
+
+			if !cmd.Flags().Changed("presence") && cfg.UI.DefaultPresence != "" {
+				options.presence = cfg.UI.DefaultPresence
+			}
+
+			filter, err := buildFilter(options)
+			if err != nil {
+				return err
+			}
+
+			prepared, err = app.prepareWatch(watchOptions{
+				filter:     filter,
+				noSnapshot: noSnapshot,
+				format:     watchFormat,
+				formatSet:  cmd.Flags().Changed("format"),
+			})
+
+			return err
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return app.runWatch(cmd.Context(), prepared)
+		},
+	}
+	flags := command.Flags()
+	configureSessionFilterFlags(flags, &options)
+	flags.BoolVar(&noSnapshot, "no-snapshot", false, "start with future changes only")
+	flags.StringVar(&watchFormat, "format", "", "output format: `<table|plain>`")
+
+	return command
 }

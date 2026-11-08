@@ -9,13 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -31,11 +31,12 @@ var errSymlinkCycle = errors.New("too many levels of symbolic links")
 // stat through their root to keep its containment guarantees. children are
 // histories that belong to this file's conversation, in walk order.
 type historyFile struct {
-	path     string
-	database bool
-	open     func() (*os.File, error)
-	stat     func() (os.FileInfo, error)
-	children []historyFile
+	path       string
+	database   bool
+	compressed bool
+	open       func() (*os.File, error)
+	stat       func() (os.FileInfo, error)
+	children   []historyFile
 }
 
 type fileIssueBuffer struct {
@@ -108,23 +109,21 @@ func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, sel
 
 func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
 
-func (s *search) forgetMissingDirectories(ctx context.Context, source Source, status SourceStatus) {
-	if s.index == nil || status.Status != "missing" {
+func (s *search) forgetMissingDirectories(source Source, status SourceStatus) {
+	if s.index == nil || status.Status != StatusMissing {
 		return
 	}
 
-	if _, err := s.index.loadDirectories(ctx, source); err != nil {
-		s.index.report(s, source, source.Path, err)
-	}
+	s.index.forgetDirectories(source)
 }
 
 func (s *search) scanSource(ctx context.Context, source Source) {
-	status := SourceStatus{Source: source, Status: "searched", Files: 0}
+	status := SourceStatus{Source: source, Status: StatusSearched, Files: 0}
 	defer func() { s.result.Sources = append(s.result.Sources, status) }()
 
 	resolved, info, ok := s.inspectSource(source, &status)
 	if !ok {
-		s.forgetMissingDirectories(ctx, resolved, status)
+		s.forgetMissingDirectories(resolved, status)
 		return
 	}
 
@@ -139,7 +138,7 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		if err != nil {
 			s.issue(source, path, err)
 
-			status.Status = "failed"
+			status.Status = StatusFailed
 
 			return
 		}
@@ -150,7 +149,12 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 		if s.index == nil {
 			files = s.walkDirectory(ctx, source, root)
 		} else {
-			files = s.index.walkDirectory(ctx, s, source, root)
+			files = s.index.walkDirectory(
+				ctx,
+				s.directoryScan(),
+				source,
+				root,
+			)
 		}
 
 		files = groupChildren(source.Harness, files)
@@ -161,15 +165,15 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 
 	switch {
 	case s.mode == modeSearch && s.query.IncludeTools:
-		s.scanToolsFiles(ctx, source, files, &status)
+		scanToolsFiles(ctx, s, source, files, &status)
 	case s.index != nil:
-		s.index.scanFiles(ctx, s, source, files, &status)
+		s.scanIndex(ctx, source, files, &status)
 	default:
 		s.scanFilesParallel(ctx, source, files, &status)
 	}
 
 	if s.failureCount() > before {
-		status.Status = "failed"
+		status.Status = StatusFailed
 	}
 }
 
@@ -183,32 +187,23 @@ func (s *search) failureCount() int {
 func (s *search) walkDirectory(ctx context.Context, source Source, root *os.Root) []historyFile {
 	var files []historyFile
 
-	err := fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
-		if err := s.checkScan(ctx); err != nil {
-			return err
-		}
-
-		if walkErr != nil {
-			s.issue(source, filepath.Join(source.Path, path), walkErr)
-			return nil
-		}
-
-		skip, process := s.shouldVisitEntry(source, path, entry)
-		if skip {
-			return fs.SkipDir
-		}
-
-		if process {
-			files = append(files, rootFile(root, source.Path, path))
-		}
-
-		return nil
-	})
-	if err != nil && ctx.Err() == nil {
-		s.issue(source, source.Path, err)
+	cache := &directoryCache{
+		source:   source,
+		previous: nil,
+		current:  make(map[string]indexedDirectory),
+		files:    nil,
 	}
+	cache.walk(ctx, s.directoryScan(), root, ".", &files)
 
 	return files
+}
+
+func (s *search) directoryScan() directoryScan {
+	return directoryScan{
+		check: s.checkScan,
+		issue: s.issue,
+		visit: s.shouldVisitEntry,
+	}
 }
 
 // groupChildren attaches each history whose native parent was also found to
@@ -248,24 +243,26 @@ func groupChildren(h registry.Harness, files []historyFile) []historyFile {
 	return grouped
 }
 
-func rootFile(root *os.Root, base string, relative string) historyFile {
+func rootFile(h registry.Harness, root *os.Root, base string, relative string) historyFile {
 	absolute := filepath.Join(base, relative)
-	if isDatabase(relative) {
+	if catalog.TranscriptFor(h).Format(relative) == native.FormatDatabase {
 		return historyFile{
-			path:     absolute,
-			database: true,
-			open:     nil,
-			stat:     func() (os.FileInfo, error) { return os.Stat(absolute) },
-			children: nil,
+			path:       absolute,
+			database:   true,
+			open:       nil,
+			stat:       func() (os.FileInfo, error) { return os.Stat(absolute) },
+			children:   nil,
+			compressed: false,
 		}
 	}
 
 	return historyFile{
-		path:     absolute,
-		database: false,
-		open:     func() (*os.File, error) { return root.Open(relative) },
-		stat:     func() (os.FileInfo, error) { return root.Stat(relative) },
-		children: nil,
+		path:       absolute,
+		database:   false,
+		compressed: catalog.TranscriptFor(h).Format(relative) == native.FormatCompressed,
+		open:       func() (*os.File, error) { return root.Open(relative) },
+		stat:       func() (os.FileInfo, error) { return root.Stat(relative) },
+		children:   nil,
 	}
 }
 
@@ -274,25 +271,28 @@ func (s *search) singleFile(source Source, path string) (historyFile, bool) {
 	resolved, err := resolveSymlinkFile(path)
 	if err != nil {
 		s.issue(source, path, err)
-		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+		return historyFile{}, false
 	}
 
 	info, err := os.Lstat(resolved)
 	if err != nil {
 		s.issue(source, resolved, err)
-		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+		return historyFile{}, false
 	}
 
 	if !info.Mode().IsRegular() {
-		return historyFile{path: "", database: false, open: nil, stat: nil, children: nil}, false
+		return historyFile{}, false
 	}
 
+	format := catalog.TranscriptFor(source.Harness).Format(resolved)
+
 	file := historyFile{
-		path:     resolved,
-		database: isDatabase(resolved),
-		open:     func() (*os.File, error) { return os.Open(resolved) },
-		stat:     func() (os.FileInfo, error) { return os.Stat(resolved) },
-		children: nil,
+		path:       resolved,
+		database:   format == native.FormatDatabase,
+		open:       func() (*os.File, error) { return os.Open(resolved) },
+		stat:       func() (os.FileInfo, error) { return os.Stat(resolved) },
+		children:   nil,
+		compressed: format == native.FormatCompressed,
 	}
 	if file.database {
 		file.open = nil
@@ -375,7 +375,7 @@ func (s *search) scanFileGroup(
 	buffer *fileIssueBuffer,
 ) int {
 	if file.database {
-		s.scanDatabase(ctx, source, file.path, buffer)
+		s.parser().scanDatabase(ctx, source, file.path, buffer)
 		return 1
 	}
 
@@ -443,10 +443,10 @@ func (s *search) readTranscriptFile(
 	switch {
 	case err != nil:
 		buffer.issue(source, file.path, err)
-	case candidate || strings.HasSuffix(file.path, ".zst"):
-		parsed = s.scanTranscript(ctx, source, file.path, opened, buffer)
+	case candidate || file.compressed:
+		parsed = s.parser().scanTranscript(ctx, source, file.path, opened, buffer)
 	default:
-		s.checkTranscriptFormat(ctx, source, file.path, opened, buffer)
+		s.parser().checkTranscriptFormat(ctx, source, file.path, opened, buffer)
 	}
 
 	if err := opened.Close(); err != nil {
@@ -517,10 +517,6 @@ func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry)
 	return false, entry.Type().IsRegular() && historyName(source.Harness, entry.Name())
 }
 
-func isDatabase(path string) bool {
-	return strings.HasSuffix(path, ".db") || strings.HasSuffix(path, ".sqlite")
-}
-
 func historyName(h registry.Harness, name string) bool {
 	for _, pattern := range catalog.TranscriptFor(h).Patterns {
 		matched, err := filepath.Match(pattern, name)
@@ -533,6 +529,7 @@ func historyName(h registry.Harness, name string) bool {
 }
 
 func isIgnoredDirName(name string) bool {
+	// Harness config roots contain extension dependency trees, which never hold native transcripts.
 	switch name {
 	case ".git",
 		"node_modules",
@@ -571,7 +568,7 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 // when the caller selected it explicitly or filtered by harness.
 func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.FileInfo, bool) {
 	if source.Path == "" {
-		status.Status = "failed"
+		status.Status = StatusFailed
 
 		s.issue(source, "", ErrInvalidSource)
 
@@ -582,7 +579,7 @@ func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.
 	if err != nil {
 		s.issue(source, source.Path, err)
 
-		status.Status = "failed"
+		status.Status = StatusFailed
 
 		return source, nil, false
 	}
@@ -591,7 +588,7 @@ func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.
 
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		status.Status = "missing"
+		status.Status = StatusMissing
 
 		if s.explicitSources {
 			s.issue(source, path, err)
@@ -603,13 +600,13 @@ func (s *search) inspectSource(source Source, status *SourceStatus) (Source, fs.
 	if err != nil {
 		s.issue(source, path, err)
 
-		status.Status = "failed"
+		status.Status = StatusFailed
 
 		return source, nil, false
 	}
 
 	if !supported(source.Harness) {
-		status.Status = "unsupported"
+		status.Status = StatusUnsupported
 
 		if len(s.query.Harnesses) > 0 || s.explicitSources {
 			s.issue(source, path, ErrUnsupportedHarness)

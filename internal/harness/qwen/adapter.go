@@ -11,6 +11,7 @@ import (
 const (
 	qwenCommand           = "qwen"
 	qwenIntegrationSource = "qwen-hook"
+	integrationVersion    = 15
 )
 
 type qwenHarness struct{ harness.BaseAdapter }
@@ -25,160 +26,85 @@ type hookPayload struct {
 
 func New() qwenHarness {
 	return qwenHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		PayloadOmissions: []string{"tool_input", "tool_response"},
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("qwen"),
 		Aliases:          []string{"qwen-code", "qwen_code", "qwencode"},
 		ProcessNames:     []string{"qwen"},
 		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
+			Config:      []string{"QWEN_HOME", "QWEN_RUNTIME_DIR"},
 			ProjectRoot: []string{"QWEN_PROJECT_DIR"},
-			PID:         nil,
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  qwenIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "qwen_hook_event",
+		LifecycleSourceAttributes: []string{"qwen_source", "source", "qwen_reason", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         qwenIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
-func (qwenHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter qwenHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := configDirectory(harness.HomeDir())
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
+	hooks := []harness.CommandHook{
+		{
+			Event:      "SessionStart",
+			Matcher:    "startup|resume|clear|branch",
+			Transition: harness.HookActivityIdle,
+		},
+		// Automatic compaction fires SessionStart inside a turn that keeps
+		// running, so compaction reports presence without activity.
+		{
+			Event:      "SessionStart",
+			Matcher:    "compact",
+			Transition: harness.HookPresenceLive,
+		},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
+		// PermissionRequest also fires for background agents, which then
+		// deny the call without asking. The permission_prompt notification
+		// fires only once the approval dialog is shown.
+		{
+			Event:      "Notification",
+			Matcher:    "permission_prompt",
+			Transition: harness.HookActivityWaiting,
+		},
+		// The interactive UI sends idle_prompt whenever it returns to the
+		// input prompt, including after Esc cancels a turn or the user
+		// rejects a tool call; neither path runs Stop.
+		{Event: "Notification", Matcher: "idle_prompt", Transition: harness.HookActivityIdle},
+		{Event: "PreCompact", Transition: harness.HookActivityRunning},
+		// Automatic compaction continues the running turn; only manual
+		// compaction returns the session to idle.
+		{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "StopFailure", Transition: harness.HookActivityFailed},
+		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
+	}
+	for index := range hooks {
+		hooks[index].Stdin = harness.ReportStdinDefaults
+	}
+
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
 			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-				Path:              filepath.Join(base, "settings.json"),
-				Source:            qwenIntegrationSource,
-				Label:             "qwen hooks",
-				ConfigLabel:       "qwen config",
-				StatusMessage:     "",
-				OmitStatusMessage: true,
-				HooksAtRoot:       false,
-				Trust:             nil,
-				Hooks: []harness.CommandHookInstallSpec{
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "startup|resume|clear|branch",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityIdle,
-							harness.HookEventSessionStart,
-						),
-					},
-					// Automatic compaction fires SessionStart inside a turn that keeps
-					// running, so compaction reports presence without activity.
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "compact",
-						Command: qwenHookCommand(
-							binary,
-							registry.PresenceLive,
-							harness.HookEventSessionStart,
-						),
-					},
-					{
-						Event:   harness.HookEventUserPromptSubmit,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventUserPromptSubmit,
-						),
-					},
-					{
-						Event:   harness.HookEventPreToolUse,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventPreToolUse,
-						),
-					},
-					{
-						Event:   harness.HookEventPostToolUse,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventPostToolUse,
-						),
-					},
-					{
-						Event:   harness.HookEventPostToolUseFailure,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventPostToolUseFailure,
-						),
-					},
-					// PermissionRequest also fires for background agents, which then
-					// deny the call without asking. The permission_prompt notification
-					// fires only once the approval dialog is shown.
-					{
-						Event:   "Notification",
-						Matcher: "permission_prompt",
-						Command: qwenHookCommand(binary, registry.ActivityWaiting, "Notification"),
-					},
-					// The interactive UI sends idle_prompt whenever it returns to the
-					// input prompt, including after Esc cancels a turn or the user
-					// rejects a tool call; neither path runs Stop.
-					{
-						Event:   "Notification",
-						Matcher: "idle_prompt",
-						Command: qwenHookCommand(binary, registry.ActivityIdle, "Notification"),
-					},
-					{
-						Event:   "PreCompact",
-						Matcher: "",
-						Command: qwenHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-					},
-					// Automatic compaction continues the running turn; only manual
-					// compaction returns the session to idle.
-					{
-						Event:   "PostCompact",
-						Matcher: "manual",
-						Command: qwenHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-					},
-					{
-						Event:   harness.HookEventStop,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.ActivityIdle,
-							harness.HookEventStop,
-						),
-					},
-					{
-						Event:   "StopFailure",
-						Matcher: "",
-						Command: qwenHookCommand(binary, registry.ActivityFailed, "StopFailure"),
-					},
-					{
-						Event:   harness.HookEventSessionEnd,
-						Matcher: "",
-						Command: qwenHookCommand(
-							binary,
-							registry.PresenceGone,
-							harness.HookEventSessionEnd,
-						),
-					},
-				},
+				HooksKey:    "hooks",
+				Path:        filepath.Join(base, "settings.json"),
+				Source:      qwenIntegrationSource,
+				Label:       "qwen hooks",
+				ConfigLabel: "qwen config",
+				Hooks:       harness.CommandHookSpecs(binary, adapter.Definition(), hooks),
 			}},
 		},
 	}, nil
@@ -239,32 +165,7 @@ func (qwenHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefau
 		SessionID:   harness.PayloadString(payload, "session_id"),
 		SessionPath: harness.PayloadString(payload, "transcript_path"),
 		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
 	}, nil
-}
-
-func (qwenHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["qwen_hook_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "qwen_source", "source", "qwen_reason", "reason"),
-	)
-}
-
-func qwenHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(
-		binary,
-		registry.Harness("qwen"),
-		transition,
-		event,
-		qwenIntegrationSource,
-	)
 }

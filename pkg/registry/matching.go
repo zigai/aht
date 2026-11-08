@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+type sessionMatch struct{ id, identityID, processID, droppedID string }
+
 func reconcileResumedProcessSession(
 	sessions map[string]Session,
 	session *Session,
@@ -44,9 +46,9 @@ func (r Reducer) retireConflictingProcessSessions(
 	observation Observation,
 	at time.Time,
 	receivedAt time.Time,
-) (Session, error) {
+) error {
 	if observation.ProcessIdentity() == nil || !observation.ProcessIdentity().Complete() {
-		return Session{}, nil
+		return nil
 	}
 
 	for id, session := range sessions {
@@ -61,10 +63,13 @@ func (r Reducer) retireConflictingProcessSessions(
 				continue
 			}
 
-			return session, fmt.Errorf("%w: retired process evidence", errObservationDropped)
+			return fmt.Errorf("%w: retired process evidence", errObservationDropped)
 		}
 
-		(lifecycleMachine{session: &session}).commit(transition, at)
+		machine := lifecycleMachine{session: &session}
+		changed := machine.trackChanges(at)
+		machine.commit(transition, at)
+		changed()
 
 		if nativeReplacement {
 			if gone, ok := session.Liveness.(Gone); ok {
@@ -73,7 +78,7 @@ func (r Reducer) retireConflictingProcessSessions(
 			}
 
 			session.setDecision(&ActivityDecision{
-				Authority:       "hook",
+				Authority:       AuthorityHook,
 				Reason:          sessionReplacedReason,
 				RuleID:          "",
 				ManifestSource:  "",
@@ -88,7 +93,7 @@ func (r Reducer) retireConflictingProcessSessions(
 		sessions[id] = session
 	}
 
-	return Session{}, nil
+	return nil
 }
 
 func (r Reducer) conflictingSessionReplacement(
@@ -108,8 +113,8 @@ func (r Reducer) conflictingSessionReplacement(
 		return true, false
 	}
 
-	if session.Process == nil && observation.Kind() == "placement" &&
-		samePane(session, observation.Location()) {
+	if session.Process == nil && observation.Kind() == EvidencePlacement &&
+		observation.Location() != nil && r.rules.SamePane(session.Location, *observation.Location()) {
 		return true, false
 	}
 
@@ -122,7 +127,7 @@ func (r Reducer) nativeSessionReplacement(
 	sameProcess bool,
 ) bool {
 	if !sameProcess ||
-		observation.Kind() != "report" ||
+		observation.Kind() != EvidenceReport ||
 		!observationHasIdentity(observation) ||
 		session.Harness != observation.Harness ||
 		!observationIdentityConflicts(session, observation.Subject) {
@@ -138,31 +143,10 @@ func (r Reducer) nativeSessionReplacement(
 }
 
 func processHarnessReplacement(observation Observation, sameProcess bool) bool {
-	return observation.Kind() == "sighting" &&
+	return observation.Kind() == EvidenceSighting &&
 		observation.Present() != nil &&
 		*observation.Present() &&
 		sameProcess
-}
-
-func samePane(session Session, observed *Location) bool {
-	if observed == nil || observed.PaneID == "" {
-		return false
-	}
-
-	current := session.Location
-	if current.Kind != observed.Kind || current.PaneID != observed.PaneID {
-		return false
-	}
-
-	if current.ServerID != "" || observed.ServerID != "" {
-		return current.ServerID == observed.ServerID
-	}
-
-	if current.SessionID != "" || observed.SessionID != "" {
-		return current.SessionID == observed.SessionID
-	}
-
-	return false
 }
 
 func observationHasIdentity(observation Observation) bool {
@@ -181,31 +165,35 @@ func observationIdentityConflicts(session Session, identity ObservationIdentity)
 	return false
 }
 
-func findAndReconcileMatchingSession(
-	sessions map[string]Session,
-	observation Observation,
-	at time.Time,
-) string {
-	identityID := findIdentityMatchingSession(sessions, observation)
-
-	processID := findProcessMatchingSession(sessions, observation)
-	if preferNativeIdentity(sessions, observation, identityID, processID) {
-		return identityID
+func matchSession(sessions map[string]Session, observation Observation) sessionMatch {
+	match := sessionMatch{
+		identityID: findIdentityMatchingSession(sessions, observation),
+		processID:  findProcessMatchingSession(sessions, observation),
+		id:         "",
+		droppedID:  "",
+	}
+	switch {
+	case preferNativeIdentity(sessions, observation, match.identityID, match.processID):
+		match.id = match.identityID
+	case match.processID != "":
+		match.id = match.processID
+	case match.identityID != "":
+		match.id = match.identityID
+	default:
+		match.id = findListingMatchingSession(sessions, observation)
 	}
 
-	if reconcileIdentityProcessSessions(sessions, observation, at, identityID, processID) {
-		return processID
+	match.droppedID = match.id
+	if match.droppedID == "" && observation.ProcessIdentity() != nil {
+		processOnly := observation
+
+		var subject ObservationIdentity
+
+		processOnly.Subject = subject
+		match.droppedID = findProcessMatchingSession(sessions, processOnly)
 	}
 
-	if processID != "" {
-		return processID
-	}
-
-	if identityID != "" {
-		return identityID
-	}
-
-	return findListingMatchingSession(sessions, observation)
+	return match
 }
 
 func reconcileIdentityProcessSessions(
@@ -213,17 +201,21 @@ func reconcileIdentityProcessSessions(
 	observation Observation,
 	at time.Time,
 	identityID string, processID string,
-) bool {
+) {
 	if identityID != "" && processID != "" && identityID != processID {
 		if prior := sessions[identityID]; prior.Process != nil &&
 			!prior.Process.Equal(*observation.ProcessIdentity()) {
 			// The prior process terminated and the same session is being resumed
 			// or restarted under a new process. Retire the stale incarnation so
 			// the registry never retains two live sessions for one session_id.
-			(lifecycleMachine{session: &prior}).commit(
+			machine := lifecycleMachine{session: &prior}
+			changed := machine.trackChanges(at)
+			machine.commit(
 				transitionIncarnation(prior, observation, at, true),
 				at,
 			)
+			changed()
+
 			prior.UpdatedAt = maxTime(prior.UpdatedAt, at)
 			sessions[identityID] = prior
 		}
@@ -234,11 +226,9 @@ func reconcileIdentityProcessSessions(
 			sessions[processID] = target
 			delete(sessions, identityID)
 
-			return true
+			return
 		}
 	}
-
-	return false
 }
 
 func preferNativeIdentity(
@@ -247,27 +237,19 @@ func preferNativeIdentity(
 	identityID string,
 	processID string,
 ) bool {
-	return observation.Kind() == "report" && identityID != "" && processID != "" &&
+	return observation.Kind() == EvidenceReport && identityID != "" && processID != "" &&
 		identityID != processID && sessions[identityID].Process != nil &&
 		sessions[processID].IdentityState == IdentityProvisional &&
 		sessions[processID].Observations.Native == nil
 }
 
 func findMatchingSession(sessions map[string]Session, observation Observation) string {
-	if id := findProcessMatchingSession(sessions, observation); id != "" {
-		return id
-	}
-
-	if id := findIdentityMatchingSession(sessions, observation); id != "" {
-		return id
-	}
-
-	return findListingMatchingSession(sessions, observation)
+	return matchSession(sessions, observation).id
 }
 
 func findListingMatchingSession(sessions map[string]Session, observation Observation) string {
 	listing := observation.Listing()
-	if observation.Kind() != "listing" || listing == nil || !listing.Current ||
+	if observation.Kind() != EvidenceListing || listing == nil || !listing.Current ||
 		listing.ProcessPID <= 0 {
 		return ""
 	}

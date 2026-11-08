@@ -8,103 +8,12 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestPresenceValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.Presence{
-		registry.PresenceLive,
-		registry.PresenceGone,
-		registry.PresenceUnknown,
-	}
-	for _, p := range valid {
-		if !p.Valid() {
-			t.Errorf("expected presence %q to be valid", p)
-		}
-	}
-
-	invalid := []registry.Presence{"", "active", "online", "LIVE"}
-	for _, p := range invalid {
-		if p.Valid() {
-			t.Errorf("expected presence %q to be invalid", p)
-		}
-	}
-}
-
-func TestActivityValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.Activity{
-		registry.ActivityRunning,
-		registry.ActivityWaiting,
-		registry.ActivityIdle,
-		registry.ActivityFailed,
-		registry.ActivityInterrupted,
-		registry.ActivityUnknown,
-	}
-	for _, a := range valid {
-		if !a.Valid() {
-			t.Errorf("expected activity %q to be valid", a)
-		}
-	}
-
-	invalid := []registry.Activity{"", "busy", "stopped", "RUNNING"}
-	for _, a := range invalid {
-		if a.Valid() {
-			t.Errorf("expected activity %q to be invalid", a)
-		}
-	}
-}
-
-func TestNativeLifecycleValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.NativeLifecycle{
-		registry.NativeLifecycleStart,
-		registry.NativeLifecycleResume,
-		registry.NativeLifecycleEnd,
-	}
-	for _, l := range valid {
-		if !l.Valid() {
-			t.Errorf("expected lifecycle %q to be valid", l)
-		}
-	}
-
-	invalid := []registry.NativeLifecycle{"", "stop", "restart"}
-	for _, l := range invalid {
-		if l.Valid() {
-			t.Errorf("expected lifecycle %q to be invalid", l)
-		}
-	}
-}
-
-func TestMultiplexerKindValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []registry.MultiplexerKind{
-		registry.MultiplexerTmux,
-		registry.MultiplexerZellij,
-		registry.MultiplexerHerdr,
-	}
-	for _, k := range valid {
-		if !k.Valid() {
-			t.Errorf("expected multiplexer kind %q to be valid", k)
-		}
-	}
-
-	invalid := []registry.MultiplexerKind{"", "screen", "unknown"}
-	for _, k := range invalid {
-		if k.Valid() {
-			t.Errorf("expected multiplexer kind %q to be invalid", k)
-		}
-	}
-}
-
 func TestFilterUsesSnakeCaseWireNames(t *testing.T) {
 	t.Parallel()
 
 	encoded, err := json.Marshal(
 		registry.Filter{
-			Harness:            registry.Harness("claude"),
+			Harness:            registry.Harness("catalog"),
 			Presence:           registry.PresenceLive,
 			Activity:           registry.ActivityIdle,
 			MultiplexerSession: "work",
@@ -119,7 +28,7 @@ func TestFilterUsesSnakeCaseWireNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if old["harness"] != "claude" || old["presence"] != "live" || old["activity"] != "idle" ||
+	if old["harness"] != "catalog" || old["presence"] != "live" || old["activity"] != "idle" ||
 		old["multiplexer_session"] != "work" {
 		t.Fatalf("invalid filter encoding: %s", encoded)
 	}

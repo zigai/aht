@@ -7,12 +7,14 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
 	cursorCommand           = "cursor-agent"
 	cursorIntegrationSource = "cursor-hook"
+	integrationVersion      = 15
 )
 
 type cursorHarness struct{ harness.BaseAdapter }
@@ -27,30 +29,25 @@ type hookPayload struct {
 
 func New() cursorHarness {
 	return cursorHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: true, CatalogCreates: false,
-		ID:           registry.Harness("cursor"),
-		Aliases:      []string{"cursor-agent", "cursor_agent", "cursor-cli", "cursor_cli"},
-		ProcessNames: []string{"cursor", "cursor-agent", "cursor-cli"},
+		ExclusiveProcess: true,
+		ID:               registry.Harness("cursor"),
+		Aliases:          []string{"cursor-agent", "cursor_agent", "cursor-cli", "cursor_cli"},
+		ProcessNames:     []string{"cursor", "cursor-agent", "cursor-cli"},
 		Env: harness.EnvKeys{
-			SessionID:   nil,
+			Config:      []string{"CURSOR_CONFIG_DIR"},
 			SessionPath: []string{"CURSOR_TRANSCRIPT_PATH"},
 			ProjectRoot: []string{"CURSOR_PROJECT_DIR", "CLAUDE_PROJECT_DIR"},
-			PID:         nil,
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      true,
-			SessionEnd:        true,
-			RunningIdle:       true,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
+			SessionStart: true,
+			SessionEnd:   true,
+			RunningIdle:  true,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  cursorIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "cursor_hook_event",
+		LifecycleSourceAttributes: []string{"cursor_start_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         cursorIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
@@ -62,43 +59,16 @@ func (cursorHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
-			harness.CursorJSONHooksAction{Plan: harness.CursorJSONHookInstallPlan{
+			harness.JSONMergeAction{Plan: harness.JSONMergeInstallPlan{
 				Path:        filepath.Join(base, "hooks.json"),
 				Source:      cursorIntegrationSource,
 				Label:       "cursor hooks",
 				ConfigLabel: "cursor config",
-				Hooks: []harness.CursorCommandHookInstallSpec{
-					{
-						Event: "sessionStart",
-						Command: cursorHookCommand(
-							binary,
-							registry.ActivityIdle,
-							"sessionStart",
-							"{}",
-						),
-					},
-					{
-						Event: "beforeSubmitPrompt",
-						Command: cursorHookCommand(
-							binary,
-							registry.ActivityRunning,
-							"beforeSubmitPrompt",
-							`{"continue":true}`,
-						),
-					},
-					{
-						Event:   "stop",
-						Command: cursorHookCommand(binary, registry.ActivityIdle, "stop", "{}"),
-					},
-					{
-						Event: "sessionEnd",
-						Command: cursorHookCommand(
-							binary,
-							registry.PresenceGone,
-							"sessionEnd",
-							"{}",
-						),
-					},
+				Merge: func(config map[string]any, isManaged func(string) bool) (bool, error) {
+					return mergeHooks(config, hookSpecs(binary), isManaged)
+				},
+				Remove: func(config map[string]any, isManaged func(string) bool) bool {
+					return removeHooks(config, hookSpecs(binary), isManaged)
 				},
 			}},
 		},
@@ -118,43 +88,17 @@ func (cursorHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (cursorHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	attributes := make(map[string]string)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_hook_event",
-		harness.PayloadString(payload, "hook_event_name"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_start_source",
-		harness.PayloadString(payload, "source"),
-	)
-	harness.AddAttributeString(attributes, "cursor_model", harness.PayloadString(payload, "model"))
-	harness.AddAttributeString(
-		attributes,
-		"cursor_version",
-		harness.PayloadString(payload, "cursor_version"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_composer_mode",
-		harness.PayloadString(payload, "composer_mode"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_session_end_reason",
-		harness.PayloadString(payload, "reason"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_final_status",
-		harness.PayloadString(payload, "final_status"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"cursor_stop_status",
-		harness.PayloadString(payload, "status"),
-	)
+	attributes := harness.PayloadAttributes(payload, map[string][]string{
+		"cursor_hook_event":         {"hook_event_name"},
+		"cursor_start_source":       {"source"},
+		"cursor_model":              {"model"},
+		"cursor_version":            {"cursor_version"},
+		"cursor_composer_mode":      {"composer_mode"},
+		"cursor_session_end_reason": {"reason"},
+		"cursor_final_status":       {"final_status"},
+		"cursor_stop_status":        {"status"},
+	})
+
 	harness.AddAttributeString(
 		attributes,
 		"cursor_is_background_agent",
@@ -184,29 +128,12 @@ func (cursorHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDef
 }
 
 func (cursorHarness) ObservableProcess(process processinfo.Process) bool {
-	if process.TTY == "" && process.MultiplexerPane == "" &&
+	if process.TTY == "" && drivers.LocationFromEnv(process.Env).PaneID == "" &&
 		!slices.Contains(process.Args, "agent") {
 		return false
 	}
 
 	return true
-}
-
-func cursorHookCommand[T harness.Transition](
-	binary string,
-	transition T,
-	event string,
-	hookOutput string,
-) string {
-	report := harness.RawStdinDefaultsReportHookCommand(
-		binary,
-		registry.Harness("cursor"),
-		transition,
-		event,
-		cursorIntegrationSource,
-	)
-
-	return report + " >/dev/null 2>&1 || true; printf '%s\\n' " + harness.ShellQuote(hookOutput)
 }
 
 func cursorHome() string {
@@ -218,16 +145,35 @@ func cursorHome() string {
 	return filepath.Join(home, ".cursor")
 }
 
-func (cursorHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["cursor_hook_event"]
+func hookSpecs(binary string) []harness.CommandHookInstallSpec {
+	hooks := []harness.CommandHook{
+		{
+			Event:      "sessionStart",
+			Transition: harness.HookActivityIdle,
+			Stdin:      harness.ReportStdinDefaults,
+		},
+		{
+			Event:      "beforeSubmitPrompt",
+			Transition: harness.HookActivityRunning,
+			Stdin:      harness.ReportStdinDefaults,
+		},
+		{Event: "stop", Transition: harness.HookActivityIdle, Stdin: harness.ReportStdinDefaults},
+		{
+			Event:      "sessionEnd",
+			Transition: harness.HookPresenceGone,
+			Stdin:      harness.ReportStdinDefaults,
+		},
 	}
 
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "cursor_start_source", "source", "reason"),
-	)
+	specs := harness.CommandHookSpecs(binary, New().Definition(), hooks)
+	for i := range specs {
+		output := "{}"
+		if specs[i].Event == "beforeSubmitPrompt" {
+			output = `{"continue":true}`
+		}
+
+		specs[i].Command += " >/dev/null 2>&1 || true; printf '%s\\n' " + harness.ShellQuote(output)
+	}
+
+	return specs
 }

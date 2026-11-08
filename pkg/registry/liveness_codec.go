@@ -62,15 +62,8 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 	s.Liveness = NewLiveness(
 		wire.Liveness.Kind,
 		ActivityValue(wire.Liveness.Activity),
-		wire.Liveness.Decision,
+		wire.Liveness.Decision, wire.Liveness.At, wire.Liveness.Reason,
 	)
-	if wire.Liveness.Kind == PresenceGone {
-		s.Liveness = Gone{
-			At:       wire.Liveness.At,
-			Reason:   wire.Liveness.Reason,
-			Decision: wire.Liveness.Decision,
-		}
-	}
 
 	return nil
 }

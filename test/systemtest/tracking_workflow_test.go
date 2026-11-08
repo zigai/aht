@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -284,6 +285,7 @@ func buildSystemTestBinary(t *testing.T, root string) string {
 
 func systemTestEnvironment(home string, configHome string, stateDir string) []string {
 	environment := []string{
+		processinfo.ChildRoleEnv + "=fixture",
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + configHome,
 		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),

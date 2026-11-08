@@ -4,12 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const MaxRecordBytes = 16 << 20
+
+const (
+	FormatJSONL Format = iota
+	FormatDocument
+	FormatDatabase
+	FormatCompressed
+)
 
 const (
 	TypedUserRole    = "typed-user"
@@ -21,6 +29,8 @@ var (
 	ErrUnknownFormat = errors.New("unrecognized history format or missing native session identity")
 	ErrRecordSize    = errors.New("history record exceeds 16 MiB")
 )
+
+type Format uint8
 
 type Conversation struct {
 	Harness     registry.Harness `json:"harness"`
@@ -48,6 +58,7 @@ type Decoder struct {
 	Projection   string
 	Metadata     map[string]string
 	IncludeTools bool
+	UserParts    func(string) []TextPart
 }
 type Row struct {
 	SessionID, Title, CWD, Created, Updated, MessageID, Role string
@@ -56,13 +67,18 @@ type Row struct {
 }
 type (
 	RowReader func(context.Context, *Decoder, Row) error
-	Reader    struct {
+	//exhaustruct:optional
+	Reader struct {
 		Patterns       []string
+		DefaultFormat  Format
+		FileFormat     func(string) Format
 		Sources        func(string) ([]string, error)
 		SkipDirectory  func(string) bool
 		SkipFile       func(string) bool
 		SourceMetadata func(string, bool, func(string, error)) map[string]string
 		Initialize     func(*Decoder)
+		Projection     func(context.Context, *os.File, int64) (string, error)
+		UserParts      func(string) []TextPart
 		Extra          func(string, map[string]string, func(string) string) string
 		Record         func(context.Context, *Decoder, Record, int)
 		FastRecord     func(context.Context, *Decoder, []byte, int) bool
@@ -87,7 +103,30 @@ func (d *Decoder) Capture(
 	line int,
 	at time.Time,
 ) {
+	if (role == "user" || role == InjectedUserRole) && d.UserParts != nil {
+		for _, part := range d.UserParts(body) {
+			if role == InjectedUserRole && part.Role != InjectedUserRole {
+				continue
+			}
+
+			if d.Emit != nil {
+				d.Emit(ctx, part.Role, part.Text, id, line, at)
+			}
+		}
+
+		return
+	}
+
 	if d.Emit != nil {
 		d.Emit(ctx, role, body, id, line, at)
 	}
+}
+
+// Format selects a parser independently of directory discovery patterns.
+func (r Reader) Format(path string) Format {
+	if r.FileFormat != nil {
+		return r.FileFormat(path)
+	}
+
+	return r.DefaultFormat
 }

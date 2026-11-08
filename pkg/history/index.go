@@ -24,9 +24,8 @@ const (
 	indexVersion = 6
 	// oldestIndexVersion is the oldest schema this build recognizes as its own;
 	// older own versions are rebuilt from native history.
-	oldestIndexVersion      = 2
-	indexApplicationID      = 0x41485431 // ASCII "AHT1".
-	requiredIndexTableCount = 5
+	oldestIndexVersion = 2
+	indexApplicationID = 0x41485431 // ASCII "AHT1".
 	// sqlitePrimaryCodeMask isolates a primary SQLite result code from extended codes.
 	sqlitePrimaryCodeMask = 0xff
 )
@@ -36,7 +35,12 @@ CREATE INDEX parts_conversation ON parts(conversation_id,role,length(CAST(body A
 CREATE INDEX parts_search ON parts(id,conversation_id,role);
 `
 
-const indexSchema = `
+// firstConversationSQL selects the first conversation row of the history f.
+const firstConversationSQL = "coalesce((SELECT min(c.id) FROM conversations c WHERE c.file_id=f.id),0)"
+
+var indexTables = []string{"directories", "files", "conversations", "parts", "parts_fts"}
+
+var indexSchema = `
 CREATE TABLE directories (
  harness TEXT NOT NULL, root TEXT NOT NULL, path TEXT NOT NULL,
  stamp TEXT NOT NULL, children TEXT NOT NULL,
@@ -61,23 +65,10 @@ CREATE VIRTUAL TABLE parts_fts USING fts5(folded, content='', contentless_delete
  tokenize='trigram case_sensitive 1');
 CREATE TRIGGER parts_delete AFTER DELETE ON parts BEGIN
  DELETE FROM parts_fts WHERE rowid=old.id; END;
-PRAGMA application_id=0x41485431;
-PRAGMA user_version=6;
-`
-
-// firstConversationSQL selects the first conversation row of the history f.
-const firstConversationSQL = "coalesce((SELECT min(c.id) FROM conversations c WHERE c.file_id=f.id),0)"
+` + fmt.Sprintf("PRAGMA application_id=%d;\nPRAGMA user_version=%d;\n", indexApplicationID, indexVersion)
 
 // dropIndexSchema removes every object of an older own schema version.
-const dropIndexSchema = `
-DROP TRIGGER IF EXISTS parts_insert;
-DROP TRIGGER IF EXISTS parts_delete;
-DROP TABLE IF EXISTS parts_fts;
-DROP TABLE IF EXISTS parts;
-DROP TABLE IF EXISTS conversations;
-DROP TABLE IF EXISTS files;
-DROP TABLE IF EXISTS directories;
-`
+var dropIndexSchema = dropTablesSQL()
 
 var (
 	errIndexSchema = errors.New(
@@ -95,22 +86,23 @@ type indexedFile struct {
 	omitted                                  int
 }
 type historyIndex struct {
-	db           *sql.DB
-	conn         *indexConnection
-	tx           *indexTransaction
-	unavailable  error
-	files        map[string]indexedFile
-	paths        map[string]Source
-	candidates   map[int64]bool
-	plans        map[int64]*indexedMatches
-	excluded     map[int64]bool
-	queries      *indexQueries
-	seen         map[string]bool
-	sourceFilter string
-	sourceArgs   []any
-	rebuilt      bool
-	listed       map[int64][]indexedConversation
-	directories  []*directoryCache
+	db                 *sql.DB
+	conn               *indexConnection
+	tx                 *indexTransaction
+	unavailable        error
+	files              map[string]indexedFile
+	paths              map[string]Source
+	candidates         map[int64]bool
+	plans              map[int64]*indexedMatches
+	excluded           map[int64]bool
+	queries            *indexQueries
+	seen               map[string]bool
+	sourceFilter       string
+	sourceArgs         []any
+	rebuilt            bool
+	listed             map[int64][]indexedConversation
+	directories        []*directoryCache
+	directorySnapshots map[Source]*directoryCache
 }
 
 // openHistoryIndex prepares the disposable search index. An empty path uses the
@@ -223,7 +215,7 @@ func openIndexDatabase(
 		return nil, errors.Join(err, index.close(ctx))
 	}
 
-	if err = index.initialize(ctx); err != nil {
+	if err = index.initialize(ctx, sources); err != nil {
 		return nil, errors.Join(err, index.close(ctx))
 	}
 
@@ -243,7 +235,7 @@ func (index *historyIndex) connect(ctx context.Context, waiting func()) error {
 	return nil
 }
 
-func (index *historyIndex) initialize(ctx context.Context) error {
+func (index *historyIndex) initialize(ctx context.Context, sources []Source) error {
 	if err := index.ensureSchema(ctx); err != nil {
 		return err
 	}
@@ -252,7 +244,7 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 		return err
 	}
 
-	if err := index.loadFiles(ctx); err != nil {
+	if err := index.loadSnapshot(ctx, sources); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
 		}
@@ -261,6 +253,40 @@ func (index *historyIndex) initialize(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (index *historyIndex) loadSnapshot(ctx context.Context, sources []Source) (err error) {
+	if _, err = index.conn.ExecContext(ctx, "BEGIN"); err != nil {
+		return fmt.Errorf("begin history index snapshot: %w", err)
+	}
+
+	tx := &indexTransaction{indexConnection: index.conn}
+
+	finished := false
+	defer func() {
+		if !finished {
+			err = errors.Join(err, tx.Rollback(ctx))
+		}
+	}()
+
+	// Cached directory stamps and their file lists must describe the same commit.
+	if err := index.loadFiles(ctx); err != nil {
+		return err
+	}
+
+	index.directorySnapshots = make(map[Source]*directoryCache, len(sources))
+	for _, source := range sources {
+		cache, readErr := index.loadDirectories(ctx, source)
+		if readErr != nil {
+			return readErr
+		}
+
+		index.directorySnapshots[source] = cache
+	}
+
+	finished = true
+
+	return tx.Commit(ctx)
 }
 
 // ensureSchema validates the on-disk schema, creating it when the file holds no
@@ -306,8 +332,7 @@ func (index *historyIndex) ensureSchema(ctx context.Context) error {
 func (index *historyIndex) validateSchemaTables(ctx context.Context, version int) error {
 	var count int
 	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND "+
-		"name IN ('files','conversations','parts','parts_fts',"+
-		"'directories')").
+		"name IN ("+indexTableList()+")").
 		Scan(ctx, &count); err != nil {
 		if isIndexContentFailure(err) {
 			return schemaFailure(err)
@@ -316,7 +341,8 @@ func (index *historyIndex) validateSchemaTables(ctx context.Context, version int
 		return fmt.Errorf("inspect history index tables: %w", err)
 	}
 
-	required := requiredIndexTableCount
+	required := len(indexTables)
+	// Versions before indexVersion lack the directories table.
 	if version < indexVersion {
 		required--
 	}
@@ -327,8 +353,7 @@ func (index *historyIndex) validateSchemaTables(ctx context.Context, version int
 
 	var foreignCount int
 	if err := index.conn.queryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND "+
-		"name NOT LIKE 'sqlite_%' AND name NOT IN ('files',"+
-		"'conversations','parts','parts_fts','directories') AND name "+
+		"name NOT LIKE 'sqlite_%' AND name NOT IN ("+indexTableList()+") AND name "+
 		"NOT LIKE 'parts_fts_%'").
 		Scan(ctx, &foreignCount); err != nil {
 		if isIndexContentFailure(err) {
@@ -447,7 +472,7 @@ func (index *historyIndex) loadFiles(ctx context.Context) (err error) {
 		index.sourceArgs...,
 	)
 	if err != nil {
-		if isIndexContentFailure(err) || strings.Contains(err.Error(), "no such table") {
+		if isIndexContentFailure(err) || indexSQLiteCode(err) == sqlite3.SQLITE_ERROR {
 			return schemaFailure(err)
 		}
 
@@ -611,7 +636,7 @@ func (index *historyIndex) close(ctx context.Context) error {
 }
 
 func (index *historyIndex) reportIssues(
-	s *search,
+	s *indexScan,
 	source Source,
 	file indexedFile,
 	selected map[string]bool,
@@ -711,8 +736,7 @@ func directorySQL(dirs []string) (string, []any) {
 
 	for _, dir := range dirs {
 		dir = filepath.Clean(dir)
-		prefix := strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator)
-		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
+		prefix, upper := subtreeBounds(dir)
 
 		predicates = append(
 			predicates,
@@ -741,13 +765,7 @@ func sourceSQL(sources []Source) (string, []any) {
 	var args []any
 
 	for _, source := range sources {
-		prefix := strings.TrimRight(
-			source.Path,
-			string(filepath.Separator),
-		) + string(
-			filepath.Separator,
-		)
-		upper := prefix[:len(prefix)-1] + string(filepath.Separator+1)
+		prefix, upper := subtreeBounds(source.Path)
 
 		filters = append(filters, "(f.harness=? AND (f.path=? OR (f.path>=? AND f.path<?)))")
 		args = append(args, source.Harness, source.Path, prefix, upper)
@@ -758,4 +776,32 @@ func sourceSQL(sources []Source) (string, []any) {
 
 func rebuildableIndexSchema(appID int, version int) bool {
 	return appID == indexApplicationID && version >= oldestIndexVersion && version <= indexVersion
+}
+
+func dropTablesSQL() string {
+	var statements strings.Builder
+
+	statements.WriteString(
+		"DROP TRIGGER IF EXISTS parts_insert;\nDROP TRIGGER IF EXISTS parts_delete;\n",
+	)
+
+	for _, table := range slices.Backward(indexTables) {
+		statements.WriteString("DROP TABLE IF EXISTS " + table + ";\n")
+	}
+
+	return statements.String()
+}
+
+func indexTableList() string {
+	quoted := make([]string, len(indexTables))
+	for i, table := range indexTables {
+		quoted[i] = "'" + table + "'"
+	}
+
+	return strings.Join(quoted, ",")
+}
+
+func subtreeBounds(path string) (string, string) {
+	prefix := strings.TrimRight(path, string(filepath.Separator)) + string(filepath.Separator)
+	return prefix, prefix[:len(prefix)-1] + string(filepath.Separator+1)
 }

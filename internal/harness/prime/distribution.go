@@ -10,9 +10,9 @@ const primeInstallerURL = "https://app.primeintellect.ai/prime-agent/install.sh"
 
 func (primeHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source: "channel", Package: "", Repo: "", Asset: "",
-		URL: "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable", MaxVersion: "",
-		Directory: "prime", Family: "", PackageExtras: "", Install: distributionInstall,
+		Source:    harness.DistributionChannel,
+		URL:       "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
+		Directory: "prime", Install: distributionInstall,
 	}
 }
 

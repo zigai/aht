@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -47,11 +49,15 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		Harness: registry.Harness("opencode"),
 		CWD:     workDir,
 		Observations: registry.Observations{
-			Process: &registry.ProcessObservation{
-				Present: true,
-			},
+			Process: &registry.ProcessObservation{Sighting: registry.Sighting{Present: true}},
 		},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		Liveness: registry.NewLiveness(
+			registry.PresenceLive,
+			registry.ActivityValue(nil),
+			nil,
+			time.Time{},
+			"",
+		),
 	}
 
 	host := &isolatedHost{
@@ -82,7 +88,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 	withNative.Liveness = registry.NewLiveness(
 		withNative.Presence(),
 		registry.ActivityValue(new(registry.ActivityUnknown)),
-		withNative.Decision(),
+		withNative.Decision(), time.Time{}, "",
 	)
 	if host.validateSession(withNative) {
 		t.Fatal("oracle accepted unexplained unknown effective activity")
@@ -94,7 +100,7 @@ func TestSessionOracleRequiresNativeObservation(t *testing.T) {
 		&registry.ActivityDecision{
 			Authority: "screen",
 			Reason:    "screen_not_in_supported_multiplexer",
-		},
+		}, time.Time{}, "",
 	)
 	if !host.validateSession(withNative) {
 		t.Fatal("oracle rejected screen-authoritative headless terminal session")
@@ -138,35 +144,6 @@ func isolatedEnvironment() []string {
 	return result
 }
 
-func discoveryScope(id registry.Harness) string {
-	if id == registry.Harness("cursor") {
-		return "https://cursor.com/docs/cli/headless documents " +
-			"CURSOR_API_KEY-backed hosted execution, not an isolated " +
-			"local-provider endpoint"
-	}
-
-	if id == registry.Harness("prime-agent") {
-		return "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/" +
-			"README.md documents no hook or plugin surface; state comes " +
-			"from the daemon session catalog, so no installed " +
-			"integration or native lifecycle support is asserted"
-	}
-
-	if id == registry.Harness("crush") {
-		return "https://github.com/charmbracelet/crush/blob/main/docs/hooks/" +
-			"README.md documents only PreToolUse, so the hook supplies " +
-			"native session identity while start, idle, permission, and " +
-			"end come from the screen manifest; native lifecycle support " +
-			"is not asserted"
-	}
-
-	return "only plugin loading is asserted, through `agy plugin list` " +
-		"and `agy -p /hooks` with the documented Gemini API-key " +
-		"provider pointed at a local endpoint; hook inspection must " +
-		"not make model requests, and native lifecycle support is " +
-		"not asserted"
-}
-
 // Record only flags describing native observations, never stdin, tool inputs,
 // prompts or credentials. The installed integration still invokes the real AHT
 // consumer, with unchanged argv/stdin and exit status. A single append prevents
@@ -202,50 +179,9 @@ exec %s "$@"
 	}
 }
 
-// A persistent session is not retired just because a one-shot CLI client exits.
-// OpenCode/Kilo emit session.deleted only on deletion; Cline afterRun and
-// OpenClaw agent_end and Hermes on_session_end end a turn rather than the session.
-func terminalSession(id registry.Harness, session registry.Session) bool {
-	native := session.Observations.Native
-	if native == nil {
-		return false
-	}
-	// Hermes chat explicitly finalizes the session; oneshot ends only its turn.
-	if id == registry.Harness("hermes") && native.Event == "on_session_finalize" {
-		return nativeGone(native, session)
-	}
-
-	switch id {
-	case registry.Harness("opencode"),
-		registry.Harness("kilo"),
-		registry.Harness("cline"),
-		registry.Harness("openclaw"),
-		registry.Harness("hermes"):
-		return idleTurnEnded(id, native, session)
-	default:
-		// A process-observer tombstone is not a native SessionEnd.
-		return nativeGone(native, session) && native.Event == terminalEvent(id)
-	}
-}
-
 func nativeGone(native *registry.NativeObservation, session registry.Session) bool {
 	return native.Presence != nil && *native.Presence == registry.PresenceGone &&
 		session.Presence() == registry.PresenceGone
-}
-
-func idleTurnEnded(
-	id registry.Harness,
-	native *registry.NativeObservation,
-	session registry.Session,
-) bool {
-	if native.Activity == nil || *native.Activity != registry.ActivityIdle ||
-		!effectiveActivityMatches(session, registry.ActivityIdle) {
-		return false
-	}
-	// Both current Kilo idle notifications are native terminal evidence;
-	// either may be the last drained event.
-	return native.Event == terminalEvent(id) ||
-		(id == registry.Harness("kilo") && native.Event == "session.idle")
 }
 
 func nativeActivityRunning(session registry.Session) bool {
@@ -281,7 +217,7 @@ func TestNativeActivityOracleRetainsPresenceOnlyProvenance(t *testing.T) {
 				registry.ActivityRunning,
 			),
 		),
-		nil,
+		nil, time.Time{}, "",
 	)}
 	if nativeActivityRunning(session) {
 		t.Fatal("effective activity without native provenance passed")
@@ -290,7 +226,7 @@ func TestNativeActivityOracleRetainsPresenceOnlyProvenance(t *testing.T) {
 	session.Liveness = registry.NewLiveness(
 		session.Presence(),
 		registry.ActivityValue(session.Activity()),
-		&registry.ActivityDecision{Authority: "process", Process: process},
+		&registry.ActivityDecision{Authority: "process", Process: process}, time.Time{}, "",
 	)
 	if nativeActivityRunning(session) {
 		t.Fatal("process-derived activity passed as native evidence")
@@ -327,66 +263,6 @@ func effectiveActivityMatches(session registry.Session, want registry.Activity) 
 	return *session.Activity() == registry.ActivityUnknown && session.Decision() != nil &&
 		session.Decision().Authority == "screen" &&
 		session.Decision().Reason == "screen_not_in_supported_multiplexer"
-}
-
-func terminalEvent(id registry.Harness) string {
-	switch id {
-	case registry.Harness("pi"), registry.Harness("omp"):
-		return "session_shutdown"
-	case registry.Harness("copilot"):
-		return "sessionEnd"
-	case registry.Harness("opencode"):
-		return "session.execution.succeeded"
-	case registry.Harness("kilo"):
-		return "session.status"
-	case registry.Harness("cline"):
-		return "afterRun"
-	case registry.Harness("openclaw"):
-		return "agent_end"
-	case registry.Harness("hermes"):
-		return "on_session_end"
-	default:
-		return "SessionEnd"
-	}
-}
-
-func startEvent(id registry.Harness) string {
-	switch id {
-	case registry.Harness("pi"), registry.Harness("omp"), registry.Harness("openclaw"):
-		return "session_start"
-	case registry.Harness("copilot"):
-		return "sessionStart"
-	case registry.Harness("opencode"):
-		return "session.execution.started"
-	case registry.Harness("kilo"):
-		return "session.created"
-	case registry.Harness("cline"):
-		return "beforeRun"
-	case registry.Harness("hermes"):
-		return "on_session_start"
-	default:
-		return "SessionStart"
-	}
-}
-
-func turnEndEvent(id registry.Harness) string {
-	switch id {
-	case registry.Harness("pi"):
-		return "agent_settled"
-	case registry.Harness("omp"):
-		return "session_stop"
-	case registry.Harness("copilot"):
-		return "agentStop"
-	case registry.Harness("hermes"):
-		return "on_session_end"
-	case registry.Harness("cline"),
-		registry.Harness("opencode"),
-		registry.Harness("kilo"),
-		registry.Harness("openclaw"):
-		return terminalEvent(id)
-	default:
-		return "Stop"
-	}
 }
 
 func (host *isolatedHost) assertNativeEvents(t *testing.T) {
@@ -428,44 +304,25 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 	gone := registry.PresenceGone
 	idle := registry.ActivityIdle
 
-	for _, id := range []registry.Harness{
-		registry.Harness(
-			"claude",
-		),
-		registry.Harness(
-			"codex",
-		),
-		registry.Harness(
-			"pi",
-		),
-		registry.Harness(
-			"omp",
-		),
-		registry.Harness(
-			"copilot",
-		),
-		registry.Harness(
-			"kimi-code",
-		),
-		registry.Harness(
-			"grok",
-		),
-		registry.Harness(
-			"goose",
-		),
-		registry.Harness(
-			"droid",
-		),
-		registry.Harness(
-			"qwen",
-		),
-	} {
+	for _, contract := range hostContracts {
+		if contract.Level != compatibilityLevelLifecycle ||
+			len(contract.Lifecycle.IdleEvents) != 0 {
+			continue
+		}
+
+		id := contract.ID
 		t.Run(string(id), func(t *testing.T) {
 			session := registry.Session{
 				Observations: registry.Observations{
 					Native: &registry.NativeObservation{Event: startEvent(id), Activity: &idle},
 				},
-				Liveness: registry.NewLiveness(gone, registry.ActivityValue(nil), nil),
+				Liveness: registry.NewLiveness(
+					gone,
+					registry.ActivityValue(nil),
+					nil,
+					time.Time{},
+					"",
+				),
 			}
 			if terminalSession(id, session) {
 				t.Fatal("process retirement masked missing advertised native session end")
@@ -481,7 +338,7 @@ func TestTerminalOracleRejectsObserverRetirement(t *testing.T) {
 			session.Liveness = registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(session.Activity()),
-				session.Decision(),
+				session.Decision(), time.Time{}, "",
 			)
 			if terminalSession(id, session) {
 				t.Fatal("accepted stuck-live effective state")
@@ -496,32 +353,24 @@ func TestTurnOracleRejectsStuckRunning(t *testing.T) {
 	idle := registry.ActivityIdle
 	running := registry.ActivityRunning
 
-	for _, id := range []registry.Harness{
-		registry.Harness(
-			"opencode",
-		),
-		registry.Harness(
-			"kilo",
-		),
-		registry.Harness(
-			"cline",
-		),
-		registry.Harness(
-			"openclaw",
-		),
-		registry.Harness(
-			"hermes",
-		),
-	} {
+	for _, contract := range hostContracts {
+		if contract.Level != compatibilityLevelLifecycle ||
+			len(contract.Lifecycle.IdleEvents) == 0 {
+			continue
+		}
+
+		id := contract.ID
 		t.Run(string(id), func(t *testing.T) {
 			session := registry.Session{
-				Observations: registry.Observations{Native: &registry.NativeObservation{
-					Event: terminalEvent(id), Activity: &idle,
-				}},
+				Observations: registry.Observations{
+					Native: &registry.NativeObservation{
+						Event: terminalEvent(id), Activity: &idle,
+					},
+				},
 				Liveness: registry.NewLiveness(
 					registry.PresenceLive,
 					registry.ActivityValue(&running),
-					nil,
+					nil, time.Time{}, "",
 				),
 			}
 			if terminalSession(id, session) {
@@ -531,7 +380,7 @@ func TestTurnOracleRejectsStuckRunning(t *testing.T) {
 			session.Liveness = registry.NewLiveness(
 				session.Presence(),
 				registry.ActivityValue(&idle),
-				session.Decision(),
+				session.Decision(), time.Time{}, "",
 			)
 
 			session.Observations.Native.Activity = &running
@@ -545,4 +394,63 @@ func TestTurnOracleRejectsStuckRunning(t *testing.T) {
 			}
 		})
 	}
+}
+
+func terminalSession(id registry.Harness, session registry.Session) bool {
+	contract, err := contractFor(id)
+
+	native := session.Observations.Native
+	if err != nil || native == nil {
+		return false
+	}
+
+	lifecycle := contract.Lifecycle
+	if lifecycle.Finalize != "" && native.Event == lifecycle.Finalize {
+		return nativeGone(native, session)
+	}
+
+	if len(lifecycle.IdleEvents) > 0 {
+		return idleTurnEnded(id, native, session)
+	}
+
+	return nativeGone(native, session) && native.Event == lifecycle.Terminal
+}
+
+func idleTurnEnded(
+	id registry.Harness,
+	native *registry.NativeObservation,
+	session registry.Session,
+) bool {
+	contract, err := contractFor(id)
+
+	return err == nil && native.Activity != nil && *native.Activity == registry.ActivityIdle &&
+		effectiveActivityMatches(session, registry.ActivityIdle) &&
+		slices.Contains(contract.Lifecycle.IdleEvents, native.Event)
+}
+
+func terminalEvent(id registry.Harness) string {
+	contract, err := contractFor(id)
+	if err != nil {
+		return ""
+	}
+
+	return contract.Lifecycle.Terminal
+}
+
+func startEvent(id registry.Harness) string {
+	contract, err := contractFor(id)
+	if err != nil {
+		return ""
+	}
+
+	return contract.Lifecycle.Start
+}
+
+func turnEndEvent(id registry.Harness) string {
+	contract, err := contractFor(id)
+	if err != nil {
+		return ""
+	}
+
+	return contract.Lifecycle.TurnEnd
 }

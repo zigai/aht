@@ -4,29 +4,39 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 )
 
-func (s *search) scanToolsFiles(
+func scanToolsFiles(
 	ctx context.Context,
+	s *search,
 	source Source,
 	files []historyFile,
 	status *SourceStatus,
 ) {
 	metadata := new(search)
-	metadata.mode = modeList
-	metadata.query = (ListQuery{Filter: s.query.Filter, Sort: "", Limit: 0}).searchQuery()
-	metadata.explicitSources = s.explicitSources
-	metadata.sourceMetadata = s.sourceMetadata
-	metadata.registry = s.registry
-	metadata.progress = s.progress
+	metadata.scanEnvironment = s.scanEnvironment
+	metadata.queryPlan = queryPlan{
+		mode:      modeList,
+		query:     (ListQuery{Filter: s.query.Filter, Sort: "", Limit: 0}).searchQuery(),
+		terms:     nil,
+		exclude:   nil,
+		prefilter: nil,
+	}
+
 	metadata.reset()
+
+	if err := metadata.prepare(); err != nil {
+		s.fileIssue(source, source.Path, err)
+		return
+	}
+
 	metadata.prefilter = s.prefilter
 	metadata.result.IndexUnavailable = s.result.IndexUnavailable
 
 	metadata.metadataFailures = make(map[string]bool)
 	if s.index != nil {
-		s.index.scanFiles(ctx, metadata, source, files, status)
+		metadata.index = s.index
+		metadata.scanIndex(ctx, source, files, status)
 	} else {
 		metadata.scanFilesParallel(ctx, source, files, status)
 	}
@@ -96,7 +106,7 @@ func (s *search) matchesFamily(ctx context.Context, file historyFile) bool {
 
 	remaining := len(filters)
 	for _, member := range append([]historyFile{file}, file.children...) {
-		if remaining == 0 || member.database || strings.HasSuffix(member.path, ".zst") {
+		if remaining == 0 || member.database || member.compressed {
 			return true
 		}
 

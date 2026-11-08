@@ -81,9 +81,8 @@ func (e *UnsupportedSchemaError) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"unsupported store schema %s at %s; run aht --store %s manage state reset --force or move/remove the file",
+		"unsupported store schema %s at %s; reset the store or move the file",
 		version,
-		e.Path,
 		e.Path,
 	)
 }
@@ -167,36 +166,6 @@ func (s *FileStore) SummaryWithOptions(
 
 func (s *FileStore) setNowForTest(now func() time.Time)   { s.now = now }
 func (s *FileStore) setOnLockContentionForTest(fn func()) { s.onLockContention = fn }
-
-func (s *FileStore) withSnapshot(ctx context.Context, mutator func(*snapshot) error) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("creating state directory: %w", err)
-	}
-
-	lock, err := openStoreLock(ctx, s.path+".lock", s.onLockContention)
-	if err != nil {
-		return err
-	}
-
-	snap, err := s.loadSnapshot()
-	if err != nil {
-		return closeStoreLock(lock, err)
-	}
-
-	if err := mutator(&snap); err != nil {
-		return closeStoreLock(lock, err)
-	}
-
-	if err := validateSnapshot(snap); err != nil {
-		return closeStoreLock(lock, fmt.Errorf("validating updated store: %w", err))
-	}
-
-	if err := ctx.Err(); err != nil {
-		return closeStoreLock(lock, fmt.Errorf("updating store: %w", err))
-	}
-
-	return closeStoreLock(lock, writeSnapshotAtomic(s.path, snap))
-}
 
 func closeStoreLock(lock *storeLock, err error) error {
 	if closeErr := lock.Close(); closeErr != nil {

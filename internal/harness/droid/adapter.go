@@ -11,20 +11,15 @@ import (
 const (
 	droidCommand           = "droid"
 	droidIntegrationSource = "droid-hook"
+	integrationVersion     = 15
 )
 
 type droidHarness struct{ harness.BaseAdapter }
 
-type hookPayload struct {
-	SessionID     string `json:"session_id"      validate:"required,notblank"`
-	CWD           string `json:"cwd"             validate:"required,notblank"`
-	HookEventName string `json:"hook_event_name" validate:"required,notblank"`
-}
-
 func New() droidHarness {
 	return droidHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		PayloadOmissions: []string{"tool_input", "tool_response"},
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("droid"),
 		Aliases: []string{
 			"factory",
@@ -35,114 +30,58 @@ func New() droidHarness {
 		},
 		ProcessNames: []string{"droid"},
 		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
+			Config:      []string{"DROID_SESSIONS_DIR"},
 			ProjectRoot: []string{"FACTORY_PROJECT_DIR"},
-			PID:         nil,
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      true,
-			SessionEnd:        true,
-			RunningIdle:       true,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
+			SessionStart: true,
+			SessionEnd:   true,
+			RunningIdle:  true,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  droidIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "droid_hook_event",
+		LifecycleSourceAttributes: []string{"droid_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         droidIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
-func (droidHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter droidHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := droidConfigDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
+	hooks := []harness.CommandHook{
+		{Event: "SessionStart", Transition: harness.HookActivityIdle},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{
+			Event:      "Notification",
+			Matcher:    "permission_prompt",
+			Transition: harness.HookActivityWaiting,
+		},
+		{Event: "Notification", Matcher: "idle_prompt", Transition: harness.HookActivityIdle},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		// SubagentStop fires when a Task sub-droid finishes while the
+		// parent turn keeps running until Stop.
+		{Event: "PreCompact", Transition: harness.HookActivityRunning},
+		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
+	}
+	for index := range hooks {
+		hooks[index].Stdin = harness.ReportStdinDefaults
+	}
+
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
 			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-				Path:              filepath.Join(base, "hooks.json"),
-				Source:            droidIntegrationSource,
-				Label:             "droid hooks",
-				ConfigLabel:       "factory config",
-				StatusMessage:     "",
-				OmitStatusMessage: true,
-				HooksAtRoot:       true,
-				Trust:             nil,
-				Hooks: []harness.CommandHookInstallSpec{
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "",
-						Command: droidHookCommand(
-							binary,
-							registry.ActivityIdle,
-							harness.HookEventSessionStart,
-						),
-					},
-					{
-						Event:   harness.HookEventUserPromptSubmit,
-						Matcher: "",
-						Command: droidHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventUserPromptSubmit,
-						),
-					},
-					{
-						Event:   harness.HookEventPreToolUse,
-						Matcher: "",
-						Command: droidHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventPreToolUse,
-						),
-					},
-					{
-						Event:   harness.HookEventPostToolUse,
-						Matcher: "",
-						Command: droidHookCommand(
-							binary,
-							registry.ActivityRunning,
-							harness.HookEventPostToolUse,
-						),
-					},
-					{
-						Event:   "Notification",
-						Matcher: "permission_prompt",
-						Command: droidHookCommand(binary, registry.ActivityWaiting, "Notification"),
-					},
-					{
-						Event:   "Notification",
-						Matcher: "idle_prompt",
-						Command: droidHookCommand(binary, registry.ActivityIdle, "Notification"),
-					},
-					{
-						Event:   harness.HookEventStop,
-						Matcher: "",
-						Command: droidHookCommand(
-							binary,
-							registry.ActivityIdle,
-							harness.HookEventStop,
-						),
-					},
-					// SubagentStop fires when a Task sub-droid finishes while the
-					// parent turn keeps running until Stop.
-					{
-						Event:   "PreCompact",
-						Matcher: "",
-						Command: droidHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-					},
-					{
-						Event:   "SessionEnd",
-						Matcher: "",
-						Command: droidHookCommand(binary, registry.PresenceGone, "SessionEnd"),
-					},
-				},
+				HooksKey:    "",
+				Path:        filepath.Join(base, "hooks.json"),
+				Source:      droidIntegrationSource,
+				Label:       "droid hooks",
+				ConfigLabel: "factory config",
+				Hooks:       harness.CommandHookSpecs(binary, adapter.Definition(), hooks),
 			}},
 		},
 	}, nil
@@ -157,7 +96,7 @@ func (droidHarness) ResumeCommand(sessionID string, _ string) []string {
 }
 
 func (droidHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
-	return harness.PayloadValidator[hookPayload]()(rawPayload)
+	return harness.PayloadValidator[harness.CommandHookPayload]()(rawPayload)
 }
 
 func (droidHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
@@ -194,20 +133,9 @@ func (droidHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 		SessionID:   harness.PayloadString(payload, "session_id"),
 		SessionPath: harness.PayloadString(payload, "transcript_path"),
 		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
 	}, nil
-}
-
-func droidHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.RawStdinDefaultsReportHookCommand(
-		binary,
-		registry.Harness("droid"),
-		transition,
-		event,
-		droidIntegrationSource,
-	)
 }
 
 func droidConfigDir() string {
@@ -217,18 +145,4 @@ func droidConfigDir() string {
 	}
 
 	return filepath.Join(home, ".factory")
-}
-
-func (droidHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["droid_hook_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "droid_source", "source", "reason"),
-	)
 }

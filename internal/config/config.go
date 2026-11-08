@@ -26,6 +26,9 @@ const (
 	defaultFileMode = 0o600
 )
 
+// DefaultTrackerInterval is the default tracker.interval.
+const DefaultTrackerInterval = 300 * time.Millisecond
+
 // Sentinel configuration errors.
 var (
 	ErrMissingUnitSuffix   = errors.New("missing unit suffix")
@@ -44,6 +47,10 @@ var (
 	ErrParseConfig     = errors.New("failed to parse config file")
 	ErrAccessConfig    = errors.New("failed to access config file")
 	ErrInvalidDuration = errors.New("invalid duration")
+	// ErrStdinNotEditable means the configuration was read from stdin.
+	ErrStdinNotEditable = errors.New("cannot set key on stdin configuration")
+	// ErrInvalidSetting means a config edit was rejected.
+	ErrInvalidSetting = errors.New("invalid configuration setting")
 
 	validSortKeys = map[string]string{
 		"updated":             "updated",
@@ -67,6 +74,35 @@ var (
 		"activity-since":      "activity-changed",
 	}
 )
+
+var configValues = []configValue{
+	{"ui.default_presence", func(c Config) any { return c.UI.DefaultPresence }},
+	{"ui.sort", func(c Config) any { return c.UI.Sort }},
+	{"ui.sort_desc", func(c Config) any {
+		return boolOr(c.UI.SortDesc, Defaults().UI.SortDesc)
+	}},
+	{"ui.absolute_time", func(c Config) any {
+		return boolOr(c.UI.AbsoluteTime, Defaults().UI.AbsoluteTime)
+	}},
+	{"ui.time_format", func(c Config) any { return c.UI.TimeFormat }},
+	{"retention.tombstone_ttl", func(c Config) any { return c.Retention.TombstoneTTL }},
+	{"filter.ignore_harnesses", func(c Config) any { return c.Filter.IgnoreHarnesses }},
+	{"filter.ignore_paths", func(c Config) any { return c.Filter.IgnorePaths }},
+	{"tracker.interval", func(c Config) any { return c.Tracker.Interval }},
+	{"tracker.grace_period", func(c Config) any { return c.Tracker.GracePeriod }},
+	{"tracker.quiet", func(c Config) any {
+		return boolOr(c.Tracker.Quiet, Defaults().Tracker.Quiet)
+	}},
+	{"detection.manifests_dir", func(c Config) any { return c.Detection.ManifestsDir }},
+	{"detection.screen_inspection", func(c Config) any {
+		return boolOr(c.Detection.ScreenInspection, Defaults().Detection.ScreenInspection)
+	}},
+}
+
+type configValue struct {
+	key string
+	get func(Config) any
+}
 
 type Config struct {
 	UI        UIConfig        `json:"ui"        toml:"ui"`
@@ -122,6 +158,33 @@ type Options struct {
 	Stdin    io.Reader
 }
 
+// TrackerDurations resolves blank tracker durations to their defaults.
+func TrackerDurations(cfg Config) (time.Duration, time.Duration, error) {
+	interval := DefaultTrackerInterval
+
+	var grace time.Duration
+
+	if cfg.Tracker.Interval != "" {
+		parsed, err := ParseDuration(cfg.Tracker.Interval)
+		if err != nil {
+			return 0, 0, fmt.Errorf("parsing tracker interval: %w", err)
+		}
+
+		interval = parsed
+	}
+
+	if cfg.Tracker.GracePeriod != "" {
+		parsed, err := ParseDuration(cfg.Tracker.GracePeriod)
+		if err != nil {
+			return 0, 0, fmt.Errorf("parsing tracker grace period: %w", err)
+		}
+
+		grace = parsed
+	}
+
+	return interval, grace, nil
+}
+
 // SetDefaults declares the configuration defaults for strata.Defaulter.
 func (c *Config) SetDefaults() {
 	*c = Defaults()
@@ -159,7 +222,7 @@ func Defaults() Config {
 			IgnorePaths:     []string{},
 		},
 		Tracker: TrackerConfig{
-			Interval:    "300ms",
+			Interval:    DefaultTrackerInterval.String(),
 			GracePeriod: "0s",
 			Quiet:       new(false),
 		},
@@ -195,6 +258,11 @@ func DefaultPath() string {
 		return val
 	}
 
+	return UserPath()
+}
+
+// UserPath returns the user's config file path, ignoring $AHT_CONFIG.
+func UserPath() string {
 	if path, err := strata.EditPath(
 		strata.WithAppName("aht"),
 		strata.WithFormats(".toml"),
@@ -240,7 +308,7 @@ time_format = "relative"
 tombstone_ttl = "10m"
 
 [filter]
-# List of harnesses to omit from default session listings unless explicitly requested via --agent
+# List of harnesses to omit from default session listings unless explicitly requested via --harness
 ignore_harnesses = []
 
 # List of glob or directory path patterns matching session working directories to ignore
@@ -331,10 +399,15 @@ func ParseDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
+// SortKey returns the canonical sort key for a sort name or alias.
+func SortKey(s string) (string, bool) {
+	key, ok := validSortKeys[strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "_", "-"))]
+	return key, ok
+}
+
 // NormalizeSort validates and normalizes sort key names.
 func NormalizeSort(s string) (string, error) {
-	norm := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "_", "-"))
-	if key, ok := validSortKeys[norm]; ok {
+	if key, ok := SortKey(s); ok {
 		return key, nil
 	}
 
@@ -347,9 +420,17 @@ func NormalizeSort(s string) (string, error) {
 	)
 }
 
-// Validate checks configuration invariants.
-func (c *Config) Validate() error {
-	return c.ValidateWith(nil)
+// Get returns the value of a configuration key. Unset booleans report their
+// default.
+func (c *Config) Get(key string) (any, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, value := range configValues {
+		if value.key == key {
+			return value.get(*c), true
+		}
+	}
+
+	return nil, false
 }
 
 func (c *Config) validateUI(meta *strata.Metadata) error {
@@ -542,24 +623,23 @@ func (c *Config) validateGracePeriod(meta *strata.Metadata) error {
 	return nil
 }
 
+// Keys returns every configuration key in display order.
+func Keys() []string {
+	keys := make([]string, 0, len(configValues))
+	for _, value := range configValues {
+		keys = append(keys, value.key)
+	}
+
+	return keys
+}
+
 // TombstoneTTL returns the configured tombstone TTL, or zero when unset.
 func TombstoneTTL(cfg Config) (time.Duration, error) {
 	if cfg.Retention.TombstoneTTL == "" {
-		return 0, nil
+		return registry.DefaultTombstoneTTL, nil
 	}
 
 	return ParseDuration(cfg.Retention.TombstoneTTL)
-}
-
-// Load loads, parses, and validates the configuration file from path.
-func Load(path string) (Config, string, error) {
-	return LoadWithOptions(Options{Path: path, Explicit: path != ""})
-}
-
-// LoadWithOptions resolves configuration across all tiers per the given options.
-func LoadWithOptions(opts Options) (Config, string, error) {
-	cfg, _, resolved, err := LoadWithMetadata(opts)
-	return cfg, resolved, err
 }
 
 // LoadWithMetadata resolves configuration across all tiers per the given options and returns strata.Metadata.
@@ -666,4 +746,12 @@ func isValidationOrDurationError(err error) bool {
 		errors.Is(err, ErrNegativeGracePeriod) ||
 		errors.Is(err, ErrInvalidDuration) ||
 		errors.Is(err, ErrMissingUnitSuffix)
+}
+
+func boolOr(value *bool, fallback *bool) bool {
+	if value != nil {
+		return *value
+	}
+
+	return *fallback
 }

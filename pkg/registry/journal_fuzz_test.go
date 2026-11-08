@@ -22,7 +22,7 @@ func FuzzJournalRecovery(f *testing.F) {
 		ReceivedAt: base,
 		Observations: []Observation{
 			{
-				Harness:  HarnessPi,
+				Harness:  harnessSecondary,
 				At:       base,
 				Subject:  ObservationIdentity{SessionID: "fuzz"},
 				Evidence: &Report{Activity: new(ActivityRunning)},
@@ -42,7 +42,16 @@ func FuzzJournalRecovery(f *testing.F) {
 	f.Add(validSnapshot, append(bytes.Clone(line), []byte(`{"sequence":`)...))
 	f.Add(validSnapshot, append(bytes.Clone(line), line...))
 	f.Add(validSnapshot, append([]byte(`{"sequence":2}`+"\n"), line...))
-	f.Add([]byte(`{"schema_version":3,"sessions":{"bad":{}}}`), []byte("garbage\n"))
+
+	invalidSnapshot := newSnapshot()
+	invalidSnapshot.Sessions["bad"] = Session{}
+
+	invalidBytes, err := json.Marshal(invalidSnapshot)
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	f.Add(invalidBytes, []byte("garbage\n"))
 	f.Add([]byte("{"), []byte("{"))
 	f.Fuzz(fuzzJournalCase)
 }
@@ -59,7 +68,7 @@ func fuzzJournalCase(t *testing.T, snapshotBytes []byte, journalBytes []byte) {
 		}
 	}
 
-	journalPath := path + ".journal.jsonl"
+	journalPath := journalPath(path)
 	if len(journalBytes) > 0 {
 		if err := os.WriteFile(journalPath, journalBytes, 0o600); err != nil {
 			t.Fatal(err)
@@ -93,7 +102,7 @@ func checkAppendAfterTornTail(t *testing.T, path string, journalBytes []byte, se
 		t.Fatalf("append after torn tail: %v", err)
 	}
 
-	data, err := os.ReadFile(path + ".journal.jsonl")
+	data, err := os.ReadFile(journalPath(path))
 	if err != nil {
 		t.Fatal(err)
 	}

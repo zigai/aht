@@ -74,7 +74,7 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]Location, bo
 func AllLocations(projectDir string) []Location {
 	var locations []Location
 
-	for _, harnessID := range Supported() {
+	for _, harnessID := range catalog.Harnesses() {
 		found, ok := LocationsFor(harnessID, projectDir)
 		if ok {
 			locations = append(locations, found...)

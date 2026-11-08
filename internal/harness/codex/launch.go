@@ -8,7 +8,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 var (
@@ -24,7 +23,7 @@ func (codexHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: codexCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIResponses,
+		Protocol:   harness.LaunchProtocolOpenAIResponses,
 		Env: []string{
 			"CODEX_HOME=" + home,
 			"AHT_FAKEPROVIDER_API_KEY=" + model.APIKey,
@@ -35,8 +34,6 @@ func (codexHarness) LaunchPlan(
 				return launchConfig(existing, model)
 			},
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
 				return nil, errEmptyPrompt

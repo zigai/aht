@@ -9,7 +9,7 @@ import (
 )
 
 func (kiloHarness) Locations(projectDir string) []harness.Location {
-	dir := kiloConfigDir()
+	dir := kiloPaths(harness.HomeDir()).config
 
 	builder := harness.NewLocationBuilder(projectDir).
 		Global(harness.LocationKindConfig, filepath.Join(dir, "kilo.json"), filepath.Join(dir, "kilo.jsonc"))

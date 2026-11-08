@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"runtime"
+	"time"
 )
+
+const indexRetryDelay = 100 * time.Millisecond
 
 type indexConnection struct {
 	*sql.Conn
@@ -50,7 +52,16 @@ func retryIndex[Value any](
 			waiting()
 		}
 
-		runtime.Gosched()
+		timer := time.NewTimer(indexRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			var zero Value
+
+			return zero, fmt.Errorf("wait for history index: %w", ctx.Err())
+		case <-timer.C:
+		}
 	}
 }
 

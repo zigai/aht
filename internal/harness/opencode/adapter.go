@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	integrationVersion        = 14
+	integrationVersion        = 16
 	opencodePluginName        = "aht-state.ts"
-	opencodeIntegrationID     = "opencode"
 	opencodeIntegrationSource = "opencode-plugin"
 	opencodeSessionFlag       = "--session"
 )
@@ -26,25 +25,20 @@ type opencodeHarness struct{ harness.BaseAdapter }
 func New() opencodeHarness {
 	return opencodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("opencode"),
 		Aliases:          []string{"open-code", "open_code"},
 		ProcessNames:     []string{"opencode", "open-code"},
 		Env: harness.EnvKeys{
+			Config:      []string{"OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_DB"},
 			SessionID:   []string{"OPENCODE_SESSION_ID"},
 			SessionPath: []string{"OPENCODE_SESSION_PATH"},
-			ProjectRoot: nil,
 			PID:         []string{"OPENCODE_PID"},
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  opencodeIntegrationSource,
@@ -53,7 +47,7 @@ func New() opencodeHarness {
 	})}
 }
 
-func (opencodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter opencodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := opencodeConfigDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -66,12 +60,9 @@ func (opencodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 			ConfigLabel: "opencode plugin",
 			Content: harness.RenderScriptTemplate(
 				opencodePluginTemplate,
-				opencodeIntegrationID,
 				binary,
-				opencodeIntegrationSource,
-				integrationVersion,
+				adapter.Definition(),
 			),
-			JSONContent: nil,
 		}},
 		harness.ShimAction{},
 	}}, nil

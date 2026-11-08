@@ -3,25 +3,21 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/google/shlex"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	ManagedMarker               = "aht managed integration"
-	HookTimeoutSeconds          = 5
-	HookTypeCommand             = "command"
-	HookEventSessionStart       = "SessionStart"
-	HookEventSessionEnd         = "SessionEnd"
-	HookEventUserPromptSubmit   = "UserPromptSubmit"
-	HookEventPostToolUse        = "PostToolUse"
-	HookEventPostToolUseFailure = "PostToolUseFailure"
-	HookEventPreToolUse         = "PreToolUse"
-	HookEventStop               = "Stop"
-	ResumeFlag                  = "--resume"
+	ManagedMarker      = "aht managed integration"
+	HookTimeoutSeconds = 5
+	HookTypeCommand    = "command"
+	ResumeFlag         = "--resume"
 
 	HookActivityRunning     HookTransition = "activity:running"
 	HookActivityWaiting     HookTransition = "activity:waiting"
@@ -33,12 +29,24 @@ const (
 )
 
 const (
+	ReportStdinRaw      ReportStdin = "--raw-stdin"
+	ReportStdinDefaults ReportStdin = "--raw-stdin-defaults-only"
+
+	nativeHookWords = 6
+)
+
+const (
 	PluginRegistrationMissing PluginRegistrationState = iota
 	PluginRegistrationCurrent
 	PluginRegistrationStale
 	PluginRegistrationDisabled
 	PluginRegistrationForeign
 )
+
+var ErrHookConfigShape = errors.New("hook config has an unexpected shape")
+
+// ReportStdin selects how a report command reads the native hook payload.
+type ReportStdin string
 
 // HookTransition is the closed, dimension-aware state used by generated hook
 // specifications that need to store a transition before rendering it.
@@ -60,8 +68,8 @@ type JSONCommandHooksAction struct {
 	Plan JSONCommandHookInstallPlan
 }
 
-type CursorJSONHooksAction struct {
-	Plan CursorJSONHookInstallPlan
+type JSONMergeAction struct {
+	Plan JSONMergeInstallPlan
 }
 
 type ManagedTextBlockAction struct {
@@ -76,26 +84,24 @@ type PluginDirectoryAction struct {
 	Plan PluginDirectoryInstallPlan
 }
 
-// NativeCatalogAction describes the native command that already exposes the
-// integration data. Integration management reports this action but never runs
-// the command or installs an artifact for it.
+// NativeCatalogAction labels integration data already exposed by a native
+// catalog. Integration management never installs an artifact for it.
 type NativeCatalogAction struct {
-	Label   string
-	Command []string
+	Label string
 }
 
 type ShimAction struct{}
 
+//exhaustruct:optional
 type JSONCommandHookInstallPlan struct {
-	Path              string
-	Source            string
-	Label             string
-	ConfigLabel       string
-	StatusMessage     string
-	OmitStatusMessage bool
-	HooksAtRoot       bool
-	Hooks             []CommandHookInstallSpec
-	Trust             JSONCommandHookTrust
+	Path          string
+	Source        string
+	Label         string
+	ConfigLabel   string
+	StatusMessage string
+	HooksKey      string
+	Hooks         []CommandHookInstallSpec
+	Trust         JSONCommandHookTrust
 }
 
 type JSONCommandHookTrust interface {
@@ -103,23 +109,23 @@ type JSONCommandHookTrust interface {
 	Inspect(ctx context.Context) (bool, error)
 }
 
+//exhaustruct:optional
 type CommandHookInstallSpec struct {
 	Event   string
 	Matcher string
 	Command string
+	// Timeout is in seconds; zero means HookTimeoutSeconds.
+	Timeout int
 }
 
-type CursorJSONHookInstallPlan struct {
+//exhaustruct:optional
+type JSONMergeInstallPlan struct {
 	Path        string
 	Source      string
 	Label       string
 	ConfigLabel string
-	Hooks       []CursorCommandHookInstallSpec
-}
-
-type CursorCommandHookInstallSpec struct {
-	Event   string
-	Command string
+	Merge       func(map[string]any, func(string) bool) (bool, error)
+	Remove      func(map[string]any, func(string) bool) bool
 }
 
 type ManagedTextBlockInstallPlan struct {
@@ -131,6 +137,7 @@ type ManagedTextBlockInstallPlan struct {
 	Block       string
 }
 
+//exhaustruct:optional
 type RenderedFileInstallPlan struct {
 	Path        string
 	Label       string
@@ -139,18 +146,22 @@ type RenderedFileInstallPlan struct {
 	JSONContent any
 }
 
+//exhaustruct:optional
 type RenderedFileInstallSpec struct {
 	Name        string
 	Content     string
 	JSONContent any
 }
 
+// PluginDirectoryInstallPlan installs Files, in order, into Dir and writes the
+// identity to ArtifactMarkerFile beside them.
+//
+//exhaustruct:optional
 type PluginDirectoryInstallPlan struct {
 	Dir            string
 	Label          string
 	Files          []RenderedFileInstallSpec
-	SnippetOrder   []string
-	MarkerFile     string
+	Identity       ArtifactIdentity
 	ImportManifest *ImportManifestInstallPlan
 	Registration   PluginRegistration
 	// Retired lists former locations of this plugin. Installing or removing
@@ -182,7 +193,7 @@ type ImportManifestInstallPlan struct {
 
 func (JSONCommandHooksAction) installAction() {}
 
-func (CursorJSONHooksAction) installAction() {}
+func (JSONMergeAction) installAction() {}
 
 func (ManagedTextBlockAction) installAction() {}
 
@@ -194,34 +205,77 @@ func (NativeCatalogAction) installAction() {}
 
 func (ShimAction) installAction() {}
 
+// ReportHookCommand renders the shell command a generated hook runs to report
+// a transition for the harness the definition describes.
 func ReportHookCommand[T Transition](
 	binary string,
-	harness registry.Harness,
+	definition Definition,
+	stdin ReportStdin,
 	transition T,
 	event string,
-	source string,
 ) string {
-	return reportHookCommand(binary, harness, transition, event, source, "--raw-stdin")
+	flag, value := hookTransitionArgument(transition)
+
+	quotedEvent := ""
+	if event != "" {
+		quotedEvent = ShellQuote(event)
+	}
+
+	return ReportScriptCommand(binary, definition, stdin, flag, ShellQuote(value), quotedEvent)
 }
 
-func RawStdinDefaultsReportHookCommand[T Transition](
+// ReportScriptCommand renders a report command whose transition value and
+// event are already shell words, such as quoted variable expansions. flag is
+// "--activity" or "--presence"; an empty event omits --event.
+func ReportScriptCommand(
 	binary string,
-	harness registry.Harness,
-	transition T,
+	definition Definition,
+	stdin ReportStdin,
+	flag string,
+	value string,
 	event string,
-	source string,
 ) string {
-	return reportHookCommand(
-		binary,
-		harness,
-		transition,
-		event,
-		source,
-		"--raw-stdin-defaults-only",
+	parts := []string{ShellQuote(binary), "report", ShellQuote(string(definition.ID)), flag, value}
+	if event != "" {
+		parts = append(parts, "--event", event)
+	}
+
+	parts = append(
+		parts,
+		"--reporter-version", ShellQuote(strconv.Itoa(definition.IntegrationVersion)),
+		"--reporter", ShellQuote(definition.IntegrationSource),
 	)
+	if !definition.ExclusiveProcess {
+		parts = append(parts, "--multi-session")
+	}
+
+	return strings.Join(append(parts, string(stdin), "--quiet"), " ")
 }
 
-// State returns the activity or presence state represented by the transition.
+// NativeHookCommand renders the command a generated hook runs to pass a native
+// hook event to the adapter's HookAdapter.
+func NativeHookCommand(binary string, id registry.Harness, event string) string {
+	return strings.Join([]string{
+		ShellQuote(binary), "--json", "hook", ShellQuote(string(id)), "--event", ShellQuote(event),
+	}, " ")
+}
+
+// ParseNativeHookCommand returns the binary of a command NativeHookCommand
+// rendered for id. It reports false for any other command.
+func ParseNativeHookCommand(command string, id registry.Harness) (string, bool) {
+	words, err := shlex.Split(command)
+	if err != nil || len(words) != nativeHookWords || words[1] != "--json" ||
+		words[2] != "hook" || words[3] != string(id) || words[4] != "--event" || words[5] == "" {
+		return "", false
+	}
+
+	if command != NativeHookCommand(words[0], id, words[5]) {
+		return "", false
+	}
+
+	return words[0], true
+}
+
 func (transition HookTransition) State() string {
 	_, state := hookTransitionArgument(transition)
 
@@ -253,53 +307,35 @@ func ScriptString(value string) string {
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
-func RenderScriptTemplate(
-	template string,
-	integrationID string,
-	binary string,
-	source string,
-	version int,
-) string {
-	return strings.NewReplacer(
+// RenderScriptTemplate fills a plugin or extension template with the binary
+// and the identity of the definition.
+func RenderScriptTemplate(template string, binary string, definition Definition) string {
+	rendered := strings.NewReplacer(
 		"{{MANAGED_MARKER}}", ManagedMarker,
-		"{{INTEGRATION_ID}}", integrationID,
-		"{{INTEGRATION_VERSION}}", strconv.Itoa(version),
+		"{{INTEGRATION_ID}}", string(definition.ID),
+		"{{INTEGRATION_VERSION}}", strconv.Itoa(definition.IntegrationVersion),
 		"{{BINARY}}", ScriptString(binary),
-		"{{SOURCE}}", strconv.Quote(source),
+		"{{SOURCE}}", strconv.Quote(definition.IntegrationSource),
 		"{{TYPESCRIPT_QUEUE}}", typeScriptQueueTemplate,
 		"{{TYPESCRIPT_EVENT_PARSER}}", typeScriptEventParserTemplate,
 	).Replace(template)
+
+	// The replacer does not rescan the event parser it splices in, so the
+	// alias table it references is filled in a second pass.
+	return strings.ReplaceAll(rendered, "{{ACTIVITY_ALIASES}}", typeScriptActivityAliases())
 }
 
-func reportHookCommand[T Transition](
-	binary string,
-	harness registry.Harness,
-	transition T,
-	event string,
-	source string,
-	stdinFlag string,
-) string {
-	parts := []string{
-		ShellQuote(binary),
-		"report",
-		ShellQuote(string(harness)),
-	}
-	flag, value := hookTransitionArgument(transition)
+func typeScriptActivityAliases() string {
+	aliases := registry.ActivityAliases()
+	// Plugins report no state for an unknown status.
+	delete(aliases, string(registry.ActivityUnknown))
 
-	parts = append(parts, flag, ShellQuote(value))
-	if event != "" {
-		parts = append(parts, "--event", ShellQuote(event))
+	encoded, err := json.Marshal(aliases)
+	if err != nil {
+		panic(fmt.Errorf("encode activity aliases: %w", err))
 	}
 
-	parts = append(
-		parts,
-		"--reporter-version", ShellQuote(strconv.Itoa(IntegrationVersion)),
-		"--reporter", ShellQuote(source),
-		stdinFlag,
-		"--quiet",
-	)
-
-	return strings.Join(parts, " ")
+	return string(encoded)
 }
 
 func hookTransitionArgument[T Transition](transition T) (string, string) {

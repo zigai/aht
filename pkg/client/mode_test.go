@@ -50,7 +50,7 @@ func TestModeAutoReportsLostBrokerReply(t *testing.T) {
 	)
 
 	sessions, err := c.List(t.Context(), registry.Filter{})
-	if !errors.Is(err, broker.ErrNoReply) || client.IsUnavailable(err) {
+	if !errors.Is(err, broker.ErrNoReply) || broker.IsUnavailable(err) {
 		t.Fatalf("List() err = %v, want ErrNoReply, not IsUnavailable", err)
 	}
 

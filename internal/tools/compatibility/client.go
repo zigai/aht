@@ -12,12 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/tools/githubapi"
 )
 
 const (
 	requestTimeout   = 30 * time.Second
 	maxMetadataBytes = 2 * 1024 * 1024
-	maxRedirects     = 10
 	stateArtifact    = "compatibility-release-state-v2"
 	workflowPath     = ".github/workflows/compatibility-releases.yml"
 	artifactPageSize = 100
@@ -25,11 +27,10 @@ const (
 )
 
 type releaseClient struct {
-	http       *http.Client
-	githubBase string
-	npmBase    string
-	pypiBase   string
-	token      string
+	http     *http.Client
+	github   *githubapi.Client
+	npmBase  string
+	pypiBase string
 }
 
 type artifact struct {
@@ -41,30 +42,16 @@ type artifact struct {
 	} `json:"workflow_run"`
 }
 
-func newReleaseClient(token string) *releaseClient {
+func newReleaseClient(githubBase string, token string) *releaseClient {
 	client := *http.DefaultClient
 	client.Timeout = requestTimeout
-	client.CheckRedirect = checkRedirect
 
 	return &releaseClient{
-		http:       &client,
-		githubBase: "https://api.github.com",
-		npmBase:    "https://registry.npmjs.org",
-		pypiBase:   "https://pypi.org/pypi",
-		token:      token,
+		http:     &client,
+		github:   githubapi.New(githubBase, token),
+		npmBase:  "https://registry.npmjs.org",
+		pypiBase: "https://pypi.org/pypi",
 	}
-}
-
-func checkRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= maxRedirects {
-		return fmt.Errorf("%w: too many redirects", errCompatibility)
-	}
-	// Artifact downloads redirect to object storage; do not forward the API token.
-	if req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme {
-		req.Header.Del("Authorization")
-	}
-
-	return nil
 }
 
 func (c *releaseClient) get(ctx context.Context, target string) ([]byte, error) {
@@ -74,15 +61,6 @@ func (c *releaseClient) get(ctx context.Context, target string) ([]byte, error) 
 	}
 
 	req.Header.Set("User-Agent", "aht-compatibility")
-
-	if strings.HasPrefix(target, c.githubBase+"/") {
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("X-Github-Api-Version", "2026-03-10")
-
-		if c.token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.token)
-		}
-	}
 
 	response, err := c.http.Do(req)
 	if err != nil {
@@ -102,6 +80,23 @@ func (c *releaseClient) get(ctx context.Context, target string) ([]byte, error) 
 
 	if len(body) > maxMetadataBytes {
 		return nil, fmt.Errorf("%w: response from %s exceeds size limit", errCompatibility, target)
+	}
+
+	return body, nil
+}
+
+func (c *releaseClient) githubJSON(ctx context.Context, path string, destination any) error {
+	if err := c.github.Get(ctx, path, destination); err != nil {
+		return fmt.Errorf("%w: %w", errCompatibility, err)
+	}
+
+	return nil
+}
+
+func (c *releaseClient) githubDownload(ctx context.Context, path string) ([]byte, error) {
+	body, err := c.github.Download(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errCompatibility, err)
 	}
 
 	return body, nil
@@ -127,17 +122,19 @@ func (c *releaseClient) latest(ctx context.Context, spec harnessSpec) (string, e
 	)
 
 	switch spec.Source {
-	case "npm":
+	case harness.DistributionNPM:
 		version, err = c.npmVersion(ctx, spec)
-	case "pypi":
+	case harness.DistributionPyPI:
 		version, err = c.pypiVersion(ctx, spec)
-	case "github":
+	case harness.DistributionGitHub:
 		version, err = c.githubVersion(ctx, spec)
-	case "channel":
+	case harness.DistributionChannel:
 		var body []byte
 
 		body, err = c.get(ctx, spec.URL)
 		version = strings.TrimSpace(string(body))
+	case harness.DistributionWeekly:
+		err = fmt.Errorf("%w: weekly harness %s has no release feed", errCompatibility, spec.ID)
 	default:
 		err = fmt.Errorf("%w: no release source for %s", errCompatibility, spec.ID)
 	}
@@ -230,11 +227,7 @@ func (c *releaseClient) githubVersion(ctx context.Context, spec harnessSpec) (st
 			State string `json:"state"`
 		} `json:"assets"`
 	}
-	if err := c.getJSON(
-		ctx,
-		c.githubBase+"/repos/"+spec.Repo+"/releases/latest",
-		&data,
-	); err != nil {
+	if err := c.githubJSON(ctx, "/repos/"+spec.Repo+"/releases/latest", &data); err != nil {
 		return "", err
 	}
 
@@ -263,7 +256,7 @@ func (c *releaseClient) restoreState(
 		)
 	}
 
-	base := c.githubBase + "/repos/" + repository + "/actions"
+	base := "/repos/" + repository + "/actions"
 
 	restored, found, err := c.restoreArtifactState(ctx, base, stateArtifact, branch, runID)
 	if err != nil || found {
@@ -289,7 +282,7 @@ func (c *releaseClient) restoreArtifactState(
 		) + "&page=" + strconv.Itoa(
 			page,
 		)
-		if err := c.getJSON(ctx, target, &data); err != nil {
+		if err := c.githubJSON(ctx, target, &data); err != nil {
 			return state, false, err
 		}
 
@@ -314,7 +307,10 @@ func (c *releaseClient) restoreArtifactState(
 				continue
 			}
 
-			body, err := c.get(ctx, base+"/artifacts/"+strconv.FormatInt(item.ID, 10)+"/zip")
+			body, err := c.githubDownload(
+				ctx,
+				base+"/artifacts/"+strconv.FormatInt(item.ID, 10)+"/zip",
+			)
 			if err != nil {
 				return state, false, err
 			}
@@ -350,7 +346,7 @@ func (c *releaseClient) trustedArtifact(
 		Path  string `json:"path"`
 		Event string `json:"event"`
 	}
-	if err := c.getJSON(
+	if err := c.githubJSON(
 		ctx,
 		base+"/runs/"+strconv.FormatInt(item.WorkflowRun.ID, 10),
 		&details,

@@ -288,12 +288,7 @@ func TestManagerTrackerHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := manage.New(manage.Config{
-		Binary:             "aht",
-		StorePath:          storePath,
-		TrackerInterval:    0,
-		TrackerGracePeriod: 0,
-	})
+	m := manage.New(manage.Config{Binary: "aht", StorePath: storePath})
 
 	if m.HealthPath() != healthPath {
 		t.Fatalf("m.HealthPath() = %q, want %q", m.HealthPath(), healthPath)

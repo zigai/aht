@@ -6,6 +6,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,7 +112,7 @@ func TestLoadMissingDefaultFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempDir, "user"))
 	t.Setenv(ConfigEnv, nonExistentPath)
 
-	cfg, resolved, err := Load("")
+	cfg, resolved, err := load("")
 	if err != nil {
 		t.Fatalf("Load(\"\") with missing default file returned unexpected error: %v", err)
 	}
@@ -129,7 +131,7 @@ func TestLoadExplicitMissingFile(t *testing.T) {
 	tempDir := t.TempDir()
 	nonExistentPath := filepath.Join(tempDir, "missing.toml")
 
-	_, _, err := Load(nonExistentPath)
+	_, _, err := load(nonExistentPath)
 	if err == nil {
 		t.Fatal("Load with explicit missing file expected error, got nil")
 	}
@@ -173,7 +175,7 @@ screen_inspection = false
 		t.Fatal(err)
 	}
 
-	cfg, resolved, err := Load(configPath)
+	cfg, resolved, err := load(configPath)
 	if err != nil {
 		t.Fatalf("Load valid config failed: %v", err)
 	}
@@ -261,7 +263,7 @@ unknown_setting = "invalid"
 		t.Fatal(err)
 	}
 
-	_, _, err := Load(configPath)
+	_, _, err := load(configPath)
 	if err == nil {
 		t.Fatal("Load with unknown field expected error, got nil")
 	}
@@ -286,7 +288,7 @@ broken toml syntax
 		t.Fatal(err)
 	}
 
-	_, _, err := Load(configPath)
+	_, _, err := load(configPath)
 	if err == nil {
 		t.Fatal("Load with syntax error expected error, got nil")
 	}
@@ -405,7 +407,7 @@ grace_period = "bogus"`,
 				t.Fatal(err)
 			}
 
-			_, _, err := Load(configPath)
+			_, _, err := load(configPath)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.errSub)
 			}
@@ -468,7 +470,7 @@ func TestSettingsEnvironmentLayer(t *testing.T) {
 		t.Fatalf("environment origin = %+v, found %t", origin, ok)
 	}
 
-	cfg, _, err = LoadWithOptions(Options{NoConfig: true})
+	cfg, _, err = loadWithOptions(Options{NoConfig: true})
 	if err != nil || cfg.UI.Sort != "created" || cfg.UI.DefaultPresence != "all" {
 		t.Fatalf("no-config result = %+v, error = %v", cfg, err)
 	}
@@ -496,7 +498,7 @@ func TestMaxFileSizeLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err = Load(largeConfig); !errors.Is(err, ErrConfigFileTooLarge) {
+	if _, _, err = load(largeConfig); !errors.Is(err, ErrConfigFileTooLarge) {
 		t.Fatalf("Load large file error = %v, want ErrConfigFileTooLarge", err)
 	}
 }
@@ -509,7 +511,7 @@ func TestDefaultConfigTemplateMatchesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, resolved, err := Load(configPath)
+	cfg, resolved, err := load(configPath)
 	if err != nil {
 		t.Fatalf("Load(defaultTemplate) failed: %v", err)
 	}
@@ -626,7 +628,7 @@ sort = "created"
 		t.Fatal(err)
 	}
 
-	cfg, _, err := Load(sparseConfig)
+	cfg, _, err := load(sparseConfig)
 	if err != nil {
 		t.Fatalf("Load sparse config failed: %v", err)
 	}
@@ -758,7 +760,7 @@ sort = "activity"
 default_presence = "unknown"
 `
 
-	cfg, resolved, err := LoadWithOptions(Options{
+	cfg, resolved, err := loadWithOptions(Options{
 		Path:  "-",
 		Stdin: strings.NewReader(stdinContent),
 	})
@@ -866,7 +868,7 @@ func TestOnlyTOMLConfigFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, _, err := Load(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+		if _, _, err := load(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
 			t.Fatalf("Load(%q) error = %v, want unsupported format", path, err)
 		}
 
@@ -879,7 +881,7 @@ func TestOnlyTOMLConfigFiles(t *testing.T) {
 		}
 	}
 
-	cfg, resolved, err := Load("")
+	cfg, resolved, err := load("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,13 +892,13 @@ func TestOnlyTOMLConfigFiles(t *testing.T) {
 
 	t.Setenv(ConfigEnv, filepath.Join(userDir, "config.yaml"))
 
-	if _, _, err := Load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
+	if _, _, err := load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
 		t.Fatalf("AHT_CONFIG YAML error = %v, want unsupported format", err)
 	}
 
 	t.Setenv(ConfigEnv, filepath.Join(userDir, "missing.yaml"))
 
-	if _, _, err := Load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
+	if _, _, err := load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
 		t.Fatalf("missing AHT_CONFIG YAML error = %v, want unsupported format", err)
 	}
 }
@@ -914,7 +916,7 @@ func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, resolved, err := Load(path)
+	cfg, resolved, err := load(path)
 	if err != nil || resolved != path || cfg.UI.Sort != "updated" {
 		t.Fatalf("Load(%q): sort = %q, resolved = %q, error = %v", path, cfg.UI.Sort, resolved, err)
 	}
@@ -960,7 +962,7 @@ func TestLoadNormalizesUIValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, _, err := Load(path)
+	cfg, _, err := load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -974,7 +976,7 @@ func TestLoadNormalizesUIValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, _, err = Load(path)
+	cfg, _, err = load(path)
 	if err != nil || cfg.UI.Sort != "harness" {
 		t.Fatalf("file alias: sort = %q, error = %v", cfg.UI.Sort, err)
 	}
@@ -995,7 +997,7 @@ func TestLoadPreservesFilesystemError(t *testing.T) {
 		t.Fatal("expected a non-directory path component error")
 	}
 
-	_, _, err := Load(invalid)
+	_, _, err := load(invalid)
 	if !errors.Is(err, ErrAccessConfig) || errors.Is(err, ErrConfigNotFound) {
 		t.Fatalf("Load error = %v, want access error, not missing", err)
 	}
@@ -1074,4 +1076,78 @@ func TestWriteConfigReplacesWithoutMutatingExistingInode(t *testing.T) {
 	if _, err := old.Read(contents); err != nil || string(contents) != "old config" {
 		t.Fatalf("existing inode was overwritten: %q, %v", contents, err)
 	}
+}
+
+func load(path string) (Config, string, error) {
+	return loadWithOptions(Options{Path: path, Explicit: path != ""})
+}
+
+func TestConfigValuePreservesDefaultsTypesAndNormalizedKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{false, true} {
+		cfg := Config{}
+		value := reflect.ValueOf(&cfg).Elem()
+
+		var keys []string
+
+		for i := range value.NumField() {
+			group := value.Field(i)
+
+			prefix := value.Type().Field(i).Tag.Get("toml")
+			for j := range group.NumField() {
+				field := group.Field(j)
+				key := prefix + "." + group.Type().Field(j).Tag.Get("toml")
+				keys = append(keys, key)
+				cfg = Config{}
+
+				switch field.Interface().(type) {
+				case string:
+					field.SetString(key)
+				case []string:
+					field.Set(reflect.ValueOf([]string{key}))
+				case *bool:
+					field.Set(reflect.ValueOf(new(enabled)))
+				default:
+					t.Fatalf("unhandled configuration type %s", field.Type())
+				}
+
+				want := field.Interface()
+				if field.Kind() == reflect.Pointer {
+					want = field.Elem().Interface()
+				}
+
+				got, ok := cfg.Get(" " + strings.ToUpper(key) + "\t")
+				if !ok || !reflect.DeepEqual(want, got) {
+					t.Fatalf("Get(%q) = %#v, %v; want %#v", key, got, ok, want)
+				}
+			}
+		}
+
+		gotKeys := Keys()
+		slices.Sort(gotKeys)
+		slices.Sort(keys)
+
+		if diff := cmp.Diff(keys, gotKeys); diff != "" {
+			t.Fatalf("config keys omit or duplicate fields (-want +got):\n%s", diff)
+		}
+	}
+
+	cfg := Config{}
+	if got, ok := cfg.Get("detection.screen_inspection"); !ok || got != true {
+		t.Fatalf("unset screen inspection = %#v, %v; want true", got, ok)
+	}
+
+	if got, ok := cfg.Get("tracker.quiet"); !ok || got != false {
+		t.Fatalf("unset quiet = %#v, %v; want false", got, ok)
+	}
+
+	if got, ok := cfg.Get("unknown"); ok || got != nil {
+		t.Fatalf("unknown key = %#v, %v", got, ok)
+	}
+}
+
+func loadWithOptions(opts Options) (Config, string, error) {
+	cfg, _, resolved, err := LoadWithMetadata(opts)
+	return cfg, resolved, err
 }

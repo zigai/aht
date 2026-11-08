@@ -9,7 +9,7 @@ import (
 )
 
 func (openclawHarness) Locations(_ string) []harness.Location {
-	state := openclawStateDir()
+	state := openclawStateDir(harness.HomeDir())
 
 	config := filepath.Join(state, "openclaw.json")
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); value != "" {
@@ -46,14 +46,13 @@ func (openclawHarness) Locations(_ string) []harness.Location {
 		Locations()
 }
 
-func openclawStateDir() string {
+func openclawStateDir(home string) string {
 	if value := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR")); value != "" {
 		return value
 	}
 
-	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
-	if home == "" {
-		home = harness.HomeDir()
+	if value := strings.TrimSpace(os.Getenv("OPENCLAW_HOME")); value != "" {
+		home = value
 	}
 
 	if home == "" {

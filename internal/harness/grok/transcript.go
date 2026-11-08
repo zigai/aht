@@ -8,23 +8,18 @@ import (
 
 func (grokHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"grok.db"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            nil,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             transcriptQuery,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		DefaultFormat: transcript.FormatDatabase,
+		Patterns:      []string{"grok.db"},
+		Sources:       transcriptSources,
+		Query:         transcriptQuery,
 	}
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{filepath.Join(home, ".grok", "grok.db")}, nil
+	root := grokHome(home)
+	if root == "" {
+		return nil, nil
+	}
+
+	return []string{filepath.Join(root, "grok.db")}, nil
 }

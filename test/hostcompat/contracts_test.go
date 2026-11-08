@@ -30,17 +30,73 @@ type loadCheck struct {
 	Prepare func(t *testing.T, host *isolatedHost)
 }
 
+type nativeDriver string
+
+const (
+	driverProcess         nativeDriver = ""
+	driverExecRPC         nativeDriver = "exec-rpc"
+	driverACP             nativeDriver = "acp"
+	driverCompletionRPC   nativeDriver = "completion-rpc"
+	driverExtensionRPC    nativeDriver = "extension-rpc"
+	driverPythonACP       nativeDriver = "python-acp"
+	driverExecutionServer nativeDriver = "execution-server"
+	driverPluginServer    nativeDriver = "plugin-server"
+	driverTerminalQuit    nativeDriver = "terminal-quit"
+	driverTerminalDialog  nativeDriver = "terminal-dialog"
+	driverCLIACP          nativeDriver = "cli-acp"
+	driverControlCLI      nativeDriver = "control-cli"
+	driverAppServer       nativeDriver = "app-server"
+	driverSDKCLI          nativeDriver = "sdk-cli"
+)
+
+type resumeMode string
+
+const (
+	resumeAppend     resumeMode = ""
+	resumeExec       resumeMode = "exec"
+	resumeSubcommand resumeMode = "subcommand"
+	resumeQuery      resumeMode = "query"
+	resumeGateway    resumeMode = "gateway"
+)
+
+type lifecycleContract struct {
+	Start      string
+	TurnEnd    string
+	Terminal   string
+	IdleEvents []string
+	Finalize   string
+}
+
 type hostContract struct {
-	ID          registry.Harness
-	Executable  string
-	VersionArgs []string
-	LoadChecks  []loadCheck
-	Level       compatibilityLevel
-	Docs        []string
+	LifecycleDriver     nativeDriver
+	InterruptionDriver  nativeDriver
+	PermissionDriver    nativeDriver
+	Lifecycle           lifecycleContract
+	Resume              resumeMode
+	Scope               string
+	ShellCommand        string
+	CompactCallID       bool
+	DangerousPermission bool
+	InterruptGone       bool
+	InterruptTerminal   bool
+	PermissionConfig    string
+	ID                  registry.Harness
+	Executable          string
+	VersionArgs         []string
+	LoadChecks          []loadCheck
+	Level               compatibilityLevel
+	Docs                []string
 }
 
 var hostContracts = []hostContract{
 	{
+		PermissionDriver: driverControlCLI,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("claude"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -55,6 +111,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		PermissionDriver: driverAppServer,
+		Resume:           resumeExec,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("codex"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -69,6 +133,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Scope: "https://cursor.com/docs/cli/headless documents CURSOR_API_KEY-backed hosted execution, " +
+			"not an isolated local-provider endpoint",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("cursor"),
 		Executable:  "agent",
 		VersionArgs: []string{"--version"},
@@ -83,6 +155,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		PermissionDriver: driverSDKCLI,
+		InterruptGone:    true,
+		Lifecycle: lifecycleContract{
+			Start:    "sessionStart",
+			TurnEnd:  "agentStop",
+			Terminal: "sessionEnd",
+		},
+
 		ID:          registry.Harness("copilot"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -97,6 +177,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver: driverCLIACP,
+		Lifecycle: lifecycleContract{
+			Start:      "beforeRun",
+			TurnEnd:    "afterRun",
+			Terminal:   "afterRun",
+			IdleEvents: []string{"afterRun"},
+		},
+
 		ID:          registry.Harness("cline"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -110,6 +198,16 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		LifecycleDriver:    driverACP,
+		InterruptionDriver: driverACP,
+		PermissionDriver:   driverACP,
+		ShellCommand:       "printf 'aht-compat-marker\\n'",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("kimi-code"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -122,6 +220,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver: driverTerminalQuit,
+		InterruptTerminal:  true,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("grok"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -134,6 +240,13 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Resume: resumeSubcommand,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("goose"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -147,6 +260,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		LifecycleDriver:    driverCompletionRPC,
+		InterruptionDriver: driverCompletionRPC,
+		PermissionDriver:   driverCompletionRPC,
+		Lifecycle: lifecycleContract{
+			Start:    "session_start",
+			TurnEnd:  "agent_settled",
+			Terminal: "session_shutdown",
+		},
+
 		ID:          registry.Harness("pi"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -158,6 +280,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver: driverExtensionRPC,
+		PermissionDriver:   driverExtensionRPC,
+		Lifecycle: lifecycleContract{
+			Start:    "session_start",
+			TurnEnd:  "session_stop",
+			Terminal: "session_shutdown",
+		},
+
 		ID:          registry.Harness("omp"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -172,6 +302,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver: driverExecutionServer,
+		PermissionDriver:   driverExecutionServer,
+		Lifecycle: lifecycleContract{
+			Start:      "session.execution.started",
+			TurnEnd:    "session.execution.succeeded",
+			Terminal:   "session.execution.succeeded",
+			IdleEvents: []string{"session.execution.succeeded"},
+		},
+
 		ID:          registry.Harness("opencode"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -185,6 +324,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Scope: "only plugin loading is asserted, through agy plugin list and agy -p /hooks with the " +
+			"documented Gemini API-key provider pointed at a local endpoint; hook inspection must " +
+			"not make model requests, and native lifecycle support is not asserted",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("agy"),
 		Executable:  "agy",
 		VersionArgs: []string{"--version"},
@@ -201,6 +349,16 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver: driverPluginServer,
+		PermissionDriver:   driverPluginServer,
+		PermissionConfig:   "kilo.json",
+		Lifecycle: lifecycleContract{
+			Start:      "session.created",
+			TurnEnd:    "session.status",
+			Terminal:   "session.status",
+			IdleEvents: []string{"session.status", "session.idle"},
+		},
+
 		ID:          registry.Harness("kilo"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -214,6 +372,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		LifecycleDriver:    driverExecRPC,
+		InterruptionDriver: driverExecRPC,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("droid"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -227,6 +393,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Resume:        resumeGateway,
+		CompactCallID: true,
+		Lifecycle: lifecycleContract{
+			Start:      "session_start",
+			TurnEnd:    "agent_end",
+			Terminal:   "agent_end",
+			IdleEvents: []string{"agent_end"},
+		},
+
 		ID:          registry.Harness("openclaw"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -240,6 +415,18 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		InterruptionDriver:  driverPythonACP,
+		PermissionDriver:    driverPythonACP,
+		DangerousPermission: true,
+		Resume:              resumeQuery,
+		Lifecycle: lifecycleContract{
+			Start:      "on_session_start",
+			TurnEnd:    "on_session_end",
+			Terminal:   "on_session_end",
+			IdleEvents: []string{"on_session_end"},
+			Finalize:   "on_session_finalize",
+		},
+
 		ID:          registry.Harness("hermes"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -251,6 +438,14 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Scope: "the documented plugin API supplies native event handlers; " +
+			"no isolated local-provider launch is available for a model turn",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("amp"),
 		Executable:  "amp",
 		VersionArgs: []string{"--version"},
@@ -264,6 +459,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Scope: "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md documents only " +
+			"PreToolUse, so the hook supplies native session identity while start, idle, permission, " +
+			"and end come from the screen manifest; native lifecycle support is not asserted",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("crush"),
 		Executable:  "crush",
 		VersionArgs: []string{"--version"},
@@ -275,6 +479,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		LifecycleDriver:    driverTerminalDialog,
+		InterruptionDriver: driverTerminalDialog,
+		PermissionDriver:   driverTerminalDialog,
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("qwen"),
 		VersionArgs: []string{"--version"},
 		Level:       compatibilityLevelLifecycle,
@@ -289,6 +502,15 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
+		Scope: "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/README.md documents no hook " +
+			"or plugin surface; state comes from the daemon session catalog, so no installed " +
+			"integration or native lifecycle support is asserted",
+		Lifecycle: lifecycleContract{
+			Start:    "SessionStart",
+			TurnEnd:  "Stop",
+			Terminal: "SessionEnd",
+		},
+
 		ID:          registry.Harness("prime-agent"),
 		Executable:  "prime-agent",
 		VersionArgs: []string{"--version"},
@@ -318,6 +540,15 @@ func TestEveryHarnessHasCurrentHostContract(t *testing.T) {
 
 		if contract.Level == compatibilityLevelDiscovery && contract.Executable == "" {
 			t.Fatalf("discovery-only host contract for %s names no executable", contract.ID)
+		}
+
+		if contract.Level == compatibilityLevelDiscovery && contract.Scope == "" {
+			t.Fatalf("discovery-only host contract for %s describes no scope", contract.ID)
+		}
+
+		if contract.Level == compatibilityLevelLifecycle &&
+			(contract.Lifecycle.Start == "" || contract.Lifecycle.TurnEnd == "" || contract.Lifecycle.Terminal == "") {
+			t.Fatalf("lifecycle host contract for %s omits native event evidence", contract.ID)
 		}
 
 		assertAuthoritativeDocs(t, contract)

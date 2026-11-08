@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -18,17 +19,12 @@ var (
 // Driver implements [mux.Driver] and [mux.Interrupter] for tmux.
 type Driver struct {
 	LookPath func(string) (string, error)
-	// ServerProcesses, when non-nil, replaces the process scan that finds tmux
-	// servers outside the standard socket directories.
-	ServerProcesses ServerProcessLister
 }
 
-// NewDriver returns a tmux driver.
 func NewDriver() Driver {
-	return Driver{LookPath: nil, ServerProcesses: nil}
+	return Driver{}
 }
 
-// Kind returns [registry.MultiplexerTmux].
 func (d Driver) Kind() registry.MultiplexerKind {
 	return registry.MultiplexerTmux
 }
@@ -49,9 +45,23 @@ func (d Driver) Current(ctx context.Context) (registry.Location, error) {
 	return location, nil
 }
 
-// ListPanes enumerates live tmux panes converted to [mux.Pane].
-// If tmux is not installed, it returns nil, nil.
-func (d Driver) ListPanes(ctx context.Context) ([]mux.Pane, error) {
+// EnvKeys is empty: tmux panes are tied to processes by TTY and pane PID, not
+// by the process environment.
+func (d Driver) EnvKeys() []string { return nil }
+
+func (d Driver) LocationFromEnv(func(string) string) registry.Location {
+	var empty registry.Location
+
+	return empty
+}
+
+// ListPanes enumerates live tmux panes converted to [mux.Pane]. processes is
+// searched for servers on custom sockets. If tmux is not installed, it returns
+// nil, nil.
+func (d Driver) ListPanes(
+	ctx context.Context,
+	processes []processinfo.Process,
+) ([]mux.Pane, error) {
 	lookPath := d.LookPath
 	if lookPath == nil {
 		lookPath = exec.LookPath
@@ -63,22 +73,18 @@ func (d Driver) ListPanes(ctx context.Context) ([]mux.Pane, error) {
 	}
 
 	panes, err := ListPanesWithOptions(ctx, ListOptions{
-		Env:             Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
-		ServerProcesses: d.ServerProcesses,
+		Env:       Env{TMUX: os.Getenv("TMUX"), TMUXPane: os.Getenv("TMUX_PANE")},
+		Processes: processes,
 	})
-	if err != nil {
-		return nil, err
-	}
 
 	result := make([]mux.Pane, 0, len(panes))
 	for _, p := range panes {
 		result = append(result, p.ToMuxPane())
 	}
 
-	return result, nil
+	return result, err
 }
 
-// CapturePane captures the screen text and title for pane.
 func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
 	tmuxPane := Pane{
 		Location: pane.Location,
@@ -89,7 +95,21 @@ func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnaps
 	return CapturePane(ctx, tmuxPane)
 }
 
-// SendInterrupt sends an interrupt signal to the target pane.
+func (d Driver) Presence(
+	ctx context.Context,
+	location registry.Location,
+) (registry.Presence, error) {
+	return PanePresence(ctx, location)
+}
+
+// SamePane matches pane ids within one server; tmux pane ids repeat across
+// servers, and session names can change.
+func (d Driver) SamePane(a registry.Location, b registry.Location) bool {
+	return a.Kind == registry.MultiplexerTmux && b.Kind == registry.MultiplexerTmux &&
+		a.PaneID != "" && a.PaneID == b.PaneID &&
+		a.ServerID != "" && (a.ServerID == b.ServerID || registry.PathsEqual(a.ServerID, b.ServerID))
+}
+
 func (d Driver) SendInterrupt(ctx context.Context, serverIdentity string, paneID string) error {
 	return SendInterruptTo(ctx, serverIdentity, paneID)
 }

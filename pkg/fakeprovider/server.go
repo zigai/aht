@@ -16,24 +16,23 @@ const (
 )
 
 var (
-	errEmptySideMarker = errors.New("side marker must not be empty")
-	errNegativeCount   = errors.New("request count must not be negative")
-	errServerClosed    = errors.New("fake provider is closed")
+	errNegativeCount = errors.New("request count must not be negative")
+	errServerClosed  = errors.New("fake provider is closed")
 )
 
 // Options configures a [Server].
 type Options struct {
-	Address     string   // listen address; default "127.0.0.1:0"
-	Model       string   // model id served by /models; default "fake"
-	Script      Script   // default Echo()
-	Hold        bool     // hold every conversation request at StageBeforeReply
-	SideMarkers []string // extra body substrings that mark a side request
+	Address     string                    // listen address; default "127.0.0.1:0"
+	Model       string                    // model id served by /models; default "fake"
+	Script      Script                    // default Echo()
+	Hold        bool                      // hold every conversation request at StageBeforeReply
+	SideRequest func(map[string]any) bool // recognizes adapter-declared auxiliary model requests
 }
 
 // Server is a fake model API. It is safe for concurrent use.
 type Server struct {
 	model       string
-	sideMarkers []string
+	sideRequest func(map[string]any) bool
 	holdAll     bool
 	url         string
 	httpServer  *http.Server
@@ -75,10 +74,6 @@ func Start(options Options) (*Server, error) {
 		script = Echo()
 	}
 
-	if slices.Contains(options.SideMarkers, "") {
-		return nil, errEmptySideMarker
-	}
-
 	var listenConfig net.ListenConfig
 
 	listener, err := listenConfig.Listen(context.Background(), "tcp", address)
@@ -88,7 +83,7 @@ func Start(options Options) (*Server, error) {
 
 	server := &Server{
 		model:       model,
-		sideMarkers: slices.Clone(options.SideMarkers),
+		sideRequest: options.SideRequest,
 		holdAll:     options.Hold,
 		url:         "http://" + listener.Addr().String(),
 		httpServer:  nil,
@@ -191,6 +186,48 @@ func (s *Server) WaitRequests(ctx context.Context, count int) ([]Request, error)
 	}
 }
 
+// StreamRequests emits existing and new conversation and side requests in arrival
+// order until cancellation, server shutdown, or an error from yield.
+func (s *Server) StreamRequests(ctx context.Context, yield func(Request) error) error {
+	var current *session
+
+	conversationCount, sideCount := 0, 0
+
+	for {
+		s.mu.Lock()
+		if current != s.session {
+			current = s.session
+			conversationCount, sideCount = 0, 0
+		}
+
+		pending := slices.Concat(
+			cloneRequests(current.requests[conversationCount:]),
+			cloneRequests(current.side[sideCount:]),
+		)
+		conversationCount, sideCount = len(current.requests), len(current.side)
+		changed := s.changed
+		s.mu.Unlock()
+		slices.SortStableFunc(
+			pending,
+			func(a, b Request) int { return a.ReceivedAt.Compare(b.ReceivedAt) },
+		)
+
+		for _, request := range pending {
+			if err := yield(request); err != nil {
+				return fmt.Errorf("stream requests: %w", err)
+			}
+		}
+
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return fmt.Errorf("stream requests: %w", ctx.Err())
+		case <-s.closing:
+			return fmt.Errorf("stream requests: %w", errServerClosed)
+		}
+	}
+}
+
 // Err returns the first script or protocol error of the current session.
 func (s *Server) Err() error {
 	s.mu.Lock()
@@ -262,6 +299,8 @@ func (s *Server) recordSide(request Request) (*session, Request) {
 	request.Index = len(gen.side)
 	request.Outcome = OutcomePending
 	gen.side = append(gen.side, request)
+
+	s.notifyLocked()
 
 	return gen, request
 }

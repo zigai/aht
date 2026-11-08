@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/pkg/manage"
 )
 
 func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {
@@ -21,11 +21,10 @@ func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if binary == "" {
-				binary = defaultInstallBinary()
-			}
-
-			results, err := install.Upgrade(cmd.Context(), binary, dryRun)
+			results, err := app.manager(binary).UpgradeIntegrations(
+				cmd.Context(),
+				manage.IntegrationOptions{DryRun: dryRun},
+			)
 
 			var writeErr error
 			if app.outputJSON {

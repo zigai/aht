@@ -22,12 +22,14 @@ var (
 	errWatchParentNotDirectory = errors.New("store watch parent is not a directory")
 )
 
-// WatchOptions controls filtering and filesystem event coalescing. Non-positive
-// durations use package defaults.
+// WatchOptions controls filtering and filesystem event coalescing. A
+// non-positive Debounce uses the package default.
 type WatchOptions struct {
-	Filter            Filter
-	Debounce          time.Duration
-	ReconcileInterval time.Duration
+	Filter   Filter
+	Debounce time.Duration
+
+	//exhaustruct:optional
+	reconcileInterval time.Duration
 }
 
 // WatchResult is an authoritative filtered snapshot or a transient watch/read
@@ -176,7 +178,7 @@ func (watch *fileStoreWatch) run(ctx context.Context) error {
 	debounceTimer.Stop()
 	defer debounceTimer.Stop()
 
-	reconcile := time.NewTicker(watch.options.ReconcileInterval)
+	reconcile := time.NewTicker(watch.options.reconcileInterval)
 	defer reconcile.Stop()
 
 	state := watchRunState{
@@ -248,8 +250,8 @@ func normalizeFileStoreWatchOptions(opts WatchOptions) WatchOptions {
 		opts.Debounce = defaultWatchDebounce
 	}
 
-	if opts.ReconcileInterval <= 0 {
-		opts.ReconcileInterval = defaultWatchReconcileInterval
+	if opts.reconcileInterval <= 0 {
+		opts.reconcileInterval = defaultWatchReconcileInterval
 	}
 
 	return opts
@@ -321,7 +323,7 @@ func isFileStoreWatchEvent(event fsnotify.Event, target string, directory string
 
 	path = filepath.Clean(path)
 
-	return path == target || path == target+".journal.jsonl" || path == directory
+	return path == target || path == journalPath(target) || path == directory
 }
 
 func isFileStoreWatchDirectoryRemoval(event fsnotify.Event, directory string) bool {

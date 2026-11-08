@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -24,12 +22,26 @@ func runCLIInterruption(t *testing.T, host *isolatedHost, env []string) {
 
 	var command *exec.Cmd
 
-	switch host.contract.ID {
-	case registry.Harness("cline"):
+	switch host.contract.InterruptionDriver {
+	case driverCLIACP:
 		// ACP branches before the CLI's ordinary provider/sandbox argument
 		// handling. Its documented environment supplies provider selection;
 		// force the native local backend to avoid a detached hub daemon.
 		command = clineACPCommand(t, host, env)
+	case driverProcess,
+		driverExecRPC,
+		driverACP,
+		driverCompletionRPC,
+		driverExtensionRPC,
+		driverPythonACP,
+		driverExecutionServer,
+		driverPluginServer,
+		driverTerminalQuit,
+		driverTerminalDialog,
+		driverControlCLI,
+		driverAppServer,
+		driverSDKCLI:
+		fallthrough
 	default:
 		t.Fatalf("no native CLI interruption driver for %s", host.contract.ID)
 	}
@@ -74,16 +86,7 @@ func runCLIInterruption(t *testing.T, host *isolatedHost, env []string) {
 		},
 	)
 
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first native CLI provider request step = %d, want 0", hold.Request.Index)
-		}
-	case <-process.done:
-		t.Fatalf("native CLI exited before active provider request: %v", process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatal("native CLI did not reach active provider request")
-	}
+	host.awaitHold(t, process, 0)
 
 	host.waitForActiveSession(t)
 	wire.send(
@@ -238,17 +241,7 @@ func (host *isolatedHost) runClineResume(t *testing.T, env []string, previous re
 	)
 
 	for expected := range 2 {
-		var hold *fakeprovider.Hold
-		select {
-		case hold = <-host.provider.Holds():
-			if hold.Request.Index != expected {
-				t.Fatalf("resumed Cline provider step = %d, want %d", hold.Request.Index, expected)
-			}
-		case <-process.done:
-			t.Fatalf("Cline exited before resumed request %d: %v", expected, process.waitErr())
-		case <-time.After(30 * time.Second):
-			t.Fatalf("Cline did not reach resumed provider request %d", expected)
-		}
+		hold := host.awaitHold(t, process, expected)
 
 		host.waitForActiveSession(t)
 		hold.Release()

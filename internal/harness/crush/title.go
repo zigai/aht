@@ -5,17 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"slices"
 
-	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
-
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-var errCrushDatabaseNotRegular = errors.New("crush session database is not a regular file")
 
 type titleDatabase struct {
 	db        *sql.DB
@@ -145,27 +141,10 @@ func titleCandidates(projects []crushProject, cwd string) []string {
 }
 
 func openTitleDatabase(ctx context.Context, path string) (*titleDatabase, error) {
-	info, err := os.Stat(path)
+	db, err := transcript.OpenDatabase(path)
 	if err != nil {
-		return nil, fmt.Errorf("inspect Crush session database: %w", err)
+		return nil, fmt.Errorf("open Crush title database: %w", err)
 	}
-
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %q", errCrushDatabaseNotRegular, path)
-	}
-
-	var databaseURL url.URL
-
-	databaseURL.Scheme = "file"
-	databaseURL.Path = path
-	databaseURL.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", databaseURL.String())
-	if err != nil {
-		return nil, fmt.Errorf("open Crush session database: %w", err)
-	}
-
-	db.SetMaxOpenConns(1)
 
 	statement, err := db.PrepareContext(ctx, "SELECT COALESCE(title, '') FROM sessions WHERE id=?")
 	if err != nil {

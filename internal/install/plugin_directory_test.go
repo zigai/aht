@@ -40,7 +40,7 @@ func TestReplacePluginDirectoryRollbackRestoresExistingDirectory(t *testing.T) {
 		t.Fatalf("writing staged plugin file: %v", err)
 	}
 
-	plugin := pluginDirectoryInstall{dir: dir, markerFile: "", files: nil, snippetOrder: nil}
+	plugin := pluginDirectoryInstall{dir: dir, files: nil, snippetOrder: nil}
 
 	rollback, _, err := plugin.replace(staged)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestPluginDirectoryNeedsUpdateDetectsStaleFiles(t *testing.T) {
 		t.Fatalf("writing stale plugin file: %v", err)
 	}
 
-	plugin := pluginDirectoryInstall{dir: dir, markerFile: "", files: files, snippetOrder: nil}
+	plugin := pluginDirectoryInstall{dir: dir, files: files, snippetOrder: nil}
 
 	changed, err := plugin.needsUpdate()
 	if err != nil {
@@ -178,7 +178,6 @@ func TestPluginDirectorySupportsNestedFiles(t *testing.T) {
 	}
 	plugin := pluginDirectoryInstall{
 		dir:          filepath.Join(root, "plugin"),
-		markerFile:   "",
 		files:        files,
 		snippetOrder: []string{"plugin.json", "hooks/hooks.json", "scripts/report.sh"},
 	}
@@ -231,7 +230,7 @@ func TestPluginDirectoryNeedsUpdateDetectsNestedStaleFiles(t *testing.T) {
 		t.Fatalf("writing stale nested plugin file: %v", err)
 	}
 
-	plugin := pluginDirectoryInstall{dir: dir, markerFile: "", files: files, snippetOrder: nil}
+	plugin := pluginDirectoryInstall{dir: dir, files: files, snippetOrder: nil}
 
 	changed, err := plugin.needsUpdate()
 	if err != nil {
@@ -248,11 +247,11 @@ func TestReinstallAfterInterruptedPluginReplaceLeavesOnlyPluginDirectory(t *test
 
 	root := t.TempDir()
 	plan := harnesspkg.PluginDirectoryInstallPlan{
-		Dir:        filepath.Join(root, "plugin"),
-		MarkerFile: "plugin.json",
+		Dir: filepath.Join(root, "plugin"),
 		Files: []harnesspkg.RenderedFileInstallSpec{
-			{Name: "plugin.json", Content: "{\"marker\":\"" + managedMarker + "\"}\n"},
+			{Name: "plugin.json", Content: "{}\n"},
 		},
+		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
 	}
 
 	if _, err := installPluginDirectory(
@@ -264,13 +263,13 @@ func TestReinstallAfterInterruptedPluginReplaceLeavesOnlyPluginDirectory(t *test
 		t.Fatal(err)
 	}
 
-	files, err := renderInstallFiles(plan.Files, "plugin")
+	files, order, err := renderPluginFiles(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	renames := 0
-	interrupted := newPluginDirectoryInstall(plan, files)
+	interrupted := newPluginDirectoryInstall(plan, files, order)
 	interrupted.renameFile = func(oldPath string, newPath string) error {
 		renames++
 		if renames == 2 {

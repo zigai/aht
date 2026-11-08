@@ -45,7 +45,10 @@ func replayTranscript(
 
 	var result transcriptState
 
+	reader := codexHarness{}.Transcript()
+
 	decoder := &transcript.Decoder{
+		UserParts:    reader.UserParts,
 		Conversation: &result.Conversation,
 		Recognized:   &result.Recognized,
 		Projection:   projection,
@@ -55,7 +58,6 @@ func replayTranscript(
 		},
 	}
 
-	reader := codexHarness{}.Transcript()
 	for index, line := range lines {
 		if !fast || !reader.FastRecord(t.Context(), decoder, []byte(line), index+1) {
 			var record transcript.Record
@@ -80,13 +82,15 @@ func readTranscript(t *testing.T, includeTools bool, lines ...string) transcript
 		recognized   bool
 	)
 
+	reader := codexHarness{}.Transcript()
+
 	decoder := &transcript.Decoder{
+		UserParts:    reader.UserParts,
 		Conversation: &conversation,
 		Recognized:   &recognized,
 		IncludeTools: includeTools,
 	}
 
-	reader := codexHarness{}.Transcript()
 	for i, line := range lines {
 		if reader.FastRecord(t.Context(), decoder, []byte(line), i+1) {
 			continue
@@ -150,7 +154,7 @@ func TestTranscriptProjectionAcrossLongRecords(t *testing.T) {
 				}
 			})
 
-			projection, err := (codexHarness{}).TranscriptProjection(
+			projection, err := (codexHarness{}).Transcript().Projection(
 				t.Context(),
 				file,
 				int64(len(test.body)),
@@ -276,8 +280,8 @@ func TestTranscriptUserProjectionCaptures(t *testing.T) {
 	}{
 		{"legacy", "", []transcriptCapture{
 			{
-				"user",
-				"<environment_context>work</environment_context>\ntyped input",
+				transcript.InjectedUserRole,
+				"<environment_context>work</environment_context>",
 				"echo",
 				3,
 				time.Date(
@@ -291,6 +295,7 @@ func TestTranscriptUserProjectionCaptures(t *testing.T) {
 					time.UTC,
 				),
 			},
+			{transcript.TypedUserRole, "typed input", "echo", 3, time.Date(2026, 9, 1, 10, 2, 0, 0, time.UTC)},
 			{"assistant", "answer", "answer", 5, time.Date(2026, 9, 1, 10, 4, 0, 0, time.UTC)},
 		}},
 		{"typed users", typedUserProjection, []transcriptCapture{
@@ -312,7 +317,7 @@ func TestTranscriptUserProjectionCaptures(t *testing.T) {
 			},
 			{
 				transcript.InjectedUserRole,
-				"<environment_context>work</environment_context>\ntyped input",
+				"<environment_context>work</environment_context>",
 				"echo",
 				3,
 				time.Date(
@@ -365,7 +370,10 @@ func TestFastTranscriptIgnoredResponseItemsKeepMetadata(t *testing.T) {
 	for _, includeTools := range []bool{false, true} {
 		conversation := transcript.Conversation{SessionID: "native", CWD: "/work", Model: "model-a"}
 		recognized := true
+		reader := codexHarness{}.Transcript()
+
 		decoder := &transcript.Decoder{
+			UserParts:    reader.UserParts,
 			Conversation: &conversation,
 			Recognized:   &recognized,
 			IncludeTools: includeTools,

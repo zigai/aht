@@ -17,28 +17,31 @@ var (
 	errBinaryNotFound    = errors.New("binary not found")
 )
 
-func TestCurrentWithEnvUsesManagedPaneIdentity(t *testing.T) {
+func TestLocationFromEnvUsesManagedPaneIdentity(t *testing.T) {
 	t.Parallel()
 
-	location := herdr.CurrentWithEnv(
-		herdr.Env{
-			Enabled:     "1",
-			SessionName: "work",
-			SocketPath:  "/tmp/herdr.sock",
-			WorkspaceID: "w1",
-			TabID:       "w1:t1",
-			PaneID:      "w1:p1",
-		},
-	)
+	env := map[string]string{
+		"HERDR_ENV":          "1",
+		"HERDR_SESSION":      "work",
+		"HERDR_SOCKET_PATH":  "/tmp/herdr.sock",
+		"HERDR_WORKSPACE_ID": "w1",
+		"HERDR_TAB_ID":       "w1:t1",
+		"HERDR_PANE_ID":      "w1:p1",
+	}
+	lookup := func(key string) string { return env[key] }
+
+	location := herdr.NewDriver().LocationFromEnv(lookup)
 	if location.Kind != registry.MultiplexerHerdr || location.ServerID != "/tmp/herdr.sock" ||
 		location.SessionName != "work" ||
 		location.WorkspaceID != "w1" ||
 		location.TabID != "w1:t1" ||
 		location.PaneID != "w1:p1" {
-		t.Fatalf("CurrentWithEnv() = %#v", location)
+		t.Fatalf("LocationFromEnv() = %#v", location)
 	}
 
-	if got := herdr.CurrentWithEnv(herdr.Env{PaneID: "w1:p1"}); !got.Empty() {
+	env = map[string]string{"HERDR_PANE_ID": "w1:p1"}
+
+	if got := herdr.NewDriver().LocationFromEnv(lookup); !got.Empty() {
 		t.Fatalf("unmanaged environment produced context: %#v", got)
 	}
 }
@@ -59,17 +62,17 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 		case "session list --json":
 			return `{"sessions":[{"name":"work"}]}`, nil
 		case "api snapshot":
-			return `{"result":{"workspaces":[{"workspace_id":"w1",` +
+			return `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1",` +
 				`"label":"repo"}],"tabs":[{"tab_id":"w1:t1",` +
 				`"label":"agents"}],"panes":[{"pane_id":"w1:p1",` +
 				`"workspace_id":"w1","tab_id":"w1:t1","foreground_cwd":"/` +
 				`repo","terminal_title_stripped":"Codex"}],` +
 				`"agents":[{"pane_id":"w1:p1","agent":"codex",` +
-				`"agent_status":"blocked"}]}}`, nil
+				`"agent_status":"blocked"}]}}}`, nil
 		case "pane process-info --pane w1:p1":
-			return `{"result":{"shell_pid":40,"foreground_process_group_id":42,` +
+			return `{"result":{"process_info":{"shell_pid":40,"foreground_process_group_id":42,` +
 				`"foreground_processes":[{"pid":42,"name":"codex",` +
-				`"argv":["codex"],"cwd":"/repo"}]}}`, nil
+				`"argv":["codex"],"cwd":"/repo"}]}}}`, nil
 		default:
 			return "", errUnexpectedCommand
 		}
@@ -199,7 +202,7 @@ func TestCapturePaneUsesDetectionBuffer(t *testing.T) {
 		t.Fatalf("capture call = %#v %#v", gotEnv, gotArgs)
 	}
 
-	if snapshot.Text != "permission prompt" || snapshot.Title != "Codex" {
+	if snapshot.Text != `{"result":{"text":"permission prompt"}}` || snapshot.Title != "Codex" {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 }

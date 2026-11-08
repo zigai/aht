@@ -70,7 +70,6 @@ func TestObserverCycleAcceptsCanonicalizedCatalogAlias(t *testing.T) {
 	watcher := New(Options{
 		Store:       store,
 		StorePath:   path,
-		HealthPath:  path + ".health",
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
 		CatalogList: func(ctx context.Context) ([]CatalogEntry, error) {
@@ -232,14 +231,6 @@ func TestCatalogActivityReportRequiresCurrentSessionAndCompleteListedProcess(t *
 	if _, ok := catalogActivityReport(entry, processes); ok {
 		t.Fatal("reused PID owned by another harness produced an activity report")
 	}
-
-	other := processes[42]
-	other.AgentHint = "goose"
-
-	processes[42] = other
-	if _, ok := catalogActivityReport(entry, processes); ok {
-		t.Fatal("conflicting AgentHint overrode the executable's harness")
-	}
 }
 
 func TestPrimeCatalogRequiresMatchingWorkerAtListedPID(t *testing.T) {
@@ -262,13 +253,13 @@ func TestPrimeCatalogRequiresMatchingWorkerAtListedPID(t *testing.T) {
 		want    bool
 	}{
 		{name: "native worker", process: worker, want: true},
-		{name: "unrelated executable with hint", process: processinfo.Process{
+		{name: "unrelated executable", process: processinfo.Process{
 			PID: 42, PPID: 1, ProcessGroupID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/other",
-			Args: []string{"other", "worker"}, AgentHint: "prime-agent", CWD: "/work",
+			Args: []string{"other", "worker"}, CWD: "/work",
 		}},
 		{name: "native CLI but not worker", process: processinfo.Process{
 			PID: 42, PPID: 1, ProcessGroupID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/prime-agent",
-			Args: []string{"prime-agent", "sessions", "--all", "--json"}, AgentHint: "prime-agent", CWD: "/work",
+			Args: []string{"prime-agent", "sessions", "--all", "--json"}, CWD: "/work",
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -379,7 +370,6 @@ func TestPrimeCatalogInvalidPIDKeepsSavedMetadata(t *testing.T) {
 		StartIdentity:  "boot:42",
 		Executable:     "/usr/bin/other",
 		Args:           []string{"other", "worker"},
-		AgentHint:      "prime-agent",
 		CWD:            "/work",
 	}
 

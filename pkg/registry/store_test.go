@@ -21,7 +21,7 @@ func TestStoreBatchIsAtomicOnSourceConflict(t *testing.T) {
 	first, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: "atomic"},
 			Evidence: &Report{Event: "test", Activity: &idle},
@@ -35,13 +35,13 @@ func TestStoreBatchIsAtomicOnSourceConflict(t *testing.T) {
 
 	_, err = store.ObserveBatch(context.Background(), []Observation{
 		{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(time.Second),
 			Subject:  ObservationIdentity{SessionID: "atomic"},
 			Evidence: &Report{Event: "test", Activity: &running},
 		},
 		{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(time.Second),
 			Subject:  ObservationIdentity{SessionID: "atomic"},
 			Evidence: &Report{Event: "test", Activity: &idle},
@@ -82,7 +82,7 @@ func TestStoreConcurrentWritersPreserveEverySession(t *testing.T) {
 			_, err := store.Observe(
 				context.Background(),
 				Observation{
-					Harness:  HarnessCodex,
+					Harness:  harnessPrimary,
 					At:       time.Now().UTC(),
 					Subject:  ObservationIdentity{SessionID: "concurrent-" + strconv.Itoa(index)},
 					Evidence: &Report{Event: "start"},
@@ -121,7 +121,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 	idle := ActivityIdle
 	for _, observation := range []Observation{
 		{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      at,
 			Subject: ObservationIdentity{
 				SessionID: "live-idle",
@@ -133,7 +133,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 			},
 		},
 		{
-			Harness: HarnessClaude,
+			Harness: harnessCatalog,
 			At:      at,
 			Subject: ObservationIdentity{
 				SessionID: "unknown",
@@ -152,7 +152,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      at.Add(time.Second),
 			Subject: ObservationIdentity{SessionID: "live-idle"},
 			Evidence: &Sighting{
@@ -168,7 +168,7 @@ func TestStoreListFiltersIndependentDimensions(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessClaude,
+			Harness:  harnessCatalog,
 			At:       at.Add(time.Second),
 			Subject:  ObservationIdentity{SessionID: "unknown"},
 			Evidence: &Report{Event: "test", Lifecycle: &end},
@@ -208,7 +208,7 @@ func TestStorePersistsSchemaEnvelope(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: "json"},
 			Evidence: &Report{Event: "test"},
@@ -244,7 +244,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 		PPID:           1,
 		ProcessGroupID: 42,
 		StartIdentity:  "boot:42",
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 		CWD:            "/repo",
 	}
 
@@ -252,7 +252,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at,
 			Subject:  ObservationIdentity{},
 			Evidence: &Sighting{Process: *process, Present: present},
@@ -272,7 +272,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(time.Second),
 			Subject:  ObservationIdentity{},
 			Evidence: &Placement{Process: *process, Location: *location},
@@ -283,7 +283,7 @@ func TestStorePersistsNativeMultiplexerLocation(t *testing.T) {
 	}
 
 	if session.Location != *location || session.Observations.Location == nil ||
-		session.Observations.Location.Location != *location {
+		session.Observations.Location.Placement.Location != *location {
 		t.Fatalf("stored session = %#v", session)
 	}
 }
@@ -348,7 +348,7 @@ func TestStoreGCUsesInclusiveAgeBoundary(t *testing.T) {
 	presence := PresenceGone
 	for _, observation := range []Observation{
 		{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At: base.Add(
 				-threshold,
 			),
@@ -360,7 +360,7 @@ func TestStoreGCUsesInclusiveAgeBoundary(t *testing.T) {
 			},
 		},
 		{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At: base.Add(
 				-threshold,
 			).Add(
@@ -410,7 +410,7 @@ func TestObservePreservesGoneSessionsWithoutGC(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(-time.Hour),
 			Subject:  ObservationIdentity{SessionID: "ended"},
 			Evidence: &Report{Claim: &gone},
@@ -425,7 +425,7 @@ func TestObservePreservesGoneSessionsWithoutGC(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       now,
 			Subject:  ObservationIdentity{SessionID: "current"},
 			Evidence: &Report{Claim: &live},
@@ -447,51 +447,6 @@ func TestObservePreservesGoneSessionsWithoutGC(t *testing.T) {
 	}
 }
 
-func TestSummariesCountIndependentPresenceAndActivity(t *testing.T) {
-	t.Parallel()
-
-	activity := func(value Activity) *Activity { return &value }
-	sessions := []Session{
-		{
-			Location: Location{Kind: MultiplexerTmux, SessionID: "$1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(activity(ActivityRunning)), nil),
-		},
-		{
-			Location: Location{Kind: MultiplexerTmux, SessionID: "$1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(activity(ActivityWaiting)), nil),
-		},
-		{
-			Location: Location{Kind: MultiplexerTmux, SessionID: "$1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(activity(ActivityIdle)), nil),
-		},
-		{
-			Location: Location{Kind: MultiplexerTmux, SessionID: "$1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil),
-		},
-		{
-			Liveness: NewLiveness(PresenceUnknown, ActivityValue(activity(ActivityUnknown)), nil),
-		},
-	}
-
-	summaries := Summaries(sessions)
-	if len(summaries) != 2 {
-		t.Fatalf("summaries = %#v, want work and unknown groups", summaries)
-	}
-
-	work := summaries[0]
-	if work.Total != 4 || work.Live != 3 || work.Gone != 1 || work.Running != 1 ||
-		work.Waiting != 1 ||
-		work.Idle != 1 ||
-		work.ActivityUnknown != 0 {
-		t.Fatalf("work summary = %#v", work)
-	}
-
-	unknown := summaries[1]
-	if unknown.Total != 1 || unknown.PresenceUnknown != 1 || unknown.ActivityUnknown != 1 {
-		t.Fatalf("unknown summary = %#v", unknown)
-	}
-}
-
 func TestSummariesGroupNativeMultiplexerSessions(t *testing.T) {
 	t.Parallel()
 
@@ -499,7 +454,7 @@ func TestSummariesGroupNativeMultiplexerSessions(t *testing.T) {
 
 	summaries := Summaries([]Session{{
 		Location: Location{Kind: MultiplexerZellij, SessionName: "work", PaneID: "terminal_7"},
-		Liveness: NewLiveness(PresenceLive, ActivityValue(&activity), nil),
+		Liveness: NewLiveness(PresenceLive, ActivityValue(&activity), nil, time.Time{}, ""),
 	}})
 	if len(summaries) != 1 || summaries[0].MultiplexerKind != MultiplexerZellij ||
 		summaries[0].MultiplexerSessionName != "work" ||
@@ -513,7 +468,7 @@ func TestObservationValidateRejectsCorruptBoundaryValues(t *testing.T) {
 	t.Parallel()
 
 	base := Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       time.Now().UTC(),
 		Subject:  ObservationIdentity{SessionID: "session"},
 		Evidence: &Report{Event: "start"},
@@ -529,7 +484,7 @@ func TestObservationValidateRejectsCorruptBoundaryValues(t *testing.T) {
 		},
 		{
 			name:   "noncanonical harness",
-			mutate: func(observation *Observation) { observation.Harness = Harness("claude-code") },
+			mutate: func(observation *Observation) { observation.Harness = Harness("catalog-code") },
 		},
 		{name: "invalid lifecycle", mutate: func(observation *Observation) {
 			value := NativeLifecycle("restart")
@@ -547,6 +502,12 @@ func TestObservationValidateRejectsCorruptBoundaryValues(t *testing.T) {
 		{
 			name:   "invalid activity",
 			mutate: func(observation *Observation) { value := Activity("busy"); observation.SetActivity(&value) },
+		},
+		{
+			name: "invalid multiplexer",
+			mutate: func(observation *Observation) {
+				observation.SetLocation(&Location{Kind: "unsupported", PaneID: "1"})
+			},
 		},
 		{
 			name:   "incomplete process",
@@ -574,6 +535,7 @@ func TestObservationValidateRejectsCorruptBoundaryValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			observation := base
+			observation.Evidence = &Report{Event: "start"}
 			test.mutate(&observation)
 
 			if err := observation.Validate(fixtureRules{}); !errors.Is(err, ErrInvalidObservation) {
@@ -636,7 +598,7 @@ func TestStoreVerifyCountsListedSessions(t *testing.T) {
 		if _, err := store.Observe(
 			t.Context(),
 			Observation{
-				Harness:  HarnessCodex,
+				Harness:  harnessPrimary,
 				At:       time.Now().UTC(),
 				Subject:  ObservationIdentity{SessionID: id},
 				Evidence: &Report{Event: "start"},
@@ -680,45 +642,6 @@ func TestStoreVerifyRejectsCorruptFiles(t *testing.T) {
 	}
 }
 
-func TestStoreRejectsInvalidMutationBeforePersisting(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "sessions.json")
-
-	store := NewJournal(path, fixtureRules{})
-	if _, err := store.Observe(
-		context.Background(),
-		Observation{
-			Harness:  HarnessCodex,
-			At:       time.Now().UTC(),
-			Subject:  ObservationIdentity{SessionID: "session"},
-			Evidence: &Report{Event: "start"},
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	err := store.withSnapshot(t.Context(), func(snap *snapshot) error {
-		id, session := onlyStoredSession(snap.Sessions)
-		session.Liveness = Live{Activity: Activity("invalid"), Decision: nil}
-		snap.Sessions[id] = session
-
-		return nil
-	})
-	if !errors.Is(err, ErrCorruptStore) {
-		t.Fatalf("withSnapshot() error = %v, want %v", err, ErrCorruptStore)
-	}
-
-	sessions, err := store.List(context.Background(), Filter{})
-	if err != nil {
-		t.Fatalf("List() after rejected mutation error = %v", err)
-	}
-
-	if len(sessions) != 1 || sessions[0].Activity() == nil {
-		t.Fatalf("invalid mutation reached disk: %#v", sessions)
-	}
-}
-
 func writeCorruptTestStore(t *testing.T, mutate func(*snapshot)) *Journal {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sessions.json")
@@ -727,7 +650,7 @@ func writeCorruptTestStore(t *testing.T, mutate func(*snapshot)) *Journal {
 	_, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       time.Now().UTC(),
 			Subject:  ObservationIdentity{SessionID: "session"},
 			Evidence: &Report{Event: "start"},
@@ -805,9 +728,10 @@ func corruptSnapshotStaleNativeRevival(snap *snapshot) {
 	session.Observations.Native.Activity = &idle
 	session.Observations.Native.Process = process
 	session.Observations.Process = &ProcessObservation{
-		Present:    false,
-		Process:    process,
-		ObservedAt: processAt,
+		Sighting: Sighting{
+			Present: false,
+			Process: process,
+		}, ObservedAt: processAt,
 	}
 	session.setDecision(
 		&ActivityDecision{
@@ -830,7 +754,7 @@ func TestScreenObservationDoesNotRegressNewerNativeActivity(t *testing.T) {
 		PPID:           1,
 		ProcessGroupID: 4242,
 		StartIdentity:  "boot:4242",
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 		CWD:            "/repo",
 	}
 	live := PresenceLive
@@ -840,7 +764,7 @@ func TestScreenObservationDoesNotRegressNewerNativeActivity(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      base,
 			Subject: ObservationIdentity{SessionID: "screen-regression"},
 			Evidence: &Report{
@@ -859,7 +783,7 @@ func TestScreenObservationDoesNotRegressNewerNativeActivity(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       nativeDecisionAt,
 			Subject:  ObservationIdentity{SessionID: "screen-regression"},
 			Evidence: &Report{Event: "hook", Activity: &idle, Process: process},
@@ -873,7 +797,7 @@ func TestScreenObservationDoesNotRegressNewerNativeActivity(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      base.Add(5 * time.Second),
 			Subject: ObservationIdentity{SessionID: "screen-regression"},
 			Evidence: (*Reading)(
@@ -920,7 +844,7 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 		PPID:           1,
 		ProcessGroupID: 100,
 		StartIdentity:  "boot:100",
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 		CWD:            "/repo",
 	}
 	newProcess := &ProcessIdentity{
@@ -928,7 +852,7 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 		PPID:           1,
 		ProcessGroupID: 200,
 		StartIdentity:  "boot:200",
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 		CWD:            "/repo",
 	}
 	live := PresenceLive
@@ -938,7 +862,7 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      base,
 			Subject: ObservationIdentity{SessionID: "restart"},
 			Evidence: &Report{
@@ -957,7 +881,7 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(time.Second),
 			Subject:  ObservationIdentity{},
 			Evidence: &Sighting{Process: *newProcess, Present: present},
@@ -970,7 +894,7 @@ func TestAgentRestartWithProvisionalScanKeepsSingleLiveSession(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessCodex,
+			Harness: harnessPrimary,
 			At:      base.Add(2 * time.Second),
 			Subject: ObservationIdentity{SessionID: "restart"},
 			Evidence: &Report{
@@ -1029,7 +953,7 @@ func TestStoreOlderProcessAbsenceDoesNotOverrideNewerNativePresence(t *testing.T
 
 	proc := &ProcessIdentity{PID: 1234, StartIdentity: "start"}
 	initial := Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      now,
 		Subject: ObservationIdentity{SessionID: "active"},
 		Evidence: &Report{
@@ -1048,7 +972,7 @@ func TestStoreOlderProcessAbsenceDoesNotOverrideNewerNativePresence(t *testing.T
 	now = now.Add(10 * time.Second)
 
 	fresh := Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      now,
 		Subject: ObservationIdentity{SessionID: "active"},
 		Evidence: &Report{
@@ -1063,7 +987,7 @@ func TestStoreOlderProcessAbsenceDoesNotOverrideNewerNativePresence(t *testing.T
 	}
 	// Delayed observer batch: process absence sampled before the latest native callback.
 	absent := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       now.Add(-5 * time.Second),
 		Subject:  ObservationIdentity{},
 		Evidence: &Sighting{Process: *proc, Present: false},
@@ -1097,7 +1021,7 @@ func TestStoreMultiSessionHarnessDoesNotRetireSiblingSessions(t *testing.T) {
 
 	proc := &ProcessIdentity{PID: 1234, StartIdentity: "gateway-incarnation"}
 	first := Observation{
-		Harness: HarnessOpenClaw,
+		Harness: harnessShared,
 		At:      now,
 		Subject: ObservationIdentity{SessionID: "concurrent-A"},
 		Evidence: &Report{
@@ -1116,7 +1040,7 @@ func TestStoreMultiSessionHarnessDoesNotRetireSiblingSessions(t *testing.T) {
 	now = now.Add(time.Second)
 
 	second := Observation{
-		Harness: HarnessOpenClaw,
+		Harness: harnessShared,
 		At:      now,
 		Subject: ObservationIdentity{SessionID: "concurrent-B"},
 		Evidence: &Report{
@@ -1158,15 +1082,15 @@ func TestStoreSameMillisecondNativeEventsDoNotConflict(t *testing.T) {
 	s.setNowForTest(func() time.Time { return now })
 
 	first := Observation{
-		Harness: HarnessKilo,
+		Harness: harnessOrdered,
 		At:      now,
-		Subject: ObservationIdentity{SessionID: "kilo-session"},
+		Subject: ObservationIdentity{SessionID: "ordered-session"},
 		Evidence: &Report{
-			Reporter:   Reporter{Integration: "kilo-plugin"},
+			Reporter:   Reporter{Integration: "ordered-plugin"},
 			Event:      "session.status",
 			Claim:      new(PresenceLive),
 			Activity:   new(ActivityRunning),
-			Attributes: map[string]string{"kilo_status": "busy"},
+			Attributes: map[string]string{"native_status": "busy"},
 		},
 	}
 
@@ -1176,15 +1100,15 @@ func TestStoreSameMillisecondNativeEventsDoNotConflict(t *testing.T) {
 	}
 
 	second := Observation{
-		Harness: HarnessKilo,
+		Harness: harnessOrdered,
 		At:      now,
-		Subject: ObservationIdentity{SessionID: "kilo-session"},
+		Subject: ObservationIdentity{SessionID: "ordered-session"},
 		Evidence: &Report{
-			Reporter:   Reporter{Integration: "kilo-plugin"},
+			Reporter:   Reporter{Integration: "ordered-plugin"},
 			Event:      "session.status",
 			Claim:      new(PresenceLive),
 			Activity:   new(ActivityIdle),
-			Attributes: map[string]string{"kilo_status": "idle"},
+			Attributes: map[string]string{"native_status": "idle"},
 		},
 	}
 	_, err = s.Observe(ctx, second)

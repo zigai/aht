@@ -60,8 +60,7 @@ func TestFileStoreWatchUpdate(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- store.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			if result.Err != nil {
 				return result.Err
@@ -110,8 +109,7 @@ func TestFileStoreWatchAtomicRename(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- target.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			if result.Err != nil {
 				return result.Err
@@ -171,8 +169,7 @@ func TestFileStoreWatchReattachesAfterDirectoryRecreation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- target.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			if result.Err != nil {
 				return result.Err
@@ -262,10 +259,9 @@ func TestFileStoreWatchReconcilesMissedEvent(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- target.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Hour,
-			ReconcileInterval: 10 * time.Millisecond,
-		}, func(result registry.WatchResult) error {
+		done <- target.Watch(ctx, registry.ReconcilingWatchOptions(registry.WatchOptions{
+			Debounce: time.Hour,
+		}, 10*time.Millisecond), func(result registry.WatchResult) error {
 			if result.Err != nil {
 				return result.Err
 			}
@@ -320,8 +316,7 @@ func TestFileStoreWatchReportsReadErrorAndRetainsBaseline(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- target.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			switch {
 			case result.Initial:
@@ -378,8 +373,7 @@ func TestFileStoreWatchRecoversInitialMalformedSnapshot(t *testing.T) {
 
 	go func() {
 		done <- target.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			if result.Err != nil {
 				readError <- result
@@ -434,8 +428,7 @@ func TestFileStoreWatchSerializesCallbacks(t *testing.T) {
 
 	go func() {
 		done <- store.Watch(ctx, registry.WatchOptions{
-			Debounce:          time.Millisecond,
-			ReconcileInterval: time.Hour,
+			Debounce: time.Millisecond,
 		}, func(result registry.WatchResult) error {
 			if !active.CompareAndSwap(false, true) {
 				select {
@@ -511,7 +504,7 @@ func observeWatchSession(t *testing.T, store *registry.Journal, id string) regis
 	session, err := store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("codex"),
+			Harness:  registry.Harness("primary"),
 			At:       time.Now().UTC(),
 			Subject:  registry.ObservationIdentity{SessionID: id},
 			Evidence: &registry.Report{Activity: &activity},

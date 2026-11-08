@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/terminal"
+
 	gotmux "github.com/zigai/gotmux/tmux"
 )
 
 var (
-	errNoTmux         = errors.New("tmux is not installed")
 	errNoTerminalArgv = errors.New("terminal program is empty")
 	errTerminalPanes  = errors.New("terminal session must have exactly one pane")
 	errEmptyText      = errors.New("terminal text must not be empty")
@@ -225,12 +226,12 @@ func startTerminal(
 		return nil, errNoTerminalArgv
 	}
 
-	tmuxPath, err := tmuxExecutable()
+	tmuxPath, err := terminal.FindExecutable()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve terminal tmux: %w", err)
 	}
 
-	directory, err := os.MkdirTemp("/tmp", "aht-launch-tmux-")
+	directory, err := terminal.NewSocketDir("aht-launch-tmux-")
 	if err != nil {
 		return nil, fmt.Errorf("create terminal directory: %w", err)
 	}
@@ -264,23 +265,4 @@ func startTerminal(
 
 func terminalEnvironment() []string {
 	return []string{"LANG=C.UTF-8", "PATH=" + os.Getenv("PATH"), "SHELL=/bin/sh"}
-}
-
-func tmuxExecutable() (string, error) {
-	if override := os.Getenv("AHT_TEST_TMUX_EXECUTABLE"); override != "" {
-		path, err := exec.LookPath(override)
-		if err != nil {
-			return "", fmt.Errorf("resolve AHT_TEST_TMUX_EXECUTABLE: %w", err)
-		}
-
-		return path, nil
-	}
-
-	for _, candidate := range []string{"/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux", "tmux"} {
-		if path, err := exec.LookPath(candidate); err == nil {
-			return path, nil
-		}
-	}
-
-	return "", errNoTmux
 }

@@ -14,6 +14,9 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/tools/githubapi"
 )
 
 var markdownEscaper = strings.NewReplacer("|", "\\|", "\r", " ", "\n", " ")
@@ -108,7 +111,10 @@ func (a application) releaseClient() *releaseClient {
 		return a.client
 	}
 
-	return newReleaseClient(cmp.Or(a.getenv("GH_TOKEN"), a.getenv("GITHUB_TOKEN")))
+	return newReleaseClient(
+		githubapi.DefaultBaseURL,
+		cmp.Or(a.getenv("GH_TOKEN"), a.getenv("GITHUB_TOKEN")),
+	)
 }
 
 func (a application) restore(ctx context.Context) (releaseState, error) {
@@ -238,7 +244,7 @@ func (a application) weekly() error {
 	entries := matrix{Include: []candidate{}}
 
 	for _, spec := range defaultCatalog {
-		if spec.Source == "weekly" {
+		if spec.Source == harness.DistributionWeekly {
 			entries.Include = append(entries.Include, candidate{Harness: spec.ID, Version: ""})
 		}
 	}
@@ -390,7 +396,7 @@ func trackedIssues(state releaseState, unreleased []string) issueReport {
 		}
 
 		record := state.Harnesses[spec.ID]
-		if spec.Source == "weekly" || record.Source != spec.sourceKey() {
+		if spec.Source == harness.DistributionWeekly || record.Source != spec.sourceKey() {
 			continue
 		}
 
@@ -503,7 +509,7 @@ func releaseSummary(
 	)
 
 	for _, spec := range defaultCatalog {
-		if spec.Source == "weekly" {
+		if spec.Source == harness.DistributionWeekly {
 			continue
 		}
 

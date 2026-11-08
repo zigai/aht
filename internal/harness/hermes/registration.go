@@ -211,7 +211,7 @@ func (registration registration) ownsPluginDirectory(
 		return false, nil
 	}
 
-	if _, err := os.Lstat(filepath.Join(pluginDir, hermesMarkerFileName)); err == nil {
+	if _, err := os.Lstat(filepath.Join(pluginDir, harness.ArtifactMarkerFile)); err == nil {
 		return true, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("checking Hermes plugin marker: %w", err)

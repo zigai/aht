@@ -4,12 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	native "github.com/zigai/aht/v2/internal/harness/transcript"
-
-	_ "modernc.org/sqlite" // Registers the CGO-free reader for native harness databases.
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -24,27 +21,18 @@ const (
 
 type databaseRow = native.Row
 
-func (s *search) scanDatabase(
+func (s *parser) scanDatabase(
 	ctx context.Context,
 	source Source,
 	path string,
 	buffer *fileIssueBuffer,
 ) {
-	// mode=ro prevents creation, migration and writes. Do not use immutable=1:
-	// an actively running harness may have committed history in its WAL.
-	var uri url.URL
-
-	uri.Scheme = "file"
-	uri.Path = path
-	uri.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", uri.String())
+	db, err := native.OpenDatabase(path)
 	if err != nil {
 		buffer.issue(source, path, fmt.Errorf("open history database: %w", err))
 		return
 	}
 
-	db.SetMaxOpenConns(1)
 	defer func() {
 		if err := db.Close(); err != nil {
 			buffer.issue(source, path, err)
@@ -89,7 +77,7 @@ func historySQL(
 	return boundedSQLPrefix + query + boundedSQLSuffix, parse, nil
 }
 
-func (s *search) databaseRows(
+func (s *parser) databaseRows(
 	ctx context.Context,
 	source Source,
 	path string,
@@ -101,9 +89,9 @@ func (s *search) databaseRows(
 	defer func() {
 		buffer.selectConversation(
 			t.match.Conversation,
-			s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))),
+			s.selected(&t),
 		)
-		s.add(ctx, &t)
+		s.sink.conversation(ctx, &t)
 	}()
 
 	for rows.Next() {
@@ -130,9 +118,9 @@ func (s *search) databaseRows(
 		if row.SessionID != t.match.Conversation.SessionID {
 			buffer.selectConversation(
 				t.match.Conversation,
-				s.issueConversationSelected(t.match.Conversation, t.qualifies(len(s.terms))),
+				s.selected(&t),
 			)
-			s.add(ctx, &t)
+			s.sink.conversation(ctx, &t)
 			t = newDatabaseTranscript(
 				Conversation{
 					Harness:     source.Harness,

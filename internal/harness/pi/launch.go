@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const (
@@ -28,14 +27,12 @@ func (piHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: "pi",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env:        []string{"PI_CODING_AGENT_DIR=" + agentDir},
 		Files: []harness.LaunchFile{{
 			Path:   filepath.Join(agentDir, "models.json"),
 			Update: func([]byte) ([]byte, error) { return modelsJSON, nil },
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(string) ([]string, error) {
 			return []string{
 				"--mode",

@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const openAICompatibleProvider = "openai-compatible"
@@ -18,14 +17,12 @@ func (clineHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: clineCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"CLINE_DIR=" + configDir,
 			"CLINE_DATA_DIR=" + dataDir,
 			"CLINE_DISABLE_CLINE_PASS_NOTICE=1",
 		},
-		Files:    nil,
-		Services: nil,
 		Setup: [][]string{{
 			"auth", "-p", openAICompatibleProvider, "-k", model.APIKey, "-m", model.Model,
 			"-b", model.Endpoint + "/v1", "--config", configDir, "--data-dir", dataDir,

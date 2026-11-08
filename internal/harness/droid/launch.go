@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const (
@@ -23,8 +22,14 @@ func (droidHarness) LaunchPlan(
 	factoryDir := filepath.Join(paths.Home, ".factory")
 
 	return harness.LaunchPlan{
+		TitleRequests: []harness.TitleRequest{
+			{
+				Role:     "system",
+				Contains: "You are a helper that generates concise session titles for a session picker.",
+			},
+		},
 		Executable: droidCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"FACTORY_CONFIG_DIR=" + factoryDir,
 			"FACTORY_DROID_AUTO_UPDATE_ENABLED=false",
@@ -42,8 +47,6 @@ func (droidHarness) LaunchPlan(
 				return droidLaunchSettings(existing, model, trustRoot)
 			},
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(string) ([]string, error) {
 			return droidRPCArguments(paths.Work), nil
 		},

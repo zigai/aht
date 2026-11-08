@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -18,12 +19,12 @@ func retentionProcess(pid int) ProcessIdentity {
 		PPID:           1,
 		ProcessGroupID: pid,
 		StartIdentity:  "boot:" + strconv.Itoa(pid),
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 	}
 }
 
 func storedSession(id string, pid int, sessionID string, createdAt time.Time) Session {
-	session := newSession(id, HarnessCodex, createdAt)
+	session := newSession(id, harnessPrimary, createdAt)
 	process := retentionProcess(pid)
 
 	session.Process = &process
@@ -111,19 +112,6 @@ func markFile(t *testing.T, path string) fileMark {
 	return fileMark{inode: stat.Ino, modTime: info.ModTime(), size: info.Size()}
 }
 
-func waitFor(t *testing.T, timeout time.Duration, condition func() bool, failure string) {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatal(failure)
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func TestMemoryStoreStartupPrunesToLiveSetAndRecentIdentifiedTombstones(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
@@ -199,79 +187,76 @@ func TestMemoryStoreStartupPrunesToLiveSetAndRecentIdentifiedTombstones(t *testi
 
 func TestMemoryStoreContinuouslyExpiresIdentifiedTombstonesAfterTTL(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "state.json")
-	base := time.Now().UTC()
-	writeLegacySnapshot(t, path,
-		goneStoredSession("tombstone", 4000, "native-tombstone", base),
-		storedSession("live", 4001, "native-live", base),
-	)
-
-	store, err := OpenMemoryStoreWithOptions(
-		path,
-		fixtureRules{},
-		MemoryStoreOptions{TombstoneTTL: time.Minute},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = store.Close() })
-
-	clock := base.Add(30 * time.Second)
-
-	store.setNowForTest(func() time.Time { return clock })
-
-	if _, err := store.Get(t.Context(), "tombstone"); err != nil {
-		t.Fatalf("tombstone inside TTL = %v, want retained", err)
-	}
-
-	before, err := store.State(t.Context(), Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	store.mu.Lock()
-	clock = base.Add(2 * time.Minute)
-	store.mu.Unlock()
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	done := make(chan error, 1)
-	go func() { done <- store.RunPersistence(ctx, 0, 0) }()
-
-	waitFor(t, 5*time.Second, func() bool {
-		_, err := store.Get(t.Context(), "tombstone")
-		return errors.Is(err, ErrSessionNotFound)
-	}, "tombstone was not expired by the persistence loop")
-	cancel()
-
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-
-	after, err := store.State(t.Context(), Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if after.Revision <= before.Revision || len(after.Sessions) != 1 ||
-		after.Sessions[0].ID != "live" {
-		t.Fatalf(
-			"state after expiry = revision %d sessions %d, want new revision with only live",
-			after.Revision,
-			len(after.Sessions),
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "state.json")
+		base := time.Now().UTC()
+		writeLegacySnapshot(t, path,
+			goneStoredSession("tombstone", 4000, "native-tombstone", base),
+			storedSession("live", 4001, "native-live", base),
 		)
-	}
 
-	if _, err := NewJournal(
-		path,
-		fixtureRules{},
-	).Get(t.Context(), "tombstone"); !errors.Is(
-		err,
-		ErrSessionNotFound,
-	) {
-		t.Fatalf("expired tombstone persisted: %v", err)
-	}
+		store, err := OpenMemoryStoreWithOptions(
+			path,
+			fixtureRules{},
+			MemoryStoreOptions{TombstoneTTL: time.Minute},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() { _ = store.Close() })
+
+		clock := base.Add(30 * time.Second)
+
+		store.setNowForTest(func() time.Time { return clock })
+
+		if _, err := store.Get(t.Context(), "tombstone"); err != nil {
+			t.Fatalf("tombstone inside TTL = %v, want retained", err)
+		}
+
+		before, err := store.State(t.Context(), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		store.mu.Lock()
+		clock = base.Add(2 * time.Minute)
+		store.mu.Unlock()
+
+		runPersistenceInBackground(t, store)
+
+		synctest.Wait()
+		time.Sleep(defaultPersistenceMaxDelay)
+		synctest.Wait()
+
+		if _, err := store.Get(t.Context(), "tombstone"); !errors.Is(err, ErrSessionNotFound) {
+			t.Fatalf("tombstone after persistence interval: %v", err)
+		}
+
+		after, err := store.State(t.Context(), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if after.Revision <= before.Revision || len(after.Sessions) != 1 ||
+			after.Sessions[0].ID != "live" {
+			t.Fatalf(
+				"state after expiry = revision %d sessions %d, want new revision with only live",
+				after.Revision,
+				len(after.Sessions),
+			)
+		}
+
+		if _, err := NewJournal(
+			path,
+			fixtureRules{},
+		).Get(t.Context(), "tombstone"); !errors.Is(
+			err,
+			ErrSessionNotFound,
+		) {
+			t.Fatalf("expired tombstone persisted: %v", err)
+		}
+	})
 }
 
 func TestProcessOnlySessionIsRemovedWhenItGoesGone(t *testing.T) {
@@ -293,7 +278,7 @@ func TestProcessOnlySessionIsRemovedWhenItGoesGone(t *testing.T) {
 	session, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base,
 			Evidence: &Sighting{Process: process, Present: true},
 		},
@@ -314,7 +299,7 @@ func TestProcessOnlySessionIsRemovedWhenItGoesGone(t *testing.T) {
 	gone, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(time.Second),
 			Evidence: &Sighting{Process: process, Present: false},
 		},
@@ -367,7 +352,7 @@ func TestLateNativeReportRejectedWithinTombstoneTTL(t *testing.T) {
 	session, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base,
 			Subject:  identity,
 			Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process},
@@ -380,7 +365,7 @@ func TestLateNativeReportRejectedWithinTombstoneTTL(t *testing.T) {
 	if _, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(time.Second),
 			Evidence: &Sighting{Process: process, Present: false},
 		},
@@ -393,7 +378,7 @@ func TestLateNativeReportRejectedWithinTombstoneTTL(t *testing.T) {
 	late, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(2 * time.Second),
 			Subject:  identity,
 			Evidence: &Report{Event: "agent_end", Activity: &idle, Process: &process},
@@ -427,7 +412,7 @@ func runPersistenceInBackground(t *testing.T, store *MemoryStore) {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	done := make(chan error, 1)
-	go func() { done <- store.RunPersistence(ctx, 0, 0) }()
+	go func() { done <- store.RunPersistence(ctx) }()
 
 	t.Cleanup(func() {
 		cancel()
@@ -451,7 +436,7 @@ func assertNoPersistence(
 		t.Fatalf("heartbeats rewrote the snapshot: before %+v after %+v", snapshot, after)
 	}
 
-	if after := markFile(t, path+".journal.jsonl"); after != journal || after.size != 0 {
+	if after := markFile(t, journalPath(path)); after != journal || after.size != 0 {
 		t.Fatalf("heartbeats appended the journal: before %+v after %+v", journal, after)
 	}
 
@@ -467,87 +452,98 @@ func assertNoPersistence(
 
 func TestHeartbeatObservationsDoNotJournalOrRewriteSnapshot(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "state.json")
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "state.json")
 
-	store, err := OpenMemoryStore(path, fixtureRules{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = store.Close() })
-	runPersistenceInBackground(t, store)
-
-	process := retentionProcess(7000)
-	location := Location{
-		Kind:        MultiplexerTmux,
-		ServerID:    "srv",
-		SessionName: "work",
-		PaneID:      "%1",
-		PanePID:     7000,
-	}
-	cycle := func(at time.Time) []Observation {
-		return []Observation{
-			{Harness: HarnessCodex, At: at, Evidence: &Sighting{Process: process, Present: true}},
-			{
-				Harness:  HarnessCodex,
-				At:       at,
-				Evidence: &Placement{Process: process, Location: location},
-			},
+		store, err := OpenMemoryStore(path, fixtureRules{})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
 
-	at := time.Now().UTC()
-	if _, err := store.ObserveBatch(t.Context(), cycle(at)); err != nil {
-		t.Fatal(err)
-	}
+		t.Cleanup(func() { _ = store.Close() })
+		runPersistenceInBackground(t, store)
 
-	if err := store.Flush(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+		process := retentionProcess(7000)
+		location := Location{
+			Kind:        MultiplexerTmux,
+			ServerID:    "srv",
+			SessionName: "work",
+			PaneID:      "%1",
+			PanePID:     7000,
+		}
+		cycle := func(at time.Time) []Observation {
+			return []Observation{
+				{
+					Harness:  harnessPrimary,
+					At:       at,
+					Evidence: &Sighting{Process: process, Present: true},
+				},
+				{
+					Harness:  harnessPrimary,
+					At:       at,
+					Evidence: &Placement{Process: process, Location: location},
+				},
+			}
+		}
 
-	snapshotBefore := markFile(t, path)
-	journalBefore := markFile(t, path+".journal.jsonl")
-
-	stateBefore, err := store.State(t.Context(), Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Heartbeats spaced past the settle and maximum persistence delays.
-	for range 12 {
-		at = at.Add(300 * time.Millisecond)
+		at := time.Now().UTC()
 		if _, err := store.ObserveBatch(t.Context(), cycle(at)); err != nil {
 			t.Fatal(err)
 		}
 
-		time.Sleep(60 * time.Millisecond)
-	}
+		if err := store.Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 
-	time.Sleep(2 * defaultPersistenceMaxDelay)
+		snapshotBefore := markFile(t, path)
+		journalBefore := markFile(t, journalPath(path))
 
-	assertNoPersistence(t, store, path, snapshotBefore, journalBefore, stateBefore.Revision)
+		stateBefore, err := store.State(t.Context(), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// A visible change is journaled at once and checkpointed promptly.
-	running := ActivityRunning
-	if _, err := store.Observe(
-		t.Context(),
-		Observation{
-			Harness:  HarnessCodex,
-			At:       at.Add(time.Second),
-			Subject:  ObservationIdentity{SessionID: "native-visible"},
-			Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process},
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
+		synctest.Wait()
 
-	waitFor(
-		t,
-		defaultPersistenceMaxDelay+2*time.Second,
-		func() bool { return markFile(t, path) != snapshotBefore },
-		"visible change was not persisted promptly",
-	)
-	assertPersistedRunning(t, path, "native-visible")
+		for range 12 {
+			at = at.Add(300 * time.Millisecond)
+			if _, err := store.ObserveBatch(t.Context(), cycle(at)); err != nil {
+				t.Fatal(err)
+			}
+
+			synctest.Wait()
+			time.Sleep(300 * time.Millisecond)
+		}
+
+		time.Sleep(2 * defaultPersistenceMaxDelay)
+		synctest.Wait()
+
+		assertNoPersistence(t, store, path, snapshotBefore, journalBefore, stateBefore.Revision)
+
+		// A visible change is journaled at once and checkpointed promptly.
+		running := ActivityRunning
+		if _, err := store.Observe(
+			t.Context(),
+			Observation{
+				Harness:  harnessPrimary,
+				At:       at.Add(time.Second),
+				Subject:  ObservationIdentity{SessionID: "native-visible"},
+				Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process},
+			},
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		synctest.Wait()
+		time.Sleep(defaultPersistenceMaxDelay)
+		synctest.Wait()
+
+		if markFile(t, path) == snapshotBefore {
+			t.Fatal("visible change was not persisted promptly")
+		}
+
+		assertPersistedRunning(t, path, "native-visible")
+	})
 }
 
 func assertPersistedRunning(t *testing.T, path string, sessionID string) {
@@ -580,7 +576,7 @@ func TestVisibleChangeSurvivesOwnerCrashThroughJournal(t *testing.T) {
 	session, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       time.Now().UTC(),
 			Subject:  ObservationIdentity{SessionID: "crash"},
 			Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process},
@@ -590,7 +586,7 @@ func TestVisibleChangeSurvivesOwnerCrashThroughJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if info, err := os.Stat(path + ".journal.jsonl"); err != nil || info.Size() == 0 {
+	if info, err := os.Stat(journalPath(path)); err != nil || info.Size() == 0 {
 		t.Fatalf("visible change was not journaled: %v %v", info, err)
 	}
 	// Simulate a crash: release ownership without the final flush.
@@ -663,7 +659,7 @@ func endedProcessOnlySession(t *testing.T, store Store, process ProcessIdentity,
 
 	for index, present := range []bool{true, false} {
 		sighting := Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(time.Duration(index) * time.Second),
 			Evidence: &Sighting{Process: process, Present: present},
 		}
@@ -677,7 +673,7 @@ func lateReport(process ProcessIdentity, sessionID string, at time.Time) Observa
 	running := ActivityRunning
 
 	return Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       at,
 		Subject:  ObservationIdentity{SessionID: sessionID},
 		Evidence: &Report{Event: "agent_start", Activity: &running, Process: &process},

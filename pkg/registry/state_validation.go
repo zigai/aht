@@ -103,14 +103,14 @@ func storedObservationCorruption(observations Observations) string {
 
 func validStoredProcessObservation(observation ProcessObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
-		validStoredProcess(observation.Process, !observation.Present)
+		validStoredProcess(observation.Sighting.Process, !observation.Sighting.Present)
 }
 
 func validStoredMultiplexerObservation(observation MultiplexerObservation) bool {
 	return !observation.ObservedAt.IsZero() &&
-		validStoredProcess(observation.Process, false) &&
-		observation.Location.PanePID >= 0 &&
-		(observation.Location.Empty() || observation.Location.Kind.Valid())
+		validStoredProcess(observation.Placement.Process, false) &&
+		observation.Placement.Location.PanePID >= 0 &&
+		(observation.Placement.Location.Empty() || observation.Placement.Location.Kind.Valid())
 }
 
 func validStoredCatalogObservation(observation CatalogObservation) bool {

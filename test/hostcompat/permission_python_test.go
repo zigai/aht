@@ -9,8 +9,6 @@ import (
 	"os/exec"
 	"testing"
 	"time"
-
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func runPythonPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
@@ -67,9 +65,23 @@ func runPythonPermission(t *testing.T, contract hostContract, oracle string, all
 func pythonPermissionCommand(t *testing.T, host *isolatedHost, env []string) *exec.Cmd {
 	t.Helper()
 
-	switch host.contract.ID {
-	case registry.Harness("hermes"):
+	switch host.contract.PermissionDriver {
+	case driverPythonACP:
 		return host.command(t, env, "acp", "--accept-hooks")
+	case driverProcess,
+		driverExecRPC,
+		driverACP,
+		driverCompletionRPC,
+		driverExtensionRPC,
+		driverExecutionServer,
+		driverPluginServer,
+		driverTerminalQuit,
+		driverTerminalDialog,
+		driverCLIACP,
+		driverControlCLI,
+		driverAppServer,
+		driverSDKCLI:
+		fallthrough
 	default:
 		t.Fatalf("unsupported Python permission host %s", host.contract.ID)
 		return nil

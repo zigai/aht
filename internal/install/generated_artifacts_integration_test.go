@@ -181,13 +181,13 @@ func generatedActionArtifacts(
 				applyJSONCommandHooks(harness, plan.Plan),
 			),
 		}
-	case harnesspkg.CursorJSONHooksAction:
+	case harnesspkg.JSONMergeAction:
 		return []generatedArtifact{
 			generatedHookArtifact(
 				t,
 				harness,
 				plan.Plan.Path,
-				applyCursorJSONHooks(harness, plan.Plan),
+				applyJSONMerge(plan.Plan),
 			),
 		}
 	case harnesspkg.ManagedTextBlockAction:
@@ -225,7 +225,7 @@ func generatedActionArtifacts(
 				path:    string(harness) + ".sh",
 				content: shimScript(
 					binary.command,
-					string(harness),
+					harness,
 					"/usr/bin/true",
 					catalog.IntegrationVersionFor(harness),
 				),

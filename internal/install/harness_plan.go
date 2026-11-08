@@ -1,11 +1,11 @@
 package install
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,11 +39,12 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	for _, action := range plan.Actions {
-		result, handled, err := installPlanAction(ctx, opts, opts.Harness, action)
-		if !handled {
+		handler, ok := handlerFor(action)
+		if !ok {
 			continue
 		}
 
+		result, err := handler.install(ctx, opts, opts.Harness)
 		if err == nil {
 			if advisor != nil {
 				result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
@@ -63,7 +64,7 @@ func nativeCatalogAction(plan harnesspkg.InstallPlan) (harnesspkg.NativeCatalogA
 		}
 	}
 
-	return harnesspkg.NativeCatalogAction{Label: "", Command: nil}, false
+	return harnesspkg.NativeCatalogAction{Label: ""}, false
 }
 
 func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
@@ -74,46 +75,6 @@ func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
 	}
 
 	return false
-}
-
-func installPlanAction(
-	ctx context.Context,
-	opts Options,
-	harness registry.Harness,
-	action harnesspkg.InstallAction,
-) (Result, bool, error) {
-	switch typed := action.(type) {
-	case harnesspkg.JSONCommandHooksAction:
-		result, err := installTrustedJSONCommandHooks(ctx, opts, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.CursorJSONHooksAction:
-		result, err := installCursorJSONHooks(opts, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.ManagedTextBlockAction:
-		result, err := installManagedTextBlock(opts, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.RenderedFileAction:
-		result, err := installRenderedPlan(opts, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.PluginDirectoryAction:
-		result, err := installPluginDirectory(ctx, opts, harness, typed.Plan)
-
-		return result, true, err
-	case harnesspkg.NativeCatalogAction:
-		return noInstallRequiredResult(harness, typed.Label), true, nil
-	case harnesspkg.ShimAction:
-		var result Result
-
-		return result, false, nil
-	default:
-		var result Result
-
-		return result, false, nil
-	}
 }
 
 func installTrustedJSONCommandHooks(
@@ -177,7 +138,7 @@ func applyJSONCommandHooks(
 	plan harnesspkg.JSONCommandHookInstallPlan,
 ) func(map[string]any) (bool, error) {
 	source := managedSource(plan.Source, harness)
-	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(harness, plan)
+	desiredByEvent, events, desiredConfig := buildJSONCommandHooks(plan)
 
 	return func(harnessConfig map[string]any) (bool, error) {
 		isManaged := isManagedSourceHookCommand(
@@ -187,12 +148,12 @@ func applyJSONCommandHooks(
 		changed := false
 
 		hooks := harnessConfig
-		if plan.HooksAtRoot {
+		if plan.HooksKey == "" {
 			changed = removeWrappedCommandHooks(harnessConfig, isManaged)
 		} else {
 			var err error
 
-			hooks, err = hooksObject(harnessConfig)
+			hooks, err = commandHooksObject(harnessConfig, plan.HooksKey)
 			if err != nil {
 				return false, err
 			}
@@ -230,18 +191,18 @@ func applyJSONCommandHooks(
 	}
 }
 
-func hooksObject(harnessConfig map[string]any) (map[string]any, error) {
-	value, exists := harnessConfig["hooks"]
+func commandHooksObject(harnessConfig map[string]any, key string) (map[string]any, error) {
+	value, exists := harnessConfig[key]
 	if !exists || value == nil {
 		hooks := make(map[string]any)
-		harnessConfig["hooks"] = hooks
+		harnessConfig[key] = hooks
 
 		return hooks, nil
 	}
 
 	hooks, ok := value.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: hooks is not an object", errHookConfigShape)
+		return nil, fmt.Errorf("%w: %s is not an object", harnesspkg.ErrHookConfigShape, key)
 	}
 
 	return hooks, nil
@@ -255,21 +216,15 @@ func hookEventList(hooks map[string]any, event string) ([]any, error) {
 
 	definitions, ok := value.([]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: hooks.%s is not an array", errHookConfigShape, event)
+		return nil, fmt.Errorf("%w: hooks.%s is not an array", harnesspkg.ErrHookConfigShape, event)
 	}
 
 	return definitions, nil
 }
 
 func buildJSONCommandHooks(
-	harness registry.Harness,
 	plan harnesspkg.JSONCommandHookInstallPlan,
 ) (map[string][]any, []string, map[string]any) {
-	statusMessage := strings.TrimSpace(plan.StatusMessage)
-	if !plan.OmitStatusMessage && statusMessage == "" {
-		statusMessage = managedMarker
-	}
-
 	desiredByEvent := make(map[string][]any)
 
 	events := make([]string, 0, len(plan.Hooks))
@@ -278,11 +233,11 @@ func buildJSONCommandHooks(
 			events = append(events, hook.Event)
 		}
 
-		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], commandHookGroup(
+		desiredByEvent[hook.Event] = append(desiredByEvent[hook.Event], harnesspkg.CommandHookGroup(
 			hook.Command,
 			hook.Matcher,
-			statusMessage,
-			catalog.HookTimeoutSecondsFor(harness, hook.Event),
+			plan.StatusMessage,
+			cmp.Or(hook.Timeout, harnesspkg.HookTimeoutSeconds),
 		))
 	}
 
@@ -296,10 +251,10 @@ func buildJSONCommandHooks(
 	return desiredByEvent, events, desiredConfig
 }
 
-func installCursorJSONHooks(
+func installJSONMerge(
 	opts Options,
 	harness registry.Harness,
-	plan harnesspkg.CursorJSONHookInstallPlan,
+	plan harnesspkg.JSONMergeInstallPlan,
 ) (Result, error) {
 	label := installLabel(plan.Label, harness, "hooks")
 	configLabel := installLabel(plan.ConfigLabel, harness, "config")
@@ -307,7 +262,7 @@ func installCursorJSONHooks(
 	return installJSONHookFile(opts, jsonHookFileInstall{
 		Harness:                 harness,
 		Path:                    plan.Path,
-		Apply:                   applyCursorJSONHooks(harness, plan),
+		Apply:                   applyJSONMerge(plan),
 		EncodeError:             "encoding " + label,
 		CreateDirError:          "creating " + configLabel + " directory",
 		WriteError:              "writing " + label,
@@ -317,121 +272,12 @@ func installCursorJSONHooks(
 	})
 }
 
-func applyCursorJSONHooks(
-	harness registry.Harness,
-	plan harnesspkg.CursorJSONHookInstallPlan,
+func applyJSONMerge(
+	plan harnesspkg.JSONMergeInstallPlan,
 ) func(map[string]any) (bool, error) {
-	source := managedSource(plan.Source, harness)
-
-	return func(harnessConfig map[string]any) (bool, error) {
-		isManaged := isManagedSourceHookCommand(source, []map[string]any{harnessConfig})
-
-		changed := ensureCursorVersion(harnessConfig)
-		for _, hook := range plan.Hooks {
-			updated, err := upsertCursorHook(harnessConfig, hook.Event, hook.Command, isManaged)
-			if err != nil {
-				return false, err
-			}
-
-			changed = changed || updated
-		}
-
-		return changed, nil
+	return func(config map[string]any) (bool, error) {
+		return plan.Merge(config, isManagedSourceHookCommand(plan.Source, []map[string]any{config}))
 	}
-}
-
-func ensureCursorVersion(harnessConfig map[string]any) bool {
-	if _, ok := harnessConfig["version"]; ok {
-		return false
-	}
-
-	harnessConfig["version"] = float64(1)
-
-	return true
-}
-
-func upsertCursorHook(
-	harnessConfig map[string]any,
-	event string,
-	command string,
-	isManaged func(string) bool,
-) (bool, error) {
-	hooks, err := hooksObject(harnessConfig)
-	if err != nil {
-		return false, err
-	}
-
-	definitions, err := hookEventList(hooks, event)
-	if err != nil {
-		return false, err
-	}
-
-	managedCount, exactCount := countManagedCursorHooks(definitions, command, isManaged)
-	if managedCount == 1 && exactCount == 1 {
-		return false, nil
-	}
-
-	definitions, _ = removeManagedCursorHooks(definitions, isManaged)
-	hooks[event] = append(definitions, map[string]any{
-		"command": command,
-		"timeout": float64(harnesspkg.HookTimeoutSeconds),
-	})
-
-	return true, nil
-}
-
-func countManagedCursorHooks(
-	definitions []any,
-	command string,
-	isManaged func(string) bool,
-) (int, int) {
-	managedCount := 0
-	exactCount := 0
-
-	for _, definitionValue := range definitions {
-		definition, ok := definitionValue.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		hookCommand, commandOK := definition["command"].(string)
-		if !commandOK || !isManaged(hookCommand) {
-			continue
-		}
-
-		managedCount++
-
-		if hookCommand == command {
-			exactCount++
-		}
-	}
-
-	return managedCount, exactCount
-}
-
-func removeManagedCursorHooks(definitions []any, isManaged func(string) bool) ([]any, bool) {
-	cleanedDefinitions := make([]any, 0, len(definitions))
-	removed := false
-
-	for _, definitionValue := range definitions {
-		definition, ok := definitionValue.(map[string]any)
-		if !ok {
-			cleanedDefinitions = append(cleanedDefinitions, definitionValue)
-			continue
-		}
-
-		hookCommand, commandOK := definition["command"].(string)
-		if commandOK && isManaged(hookCommand) {
-			removed = true
-			continue
-		}
-
-		cleanedDefinition := make(map[string]any, len(definition))
-		maps.Copy(cleanedDefinition, definition)
-		cleanedDefinitions = append(cleanedDefinitions, cleanedDefinition)
-	}
-
-	return cleanedDefinitions, removed
 }
 
 func installManagedTextBlock(
@@ -453,7 +299,7 @@ func installManagedTextBlock(
 	if filepath.Ext(plan.Path) == ".toml" && validTOML(cleaned) && !validTOML(next) {
 		return Result{}, fmt.Errorf(
 			"%w: %s cannot take the managed block",
-			errHookConfigShape,
+			harnesspkg.ErrHookConfigShape,
 			plan.Path,
 		)
 	}
@@ -933,14 +779,14 @@ func isManagedSourceHookCommand(source string, configs []map[string]any) func(st
 	}
 }
 
-func nativeHookIDForSource(source string) string {
+func nativeHookIDForSource(source string) registry.Harness {
 	for _, adapter := range catalog.All() {
 		if adapter.Definition().IntegrationSource != source {
 			continue
 		}
 
 		if _, ok := adapter.(harnesspkg.HookAdapter); ok {
-			return string(adapter.Definition().ID)
+			return adapter.Definition().ID
 		}
 
 		break
@@ -949,31 +795,20 @@ func nativeHookIDForSource(source string) string {
 	return ""
 }
 
-func canonicalNativeHookCommand(command string, nativeID string, binaries map[string]bool) bool {
-	words, err := shlex.Split(command)
+func canonicalNativeHookCommand(
+	command string,
+	nativeID registry.Harness,
+	binaries map[string]bool,
+) bool {
+	binary, ok := harnesspkg.ParseNativeHookCommand(command, nativeID)
 
-	return err == nil && len(words) > 0 && binaries[words[0]] &&
-		canonicalNativeHookWords(command, nativeID, words)
-}
-
-func canonicalNativeHookWords(command string, nativeID string, words []string) bool {
-	if nativeID == "" || len(words) != 6 ||
-		words[1] != "--json" || words[2] != "hook" || words[3] != nativeID ||
-		words[4] != "--event" || words[5] == "" {
-		return false
-	}
-
-	for i, word := range words {
-		words[i] = harnesspkg.ShellQuote(word)
-	}
-
-	return command == strings.Join(words, " ")
+	return ok && binaries[binary]
 }
 
 func collectOwnedHookBinaries(
 	value any,
 	sourcePattern *regexp.Regexp,
-	nativeID string,
+	nativeID registry.Harness,
 	binaries map[string]bool,
 ) {
 	switch value := value.(type) {
@@ -992,7 +827,11 @@ func collectOwnedHookBinaries(
 	}
 }
 
-func ownedHookBinary(hook map[string]any, sourcePattern *regexp.Regexp, nativeID string) string {
+func ownedHookBinary(
+	hook map[string]any,
+	sourcePattern *regexp.Regexp,
+	nativeID registry.Harness,
+) string {
 	command, ok := hook["command"].(string)
 	if !ok {
 		return ""
@@ -1015,8 +854,10 @@ func ownedHookBinary(hook map[string]any, sourcePattern *regexp.Regexp, nativeID
 		return binary
 	}
 
-	if marked && canonicalNativeHookWords(command, nativeID, words) {
-		return binary
+	if marked && nativeID != "" {
+		if _, ok := harnesspkg.ParseNativeHookCommand(command, nativeID); ok {
+			return binary
+		}
 	}
 
 	return ""
@@ -1048,12 +889,12 @@ func preparePluginDirectory(
 	opts Options,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (pluginDirectoryInstall, bool, error) {
-	files, err := renderInstallFiles(plan.Files, "plugin")
+	files, order, err := renderPluginFiles(plan)
 	if err != nil {
 		return pluginDirectoryInstall{}, false, err
 	}
 
-	plugin := newPluginDirectoryInstall(plan, files)
+	plugin := newPluginDirectoryInstall(plan, files, order)
 
 	if _, err := plugin.recover(opts.DryRun); err != nil {
 		return pluginDirectoryInstall{}, false, err

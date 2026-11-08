@@ -10,34 +10,39 @@ import (
 func (openclawHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
 		Patterns: []string{
-			"openclaw-agent.sqlite",
 			"*.jsonl",
+			"openclaw-agent.sqlite",
+			"*.jsonl.deleted.*.zst",
+			"*.jsonl.reset.*.zst",
 			"*.jsonl.deleted.*",
 			"*.jsonl.reset.*",
 		},
-		Sources:           transcriptSources,
-		SkipDirectory:     skipTranscriptDirectory,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            transcript.TreeRecord,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             transcriptQuery,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		Sources:       transcriptSources,
+		FileFormat:    transcriptFormat,
+		SkipDirectory: skipTranscriptDirectory,
+		Record:        transcript.TreeRecord,
+		Query:         transcriptQuery,
 	}
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{
-		filepath.Join(
-			transcript.EnvPath("OPENCLAW_STATE_DIR", filepath.Join(home, ".openclaw")),
-			"agents",
-		),
-	}, nil
+	state := openclawStateDir(home)
+	if state == "" {
+		return nil, nil
+	}
+
+	return []string{filepath.Join(state, "agents")}, nil
+}
+
+func transcriptFormat(path string) transcript.Format {
+	switch filepath.Ext(path) {
+	case ".sqlite", ".db":
+		return transcript.FormatDatabase
+	case ".zst":
+		return transcript.FormatCompressed
+	default:
+		return transcript.FormatJSONL
+	}
 }
 
 func skipTranscriptDirectory(path string) bool {

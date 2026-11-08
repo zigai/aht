@@ -6,15 +6,8 @@ import (
 
 func (kimiCodeHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "npm",
-		Package:       "@moonshot-ai/kimi-code",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "kimi",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
+		Source:    harness.DistributionNPM,
+		Package:   "@moonshot-ai/kimi-code",
+		Directory: "kimi",
 	}
 }

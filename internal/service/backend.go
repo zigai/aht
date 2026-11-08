@@ -9,12 +9,11 @@ type backend interface {
 	load(ctx context.Context, executor CommandExecutor) error
 	restart(ctx context.Context, executor CommandExecutor) error
 	unload(ctx context.Context, executor CommandExecutor) error
-	running(ctx context.Context, executor CommandExecutor, checkEnabled bool) (runtimeState, error)
+	running(ctx context.Context, executor CommandExecutor) (runtimeState, error)
 }
 
 type runtimeState struct {
 	Running bool
 	Loaded  bool
-	Enabled bool
 	Message string
 }

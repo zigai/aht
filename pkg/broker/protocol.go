@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -24,6 +25,27 @@ const (
 	MethodReset        = "reset"
 )
 
+// Response frame types.
+const (
+	ResponseResult    = "result"
+	ResponseSnapshot  = "snapshot"
+	ResponseHeartbeat = "heartbeat"
+	ResponseError     = "error"
+)
+
+// Error codes carried in [Error.Code].
+const (
+	CodeBusy                = "busy"
+	CodeNotFound            = "not_found"
+	CodeObservationConflict = "observation_conflict"
+	CodeProcessEnded        = "process_ended"
+	CodeCanceled            = "canceled"
+	CodeOperationFailed     = "operation_failed"
+	CodeInvalidJSON         = "invalid_json"
+	CodeInvalidRequest      = "invalid_request"
+	CodeResponseTooLarge    = "response_too_large"
+)
+
 // SocketPathEnv overrides the broker socket used by clients and integrations.
 const SocketPathEnv = "AHT_SOCKET"
 
@@ -39,6 +61,16 @@ var (
 	// ErrProtocol means the broker returned an invalid or incompatible frame.
 	ErrProtocol = errors.New("aht broker protocol error")
 )
+
+var classifiedCodes = []struct {
+	code string
+	err  error
+}{
+	{code: CodeBusy, err: ErrBusy},
+	{code: CodeNotFound, err: registry.ErrSessionNotFound},
+	{code: CodeObservationConflict, err: registry.ErrObservationConflict},
+	{code: CodeProcessEnded, err: registry.ErrProcessEnded},
+}
 
 // Request is one broker RPC. Subscribe keeps the connection open after the
 // initial response and streams Snapshot frames.
@@ -91,4 +123,20 @@ func SocketPath(storePath string) string {
 // DefaultSocketPath returns the default endpoint for the current user's AHT broker.
 func DefaultSocketPath() string {
 	return SocketPath("")
+}
+
+// ErrorCode returns the wire code for an operation failure. [RemoteError]
+// maps classified codes back to the same errors.
+func ErrorCode(err error) string {
+	for _, classified := range classifiedCodes {
+		if errors.Is(err, classified.err) {
+			return classified.code
+		}
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return CodeCanceled
+	}
+
+	return CodeOperationFailed
 }

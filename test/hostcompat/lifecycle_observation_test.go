@@ -69,13 +69,13 @@ func (host *isolatedHost) assertInterrupted(t *testing.T) {
 				return false
 			}
 
-			if host.contract.ID == registry.Harness("kilo") {
+			if host.contract.InterruptionDriver == driverPluginServer {
 				// Its abort API ends the held turn with native idle, without
 				// deleting the durable session. Running was required before abort.
 				return terminalSession(host.contract.ID, session)
 			}
 
-			if host.contract.ID == registry.Harness("copilot") &&
+			if host.contract.InterruptGone &&
 				session.Presence() == registry.PresenceGone {
 				return true
 			}
@@ -85,7 +85,7 @@ func (host *isolatedHost) assertInterrupted(t *testing.T) {
 			}
 			// Grok's TUI quit must publish SessionEnd after Esc canceled the turn.
 			// An earlier interrupted Stop alone does not prove clean shutdown.
-			if host.contract.ID == registry.Harness("grok") {
+			if host.contract.InterruptTerminal {
 				return false
 			}
 

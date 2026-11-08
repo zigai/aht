@@ -6,15 +6,8 @@ import (
 
 func (clineHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "npm",
-		Package:       "cline",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "cline",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
+		Source:    harness.DistributionNPM,
+		Package:   "cline",
+		Directory: "cline",
 	}
 }

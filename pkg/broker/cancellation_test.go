@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 package broker_test
 
 import (
@@ -141,7 +139,7 @@ func socketClient(t *testing.T, serve func(net.Conn)) *broker.Client {
 		serve(connection)
 	}()
 
-	return broker.NewClientForSocket(path)
+	return broker.NewClient(path)
 }
 
 // shortSocketPath keeps test listeners below Darwin's Unix socket path limit.

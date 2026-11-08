@@ -375,7 +375,7 @@ func TestMultiplexerPanesFindCustomSocketServerInScannedProcesses(t *testing.T) 
 			func(pane mux.Pane) bool { return pane.Location.ServerID == server.Socket },
 		)
 	}
-	if found(nil) {
+	if found([]processinfo.Process{}) {
 		t.Fatal("custom -S server found without its process, so the scan below proves nothing")
 	}
 

@@ -295,7 +295,7 @@ func searchSourceStatus(
 	for _, status := range result.Sources {
 		if status.Source.Harness == harness &&
 			filepath.Clean(status.Source.Path) == filepath.Clean(path) {
-			return status.Status
+			return string(status.Status)
 		}
 	}
 
@@ -591,10 +591,10 @@ func TestSearchCLIRejectsInvalidOptionsBeforeConfig(t *testing.T) {
 	for _, args := range [][]string{
 		{"search", ""},
 		{"search", "x", "--limit", "-1"},
-		{"search", "x", "--agent", "bad"},
+		{"search", "x", "--harness", "bad"},
 		{"search", "x", "--source", "pi"},
 		{"search", "x", "--source", "pi="},
-		{"search", "x", "--agent", "codex", "--source", "pi=/tmp/history.jsonl"},
+		{"search", "x", "--harness", "codex", "--source", "pi=/tmp/history.jsonl"},
 		{"search", "(", "--regex"},
 		{"search", "--since", "yesterday"},
 		{"search", "--since", "1d", "--until", "2d"},
@@ -818,7 +818,7 @@ func TestSearchCLIUsageErrorsShowCorrectedUsage(t *testing.T) {
 		},
 		{
 			name:     "conflicting harness selection",
-			args:     []string{"search", "refresh", "--agent", "codex", "--source", "pi=" + path},
+			args:     []string{"search", "refresh", "--harness", "codex", "--source", "pi=" + path},
 			expected: []string{"conflicting --harness and --source harnesses", `--source "pi=`, "aht search --help"},
 		},
 	} {
@@ -863,7 +863,7 @@ func TestSearchCLIAgentAndSourceAgree(t *testing.T) {
 		"--json",
 		"search",
 		"refresh",
-		"--agent",
+		"--harness",
 		"pi",
 		"--source",
 		"pi=" + path,

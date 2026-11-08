@@ -7,6 +7,7 @@ import (
 	rand "math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -769,10 +770,11 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 		steps = 200
 	}
 
-	seedCases := []uint64{13, 21, 24, 25}
+	regressionSeeds := []uint64{4, 6, 13, 21, 24, 25}
+	seedCases := slices.Clone(regressionSeeds)
 
 	for seed := range seeds {
-		if seed != 13 && seed != 21 && seed != 24 && seed != 25 {
+		if !slices.Contains(regressionSeeds, seed) {
 			seedCases = append(seedCases, seed)
 		}
 	}
@@ -782,7 +784,7 @@ func TestStoreBackendsRemainEquivalentAcrossOperationSequences(t *testing.T) {
 			t.Parallel()
 
 			seedSteps := steps
-			if seed == 13 || seed == 21 || seed == 24 || seed == 25 {
+			if slices.Contains(regressionSeeds, seed) {
 				seedSteps = max(seedSteps, 200)
 			}
 
@@ -910,9 +912,8 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 			)
 			assertEquivalent(t, fmt.Sprintf("step %d session", step), fileSession, memorySession)
 
-			if lifecycle := observation.Report().Lifecycle; observation.Kind() == "report" &&
-				lifecycle != nil &&
-				*lifecycle == NativeLifecycleEnd {
+			if report := observation.Report(); report != nil && report.Lifecycle != nil &&
+				*report.Lifecycle == NativeLifecycleEnd {
 				coverage.Hit("native end")
 			}
 
@@ -920,7 +921,7 @@ func exerciseEquivalentStores(t *testing.T, seed uint64, steps int, coverage *co
 				coverage.Hit("waiting activity")
 			}
 
-			if decision := fileSession.Decision(); observation.Kind() == "reading" &&
+			if decision := fileSession.Decision(); observation.Kind() == EvidenceReading &&
 				decision != nil &&
 				decision.Authority == AuthorityScreen {
 				coverage.Hit("screen evidence")
@@ -978,25 +979,25 @@ func exerciseReplacedSightingPair(
 
 	observations := []Observation{
 		{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: oldID},
 			Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process},
 		},
 		{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at.Add(time.Nanosecond),
 			Subject:  ObservationIdentity{SessionID: newID},
 			Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process},
 		},
 		{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at.Add(2 * time.Nanosecond),
 			Subject:  ObservationIdentity{SessionID: oldID},
 			Evidence: &Sighting{Process: sameIdentity, Present: true},
 		},
 		{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at.Add(3 * time.Nanosecond),
 			Subject:  ObservationIdentity{SessionID: oldID},
 			Evidence: &Sighting{Process: newProcess, Present: true},
@@ -1071,7 +1072,7 @@ func mustListParity(t *testing.T, store Store) []Session {
 func rejectedStaleSequence(t *testing.T, store Store, observation Observation) bool {
 	t.Helper()
 
-	if observation.Kind() != "report" || observation.Report().Reporter.Sequence == nil {
+	if observation.Kind() != EvidenceReport || observation.Report().Reporter.Sequence == nil {
 		return false
 	}
 
@@ -1102,13 +1103,13 @@ func injectParityConflictBatch(
 	running, idle := ActivityRunning, ActivityIdle
 	conflictBatch := []Observation{
 		{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(time.Duration(step) * time.Millisecond),
 			Subject:  ObservationIdentity{SessionID: "conflict-item"},
 			Evidence: &Report{Activity: &running},
 		},
 		{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       base.Add(time.Duration(step) * time.Millisecond),
 			Subject:  ObservationIdentity{SessionID: "conflict-item"},
 			Evidence: &Report{Activity: &idle},
@@ -1133,7 +1134,7 @@ func assertTerminalLifecycleOutcome(
 ) {
 	t.Helper()
 
-	if obs.Kind() != "report" || !reportEnds(obs.Report()) {
+	if obs.Kind() != EvidenceReport || !obs.Report().Ends() {
 		return
 	}
 
@@ -1217,7 +1218,7 @@ func generatedObservation(
 ) Observation {
 	sessionID := fmt.Sprintf("session-%d", generator.IntN(8))
 	activity := []Activity{ActivityIdle, ActivityRunning, ActivityWaiting}[generator.IntN(3)]
-	harness := []Harness{HarnessClaude, HarnessCodex, HarnessOmp, HarnessPi}[generator.IntN(4)]
+	harness := []Harness{harnessCatalog, harnessPrimary, harnessAlternate, harnessSecondary}[generator.IntN(4)]
 	observedAt := base.Add(time.Duration(step) * time.Millisecond)
 
 	switch generator.IntN(8) {
@@ -1401,7 +1402,7 @@ func testParityNativeLifecyclePhase(
 	running := ActivityRunning
 	live := PresenceLive
 	obs := Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      at,
 		Subject: ObservationIdentity{SessionID: sessionID},
 		Evidence: &Report{
@@ -1445,7 +1446,7 @@ func testParityInvalidEndPhase(
 	running := ActivityRunning
 	end := NativeLifecycleEnd
 	invalidEnd := Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      at,
 		Subject: ObservationIdentity{SessionID: sessionID},
 		Evidence: &Report{
@@ -1475,7 +1476,7 @@ func testParityValidEndPhase(
 
 	end := NativeLifecycleEnd
 	validEnd := Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       at,
 		Subject:  ObservationIdentity{SessionID: sessionID},
 		Evidence: &Report{Event: "session_end", Lifecycle: &end, Activity: nil, Process: process},
@@ -1518,7 +1519,7 @@ func testParityProcessPresencePhase(
 
 	present := true
 	procObs := Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       at,
 		Subject:  ObservationIdentity{SessionID: sessionID},
 		Evidence: &Sighting{Process: *process, Present: present},

@@ -190,6 +190,28 @@ INSERT INTO messages VALUES('m5','title-native','user','[{"type":"text","data":{
 			db := databaseFixture(t, tt.filename, tt.ddl)
 			path := databasePath(t, db)
 			assertDatabaseSearch(t, tt.harness, path)
+
+			if tt.harness == registry.Harness("openclaw") {
+				export := filepath.Join(t.TempDir(), "export.sqlite")
+				if _, err := db.ExecContext(t.Context(), "VACUUM INTO ?", export); err != nil {
+					t.Fatal(err)
+				}
+
+				c := history.Catalog{
+					IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
+					Sources:   []history.Source{{Harness: tt.harness, Path: export}},
+				}
+				for range 2 {
+					result, err := c.Search(
+						t.Context(),
+						history.Query{Terms: []string{"refresh token"}},
+					)
+					if err != nil || len(result.Issues) != 0 || len(result.Matches) != 1 ||
+						result.Matches[0].Conversation.SessionID != "native" {
+						t.Fatalf("renamed database search = %+v, %v", result, err)
+					}
+				}
+			}
 		})
 	}
 }
@@ -461,7 +483,7 @@ INSERT INTO messages VALUES(2,'native','user','refresh token',2);`+tt.extraRows)
 				len(result.Issues) != tt.issues ||
 				len(result.Matches) != 1 ||
 				result.Matches[0].MatchingParts != tt.matchingParts ||
-				result.Sources[0].Status != tt.status {
+				string(result.Sources[0].Status) != tt.status {
 				t.Fatalf("content search = %#v, %v", result, err)
 			}
 

@@ -10,18 +10,10 @@ func (ompHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
 		Patterns:          []string{"*.jsonl"},
 		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
 		Record:            transcriptRecord,
 		FastRecord:        transcript.FastTreeRecord,
-		Document:          nil,
-		Query:             nil,
 		LocalTitles:       true,
 		RewritableHeaders: []string{"title"},
-		Parent:            nil,
 	}
 }
 

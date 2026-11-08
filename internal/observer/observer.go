@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -32,7 +32,6 @@ const (
 	// healthWriteInterval bounds how stale the health file may get while the
 	// observer status and error category stay unchanged.
 	healthWriteInterval        = 30 * time.Second
-	commandArgumentPrefixCount = 2
 	initialScreenConfirmations = 2
 )
 
@@ -77,7 +76,6 @@ type Options struct {
 	StorePath        string
 	Interval         time.Duration
 	GracePeriod      time.Duration
-	HealthPath       string
 	ProcessList      ProcessLister
 	PaneList         mux.PaneLister
 	LocationPresence func(context.Context, registry.Location) (registry.Presence, error)
@@ -112,22 +110,6 @@ type Result struct {
 	Error        string    `json:"error,omitempty"`
 }
 
-type Health struct {
-	PID                          int           `json:"pid"`
-	StartIdentity                string        `json:"start_identity,omitempty"`
-	Interval                     time.Duration `json:"interval"`
-	GracePeriod                  time.Duration `json:"grace_period"`
-	StartedAt                    time.Time     `json:"started_at"`
-	LastAttemptAt                time.Time     `json:"last_attempt_at"`
-	LastSuccessAt                time.Time     `json:"last_success_at"`
-	LastEnumerationErrorCategory string        `json:"last_enumeration_error_category,omitempty"`
-	LastEnumerationError         string        `json:"last_enumeration_error,omitempty"`
-	Cycles                       int           `json:"cycles"`
-	Observations                 int           `json:"observations"`
-	Sessions                     int           `json:"sessions"`
-	Degraded                     bool          `json:"degraded"`
-}
-
 type processKey struct {
 	harness registry.Harness
 	pid     int
@@ -147,6 +129,7 @@ type pendingScreenDecision struct {
 type cycleInventory struct {
 	processes     []processinfo.Process
 	processByPID  map[int]processinfo.Process
+	tree          *processTree
 	harnessByPID  map[int]registry.Harness
 	knownSessions []registry.Session
 }
@@ -194,7 +177,9 @@ func New(opts Options) *Observer {
 
 	processList := opts.ProcessList
 	if processList == nil {
-		processList = processinfo.List
+		processList = func(ctx context.Context) ([]processinfo.Process, error) {
+			return processinfo.ListWithEnv(ctx, append(drivers.EnvKeys(), processinfo.ChildRoleEnv))
+		}
 	}
 
 	paneList := listMultiplexerPanes
@@ -222,7 +207,10 @@ func New(opts Options) *Observer {
 		errorWriter = os.Stderr
 	}
 
-	healthPath, lockPath := observerStateFiles(opts.HealthPath, storePath)
+	var healthPath, observerLockPath string
+	if storePath != "" {
+		healthPath, observerLockPath = HealthPath(storePath), lockPath(storePath)
+	}
 
 	catalogList := opts.CatalogList
 	if catalogList == nil {
@@ -264,7 +252,6 @@ func New(opts Options) *Observer {
 		initialized:   false,
 		health: Health{
 			PID:                          0,
-			StartIdentity:                "",
 			Interval:                     0,
 			GracePeriod:                  0,
 			StartedAt:                    time.Time{},
@@ -278,7 +265,7 @@ func New(opts Options) *Observer {
 			Degraded:                     false,
 		},
 		lastHealthWrite: time.Time{},
-		lockPath:        lockPath,
+		lockPath:        observerLockPath,
 		lockFile:        nil,
 		running:         false,
 		continuous:      false,
@@ -295,7 +282,7 @@ func (o *Observer) RunWithResults(ctx context.Context, handle func(Result) error
 	return o.run(ctx, handle)
 }
 
-func (o *Observer) RunOnce(ctx context.Context) (Result, error) {
+func (o *Observer) RunOnce(ctx context.Context) (_ Result, err error) {
 	if ctx == nil {
 		return Result{}, errObserverContextNil
 	}
@@ -303,7 +290,7 @@ func (o *Observer) RunOnce(ctx context.Context) (Result, error) {
 	if err := o.acquireLock(); err != nil {
 		return Result{}, err
 	}
-	defer o.releaseLock()
+	defer func() { err = errors.Join(err, o.releaseLock()) }()
 
 	return o.runCycle(ctx)
 }
@@ -315,7 +302,7 @@ func (o *Observer) Health() Health {
 	return o.health
 }
 
-func (o *Observer) run(ctx context.Context, handle func(Result) error) error {
+func (o *Observer) run(ctx context.Context, handle func(Result) error) (err error) {
 	if ctx == nil {
 		return errObserverContextNil
 	}
@@ -323,7 +310,7 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) error {
 	if err := o.acquireLock(); err != nil {
 		return err
 	}
-	defer o.releaseLock()
+	defer func() { err = errors.Join(err, o.releaseLock()) }()
 
 	o.continuous = true
 	defer func() { o.continuous = false }()
@@ -412,10 +399,11 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 
 	observations := make([]registry.Observation, 0, len(processes)+len(panes)+len(catalogEntries))
 	processByPID := processesByPID(processes)
+	tree := newProcessTree(processByPID)
 	catalogEntries, catalogByPID := claimCurrentCatalogEntries(catalogEntries, processByPID)
 	harnessByPID := resolveHarnesses(processes)
-	pruneNestedHarnesses(processes, processByPID, harnessByPID)
-	normalizeHarnessForeground(processes, processByPID, harnessByPID)
+	pruneNestedHarnesses(processes, tree, harnessByPID)
+	normalizeHarnessForeground(processes, tree, harnessByPID)
 
 	candidates := o.holdUnconfirmedProcesses(
 		knownSessions,
@@ -426,8 +414,8 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	)
 
 	inventory := cycleInventory{
-		processes:     processes,
-		processByPID:  processByPID,
+		processes:    processes,
+		processByPID: processByPID, tree: tree,
 		harnessByPID:  harnessByPID,
 		knownSessions: knownSessions,
 	}
@@ -496,7 +484,7 @@ func (o *Observer) paneObservations(
 		process, harnessID, ok := multiplexerPaneProcess(
 			pane,
 			inventory.processes,
-			inventory.processByPID,
+			inventory.tree,
 			inventory.harnessByPID,
 			paneCommandCounts,
 		)
@@ -508,7 +496,7 @@ func (o *Observer) paneObservations(
 		)
 
 		if !ok || claimed ||
-			nestedHarnessProcess(process, inventory.processByPID, inventory.harnessByPID) {
+			nestedHarnessProcess(process, inventory.tree, inventory.harnessByPID) {
 			continue
 		}
 		// Only infer a foreground owner when controlling-TTY job-control metadata is unavailable.
@@ -568,20 +556,10 @@ func (o *Observer) retireMissingProcesses(
 
 		observations = append(
 			observations,
-			registry.Observation{
-				Harness: key.harness,
-				At:      at,
-				Subject: registry.ObservationIdentity{
-					SessionID:   "",
-					SessionPath: "",
-					CWD:         "",
-					Attributes:  nil,
-				},
-				Evidence: &registry.Sighting{
-					Process: *processIdentity(old.process),
-					Present: false,
-				},
-			},
+			processObservation(key.harness, at, &registry.Sighting{
+				Process: *processIdentity(old.process),
+				Present: false,
+			}),
 		)
 		update.retired = append(update.retired, key)
 	}
@@ -663,36 +641,6 @@ func (o *Observer) recordCycleHealth(at time.Time, result Result) error {
 	return o.recordHealth(at, false, "", nil, result)
 }
 
-func IsAgentWrapper(process processinfo.Process) bool {
-	command := filepath.Base(process.Executable)
-	if command == "" && len(process.Args) > 0 {
-		command = filepath.Base(process.Args[0])
-	}
-
-	switch command {
-	case "env",
-		"fence",
-		"bwrap",
-		"bubblewrap",
-		"mise",
-		"nix-shell",
-		"nix",
-		"direnv",
-		"node",
-		"bun",
-		"python",
-		"python3",
-		"sh",
-		"bash":
-		return true
-	default:
-		return false
-	}
-}
-
-// An agent can itself look like a wrapper (pi runs as node), so only a chain of
-// wrappers counts as launching the descendant; agents nested behind other tools
-// belong to the outer agent.
 func observerStore(opts Options) (Store, string) {
 	if opts.Store != nil {
 		return opts.Store, opts.StorePath
@@ -706,23 +654,14 @@ func observerStore(opts Options) (Store, string) {
 	return registry.NewJournal(storePath, catalog.Rules{}), storePath
 }
 
-func observerStateFiles(healthPath string, storePath string) (string, string) {
-	if storePath == "" {
-		return healthPath, ""
-	}
-
-	if healthPath == "" {
-		healthPath = storePath + ".observer-health.json"
-	}
-
-	return healthPath, storePath + ".observer.lock"
-}
-
+// An agent can itself look like a wrapper (pi runs as node), so only a chain of
+// wrappers counts as launching the descendant; agents nested behind other tools
+// belong to the outer agent.
 func launchesHarnessThroughWrappers(
 	wrapperPID int,
 	harnessID registry.Harness,
 	processes []processinfo.Process,
-	processByPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) bool {
 	for _, process := range processes {
@@ -730,20 +669,15 @@ func launchesHarnessThroughWrappers(
 			continue
 		}
 
-		visited := map[int]bool{process.PID: true}
-		for ppid := process.PPID; ppid > 0 && !visited[ppid]; {
+		for ppid := range tree.parents(process.PID) {
 			if ppid == wrapperPID {
 				return true
 			}
 
-			visited[ppid] = true
-
-			parent, ok := processByPID[ppid]
-			if !ok || !IsAgentWrapper(parent) {
+			parent, ok := tree.byPID[ppid]
+			if !ok || !catalog.IsWrapper(parent) {
 				break
 			}
-
-			ppid = parent.PPID
 		}
 	}
 
@@ -761,8 +695,8 @@ func joinObserverHealthError(primary error, healthErr error) error {
 func sortPanesByPriority(panes []mux.Pane) {
 	slices.SortStableFunc(panes, func(left, right mux.Pane) int {
 		return cmp.Compare(
-			multiplexerPriority(right.Location.Kind),
-			multiplexerPriority(left.Location.Kind),
+			drivers.Precedence(right.Location.Kind),
+			drivers.Precedence(left.Location.Kind),
 		)
 	})
 }
@@ -825,12 +759,12 @@ func resolveHarnesses(processes []processinfo.Process) map[int]registry.Harness 
 
 func pruneNestedHarnesses(
 	processes []processinfo.Process,
-	processByPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) {
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
-		if !ok || !IsAgentWrapper(process) {
+		if !ok || !catalog.IsWrapper(process) {
 			continue
 		}
 
@@ -838,7 +772,7 @@ func pruneNestedHarnesses(
 			process.PID,
 			harnessID,
 			processes,
-			processByPID,
+			tree,
 			harnessByPID,
 		) {
 			delete(harnessByPID, process.PID)
@@ -851,7 +785,7 @@ func pruneNestedHarnesses(
 			continue
 		}
 
-		if hasAncestorHarness(process.PID, harnessID, processByPID, harnessByPID) {
+		if hasAncestorHarness(process.PID, harnessID, tree, harnessByPID) {
 			delete(harnessByPID, process.PID)
 		}
 	}
@@ -874,12 +808,8 @@ func processSightings(
 		key := processKey{harness: harnessID, pid: process.PID, start: process.StartIdentity}
 		current[key] = trackedProcess{process: process, missingSince: time.Time{}, missingCount: 0}
 
-		identity := registry.ObservationIdentity{
-			SessionID:   "",
-			SessionPath: "",
-			CWD:         "",
-			Attributes:  nil,
-		}
+		var identity registry.ObservationIdentity
+
 		if entry, ok := catalogByPID[process.PID]; ok && entry.Harness == harnessID {
 			identity = registry.ObservationIdentity{
 				SessionID:   entry.SessionID,
@@ -1045,46 +975,21 @@ func (o *Observer) processConfirmed(
 }
 
 func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
-	if process.AgentHint != "" {
-		if harnessID, err := catalog.Parse(process.AgentHint); err == nil {
-			return observableHarness(process, harnessID)
-		}
+	harnessID, ok := catalog.ResolveProcess(process)
+	if !ok {
+		return "", false
 	}
 
-	if harnessID, ok := catalog.FromCommand(process.Executable); ok {
-		return observableHarness(process, harnessID)
-	}
-
-	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if harnessID, ok := catalog.FromCommand(arg); ok {
-			return observableHarness(process, harnessID)
-		}
-	}
-
-	if IsAgentWrapper(process) {
-		start := min(commandArgumentPrefixCount, len(process.Args))
-		for _, arg := range process.Args[start:] {
-			if harnessID, ok := catalog.FromCommand(arg); ok {
-				return observableHarness(process, harnessID)
-			}
-		}
-	}
-
-	return "", false
+	return observableHarness(process, harnessID)
 }
 
 func observableHarness(
 	process processinfo.Process,
 	harnessID registry.Harness,
 ) (registry.Harness, bool) {
-	if isTestFixtureProcess(process) || isReportCommand(process.Args, harnessID) {
+	if process.Env[processinfo.ChildRoleEnv] != "" || process.PID == os.Getpid() ||
+		isReportCommand(process.Args, harnessID) {
 		return "", false
-	}
-
-	for _, arg := range process.Args {
-		if strings.HasPrefix(arg, "--type=") {
-			return "", false
-		}
 	}
 
 	if filter, ok := catalog.ProcessFilterFor(harnessID); ok {
@@ -1106,52 +1011,16 @@ func isReportCommand(args []string, harnessID registry.Harness) bool {
 	return false
 }
 
-func isTestFixtureProcess(process processinfo.Process) bool {
-	if strings.Contains(process.Executable, "/aht-systest-") ||
-		strings.Contains(process.CWD, "/aht-systest-") {
-		return true
-	}
-
-	for _, arg := range process.Args {
-		if strings.Contains(arg, "/aht-systest-") {
-			return true
-		}
-	}
-
-	if slices.Contains(process.Args, "manage") &&
-		(slices.Contains(process.Args, "tracker") || slices.Contains(process.Args, "run")) {
-		return true
-	}
-
-	return false
-}
-
 func hasAncestorHarness(
 	pid int,
 	harnessID registry.Harness,
-	processByPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) bool {
-	curr, ok := processByPID[pid]
-	if !ok {
-		return false
-	}
-
-	ppid := curr.PPID
-
-	visited := map[int]bool{pid: true}
-	for ppid > 0 && !visited[ppid] {
-		visited[ppid] = true
-		if ancestorHarness, found := harnessByPID[ppid]; found && ancestorHarness == harnessID {
+	for parent := range tree.parents(pid) {
+		if harnessByPID[parent] == harnessID {
 			return true
 		}
-
-		parent, ok := processByPID[ppid]
-		if !ok {
-			break
-		}
-
-		ppid = parent.PPID
 	}
 
 	return false
@@ -1173,42 +1042,15 @@ func observationsForUnlocatedProcesses(
 		}
 		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
 		process := processByPID[pid]
-		emptyLocation := registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}
+
+		var emptyLocation registry.Location
+
 		observations = append(
 			observations,
-			registry.Observation{
-				Harness: harnessID,
-				At:      at,
-				Subject: registry.ObservationIdentity{
-					SessionID:   "",
-					SessionPath: "",
-					CWD:         "",
-					Attributes:  nil,
-				},
-				Evidence: &registry.Placement{
-					Process:  *processIdentity(process),
-					Location: emptyLocation,
-				},
-			},
+			processObservation(harnessID, at, &registry.Placement{
+				Process:  *processIdentity(process),
+				Location: emptyLocation,
+			}),
 		)
 
 		if !inspectScreen {
@@ -1245,21 +1087,15 @@ func unobservedSessionAbsence(
 
 		present := false
 
-		return registry.Observation{
-			Harness: session.Harness,
-			At:      at,
-			Subject: registry.ObservationIdentity{
-				SessionID:   "",
-				SessionPath: "",
-				CWD:         "",
-				Attributes:  nil,
-			},
-			Evidence: &registry.Sighting{Process: registry.ProcessIdentity{
+		return processObservation(
+			session.Harness,
+			at,
+			&registry.Sighting{Process: registry.ProcessIdentity{
 				PPID: 0, ProcessGroupID: 0, Foreground: false, Executable: "", CWD: "", TTY: "",
 				PID:           session.Process.PID,
 				StartIdentity: session.Process.StartIdentity,
 			}, Present: present},
-		}, true
+		), true
 	}
 
 	panePID := session.Location.PanePID
@@ -1306,54 +1142,11 @@ func sessionForProcess(
 	harnessID registry.Harness,
 	identity *registry.ProcessIdentity,
 ) registry.Session {
-	var incarnation registry.Incarnation
+	var session registry.Session
 
-	session := registry.Session{
-		Incarnation:   incarnation,
-		IdentityState: "",
-		Liveness:      nil,
-		SchemaVersion: 0,
-		ID:            "",
-		SessionID:     "",
-		SessionPath:   "",
-		ResumeCommand: nil,
-		CWD:           "",
-		ProjectRoot:   "",
-		Location: registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		},
-		Observations: registry.Observations{
-			Native:   nil,
-			Process:  nil,
-			Location: nil,
-			Catalog:  nil,
-			Screen:   nil,
-		},
-		CreatedAt:         time.Time{},
-		UpdatedAt:         time.Time{},
-		PresenceChangedAt: time.Time{},
-		ActivityChangedAt: time.Time{},
-		Harness:           harnessID,
-		Process:           identity,
-		Detail:            nil,
-	}
+	session.Harness = harnessID
+	session.Process = identity
+
 	for _, candidate := range sessions {
 		if candidate.Harness == harnessID && candidate.Process != nil &&
 			candidate.Process.Equal(*identity) {
@@ -1398,32 +1191,16 @@ func unavailableScreenState(
 		return empty, false
 	}
 
-	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-	unknown := registry.ActivityUnknown
-	screen := &registry.ScreenObservation{
-		Activity:               unknown,
-		Authority:              registry.AuthorityScreen,
-		Reason:                 reason,
-		RuleID:                 "",
-		ManifestSource:         "",
-		ManifestVersion:        0,
-		FallbackForIntegration: fallback,
-		FallbackReason:         fallbackReason,
-		Process:                *identity,
-		ObservedAt:             at,
-		Detail:                 "",
-	}
-	observation := registry.Observation{
-		Harness: harnessID,
-		At:      at,
-		Subject: registry.ObservationIdentity{
-			SessionID:   "",
-			SessionPath: "",
-			CWD:         "",
-			Attributes:  nil,
-		},
-		Evidence: (*registry.Reading)(screen),
-	}
+	observation := screenObservation(session, harnessID, identity, at, at, agentstate.Decision{
+		Activity:        registry.ActivityUnknown,
+		Detail:          "",
+		Reason:          reason,
+		RuleID:          "",
+		ManifestSource:  "",
+		ManifestVersion: 0,
+		Warning:         "",
+		Evidence:        nil,
+	})
 
 	return observation, true
 }
@@ -1450,30 +1227,21 @@ func (o *Observer) detectScreenState(
 	}
 
 	if pane.Activity != nil {
-		fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-
 		reason := pane.StateReason
 		if reason == "" {
 			reason = "multiplexer_agent_status"
 		}
 
-		screen := &registry.ScreenObservation{
-			Activity: *pane.Activity, Authority: registry.AuthorityScreen, Reason: reason,
-			RuleID: "", ManifestSource: "", ManifestVersion: 0,
-			FallbackForIntegration: fallback, FallbackReason: fallbackReason,
-			Process: *identity, ObservedAt: at, Detail: "",
-		}
-		observation := registry.Observation{
-			Harness: harnessID,
-			At:      at,
-			Subject: registry.ObservationIdentity{
-				SessionID:   "",
-				SessionPath: "",
-				CWD:         "",
-				Attributes:  nil,
-			},
-			Evidence: (*registry.Reading)(screen),
-		}
+		observation := screenObservation(session, harnessID, identity, at, at, agentstate.Decision{
+			Activity:        *pane.Activity,
+			Detail:          "",
+			Reason:          reason,
+			RuleID:          "",
+			ManifestSource:  "",
+			ManifestVersion: 0,
+			Warning:         "",
+			Evidence:        nil,
+		})
 
 		return observation, true, nil
 	}
@@ -1591,21 +1359,13 @@ func preferForegroundProcess(candidate processinfo.Process, current processinfo.
 }
 
 func isDirectAgentProcess(process processinfo.Process) bool {
-	if IsAgentWrapper(process) {
+	if catalog.IsWrapper(process) {
 		return false
 	}
 
-	if _, ok := catalog.FromCommand(process.Executable); ok {
-		return true
-	}
+	_, ok := catalog.ResolveProcess(process)
 
-	for _, arg := range process.Args[:min(commandArgumentPrefixCount, len(process.Args))] {
-		if _, ok := catalog.FromCommand(arg); ok {
-			return true
-		}
-	}
-
-	return false
+	return ok
 }
 
 func catalogListedProcess(
@@ -1686,23 +1446,23 @@ func (o *Observer) initializeTracked(ctx context.Context) error {
 
 	for _, session := range sessions {
 		observation := session.Observations.Process
-		if observation == nil || !observation.Present || !observation.Process.Complete() {
+		if observation == nil || !observation.Sighting.Present ||
+			!observation.Sighting.Process.Complete() {
 			continue
 		}
 
 		process := processinfo.Process{
-			PID:             observation.Process.PID,
-			Name:            "",
-			PPID:            observation.Process.PPID,
-			ProcessGroupID:  observation.Process.ProcessGroupID,
-			Foreground:      observation.Process.Foreground,
-			StartIdentity:   observation.Process.StartIdentity,
-			Executable:      observation.Process.Executable,
-			CWD:             observation.Process.CWD,
-			TTY:             observation.Process.TTY,
-			AgentHint:       "",
-			MultiplexerKind: "", MultiplexerServer: "", MultiplexerSession: "", MultiplexerPane: "",
-			Args: nil,
+			PID:            observation.Sighting.Process.PID,
+			Name:           "",
+			PPID:           observation.Sighting.Process.PPID,
+			ProcessGroupID: observation.Sighting.Process.ProcessGroupID,
+			Foreground:     observation.Sighting.Process.Foreground,
+			StartIdentity:  observation.Sighting.Process.StartIdentity,
+			Executable:     observation.Sighting.Process.Executable,
+			CWD:            observation.Sighting.Process.CWD,
+			TTY:            observation.Sighting.Process.TTY,
+			Env:            nil,
+			Args:           nil,
 		}
 		key := processKey{harness: session.Harness, pid: process.PID, start: process.StartIdentity}
 		o.tracked[key] = trackedProcess{
@@ -1749,19 +1509,14 @@ func (o *Observer) acquireLock() error {
 	return nil
 }
 
-func (o *Observer) releaseLock() {
+func (o *Observer) releaseLock() error {
 	o.mu.Lock()
 	file := o.lockFile
 	o.lockFile = nil
 	o.running = false
 	o.mu.Unlock()
 
-	if file == nil {
-		return
-	}
-
-	_ = closeObserverLock(file)
-	_ = removeObserverLock(o.lockPath)
+	return closeObserverLock(file)
 }
 
 func (o *Observer) recordHealth(
@@ -1810,8 +1565,8 @@ func (o *Observer) updateHealth(
 
 	o.health.LastAttemptAt = at
 	o.health.Cycles++
-	o.health.Observations += result.Observations
-	o.health.Sessions += result.Sessions
+	o.health.Observations += int64(result.Observations)
+	o.health.Sessions += int64(result.Sessions)
 
 	o.health.Degraded = degraded
 	if err != nil {
@@ -1974,7 +1729,7 @@ func (o *Observer) captureScreenState(
 
 	decision := manifest.Evaluate(agentstate.NormalizeSnapshot(snapshot.Text, snapshot.Title))
 	if decision.Activity == registry.ActivityUnknown &&
-		decision.Reason == "no_rule_matched" &&
+		decision.Reason == agentstate.ReasonNoRuleMatched &&
 		session.Activity() != nil &&
 		*session.Activity() != registry.ActivityUnknown {
 		var empty registry.Observation
@@ -1982,32 +1737,8 @@ func (o *Observer) captureScreenState(
 	}
 
 	observedAt := screenObservationTime(at, o.now().UTC())
-	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
-	screen := &registry.ScreenObservation{
-		Activity:               decision.Activity,
-		Detail:                 decision.Detail,
-		Authority:              registry.AuthorityScreen,
-		Reason:                 decision.Reason,
-		RuleID:                 decision.RuleID,
-		ManifestSource:         decision.ManifestSource,
-		ManifestVersion:        decision.ManifestVersion,
-		FallbackForIntegration: fallback,
-		FallbackReason:         fallbackReason,
-		Process:                *identity,
-		ObservedAt:             observedAt,
-	}
+	observation := screenObservation(session, harnessID, identity, at, observedAt, decision)
 
-	observation := registry.Observation{
-		Harness: harnessID,
-		At:      observedAt,
-		Subject: registry.ObservationIdentity{
-			SessionID:   "",
-			SessionPath: "",
-			CWD:         "",
-			Attributes:  nil,
-		},
-		Evidence: (*registry.Reading)(screen),
-	}
 	if manifest.Warning != "" {
 		return observation, true, fmt.Errorf(
 			"%w: %s",
@@ -2095,26 +1826,60 @@ func panePlacementObservations(
 		candidateHarness := inventory.harnessByPID[candidate.PID]
 		if candidateHarness == "" || locationPIDs[candidate.PID] ||
 			((!selected || candidate.PID != process.PID) &&
-				!processTiedToPane(candidate, pane, inventory.processByPID)) {
+				!processTiedToPane(candidate, pane, inventory.tree)) {
 			continue
 		}
 
-		observations = append(observations, registry.Observation{
-			Harness: candidateHarness,
-			Subject: registry.ObservationIdentity{
-				SessionID:   "",
-				SessionPath: "",
-				CWD:         "",
-				Attributes:  nil,
-			},
-			At: at,
-			Evidence: &registry.Placement{
+		observations = append(
+			observations,
+			processObservation(candidateHarness, at, &registry.Placement{
 				Process:  *processIdentity(candidate),
 				Location: paneLocation(pane),
-			},
-		})
+			}),
+		)
 		locationPIDs[candidate.PID] = true
 	}
 
 	return observations
+}
+
+func screenObservation(
+	session registry.Session,
+	harnessID registry.Harness,
+	identity *registry.ProcessIdentity,
+	at time.Time,
+	observedAt time.Time,
+	decision agentstate.Decision,
+) registry.Observation {
+	fallback, fallbackReason := screenFallbackMetadata(session, harnessID, at)
+
+	var subject registry.ObservationIdentity
+
+	return registry.Observation{
+		Harness: harnessID,
+		At:      observedAt,
+		Subject: subject,
+		Evidence: (*registry.Reading)(&registry.ScreenObservation{
+			Activity:               decision.Activity,
+			Detail:                 decision.Detail,
+			Authority:              registry.AuthorityScreen,
+			Reason:                 decision.Reason,
+			RuleID:                 decision.RuleID,
+			ManifestSource:         decision.ManifestSource,
+			ManifestVersion:        decision.ManifestVersion,
+			FallbackForIntegration: fallback,
+			FallbackReason:         fallbackReason,
+			Process:                *identity,
+			ObservedAt:             observedAt,
+		}),
+	}
+}
+
+func processObservation(
+	harnessID registry.Harness,
+	at time.Time,
+	evidence registry.Evidence,
+) registry.Observation {
+	var subject registry.ObservationIdentity
+	return registry.Observation{Harness: harnessID, At: at, Subject: subject, Evidence: evidence}
 }

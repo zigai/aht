@@ -13,7 +13,7 @@ func TestListPanesSkipsWhenTmuxIsNotInstalled(t *testing.T) {
 		return "", errBinaryNotFound
 	}}
 
-	panes, err := driver.ListPanes(context.Background())
+	panes, err := driver.ListPanes(context.Background(), nil)
 	if err != nil || panes != nil {
 		t.Fatalf("ListPanes() = %#v, %v", panes, err)
 	}

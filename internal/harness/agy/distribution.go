@@ -8,16 +8,11 @@ import (
 
 func (agyHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "github",
-		Package:       "",
-		Repo:          "google-antigravity/antigravity-cli",
-		Asset:         "agy_cli_linux_x64.tar.gz",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "agy",
-		Family:        "",
-		PackageExtras: "",
-		Install:       distributionInstall,
+		Source:    harness.DistributionGitHub,
+		Repo:      "google-antigravity/antigravity-cli",
+		Asset:     "agy_cli_linux_x64.tar.gz",
+		Directory: "agy",
+		Install:   distributionInstall,
 	}
 }
 

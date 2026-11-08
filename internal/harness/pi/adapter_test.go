@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -30,13 +32,7 @@ func TestShutdownSurvivesEqualObservationTimestamps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	module := harness.RenderScriptTemplate(
-		piExtensionTemplate,
-		piIntegrationID,
-		reporter,
-		piIntegrationSourceID,
-		integrationVersion,
-	)
+	module := harness.RenderScriptTemplate(piExtensionTemplate, reporter, New().Definition())
 	if err := os.WriteFile(filepath.Join(dir, "extension.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +120,8 @@ process.exit(0);
 
 type piTestRules struct{}
 
+func (piTestRules) SamePane(a registry.Location, b registry.Location) bool { return a == b }
+
 func (piTestRules) Known(id registry.Harness) bool { return id == New().Definition().ID }
 func (piTestRules) Policy(registry.Harness) registry.Policy {
 	return registry.Policy{
@@ -131,5 +129,50 @@ func (piTestRules) Policy(registry.Harness) registry.Policy {
 		Authority:        registry.AuthorityHook,
 		ScreenFallback:   true,
 		Reporter:         piIntegrationSourceID,
+	}
+}
+
+func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+		value    func(dir string) string
+	}{
+		{harness: registry.Harness("pi"), variable: "PI_CODING_AGENT_DIR"},
+	} {
+		for _, knownHome := range []bool{true, false} {
+			name := string(test.harness) + "/" + test.variable
+			if !knownHome {
+				name += "/without home"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				testharness.Isolate(t, New())
+
+				if !knownHome {
+					t.Setenv("HOME", "")
+					t.Setenv("USERPROFILE", "")
+				}
+
+				override := t.TempDir()
+
+				value := override
+				if test.value != nil {
+					value = test.value(override)
+				}
+
+				t.Setenv(test.variable, value)
+
+				locations := New().Locations("")
+
+				config := testharness.LocationPaths(locations, harness.LocationKindConfig)
+				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
+					return !strings.HasPrefix(path, override+string(filepath.Separator)) &&
+						!strings.HasPrefix(path, "/etc/")
+				}) {
+					t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
+				}
+			})
+		}
 	}
 }

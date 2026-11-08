@@ -11,10 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/spf13/cobra"
-
-	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -104,30 +100,6 @@ func TestListSummaryAcceptsDefaultSortingConfig(t *testing.T) {
 	}
 }
 
-func TestServiceOptionsUseConfigAndExplicitOverrides(t *testing.T) {
-	app := &application{
-		cfgLoaded: true,
-		cfg:       config.Config{Tracker: config.TrackerConfig{Interval: "2s", GracePeriod: "5s"}},
-	}
-	cmd := &cobra.Command{}
-	cmd.Flags().Duration("interval", time.Second, "")
-	options := serviceOptions{binary: "/aht", interval: time.Second}
-
-	got, err := app.configuredServiceOptions(cmd, options)
-	if err != nil || got.Interval != 2*time.Second || got.GracePeriod != 5*time.Second {
-		t.Fatalf("configured service = %#v, %v", got, err)
-	}
-
-	cmd2 := &cobra.Command{}
-	cmd2.Flags().Duration("interval", time.Second, "")
-	_ = cmd2.Flags().Set("interval", "1s")
-
-	got, err = app.configuredServiceOptions(cmd2, options)
-	if err != nil || got.Interval != time.Second || got.GracePeriod != 5*time.Second {
-		t.Fatalf("overridden service = %#v, %v", got, err)
-	}
-}
-
 func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store := registry.NewJournal(path, catalog.Rules{})
@@ -210,15 +182,12 @@ func TestFilesystemWatchPreservesRequestedFilter(t *testing.T) {
 
 	app := &application{storePath: path, stdout: &stdout}
 	watcher := startTestWatch(t, func(ctx context.Context, ready chan struct{}) error {
-		return app.runFilesystemWatch(
-			ctx,
-			newWatchUpdateProcessor(app, watchOptions{
-				filter: registry.Filter{Harness: registry.Harness("codex")},
-				format: watchFormatJSON,
-				ready:  ready,
-				now:    time.Now,
-			}),
-		)
+		return app.runWatch(ctx, watchOptions{
+			filter: registry.Filter{Harness: registry.Harness("codex")},
+			format: watchFormatJSON,
+			ready:  ready,
+			now:    time.Now,
+		})
 	})
 	watcher.stop(t)
 
@@ -244,17 +213,23 @@ func TestListColumnsPreservePrimaryValuesAndUseCellWidths(t *testing.T) {
 		"now",
 	}
 
-	columns := listTableColumns([][]string{row}, 200)
-	for _, index := range []int{0, 1, 3, 4, 6} {
-		if columns[index].width < text.StringWidth(row[index]) {
-			t.Errorf(
-				"column %s width %d truncates %q",
-				columns[index].heading,
-				columns[index].width,
-				row[index],
-			)
+	var output bytes.Buffer
+
+	app := &application{stdout: &output}
+	if err := app.writeHumanTable(
+		listTableColumns([][]string{row}, 120),
+		[][]string{row},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, value := range row {
+		if !strings.Contains(output.String(), value) {
+			t.Errorf("list output loses %q: %q", value, output.String())
 		}
 	}
+
+	assertHumanLinesBounded(t, output.String())
 }
 
 func TestDisabledScreenInspectionDoesNotCaptureLivePane(t *testing.T) {

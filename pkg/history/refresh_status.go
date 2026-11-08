@@ -12,7 +12,7 @@ import (
 )
 
 var errRefreshStatusInvalid = errors.New(
-	"history refresh status is stale or invalid; run aht manage history refresh",
+	"history refresh status is stale or invalid",
 )
 
 // RefreshStatus describes the last completed explicit index refresh, including
@@ -44,7 +44,7 @@ func (c Catalog) RefreshStatus(ctx context.Context) (RefreshStatus, error) {
 		return empty, err
 	}
 
-	data, err := os.ReadFile(path + ".refresh.json")
+	data, err := os.ReadFile(refreshStatusPath(path))
 	if err != nil {
 		return empty, fmt.Errorf("read history refresh status: %w", err)
 	}
@@ -95,7 +95,7 @@ func (c Catalog) saveRefreshStatus(ctx context.Context, result Result, incomplet
 		return fmt.Errorf("save history refresh status: %w", err)
 	}
 
-	if err = strata.Save(path+".refresh.json", saved, strata.WithFileMode(0o600)); err != nil {
+	if err = strata.Save(refreshStatusPath(path), saved, strata.WithFileMode(0o600)); err != nil {
 		return fmt.Errorf("save history refresh status after committed refresh: %w", err)
 	}
 
@@ -111,3 +111,5 @@ func (saved refreshStatusFile) validForIndex(info os.FileInfo) bool {
 		saved.IssueCount >= 0 &&
 		info.Mode().IsRegular()
 }
+
+func refreshStatusPath(indexPath string) string { return indexPath + ".refresh.json" }

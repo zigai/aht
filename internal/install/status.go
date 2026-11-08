@@ -127,15 +127,19 @@ func inspectIntegrationPlan(
 	var missing, managed bool
 
 	for _, action := range plan.Actions {
-		statuses, err := inspectAction(ctx, action, result.Harness)
+		handler, ok := handlerFor(action)
+		if !ok {
+			continue
+		}
+
+		statuses, err := handler.inspect(ctx, result.Harness)
 		if err != nil {
 			return err
 		}
 
 		for _, item := range statuses {
 			missing = missing || item.status == ArtifactMissing
-			managed = managed || item.status == ArtifactCurrent || item.status == ArtifactStale ||
-				item.status == ArtifactDisabled
+			managed = managed || managedArtifact(item.status)
 			mergeInspectedArtifact(result, item)
 
 			if result.Status == ArtifactForeign {
@@ -150,6 +154,10 @@ func inspectIntegrationPlan(
 	}
 
 	return nil
+}
+
+func managedArtifact(status ArtifactStatus) bool {
+	return status == ArtifactCurrent || status == ArtifactStale || status == ArtifactDisabled
 }
 
 func markDesiredIntegrationState(
@@ -180,7 +188,7 @@ func markDesiredIntegrationState(
 }
 
 func mergeShimStatus(result IntegrationStatus, path string) (IntegrationStatus, error) {
-	status, err := classifyShimArtifact(path)
+	status, err := classifyShimArtifact(path, result.Harness)
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
@@ -217,34 +225,12 @@ func mergeInspectedArtifact(result *IntegrationStatus, item inspectedArtifact) {
 	}
 }
 
-func inspectAction(
-	ctx context.Context,
-	action harnesspkg.InstallAction,
-	harnessID registry.Harness,
-) ([]inspectedArtifact, error) {
-	switch value := action.(type) {
-	case harnesspkg.JSONCommandHooksAction:
-		return inspectCommandHooks(ctx, value.Plan)
-	case harnesspkg.CursorJSONHooksAction:
-		return inspectSharedFile(value.Plan.Path)
-	case harnesspkg.ManagedTextBlockAction:
-		return inspectSharedFile(value.Plan.Path)
-	case harnesspkg.RenderedFileAction:
-		return inspectOwnedPath(value.Plan.Path, harnessID)
-	case harnesspkg.PluginDirectoryAction:
-		return inspectPluginAction(ctx, value.Plan, harnessID)
-	case harnesspkg.NativeCatalogAction:
-		return []inspectedArtifact{{path: value.Label, status: ArtifactCurrent}}, nil
-	default:
-		return nil, nil
-	}
-}
-
 func inspectCommandHooks(
 	ctx context.Context,
 	plan harnesspkg.JSONCommandHookInstallPlan,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	statuses, err := inspectSharedFile(plan.Path)
+	statuses, err := inspectSharedFile(plan.Path, harnessID)
 	if err != nil || plan.Trust == nil || statuses[0].status == ArtifactMissing {
 		return statuses, err
 	}
@@ -288,7 +274,7 @@ func inspectPluginAction(
 		return append(result, registration), nil
 	}
 
-	retired, err := inspectRetiredPlugins(plan)
+	retired, err := inspectRetiredPlugins(plan, harnessID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,11 +296,12 @@ func inspectPluginAction(
 // so that an upgrade moves them.
 func inspectRetiredPlugins(
 	plan harnesspkg.PluginDirectoryInstallPlan,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
 	var stale []inspectedArtifact
 
 	for _, retired := range plan.Retired {
-		status, err := ClassifyArtifact(retired.Dir)
+		status, err := classifyArtifact(retired.Dir, harnessID)
 		if err != nil {
 			return nil, err
 		}
@@ -327,7 +314,7 @@ func inspectRetiredPlugins(
 	return stale, nil
 }
 
-func inspectSharedFile(path string) ([]inspectedArtifact, error) {
+func inspectSharedFile(path string, harnessID registry.Harness) ([]inspectedArtifact, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -337,7 +324,7 @@ func inspectSharedFile(path string) ([]inspectedArtifact, error) {
 		return nil, fmt.Errorf("reading integration artifact %s: %w", path, err)
 	}
 
-	status := classifyArtifactContent(string(data))
+	status := classifyArtifactContent(string(data), harnessID)
 	if status == ArtifactForeign {
 		status = ArtifactMissing
 	}
@@ -346,7 +333,7 @@ func inspectSharedFile(path string) ([]inspectedArtifact, error) {
 }
 
 func inspectOwnedPath(path string, harnessID registry.Harness) ([]inspectedArtifact, error) {
-	status, err := classifyArtifactForHarness(path, harnessID)
+	status, err := classifyArtifact(path, harnessID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,20 +344,8 @@ func inspectOwnedPath(path string, harnessID registry.Harness) ([]inspectedArtif
 func planPaths(plan harnesspkg.InstallPlan) []string {
 	paths := make([]string, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
-		switch value := action.(type) {
-		case harnesspkg.JSONCommandHooksAction:
-			paths = append(paths, value.Plan.Path)
-		case harnesspkg.CursorJSONHooksAction:
-			paths = append(paths, value.Plan.Path)
-		case harnesspkg.ManagedTextBlockAction:
-			paths = append(paths, value.Plan.Path)
-		case harnesspkg.RenderedFileAction:
-			paths = append(paths, value.Plan.Path)
-		case harnesspkg.PluginDirectoryAction:
-			paths = append(paths, value.Plan.Dir)
-			if value.Plan.ImportManifest != nil {
-				paths = append(paths, value.Plan.ImportManifest.Path)
-			}
+		if handler, ok := handlerFor(action); ok {
+			paths = append(paths, handler.paths()...)
 		}
 	}
 
@@ -390,7 +365,7 @@ func inspectPluginFiles(
 
 		if missingMarker {
 			result[0] = inspectedArtifact{
-				path:   filepath.Join(plan.Dir, plan.MarkerFile),
+				path:   filepath.Join(plan.Dir, harnesspkg.ArtifactMarkerFile),
 				status: ArtifactMissing,
 			}
 		}

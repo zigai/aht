@@ -243,16 +243,7 @@ func (host *isolatedHost) runOpenCodeInterruption(t *testing.T, env []string) {
 	server := startOpenCodeServer(t, host, env)
 
 	sessionID := server.startTurn(t, host, nil)
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first active request step = %d", hold.Request.Index)
-		}
-	case <-server.process.done:
-		t.Fatalf("server exited before active request: %v", server.process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatal("native server did not reach active provider request")
-	}
+	host.awaitHold(t, server.process, 0)
 
 	host.waitForActiveSession(t)
 

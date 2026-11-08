@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,9 +13,47 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 	"github.com/zigai/aht/v2/pkg/tmux"
 )
+
+func TestStopRevalidatesInterpretedHarness(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "read line", "pi")
+
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = input.Close()
+		_ = cmd.Wait()
+	})
+
+	proc, found, err := processinfo.Find(t.Context(), cmd.Process.Pid)
+	if err != nil || !found {
+		t.Fatalf("find interpreted process: found=%t, error=%v", found, err)
+	}
+
+	id, ok := catalog.ResolveProcess(proc)
+	if !ok {
+		t.Fatalf("discovery rejected interpreted process: %+v", proc)
+	}
+
+	session := registry.Session{Harness: id, Process: &registry.ProcessIdentity{
+		PID: proc.PID, StartIdentity: proc.StartIdentity,
+	}}
+
+	validation, err := revalidateProcess(t.Context(), session)
+	if err != nil || !validation.OK {
+		t.Fatalf("stop rejected discovered process: %+v, %v", validation, err)
+	}
+}
 
 func TestStopExplicitSkippedTargetReturnsReasonAndError(t *testing.T) {
 	path, session := createSkippedStopSession(t)
@@ -234,6 +273,7 @@ func (signaler *recordingStopSignaler) ValidateStopTarget(
 
 func (signaler *recordingStopSignaler) SendMultiplexerInterrupt(
 	_ context.Context,
+	_ registry.MultiplexerKind,
 	serverIdentity string, paneID string,
 ) error {
 	signaler.servers = append(signaler.servers, serverIdentity)
@@ -253,10 +293,16 @@ func TestRunManageStopSessionsStopsUniqueValidatedLiveTargets(t *testing.T) {
 	signaler := &recordingStopSignaler{validation: stopTargetValidation{OK: true}}
 	sessions := []registry.Session{
 		{
-			ID:       "a",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 101},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			ID:      "a",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 		{
 			ID:      "b",
@@ -266,19 +312,37 @@ func TestRunManageStopSessionsStopsUniqueValidatedLiveTargets(t *testing.T) {
 				ServerID: "-L:custom",
 				PaneID:   "%2",
 			},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 		{
-			ID:       "c",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 101},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			ID:      "c",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 		{
-			ID:       "d",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 202},
-			Liveness: registry.NewLiveness(registry.PresenceGone, registry.ActivityValue(nil), nil),
+			ID:      "d",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 202},
+			Liveness: registry.NewLiveness(
+				registry.PresenceGone,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 		{
 			ID:      "e",
@@ -288,7 +352,13 @@ func TestRunManageStopSessionsStopsUniqueValidatedLiveTargets(t *testing.T) {
 				ServerID: "-L:other",
 				PaneID:   "%2",
 			},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 	}
 
@@ -436,7 +506,13 @@ func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
 			StartIdentity: "agent-201",
 			Foreground:    false,
 		},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+		Liveness: registry.NewLiveness(
+			registry.PresenceLive,
+			registry.ActivityValue(nil),
+			nil,
+			time.Time{},
+			"",
+		),
 	}
 
 	target, ok := stopTargetForSession(session)
@@ -466,16 +542,28 @@ func TestRunManageStopSessionsValidatesBeforeDeduplicating(t *testing.T) {
 	}
 	sessions := []registry.Session{
 		{
-			ID:       "a-stale",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 101},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			ID:      "a-stale",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 		{
-			ID:       "b-current",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 101},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			ID:      "b-current",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 	}
 
@@ -502,10 +590,16 @@ func TestRunManageStopSessionsDryRunStillValidatesTargets(t *testing.T) {
 	}
 	sessions := []registry.Session{
 		{
-			ID:       "stale",
-			Harness:  registry.Harness("codex"),
-			Process:  &registry.ProcessIdentity{PID: 101},
-			Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
+			ID:      "stale",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		},
 	}
 
@@ -541,12 +635,20 @@ func TestRunManageStopSessionsReportsSignalFailure(t *testing.T) {
 		validation: stopTargetValidation{OK: true},
 		sendErr:    errTestSignal,
 	}
-	sessions := []registry.Session{{
-		ID:       "a",
-		Harness:  registry.Harness("codex"),
-		Process:  &registry.ProcessIdentity{PID: 101},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(nil), nil),
-	}}
+	sessions := []registry.Session{
+		{
+			ID:      "a",
+			Harness: registry.Harness("codex"),
+			Process: &registry.ProcessIdentity{PID: 101},
+			Liveness: registry.NewLiveness(
+				registry.PresenceLive,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
+		},
+	}
 
 	result, err := runManageStopSessions(
 		context.Background(),
@@ -555,5 +657,24 @@ func TestRunManageStopSessionsReportsSignalFailure(t *testing.T) {
 	)
 	if !errors.Is(err, errManageStopAllFailed) || result.Failed != 1 || result.Stopped != 0 {
 		t.Fatalf("stop failure result = %+v, err=%v", result, err)
+	}
+}
+
+func TestStopTargetUsesProcessForPanesWithoutInterrupter(t *testing.T) {
+	t.Parallel()
+
+	session := registry.Session{
+		Harness: registry.Harness("codex"),
+		Location: registry.Location{
+			Kind:     registry.MultiplexerHerdr,
+			ServerID: "herdr-server",
+			PaneID:   "pane-1",
+		},
+		Process: &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"},
+	}
+
+	target, ok := stopTargetForSession(session)
+	if !ok || target.Method != stopMethodProcess || target.PID != 42 {
+		t.Fatalf("herdr pane target = %#v, %t; want process interrupt", target, ok)
 	}
 }

@@ -1,35 +1,12 @@
 package tmux
 
 import (
-	"os"
-	"syscall"
 	"testing"
+
+	"github.com/zigai/aht/v2/internal/processinfo"
 )
 
-func TestServerDiscoveryToleratesVanishedProcesses(t *testing.T) {
-	t.Parallel()
-
-	for _, err := range []error{
-		os.ErrNotExist,
-		os.ErrPermission,
-		errNotTmuxServer,
-		&os.PathError{
-			Op:   "read",
-			Path: "/proc/42/cmdline",
-			Err:  syscall.ESRCH,
-		},
-	} {
-		if !skippableServerProcessError(err) {
-			t.Fatalf("discovery rejected a transient process: %v", err)
-		}
-	}
-
-	if skippableServerProcessError(syscall.EIO) {
-		t.Fatal("discovery hid an unexpected failure")
-	}
-}
-
-func TestServerProcessFromSeparatesServersFromClients(t *testing.T) {
+func TestIsServerProcessSeparatesServersFromClients(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -48,9 +25,10 @@ func TestServerProcessFromSeparatesServersFromClients(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, server := ServerProcessFrom(42, test.comm, test.args); server != test.server {
+			process := processinfo.Process{PID: 42, Name: test.comm, Args: test.args}
+			if server := isServerProcess(process); server != test.server {
 				t.Fatalf(
-					"ServerProcessFrom(%q, %q) = %t, want %t",
+					"isServerProcess(%q, %q) = %t, want %t",
 					test.comm,
 					test.args,
 					server,

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 const (
 	ManagedVersion            = 8
 	ManagedMarker             = "aht managed observer service"
-	defaultInterval           = 300 * time.Millisecond
 	serviceDirectoryMode      = 0o755
 	serviceRollbackTime       = 10 * time.Second
 	serviceCommandTimeout     = 30 * time.Second
@@ -25,7 +25,6 @@ const (
 
 var (
 	ErrForeign           = errors.New("service path contains foreign content")
-	ErrUnsupported       = errors.New("observer service is unsupported on this platform")
 	errBinaryRequired    = errors.New("binary is required")
 	errStorePathRequired = errors.New("store path is required")
 	errIntervalPositive  = errors.New("interval must be positive")
@@ -48,8 +47,6 @@ type Result struct {
 	Manager        string `json:"manager"`
 	ManagedPath    string `json:"managed_path"`
 	ManagedVersion int    `json:"managed_version"`
-	Path           string `json:"-"`
-	Version        int    `json:"-"`
 	Installed      bool   `json:"installed"`
 	Current        bool   `json:"current"`
 	Running        bool   `json:"running"`
@@ -94,39 +91,27 @@ func New(executor CommandExecutor) *Service {
 	return &Service{executor: executor}
 }
 
-func Install(ctx context.Context, opts Options) (Result, error) {
-	return defaultService.Install(ctx, opts)
-}
-
 func Update(ctx context.Context, opts Options) (Result, error) {
 	return defaultService.Update(ctx, opts)
 }
 
-func Uninstall(ctx context.Context, opts Options) (Result, error) {
-	return defaultService.Uninstall(ctx, opts)
+func Uninstall(ctx context.Context, dryRun bool) (Result, error) {
+	return defaultService.Uninstall(ctx, dryRun)
 }
 
 func Status(ctx context.Context, opts Options) (Result, error) {
 	return defaultService.Status(ctx, opts)
 }
 
-func (s *Service) Install(ctx context.Context, opts Options) (Result, error) {
-	return s.apply(ctx, opts, false)
-}
-
-func (s *Service) Update(ctx context.Context, opts Options) (Result, error) {
-	return s.apply(ctx, opts, true)
-}
-
-func (s *Service) Uninstall(ctx context.Context, opts Options) (Result, error) {
-	backend, err := platformBackend(opts)
+func (s *Service) Uninstall(ctx context.Context, dryRun bool) (Result, error) {
+	backend, err := definitionBackend("")
 	if err != nil {
 		return Result{}, err
 	}
 
 	result := backend.describe()
 
-	content, readErr := os.ReadFile(result.Path)
+	content, readErr := os.ReadFile(result.ManagedPath)
 	if readErr != nil {
 		if errors.Is(readErr, os.ErrNotExist) {
 			result.Message = "not installed"
@@ -137,11 +122,11 @@ func (s *Service) Uninstall(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	if !isManaged(string(content)) {
-		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
+		return result, fmt.Errorf("%w: %s", ErrForeign, result.ManagedPath)
 	}
 
-	result.Installed, result.Current = true, string(content) == backend.content()
-	if opts.DryRun {
+	result.Installed = true
+	if dryRun {
 		result.Message = "would uninstall"
 		return result, nil
 	}
@@ -150,14 +135,14 @@ func (s *Service) Uninstall(ctx context.Context, opts Options) (Result, error) {
 		return result, err
 	}
 
-	if err := os.Remove(result.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(result.ManagedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		cause := fmt.Errorf("remove managed service: %w", err)
 
-		return result, s.rollbackDefinition(ctx, backend, result.Path, content, true, cause)
+		return result, s.rollbackDefinition(ctx, backend, result.ManagedPath, content, true, cause)
 	}
 
 	if err := backend.reload(ctx, s.executor); err != nil {
-		return result, s.rollbackDefinition(ctx, backend, result.Path, content, true, err)
+		return result, s.rollbackDefinition(ctx, backend, result.ManagedPath, content, true, err)
 	}
 
 	result.Installed, result.Current, result.Changed, result.Message = false, false, true, "uninstalled"
@@ -173,7 +158,7 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 
 	result := backend.describe()
 
-	content, readErr := os.ReadFile(result.Path)
+	content, readErr := os.ReadFile(result.ManagedPath)
 	if readErr != nil {
 		if errors.Is(readErr, os.ErrNotExist) {
 			result.Message = "not installed"
@@ -187,10 +172,10 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 
 	result.Current = string(content) == backend.content()
 	if !isManaged(string(content)) {
-		return result, fmt.Errorf("%w: %s", ErrForeign, result.Path)
+		return result, fmt.Errorf("%w: %s", ErrForeign, result.ManagedPath)
 	}
 
-	state, err := backend.running(ctx, s.executor, false)
+	state, err := backend.running(ctx, s.executor)
 	if err != nil {
 		return result, err
 	}
@@ -205,7 +190,19 @@ func (s *Service) Status(ctx context.Context, opts Options) (Result, error) {
 	return result, nil
 }
 
-func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result, error) {
+// TrackerArgs returns the aht arguments that run the tracker on storePath. A
+// zero interval leaves the interval and grace period to the tracker's
+// configuration.
+func TrackerArgs(storePath string, interval time.Duration, grace time.Duration) []string {
+	args := []string{"--store", storePath, "manage", "tracker", "run"}
+	if interval > 0 {
+		args = append(args, "--interval", interval.String(), "--grace-period", grace.String())
+	}
+
+	return append(args, "--quiet")
+}
+
+func (s *Service) Update(ctx context.Context, opts Options) (Result, error) {
 	backend, err := platformBackend(opts)
 	if err != nil {
 		return Result{}, err
@@ -213,7 +210,7 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 
 	result := backend.describe()
 
-	content, installed, err := managedServiceDefinition(result.Path)
+	content, installed, err := managedServiceDefinition(result.ManagedPath)
 	if err != nil {
 		return result, err
 	}
@@ -222,12 +219,7 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 
 	result.Current = installed && string(content) == backend.content()
 	if installed && result.Current {
-		return s.applyCurrent(ctx, opts, backend, result, update)
-	}
-
-	if installed && !update {
-		result.Message = "stale; run update"
-		return result, nil
+		return s.applyCurrent(ctx, opts, backend, result)
 	}
 
 	if opts.DryRun {
@@ -240,7 +232,13 @@ func (s *Service) apply(ctx context.Context, opts Options, update bool) (Result,
 		return result, nil
 	}
 
-	if err := s.publishDefinition(ctx, backend, result.Path, content, installed); err != nil {
+	if err := s.publishDefinition(
+		ctx,
+		backend,
+		result.ManagedPath,
+		content,
+		installed,
+	); err != nil {
 		return result, err
 	}
 
@@ -287,16 +285,15 @@ func (s *Service) applyCurrent(
 	opts Options,
 	backend backend,
 	result Result,
-	update bool,
 ) (Result, error) {
-	state, err := backend.running(ctx, s.executor, !update)
+	state, err := backend.running(ctx, s.executor)
 	if err != nil {
 		return result, err
 	}
 
 	result.Running = state.Running
 
-	if !state.Loaded || (!update && !state.Enabled) {
+	if !state.Loaded {
 		if opts.DryRun {
 			result.Message = "would start"
 			return result, nil
@@ -311,24 +308,18 @@ func (s *Service) applyCurrent(
 		return result, nil
 	}
 
-	// An unchanged service definition does not imply an unchanged executable.
-	// Explicit updates restart the tracker so an installed replacement takes effect.
-	if update {
-		if opts.DryRun {
-			result.Message = "would restart"
-			return result, nil
-		}
-
-		if err := backend.restart(ctx, s.executor); err != nil {
-			return result, err
-		}
-
-		result.Changed, result.Message = true, "restarted"
-
+	// An unchanged service definition does not imply an unchanged executable,
+	// so the tracker restarts to pick up an installed replacement.
+	if opts.DryRun {
+		result.Message = "would restart"
 		return result, nil
 	}
 
-	result.Message = "already enabled"
+	if err := backend.restart(ctx, s.executor); err != nil {
+		return result, err
+	}
+
+	result.Changed, result.Message = true, "restarted"
 
 	return result, nil
 }
@@ -447,21 +438,18 @@ func isManaged(content string) bool {
 	}
 
 	for line := range strings.Lines(content) {
-		switch strings.TrimSpace(line) {
-		case "# version: 2",
-			"# version: 3",
-			"# version: 4",
-			"# version: 5",
-			"# version: 6",
-			"# version: 7",
-			"# version: 8",
-			"<!-- version: 2 -->",
-			"<!-- version: 3 -->",
-			"<!-- version: 4 -->",
-			"<!-- version: 5 -->",
-			"<!-- version: 6 -->",
-			"<!-- version: 7 -->",
-			"<!-- version: 8 -->":
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), "# version: ")
+		if !ok {
+			value, ok = strings.CutPrefix(strings.TrimSpace(line), "<!-- version: ")
+			if !ok || !strings.HasSuffix(value, " -->") {
+				continue
+			}
+
+			value = strings.TrimSuffix(value, " -->")
+		}
+
+		version, err := strconv.Atoi(value)
+		if err == nil && version >= 2 && version <= ManagedVersion {
 			return true
 		}
 	}
@@ -485,6 +473,27 @@ func wrapManagerError(action string, output []byte, err error) error {
 	}
 
 	return fmt.Errorf("%s: %w (%s)", action, err, message)
+}
+
+func trackerCommand(opts Options) []string {
+	return append(
+		[]string{opts.Binary},
+		TrackerArgs(opts.StorePath, opts.Interval, opts.GracePeriod)...,
+	)
+}
+
+func describeDefinition(path string) Result {
+	return Result{
+		Platform:       platformName,
+		Manager:        managerName,
+		ManagedPath:    path,
+		ManagedVersion: ManagedVersion,
+		Installed:      false,
+		Current:        false,
+		Running:        false,
+		Changed:        false,
+		Message:        "",
+	}
 }
 
 func normalizeOptions(opts Options) (Options, error) {
@@ -514,10 +523,6 @@ func normalizeOptions(opts Options) (Options, error) {
 	store, err := filepath.Abs(opts.StorePath)
 	if err != nil {
 		return opts, fmt.Errorf("resolve store: %w", err)
-	}
-
-	if opts.Interval == 0 {
-		opts.Interval = defaultInterval
 	}
 
 	if opts.Interval <= 0 {

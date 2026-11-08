@@ -1481,6 +1481,37 @@ func TestIndexConcurrentSearchAndCancellation(t *testing.T) {
 	requireIndexedMatches(t, c, history.Query{Terms: []string{"refresh"}}, 1)
 }
 
+func TestIndexSearchDiscoversFilesCommittedAfterOpen(t *testing.T) {
+	t.Parallel()
+	c, _ := indexedFixture(t)
+	first := writeHistory(t, t.TempDir(), "first.jsonl", treeHistory)
+	c.Sources = append(
+		[]history.Source{{Harness: registry.Harness("pi"), Path: first}},
+		c.Sources...,
+	)
+
+	var refreshed bool
+
+	searching := c
+	searching.Progress = func(progress history.Progress) {
+		if refreshed || progress.Source.Path != first {
+			return
+		}
+
+		refreshed = true
+
+		if _, err := c.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := requireIndexedMatches(t, searching, history.Query{Terms: []string{"refresh"}}, 2)
+	if !refreshed || len(result.Sources) != 2 || result.Sources[1].Files != 1 ||
+		result.IndexUnavailable {
+		t.Fatalf("concurrent refresh=%v result=%#v", refreshed, result)
+	}
+}
+
 func openTestIndex(t *testing.T, path string) *sql.DB {
 	t.Helper()
 

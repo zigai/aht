@@ -347,8 +347,8 @@ const (
 	kimiCodeManagedStart  = "# BEGIN aht managed integration: kimi-code"
 	kimiCodeManagedEnd    = "# END aht managed integration: kimi-code"
 	grokHookFileName      = "aht-state.json"
-	hookEventSessionStart = harnesspkg.HookEventSessionStart
-	hookEventStop         = harnesspkg.HookEventStop
+	hookEventSessionStart = "SessionStart"
+	hookEventStop         = "Stop"
 )
 
 func TestInstallRejectsBinaryPathThatIsNotUTF8(t *testing.T) {

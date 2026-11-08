@@ -45,7 +45,7 @@ func TestExplainHookAuthority(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&running),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 
@@ -110,7 +110,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&running),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 
@@ -155,7 +155,7 @@ func TestExplainCodexScreenFallbackWithoutNativeReport(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&running),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 
@@ -208,7 +208,7 @@ func TestExplainExpiredAndFutureEvidence(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(&running),
-				nil,
+				nil, time.Time{}, "",
 			),
 		}
 
@@ -256,7 +256,7 @@ func TestExplainExpiredAndFutureEvidence(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(&running),
-				nil,
+				nil, time.Time{}, "",
 			),
 		}
 
@@ -313,7 +313,7 @@ func TestExplainIntegrationMismatchAndPIDReuse(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(&running),
-				nil,
+				nil, time.Time{}, "",
 			),
 		}
 
@@ -359,17 +359,20 @@ func TestExplainIntegrationMismatchAndPIDReuse(t *testing.T) {
 			Process: &currentProc,
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{
-					Event:      "agent_start",
-					Activity:   &running,
+					Event:    "agent_start",
+					Activity: &running,
+
+					Reporter: registry.Reporter{
+						Integration: "pi-extension",
+					},
 					Process:    staleHookProc,
 					ObservedAt: now.Add(-2 * time.Second),
-					Reporter:   registry.Reporter{Integration: "pi-extension"},
 				},
 			},
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(&running),
-				nil,
+				nil, time.Time{}, "",
 			),
 		}
 
@@ -431,7 +434,13 @@ func TestExplainEndedSessions(t *testing.T) {
 						Reporter:   registry.Reporter{Integration: "pi-extension"},
 					},
 				},
-				Liveness: registry.NewLiveness(tc.presence, registry.ActivityValue(&running), nil),
+				Liveness: registry.NewLiveness(
+					tc.presence,
+					registry.ActivityValue(&running),
+					nil,
+					time.Time{},
+					"",
+				),
 			}
 
 			exp, err := manage.ExplainSession(
@@ -476,7 +485,7 @@ func TestExplainDefensiveCopies(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&running),
-			&decision,
+			&decision, time.Time{}, "",
 		),
 	}
 
@@ -522,7 +531,13 @@ func TestExplainJSONCompatibility(t *testing.T) {
 		Harness:  registry.Harness("codex"),
 		Process:  &process,
 		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%5"},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&idle), nil),
+		Liveness: registry.NewLiveness(
+			registry.PresenceLive,
+			registry.ActivityValue(&idle),
+			nil,
+			time.Time{},
+			"",
+		),
 	}
 
 	exp, err := manage.ExplainSession(
@@ -567,10 +582,18 @@ func TestExplainReadOnlyDoesNotSpawnScreenCapture(t *testing.T) {
 		Harness:  registry.Harness("codex"),
 		Process:  &process,
 		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%999"},
-		Liveness: registry.NewLiveness(registry.PresenceLive, registry.ActivityValue(&idle), nil),
+		Liveness: registry.NewLiveness(
+			registry.PresenceLive,
+			registry.ActivityValue(&idle),
+			nil,
+			time.Time{
+
+				// LiveScreen: false (the default) must succeed without attempting tmux pane capture!
+			},
+			"",
+		),
 	}
 
-	// LiveScreen: false (the default) must succeed without attempting tmux pane capture!
 	exp, err := manage.ExplainSession(
 		context.Background(),
 		session,

@@ -7,14 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
-)
-
-const (
-	defaultWatcherBufferSize = 16
-	defaultFileWatchDebounce = 10 * time.Millisecond
 )
 
 const (
@@ -43,20 +36,22 @@ var (
 	// ErrInvalidDuration means a duration was negative or stable-for reached timeout.
 	ErrInvalidDuration = errors.New("invalid wait duration")
 
-	// ErrSessionRequired means a canonical session ID was not provided.
-	ErrSessionRequired = errors.New("session ID is required")
+	// ErrSessionRequired means no session reference was provided.
+	ErrSessionRequired = errors.New("session reference is required")
 )
 
 // WaitOptions configures the session condition, timeout, and stability duration to wait for.
 type WaitOptions struct {
-	// ID is the canonical registry session ID to watch.
-	ID string
+	// Reference selects the session like [Selector.Reference]: a registry ID,
+	// registry ID prefix, native session ID, or session path. It is resolved
+	// against the first snapshot.
+	Reference string
 
 	// Activity optionally specifies the target activity state.
-	Activity Activity
+	Activity registry.Activity
 
 	// Presence optionally specifies the target presence state.
-	Presence Presence
+	Presence registry.Presence
 
 	// Timeout is the maximum duration to wait for the condition to be satisfied.
 	// A zero duration means no timeout (wait until context cancellation).
@@ -70,42 +65,18 @@ type WaitOptions struct {
 // WaitResult describes the session state that satisfied the wait condition.
 type WaitResult struct {
 	// Session is the session that satisfied the wait condition.
-	Session Session `json:"session"`
+	Session registry.Session `json:"session"`
 
 	// Initial reports whether the condition was already satisfied by the initial snapshot.
 	Initial bool `json:"initial"`
 }
 
-type watchEvent struct {
-	sessions []registry.Session
-	err      error
-}
-
-type sessionWatcher interface {
-	Events() <-chan watchEvent
-	Close()
-}
-
-type brokerSessionWatcher struct {
-	subscription *broker.Subscription
-	cancel       context.CancelFunc
-	events       chan watchEvent
-	done         chan struct{}
-}
-
-type durableSessionWatcher struct {
-	cancel context.CancelFunc
-	events chan watchEvent
-	done   chan struct{}
-}
-
 type waitStep int
 
 type waitRun struct {
-	client        *Client
 	opts          WaitOptions
-	stream        sessionWatcher
-	durable       bool
+	stream        *sessionStream
+	id            string
 	stableTimer   *time.Timer
 	stableTimerCh <-chan time.Time
 	stableReady   bool
@@ -114,9 +85,10 @@ type waitRun struct {
 	seenInitial   bool
 }
 
-// Validate checks that WaitOptions has a session ID, valid durations, and at least one non-contradictory condition.
+// Validate checks that WaitOptions has a session reference, valid durations,
+// and at least one non-contradictory condition.
 func (o WaitOptions) Validate() error {
-	if strings.TrimSpace(o.ID) == "" {
+	if strings.TrimSpace(o.Reference) == "" {
 		return ErrSessionRequired
 	}
 
@@ -156,16 +128,8 @@ func (o WaitOptions) validateConditions() error {
 		return fmt.Errorf("%w: %q", registry.ErrUnknownActivity, o.Activity)
 	}
 
-	if o.Presence == PresenceGone && o.Activity != "" {
-		return fmt.Errorf(
-			"%w: presence %q cannot be combined with activity %q",
-			ErrContradictoryCondition,
-			o.Presence,
-			o.Activity,
-		)
-	}
-
-	if o.Presence == PresenceUnknown && o.Activity != "" {
+	if (o.Presence == registry.PresenceGone || o.Presence == registry.PresenceUnknown) &&
+		o.Activity != "" {
 		return fmt.Errorf(
 			"%w: presence %q cannot be combined with activity %q",
 			ErrContradictoryCondition,
@@ -177,10 +141,6 @@ func (o WaitOptions) validateConditions() error {
 	return nil
 }
 
-func emptyFilter() registry.Filter {
-	return registry.Filter{}
-}
-
 // Wait waits for a session condition to be met, optionally requiring the condition
 // to hold across observed snapshots for options.StableFor before returning.
 //
@@ -190,7 +150,8 @@ func emptyFilter() registry.Filter {
 // disappears after Wait has seen it satisfies a gone presence condition; the
 // result is the last observed session with a Gone liveness whose reason is
 // "session_removed". For any other condition it returns ErrSessionDisappeared.
-// A session missing from the first snapshot returns registry.ErrSessionNotFound.
+// A reference that matches no session in the first snapshot returns
+// registry.ErrSessionNotFound.
 func (c *Client) Wait(ctx context.Context, opts WaitOptions) (WaitResult, error) {
 	if c.configErr != nil {
 		return WaitResult{}, c.configErr
@@ -207,14 +168,13 @@ func (c *Client) Wait(ctx context.Context, opts WaitOptions) (WaitResult, error)
 		defer cancel()
 	}
 
-	stream, err := c.startWatcher(ctx)
+	stream, err := c.openSessionStream(ctx, registry.Filter{})
 	if err != nil {
 		return WaitResult{}, waitError(err)
 	}
 
-	_, durable := stream.(*durableSessionWatcher)
 	run := &waitRun{
-		client: c, opts: opts, stream: stream, durable: durable,
+		opts: opts, stream: stream, id: "",
 		stableTimer: nil, stableTimerCh: nil, stableReady: false,
 		candidate: nil, lastSeen: nil, seenInitial: false,
 	}
@@ -238,14 +198,16 @@ func (r *waitRun) loop(ctx context.Context) (WaitResult, error) {
 		}
 
 		if !ok || ev.err != nil {
-			if err := r.replaceFailedStream(ctx, ok, ev.err); err != nil {
-				return WaitResult{}, err
+			r.resetStable()
+
+			if err := r.stream.recover(ctx, ok, ev.err); err != nil {
+				return WaitResult{}, waitError(err)
 			}
 
 			continue
 		}
 
-		result, done, err := r.observe(ev.sessions)
+		result, done, err := r.observe(ev.snapshot.Sessions)
 		if err != nil {
 			return WaitResult{}, err
 		}
@@ -264,7 +226,7 @@ func (r *waitRun) nextEvent(ctx context.Context) (watchEvent, bool, waitStep) {
 	// Consume already queued observations before accepting an elapsed stability
 	// timer. Otherwise select could return a stale match while a change waits.
 	select {
-	case ev, ok := <-r.stream.Events():
+	case ev, ok := <-r.stream.events():
 		return ev, ok, waitStepEvent
 	default:
 	}
@@ -281,45 +243,19 @@ func (r *waitRun) nextEvent(ctx context.Context) (watchEvent, bool, waitStep) {
 		r.stableTimerCh = nil
 
 		return watchEvent{}, false, waitStepTimer
-	case ev, ok := <-r.stream.Events():
+	case ev, ok := <-r.stream.events():
 		return ev, ok, waitStepEvent
 	}
-}
-
-func (r *waitRun) replaceFailedStream(ctx context.Context, ok bool, err error) error {
-	r.resetStable()
-
-	if !r.fallsBackToDurable(ok, err) {
-		if !ok {
-			return ErrStreamClosed
-		}
-
-		return waitError(publicError(err))
-	}
-
-	r.stream.Close()
-	r.stream = startDurableWatcher(ctx, r.client.storePath)
-	r.durable = true
-
-	return nil
-}
-
-func (r *waitRun) fallsBackToDurable(ok bool, err error) bool {
-	if r.client.mode != ModeAuto || r.durable {
-		return false
-	}
-
-	return !ok || IsUnavailable(err) || broker.IsUnavailable(err) || StreamClosed(err)
 }
 
 func (r *waitRun) observe(sessions []registry.Session) (WaitResult, bool, error) {
 	isInitial := !r.seenInitial
 	r.seenInitial = true
 
-	current := r.currentSession(sessions)
-	if current == nil {
+	current, err := r.currentSession(sessions)
+	if err != nil {
 		r.resetStable()
-		return WaitResult{}, false, registry.ErrSessionNotFound
+		return WaitResult{}, false, err
 	}
 
 	r.lastSeen = current
@@ -344,20 +280,25 @@ func (r *waitRun) observe(sessions []registry.Session) (WaitResult, bool, error)
 	return WaitResult{}, false, nil
 }
 
-func (r *waitRun) currentSession(sessions []registry.Session) *registry.Session {
-	for i := range sessions {
-		if sessions[i].ID == r.opts.ID {
-			return &sessions[i]
+func (r *waitRun) currentSession(sessions []registry.Session) (*registry.Session, error) {
+	if r.id == "" {
+		session, err := ResolveSessions(sessions, Selector{Reference: r.opts.Reference})
+		if err != nil {
+			return nil, err
 		}
+
+		r.id = session.ID
 	}
 
-	if r.lastSeen == nil {
-		return nil
+	for i := range sessions {
+		if sessions[i].ID == r.id {
+			return &sessions[i], nil
+		}
 	}
 
 	removed := removedSession(*r.lastSeen, time.Now().UTC())
 
-	return &removed
+	return &removed, nil
 }
 
 func (r *waitRun) holdCandidate(current *registry.Session) {
@@ -376,24 +317,27 @@ func (r *waitRun) holdCandidate(current *registry.Session) {
 func (r *waitRun) resetStable() {
 	r.stableReady = false
 
-	stopTimer(r.stableTimer)
+	if r.stableTimer != nil {
+		r.stableTimer.Stop()
+	}
+
 	r.stableTimer = nil
 	r.stableTimerCh = nil
 	r.candidate = nil
 }
 
 func (r *waitRun) close() {
-	stopTimer(r.stableTimer)
-
-	if r.stream != nil {
-		r.stream.Close()
+	if r.stableTimer != nil {
+		r.stableTimer.Stop()
 	}
+
+	r.stream.close()
 }
 
 // removedSession describes a session the registry deleted after Wait saw it.
 // Deletion only follows the gone transition, so the session is gone.
 func removedSession(session registry.Session, at time.Time) registry.Session {
-	if session.Presence() == PresenceGone {
+	if session.Presence() == registry.PresenceGone {
 		return session
 	}
 
@@ -407,55 +351,24 @@ func removedSession(session registry.Session, at time.Time) registry.Session {
 	return session
 }
 
-func (c *Client) startWatcher(ctx context.Context) (sessionWatcher, error) {
-	if c.newWatcher != nil {
-		return c.newWatcher(ctx, emptyFilter())
-	}
-
-	switch c.mode {
-	case ModeRealtimeOnly:
-		w, err := openBrokerWatcher(ctx, c.realtime, emptyFilter())
-		if err != nil {
-			return nil, publicError(err)
-		}
-
-		return w, nil
-	case ModeDurableOnly:
-		return startDurableWatcher(ctx, c.storePath), nil
-	case ModeAuto:
-		w, err := openBrokerWatcher(ctx, c.realtime, emptyFilter())
-		if err == nil {
-			return w, nil
-		}
-
-		if !IsUnavailable(err) && !broker.IsUnavailable(err) && !StreamClosed(err) {
-			return nil, publicError(err)
-		}
-
-		return startDurableWatcher(ctx, c.storePath), nil
-	default:
-		return nil, ErrInvalidMode
-	}
-}
-
 func evaluateCondition(session registry.Session, opts WaitOptions) (bool, error) {
-	if opts.Presence == PresenceGone {
-		return session.Presence() == PresenceGone, nil
+	if opts.Presence == registry.PresenceGone {
+		return session.Presence() == registry.PresenceGone, nil
 	}
 
-	if session.Presence() == PresenceGone {
+	if session.Presence() == registry.PresenceGone {
 		return false, ErrSessionDisappeared
 	}
 
-	if session.Presence() == PresenceUnknown {
-		if opts.Presence == PresenceUnknown {
+	if session.Presence() == registry.PresenceUnknown {
+		if opts.Presence == registry.PresenceUnknown {
 			return true, nil
 		}
 
 		return false, ErrUnknownState
 	}
 
-	if opts.Presence != "" && opts.Presence != PresenceLive {
+	if opts.Presence != "" && opts.Presence != registry.PresenceLive {
 		return false, nil
 	}
 
@@ -468,136 +381,6 @@ func evaluateCondition(session registry.Session, opts WaitOptions) (bool, error)
 	}
 
 	return true, nil
-}
-
-func openBrokerWatcher(
-	ctx context.Context,
-	brokerClient *broker.Client,
-	filter registry.Filter,
-) (*brokerSessionWatcher, error) {
-	sub, err := brokerClient.Subscribe(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("subscribing to broker: %w", err)
-	}
-
-	watcherCtx, cancel := context.WithCancel(ctx)
-	w := &brokerSessionWatcher{
-		subscription: sub,
-		cancel:       cancel,
-		events:       make(chan watchEvent, defaultWatcherBufferSize),
-		done:         make(chan struct{}),
-	}
-
-	go w.run(watcherCtx)
-
-	return w, nil
-}
-
-func (w *brokerSessionWatcher) Events() <-chan watchEvent {
-	return w.events
-}
-
-func (w *brokerSessionWatcher) Close() {
-	w.cancel()
-	w.subscription.Close()
-	<-w.done
-}
-
-func (w *brokerSessionWatcher) run(ctx context.Context) {
-	defer close(w.done)
-	defer close(w.events)
-
-	snapshots := w.subscription.Snapshots
-	errCh := w.subscription.Errors
-
-	for snapshots != nil || errCh != nil {
-		select {
-		case <-ctx.Done():
-			return
-		case snap, ok := <-snapshots:
-			if !ok {
-				snapshots = nil
-				continue
-			}
-
-			if !w.forwardEvent(ctx, watchEvent{sessions: snap.Sessions, err: nil}) {
-				return
-			}
-		case err, ok := <-errCh:
-			if !ok {
-				errCh = nil
-				continue
-			}
-
-			if err != nil && !w.forwardEvent(ctx, watchEvent{sessions: nil, err: err}) {
-				return
-			}
-		}
-	}
-}
-
-func (w *brokerSessionWatcher) forwardEvent(ctx context.Context, ev watchEvent) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case w.events <- ev:
-		return true
-	}
-}
-
-func startDurableWatcher(ctx context.Context, storePath string) *durableSessionWatcher {
-	watchCtx, cancel := context.WithCancel(ctx)
-	w := &durableSessionWatcher{
-		cancel: cancel,
-		events: make(chan watchEvent, defaultWatcherBufferSize),
-		done:   make(chan struct{}),
-	}
-
-	go w.run(watchCtx, storePath)
-
-	return w
-}
-
-func (w *durableSessionWatcher) Events() <-chan watchEvent {
-	return w.events
-}
-
-func (w *durableSessionWatcher) Close() {
-	w.cancel()
-	<-w.done
-}
-
-func (w *durableSessionWatcher) run(ctx context.Context, storePath string) {
-	defer close(w.done)
-	defer close(w.events)
-
-	store := registry.NewJournal(storePath, catalog.Rules{})
-
-	err := store.Watch(ctx, registry.WatchOptions{
-		Filter:            emptyFilter(),
-		Debounce:          defaultFileWatchDebounce,
-		ReconcileInterval: 0,
-	}, func(res registry.WatchResult) error {
-		var ev watchEvent
-		if res.Err != nil {
-			ev = watchEvent{sessions: nil, err: res.Err}
-		} else {
-			ev = watchEvent{sessions: res.Sessions, err: nil}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case w.events <- ev:
-			return nil
-		}
-	})
-	if err != nil && ctx.Err() == nil {
-		select {
-		case <-ctx.Done():
-		case w.events <- watchEvent{sessions: nil, err: err}:
-		}
-	}
 }
 
 func waitError(err error) error {
@@ -614,10 +397,4 @@ func sameWaitProcess(left *registry.ProcessIdentity, right *registry.ProcessIden
 	}
 
 	return left.PID == right.PID && left.StartIdentity == right.StartIdentity
-}
-
-func stopTimer(t *time.Timer) {
-	if t != nil {
-		t.Stop()
-	}
 }

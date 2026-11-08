@@ -10,6 +10,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 func TestCurrentAncestorLookup(t *testing.T) {
@@ -61,52 +62,40 @@ func TestCurrentAncestorLookup(t *testing.T) {
 	// Process tree: Caller (PID 300) -> Parent (PID 200, bash) -> Grandparent (PID 100, codex)
 	processTree := []processinfo.Process{
 		{
-			PID:                300,
-			PPID:               200,
-			ProcessGroupID:     100,
-			Foreground:         true,
-			StartIdentity:      "boot-1:300:caller",
-			Executable:         "/usr/bin/aht",
-			CWD:                "/tmp/work",
-			TTY:                "/dev/pts/1",
-			AgentHint:          "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerSession: "",
-			MultiplexerPane:    "",
-			Args:               nil,
+			PID:            300,
+			PPID:           200,
+			ProcessGroupID: 100,
+			Foreground:     true,
+			StartIdentity:  "boot-1:300:caller",
+			Executable:     "/usr/bin/aht",
+			CWD:            "/tmp/work",
+			TTY:            "/dev/pts/1",
+			Env:            nil,
+			Args:           nil,
 		},
 		{
-			PID:                200,
-			PPID:               agentPID,
-			ProcessGroupID:     100,
-			Foreground:         true,
-			StartIdentity:      "boot-1:200:shell",
-			Executable:         "/bin/bash",
-			CWD:                "/tmp/work",
-			TTY:                "/dev/pts/1",
-			AgentHint:          "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerSession: "",
-			MultiplexerPane:    "",
-			Args:               nil,
+			PID:            200,
+			PPID:           agentPID,
+			ProcessGroupID: 100,
+			Foreground:     true,
+			StartIdentity:  "boot-1:200:shell",
+			Executable:     "/bin/bash",
+			CWD:            "/tmp/work",
+			TTY:            "/dev/pts/1",
+			Env:            nil,
+			Args:           nil,
 		},
 		{
-			PID:                agentPID,
-			PPID:               1,
-			ProcessGroupID:     100,
-			Foreground:         true,
-			StartIdentity:      agentIdentity,
-			Executable:         "/usr/bin/codex",
-			CWD:                "/tmp/work",
-			TTY:                "/dev/pts/1",
-			AgentHint:          "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerSession: "",
-			MultiplexerPane:    "",
-			Args:               nil,
+			PID:            agentPID,
+			PPID:           1,
+			ProcessGroupID: 100,
+			Foreground:     true,
+			StartIdentity:  agentIdentity,
+			Executable:     "/usr/bin/codex",
+			CWD:            "/tmp/work",
+			TTY:            "/dev/pts/1",
+			Env:            nil,
+			Args:           nil,
 		},
 	}
 
@@ -124,9 +113,7 @@ func TestCurrentAncestorLookup(t *testing.T) {
 
 			return processinfo.Process{}, false, nil
 		},
-		TmuxCurrent:   nil,
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
+		Locations: nil,
 	})
 	if err != nil {
 		t.Fatalf("ancestor lookup failed: %v", err)
@@ -185,20 +172,16 @@ func TestCurrentPIDReuseDefense(t *testing.T) {
 	// Process table has a process with PID 500, but DIFFERENT StartIdentity (PID was reused)
 	reusedProcessTree := []processinfo.Process{
 		{
-			PID:                agentPID,
-			PPID:               1,
-			ProcessGroupID:     500,
-			Foreground:         true,
-			StartIdentity:      "boot-1:500:reused-start", // mismatch!
-			Executable:         "/usr/bin/other-app",
-			CWD:                "/tmp/work",
-			TTY:                "/dev/pts/2",
-			AgentHint:          "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerSession: "",
-			MultiplexerPane:    "",
-			Args:               nil,
+			PID:            agentPID,
+			PPID:           1,
+			ProcessGroupID: 500,
+			Foreground:     true,
+			StartIdentity:  "boot-1:500:reused-start", // mismatch!
+			Executable:     "/usr/bin/other-app",
+			CWD:            "/tmp/work",
+			TTY:            "/dev/pts/2",
+			Env:            nil,
+			Args:           nil,
 		},
 	}
 
@@ -216,9 +199,7 @@ func TestCurrentPIDReuseDefense(t *testing.T) {
 
 			return processinfo.Process{}, false, nil
 		},
-		TmuxCurrent:   nil,
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
+		Locations: nil,
 	})
 	if !errors.Is(err, ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession on PID reuse, got: %v", err)
@@ -296,27 +277,23 @@ func TestCurrentTerminalContext(t *testing.T) {
 		ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
 			if pid == 700 || pid == 999 {
 				return processinfo.Process{
-					PID:                pid,
-					PPID:               1,
-					ProcessGroupID:     700,
-					Foreground:         true,
-					StartIdentity:      "boot-1:700:tmux-agent",
-					Executable:         "/usr/bin/claude",
-					CWD:                "/tmp/work",
-					TTY:                "/dev/pts/3",
-					AgentHint:          "",
-					MultiplexerKind:    "",
-					MultiplexerServer:  "",
-					MultiplexerSession: "",
-					MultiplexerPane:    "",
-					Args:               nil,
+					PID:            pid,
+					PPID:           1,
+					ProcessGroupID: 700,
+					Foreground:     true,
+					StartIdentity:  "boot-1:700:tmux-agent",
+					Executable:     "/usr/bin/claude",
+					CWD:            "/tmp/work",
+					TTY:            "/dev/pts/3",
+					Env:            nil,
+					Args:           nil,
 				}, true, nil
 			}
 
 			return processinfo.Process{}, false, nil
 		},
-		TmuxCurrent: func(context.Context) (registry.Location, error) {
-			return registry.Location{
+		Locations: func(context.Context) []registry.Location {
+			return []registry.Location{{
 				Kind:            registry.MultiplexerTmux,
 				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
@@ -330,10 +307,8 @@ func TestCurrentTerminalContext(t *testing.T) {
 				PanePID:         700,
 				PaneTTY:         "/dev/pts/3",
 				ClientTTY:       "",
-			}, nil
+			}}
 		},
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
 	})
 	if err != nil {
 		t.Fatalf("tmux terminal context resolution failed: %v", err)
@@ -350,8 +325,8 @@ func TestCurrentTerminalContext(t *testing.T) {
 			return nil, nil
 		},
 		ProcessFind: nil,
-		TmuxCurrent: func(context.Context) (registry.Location, error) {
-			return registry.Location{
+		Locations: func(context.Context) []registry.Location {
+			return []registry.Location{{
 				Kind:            registry.MultiplexerTmux,
 				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
@@ -365,10 +340,8 @@ func TestCurrentTerminalContext(t *testing.T) {
 				PanePID:         0,
 				PaneTTY:         "",
 				ClientTTY:       "",
-			}, nil
+			}}
 		},
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
 	})
 	if !errors.Is(err, ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession for stale pane, got: %v", err)
@@ -383,8 +356,8 @@ func TestCurrentTerminalContext(t *testing.T) {
 		ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
 			return processinfo.Process{}, false, nil // process not found (died)
 		},
-		TmuxCurrent: func(context.Context) (registry.Location, error) {
-			return registry.Location{
+		Locations: func(context.Context) []registry.Location {
+			return []registry.Location{{
 				Kind:            registry.MultiplexerTmux,
 				ServerID:        "/tmp/tmux.sock",
 				SessionID:       "$1",
@@ -398,10 +371,8 @@ func TestCurrentTerminalContext(t *testing.T) {
 				PanePID:         700,
 				PaneTTY:         "/dev/pts/3",
 				ClientTTY:       "",
-			}, nil
+			}}
 		},
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
 	})
 	if !errors.Is(err, ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession when process died in pane, got: %v", err)
@@ -422,10 +393,8 @@ func TestCurrentNoAmbientAgent(t *testing.T) {
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			return nil, nil
 		},
-		ProcessFind:   nil,
-		TmuxCurrent:   nil,
-		ZellijCurrent: nil,
-		HerdrCurrent:  nil,
+		ProcessFind: nil,
+		Locations:   nil,
 	})
 	if !errors.Is(err, ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession for no ambient agent, got: %v", err)
@@ -469,10 +438,8 @@ func TestCurrentRejectsUnverifiedPaneCandidates(t *testing.T) {
 		_, found, err := resolvePaneSession(
 			t.Context(),
 			sessions,
-			location.Kind,
-			"",
-			location.PaneID,
-			location.SessionName,
+			zellij.NewDriver(),
+			location,
 			opts,
 		)
 		if found || err != nil {

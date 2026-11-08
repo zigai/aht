@@ -24,7 +24,7 @@ func TestJournalReadersSeeUnflushedBrokerAndFallbackWrites(t *testing.T) {
 	})
 
 	observation := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       time.Time{},
 		Subject:  ObservationIdentity{SessionID: "queued"},
 		Evidence: &Report{Activity: new(ActivityRunning)},
@@ -74,7 +74,7 @@ func TestJournalSnapshotSequencePreventsReplayAfterCrash(t *testing.T) {
 	_, err = memory.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       time.Time{},
 			Subject:  ObservationIdentity{SessionID: "gone"},
 			Evidence: &Report{Lifecycle: new(NativeLifecycleEnd)},
@@ -84,7 +84,7 @@ func TestJournalSnapshotSequencePreventsReplayAfterCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(path + ".journal.jsonl")
+	data, err := os.ReadFile(journalPath(path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestJournalHeartbeatDoesNotAdvanceConsumerRevision(t *testing.T) {
 	now := time.Now().UTC()
 
 	observation := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       now,
 		Subject:  ObservationIdentity{SessionID: "heartbeat"},
 		Evidence: &Report{Activity: new(ActivityRunning)},
@@ -201,7 +201,7 @@ func TestJournalDiscardsUncommittedPartialTail(t *testing.T) {
 		}
 	})
 
-	if err := os.WriteFile(path+".journal.jsonl", []byte(`{"sequence":`), 0o600); err != nil {
+	if err := os.WriteFile(journalPath(path), []byte(`{"sequence":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,7 +209,7 @@ func TestJournalDiscardsUncommittedPartialTail(t *testing.T) {
 		path,
 		fixtureRules{},
 	).Observe(t.Context(), Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      time.Time{},
 		Subject: ObservationIdentity{
 			SessionID: "complete",
@@ -266,7 +266,7 @@ func TestFallbackReportSurvivesNewerMemoryHeartbeat(t *testing.T) {
 	running, waiting := ActivityRunning, ActivityWaiting
 	process := ProcessIdentity{PID: 123, StartIdentity: "boot:123"}
 	report := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       base,
 		Subject:  ObservationIdentity{SessionID: "fallback"},
 		Evidence: &Report{Activity: &running, Process: &process},
@@ -291,7 +291,7 @@ func TestFallbackReportSurvivesNewerMemoryHeartbeat(t *testing.T) {
 	_, err = memory.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       base.Add(2 * time.Second),
 			Subject:  ObservationIdentity{},
 			Evidence: &Sighting{Process: process, Present: present},
@@ -341,7 +341,7 @@ func TestFallbackGCCannotBeResurrectedByMemoryFlush(t *testing.T) {
 	ended, err := durable.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       base,
 			Subject:  ObservationIdentity{SessionID: "expired"},
 			Evidence: &Report{Lifecycle: &end},
@@ -354,7 +354,7 @@ func TestFallbackGCCannotBeResurrectedByMemoryFlush(t *testing.T) {
 	live, err := durable.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       base,
 			Subject:  ObservationIdentity{SessionID: "retained"},
 			Evidence: &Report{Activity: &idle},
@@ -418,13 +418,13 @@ func TestMemoryStoreJournalsEndedProcessBeforeLateReport(t *testing.T) {
 	}
 	if _, err := memory.Observe(
 		t.Context(),
-		Observation{Harness: HarnessCodex, Evidence: &Sighting{Process: process, Present: false}},
+		Observation{Harness: harnessPrimary, Evidence: &Sighting{Process: process, Present: false}},
 	); err != nil {
 		t.Fatal(err)
 	}
 
 	late := Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		Subject:  ObservationIdentity{SessionID: "late"},
 		Evidence: &Report{Activity: new(ActivityIdle), Process: &process},
 	}
@@ -463,11 +463,11 @@ func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
 	owner.setNowForTest(func() time.Time { return now })
 
 	if _, err := owner.Observe(ctx, Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      base,
 		Subject: ObservationIdentity{SessionID: "shared"},
 		Evidence: &Report{
-			Reporter: Reporter{Integration: "codex-extension"},
+			Reporter: Reporter{Integration: "primary-extension"},
 			Activity: &running,
 			Process:  &first,
 		},
@@ -476,7 +476,7 @@ func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
 	}
 
 	if _, err := owner.Observe(ctx, Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       base.Add(time.Second),
 		Evidence: &Sighting{Process: first, Present: true},
 	}); err != nil {
@@ -490,7 +490,7 @@ func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
 	// A heartbeat sighting the owner keeps only in memory.
 	now = base.Add(time.Minute)
 	if _, err := owner.Observe(ctx, Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       now,
 		Evidence: &Sighting{Process: first, Present: true},
 	}); err != nil {
@@ -501,11 +501,11 @@ func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
 	fallback.setNowForTest(func() time.Time { return base.Add(61 * time.Second) })
 
 	if _, err := fallback.Observe(ctx, Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      base.Add(30 * time.Second),
 		Subject: ObservationIdentity{SessionID: "shared"},
 		Evidence: &Report{
-			Reporter: Reporter{Integration: "codex-extension"},
+			Reporter: Reporter{Integration: "primary-extension"},
 			Activity: &idle,
 			Process:  &second,
 		},
@@ -518,10 +518,10 @@ func TestOwnerKeepsServingAfterFallbackWriteItCannotReplay(t *testing.T) {
 	}
 
 	if _, err := owner.Observe(ctx, Observation{
-		Harness:  HarnessCodex,
+		Harness:  harnessPrimary,
 		At:       now,
 		Subject:  ObservationIdentity{SessionID: "unrelated"},
-		Evidence: &Report{Reporter: Reporter{Integration: "codex-extension"}, Activity: &running},
+		Evidence: &Report{Reporter: Reporter{Integration: "primary-extension"}, Activity: &running},
 	}); err != nil {
 		t.Fatalf("owner Observe after fallback write: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestJournalResetRecoversUnreadableJournal(t *testing.T) {
 			At:      time.Now().UTC(),
 			Subject: ObservationIdentity{SessionID: "before-reset"},
 			Evidence: &Report{
-				Reporter: Reporter{Integration: "codex-extension"},
+				Reporter: Reporter{Integration: "primary-extension"},
 				Activity: &running,
 			},
 		}
@@ -563,7 +563,7 @@ func TestJournalResetRecoversUnreadableJournal(t *testing.T) {
 				if _, err := NewJournal(
 					path,
 					fixtureRules{},
-				).Observe(t.Context(), report(HarnessCodex)); err != nil {
+				).Observe(t.Context(), report(harnessPrimary)); err != nil {
 					t.Fatal(err)
 				}
 
@@ -576,7 +576,7 @@ func TestJournalResetRecoversUnreadableJournal(t *testing.T) {
 				t.Helper()
 
 				// While an owner holds the store, fallback writes stay in the journal.
-				owner, err := tryStoreLock(path + ".owner.lock")
+				owner, err := tryStoreLock(ownerLockPath(path))
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -14,15 +14,15 @@ func TestSummarySeparatesServersAndCountsAllActivities(t *testing.T) {
 	sessions := []Session{
 		{
 			Location: Location{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil, time.Time{}, ""),
 		},
 		{
 			Location: Location{Kind: MultiplexerTmux, ServerID: "second", SessionID: "$0"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil, time.Time{}, ""),
 		},
 		{
 			Location: Location{Kind: MultiplexerTmux, ServerID: "first", SessionID: "$0"},
-			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil),
+			Liveness: NewLiveness(PresenceGone, ActivityValue(nil), nil, time.Time{}, ""),
 		},
 	}
 
@@ -76,48 +76,66 @@ func TestSummariesSumConservationAndNilActivity(t *testing.T) {
 		{
 			ID:          "1",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "2",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil, time.Time{
+
+				// Live with nil activity (must count into ActivityUnknown)
+			}, ""),
 		},
-		// Live with nil activity (must count into ActivityUnknown)
+
 		{
 			ID:          "3",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(nil), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(nil), nil, time.Time{
+
+				// Gone with nil activity (must NOT increment idle/running or ActivityUnknown)
+			}, ""),
 		},
-		// Gone with nil activity (must NOT increment idle/running or ActivityUnknown)
+
 		{
 			ID:          "4",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil),
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil, time.Time{
+
+				// Gone with non-nil activity (must NOT increment activity counts)
+			}, ""),
 		},
-		// Gone with non-nil activity (must NOT increment activity counts)
+
 		{
 			ID:          "5",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceGone, ActivityValue(&failed), nil),
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(&failed), nil, time.Time{
+
+				// Unknown presence with activity
+			}, ""),
 		},
-		// Unknown presence with activity
+
 		{
 			ID:          "6",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(&running), nil, time.Time{
+
+				// Unknown presence with nil activity
+			}, ""),
 		},
-		// Unknown presence with nil activity
+
 		{
 			ID:          "7",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(nil), nil),
+			Liveness:    NewLiveness(PresenceUnknown, ActivityValue(nil), nil, time.Time{
+
+				// Blank presence with nil activity (must count as PresenceUnknown, ActivityUnknown)
+			}, ""),
 		},
-		// Blank presence with nil activity (must count as PresenceUnknown, ActivityUnknown)
+
 		{
 			ID:          "8",
 			ProjectRoot: "/p1",
-			Liveness:    NewLiveness("", ActivityValue(nil), nil),
+			Liveness:    NewLiveness("", ActivityValue(nil), nil, time.Time{}, ""),
 		},
 	}
 
@@ -196,43 +214,43 @@ func TestSummariesAllActivitiesAndPresenceStates(t *testing.T) {
 	sessions := []Session{
 		{
 			ID:       "r",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "w",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&waiting), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&waiting), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "i",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&idle), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "f",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&failed), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "int",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&interrupted), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "unk",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&unknownAct), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&unknownAct), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "inv",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&invalidAct), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&invalidAct), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "gone",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceGone, ActivityValue(&running), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceGone, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 	}
 
@@ -290,17 +308,17 @@ func TestSummariesProjectGroupingCollidingBasenames(t *testing.T) {
 		{
 			ID:          "1",
 			ProjectRoot: "/home/alice/work/service",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "2",
 			ProjectRoot: "/home/alice/work/service",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "3",
 			ProjectRoot: "/home/bob/other/service",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 	}
 
@@ -346,24 +364,30 @@ func TestSummariesProjectGroupingUnknownAndMissingRoot(t *testing.T) {
 		{
 			ID:          "1",
 			ProjectRoot: "",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "2",
 			ProjectRoot: "",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{
+
+				// Project with root literally named "/var/projects/unknown"
+			}, ""),
 		},
-		// Project with root literally named "/var/projects/unknown"
+
 		{
 			ID:          "3",
 			ProjectRoot: "/var/projects/unknown",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{
+
+				// Normal project
+			}, ""),
 		},
-		// Normal project
+
 		{
 			ID:          "4",
 			ProjectRoot: "/home/user/alpha",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 	}
 
@@ -398,23 +422,23 @@ func TestSummariesHarnessGroupingAndUnknown(t *testing.T) {
 	sessions := []Session{
 		{
 			ID:       "1",
-			Harness:  HarnessClaude,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Harness:  harnessCatalog,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "2",
-			Harness:  HarnessCodex,
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Harness:  harnessPrimary,
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "3",
 			Harness:  "",
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "4",
 			Harness:  "",
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 	}
 
@@ -423,12 +447,12 @@ func TestSummariesHarnessGroupingAndUnknown(t *testing.T) {
 		t.Fatalf("expected 3 harness groups, got %d", len(summaries))
 	}
 
-	if summaries[0].Harness != HarnessClaude || summaries[0].Total != 1 {
-		t.Errorf("summary[0] = %+v, want claude", summaries[0])
+	if summaries[0].Harness != harnessCatalog || summaries[0].Total != 1 {
+		t.Errorf("summary[0] = %+v, want catalog", summaries[0])
 	}
 
-	if summaries[1].Harness != HarnessCodex || summaries[1].Total != 1 {
-		t.Errorf("summary[1] = %+v, want codex", summaries[1])
+	if summaries[1].Harness != harnessPrimary || summaries[1].Total != 1 {
+		t.Errorf("summary[1] = %+v, want primary", summaries[1])
 	}
 
 	if summaries[2].Harness != "" || summaries[2].GroupLabel != "unknown" ||
@@ -446,22 +470,24 @@ func TestSummariesMultiplexerGroupingServerQualified(t *testing.T) {
 		{
 			ID:       "1",
 			Location: Location{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "2",
 			Location: Location{Kind: MultiplexerTmux, ServerID: "srv2", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "3",
 			Location: Location{Kind: MultiplexerTmux, ServerID: "srv1", SessionName: "work"},
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:       "4",
-			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil),
-		}, // unlocated
+			Liveness: NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{
+				// unlocated
+			}, ""),
+		},
 	}
 
 	summaries := SummariesWithOptions(
@@ -499,26 +525,26 @@ func TestSummariesFiltersBeforeGrouping(t *testing.T) {
 	sessions := []Session{
 		{
 			ID:          "1",
-			Harness:     HarnessClaude,
+			Harness:     harnessCatalog,
 			ProjectRoot: "/app",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&running), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "2",
-			Harness:     HarnessCodex,
+			Harness:     harnessPrimary,
 			ProjectRoot: "/app",
-			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil),
+			Liveness:    NewLiveness(PresenceLive, ActivityValue(&idle), nil, time.Time{}, ""),
 		},
 		{
 			ID:          "3",
-			Harness:     HarnessClaude,
+			Harness:     harnessCatalog,
 			ProjectRoot: "/app",
-			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil),
+			Liveness:    NewLiveness(PresenceGone, ActivityValue(nil), nil, time.Time{}, ""),
 		},
 	}
 
-	// Filter by HarnessClaude before summarizing
-	filtered := FilterSessions(sessions, Filter{Harness: HarnessClaude})
+	// Filter by harness before summarizing.
+	filtered := FilterSessions(sessions, Filter{Harness: harnessCatalog})
 	summaries := SummariesWithOptions(filtered, SummaryOptions{GroupBy: SummaryGroupByProject})
 
 	if len(summaries) != 1 {
@@ -526,7 +552,7 @@ func TestSummariesFiltersBeforeGrouping(t *testing.T) {
 	}
 
 	if summaries[0].Total != 2 {
-		t.Errorf("total = %d, want 2 (only claude sessions)", summaries[0].Total)
+		t.Errorf("total = %d, want 2 (only catalog sessions)", summaries[0].Total)
 	}
 
 	if summaries[0].Live != 1 || summaries[0].Gone != 1 {
@@ -552,7 +578,7 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 
 	running := ActivityRunning
 	obs1 := Observation{
-		Harness: HarnessClaude,
+		Harness: harnessCatalog,
 		At:      time.Time{},
 		Subject: ObservationIdentity{SessionID: "sess-1"},
 		Evidence: &Report{
@@ -563,7 +589,7 @@ func TestSummariesFileAndMemoryStoreParity(t *testing.T) {
 		},
 	}
 	obs2 := Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      time.Time{},
 		Subject: ObservationIdentity{SessionID: "sess-2"},
 		Evidence: &Report{

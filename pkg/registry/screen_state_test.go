@@ -9,7 +9,7 @@ import (
 func TestScreenStateIsAuthoritativeUnderScreenPolicy(t *testing.T) {
 	t.Parallel()
 
-	for _, harness := range []Harness{HarnessCodex, HarnessClaude} {
+	for _, harness := range []Harness{harnessPrimary, harnessCatalog} {
 		t.Run(string(harness), func(t *testing.T) {
 			t.Parallel()
 			store := NewJournal(t.TempDir()+"/state.json", fixtureRules{authority: AuthorityScreen})
@@ -90,18 +90,18 @@ func TestStaleIntegrationDoesNotSuppressScreenFallback(t *testing.T) {
 	t.Parallel()
 	store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})
 	at := time.Now().UTC().Add(-time.Minute)
-	process := ProcessIdentity{PID: 150, StartIdentity: "boot:150", Executable: "pi"}
+	process := ProcessIdentity{PID: 150, StartIdentity: "boot:150", Executable: "secondary"}
 	presence := PresenceLive
 	idle := ActivityIdle
 
 	_, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      at,
-			Subject: ObservationIdentity{SessionID: "pi-stale"},
+			Subject: ObservationIdentity{SessionID: "secondary-stale"},
 			Evidence: &Report{
-				Reporter: Reporter{Integration: "pi-extension"},
+				Reporter: Reporter{Integration: "secondary-extension"},
 				Event:    "agent_settled",
 				Claim:    &presence,
 				Activity: &idle,
@@ -122,7 +122,7 @@ func TestStaleIntegrationDoesNotSuppressScreenFallback(t *testing.T) {
 		RuleID:                 "permission_prompt",
 		ManifestSource:         "bundled",
 		ManifestVersion:        1,
-		FallbackForIntegration: "pi-extension",
+		FallbackForIntegration: "secondary-extension",
 		FallbackReason:         "integration_report_stale",
 		Process:                process,
 		ObservedAt:             screenAt,
@@ -131,9 +131,9 @@ func TestStaleIntegrationDoesNotSuppressScreenFallback(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       screenAt,
-			Subject:  ObservationIdentity{SessionID: "pi-stale"},
+			Subject:  ObservationIdentity{SessionID: "secondary-stale"},
 			Evidence: (*Reading)(screen),
 		},
 	)
@@ -154,18 +154,18 @@ func TestDelayedNativeActivityCannotOverwriteNewerScreenDecision(t *testing.T) {
 
 	store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})
 	at := time.Date(2026, 8, 12, 6, 0, 0, 0, time.UTC)
-	process := ProcessIdentity{PID: 151, StartIdentity: "boot:151", Executable: "pi"}
+	process := ProcessIdentity{PID: 151, StartIdentity: "boot:151", Executable: "secondary"}
 	presence := PresenceLive
 	running := ActivityRunning
 
 	_, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      at,
-			Subject: ObservationIdentity{SessionID: "pi-delayed"},
+			Subject: ObservationIdentity{SessionID: "secondary-delayed"},
 			Evidence: &Report{
-				Reporter: Reporter{Integration: "pi-extension"},
+				Reporter: Reporter{Integration: "secondary-extension"},
 				Event:    "agent_start",
 				Claim:    &presence,
 				Activity: &running,
@@ -180,17 +180,24 @@ func TestDelayedNativeActivityCannotOverwriteNewerScreenDecision(t *testing.T) {
 	screenAt := at.Add(IntegrationActivityLease + time.Second)
 	idle := ActivityIdle
 	screen := &ScreenObservation{
-		Activity: idle, Authority: "screen", Reason: "manifest_rule", RuleID: "input_prompt",
-		ManifestSource: "bundled", ManifestVersion: 1, FallbackForIntegration: "pi-extension",
-		FallbackReason: "integration_report_stale", Process: process, ObservedAt: screenAt,
+		Activity:               idle,
+		Authority:              "screen",
+		Reason:                 "manifest_rule",
+		RuleID:                 "input_prompt",
+		ManifestSource:         "bundled",
+		ManifestVersion:        1,
+		FallbackForIntegration: "secondary-extension",
+		FallbackReason:         "integration_report_stale",
+		Process:                process,
+		ObservedAt:             screenAt,
 	}
 
 	_, err = store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       screenAt,
-			Subject:  ObservationIdentity{SessionID: "pi-delayed"},
+			Subject:  ObservationIdentity{SessionID: "secondary-delayed"},
 			Evidence: (*Reading)(screen),
 		},
 	)
@@ -203,11 +210,11 @@ func TestDelayedNativeActivityCannotOverwriteNewerScreenDecision(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      at.Add(10 * time.Second),
-			Subject: ObservationIdentity{SessionID: "pi-delayed"},
+			Subject: ObservationIdentity{SessionID: "secondary-delayed"},
 			Evidence: &Report{
-				Reporter: Reporter{Integration: "pi-extension"},
+				Reporter: Reporter{Integration: "secondary-extension"},
 				Event:    "permission_prompt",
 				Claim:    &presence,
 				Activity: &waiting,
@@ -231,7 +238,7 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 	t.Parallel()
 	store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})
 	at := time.Now().UTC()
-	oldProcess := ProcessIdentity{PID: 102, StartIdentity: "boot:old", Executable: "codex"}
+	oldProcess := ProcessIdentity{PID: 102, StartIdentity: "boot:old", Executable: "primary"}
 	idle := ActivityIdle
 	screen := &ScreenObservation{
 		Activity:   idle,
@@ -245,7 +252,7 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 	_, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: "same"},
 			Evidence: (*Reading)(screen),
@@ -255,13 +262,13 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newProcess := ProcessIdentity{PID: 103, StartIdentity: "boot:new", Executable: "codex"}
+	newProcess := ProcessIdentity{PID: 103, StartIdentity: "boot:new", Executable: "primary"}
 	presence := PresenceLive
 
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(time.Second),
 			Subject:  ObservationIdentity{SessionID: "same"},
 			Evidence: &Report{Event: "session_start", Claim: &presence, Process: &newProcess},
@@ -294,7 +301,7 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 	if _, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       at.Add(500 * time.Millisecond),
 			Subject:  ObservationIdentity{SessionID: "same"},
 			Evidence: (*Reading)(staleScreen),

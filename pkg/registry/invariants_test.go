@@ -50,7 +50,7 @@ func TestPresenceVerificationInvariants(t *testing.T) {
 			before, err := store.Observe(
 				t.Context(),
 				Observation{
-					Harness: HarnessPi,
+					Harness: harnessSecondary,
 					At:      at,
 					Subject: ObservationIdentity{SessionID: "native-session"},
 					Evidence: &Report{
@@ -72,7 +72,7 @@ func TestPresenceVerificationInvariants(t *testing.T) {
 			_, err = store.Observe(
 				t.Context(),
 				Observation{
-					Harness:  HarnessPi,
+					Harness:  harnessSecondary,
 					At:       checkAt,
 					Subject:  ObservationIdentity{SessionID: "native-session"},
 					Evidence: &Verification{Presence: test.check, Reason: "owner_check"},
@@ -231,7 +231,7 @@ func TestReducerDeterminismAndRejectedSequence(t *testing.T) {
 	first := uint64(2)
 	stale := uint64(1)
 	start := Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      base,
 		Subject: ObservationIdentity{SessionID: "invariant-sequence"},
 		Evidence: &Report{
@@ -299,7 +299,7 @@ func TestJournalReplayGuardAndGCInvariant(t *testing.T) {
 		_, err := journal.Observe(
 			t.Context(),
 			Observation{
-				Harness:  HarnessPi,
+				Harness:  harnessSecondary,
 				At:       base,
 				Subject:  ObservationIdentity{SessionID: item.id},
 				Evidence: &Report{Event: "state", Lifecycle: item.lifecycle},
@@ -365,7 +365,7 @@ func TestExclusiveProcessAndActivityAuthorityInvariant(t *testing.T) {
 	for index, id := range []string{"first", "second"} {
 		activity := ActivityRunning
 		observation := Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       base.Add(time.Duration(index) * time.Second),
 			Subject:  ObservationIdentity{SessionID: id},
 			Evidence: &Report{Activity: &activity, Process: &process},
@@ -424,12 +424,12 @@ func TestActivityDecisionFollowsActivityAuthority(t *testing.T) {
 	rules := fixtureRules{}
 	reducer := NewReducer(rules)
 	report := Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      base,
 		Subject: ObservationIdentity{SessionID: "authority"},
 		Evidence: &Report{
 			Event:    "agent_start",
-			Reporter: Reporter{Integration: rules.Policy(HarnessPi).Reporter},
+			Reporter: Reporter{Integration: rules.Policy(harnessSecondary).Reporter},
 			Activity: &running,
 			Claim:    &live,
 			Process:  &process,
@@ -445,7 +445,7 @@ func TestActivityDecisionFollowsActivityAuthority(t *testing.T) {
 
 	for _, at := range []time.Time{base.Add(time.Second), base.Add(time.Minute)} {
 		reading := Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      at,
 			Subject: ObservationIdentity{SessionID: "authority"},
 			Evidence: (*Reading)(
@@ -490,7 +490,7 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	for index, id := range []string{"old", "new"} {
 		at := base.Add(time.Duration(index) * time.Second)
 		observation := Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: id},
 			Evidence: &Report{Event: "start", Claim: &live, Activity: &running, Process: &process},
@@ -510,7 +510,7 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 
 	absentAt := base.Add(1500 * time.Millisecond)
 	absent := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       absentAt,
 		Subject:  ObservationIdentity{SessionID: "old"},
 		Evidence: &Sighting{Process: process, Present: false},
@@ -525,7 +525,7 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	sameIdentity := process
 	sameIdentity.Executable = "different-path"
 	sighting := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       at,
 		Subject:  ObservationIdentity{SessionID: "old"},
 		Evidence: &Sighting{Process: sameIdentity, Present: true},
@@ -558,7 +558,7 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	newProcess := ProcessIdentity{PID: 889, StartIdentity: "boot:889", Executable: "agent"}
 	newAt := base.Add(3 * time.Second)
 	newSighting := Observation{
-		Harness:  HarnessPi,
+		Harness:  harnessSecondary,
 		At:       newAt,
 		Subject:  ObservationIdentity{SessionID: "old"},
 		Evidence: &Sighting{Process: newProcess, Present: true},
@@ -588,7 +588,7 @@ func TestSightingCannotReviveRetiredExclusiveSession(t *testing.T) {
 	resume := NativeLifecycleResume
 	resumeAt := base.Add(3 * time.Second)
 	observation := Observation{
-		Harness: HarnessPi,
+		Harness: harnessSecondary,
 		At:      resumeAt,
 		Subject: ObservationIdentity{SessionID: "old"},
 		Evidence: &Report{
@@ -688,12 +688,12 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 	second := ProcessIdentity{PID: 901, StartIdentity: "boot:902"}
 	report := func(at time.Time, process *ProcessIdentity, lifecycle *NativeLifecycle, sequence uint64) Observation {
 		result := Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      at,
 			Subject: ObservationIdentity{SessionID: "incarnation"},
 			Evidence: &Report{
 				Reporter: Reporter{
-					Integration: "pi-extension",
+					Integration: "secondary-extension",
 					Sequence:    new(sequence),
 				},
 				Activity:  new(ActivityRunning),
@@ -711,7 +711,7 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 	}
 	sighting := func(at time.Time, process ProcessIdentity, present bool) Observation {
 		return Observation{
-			Harness:  HarnessPi,
+			Harness:  harnessSecondary,
 			At:       at,
 			Evidence: &Sighting{Process: process, Present: present},
 		}
@@ -760,17 +760,15 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 								process = core.ProcessKey(value.PID, value.StartIdentity)
 							}
 
-							ends := observation.Kind() == "report" &&
-								reportEnds(observation.Report())
 							if err := core.Transition(projected[0], projected[1], core.Event{
-								Kind:        observation.Kind(),
 								Process:     process,
 								Harness:     string(observation.Harness),
 								SessionID:   observation.Subject.SessionID,
 								SessionPath: observation.Subject.SessionPath,
 								At:          observationTime(observation.At, received),
-								Ends:        ends,
-								Present:     observation.Present() != nil && *observation.Present(),
+								NativeEnd:   observation.Report().Ends(),
+								Absent: observation.Present() != nil &&
+									!*observation.Present(),
 							}); err != nil {
 								t.Fatal(err)
 							}
@@ -1008,7 +1006,7 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 				apply(
 					scan,
 					Observation{
-						Harness:  HarnessPi,
+						Harness:  harnessSecondary,
 						At:       scan,
 						Evidence: &Placement{Process: second},
 					},

@@ -68,7 +68,6 @@ func TestObserverReconcilesUnknownNativeSession(t *testing.T) {
 
 			watcher := New(Options{
 				StorePath:   path,
-				HealthPath:  path + ".health",
 				Now:         func() time.Time { return at.Add(time.Minute) },
 				ProcessList: func(context.Context) ([]processinfo.Process, error) { return test.processes, nil },
 				PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },

@@ -9,10 +9,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/zigai/aht/v2/internal/cobrausage"
 )
 
 const (
@@ -85,28 +86,11 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 	}
 
 	var usage usageError
-	if errors.As(err, &usage) || isCobraUsageError(err) {
+	if errors.As(err, &usage) || cobrausage.Is(err) {
 		return exitCodeUsage
 	}
 
 	return exitCodeGeneral
-}
-
-func isCobraUsageError(err error) bool {
-	message := err.Error()
-	for _, prefix := range []string{
-		"unknown flag",
-		"unknown shorthand flag",
-		"flag needs an argument",
-		"invalid argument",
-		"unknown command",
-	} {
-		if strings.HasPrefix(message, prefix) {
-			return true
-		}
-	}
-
-	return strings.Contains(message, "accepts ") && strings.Contains(message, " arg")
 }
 
 func (app *application) newRootCommand() *cobra.Command {

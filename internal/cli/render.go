@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
-	prettytable "github.com/jedib0t/go-pretty/v6/table"
+	"github.com/zigai/aht/v2/pkg/registry"
+
 	"github.com/jedib0t/go-pretty/v6/text"
+
+	prettytable "github.com/jedib0t/go-pretty/v6/table"
 )
 
 const (
@@ -475,4 +480,116 @@ func wrapDelimitedHumanText(value string, width int, delimiters string) []string
 	}
 
 	return lines
+}
+
+func allocateColumnPair(
+	sessionWidth int,
+	cwdWidth int,
+	sessionNeeded int,
+	cwdNeeded int,
+	available int,
+) (int, int) {
+	if available >= sessionNeeded+cwdNeeded {
+		return sessionNeeded, cwdNeeded
+	}
+
+	extra := available - sessionWidth - cwdWidth
+	sessionUnmet := sessionNeeded - sessionWidth
+	cwdUnmet := cwdNeeded - cwdWidth
+
+	totalUnmet := sessionUnmet + cwdUnmet
+	if extra <= 0 || totalUnmet == 0 {
+		return sessionWidth, cwdWidth
+	}
+
+	sessionAdd := min(sessionUnmet, extra*sessionUnmet/totalUnmet)
+	cwdAdd := min(cwdUnmet, extra-sessionAdd)
+	remaining := extra - sessionAdd - cwdAdd
+	additionalSession := min(sessionUnmet-sessionAdd, remaining)
+	sessionAdd += additionalSession
+	remaining -= additionalSession
+	cwdAdd += min(cwdUnmet-cwdAdd, remaining)
+
+	return sessionWidth + sessionAdd, cwdWidth + cwdAdd
+}
+
+func formatUpdatedAt(t time.Time, now time.Time, absolute bool) string {
+	if t.IsZero() {
+		return "-"
+	}
+
+	if absolute {
+		return t.Format(time.RFC3339)
+	}
+
+	d := now.Sub(t)
+	if d < time.Second {
+		return "just now"
+	}
+
+	return formatElapsed(d)
+}
+
+func formatHumanPath(p string) string {
+	if p == "" {
+		return ""
+	}
+
+	h, e := os.UserHomeDir()
+	if e != nil {
+		return p
+	}
+
+	r, e := filepath.Rel(h, p)
+	if e != nil || filepath.IsAbs(r) || r == ".." ||
+		strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return p
+	}
+
+	if r == "." {
+		return "~"
+	}
+
+	return filepath.Join("~", r)
+}
+
+func formatElapsed(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d/time.Minute))
+	case d < hoursPerDay*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d/time.Hour))
+	case d < 7*hoursPerDay*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d/(hoursPerDay*time.Hour)))
+	case d < 365*hoursPerDay*time.Hour:
+		return fmt.Sprintf("%dw ago", int(d/(7*hoursPerDay*time.Hour)))
+	default:
+		return fmt.Sprintf("%dy ago", int(d/(365*hoursPerDay*time.Hour)))
+	}
+}
+
+func formatActivity(activity *registry.Activity) string {
+	if activity == nil {
+		return "null"
+	}
+
+	return string(*activity)
+}
+
+func abbreviateHome(value string, home string) string {
+	if home == "" || home == string(filepath.Separator) {
+		return value
+	}
+
+	if value == home {
+		return "~"
+	}
+
+	return strings.ReplaceAll(
+		value,
+		home+string(filepath.Separator),
+		"~"+string(filepath.Separator),
+	)
 }

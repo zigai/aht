@@ -20,20 +20,13 @@ const nativeQuery = `SELECT s.id AS session_id, s.title AS title, '' AS cwd,
 
 func (crushHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{databaseName},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    transcriptSourceMetadata,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            nil,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             transcriptQuery,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		DefaultFormat: transcript.FormatDatabase,
+		Patterns: []string{
+			databaseName,
+		},
+		Sources:        transcriptSources,
+		SourceMetadata: transcriptSourceMetadata,
+		Query:          transcriptQuery,
 	}
 }
 

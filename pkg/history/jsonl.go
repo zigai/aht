@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,24 +26,19 @@ const (
 
 var errInvalidRecord = native.ErrInvalidRecord
 
-type transcriptProjector interface {
-	TranscriptProjection(ctx context.Context, file *os.File, size int64) (string, error)
-}
-
 type transcriptHeader struct {
 	record native.Record
 	size   int64
 }
 
 type transcript struct {
+	conversationHits
+
 	match       Match
 	recognized  bool
-	hits        []bool
 	excluded    bool
 	lastMessage string
 	projection  string
-	last        Excerpt
-	hasLast     bool
 }
 
 func readTranscriptHeaders(
@@ -98,18 +92,10 @@ func newDatabaseTranscript(c Conversation) transcript {
 		},
 		recognized:  true,
 		hits:        nil,
+		count:       0,
 		excluded:    false,
 		lastMessage: "",
 		projection:  "",
-		last: Excerpt{
-			Role:      "",
-			Text:      "",
-			Spans:     nil,
-			MessageID: "",
-			Line:      0,
-			Timestamp: time.Time{},
-		},
-		hasLast: false,
 	}
 }
 
@@ -118,15 +104,8 @@ func newDatabaseTranscript(c Conversation) transcript {
 func (t *transcript) absorb(child *transcript, excerpts int) {
 	t.excluded = t.excluded || child.excluded
 
-	t.match.MatchingParts += child.match.MatchingParts
-	if t.hits == nil && child.hits != nil {
-		t.hits = make([]bool, len(child.hits))
-	}
-
-	for i, hit := range child.hits {
-		t.hits[i] = t.hits[i] || hit
-	}
-
+	t.conversationHits.absorb(child.conversationHits)
+	t.match.MatchingParts = t.count
 	room := max(excerpts-len(t.match.Excerpts), 0)
 	t.match.Excerpts = append(
 		t.match.Excerpts,
@@ -136,14 +115,10 @@ func (t *transcript) absorb(child *transcript, excerpts int) {
 
 // qualifies reports whether every term matched and no exclusion did.
 func (t *transcript) qualifies(terms int) bool {
-	if t.excluded || t.match.MatchingParts == 0 || len(t.hits) < terms {
-		return false
-	}
-
-	return !slices.Contains(t.hits, false)
+	return !t.excluded && t.conversationHits.qualifies(terms)
 }
 
-func (s *search) scanJSONL(
+func (s *parser) scanJSONL(
 	ctx context.Context,
 	source Source,
 	path string,
@@ -205,7 +180,7 @@ func (s *search) scanJSONL(
 	return &t
 }
 
-func (s *search) transcriptHeaders(
+func (s *parser) transcriptHeaders(
 	ctx context.Context,
 	source Source,
 	file *os.File,
@@ -223,7 +198,7 @@ func (s *search) transcriptHeaders(
 	)
 }
 
-func (s *search) jsonlState(
+func (s *parser) jsonlState(
 	source Source,
 	path string,
 	headers []transcriptHeader,
@@ -251,7 +226,7 @@ func (s *search) jsonlState(
 	return current, transcriptHeaderBytes(headers), len(headers)
 }
 
-func (s *search) replayTranscriptHeaders(
+func (s *parser) replayTranscriptHeaders(
 	ctx context.Context,
 	source Source,
 	current *transcript,
@@ -281,16 +256,15 @@ func (writer *indexWriter) finishJSONL(
 	writer.checkpoint.Digest = hex.EncodeToString(writer.hash.Sum(nil))
 }
 
-func (s *search) prepareProjection(
+func (s *parser) prepareProjection(
 	ctx context.Context,
 	source Source,
 	file *os.File,
 	size int64,
 	t *transcript,
 ) error {
-	adapter, _ := catalog.Find(source.Harness)
-	if projector, ok := adapter.(transcriptProjector); ok {
-		projection, err := projector.TranscriptProjection(ctx, file, size)
+	if project := catalog.TranscriptFor(source.Harness).Projection; project != nil {
+		projection, err := project(ctx, file, size)
 		if err != nil {
 			return fmt.Errorf("prepare transcript projection: %w", err)
 		}
@@ -315,7 +289,7 @@ func (s *search) prepareProjection(
 	return nil
 }
 
-func (s *search) readJSONLLines(
+func (s *parser) readJSONLLines(
 	ctx context.Context,
 	source Source,
 	path string,
@@ -445,9 +419,9 @@ func (t *transcript) identified() bool { return t.recognized && t.match.Conversa
 // either appends it to the index writer or matches it. Metadata is
 // mode-independent: IncludeTools filtering belongs to the writer and to
 // matchText, never here.
-func (s *search) capture(
+func (s *parser) capture(
 	t *transcript,
-	role string,
+	nativeRole string,
 	body string,
 	id string,
 	line int,
@@ -456,86 +430,54 @@ func (s *search) capture(
 	c := &t.match.Conversation
 	extendTimes(c, timestamp)
 
-	switch role {
-	case "user":
-		injected, typed := splitInjected(body)
+	role := Role(nativeRole)
+
+	switch nativeRole {
+	case string(RoleUser):
+		injected, typed := native.SplitPrompt(body)
 		if injected != "" {
-			s.capturePart(t, "context", injected, id, line, timestamp)
+			s.capturePart(t, RoleContext, injected, id, line, timestamp)
 		}
 
 		body = typed
 	case native.TypedUserRole:
-		role = "user"
+		role = RoleUser
 	case native.InjectedUserRole:
-		body, _ = splitInjected(body)
-		role = "context"
+		role = RoleContext
 	}
 
-	if body == "" && (role == "user" || role == "context") {
+	if body == "" && (role == RoleUser || role == RoleContext) {
 		return
 	}
 
 	t.countMessage(role, id, line)
 
-	if c.Prompt == "" && role == "user" {
+	if c.Prompt == "" && role == RoleUser {
 		c.Prompt = clip(strings.Join(strings.Fields(body), " "), promptRunes)
 	}
 
 	s.capturePart(t, role, body, id, line, timestamp)
 }
 
-func (s *search) capturePart(
+func (s *parser) capturePart(
 	t *transcript,
-	role string,
+	role Role,
 	body string,
 	id string,
 	line int,
 	timestamp time.Time,
 ) {
-	if s.writer != nil {
-		s.writer.append(
-			Excerpt{
-				Role:      role,
-				Text:      body,
-				Spans:     nil,
-				MessageID: id,
-				Line:      line,
-				Timestamp: timestamp,
-			},
-		)
-
-		return
-	}
-
-	if s.last != nil {
-		if role == s.last.role {
-			t.keepLast(
-				Excerpt{
-					Role:      role,
-					Text:      body,
-					Spans:     nil,
-					MessageID: id,
-					Line:      line,
-					Timestamp: timestamp,
-				},
-			)
-		}
-
-		return
-	}
-
-	s.matchText(t, role, body, id, line, timestamp)
-}
-
-// keepLast keeps part as the conversation's last message, or adds it to that message when both
-// are parts of one native message.
-func (t *transcript) keepLast(part Excerpt) {
-	if t.hasLast && part.MessageID != "" && part.MessageID == t.last.MessageID {
-		t.last.Text += "\n" + part.Text
-		return
-	}
-
-	t.last, t.hasLast = part, true
+	s.sink.part(
+		t,
+		Excerpt{
+			Role:      role,
+			Text:      body,
+			Spans:     nil,
+			MessageID: id,
+			Line:      line,
+			Timestamp: timestamp,
+		},
+	)
 }
 
 func extendTimes(c *Conversation, timestamp time.Time) {
@@ -552,8 +494,8 @@ func extendTimes(c *Conversation, timestamp time.Time) {
 	}
 }
 
-func (t *transcript) countMessage(role string, id string, line int) {
-	if role != "user" && role != "assistant" {
+func (t *transcript) countMessage(role Role, id string, line int) {
+	if role != RoleUser && role != RoleAssistant {
 		return
 	}
 
@@ -567,9 +509,9 @@ func (t *transcript) countMessage(role string, id string, line int) {
 // a bounded window around it. Tool parts are skipped unless the query includes
 // tools: this is the only place that decision is made for matching, so
 // conversation metadata stays independent of IncludeTools.
-func (s *search) matchText(
+func (s *queryPlan) matchText(
 	t *transcript,
-	role string,
+	role Role,
 	body string,
 	id string,
 	line int,
@@ -600,7 +542,9 @@ func (s *search) matchText(
 		return
 	}
 
-	t.match.MatchingParts++
+	t.count++
+
+	t.match.MatchingParts = t.count
 	if len(t.match.Excerpts) >= s.query.Excerpts {
 		return
 	}
@@ -619,20 +563,12 @@ func (s *search) matchText(
 	)
 }
 
-func (s *search) skipsPart(t *transcript, role string) bool {
+func (s *queryPlan) skipsPart(t *transcript, role Role) bool {
 	if s.mode != modeSearch || t.excluded {
 		return true
 	}
 
-	if role == "tool" && !s.query.IncludeTools {
-		return true
-	}
-
-	if role == "context" && s.query.Role == "" {
-		return true
-	}
-
-	return s.query.Role != "" && s.query.Role != "all" && s.query.Role != role
+	return !s.query.acceptsRole(role)
 }
 
 func (t *transcript) recordHits(terms []matcher, body string, normalized string) (int, int, bool) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -217,7 +218,7 @@ func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 		&bytes.Buffer{},
 	); !errors.Is(
 		err,
-		errTmuxPaneNotLive,
+		manage.ErrPaneNotLive,
 	) {
 		t.Fatalf("info explanation missing pane error = %v", err)
 	}

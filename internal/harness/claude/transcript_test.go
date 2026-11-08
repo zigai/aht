@@ -33,13 +33,15 @@ func readTranscript(
 
 	var recognized bool
 
+	reader := claudeHarness{}.Transcript()
+
 	decoder := &transcript.Decoder{
+		UserParts:    reader.UserParts,
 		Conversation: conversation,
 		Recognized:   &recognized,
 		IncludeTools: includeTools,
 	}
 
-	reader := claudeHarness{}.Transcript()
 	for i, line := range lines {
 		if reader.FastRecord(t.Context(), decoder, []byte(line), i+1) {
 			continue
@@ -314,7 +316,13 @@ func TestFastTranscriptRejectsMalformedAndUnrecognizedShapes(t *testing.T) {
 			recognized   bool
 		)
 
-		decoder := &transcript.Decoder{Conversation: &conversation, Recognized: &recognized}
+		reader := claudeHarness{}.Transcript()
+
+		decoder := &transcript.Decoder{
+			UserParts:    reader.UserParts,
+			Conversation: &conversation,
+			Recognized:   &recognized,
+		}
 		if readFastRecord(t.Context(), decoder, []byte(line), 1) {
 			t.Fatalf("handled malformed or unrecognized record: %s", line)
 		}
@@ -413,7 +421,10 @@ func replayTranscript(
 
 	var state transcriptReadState
 
+	reader := claudeHarness{}.Transcript()
+
 	decoder := &transcript.Decoder{
+		UserParts:    reader.UserParts,
 		Conversation: &state.Conversation,
 		Recognized:   &state.Recognized,
 		IncludeTools: includeTools,

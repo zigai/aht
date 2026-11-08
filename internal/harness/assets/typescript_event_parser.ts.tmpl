@@ -22,27 +22,13 @@ function firstPathString(value: unknown, paths: string[][]): string | undefined 
   return firstString(...paths.map((path) => valueAt(value, path)));
 }
 
+const activityAliases: Readonly<Record<string, string>> = {{ACTIVITY_ALIASES}};
+
 function normalizeStatus(value: string | undefined): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-  const status = value.toLowerCase();
-  if (["running", "busy", "retry"].includes(status)) {
-    return "running";
-  }
-  if (["failed", "error", "errored", "crash", "crashed"].includes(status)) {
-    return "failed";
-  }
-  if (["interrupted", "paused", "stopped", "cancelled", "canceled"].includes(status)) {
-    return "interrupted";
-  }
-  if (["waiting", "blocked"].includes(status)) {
-    return "waiting";
-  }
-  if (status === "idle" || status === "offline") {
-    return "idle";
-  }
-  return undefined;
+  return Object.entries(activityAliases).find(([alias]) => alias === value.toLowerCase())?.[1];
 }
 
 function stateForEvent(event: unknown): string | undefined {

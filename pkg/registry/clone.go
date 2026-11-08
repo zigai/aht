@@ -93,12 +93,9 @@ func cloneObservations(source Observations) Observations {
 
 	if source.Native != nil {
 		native := *source.Native
-		native.Detail = clonePtr(source.Native.Detail)
-		native.Lifecycle = clonePtr(source.Native.Lifecycle)
 		native.Presence = clonePtr(source.Native.Presence)
-		native.Activity = clonePtr(source.Native.Activity)
-		native.Reporter.Sequence = clonePtr(source.Native.Reporter.Sequence)
-		native.Attributes = cloneAttributes(source.Native.Attributes)
+		native.Detail = clonePtr(source.Native.Detail)
+		native.NativeEvidence = source.Native.NativeEvidence.clone()
 		native.RawPayload = cloneRaw(source.Native.RawPayload)
 		cloned.Native = &native
 	}
@@ -115,7 +112,7 @@ func cloneObservations(source Observations) Observations {
 
 	if source.Catalog != nil {
 		catalog := *source.Catalog
-		catalog.ResumeCommand = append([]string(nil), source.Catalog.ResumeCommand...)
+		catalog.ListingMetadata = source.Catalog.ListingMetadata.clone()
 		cloned.Catalog = &catalog
 	}
 
@@ -125,4 +122,18 @@ func cloneObservations(source Observations) Observations {
 	}
 
 	return cloned
+}
+
+func (e NativeEvidence) clone() NativeEvidence {
+	e.Lifecycle = clonePtr(e.Lifecycle)
+	e.Activity = clonePtr(e.Activity)
+	e.Reporter.Sequence = clonePtr(e.Reporter.Sequence)
+	e.Attributes = cloneAttributes(e.Attributes)
+
+	return e
+}
+
+func (m ListingMetadata) clone() ListingMetadata {
+	m.ResumeCommand = append([]string(nil), m.ResumeCommand...)
+	return m
 }

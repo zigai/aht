@@ -37,6 +37,10 @@ type (
 	HistoryFilter = history.Filter
 	// HistorySort orders history results.
 	HistorySort = history.Sort
+	// HistoryRole is the author of a message part in queries and excerpts.
+	HistoryRole = history.Role
+	// HistoryStatus is a history source's coverage in a result.
+	HistoryStatus = history.Status
 	// HistoryResult includes matches and source coverage.
 	HistoryResult = history.Result
 	// HistoryCatalog supports explicit sources instead of default discovery.
@@ -64,7 +68,9 @@ type (
 // searched, and [context.Canceled] or [context.DeadlineExceeded] reports an
 // ended context.
 func SearchHistory(ctx context.Context, query HistoryQuery) (HistoryResult, error) {
-	result, err := history.Search(ctx, query)
+	var historyCatalog HistoryCatalog
+
+	result, err := historyCatalog.Search(ctx, query)
 	if err != nil {
 		// history already prefixes errors with "search history:", so wrapcheck
 		// would add a second, redundant layer.

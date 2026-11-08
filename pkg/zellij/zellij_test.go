@@ -217,16 +217,21 @@ func sessionNames(panes []mux.Pane) []string {
 	return names
 }
 
-func TestCurrentWithEnvNormalizesTerminalPaneID(t *testing.T) {
+func TestLocationFromEnvNormalizesTerminalPaneID(t *testing.T) {
 	t.Parallel()
 
-	location := zellij.CurrentWithEnv(zellij.Env{SessionName: "work", PaneID: "7"})
+	env := map[string]string{"ZELLIJ_SESSION_NAME": "work", "ZELLIJ_PANE_ID": "7"}
+
+	location := zellij.NewDriver().LocationFromEnv(func(key string) string { return env[key] })
 	if location.Kind != registry.MultiplexerZellij || location.SessionName != "work" ||
 		location.PaneID != "terminal_7" {
-		t.Fatalf("CurrentWithEnv() = %#v", location)
+		t.Fatalf("LocationFromEnv() = %#v", location)
 	}
 
-	if got := zellij.CurrentWithEnv(zellij.Env{SessionName: "work"}); !got.Empty() {
+	delete(env, "ZELLIJ_PANE_ID")
+
+	if got := zellij.NewDriver().
+		LocationFromEnv(func(key string) string { return env[key] }); !got.Empty() {
 		t.Fatalf("incomplete environment produced context: %#v", got)
 	}
 }

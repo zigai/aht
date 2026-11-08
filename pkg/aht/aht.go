@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/install"
+
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/harness"
@@ -48,9 +50,9 @@ const (
 	// ActivityUnknown indicates activity cannot be determined.
 	ActivityUnknown Activity = registry.ActivityUnknown
 
-	MultiplexerTmux                  MultiplexerKind = client.MultiplexerTmux
-	MultiplexerZellij                MultiplexerKind = client.MultiplexerZellij
-	MultiplexerHerdr                 MultiplexerKind = client.MultiplexerHerdr
+	MultiplexerTmux                  MultiplexerKind = registry.MultiplexerTmux
+	MultiplexerZellij                MultiplexerKind = registry.MultiplexerZellij
+	MultiplexerHerdr                 MultiplexerKind = registry.MultiplexerHerdr
 	SummaryGroupByMultiplexerSession SummaryGroupBy  = registry.SummaryGroupByMultiplexerSession
 	SummaryGroupByProject            SummaryGroupBy  = registry.SummaryGroupByProject
 	SummaryGroupByHarness            SummaryGroupBy  = registry.SummaryGroupByHarness
@@ -63,10 +65,12 @@ const (
 	HarnessLocationScopeGlobal      HarnessLocationScope = harness.LocationScopeGlobal
 	HarnessLocationScopeProject     HarnessLocationScope = harness.LocationScopeProject
 
-	ArtifactMissing ArtifactStatus = manage.ArtifactMissing
-	ArtifactCurrent ArtifactStatus = manage.ArtifactCurrent
-	ArtifactStale   ArtifactStatus = manage.ArtifactStale
-	ArtifactForeign ArtifactStatus = manage.ArtifactForeign
+	ArtifactMissing  ArtifactStatus = install.ArtifactMissing
+	ArtifactCurrent  ArtifactStatus = install.ArtifactCurrent
+	ArtifactStale    ArtifactStatus = install.ArtifactStale
+	ArtifactForeign  ArtifactStatus = install.ArtifactForeign
+	ArtifactPartial  ArtifactStatus = install.ArtifactPartial
+	ArtifactDisabled ArtifactStatus = install.ArtifactDisabled
 
 	HealthStatusHealthy  HealthStatus = manage.HealthStatusHealthy
 	HealthStatusDegraded HealthStatus = manage.HealthStatusDegraded
@@ -81,21 +85,31 @@ const (
 	DoctorStatusSkip DoctorStatus = manage.DoctorStatusSkip
 )
 
+const (
+	DoctorActionRefreshHistory     = manage.DoctorActionRefreshHistory
+	DoctorActionResetStore         = manage.DoctorActionResetStore
+	DoctorActionEnableTracker      = manage.DoctorActionEnableTracker
+	DoctorActionInspectTracker     = manage.DoctorActionInspectTracker
+	DoctorActionRemoveHealth       = manage.DoctorActionRemoveHealth
+	DoctorActionReplaceIntegration = manage.DoctorActionReplaceIntegration
+	DoctorActionUpgrade            = manage.DoctorActionUpgrade
+)
+
 var (
 	// ErrInvalidMode means the client was configured with an unsupported operating mode.
 	ErrInvalidMode = client.ErrInvalidMode
 
 	// ErrUnavailable means no realtime AHT broker accepted the local connection.
-	ErrUnavailable = client.ErrUnavailable
+	ErrUnavailable = broker.ErrUnavailable
 
 	// ErrBusy means the realtime broker refused a connection because all slots are occupied.
-	ErrBusy = client.ErrBusy
+	ErrBusy = broker.ErrBusy
 
 	// ErrStreamClosed means an established realtime subscription lost its transport.
-	ErrStreamClosed = client.ErrStreamClosed
+	ErrStreamClosed = broker.ErrStreamClosed
 
 	// ErrProtocol means the broker returned an invalid or incompatible response.
-	ErrProtocol = client.ErrProtocol
+	ErrProtocol = broker.ErrProtocol
 
 	// ErrRealtimeRequired means the operation requires a realtime broker connection.
 	ErrRealtimeRequired = client.ErrRealtimeRequired
@@ -104,7 +118,7 @@ var (
 	ErrAmbiguousSession = client.ErrAmbiguousSession
 
 	// ErrSessionNotFound is returned when no session matches the selector.
-	ErrSessionNotFound = client.ErrSessionNotFound
+	ErrSessionNotFound = registry.ErrSessionNotFound
 
 	// ErrNoCurrentSession indicates that no agent session was found for the current context.
 	ErrNoCurrentSession = client.ErrNoCurrentSession
@@ -178,8 +192,8 @@ var (
 	// ErrForeignTracker means the tracker service definition is not owned by AHT.
 	ErrForeignTracker = manage.ErrForeignTracker
 
-	// ErrUnsupportedTracker means background tracking is unavailable on this platform.
-	ErrUnsupportedTracker = manage.ErrUnsupportedTracker
+	// ErrConfig means the AHT configuration could not be loaded.
+	ErrConfig = manage.ErrConfig
 
 	// ErrNoRepair means a doctor check has no automatic repair.
 	ErrNoRepair = manage.ErrNoRepair
@@ -223,7 +237,7 @@ type (
 	Location = registry.Location
 
 	// MultiplexerKind identifies a supported terminal multiplexer.
-	MultiplexerKind = client.MultiplexerKind
+	MultiplexerKind = registry.MultiplexerKind
 
 	// Selector specifies criteria for selecting and resolving a single session.
 	Selector = client.Selector
@@ -297,7 +311,8 @@ type (
 	DoctorCheck = manage.DoctorCheck
 
 	// DoctorFix says how to resolve a warn or fail doctor check.
-	DoctorFix = manage.DoctorFix
+	DoctorFix    = manage.DoctorFix
+	DoctorAction = manage.DoctorAction
 
 	// DoctorSummary counts doctor checks by status.
 	DoctorSummary = manage.DoctorSummary
@@ -320,13 +335,10 @@ type (
 	// HarnessLocationScope says whom a [HarnessLocation] applies to.
 	HarnessLocationScope = harness.LocationScope
 
-	// HarnessRuntimeStatus describes the installed/runtime state of a harness integration.
-	HarnessRuntimeStatus = harness.RuntimeStatus
-
 	// Manager installs harness integrations and controls the platform-native AHT tracker.
 	Manager = manage.Manager
 
-	// ManagerConfig identifies the binary, registry, and tracker settings used by a Manager.
+	// ManagerConfig identifies the binary, registry, configuration, and tracker settings used by a Manager.
 	ManagerConfig = manage.Config
 
 	// IntegrationOptions controls one managed harness integration operation.
@@ -336,10 +348,10 @@ type (
 	IntegrationResult = manage.IntegrationResult
 
 	// IntegrationStatus describes the installed state of one harness integration.
-	IntegrationStatus = manage.IntegrationStatus
+	IntegrationStatus = install.IntegrationStatus
 
 	// ArtifactStatus describes the ownership and freshness of a managed integration artifact.
-	ArtifactStatus = manage.ArtifactStatus
+	ArtifactStatus = install.ArtifactStatus
 
 	// TrackerOptions controls a tracker operation.
 	TrackerOptions = manage.TrackerOptions
@@ -348,9 +360,9 @@ type (
 	TrackerResult = manage.TrackerResult
 )
 
-// New returns a client for the configured local AHT instance.
 type (
 	Evidence        = registry.Evidence
+	EvidenceKind    = registry.EvidenceKind
 	Verification    = registry.Verification
 	Report          = registry.Report
 	Reporter        = registry.Reporter
@@ -364,6 +376,7 @@ type (
 	ProcessIdentity = registry.ProcessIdentity
 )
 
+// New returns a client for the configured local AHT instance.
 func New(config Config) *Client {
 	return client.New(config)
 }
@@ -394,12 +407,12 @@ func NewSubscription(
 
 // IsUnavailable reports whether err means that no realtime broker accepted the connection.
 func IsUnavailable(err error) bool {
-	return client.IsUnavailable(err)
+	return broker.IsUnavailable(err)
 }
 
 // StreamClosed reports whether an established realtime subscription lost its transport.
 func StreamClosed(err error) bool {
-	return client.StreamClosed(err)
+	return broker.StreamClosed(err)
 }
 
 // Resolve finds a single session matching selector using the provided session lister.

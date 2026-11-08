@@ -142,7 +142,7 @@ func payloadStores(t *testing.T) (*Journal, *MemoryStore, time.Time) {
 
 func payloadObservation(id string, at time.Time, raw string) Observation {
 	return Observation{
-		Harness: HarnessCodex,
+		Harness: harnessPrimary,
 		At:      at,
 		Subject: ObservationIdentity{SessionID: id},
 		Evidence: &Report{

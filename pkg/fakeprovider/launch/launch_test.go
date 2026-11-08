@@ -3,7 +3,10 @@ package launch
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +23,64 @@ import (
 )
 
 var errLaunchRefused = errors.New("launch refused by fixture")
+
+func TestProviderUsesAdapterTitleRecognition(t *testing.T) {
+	titleRequest, err := TitleRequestFor(registry.Harness("kilo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := fakeprovider.Start(fakeprovider.Options{SideRequest: titleRequest})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	for _, body := range []string{
+		`{"messages":[{"role":"system","content":"You are a title generator. You output O` +
+			`NLY a thread title. Nothing else."},{"role":"user","content":"Refine the parser"` +
+			`}]}`,
+		`{"messages":[{"role":"user","content":"Explain the phrase You are a title generator."}]}`,
+	} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+			server.URL()+"/v1/chat/completions", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := io.Copy(io.Discard, response.Body); err != nil {
+			t.Error(err)
+		}
+
+		if err := response.Body.Close(); err != nil {
+			t.Error(err)
+		}
+
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("provider status = %d", response.StatusCode)
+		}
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	requests := server.Requests()
+	if len(requests) != 1 ||
+		requests[0].UserText != "Explain the phrase You are a title generator." || len(server.SideRequests()) != 1 {
+		t.Fatalf("conversation = %+v, side = %+v", requests, server.SideRequests())
+	}
+}
 
 func TestNewRejectsUnregisteredHarness(t *testing.T) {
 	t.Parallel()
@@ -156,7 +217,7 @@ func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "root")
 	plan := harness.LaunchPlan{
-		Protocol: fakeprovider.ProtocolOpenAIChat,
+		Protocol: harness.LaunchProtocolOpenAIChat,
 		Env:      []string{"FIXTURE_HOME=" + filepath.Join(root, "plan"), "FIXTURE_PLAN=yes"},
 	}
 	options := Options{
@@ -170,7 +231,7 @@ func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertRootLayout(t, root)
+	assertRootLayout(t, s)
 
 	wantPaths := harness.LaunchPaths{
 		Root: root,
@@ -209,17 +270,36 @@ func TestNewBuildsLayoutEnvironmentAndModel(t *testing.T) {
 	}
 }
 
-func assertRootLayout(t *testing.T, root string) {
+func assertRootLayout(t *testing.T, launched *Harness) {
 	t.Helper()
 
-	for _, name := range rootDirectories {
-		info, err := os.Stat(filepath.Join(root, name))
+	keys := []string{
+		"TMPDIR",
+		"XDG_CONFIG_HOME",
+		"XDG_DATA_HOME",
+		"XDG_STATE_HOME",
+		"XDG_CACHE_HOME",
+	}
+	paths := make([]string, 0, 3+len(keys))
+
+	paths = append(paths, launched.Root, launched.Home, launched.Work)
+	for _, key := range keys {
+		path, ok := envValue(launched.Env, key)
+		if !ok || path == "" {
+			t.Fatalf("launch omits %s", key)
+		}
+
+		paths = append(paths, path)
+	}
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if !info.IsDir() || info.Mode().Perm() != 0o700 {
-			t.Errorf("%s: mode %v, want directory 0700", name, info.Mode())
+			t.Errorf("%s: mode %v, want directory 0700", path, info.Mode())
 		}
 	}
 }
@@ -368,7 +448,7 @@ func TestHeadlessAndInteractiveArgs(t *testing.T) {
 
 	plan := harness.LaunchPlan{
 		Headless: func(prompt string) ([]string, error) {
-			return []string{"run", prompt}, nil
+			return []string{helperArgument, "record", prompt}, nil
 		},
 		Interactive: func(string) ([]string, error) {
 			return nil, errLaunchRefused
@@ -380,9 +460,24 @@ func TestHeadlessAndInteractiveArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args, err := s.HeadlessArgs("hello")
-	if err != nil || !slices.Equal(args, []string{"run", "hello"}) {
-		t.Fatalf("HeadlessArgs() = %q, %v; want run hello", args, err)
+	record := filepath.Join(t.TempDir(), "launch record.txt")
+
+	args, err := s.HeadlessArgs(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Command(t.Context(), args...).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	work, err := filepath.EvalSymlinks(s.Work)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readText(t, record); got != "cwd="+work+"\nhome="+s.Home+"\n" {
+		t.Fatalf("headless command ran outside its launch environment: %q", got)
 	}
 
 	if _, err := s.InteractiveArgs(
@@ -410,35 +505,86 @@ func TestCommandCancellationKillsProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.Executable = "/bin/sh"
-	ready := filepath.Join(s.Work, "ready")
-	marker := filepath.Join(s.Work, "marker")
+	var config net.ListenConfig
+
+	listener, err := config.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = listener.Close() })
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cmd := s.Command(
 		ctx,
-		"-c",
-		"(while :; do touch marker; sleep 0.05; done) & touch ready; sleep 30",
+		helperArgument, "group", listener.Addr().String(),
 	)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 
-	waitForPath(t, ready)
-	waitForPath(t, marker)
-	cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 
-	_ = cmd.Wait()
+	t.Cleanup(func() {
+		cancel()
 
-	if err := os.Remove(marker); err != nil {
-		t.Fatal(err)
-	}
+		if err := <-done; err == nil {
+			t.Error("parent exited successfully instead of being canceled")
+		}
+	})
 
-	time.Sleep(time.Second)
+	accepted := make(chan net.Conn, 1)
+	acceptErrors := make(chan error, 1)
 
-	if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("background child survived cancellation: stat error %v", err)
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+
+		connection, err := listener.Accept()
+		if err != nil {
+			acceptErrors <- err
+			return
+		}
+
+		accepted <- connection
+	}()
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+
+		<-acceptDone
+
+		select {
+		case connection := <-accepted:
+			_ = connection.Close()
+		default:
+		}
+	})
+
+	select {
+	case connection := <-accepted:
+		defer func() { _ = connection.Close() }()
+
+		cancel()
+
+		if err := connection.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+
+		var data [1]byte
+		if _, err := connection.Read(data[:]); !errors.Is(err, io.EOF) {
+			t.Fatalf("background child connection after cancellation = %v, want EOF", err)
+		}
+	case err := <-acceptErrors:
+		t.Fatalf("child connection: %v", err)
+	case err := <-done:
+		done <- err
+
+		t.Fatalf("parent exited before child connected: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("child did not connect")
 	}
 }

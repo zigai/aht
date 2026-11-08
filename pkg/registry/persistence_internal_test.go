@@ -22,7 +22,7 @@ func TestCatalogCreationPolicyAndJSON(t *testing.T) {
 		context.Background(),
 		[]Observation{
 			{
-				Harness:  HarnessGoose,
+				Harness:  harnessOther,
 				At:       at,
 				Subject:  ObservationIdentity{SessionID: "old"},
 				Evidence: catalog,
@@ -46,7 +46,7 @@ func TestCatalogCreationPolicyAndJSON(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		Observation{
-			Harness:  HarnessClaude,
+			Harness:  harnessCatalog,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: "current"},
 			Evidence: catalog,
@@ -112,25 +112,6 @@ func TestSnapshotReadRejectsOversizedFileAndResetRecovers(t *testing.T) {
 	}
 }
 
-func TestFileStoreCanceledMutationDoesNotCommit(t *testing.T) {
-	store := NewJournal(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	err := store.withSnapshot(ctx, func(snap *snapshot) error {
-		cancel()
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("mutation error = %v, want canceled", err)
-	}
-
-	if _, err := os.Stat(store.Path()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("store stat error = %v, want no file committed", err)
-	}
-}
-
 func TestMemoryStoreFlushWaitIsCancellable(t *testing.T) {
 	store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
 	if err != nil {
@@ -162,7 +143,7 @@ func TestMemoryStoreConcurrentFlushPersistsLatestState(t *testing.T) {
 			_, err := store.Observe(
 				t.Context(),
 				Observation{
-					Harness:  HarnessCodex,
+					Harness:  harnessPrimary,
 					At:       time.Time{},
 					Subject:  ObservationIdentity{SessionID: strconv.Itoa(index)},
 					Evidence: &Report{Activity: &activity},

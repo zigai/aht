@@ -188,7 +188,7 @@ func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 			options := Options{Binary: "/bin/aht", StorePath: test.store, Interval: 7 * time.Second}
-			if _, err := New(&recordingExecutor{}).Install(t.Context(), options); err != nil {
+			if _, err := New(&recordingExecutor{}).Update(t.Context(), options); err != nil {
 				t.Fatal(err)
 			}
 
@@ -215,7 +215,7 @@ func TestUpgradeLeavesMissingForeignAndInvalidServicesAlone(t *testing.T) {
 		t.Run(content, func(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-			path, err := systemdUnitPath()
+			path, err := definitionPath()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -248,7 +248,7 @@ func TestUpgradeRollbackDoesNotStartStoppedTracker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, err := systemdUnitPath()
+	path, err := definitionPath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestUpgradeReloadsCurrentUnitBeforeRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, err := systemdUnitPath()
+	path, err := definitionPath()
 	if err != nil {
 		t.Fatal(err)
 	}

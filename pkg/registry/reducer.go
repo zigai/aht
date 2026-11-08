@@ -46,19 +46,7 @@ func (r Reducer) applyObservationBatch(
 		if errors.Is(err, errObservationDropped) {
 			snap.dropped = append(snap.dropped, err)
 
-			id := findMatchingSession(snap.Sessions, observation)
-			if id == "" && observation.ProcessIdentity() != nil {
-				id = bestMatchingSessionID(
-					snap.Sessions,
-					observation.Harness,
-					func(session Session) bool {
-						return session.Process != nil &&
-							session.Process.Equal(*observation.ProcessIdentity())
-					},
-				)
-			}
-
-			saved = append(saved, snap.Sessions[id])
+			saved = append(saved, snap.Sessions[session.ID])
 
 			continue
 		}
@@ -86,17 +74,29 @@ func (r Reducer) reduceOne(
 ) (Session, bool, error) {
 	var empty Session
 
+	match := matchSession(sessions, observation)
+
 	at := observationTime(observation.At, receivedAt)
-	if prior, err := r.retireConflictingProcessSessions(
+	if err := r.retireConflictingProcessSessions(
 		sessions,
 		observation,
 		at,
 		receivedAt,
 	); err != nil {
-		return prior, false, err
+		return sessions[match.droppedID], false, err
 	}
 
-	id := findAndReconcileMatchingSession(sessions, observation, at)
+	if match.id == match.processID {
+		reconcileIdentityProcessSessions(
+			sessions,
+			observation,
+			at,
+			match.identityID,
+			match.processID,
+		)
+	}
+
+	id := match.id
 	if id == "" && !r.observationCreatesSession(observation) {
 		return empty, false, nil
 	}
@@ -117,7 +117,7 @@ func (r Reducer) reduceOne(
 
 	session, err := r.reduceSession(sessions, session, observation, at, receivedAt)
 	if err != nil {
-		return session, false, err
+		return sessions[match.droppedID], false, err
 	}
 
 	sessions[session.ID] = session
@@ -193,8 +193,14 @@ func newSession(id string, harness Harness, now time.Time) Session {
 		UpdatedAt:         now,
 		PresenceChangedAt: time.Time{},
 		ActivityChangedAt: time.Time{},
-		Liveness:          NewLiveness(PresenceUnknown, ActivityValue(&activity), nil),
-		Detail:            nil,
+		Liveness: NewLiveness(
+			PresenceUnknown,
+			ActivityValue(&activity),
+			nil,
+			time.Time{},
+			"",
+		),
+		Detail: nil,
 	}
 }
 
@@ -233,9 +239,9 @@ func (r Reducer) applyObservation(
 		}
 	}
 
-	previousPresence := session.Presence()
-	previousActivity := session.Activity()
 	machine := lifecycleMachine{session: session}
+	defer machine.trackChanges(at)()
+
 	machine.commit(transition, at)
 	storeObservation(session, observation, at)
 	applyIdentity(session, observation)
@@ -246,13 +252,6 @@ func (r Reducer) applyObservation(
 	session.SchemaVersion = storeSchemaVersion
 
 	session.UpdatedAt = maxTime(session.UpdatedAt, receivedAt)
-	if session.Presence() != previousPresence {
-		session.PresenceChangedAt = at
-	}
-
-	if !activityEqual(session.Activity(), previousActivity) {
-		session.ActivityChangedAt = at
-	}
 
 	return nil
 }
@@ -280,12 +279,12 @@ func applyMetadata(session *Session, observation Observation) {
 			session.CWD = process.CWD
 		}
 
-		if observation.Kind() == "sighting" {
+		if observation.Kind() == EvidenceSighting {
 			return
 		}
 	}
 
-	if (observation.Kind() == "report" || observation.Kind() == "listing") &&
+	if (observation.Kind() == EvidenceReport || observation.Kind() == EvidenceListing) &&
 		observation.Listing() != nil {
 		applyListing(session, observation.Listing())
 	}
@@ -377,7 +376,7 @@ func endedProcessKey(process ProcessIdentity) string {
 // its process-only session was removed and would otherwise recreate it.
 func endedProcessReport(snap snapshot, observation Observation) bool {
 	process := observation.ProcessIdentity()
-	if observation.Kind() != "report" || process == nil || !process.Complete() {
+	if observation.Kind() != EvidenceReport || process == nil || !process.Complete() {
 		return false
 	}
 
@@ -459,10 +458,12 @@ func processOnlySession(session Session) bool {
 
 func (r Reducer) observationCreatesSession(observation Observation) bool {
 	switch observation.Kind() {
-	case "verification":
+	case EvidenceVerification:
 		return false
-	case "listing":
+	case EvidenceListing:
 		return r.rules.Policy(observation.Harness).CatalogCreates && observation.Listing().Current
+	case EvidenceReport, EvidenceSighting, EvidencePlacement, EvidenceReading:
+		return true
 	default:
 		return true
 	}

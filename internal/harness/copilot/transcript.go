@@ -77,20 +77,9 @@ func setModel(t *transcript.Decoder, model string) {
 
 func (copilotHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"events.jsonl"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            readTranscriptRecord,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             nil,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		Patterns: []string{"events.jsonl"},
+		Sources:  transcriptSources,
+		Record:   readTranscriptRecord,
 	}
 }
 

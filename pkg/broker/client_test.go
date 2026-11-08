@@ -27,7 +27,7 @@ func TestClientOfflineReturnsUnavailable(t *testing.T) {
 	t.Parallel()
 
 	socketPath := filepath.Join(t.TempDir(), "nonexistent.sock")
-	client := broker.NewClientForSocket(socketPath)
+	client := broker.NewClient(socketPath)
 
 	if client.SocketPath() != socketPath {
 		t.Fatalf("SocketPath() = %q, want %q", client.SocketPath(), socketPath)
@@ -428,75 +428,5 @@ func responseServer(t *testing.T, respond func(id string) broker.Response) *brok
 		_, _ = connection.Write(encoded)
 	}()
 
-	return broker.NewClientForSocket(socketPath)
-}
-
-func TestClientAppliesNewFiltersToOlderBrokerSnapshots(t *testing.T) {
-	t.Parallel()
-
-	sessions := []registry.Session{
-		{ID: "wanted", Harness: registry.Harness("codex"), ProjectRoot: "/project/one"},
-		{ID: "excluded", Harness: registry.Harness("claude"), ProjectRoot: "/project/two"},
-	}
-	filter := registry.Filter{Project: "/project/one"}
-
-	t.Run("list", func(t *testing.T) {
-		t.Parallel()
-		c := responseServer(t, func(id string) broker.Response {
-			return broker.Response{
-				Version:  broker.ProtocolVersion,
-				ID:       id,
-				Type:     "result",
-				Sessions: sessions,
-			}
-		})
-
-		got, err := c.List(t.Context(), filter)
-		if err != nil || len(got) != 1 || got[0].ID != "wanted" {
-			t.Fatalf("filtered list = %+v, err = %v", got, err)
-		}
-	})
-	t.Run("subscribe", func(t *testing.T) {
-		t.Parallel()
-		c := responseServer(t, func(id string) broker.Response {
-			return broker.Response{
-				Version:  broker.ProtocolVersion,
-				ID:       id,
-				Type:     "snapshot",
-				Snapshot: &registry.StateSnapshot{Sessions: sessions},
-			}
-		})
-
-		sub, err := c.Subscribe(t.Context(), filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sub.Close()
-
-		got := <-sub.Snapshots
-		if len(got.Sessions) != 1 || got.Sessions[0].ID != "wanted" {
-			t.Fatalf("filtered snapshot = %+v", got)
-		}
-	})
-	t.Run("summary", func(t *testing.T) {
-		t.Parallel()
-		c := responseServer(t, func(id string) broker.Response {
-			return broker.Response{
-				Version:  broker.ProtocolVersion,
-				ID:       id,
-				Type:     "result",
-				Sessions: sessions,
-			}
-		})
-
-		got, err := c.SummaryWithOptions(
-			t.Context(),
-			filter,
-			registry.SummaryOptions{GroupBy: registry.SummaryGroupByHarness},
-		)
-		if err != nil || len(got) != 1 || got[0].Harness != registry.Harness("codex") ||
-			got[0].Total != 1 {
-			t.Fatalf("filtered summary = %+v, err = %v", got, err)
-		}
-	})
+	return broker.NewClient(socketPath)
 }

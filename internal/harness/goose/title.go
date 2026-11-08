@@ -5,14 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
-	"runtime"
-
-	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -33,46 +29,23 @@ func (gooseHarness) SessionTitles(
 		return titles, nil
 	}
 
-	path := gooseSessionDatabasePath()
+	path := sessionDatabasePath(harness.HomeDir())
 	if path == "" {
 		return titles, nil
 	}
 
-	db, err := openGooseSessionDatabase(path)
+	db, err := transcript.OpenDatabase(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return titles, nil
 	}
 
 	if err != nil {
-		return titles, err
+		return titles, fmt.Errorf("open Goose session database: %w", err)
 	}
 
 	defer func() { _ = db.Close() }()
 
 	return readGooseSessionTitles(ctx, db, identities, titles)
-}
-
-func openGooseSessionDatabase(path string) (*sql.DB, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect Goose session database: %w", err)
-	} else if err != nil {
-		return nil, fmt.Errorf("inspect Goose session database: %w", err)
-	}
-
-	var databaseURL url.URL
-
-	databaseURL.Scheme = "file"
-	databaseURL.Path = path
-	databaseURL.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", databaseURL.String())
-	if err != nil {
-		return nil, fmt.Errorf("open Goose session database: %w", err)
-	}
-
-	db.SetMaxOpenConns(1)
-
-	return db, nil
 }
 
 func readGooseSessionTitles(
@@ -172,36 +145,4 @@ func gooseSessionColumns(ctx context.Context, db *sql.DB) (map[string]bool, erro
 	}
 
 	return columns, nil
-}
-
-func gooseSessionDatabasePath() string {
-	if root := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(root) {
-		return filepath.Join(root, "data", "sessions", "sessions.db")
-	}
-
-	if runtime.GOOS == "windows" {
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
-			home := harness.HomeDir()
-			if home == "" {
-				return ""
-			}
-
-			appData = filepath.Join(home, "AppData", "Roaming")
-		}
-
-		return filepath.Join(appData, "Block", "goose", "sessions", "sessions.db")
-	}
-
-	data := os.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		home := harness.HomeDir()
-		if home == "" {
-			return ""
-		}
-
-		data = filepath.Join(home, ".local", "share")
-	}
-
-	return filepath.Join(data, "goose", "sessions", "sessions.db")
 }

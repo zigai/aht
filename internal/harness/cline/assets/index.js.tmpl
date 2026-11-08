@@ -89,7 +89,7 @@ function report(eventName, context, transition) {
     "--observed-at", new Date().toISOString(),
     "--sequence", String(++reportSequence),
     "--quiet",
-    "--reporter", "cline-plugin",
+    "--reporter", {{SOURCE}},
     "--reporter-version", String(integrationVersion),
   ];
   if (transition.presence) args.push("--presence", transition.presence);

@@ -7,21 +7,10 @@ import (
 
 func DistributionFor(id registry.Harness) harness.Distribution {
 	if adapter, ok := Find(id); ok {
-		if provider, ok := adapter.(interface{ Distribution() harness.Distribution }); ok {
+		if provider, ok := adapter.(harness.DistributionProvider); ok {
 			return provider.Distribution()
 		}
 	}
 
-	return harness.Distribution{
-		Source:        "",
-		Package:       "",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
-	}
+	return harness.Distribution{}
 }

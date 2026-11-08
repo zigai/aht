@@ -13,7 +13,11 @@ import (
 	"strings"
 )
 
-const linuxUnitName = "aht-observer.service"
+const (
+	linuxUnitName = "aht-observer.service"
+	platformName  = "linux"
+	managerName   = "systemd"
+)
 
 var _ backend = (*linuxBackend)(nil)
 
@@ -39,16 +43,7 @@ func RenderSystemdUnit(opts Options) (string, error) {
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",
-		"ExecStart=" + systemdArg(
-			normalized.Binary,
-		) + " --store " + systemdArg(
-			normalized.StorePath,
-		) +
-			" manage tracker run --interval " +
-			normalized.Interval.String() +
-			" --grace-period " +
-			normalized.GracePeriod.String() +
-			" --quiet",
+		"ExecStart=" + systemdCommand(trackerCommand(normalized)),
 		"Restart=on-failure",
 		"RestartSec=30s",
 		"",
@@ -64,7 +59,11 @@ func platformBackend(opts Options) (backend, error) {
 		return nil, err
 	}
 
-	path, err := systemdUnitPath()
+	return definitionBackend(rendered)
+}
+
+func definitionBackend(rendered string) (backend, error) {
+	path, err := definitionPath()
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +71,7 @@ func platformBackend(opts Options) (backend, error) {
 	return &linuxBackend{path: path, rendered: rendered}, nil
 }
 
-func systemdUnitPath() (string, error) {
+func definitionPath() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
@@ -82,19 +81,7 @@ func systemdUnitPath() (string, error) {
 }
 
 func (b *linuxBackend) describe() Result {
-	return Result{
-		Platform:       "linux",
-		Manager:        "systemd",
-		ManagedPath:    b.path,
-		ManagedVersion: ManagedVersion,
-		Path:           b.path,
-		Version:        ManagedVersion,
-		Installed:      false,
-		Current:        false,
-		Running:        false,
-		Changed:        false,
-		Message:        "",
-	}
+	return describeDefinition(b.path)
 }
 func (b *linuxBackend) content() string { return b.rendered }
 
@@ -155,33 +142,10 @@ func (b *linuxBackend) unload(ctx context.Context, executor CommandExecutor) err
 func (b *linuxBackend) running(
 	ctx context.Context,
 	executor CommandExecutor,
-	checkEnabled bool,
 ) (runtimeState, error) {
 	output, err := executor.Run(ctx, "systemctl", "--user", "is-active", "--quiet", linuxUnitName)
 	if err == nil {
-		state := runtimeState{Running: true, Loaded: true, Enabled: false, Message: "running"}
-		if !checkEnabled {
-			return state, nil
-		}
-
-		output, err := executor.Run(
-			ctx,
-			"systemctl",
-			"--user",
-			"is-enabled",
-			"--quiet",
-			linuxUnitName,
-		)
-		if err == nil {
-			state.Enabled = true
-			return state, nil
-		}
-
-		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
-			return state, nil
-		}
-
-		return runtimeState{}, wrapManagerError("checking systemd service enablement", output, err)
+		return runtimeState{Running: true, Loaded: true, Message: "running"}, nil
 	}
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -199,12 +163,20 @@ func (b *linuxBackend) running(
 		return runtimeState{
 			Running: false,
 			Loaded:  false,
-			Enabled: false,
 			Message: "not running",
 		}, nil
 	}
 
 	return runtimeState{}, wrapManagerError("checking systemd service status", output, err)
+}
+
+func systemdCommand(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, systemdArg(arg))
+	}
+
+	return strings.Join(quoted, " ")
 }
 
 func systemdArg(value string) string {

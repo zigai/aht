@@ -47,7 +47,7 @@ func ExampleClient_List() {
 
 	sessions, err := aht.List(
 		context.Background(),
-		client.Filter{Presence: client.PresenceLive},
+		registry.Filter{Presence: registry.PresenceLive},
 	)
 	if err != nil {
 		panic(err)
@@ -92,8 +92,8 @@ func ExampleClient_Wait() {
 	})
 
 	res, err := aht.Wait(context.Background(), client.WaitOptions{
-		ID:       observed.ID,
-		Activity: client.ActivityIdle,
+		Reference: observed.ID,
+		Activity:  registry.ActivityIdle,
 	})
 	if err != nil {
 		panic(err)

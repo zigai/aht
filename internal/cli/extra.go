@@ -12,21 +12,13 @@ import (
 	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/observer"
-	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const (
-	observeDefaultInterval = 300 * time.Millisecond
-	serviceDefaultInterval = 300 * time.Millisecond
-	realtimeComponentCount = 4
-)
+const realtimeComponentCount = 4
 
-var (
-	errObserverRunDegraded     = errors.New("observer reconciliation degraded")
-	errUnknownServiceOperation = errors.New("unknown service operation")
-)
+var errObserverRunDegraded = errors.New("observer reconciliation degraded")
 
 //exhaustruct:optional
 type observeOptions struct {
@@ -43,14 +35,8 @@ type trackerComponentResult struct {
 }
 
 //exhaustruct:optional
-type serviceOptions struct {
-	binary          string
-	interval, grace time.Duration
-	dryRun          bool
-}
-
 func (app *application) newTrackerRunCommand() *cobra.Command {
-	o := observeOptions{interval: observeDefaultInterval}
+	o := observeOptions{interval: config.DefaultTrackerInterval}
 	screenInspection := true
 
 	var disableScreenInspection bool
@@ -94,7 +80,6 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 					StorePath:               app.resolvedStorePath(),
 					Interval:                o.interval,
 					GracePeriod:             o.grace,
-					HealthPath:              app.resolvedStorePath() + ".observer-health.json",
 					Quiet:                   o.quiet,
 					DetectionConfigDir:      cfg.Detection.ManifestsDir,
 					DisableScreenInspection: disableScreenInspection,
@@ -122,7 +107,6 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 				StorePath:               store.Path(),
 				Interval:                o.interval,
 				GracePeriod:             o.grace,
-				HealthPath:              store.Path() + ".observer-health.json",
 				Quiet:                   o.quiet,
 				DetectionConfigDir:      cfg.Detection.ManifestsDir,
 				DisableScreenInspection: disableScreenInspection,
@@ -170,22 +154,17 @@ func applyTrackerConfig(opts *observeOptions, cmd *cobra.Command, cfg config.Con
 }
 
 func applyTrackerIntervals(opts *observeOptions, cmd *cobra.Command, cfg config.Config) error {
-	if !cmd.Flags().Changed("interval") && cfg.Tracker.Interval != "" {
-		d, err := config.ParseDuration(cfg.Tracker.Interval)
-		if err != nil {
-			return exitCode(fmt.Errorf("parsing tracker interval: %w", err), exitCodeUsage)
-		}
-
-		opts.interval = d
+	interval, grace, err := config.TrackerDurations(cfg)
+	if err != nil {
+		return exitCode(err, exitCodeUsage)
 	}
 
-	if !cmd.Flags().Changed("grace-period") && cfg.Tracker.GracePeriod != "" {
-		d, err := config.ParseDuration(cfg.Tracker.GracePeriod)
-		if err != nil {
-			return exitCode(fmt.Errorf("parsing tracker grace period: %w", err), exitCodeUsage)
-		}
+	if !cmd.Flags().Changed("interval") {
+		opts.interval = interval
+	}
 
-		opts.grace = d
+	if !cmd.Flags().Changed("grace-period") {
+		opts.grace = grace
 	}
 
 	return nil
@@ -209,7 +188,7 @@ func (app *application) runRealtimeObserver(
 	}
 	run("broker", func() error { return server.Serve(runCtx) })
 	run("persistence", func() error {
-		return store.RunPersistence(runCtx, 0, 0)
+		return store.RunPersistence(runCtx)
 	})
 	run("observer", func() error { return app.runObserver(runCtx, opts, watcher) })
 	run("history", func() error { return app.runHistoryIndexer(runCtx, store, opts.quiet) })
@@ -287,12 +266,7 @@ func (app *application) runObserverOnce(
 	}
 	// A running tracker expires tombstones continuously; a single cycle has
 	// to do it explicitly or its fallback writes would keep them forever.
-	ttl := opts.tombstoneTTL
-	if ttl <= 0 {
-		ttl = registry.DefaultTombstoneTTL
-	}
-
-	if _, err := app.registryStore().GC(ctx, ttl); err != nil {
+	if _, err := app.registryStore().GC(ctx, opts.tombstoneTTL); err != nil {
 		return fmt.Errorf("expiring tombstones: %w", err)
 	}
 
@@ -338,73 +312,4 @@ func (app *application) writeObserverResult(result observer.Result) error {
 	}
 
 	return nil
-}
-
-func runServiceOperation(
-	ctx context.Context,
-	operation string,
-	opts service.Options,
-) (service.Result, error) {
-	var (
-		result service.Result
-		err    error
-	)
-
-	switch operation {
-	case "update":
-		result, err = service.Update(ctx, opts)
-	case "uninstall":
-		result, err = service.Uninstall(ctx, opts)
-	case statusCommandName:
-		result, err = service.Status(ctx, opts)
-	default:
-		return service.Result{}, fmt.Errorf("%w: %s", errUnknownServiceOperation, operation)
-	}
-
-	if err != nil {
-		return result, fmt.Errorf("service %s: %w", operation, err)
-	}
-
-	return result, nil
-}
-
-func (app *application) parseServiceOptions(opts serviceOptions) (service.Options, error) {
-	if opts.binary == "" {
-		opts.binary = defaultInstallBinary()
-	}
-
-	if opts.interval <= 0 {
-		return service.Options{}, exitCode(errInvalidObserveInterval, exitCodeUsage)
-	}
-
-	if opts.grace < 0 {
-		return service.Options{}, exitCode(errInvalidObserveGracePeriod, exitCodeUsage)
-	}
-
-	return service.Options{
-		Binary:      opts.binary,
-		StorePath:   app.resolvedStorePath(),
-		Interval:    opts.interval,
-		GracePeriod: opts.grace,
-		DryRun:      opts.dryRun,
-	}, nil
-}
-
-func (app *application) configuredServiceOptions(
-	cmd *cobra.Command,
-	opts serviceOptions,
-) (service.Options, error) {
-	cfg, err := app.loadConfig()
-	if err != nil {
-		return service.Options{}, err
-	}
-
-	intervals := observeOptions{interval: opts.interval, grace: opts.grace}
-	if err := applyTrackerIntervals(&intervals, cmd, cfg); err != nil {
-		return service.Options{}, err
-	}
-
-	opts.interval, opts.grace = intervals.interval, intervals.grace
-
-	return app.parseServiceOptions(opts)
 }

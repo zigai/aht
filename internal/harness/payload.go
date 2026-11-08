@@ -126,12 +126,11 @@ func PayloadBool(payload map[string]any, keys ...string) bool {
 	return false
 }
 
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
+func PayloadAttributes(payload map[string]any, fields map[string][]string) map[string]string {
+	attributes := make(map[string]string, len(fields))
+	for attribute, keys := range fields {
+		AddAttributeString(attributes, attribute, PayloadStringAny(payload, keys...))
 	}
 
-	return ""
+	return attributes
 }

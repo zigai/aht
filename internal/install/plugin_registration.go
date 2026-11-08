@@ -200,7 +200,7 @@ func registeredPluginMissingMarker(
 	ctx context.Context,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (bool, error) {
-	if plan.Registration == nil || plan.MarkerFile == "" {
+	if plan.Registration == nil {
 		return false, nil
 	}
 
@@ -217,7 +217,7 @@ func registeredPluginMissingMarker(
 		return false, nil
 	}
 
-	if _, err := os.Lstat(filepath.Join(plan.Dir, plan.MarkerFile)); err == nil {
+	if _, err := os.Lstat(filepath.Join(plan.Dir, harnesspkg.ArtifactMarkerFile)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("checking registered plugin marker: %w", err)

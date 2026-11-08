@@ -38,6 +38,12 @@ type directoryChange struct {
 	directory *indexedDirectory
 }
 
+type directoryScan struct {
+	check func(context.Context) error
+	issue func(Source, string, error)
+	visit func(Source, string, fs.DirEntry) (bool, bool)
+}
+
 func (index *historyIndex) loadDirectories(
 	ctx context.Context,
 	source Source,
@@ -93,43 +99,38 @@ func (index *historyIndex) loadDirectories(
 		}
 	}
 
-	index.directories = append(index.directories, cache)
-
 	return cache, nil
 }
 
 func (index *historyIndex) walkDirectory(
 	ctx context.Context,
-	search *search,
+	scan directoryScan,
 	source Source,
 	root *os.Root,
 ) []historyFile {
-	cache, err := index.loadDirectories(ctx, source)
-	if err != nil {
-		index.report(search, source, source.Path, err)
-		return nil
-	}
+	cache := index.directorySnapshots[source]
+	index.directories = append(index.directories, cache)
 
 	var files []historyFile
-	cache.walk(ctx, search, root, ".", &files)
+	cache.walk(ctx, scan, root, ".", &files)
 
 	return files
 }
 
 func (cache *directoryCache) walk(
 	ctx context.Context,
-	search *search,
+	scan directoryScan,
 	root *os.Root,
 	path string,
 	files *[]historyFile,
 ) {
-	if search.checkScan(ctx) != nil {
+	if scan.check(ctx) != nil {
 		return
 	}
 
 	info, err := root.Lstat(path)
 	if err != nil {
-		search.issue(cache.source, filepath.Join(cache.source.Path, path), err)
+		scan.issue(cache.source, filepath.Join(cache.source.Path, path), err)
 		return
 	}
 
@@ -137,9 +138,9 @@ func (cache *directoryCache) walk(
 		return
 	}
 
-	directory, err := cache.read(search, root, path, info)
+	directory, err := cache.read(scan, root, path, info)
 	if err != nil {
-		search.issue(cache.source, filepath.Join(cache.source.Path, path), err)
+		scan.issue(cache.source, filepath.Join(cache.source.Path, path), err)
 		return
 	}
 
@@ -160,21 +161,21 @@ func (cache *directoryCache) walk(
 	)
 
 	for _, entry := range entries {
-		if search.checkScan(ctx) != nil {
+		if scan.check(ctx) != nil {
 			return
 		}
 
 		child := filepath.Join(path, entry.name)
 		if entry.directory {
-			cache.walk(ctx, search, root, child, files)
+			cache.walk(ctx, scan, root, child, files)
 		} else {
-			*files = append(*files, rootFile(root, cache.source.Path, child))
+			*files = append(*files, rootFile(cache.source.Harness, root, cache.source.Path, child))
 		}
 	}
 }
 
 func (cache *directoryCache) read(
-	search *search,
+	scan directoryScan,
 	root *os.Root,
 	path string,
 	info os.FileInfo,
@@ -185,12 +186,7 @@ func (cache *directoryCache) read(
 	}
 
 	if previous, ok := cache.previous[path]; ok && stamp != "" && previous.stamp == stamp {
-		if unix.Faccessat(
-			unix.AT_FDCWD,
-			filepath.Join(cache.source.Path, path),
-			unix.R_OK,
-			unix.AT_EACCESS,
-		) == nil {
+		if readable(filepath.Join(cache.source.Path, path)) {
 			previous.files = cache.files[path]
 			return previous, nil
 		}
@@ -204,7 +200,7 @@ func (cache *directoryCache) read(
 	directory := indexedDirectory{stamp: stamp, children: nil, files: nil}
 
 	for _, entry := range entries {
-		skip, process := search.shouldVisitEntry(
+		skip, process := scan.visit(
 			cache.source,
 			filepath.Join(path, entry.Name()),
 			entry,
@@ -334,4 +330,12 @@ func (index *historyIndex) writeDirectory(ctx context.Context, change directoryC
 	}
 
 	return nil
+}
+
+func readable(path string) bool {
+	return unix.Faccessat(unix.AT_FDCWD, path, unix.R_OK, unix.AT_EACCESS) == nil
+}
+
+func (index *historyIndex) forgetDirectories(source Source) {
+	index.directories = append(index.directories, index.directorySnapshots[source])
 }

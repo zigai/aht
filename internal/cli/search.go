@@ -20,7 +20,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -166,13 +166,6 @@ func (app *application) newSearchCommand() *cobra.Command {
 		nil,
 		"filter by harness `<name,...>` (repeatable)",
 	)
-	flags.StringSliceVar(
-		&options.harnesses,
-		"agent",
-		nil,
-		"filter by harness `<name,...>` (alias for --harness)",
-	)
-	_ = flags.MarkHidden("agent")
 	flags.StringArrayVar(
 		&options.query.Dirs,
 		"dir",
@@ -347,7 +340,7 @@ func (options *searchOptions) validate(now time.Time) ([]history.Source, error) 
 
 func (options *searchOptions) validateFilters(now time.Time) error {
 	for _, name := range options.harnesses {
-		id, err := harness.Parse(strings.TrimSpace(name))
+		id, err := catalog.Parse(strings.TrimSpace(name))
 		if err != nil {
 			return fmt.Errorf("search harness: %w", err)
 		}
@@ -430,7 +423,7 @@ func (options *searchOptions) validateSources() ([]history.Source, error) {
 			)
 		}
 
-		id, err := harness.Parse(name)
+		id, err := catalog.Parse(name)
 		if err != nil {
 			return nil, fmt.Errorf("search source: %w", err)
 		}
@@ -454,23 +447,20 @@ func (options *searchOptions) validateRole() error {
 		return nil
 	}
 
-	role := strings.ToLower(strings.TrimSpace(options.role))
-	switch role {
-	case "user", "context":
-		options.query.Role = role
-	case "agent", "assistant":
-		options.query.Role = "assistant"
-	case "tool":
-		options.query.Role = "tool"
-	case "all":
-		options.query.Role = "all"
-	default:
+	role := history.Role(strings.ToLower(strings.TrimSpace(options.role)))
+	if !role.Valid() {
 		return fmt.Errorf(
 			"search: %w %q; choose user, agent, context, tool, or all",
 			errSearchRole,
 			options.role,
 		)
 	}
+
+	if role == history.RoleAgent {
+		role = history.RoleAssistant
+	}
+
+	options.query.Role = role
 
 	return nil
 }
@@ -521,7 +511,13 @@ func (app *application) runSearch(
 	sources []history.Source,
 ) error {
 	cfg := app.cfg
-	opts.query.IgnoreHarnesses = configuredIgnoreHarnesses(cfg.Filter.IgnoreHarnesses, sources)
+
+	explicit := make([]registry.Harness, 0, len(sources))
+	for _, source := range sources {
+		explicit = append(explicit, source.Harness)
+	}
+
+	opts.query.IgnoreHarnesses = configuredIgnoreHarnesses(cfg.Filter.IgnoreHarnesses, explicit)
 	opts.query.IgnorePaths = cfg.Filter.IgnorePaths
 	// History search works without creating a live registry or observer lock.
 	if _, statErr := os.Stat(app.resolvedStorePath()); statErr == nil {
@@ -535,9 +531,9 @@ func (app *application) runSearch(
 
 	progress := app.newSearchProgress()
 
-	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: progress.update}
+	historyCatalog := history.Catalog{Sources: sources, IndexPath: "", Progress: progress.update}
 	if opts.stream {
-		return app.runSearchStream(ctx, catalog, opts, progress)
+		return app.runSearchStream(ctx, historyCatalog, opts, progress)
 	}
 
 	var (
@@ -545,13 +541,13 @@ func (app *application) runSearch(
 		searchErr error
 	)
 	if opts.listing {
-		result, searchErr = catalog.List(ctx, opts.listQuery())
+		result, searchErr = historyCatalog.List(ctx, opts.listQuery())
 	} else {
-		result, searchErr = catalog.Search(ctx, opts.query)
+		result, searchErr = historyCatalog.Search(ctx, opts.query)
 	}
 	defer refreshSkippedHistory(
 		result,
-		func() error { return startHistoryRefresh(ctx, catalog.Sources) },
+		func() error { return startHistoryRefresh(ctx, historyCatalog.Sources) },
 	)
 
 	progress.clear()
@@ -598,7 +594,7 @@ func (app *application) writeSearchOutput(
 
 func (app *application) runSearchStream(
 	ctx context.Context,
-	catalog history.Catalog,
+	historyCatalog history.Catalog,
 	opts searchOptions,
 	progress *searchProgress,
 ) error {
@@ -622,18 +618,18 @@ func (app *application) runSearchStream(
 	)
 	if opts.listing {
 		// Listing has no text to stream; it streams the sorted listing instead.
-		result, searchErr = catalog.List(ctx, opts.listQuery())
+		result, searchErr = historyCatalog.List(ctx, opts.listQuery())
 		for _, match := range result.Matches {
 			if !yield(match) {
 				break
 			}
 		}
 	} else {
-		result, searchErr = catalog.Stream(ctx, opts.query, yield)
+		result, searchErr = historyCatalog.Stream(ctx, opts.query, yield)
 	}
 	defer refreshSkippedHistory(
 		result,
-		func() error { return startHistoryRefresh(ctx, catalog.Sources) },
+		func() error { return startHistoryRefresh(ctx, historyCatalog.Sources) },
 	)
 
 	progress.clear()
@@ -713,18 +709,16 @@ func (p *searchProgress) clear() {
 }
 
 // configuredIgnoreHarnesses applies filter.ignore_harnesses while keeping an
-// explicit --source selection authoritative: an explicitly selected harness is
+// explicit harness selection authoritative: an explicitly selected harness is
 // never silently dropped by configuration, and every other ignored harness stays
 // ignored.
-func configuredIgnoreHarnesses(configured []string, sources []history.Source) []registry.Harness {
-	explicit := make([]registry.Harness, 0, len(sources))
-	for _, source := range sources {
-		explicit = append(explicit, source.Harness)
-	}
-
+func configuredIgnoreHarnesses(
+	configured []string,
+	explicit []registry.Harness,
+) []registry.Harness {
 	ignored := make([]registry.Harness, 0, len(configured))
 	for _, name := range configured {
-		id, err := harness.Parse(name)
+		id, err := catalog.Parse(name)
 		if err != nil || slices.Contains(explicit, id) {
 			continue
 		}
@@ -887,14 +881,14 @@ func (app *application) writeSearchUnsupported(sources []history.SourceStatus, o
 	var unsupported []string
 
 	for _, source := range sources {
-		if source.Status != "unsupported" {
+		if source.Status != history.StatusUnsupported {
 			continue
 		}
 
 		requested := opts.verbose || slices.Contains(opts.query.Harnesses, source.Source.Harness)
 		for _, value := range opts.sources {
 			name, _, _ := strings.Cut(value, "=")
-			id, _ := harness.Parse(name)
+			id, _ := catalog.Parse(name)
 			requested = requested || id == source.Source.Harness
 		}
 
@@ -1025,7 +1019,7 @@ func (app *application) writeSearchMatch(match history.Match) error {
 
 	for _, excerpt := range match.Excerpts {
 		if err := app.writeHumanDetails(
-			[]humanDetail{{label: excerpt.Role, value: excerpt.Text}},
+			[]humanDetail{{label: string(excerpt.Role), value: excerpt.Text}},
 		); err != nil {
 			return err
 		}
@@ -1116,16 +1110,17 @@ func (app *application) writeSearchExcerptsTTY(excerpts []history.Excerpt, width
 			continuation = strings.Repeat(" ", prefixWidth)
 		}
 
-		role := excerpt.Role + ":"
+		role := string(excerpt.Role) + ":"
 		styled := role
 
 		switch excerpt.Role {
-		case "user":
+		case history.RoleUser:
 			styled = "\x1b[1;33m" + role + styleReset
-		case "assistant":
+		case history.RoleAssistant:
 			styled = "\x1b[1;37m" + role + styleReset
-		case "tool":
+		case history.RoleTool:
 			styled = "\x1b[2m" + role + styleReset
+		case history.RoleAgent, history.RoleContext, history.RoleAll:
 		}
 
 		first := branch + styled + strings.Repeat(" ", max(1, maxRoleLabelWidth-len(role)+1))

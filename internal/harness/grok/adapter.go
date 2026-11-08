@@ -13,48 +13,38 @@ import (
 const (
 	grokHookFileName      = "aht-state.json"
 	grokIntegrationSource = "grok-hook"
+	integrationVersion    = 15
 )
 
 type grokHarness struct{ harness.BaseAdapter }
 
-type grokHookSpec struct {
-	event   string
-	matcher string
-	command string
-}
-
 func New() grokHarness {
 	return grokHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("grok"),
 		Aliases:          []string{"grok-build", "grok_build"},
 		ProcessNames:     []string{"grok", "grok-build"},
 		Env: harness.EnvKeys{
+			Config:      []string{"GROK_HOME"},
 			SessionID:   []string{"GROK_SESSION_ID"},
-			SessionPath: nil,
 			ProjectRoot: []string{"GROK_WORKSPACE_ROOT"},
-			PID:         nil,
 			Event:       []string{"GROK_HOOK_EVENT"},
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      true,
-			SessionEnd:        true,
-			RunningIdle:       true,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
+			SessionStart: true,
+			SessionEnd:   true,
+			RunningIdle:  true,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  grokIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "grok_hook_event",
+		LifecycleSourceAttributes: []string{"grok_start_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         grokIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
-func (grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
-	base := grokHome()
+func (adapter grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := grokHome(harness.HomeDir())
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
@@ -65,8 +55,7 @@ func (grokHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				Path:        filepath.Join(base, "hooks", grokHookFileName),
 				Label:       "grok hooks",
 				ConfigLabel: "grok hooks",
-				Content:     "",
-				JSONContent: grokHookConfig(binary),
+				JSONContent: grokHookConfig(binary, adapter.Definition()),
 			}},
 		},
 	}, nil
@@ -122,7 +111,6 @@ func (grokHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefau
 
 	return harness.PayloadDefaults{
 		SessionID:   harness.PayloadStringAny(payload, "sessionId", "session_id"),
-		SessionPath: "",
 		CWD:         harness.PayloadString(payload, "cwd"),
 		ProjectRoot: harness.PayloadStringAny(payload, "workspaceRoot", "workspace_root"),
 		Event:       harness.PayloadStringAny(payload, "hookEventName", "hook_event_name"),
@@ -130,89 +118,33 @@ func (grokHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefau
 	}, nil
 }
 
-func grokHookConfig(binary string) map[string]any {
-	specs := []grokHookSpec{
-		{
-			event:   harness.HookEventSessionStart,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventSessionStart),
-		},
-		{
-			event:   harness.HookEventUserPromptSubmit,
-			matcher: "",
-			command: grokHookCommand(
-				binary,
-				registry.ActivityRunning,
-				harness.HookEventUserPromptSubmit,
-			),
-		},
-		{
-			event:   harness.HookEventPreToolUse,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, harness.HookEventPreToolUse),
-		},
-		{
-			event:   harness.HookEventPostToolUse,
-			matcher: "",
-			command: grokHookCommand(
-				binary,
-				registry.ActivityRunning,
-				harness.HookEventPostToolUse,
-			),
-		},
-		{
-			event:   harness.HookEventPostToolUseFailure,
-			matcher: "",
-			command: grokHookCommand(
-				binary,
-				registry.ActivityRunning,
-				harness.HookEventPostToolUseFailure,
-			),
-		},
-		{
-			event:   "PermissionDenied",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, "PermissionDenied"),
-		},
+func grokHookConfig(binary string, definition harness.Definition) map[string]any {
+	specs := harness.CommandHookSpecs(binary, definition, []harness.CommandHook{
+		{Event: "SessionStart", Transition: harness.HookActivityIdle},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
+		{Event: "PermissionDenied", Transition: harness.HookActivityIdle},
 		// SubagentStart and SubagentStop fire inside child agents while the
 		// parent turn keeps running until Stop.
-		{
-			event:   "PreCompact",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityRunning, "PreCompact"),
-		},
+		{Event: "PreCompact", Transition: harness.HookActivityRunning},
 		// Automatic compaction continues the running turn; only manual
 		// compaction returns the session to idle.
-		{
-			event:   "PostCompact",
-			matcher: "manual",
-			command: grokHookCommand(binary, registry.ActivityIdle, "PostCompact"),
-		},
-		{
-			event:   harness.HookEventStop,
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityIdle, harness.HookEventStop),
-		},
-		{
-			event:   "StopFailure",
-			matcher: "",
-			command: grokHookCommand(binary, registry.ActivityFailed, "StopFailure"),
-		},
-		{
-			event:   "SessionEnd",
-			matcher: "",
-			command: grokHookCommand(binary, registry.PresenceGone, "SessionEnd"),
-		},
-	}
+		{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "StopFailure", Transition: harness.HookActivityFailed},
+		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
+	})
 
 	hooks := make(map[string]any)
 	for _, spec := range specs {
-		existing, ok := hooks[spec.event].([]any)
+		existing, ok := hooks[spec.Event].([]any)
 		if !ok {
 			existing = nil
 		}
 
-		hooks[spec.event] = append(existing, grokCommandHookGroup(spec.matcher, spec.command))
+		hooks[spec.Event] = append(existing, grokCommandHookGroup(spec.Matcher, spec.Command))
 	}
 
 	return map[string]any{"hooks": hooks}
@@ -236,39 +168,14 @@ func grokCommandHookGroup(matcher string, command string) map[string]any {
 	return group
 }
 
-func grokHookCommand[T harness.Transition](binary string, transition T, event string) string {
-	return harness.ReportHookCommand(
-		binary,
-		registry.Harness("grok"),
-		transition,
-		event,
-		grokIntegrationSource,
-	)
-}
-
-func grokHome() string {
+func grokHome(home string) string {
 	if value := strings.TrimSpace(os.Getenv("GROK_HOME")); value != "" {
 		return value
 	}
 
-	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
 
 	return filepath.Join(home, ".grok")
-}
-
-func (grokHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["grok_hook_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "grok_start_source", "source", "reason"),
-	)
 }

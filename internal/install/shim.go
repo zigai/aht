@@ -27,12 +27,12 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 
 	script := shimScript(
 		opts.Binary,
-		string(harness),
+		harness,
 		target,
 		catalog.IntegrationVersionFor(harness),
 	)
 
-	contentChanged, err := fileNeedsUpdate(path, script, opts.Force)
+	contentChanged, err := shimContentNeedsUpdate(path, script, harness, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
@@ -74,6 +74,24 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 	}, nil
 }
 
+func shimContentNeedsUpdate(
+	path string,
+	script string,
+	id registry.Harness,
+	force bool,
+) (bool, error) {
+	status, err := classifyShimArtifact(path, id)
+	if err != nil {
+		return false, err
+	}
+
+	if status == ArtifactForeign && !force {
+		return false, fmt.Errorf("%w: %s; pass --force to replace it", errForeignFile, path)
+	}
+
+	return fileNeedsUpdate(path, script, true)
+}
+
 func writeShimChanges(path string, script string, contentChanged bool) error {
 	if contentChanged {
 		return writeFileAtomicMode(
@@ -105,8 +123,13 @@ func shimModeNeedsUpdate(path string) (bool, error) {
 	return info.Mode().Perm() != shimFileMode, nil
 }
 
-func classifyShimArtifact(path string) (ArtifactStatus, error) {
-	status, err := ClassifyArtifact(path)
+func classifyShimArtifact(path string, harness registry.Harness) (ArtifactStatus, error) {
+	status, err := classifyArtifactWith(path, func(content string) ArtifactStatus {
+		return classifyExpectedIdentity(
+			content,
+			shimIdentity(harness, catalog.IntegrationVersionFor(harness)),
+		)
+	})
 	if err != nil || status != ArtifactCurrent {
 		return status, err
 	}
@@ -217,31 +240,36 @@ func canonicalPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func shimScript(binary string, harness string, target string, version int) string {
+func shimScript(binary string, harness registry.Harness, target string, version int) string {
+	identity := shimIdentity(harness, version)
+
 	//nolint:lll // multi-line generated shell must preserve exact bytes.
 	return fmt.Sprintf(`#!/bin/sh
 set -u
 
-aht_managed_marker=%s
-AHT_INTEGRATION_ID=%s-shim
-AHT_INTEGRATION_VERSION=%d
-aht_bin=%s
+%saht_bin=%s
 harness_bin=%s
 
-"$aht_bin" report %s --presence live --evidence process --pid "$$" --event process.start --reporter-version %d --reporter %s-shim --quiet >/dev/null 2>&1 || true
+"$aht_bin" report %s --presence live --evidence process --pid "$$" --event process.start --reporter-version %d --reporter %s --quiet >/dev/null 2>&1 || true
 "$harness_bin" "$@"
 status=$?
-"$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --reporter-version %d --reporter %s-shim --quiet >/dev/null 2>&1 || true
+"$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --reporter-version %d --reporter %s --quiet >/dev/null 2>&1 || true
 exit "$status"
-`, harnesspkg.ShellQuote(
-		managedMarker,
-	), harness, version, harnesspkg.ShellQuote(
+`, identity.Marker("# "), harnesspkg.ShellQuote(
 		binary,
 	), harnesspkg.ShellQuote(
 		target,
 	), harnesspkg.ShellQuote(
-		harness,
-	), version, harness, harnesspkg.ShellQuote(
-		harness,
-	), version, harness)
+		string(harness),
+	), version, identity.Source, harnesspkg.ShellQuote(
+		string(harness),
+	), version, identity.Source)
+}
+
+func shimIdentity(id registry.Harness, version int) harnesspkg.ArtifactIdentity {
+	return harnesspkg.ArtifactIdentity{
+		ID:      string(id) + "-shim",
+		Version: version,
+		Source:  string(id) + "-shim",
+	}
 }

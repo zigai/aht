@@ -13,267 +13,104 @@ import (
 const (
 	claudeCommand           = "claude"
 	claudeIntegrationSource = "claude-hook"
+	integrationVersion      = 15
 )
 
 type claudeHarness struct{ harness.BaseAdapter }
 
-type hookPayload struct {
-	SessionID      string  `json:"session_id"      validate:"required,notblank"`
-	TranscriptPath *string `json:"transcript_path" validate:"omitempty"`
-	CWD            string  `json:"cwd"             validate:"required,notblank"`
-	HookEventName  string  `json:"hook_event_name" validate:"required,notblank"`
-}
-
 func New() claudeHarness {
 	return claudeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		PayloadOmissions: []string{"tool_input", "tool_response"},
 		ExclusiveProcess: true, CatalogCreates: true,
-		ID:           registry.Harness("claude"),
-		Aliases:      []string{"claude-code", "claude_code"},
-		ProcessNames: []string{"claude", "claude-code"},
+		RetainNativeActivity: true,
+		ID:                   registry.Harness("claude"),
+		Aliases:              []string{"claude-code", "claude_code"},
+		ProcessNames:         []string{"claude", "claude-code"},
 		Env: harness.EnvKeys{
+			Config:      []string{"CLAUDE_CONFIG_DIR"},
 			SessionID:   []string{"CLAUDE_SESSION_ID"},
 			SessionPath: []string{"CLAUDE_SESSION_PATH"},
-			ProjectRoot: nil,
 			PID:         []string{"CLAUDE_PID"},
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			ProcessIdentity:   false,
-			NativeCatalog:     true,
-			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  claudeIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     true,
+		LifecycleEventAttribute:   "claude_hook_event",
+		LifecycleSourceAttributes: []string{"claude_start_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         claudeIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
+		ScreenFallback:            true,
 	})}
 }
 
-func (claudeHarness) RetainNativeActivity() bool { return true }
-
-func (claudeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter claudeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := claudeConfigDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
+	hooks := harness.CommandHookSpecs(binary, adapter.Definition(), []harness.CommandHook{
+		{
+			Event:      "SessionStart",
+			Matcher:    "startup|resume|clear",
+			Transition: harness.HookActivityIdle,
+		},
+		// Automatic compaction also fires SessionStart inside a turn that
+		// keeps running, so compaction reports presence without activity.
+		{
+			Event:      "SessionStart",
+			Matcher:    "compact",
+			Transition: harness.HookPresenceLive,
+		},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
+		{Event: "PermissionRequest", Transition: harness.HookActivityWaiting},
+		{Event: "Elicitation", Transition: harness.HookActivityWaiting},
+		{Event: "ElicitationResult", Transition: harness.HookActivityRunning},
+		{Event: "PermissionDenied", Transition: harness.HookActivityIdle},
+		{
+			Event:      "Notification",
+			Matcher:    "permission_prompt",
+			Transition: harness.HookActivityWaiting,
+		},
+		// SubagentStart and SubagentStop describe child agents, including
+		// Claude Code's internal prompt-suggestion agents, not the main
+		// turn. Stop reports whether delegated work keeps the turn running.
+		// Automatic compaction either happens inside a turn that already
+		// runs or between turns, where no Stop would return the session to
+		// idle, so only manual compaction reports running.
+		{Event: "PreCompact", Matcher: "manual", Transition: harness.HookActivityRunning},
+		// Automatic compaction continues the running turn; only manual
+		// compaction returns the session to idle.
+		{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "StopFailure", Transition: harness.HookActivityFailed},
+		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
+	})
+
+	for _, event := range []string{"SessionStart", "FileChanged"} {
+		hooks = append(hooks, harness.CommandHookInstallSpec{
+			Event:   event,
+			Command: harness.NativeHookCommand(binary, adapter.Definition().ID, event),
+		})
+	}
+
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
 			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-				Path:              filepath.Join(base, "settings.json"),
-				Source:            claudeIntegrationSource,
-				Label:             "claude hooks",
-				ConfigLabel:       "claude config",
-				StatusMessage:     "",
-				OmitStatusMessage: false,
-				HooksAtRoot:       false,
-				Trust:             nil,
-				Hooks: []harness.CommandHookInstallSpec{
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "startup|resume|clear",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityIdle,
-							harness.HookEventSessionStart,
-							claudeIntegrationSource,
-						),
-					},
-					// Automatic compaction also fires SessionStart inside a turn that
-					// keeps running, so compaction reports presence without activity.
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "compact",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.PresenceLive,
-							harness.HookEventSessionStart,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   harness.HookEventSessionStart,
-						Matcher: "",
-						Command: harness.ShellQuote(
-							binary,
-						) + " --json hook claude --event SessionStart",
-					},
-					{
-						Event:   "FileChanged",
-						Matcher: "",
-						Command: harness.ShellQuote(
-							binary,
-						) + " --json hook claude --event FileChanged",
-					},
-					{
-						Event:   harness.HookEventUserPromptSubmit,
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							harness.HookEventUserPromptSubmit,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   harness.HookEventPreToolUse,
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							harness.HookEventPreToolUse,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   harness.HookEventPostToolUse,
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							harness.HookEventPostToolUse,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   harness.HookEventPostToolUseFailure,
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							harness.HookEventPostToolUseFailure,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "PermissionRequest",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityWaiting,
-							"PermissionRequest",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "Elicitation",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityWaiting,
-							"Elicitation",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "ElicitationResult",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							"ElicitationResult",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "PermissionDenied",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityIdle,
-							"PermissionDenied",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "Notification",
-						Matcher: "permission_prompt",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityWaiting,
-							"Notification",
-							claudeIntegrationSource,
-						),
-					},
-					// SubagentStart and SubagentStop describe child agents, including
-					// Claude Code's internal prompt-suggestion agents, not the main
-					// turn. Stop reports whether delegated work keeps the turn running.
-					// Automatic compaction either happens inside a turn that already
-					// runs or between turns, where no Stop would return the session to
-					// idle, so only manual compaction reports running.
-					{
-						Event:   "PreCompact",
-						Matcher: "manual",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityRunning,
-							"PreCompact",
-							claudeIntegrationSource,
-						),
-					},
-					// Automatic compaction continues the running turn; only manual
-					// compaction returns the session to idle.
-					{
-						Event:   "PostCompact",
-						Matcher: "manual",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityIdle,
-							"PostCompact",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   harness.HookEventStop,
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityIdle,
-							harness.HookEventStop,
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "StopFailure",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.ActivityFailed,
-							"StopFailure",
-							claudeIntegrationSource,
-						),
-					},
-					{
-						Event:   "SessionEnd",
-						Matcher: "",
-						Command: harness.ReportHookCommand(
-							binary,
-							registry.Harness("claude"),
-							registry.PresenceGone,
-							"SessionEnd",
-							claudeIntegrationSource,
-						),
-					},
-				},
+				StatusMessage: harness.ManagedMarker,
+				HooksKey:      "hooks",
+				Path:          filepath.Join(base, "settings.json"),
+				Source:        claudeIntegrationSource,
+				Label:         "claude hooks",
+				ConfigLabel:   "claude config",
+				Hooks:         hooks,
 			}},
 		},
 	}, nil
@@ -288,7 +125,7 @@ func (claudeHarness) ResumeCommand(sessionID string, _ string) []string {
 }
 
 func (claudeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
-	return harness.PayloadValidator[hookPayload]()(rawPayload)
+	return harness.PayloadValidator[harness.CommandHookPayload]()(rawPayload)
 }
 
 func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
@@ -330,7 +167,6 @@ func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDef
 		SessionID:   harness.PayloadString(payload, "session_id"),
 		SessionPath: harness.PayloadString(payload, "transcript_path"),
 		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
 	}, nil
@@ -347,18 +183,4 @@ func claudeConfigDir() string {
 	}
 
 	return filepath.Join(home, ".claude")
-}
-
-func (claudeHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["claude_hook_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "claude_start_source", "source", "reason"),
-	)
 }

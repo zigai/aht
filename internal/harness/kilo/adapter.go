@@ -2,23 +2,20 @@ package kilo
 
 import (
 	_ "embed"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	integrationVersion = 12
+	integrationVersion = 13
 	kiloCommand        = "kilo"
 	kiloSessionFlag    = "--session"
 )
 
 const (
 	kiloPluginName        = "aht-state.ts"
-	kiloIntegrationID     = "kilo"
 	kiloIntegrationSource = "kilo-plugin"
 )
 
@@ -30,11 +27,11 @@ type kiloHarness struct{ harness.BaseAdapter }
 func New() kiloHarness {
 	return kiloHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("kilo"),
 		Aliases:          []string{"kilocode", "kilo-code", "kilo_code"},
 		ProcessNames:     []string{"kilo", "kilocode", "kilo-code", "kilo_code"},
 		Env: harness.EnvKeys{
+			Config:      []string{"KILO_CONFIG_DIR", "KILO_CONFIG", "KILO_DB"},
 			SessionID:   []string{"KILO_SESSION_ID"},
 			SessionPath: []string{"KILO_SESSION_PATH"},
 			ProjectRoot: []string{"KILO_PROJECT_ROOT"},
@@ -46,19 +43,15 @@ func New() kiloHarness {
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  kiloIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
-func (kiloHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
-	base := kiloConfigDir()
+func (adapter kiloHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	base := kiloPaths(harness.HomeDir()).config
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
@@ -71,12 +64,9 @@ func (kiloHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "kilo plugin",
 				Content: harness.RenderScriptTemplate(
 					kiloPluginTemplate,
-					kiloIntegrationID,
 					binary,
-					kiloIntegrationSource,
-					integrationVersion,
+					adapter.Definition(),
 				),
-				JSONContent: nil,
 			}},
 		},
 	}, nil
@@ -88,21 +78,4 @@ func (kiloHarness) ResumeCommand(sessionID string, _ string) []string {
 	}
 
 	return []string{kiloCommand, kiloSessionFlag, sessionID}
-}
-
-func kiloConfigDir() string {
-	if value := strings.TrimSpace(os.Getenv("KILO_CONFIG_DIR")); value != "" {
-		return value
-	}
-
-	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
-		return filepath.Join(value, "kilo")
-	}
-
-	home := harness.HomeDir()
-	if home == "" {
-		return ""
-	}
-
-	return filepath.Join(home, ".config", "kilo")
 }

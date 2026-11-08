@@ -12,9 +12,8 @@ import (
 
 const (
 	ampPluginName        = "aht-state.ts"
-	ampIntegrationID     = "amp"
 	ampIntegrationSource = "amp-plugin"
-	integrationVersion   = 5
+	integrationVersion   = 6
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -25,34 +24,26 @@ type ampHarness struct{ harness.BaseAdapter }
 func New() ampHarness {
 	return ampHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("amp"),
 		Aliases:          []string{"ampcode", "amp-code", "amp_code"},
 		ProcessNames:     []string{"amp"},
 		Env: harness.EnvKeys{
-			SessionID:   []string{"AMP_THREAD_ID", "AMP_SESSION_ID"},
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
+			Config:    []string{"AMP_DATA_DIR"},
+			SessionID: []string{"AMP_THREAD_ID", "AMP_SESSION_ID"},
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ampIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
-func (ampHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter ampHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := ampConfigDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -66,12 +57,9 @@ func (ampHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "amp plugin",
 				Content: harness.RenderScriptTemplate(
 					ampPluginTemplate,
-					ampIntegrationID,
 					binary,
-					ampIntegrationSource,
-					integrationVersion,
+					adapter.Definition(),
 				),
-				JSONContent: nil,
 			}},
 		},
 	}, nil

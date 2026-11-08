@@ -12,7 +12,6 @@ import (
 
 const (
 	piExtensionName       = "aht-state.ts"
-	piIntegrationID       = "pi"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
 	integrationVersion    = 19
@@ -26,39 +25,33 @@ type piHarness struct{ harness.BaseAdapter }
 func New() piHarness {
 	return piHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
-		ID:               registry.Harness("pi"),
-		Aliases:          nil,
-		ProcessNames:     []string{"pi"},
+		// The extension refreshes running with a heartbeat, and every other state
+		// changes only through a new native event.
+		RetainNativeActivity: true,
+		ID:                   registry.Harness("pi"),
+		ProcessNames:         []string{"pi"},
 		Env: harness.EnvKeys{
+			Config:      []string{"PI_CODING_AGENT_DIR"},
 			SessionID:   []string{"PI_SESSION_ID"},
 			SessionPath: []string{"PI_SESSION_PATH"},
-			ProjectRoot: nil,
 			PID:         []string{"PI_PID"},
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: integrationVersion,
-		IntegrationSource:  piIntegrationSourceID,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     true,
+		LifecycleEventAttribute:   "pi_event",
+		LifecycleSourceAttributes: []string{"pi_reason", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         piIntegrationSourceID,
+		StateAuthority:            registry.AuthorityHook,
+		ScreenFallback:            true,
 	})}
 }
 
-// RetainNativeActivity keeps the last reported state after the report ages.
-// The extension refreshes running with a heartbeat, and every other state
-// changes only through a new native event.
-func (piHarness) RetainNativeActivity() bool { return true }
-
-func (piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := piAgentDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -72,12 +65,9 @@ func (piHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "pi extension",
 				Content: harness.RenderScriptTemplate(
 					piExtensionTemplate,
-					piIntegrationID,
 					binary,
-					piIntegrationSourceID,
-					integrationVersion,
+					adapter.Definition(),
 				),
-				JSONContent: nil,
 			}},
 		},
 	}, nil
@@ -106,18 +96,4 @@ func piAgentDir() string {
 	}
 
 	return filepath.Join(home, ".pi", "agent")
-}
-
-func (piHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["pi_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "pi_reason", "source", "reason"),
-	)
 }

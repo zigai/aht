@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -21,133 +18,80 @@ const (
 	ArtifactCurrent  ArtifactStatus = "current"
 	ArtifactStale    ArtifactStatus = "stale"
 	ArtifactForeign  ArtifactStatus = "foreign"
-
-	managedIntegrationVersion = harnesspkg.IntegrationVersion
-	integrationCaptureGroups  = 2
-)
-
-var (
-	integrationVersionPattern = regexp.MustCompile(
-		`(?i)(?:aht[_-]?integration[_-]?version\s*[=:]|--reporter-version)\s*["']?([0-9]+)`,
-	)
-	integrationSourcePattern = regexp.MustCompile(
-		`(?i)(?:aht[_-]?integration\s*[=:]|--reporter\s)`,
-	)
-	integrationIDPattern = regexp.MustCompile(
-		`(?i)AHT_INTEGRATION_ID\s*=\s*["']?([a-z0-9_-]+)`,
-	)
 )
 
 // ArtifactStatus describes whether a managed integration artifact is absent,
 // incomplete, disabled, up to date, stale, or owned by somebody else.
 type ArtifactStatus string
 
-func (s ArtifactStatus) Valid() bool {
-	switch s {
-	case ArtifactMissing,
-		ArtifactPartial,
-		ArtifactDisabled,
-		ArtifactCurrent,
-		ArtifactStale,
-		ArtifactForeign:
-		return true
-	}
-
-	return false
+// classifyArtifact inspects an artifact generated for harnessID without
+// modifying it. A directory is classified by its marker file. Content that
+// records another integration is foreign.
+func classifyArtifact(path string, harnessID registry.Harness) (ArtifactStatus, error) {
+	return classifyArtifactWith(path, func(content string) ArtifactStatus {
+		return classifyArtifactContent(content, harnessID)
+	})
 }
 
-// ClassifyArtifact inspects a generated artifact without modifying it. It is
-// intentionally format-agnostic: managed ownership is established by the
-// marker or source metadata and generation is established by the version.
-func ClassifyArtifact(path string) (ArtifactStatus, error) {
-	status, _, err := classifyArtifactWithID(path)
-	return status, err
-}
-
-func classifyArtifactWithID(path string) (ArtifactStatus, string, error) {
+func classifyArtifactWith(
+	path string,
+	classify func(string) ArtifactStatus,
+) (ArtifactStatus, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ArtifactMissing, "", nil
+			return ArtifactMissing, nil
 		}
 
-		return "", "", fmt.Errorf("checking artifact %s: %w", path, err)
+		return "", fmt.Errorf("checking artifact %s: %w", path, err)
 	}
 
 	contentPath := path
 	if info.IsDir() {
-		contentPath = filepath.Join(path, ".aht-managed")
+		contentPath = filepath.Join(path, harnesspkg.ArtifactMarkerFile)
 	}
 
 	data, err := os.ReadFile(contentPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ArtifactForeign, "", nil
+			return ArtifactForeign, nil
 		}
 
-		return "", "", fmt.Errorf("reading artifact %s: %w", contentPath, err)
+		return "", fmt.Errorf("reading artifact %s: %w", contentPath, err)
 	}
 
-	content := string(data)
-
-	return classifyArtifactContent(content), integrationIDFromContent(content), nil
+	return classify(string(data)), nil
 }
 
-func classifyArtifactContent(content string) ArtifactStatus {
-	if !strings.Contains(content, managedMarker) && !integrationSourcePattern.MatchString(content) {
+func classifyExpectedIdentity(content string, expected harnesspkg.ArtifactIdentity) ArtifactStatus {
+	identity, managed := harnesspkg.ParseArtifactIdentity(content)
+	if !managed || identity.ID != expected.ID {
 		return ArtifactForeign
 	}
 
-	match := integrationVersionPattern.FindStringSubmatch(content)
-	if len(match) != integrationCaptureGroups {
-		return ArtifactStale
-	}
-
-	version, err := strconv.Atoi(match[1])
-	if err != nil || version != expectedIntegrationVersion(content) {
+	if identity.Version != expected.Version {
 		return ArtifactStale
 	}
 
 	return ArtifactCurrent
 }
 
-func expectedIntegrationVersion(content string) int {
-	match := integrationIDPattern.FindStringSubmatch(content)
-	if len(match) != integrationCaptureGroups {
-		return managedIntegrationVersion
+func classifyArtifactContent(content string, harnessID registry.Harness) ArtifactStatus {
+	identity, managed := harnesspkg.ParseArtifactIdentity(content)
+	if !managed {
+		return ArtifactForeign
 	}
 
-	id, err := catalog.Parse(match[1])
-	if err != nil {
-		return managedIntegrationVersion
+	if identity.ID != "" {
+		owner, err := catalog.Parse(identity.ID)
+		if err != nil || owner != harnessID {
+			return ArtifactForeign
+		}
 	}
 
-	return catalog.IntegrationVersionFor(id)
-}
-
-func integrationIDFromContent(content string) string {
-	match := integrationIDPattern.FindStringSubmatch(content)
-	if len(match) != integrationCaptureGroups {
-		return ""
+	if identity.Version != catalog.IntegrationVersionFor(harnessID) {
+		return ArtifactStale
 	}
 
-	id, err := catalog.Parse(match[1])
-	if err != nil {
-		return strings.ToLower(match[1])
-	}
-
-	return string(id)
-}
-
-func classifyArtifactForHarness(path string, harnessID registry.Harness) (ArtifactStatus, error) {
-	status, integrationID, err := classifyArtifactWithID(path)
-	if err != nil || status == ArtifactMissing || status == ArtifactForeign {
-		return status, err
-	}
-
-	if integrationID != "" && integrationID != string(harnessID) {
-		return ArtifactForeign, nil
-	}
-
-	return status, nil
+	return ArtifactCurrent
 }

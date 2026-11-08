@@ -36,7 +36,7 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(opts.Harness))
 
-	shimStatus, err := ClassifyArtifact(shimPath)
+	shimStatus, err := classifyShimArtifact(shimPath, opts.Harness)
 	if err != nil {
 		return Result{}, err
 	}
@@ -73,9 +73,8 @@ func removeNativeIntegration(
 	plan harnesspkg.InstallPlan,
 ) (Result, error) {
 	for _, action := range plan.Actions {
-		result, handled, err := removePlanAction(ctx, opts, opts.Harness, action)
-		if handled {
-			return result, err
+		if handler, ok := handlerFor(action); ok {
+			return handler.remove(ctx, opts, opts.Harness)
 		}
 	}
 
@@ -98,39 +97,6 @@ func removeOwnedShim(path string, dryRun bool, status ArtifactStatus) (bool, err
 	return true, nil
 }
 
-func removePlanAction(
-	ctx context.Context,
-	opts Options,
-	harnessID registry.Harness,
-	action harnesspkg.InstallAction,
-) (Result, bool, error) {
-	switch typed := action.(type) {
-	case harnesspkg.JSONCommandHooksAction:
-		result, err := removeJSONCommandHooks(opts, harnessID, typed.Plan)
-		return result, true, err
-	case harnesspkg.CursorJSONHooksAction:
-		result, err := removeCursorJSONHooks(opts, harnessID, typed.Plan)
-		return result, true, err
-	case harnesspkg.ManagedTextBlockAction:
-		result, err := removeTextBlock(opts, harnessID, typed.Plan)
-		return result, true, err
-	case harnesspkg.RenderedFileAction:
-		result, err := removeOwnedFiles(opts, harnessID, []string{typed.Plan.Path}, typed.Plan.Path)
-		return result, true, err
-	case harnesspkg.PluginDirectoryAction:
-		result, err := removePluginDirectoryWithRetired(ctx, opts, harnessID, typed.Plan)
-		return result, true, err
-	case harnesspkg.NativeCatalogAction:
-		return noInstallRequiredResult(harnessID, typed.Label), true, nil
-	case harnesspkg.ShimAction:
-		var result Result
-		return result, false, nil
-	default:
-		var result Result
-		return result, false, nil
-	}
-}
-
 func removeJSONCommandHooks(
 	opts Options,
 	harnessID registry.Harness,
@@ -143,7 +109,7 @@ func removeJSONCommandHooks(
 		)
 
 		changed := removeWrappedCommandHooks(harnessConfig, isManaged)
-		if plan.HooksAtRoot {
+		if plan.HooksKey == "" {
 			changed = removeManagedCommandHookEvents(harnessConfig, isManaged) || changed
 		}
 
@@ -182,34 +148,16 @@ func removeManagedCommandHookEvents(hooks map[string]any, isManaged func(string)
 	return changed
 }
 
-func removeCursorJSONHooks(
+func removeJSONMerge(
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.CursorJSONHookInstallPlan,
+	plan harnesspkg.JSONMergeInstallPlan,
 ) (Result, error) {
-	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
-		hooks, ok := harnessConfig["hooks"].(map[string]any)
-		if !ok {
-			return false
-		}
-
-		isManaged := isManagedSourceHookCommand(
-			managedSource(plan.Source, harnessID),
-			[]map[string]any{harnessConfig},
+	return removeJSONHooks(opts, harnessID, plan.Path, func(config map[string]any) bool {
+		return plan.Remove(
+			config,
+			isManagedSourceHookCommand(plan.Source, []map[string]any{config}),
 		)
-
-		changed := false
-		for _, spec := range plan.Hooks {
-			changed = removeManagedJSONHookEvent(
-				hooks,
-				spec.Event,
-				isManaged,
-				removeManagedCursorHooks,
-			) ||
-				changed
-		}
-
-		return changed
 	})
 }
 
@@ -308,7 +256,7 @@ func removeOwnedFiles(
 ) (Result, error) {
 	managed := make([]string, 0, len(paths))
 	for _, path := range paths {
-		status, err := classifyArtifactForHarness(path, harnessID)
+		status, err := classifyArtifact(path, harnessID)
 		if err != nil {
 			return Result{}, err
 		}
@@ -370,7 +318,7 @@ func removeRetiredPlugins(
 	changed := false
 
 	for _, retired := range plan.Retired {
-		managed, err := newPluginDirectoryInstall(retired, nil).managed()
+		managed, err := newPluginDirectoryInstall(retired, nil, nil).managed()
 		if err != nil {
 			return false, err
 		}
@@ -396,7 +344,7 @@ func removePluginDirectory(
 	harnessID registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (Result, error) {
-	plugin := newPluginDirectoryInstall(plan, nil)
+	plugin := newPluginDirectoryInstall(plan, nil, nil)
 
 	managed, err := plugin.managed()
 	if err != nil {
@@ -490,7 +438,7 @@ func preparePluginRemoval(
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	finalizer func(parent string, backup string, backupExists bool) error,
 ) (func() error, func() error, error) {
-	plugin := newPluginDirectoryInstall(plan, nil)
+	plugin := newPluginDirectoryInstall(plan, nil, nil)
 	parent := filepath.Dir(plan.Dir)
 
 	backup, backupExists, err := plugin.backupCurrent(parent)

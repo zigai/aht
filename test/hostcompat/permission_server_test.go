@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Both hosts publish these HTTP operations in their native SDK. Polling the
@@ -49,9 +48,9 @@ func runServerPermission(
 	host := newPermissionHost(t, contract, oracle, allow)
 	configured := host.lifecycleCommand(t)
 
-	configName := "opencode.json"
-	if contract.ID == registry.Harness("kilo") {
-		configName = "kilo.json"
+	configName := contract.PermissionConfig
+	if configName == "" {
+		configName = "opencode.json"
 	}
 
 	host.writeFile(

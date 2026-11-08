@@ -177,56 +177,6 @@ func TestAbbreviatedRegistryIDsExpandCollidingPrefixes(t *testing.T) {
 	}
 }
 
-func TestListTableColumnsExpandsSessionAndCWDWhenWidthAllows(t *testing.T) {
-	t.Parallel()
-
-	rows := [][]string{
-		{
-			"omp-5afa9c61",
-			"omp",
-			"Refactor parser error handling module",
-			"live",
-			"running",
-			"tmux:0:2:zsh:%1",
-			"~/Projects/sample-project",
-			"1s ago",
-		},
-		{
-			"pi-ea2cacd9",
-			"pi",
-			"2026-08-27T20-22-44-492Z_01a044e3-a40c-77dc-8593-f0f6a3a7c42f",
-			"live",
-			"idle",
-			"tmux:0:3:zsh:%2",
-			"~/src/app-config",
-			"1s ago",
-		},
-	}
-
-	// In a wide terminal (e.g. 200 columns), SESSION and CWD should not be truncated.
-	wideCols := listTableColumns(rows, 200)
-	sessionCol := wideCols[2]
-	cwdCol := wideCols[6]
-
-	if sessionCol.width < len("2026-08-27T20-22-44-492Z_01a044e3-a40c-77dc-8593-f0f6a3a7c42f") {
-		t.Fatalf("session width in wide terminal = %d, want >= 60", sessionCol.width)
-	}
-
-	if cwdCol.width < len("~/Projects/sample-project") {
-		t.Fatalf("CWD width in wide terminal = %d, want >= 25", cwdCol.width)
-	}
-
-	// In standard 120 width, SESSION and CWD get dynamic proportioned widths instead of static 14/18.
-	stdCols := listTableColumns(rows, 120)
-	if stdCols[2].width < 25 {
-		t.Fatalf("session width in 120 terminal = %d, want >= 25", stdCols[2].width)
-	}
-
-	if stdCols[6].width < 15 {
-		t.Fatalf("CWD width in 120 terminal = %d, want >= 15", stdCols[6].width)
-	}
-}
-
 func TestListFullFlagRendersCompleteValues(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
@@ -281,63 +231,6 @@ func TestListFullFlagRendersCompleteValues(t *testing.T) {
 		if !strings.Contains(output, value) {
 			t.Fatalf("full output missing %q: %q", value, output)
 		}
-	}
-}
-
-func TestListFullLayoutUsesTableOnlyWhenUsefulColumnsFit(t *testing.T) {
-	t.Parallel()
-
-	rows := [][]string{{
-		"omp-8123f29b-full-identifier",
-		"omp",
-		"2026-08-29T07-13-53-424Z_01a04c5e-2510-7000-86b9-e9be6ca73e54.jsonl",
-		"live",
-		"idle",
-		"tmux:main:5:zsh:%21",
-		"~/work/example-extensions",
-		"4h ago",
-	}}
-
-	columns, fits := listFullTableColumns(rows, 120)
-	if fits {
-		t.Fatal("full table unexpectedly fit in 120 columns")
-	}
-
-	if columns[2].width < 24 || columns[6].width < 20 {
-		t.Fatalf(
-			"full table used unreadable flexible widths: session=%d CWD=%d",
-			columns[2].width,
-			columns[6].width,
-		)
-	}
-
-	var stdout bytes.Buffer
-
-	app := &application{stdout: &stdout}
-	if err := app.writeStackedHumanRows(columns, rows); err != nil {
-		t.Fatal(err)
-	}
-
-	output := stdout.String()
-	if strings.Contains(output, "…") || !strings.Contains(output, "Session:") ||
-		!strings.Contains(output, rows[0][2]) {
-		t.Fatalf("stacked full output lost data: %q", output)
-	}
-
-	wideColumns, wideFits := listFullTableColumns(rows, 200)
-	if !wideFits {
-		t.Fatal("full table did not fit in 200 columns")
-	}
-
-	if err := validateHumanColumns(wideColumns, 200); err != nil {
-		t.Fatalf("wide full table columns invalid: %v", err)
-	}
-
-	if got := strings.Join(
-		wrapHumanSession(rows[0][2], wideColumns[2].width),
-		"",
-	); got != rows[0][2] {
-		t.Fatalf("semantic session wrapping lost data: got %q", got)
 	}
 }
 
@@ -405,4 +298,36 @@ func TestSessionDisplayLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListTableColumnsExpandsSessionAndCWDWhenWidthAllows(t *testing.T) {
+	t.Parallel()
+
+	rows := [][]string{
+		{
+			"agent-12345678",
+			"agent",
+			"Review parser diagnostics",
+			"live",
+			"idle",
+			"terminal:1",
+			"~/src/example-project",
+			"1s ago",
+		},
+	}
+
+	var output bytes.Buffer
+
+	app := &application{stdout: &output}
+	if err := app.writeHumanTable(listTableColumns(rows, 120), rows); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, value := range rows[0] {
+		if !strings.Contains(output.String(), value) {
+			t.Errorf("list truncates %q despite available space: %q", value, output.String())
+		}
+	}
+
+	assertHumanLinesBounded(t, output.String())
 }

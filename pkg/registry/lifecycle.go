@@ -48,7 +48,7 @@ type incarnationInput struct {
 	report       *Report
 	verification *Verification
 	decision     *ActivityDecision
-	kind         string
+	kind         EvidenceKind
 	at           time.Time
 	retire       bool
 	absent       bool
@@ -63,6 +63,10 @@ type incarnationAction uint8
 type incarnationRule struct {
 	matches func(incarnationInput) bool
 	action  incarnationAction
+}
+
+type lifecycleEvidence interface {
+	apply(machine lifecycleMachine, policy Policy, at time.Time)
 }
 
 func transitionIncarnation(
@@ -108,9 +112,9 @@ func normalizeIncarnationInput(
 		kind:         observation.Kind(),
 		at:           at,
 		retire:       retire,
-		absent:       observation.Kind() == "sighting" && !*observation.Present(),
-		end:          report != nil && reportEnds(report),
-		start:        reportStarts(report),
+		absent:       observation.Kind() == EvidenceSighting && !*observation.Present(),
+		end:          report.Ends(),
+		start:        report.starts(),
 		terminal: session.Incarnation.State == IncarnationEnded ||
 			session.Incarnation.State == IncarnationExited,
 		different: process != nil && process.Complete() && session.Incarnation.Process.Complete() &&
@@ -135,8 +139,9 @@ func (input incarnationInput) retirementRejected() bool {
 func (input incarnationInput) retires() bool { return input.retire }
 
 func (input incarnationInput) replacementRejected() bool {
-	return input.different && (input.previousProcess() || input.end || input.kind == "reading" ||
-		input.kind == "placement" || input.absent || input.at.Before(input.current.EvidenceAt))
+	return input.different &&
+		(input.previousProcess() || input.end || input.kind == EvidenceReading ||
+			input.kind == EvidencePlacement || input.absent || input.at.Before(input.current.EvidenceAt))
 }
 
 func (input incarnationInput) previousProcess() bool {
@@ -236,7 +241,7 @@ func (input incarnationInput) applyEvidence(result incarnationTransition) incarn
 		result.next.State = IncarnationExited
 		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
 		result.terminal = true
-	case input.kind == "sighting":
+	case input.kind == EvidenceSighting:
 		result.next.State = IncarnationLive
 		result.next.TransitionAt = maxTime(result.next.TransitionAt, input.at)
 	case input.claimApplies(result.next):
@@ -266,46 +271,48 @@ func (input incarnationInput) ownProcessEvidence(next Incarnation) bool {
 		input.process != nil && input.process.Equal(next.Process) && !input.absent
 }
 
-func reportStarts(report *Report) bool {
-	return report != nil && report.Lifecycle != nil &&
-		(*report.Lifecycle == NativeLifecycleStart || *report.Lifecycle == NativeLifecycleResume)
+func (r *Report) starts() bool {
+	return r != nil && r.Lifecycle != nil &&
+		(*r.Lifecycle == NativeLifecycleStart || *r.Lifecycle == NativeLifecycleResume)
+}
+
+// Ends reports whether the report ends its session, by lifecycle or by a gone claim.
+func (r *Report) Ends() bool {
+	return r != nil && (r.Claim != nil && *r.Claim == PresenceGone ||
+		r.Lifecycle != nil && *r.Lifecycle == NativeLifecycleEnd)
 }
 
 func (m lifecycleMachine) apply(observation Observation, policy Policy, at time.Time) {
-	switch evidence := observation.Evidence.(type) {
-	case *Report:
-		if m.session.Observations.Native.Activity != nil && policy.Authority != AuthorityScreen &&
-			m.acceptsActivity(at) {
-			m.session.setActivity(clonePtr(m.session.Observations.Native.Activity))
-			m.session.setDecision(&ActivityDecision{
-				RuleID: "", ManifestSource: "", ManifestVersion: 0, FallbackReason: "",
-				Authority: AuthorityHook, Reason: evidence.Event,
-				Process: m.session.Observations.Native.Process, ObservedAt: at,
-			})
-		}
-	case *Reading:
-		m.reading(policy, at)
-	case *Verification:
-		m.verify(*evidence, at)
-	case *Sighting, *Placement, *Listing, nil:
+	if evidence, ok := observation.Evidence.(lifecycleEvidence); ok {
+		evidence.apply(m, policy, at)
 	}
+}
+
+func (r *Report) apply(m lifecycleMachine, policy Policy, at time.Time) {
+	if m.session.Observations.Native.Activity != nil && policy.Authority != AuthorityScreen &&
+		m.acceptsActivity(at) {
+		m.session.setActivity(clonePtr(m.session.Observations.Native.Activity))
+		m.session.setDecision(&ActivityDecision{
+			RuleID:          "",
+			ManifestSource:  "",
+			ManifestVersion: 0,
+			FallbackReason:  "",
+			Authority:       AuthorityHook,
+			Reason:          r.Event,
+			Process:         m.session.Observations.Native.Process,
+			ObservedAt:      at,
+		})
+	}
+}
+func (*Reading) apply(m lifecycleMachine, policy Policy, at time.Time) { m.reading(policy, at) }
+func (verification *Verification) apply(m lifecycleMachine, _ Policy, at time.Time) {
+	m.verify(*verification, at)
 }
 
 func (m lifecycleMachine) commit(transition incarnationTransition, at time.Time) {
 	if !transition.accepted {
 		return
 	}
-
-	previousPresence, previousActivity := m.session.Presence(), m.session.Activity()
-	defer func() {
-		if m.session.Presence() != previousPresence {
-			m.session.PresenceChangedAt = at
-		}
-
-		if !activityEqual(m.session.Activity(), previousActivity) {
-			m.session.ActivityChangedAt = at
-		}
-	}()
 
 	if transition.reset {
 		m.session.Observations.Native = nil
@@ -403,11 +410,20 @@ func (m lifecycleMachine) replacedTombstone() bool {
 	return ok && gone.Reason == sessionReplacedReason
 }
 
-func reportEnds(report *Report) bool {
-	return (report.Claim != nil && *report.Claim == PresenceGone) ||
-		(report.Lifecycle != nil && *report.Lifecycle == NativeLifecycleEnd)
-}
-
 func (input incarnationInput) replacementReport(result incarnationTransition) bool {
 	return result.reset && input.different && input.report != nil
+}
+
+func (m lifecycleMachine) trackChanges(at time.Time) func() {
+	previousPresence, previousActivity := m.session.Presence(), m.session.Activity()
+
+	return func() {
+		if m.session.Presence() != previousPresence {
+			m.session.PresenceChangedAt = at
+		}
+
+		if !activityEqual(m.session.Activity(), previousActivity) {
+			m.session.ActivityChangedAt = at
+		}
+	}
 }

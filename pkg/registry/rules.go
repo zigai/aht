@@ -16,10 +16,10 @@ type Authority string
 type Rules interface {
 	Known(harness Harness) bool
 	Policy(harness Harness) Policy
+	SamePane(a Location, b Location) bool
 }
 
 type Policy struct {
-	DetailReporters      []string
 	Details              DetailCapabilities
 	ExclusiveProcess     bool
 	Authority            Authority

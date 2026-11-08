@@ -25,7 +25,7 @@ func paneProcess(
 	return multiplexerPaneProcess(
 		converted[0],
 		processes,
-		byPID,
+		newProcessTree(byPID),
 		harnessByPID,
 		commandPaneCounts(converted),
 	)
@@ -42,7 +42,6 @@ func TestPaneProcessPrefersDirectAgentOverForegroundWrapper(t *testing.T) {
 		StartIdentity:  "boot:30",
 		Executable:     "fence",
 		TTY:            "/dev/pts/5",
-		AgentHint:      "pi",
 		Args:           []string{"fence", "--", "pi"},
 	}
 	direct := processinfo.Process{
@@ -165,7 +164,6 @@ func TestSuspendedHarnessKeepsPaneLocationWhenAnotherStarts(t *testing.T) {
 			return registry.PresenceLive, nil
 		},
 		DisableScreenInspection: true,
-		HealthPath:              path + ".health",
 	})
 
 	if _, err := watcher.RunOnce(context.Background()); err != nil {

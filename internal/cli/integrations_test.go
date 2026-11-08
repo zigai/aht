@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/install"
+	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -264,6 +264,36 @@ func TestAgentSelectionSupportsMultipleDeduplicatedAgentsAndAll(t *testing.T) {
 	}
 }
 
+func TestSetupRejectsBrokenConfigBeforeInstalling(t *testing.T) {
+	store := prepareDoctorEnvironment(t)
+
+	path := filepath.Join(filepath.Dir(store), "config.toml")
+	if err := os.WriteFile(path, []byte("[broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+
+	code := executeCLI(
+		t.Context(),
+		[]string{"--store", store, "manage", "setup", "codex", "--binary", "/bin/aht"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if code != exitCodeUsage {
+		t.Fatalf("exit = %d, stderr = %s", code, &stderr)
+	}
+
+	if _, err := os.Stat(
+		filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json"),
+	); !os.IsNotExist(
+		err,
+	) {
+		t.Fatalf("setup installed hooks before rejecting the config: %v", err)
+	}
+}
+
 func TestSetupDryRunCombinesIntegrationAndTracker(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -375,93 +405,17 @@ func TestSetupEnablesTrackerWhenIntegrationFails(t *testing.T) {
 	}
 }
 
-func TestIntegrationResultTableColumnsAdaptsToContentAndTerminalWidth(t *testing.T) {
-	rows := [][]string{
-		{"codex", "false", "/home/user/.codex/hooks.json", "already installed"},
-		{"grok", "false", "/home/user/.grok/hooks/aht-state.json", "already installed"},
-		{
-			"openclaw",
-			"false",
-			"/home/user/.local/state/aht/integrations/openclaw/aht-state",
-			"already installed; next: restart the harness to load " +
-				"updated plugin code; registration and permissions preserved",
-		},
-	}
-
-	// In standard 120-column terminal, Path must be allocated enough space to fit all paths without
-	// truncation/wrapping.
-	cols120 := integrationResultTableColumns(rows, 120)
-
-	longestPath := len("/home/user/.local/state/aht/integrations/openclaw/aht-state")
-	if cols120[2].width < longestPath {
-		t.Fatalf(
-			"Path column width in 120-column terminal = %d, want >= %d",
-			cols120[2].width,
-			longestPath,
-		)
-	}
-
-	longestResult := len(
-		"already installed; next: restart the harness to load " +
-			"updated plugin code; registration and permissions preserved",
-	)
-	// In 200-column terminal, Path and Result both fit completely.
-	cols200 := integrationResultTableColumns(rows, 200)
-	if cols200[2].width < longestPath {
-		t.Fatalf(
-			"Path column width in 200-column terminal = %d, want >= %d",
-			cols200[2].width,
-			longestPath,
-		)
-	}
-
-	if cols200[3].width < longestResult {
-		t.Fatalf(
-			"Result column width in 200-column terminal = %d, want >= %d",
-			cols200[3].width,
-			longestResult,
-		)
-	}
-
-	// In 220-column terminal, both Path and Result columns fit completely without any wrapping.
-	cols220 := integrationResultTableColumns(rows, 220)
-	if cols220[2].width < longestPath {
-		t.Fatalf(
-			"Path column width in 220-column terminal = %d, want >= %d",
-			cols220[2].width,
-			longestPath,
-		)
-	}
-
-	if cols220[3].width < longestResult {
-		t.Fatalf(
-			"Result column width in 220-column terminal = %d, want >= %d",
-			cols220[3].width,
-			longestResult,
-		)
-	}
-
-	colsNarrow := integrationResultTableColumns(rows, 60)
-	if colsNarrow[2].width < 4 {
-		t.Fatalf("Path column width in narrow terminal = %d, want >= 4", colsNarrow[2].width)
-	}
-
-	if colsNarrow[3].width < 6 {
-		t.Fatalf("Result column width in narrow terminal = %d, want >= 6", colsNarrow[3].width)
-	}
-}
-
 func TestWriteIntegrationResultsRendersFullPathsWithoutWrapping(t *testing.T) {
 	var stdout bytes.Buffer
 
 	app := &application{stdout: &stdout}
 
-	results := []install.Result{
+	results := []manage.IntegrationResult{
 		{
 			Harness: "grok",
 			Changed: false,
 			Path:    "/home/user/.grok/hooks/aht-state.json",
-			Message: "grok hooks already installed",
+			Message: "already installed",
 		},
 		{
 			Harness: "openclaw",
@@ -512,7 +466,7 @@ func TestWriteIntegrationResultsAlreadyInstalledDoesNotRepeatHarnessName(t *test
 
 	app := &application{stdout: &stdout}
 
-	results := []install.Result{
+	results := []manage.IntegrationResult{
 		{
 			Harness: "cline",
 			Changed: false,
@@ -529,13 +483,13 @@ func TestWriteIntegrationResultsAlreadyInstalledDoesNotRepeatHarnessName(t *test
 			Harness: "openclaw",
 			Changed: false,
 			Path:    "/home/user/.local/state/aht/integrations/openclaw/aht-state",
-			Message: "OpenClaw plugin already installed",
+			Message: "already installed",
 		},
 		{
 			Harness: "hermes",
 			Changed: false,
 			Path:    "/home/user/.hermes/plugins/aht-state",
-			Message: "Hermes plugin already installed",
+			Message: "already installed",
 		},
 		{
 			Harness: "claude",

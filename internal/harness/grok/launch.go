@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 func (grokHarness) LaunchPlan(
@@ -26,15 +25,28 @@ func (grokHarness) LaunchPlan(
 	trusted := fmt.Sprintf("[folders.%q]\ntrusted = true\n", paths.Work)
 
 	return harness.LaunchPlan{
+		TitleRequests: []harness.TitleRequest{
+			{Tool: "session_title"},
+			{
+				Role:     "user",
+				Prefix:   "<system-reminder>",
+				Contains: "Generate a session title for the conversation above.",
+				Suffix:   "</system-reminder>",
+			},
+			{
+				Role:     "user",
+				Prefix:   "<system-reminder>",
+				Contains: "Write an ultra-short dashboard line that captures the AGENT'S REPLY for the last turn only",
+				Suffix:   "</system-reminder>",
+			},
+		},
 		Executable: "grok",
-		Protocol:   fakeprovider.ProtocolOpenAIResponses,
+		Protocol:   harness.LaunchProtocolOpenAIResponses,
 		Env: []string{
 			"GROK_HOME=" + home,
 			"GROK_DISABLE_AUTOUPDATER=1",
 			"AHT_FAKEPROVIDER_API_KEY=" + model.APIKey,
 		},
-		Setup:    nil,
-		Services: nil,
 		Files: []harness.LaunchFile{
 			{
 				Path:   filepath.Join(home, "config.toml"),

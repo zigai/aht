@@ -455,7 +455,7 @@ func TestHistoryRefreshSignalsOnlyIdleAndGoneTransitions(t *testing.T) {
 			{
 				ID:        "sample",
 				UpdatedAt: time.Now(),
-				Liveness:  registry.NewLiveness(step.presence, step.activity, nil),
+				Liveness:  registry.NewLiveness(step.presence, step.activity, nil, time.Time{}, ""),
 			},
 		}
 

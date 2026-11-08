@@ -2,13 +2,12 @@ package manage
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/observer"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -51,41 +50,14 @@ var (
 // HealthStatus indicates the operational state of tracker reconciliation.
 type HealthStatus string
 
-// TrackerHealth represents background tracker reconciliation health, freshness, and counters.
+// TrackerHealth is the tracker's health file plus its evaluated freshness.
 type TrackerHealth struct {
-	PID                          int           `json:"pid"`
-	StartIdentity                string        `json:"start_identity,omitempty"`
-	Interval                     time.Duration `json:"interval"`
-	GracePeriod                  time.Duration `json:"grace_period"`
-	StartedAt                    time.Time     `json:"started_at"`
-	LastAttemptAt                time.Time     `json:"last_attempt_at"`
-	LastSuccessAt                time.Time     `json:"last_success_at"`
-	LastEnumerationErrorCategory string        `json:"last_enumeration_error_category,omitempty"`
-	LastEnumerationError         string        `json:"last_enumeration_error,omitempty"`
-	Cycles                       int64         `json:"cycles"`
-	Observations                 int64         `json:"observations"`
-	Sessions                     int64         `json:"sessions"`
-	Degraded                     bool          `json:"degraded"`
-	Fresh                        bool          `json:"fresh"`
-	Age                          time.Duration `json:"age"`
-	Status                       HealthStatus  `json:"status"`
-	Message                      string        `json:"message,omitempty"`
-}
+	observer.Health
 
-type observerHealthRaw struct {
-	PID                          int           `json:"pid"`
-	StartIdentity                string        `json:"start_identity,omitempty"`
-	Interval                     time.Duration `json:"interval"`
-	GracePeriod                  time.Duration `json:"grace_period"`
-	StartedAt                    time.Time     `json:"started_at"`
-	LastAttemptAt                time.Time     `json:"last_attempt_at"`
-	LastSuccessAt                time.Time     `json:"last_success_at"`
-	LastEnumerationErrorCategory string        `json:"last_enumeration_error_category,omitempty"`
-	LastEnumerationError         string        `json:"last_enumeration_error,omitempty"`
-	Cycles                       int64         `json:"cycles"`
-	Observations                 int64         `json:"observations"`
-	Sessions                     int64         `json:"sessions"`
-	Degraded                     bool          `json:"degraded"`
+	Fresh   bool          `json:"fresh"`
+	Age     time.Duration `json:"age"`
+	Status  HealthStatus  `json:"status"`
+	Message string        `json:"message,omitempty"`
 }
 
 // HealthPath returns the resolved filesystem path to the observer health sidecar.
@@ -95,7 +67,7 @@ func (m *Manager) HealthPath() string {
 		storePath = registry.DefaultStorePath()
 	}
 
-	return storePath + ".observer-health.json"
+	return observer.HealthPath(storePath)
 }
 
 // TrackerHealth returns the reconciliation health of the managed background tracker.
@@ -116,94 +88,25 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 		now = time.Now().UTC()
 	}
 
-	data, err := readHealthFile(path)
+	var health TrackerHealth
+
+	raw, err := observer.ReadHealth(path)
+	if errors.Is(err, os.ErrNotExist) {
+		health.Status = HealthStatusMissing
+		health.Message = "tracker health is missing; run aht manage tracker run " +
+			"--once or aht manage tracker enable"
+
+		return health, fmt.Errorf("%w: %s", ErrHealthMissing, path)
+	}
+
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return TrackerHealth{
-				PID:                          0,
-				StartIdentity:                "",
-				Interval:                     0,
-				GracePeriod:                  0,
-				StartedAt:                    time.Time{},
-				LastAttemptAt:                time.Time{},
-				LastSuccessAt:                time.Time{},
-				LastEnumerationErrorCategory: "",
-				LastEnumerationError:         "",
-				Cycles:                       0,
-				Observations:                 0,
-				Sessions:                     0,
-				Degraded:                     false,
-				Fresh:                        false,
-				Age:                          0,
-				Status:                       HealthStatusMissing,
-				Message: "tracker health is missing; run aht manage tracker run " +
-					"--once or aht manage tracker enable",
-			}, fmt.Errorf("%w: %s", ErrHealthMissing, path)
-		}
+		health.Status = HealthStatusCorrupt
+		health.Message = err.Error()
 
-		return TrackerHealth{
-			PID:                          0,
-			StartIdentity:                "",
-			Interval:                     0,
-			GracePeriod:                  0,
-			StartedAt:                    time.Time{},
-			LastAttemptAt:                time.Time{},
-			LastSuccessAt:                time.Time{},
-			LastEnumerationErrorCategory: "",
-			LastEnumerationError:         "",
-			Cycles:                       0,
-			Observations:                 0,
-			Sessions:                     0,
-			Degraded:                     false,
-			Fresh:                        false,
-			Age:                          0,
-			Status:                       HealthStatusCorrupt,
-			Message:                      err.Error(),
-		}, fmt.Errorf("%w: %w", ErrHealthCorrupt, err)
+		return health, fmt.Errorf("%w: %s: %w", ErrHealthCorrupt, path, err)
 	}
 
-	var raw observerHealthRaw
-	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
-		return TrackerHealth{
-			PID:                          0,
-			StartIdentity:                "",
-			Interval:                     0,
-			GracePeriod:                  0,
-			StartedAt:                    time.Time{},
-			LastAttemptAt:                time.Time{},
-			LastSuccessAt:                time.Time{},
-			LastEnumerationErrorCategory: "",
-			LastEnumerationError:         "",
-			Cycles:                       0,
-			Observations:                 0,
-			Sessions:                     0,
-			Degraded:                     false,
-			Fresh:                        false,
-			Age:                          0,
-			Status:                       HealthStatusCorrupt,
-			Message:                      "invalid observer health sidecar: " + unmarshalErr.Error(),
-		}, fmt.Errorf("%w: %s: %w", ErrHealthCorrupt, path, unmarshalErr)
-	}
-
-	health := TrackerHealth{
-		PID:                          raw.PID,
-		StartIdentity:                raw.StartIdentity,
-		Interval:                     raw.Interval,
-		GracePeriod:                  raw.GracePeriod,
-		StartedAt:                    raw.StartedAt,
-		LastAttemptAt:                raw.LastAttemptAt,
-		LastSuccessAt:                raw.LastSuccessAt,
-		LastEnumerationErrorCategory: raw.LastEnumerationErrorCategory,
-		LastEnumerationError:         raw.LastEnumerationError,
-		Cycles:                       raw.Cycles,
-		Observations:                 raw.Observations,
-		Sessions:                     raw.Sessions,
-		Degraded:                     raw.Degraded,
-		Fresh:                        false,
-		Age:                          0,
-		Status:                       HealthStatusHealthy,
-		Message:                      "",
-	}
+	health.Health = raw
 
 	return evaluateTrackerHealthFreshness(health, now, maxAge)
 }
@@ -278,26 +181,4 @@ func resolveEffectiveMaxAge(interval time.Duration, maxAge time.Duration) time.D
 	}
 
 	return defaultEffectiveAge
-}
-
-func readHealthFile(path string) ([]byte, error) {
-	const maxHealthBytes = 1 << 20
-
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open health sidecar: %w", err)
-	}
-
-	defer func() { _ = file.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(file, maxHealthBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read health sidecar: %w", err)
-	}
-
-	if len(data) > maxHealthBytes {
-		return nil, fmt.Errorf("%w: sidecar exceeds 1 MiB", ErrHealthCorrupt)
-	}
-
-	return data, nil
 }

@@ -4,10 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	native "github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
-func (s *search) decoder(source Source, t *transcript, buffer *fileIssueBuffer) *native.Decoder {
+func (s *parser) decoder(source Source, t *transcript, buffer *fileIssueBuffer) *native.Decoder {
 	return &native.Decoder{
 		Conversation: &t.match.Conversation,
 		Recognized:   &t.recognized,
@@ -17,6 +18,7 @@ func (s *search) decoder(source Source, t *transcript, buffer *fileIssueBuffer) 
 		Issue:        func(path string, err error) { buffer.issue(source, path, err) },
 		Metadata:     s.sourceMetadata,
 		Projection:   t.projection,
-		IncludeTools: s.query.IncludeTools,
+		IncludeTools: s.includeTools,
+		UserParts:    catalog.TranscriptFor(source.Harness).UserParts,
 	}
 }

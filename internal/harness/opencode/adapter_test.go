@@ -4,10 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestConfigDirOverride(t *testing.T) {
@@ -62,13 +64,7 @@ func runOpencodeDriverOutput(t *testing.T, driverSource string) string {
 		t.Fatal(err)
 	}
 
-	module := harness.RenderScriptTemplate(
-		opencodePluginTemplate,
-		opencodeIntegrationID,
-		reporter,
-		opencodeIntegrationSource,
-		integrationVersion,
-	)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, reporter, New().Definition())
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -155,13 +151,7 @@ func TestPluginDefaultExportShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	module := harness.RenderScriptTemplate(
-		opencodePluginTemplate,
-		opencodeIntegrationID,
-		reporter,
-		opencodeIntegrationSource,
-		integrationVersion,
-	)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, reporter, New().Definition())
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -218,13 +208,7 @@ func TestOpencodeV2EventStateTransitions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	module := harness.RenderScriptTemplate(
-		opencodePluginTemplate,
-		opencodeIntegrationID,
-		reporter,
-		opencodeIntegrationSource,
-		integrationVersion,
-	)
+	module := harness.RenderScriptTemplate(opencodePluginTemplate, reporter, New().Definition())
 	if err := os.WriteFile(filepath.Join(dir, "plugin.ts"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -312,5 +296,37 @@ process.exit(0);
 	}
 	if got := strings.Join(states, ","); got != strings.Join(expected, ",") {
 		t.Fatalf("unexpected state sequence:\ngot:  %s\nwant: %s", got, strings.Join(expected, ","))
+	}
+}
+
+func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		harness    registry.Harness
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{"opencode", "permission.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{"opencode", "question.asked", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
+	} {
+		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
+			report := &registry.Report{
+				Event:      test.event,
+				Activity:   &test.activity,
+				Attributes: test.attributes,
+			}
+
+			var detail *registry.ActivityDetail
+			if reader, ok := any(New()).(harness.ActivityDetailer); ok {
+				detail = reader.ActivityDetail(report.Event, *report.Activity, report.Attributes)
+			}
+
+			if !reflect.DeepEqual(detail, test.want) {
+				t.Fatalf("detail = %v, want %v", detail, test.want)
+			}
+		})
 	}
 }

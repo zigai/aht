@@ -7,15 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
+	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -29,7 +28,7 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 		t.Fatal("AHT_COMPAT_HARNESS is required; use `just compatibility <harness>`")
 	}
 
-	provider := startProvider(t)
+	provider := startProvider(t, harnessID)
 
 	launched, err := launch.New(t.Context(), launch.Options{
 		Harness:    harnessID,
@@ -37,13 +36,12 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 		Endpoint:   provider.URL(),
 		Model:      "",
 		APIKey:     "",
-		AHT:        buildAHT(t),
+		AHT:        testharness.Build(t),
 		Executable: "",
 		Env:        nil,
 	})
 	if errors.Is(err, launch.ErrUnsupported) {
-		t.Logf("%s has no launch plan: no interactive session claim", harnessID)
-		return
+		t.Skipf("%s has no launch plan: no interactive session claim", harnessID)
 	}
 
 	if err != nil {
@@ -62,8 +60,7 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 
 	terminal, err := launched.StartTerminal(t.Context(), "", gotmux.Size{Width: 160, Height: 45})
 	if errors.Is(err, launch.ErrUnsupported) {
-		t.Logf("%s has no interactive launch: no interactive session claim", harnessID)
-		return
+		t.Skipf("%s has no interactive launch: no interactive session claim", harnessID)
 	}
 
 	if err != nil {
@@ -88,14 +85,23 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 	}
 }
 
-func startProvider(t *testing.T) *fakeprovider.Server {
+func startProvider(t *testing.T, id registry.Harness) *fakeprovider.Server {
 	t.Helper()
+
+	titleRequest, err := launch.TitleRequestFor(id)
+	if errors.Is(err, launch.ErrUnsupported) {
+		t.Skipf("%s has no launch plan: no interactive session claim", id)
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	provider, err := fakeprovider.Start(fakeprovider.Options{
 		Address:     "",
 		Model:       "",
 		Hold:        true,
-		SideMarkers: nil,
+		SideRequest: titleRequest,
 		Script: fakeprovider.ScriptFunc(func(fakeprovider.Request) (fakeprovider.Reply, error) {
 			return fakeprovider.Reply{
 				Text:          interactiveReply,
@@ -136,11 +142,9 @@ func runTurn(
 		t.Fatalf("turn %d: %v", turn, err)
 	}
 
-	var hold *fakeprovider.Hold
-	select {
-	case hold = <-provider.Holds():
-	case <-ctx.Done():
-		t.Fatalf("turn %d: no model request after submitting %q", turn, prompt)
+	hold, err := testharness.AwaitHold(ctx, provider, nil)
+	if err != nil {
+		t.Fatalf("turn %d: no model request after submitting %q: %v", turn, prompt, err)
 	}
 
 	if !strings.Contains(string(hold.Request.Body), prompt) {
@@ -256,38 +260,6 @@ func effectiveActivity(session registry.Session, want registry.Activity) bool {
 
 	return activity != nil && *activity == registry.ActivityUnknown && decision != nil &&
 		decision.Authority == "screen" && decision.Reason == "screen_not_in_supported_multiplexer"
-}
-
-func buildAHT(t *testing.T) string {
-	t.Helper()
-
-	if binary := os.Getenv("AHT_COMPAT_BINARY"); binary != "" {
-		path, err := filepath.Abs(binary)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return path
-	}
-
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locating test source")
-	}
-
-	output := filepath.Join(t.TempDir(), "aht")
-
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, "go", "build", "-o", output, ".")
-
-	command.Dir = filepath.Join(filepath.Dir(file), "..", "..")
-	if out, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("build aht: %v\n%s", err, out)
-	}
-
-	return output
 }
 
 func logFailure(t *testing.T, terminal *launch.Terminal, provider *fakeprovider.Server) {

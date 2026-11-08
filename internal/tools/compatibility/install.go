@@ -54,7 +54,7 @@ func (a application) install(ctx context.Context) error {
 	}
 
 	if path := a.getenv("GITHUB_PATH"); path != "" {
-		return appendText(path, bin+"\n"+filepath.Join(home, ".cursor", "bin")+"\n")
+		return appendText(path, bin+"\n")
 	}
 
 	return nil
@@ -83,7 +83,7 @@ func installationCommands(
 	work string,
 	bin string,
 ) ([]installCommand, error) {
-	if spec.Source != "weekly" {
+	if spec.Source != harness.DistributionWeekly {
 		if _, err := parseVersion(version); err != nil {
 			return nil, err
 		}
@@ -99,7 +99,7 @@ func installationCommands(
 	}
 
 	switch spec.Source {
-	case "npm":
+	case harness.DistributionNPM:
 		return []installCommand{
 			{
 				Name: "npm",
@@ -107,13 +107,15 @@ func installationCommands(
 				Env:  nil,
 			},
 		}, nil
-	case "pypi":
+	case harness.DistributionPyPI:
 		packageName := spec.Package + spec.PackageExtras
 
 		return []installCommand{
 			{Name: "uv", Args: []string{"tool", "install", packageName + "==" + version}, Env: nil},
 		}, nil
-	default:
-		return nil, fmt.Errorf("%w: no installer for %s", errCompatibility, spec.ID)
+	case harness.DistributionGitHub, harness.DistributionChannel, harness.DistributionWeekly:
+		// These sources install only through Distribution.Install.
 	}
+
+	return nil, fmt.Errorf("%w: no installer for %s", errCompatibility, spec.ID)
 }

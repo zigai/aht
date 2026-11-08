@@ -6,15 +6,8 @@ import (
 
 func (qwenHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "npm",
-		Package:       "@qwen-code/qwen-code",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "qwen",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
+		Source:    harness.DistributionNPM,
+		Package:   "@qwen-code/qwen-code",
+		Directory: "qwen",
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const (
@@ -33,15 +32,17 @@ func (ompHarness) LaunchPlan(
 	selected := harness.LaunchProviderName + "/" + model.Model
 
 	return harness.LaunchPlan{
+		TitleRequests: []harness.TitleRequest{
+			{Role: "system", Prefix: "You name coding-agent sessions."},
+			{Role: "user", Prefix: "<title-request>", Suffix: "</title-request>"},
+		},
 		Executable: "omp",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env:        []string{"PI_CODING_AGENT_DIR=" + agentDir, "OMP_SKIP_SETUP=1"},
 		Files: []harness.LaunchFile{{
 			Path:   filepath.Join(agentDir, "models.yml"),
 			Update: func([]byte) ([]byte, error) { return modelsYAML, nil },
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			hook, err := installedHook(agentDir)
 			if err != nil {

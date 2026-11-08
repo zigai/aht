@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -15,15 +16,27 @@ import (
 //     If the caller is not running inside this multiplexer, it returns an empty
 //     [registry.Location] and nil error. A non-nil error indicates an
 //     operational inspection failure or context cancellation.
-//   - ListPanes enumerates live panes for this multiplexer.
+//   - EnvKeys lists the environment variables LocationFromEnv reads.
+//   - LocationFromEnv returns the pane a process environment places the process
+//     in, or an empty location when the environment does not name one.
+//   - ListPanes enumerates live panes for this multiplexer. processes is the
+//     caller's current process snapshot, or nil to let the driver list them.
 //     If the multiplexer binary is not installed or no active server/session exists,
 //     it returns nil, nil. A non-nil error indicates an operational failure.
 //   - CapturePane captures the visible terminal screen and title of the given pane.
+//   - Presence reports whether location is still a live pane. Drivers that
+//     cannot check a single pane return [registry.PresenceUnknown].
+//   - SamePane reports whether two locations of this multiplexer name the same
+//     pane, using the identifiers that make a pane id unique.
 type Driver interface {
 	Kind() registry.MultiplexerKind
 	Current(ctx context.Context) (registry.Location, error)
-	ListPanes(ctx context.Context) ([]Pane, error)
+	EnvKeys() []string
+	LocationFromEnv(env func(string) string) registry.Location
+	ListPanes(ctx context.Context, processes []processinfo.Process) ([]Pane, error)
 	CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error)
+	Presence(ctx context.Context, location registry.Location) (registry.Presence, error)
+	SamePane(a registry.Location, b registry.Location) bool
 }
 
 // Interrupter is an optional capability interface for multiplexers that
@@ -82,17 +95,4 @@ func BoundBottomLines(text string, limit int) []string {
 	}
 
 	return lines
-}
-
-// NormalizePaneID normalizes pane identifiers across multiplexers.
-// For Zellij, bare numeric IDs gain a "terminal_" prefix.
-func NormalizePaneID(kind registry.MultiplexerKind, paneID string) string {
-	paneID = strings.TrimSpace(paneID)
-	if kind == registry.MultiplexerZellij && paneID != "" &&
-		!strings.HasPrefix(paneID, "terminal_") &&
-		!strings.HasPrefix(paneID, "plugin_") {
-		return "terminal_" + paneID
-	}
-
-	return paneID
 }

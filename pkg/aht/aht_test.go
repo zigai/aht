@@ -123,9 +123,15 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 	// ExplainSession
 	running := aht.ActivityRunning
 	session := aht.Session{
-		ID:       "s-facade",
-		Harness:  aht.HarnessPi,
-		Liveness: registry.NewLiveness(aht.PresenceLive, registry.ActivityValue(&running), nil),
+		ID:      "s-facade",
+		Harness: aht.HarnessPi,
+		Liveness: registry.NewLiveness(
+			aht.PresenceLive,
+			registry.ActivityValue(&running),
+			nil,
+			time.Time{},
+			"",
+		),
 	}
 
 	exp, err := aht.ExplainSession(t.Context(), session, aht.ExplainOptions{})
@@ -144,8 +150,18 @@ func TestNewManagerUsesConfiguredStorePath(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 
 	manager := aht.NewManager(aht.ManagerConfig{StorePath: storePath})
-	if got := manager.HealthPath(); filepath.Dir(got) != filepath.Dir(storePath) {
-		t.Fatalf("HealthPath() = %q, want a path next to %q", got, storePath)
+	if err := os.WriteFile(
+		storePath+".observer-health.json",
+		[]byte(`{"pid":4321,"degraded":true,"last_enumeration_error":"permission denied"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := manager.TrackerHealth(t.Context())
+	if !errors.Is(err, aht.ErrHealthDegraded) || health.PID != 4321 ||
+		health.Status != aht.HealthStatusDegraded || health.LastEnumerationError != "permission denied" {
+		t.Fatalf("configured manager health = %+v, %v", health, err)
 	}
 }
 

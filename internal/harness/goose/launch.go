@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 var errEmptyPrompt = errors.New("goose headless run needs a prompt")
@@ -15,7 +14,7 @@ func (gooseHarness) LaunchPlan(
 ) (harness.LaunchPlan, error) {
 	return harness.LaunchPlan{
 		Executable: gooseCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"GOOSE_PROVIDER=openai",
 			"GOOSE_MODEL=" + model.Model,
@@ -29,9 +28,6 @@ func (gooseHarness) LaunchPlan(
 			"GOOSE_DISABLE_SESSION_NAMING=true",
 			"GOOSE_TELEMETRY_ENABLED=false",
 		},
-		Files:    nil,
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
 				return nil, errEmptyPrompt

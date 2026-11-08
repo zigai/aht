@@ -60,9 +60,6 @@ var (
 
 	//go:embed testdata/recently-updated.jsonl
 	recentlyUpdatedHistory string
-
-	//go:embed testdata/report.jsonl
-	reportHistory string
 )
 
 // toolHistory has a tool message newer than its searchable text, so searching
@@ -224,7 +221,7 @@ func TestRegistryJoinPreservesIdentityPathsAndIncarnations(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceGone,
 				registry.ActivityValue(nil),
-				nil,
+				nil, time.Time{}, "",
 			),
 		},
 		{ID: "wrong-id", Harness: registry.Harness("pi"), SessionID: "other", SessionPath: path},
@@ -237,7 +234,7 @@ func TestRegistryJoinPreservesIdentityPathsAndIncarnations(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceGone,
 				registry.ActivityValue(nil),
-				nil,
+				nil, time.Time{}, "",
 			),
 		},
 		{
@@ -255,7 +252,7 @@ func TestRegistryJoinPreservesIdentityPathsAndIncarnations(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(nil),
-				nil,
+				nil, time.Time{}, "",
 			),
 		},
 		{
@@ -314,7 +311,7 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 				Liveness: registry.NewLiveness(
 					registry.PresenceLive,
 					registry.ActivityValue(nil),
-					nil,
+					nil, time.Time{}, "",
 				),
 			},
 			{
@@ -324,7 +321,7 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 				Liveness: registry.NewLiveness(
 					registry.PresenceLive,
 					registry.ActivityValue(nil),
-					nil,
+					nil, time.Time{}, "",
 				),
 			},
 			{
@@ -335,7 +332,7 @@ func TestSearchFiltersMetadataAndRegistryJoin(t *testing.T) {
 				Liveness: registry.NewLiveness(
 					registry.PresenceLive,
 					registry.ActivityValue(nil),
-					nil,
+					nil, time.Time{}, "",
 				),
 			},
 		},
@@ -478,6 +475,40 @@ func TestSearchOptionalLimit(t *testing.T) {
 					result.Truncated,
 					err,
 				)
+			}
+		})
+	}
+}
+
+func TestHistoryWalkSkipsDependencyDirectories(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range []registry.Harness{"pi", "omp", "claude"} {
+		t.Run(string(harness), func(t *testing.T) {
+			t.Parallel()
+			root := filepath.Join(t.TempDir(), ".cache")
+
+			body := treeHistory
+			if harness == "claude" {
+				body = claudeHistory
+			}
+
+			visible := writeHistory(t, root, "sessions/session.jsonl", body)
+			for _, name := range []string{
+				".git", "node_modules", ".cache", ".npm", ".cargo", "vendor", "__pycache__", ".venv", "venv",
+			} {
+				writeHistory(t, root, filepath.Join("extensions", name, "dependency.jsonl"), body)
+			}
+
+			for _, mode := range searchModes(t, []history.Source{{Harness: harness, Path: root}}) {
+				t.Run(mode.name, func(t *testing.T) {
+					result, err := mode.catalog.Search(t.Context(), history.Query{Text: "refresh"})
+					requireMatches(t, result, err, 1)
+
+					if result.Matches[0].Conversation.Path != visible || len(result.Issues) != 0 {
+						t.Fatalf("walk returned dependency content: %+v", result)
+					}
+				})
 			}
 		})
 	}
@@ -1526,98 +1557,6 @@ func TestDefaultSourcesAreAbsoluteWithPaddedHome(t *testing.T) {
 	for _, source := range sources {
 		if !filepath.IsAbs(source.Path) {
 			t.Errorf("%s source path %q is not absolute", source.Harness, source.Path)
-		}
-	}
-}
-
-func lastMessageCatalog(t *testing.T, body string) (history.Catalog, string) {
-	t.Helper()
-	path := writeHistory(t, t.TempDir(), "session.jsonl", body)
-
-	return history.Catalog{
-		IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
-		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: path}},
-	}, path
-}
-
-func TestLastMessageJoinsTheTextOfTheLatestMessageOfTheRole(t *testing.T) {
-	t.Parallel()
-	c, _ := lastMessageCatalog(t, reportHistory)
-
-	assistant, found, err := c.LastMessage(t.Context(), "report-session", "assistant")
-	if err != nil || !found || assistant.Text != "Fixed the redirect.\n**Evidence**\n- shot.png" {
-		t.Fatalf("assistant message = %q, %v, %v", assistant.Text, found, err)
-	}
-
-	user, found, err := c.LastMessage(t.Context(), "report-session", "user")
-	if err != nil || !found || user.Text != "Go on" {
-		t.Fatalf("user message = %q, %v, %v", user.Text, found, err)
-	}
-}
-
-func TestLastMessageReadsTheHistoryAsItIsNow(t *testing.T) {
-	t.Parallel()
-
-	c, path := lastMessageCatalog(t, reportHistory)
-	if _, err := c.Refresh(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	appended := reportHistory + `{"type":"message","id":"a3","message":{"role":"assistant",` +
-		`"content":"Pushed the branch."}}` + "\n"
-	if err := os.WriteFile(path, []byte(appended), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	message, found, err := c.LastMessage(t.Context(), "report-session", "assistant")
-	if err != nil || !found || message.Text != "Pushed the branch." {
-		t.Fatalf("message after append = %q, %v, %v", message.Text, found, err)
-	}
-}
-
-func TestLastMessageIsNotFoundForAnotherSessionOrAMissingRole(t *testing.T) {
-	t.Parallel()
-	c, _ := lastMessageCatalog(t, `{"type":"session","id":"quiet-session","cwd":"/work"}
-{"type":"message","id":"u1","message":{"role":"user","content":"Hello"}}
-`)
-
-	for _, session := range []string{"quiet-session", "other-session"} {
-		if message, found, err := c.LastMessage(
-			t.Context(),
-			session,
-			"assistant",
-		); err != nil ||
-			found {
-			t.Fatalf(
-				"%s assistant message = %q, %v, %v; want not found",
-				session,
-				message.Text,
-				found,
-				err,
-			)
-		}
-	}
-}
-
-func TestLastMessageRejectsAMissingSessionOrAnUnknownRole(t *testing.T) {
-	t.Parallel()
-	c, _ := lastMessageCatalog(t, reportHistory)
-
-	for _, query := range [][2]string{{"", "assistant"}, {"report-session", "tool"}} {
-		if _, _, err := c.LastMessage(
-			t.Context(),
-			query[0],
-			query[1],
-		); !errors.Is(
-			err,
-			history.ErrInvalidQuery,
-		) {
-			t.Fatalf(
-				"LastMessage(%q, %q) error = %v, want ErrInvalidQuery",
-				query[0],
-				query[1],
-				err,
-			)
 		}
 	}
 }

@@ -9,6 +9,82 @@ import (
 	"time"
 )
 
+func TestMemoryStoreNativePresenceIsolation(t *testing.T) {
+	t.Parallel()
+
+	for _, operation := range []string{"observe", "batch", "get", "state", "reducer"} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+
+			store, err := OpenMemoryStore(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			at := time.Now().UTC()
+			observation := Observation{
+				Harness: harnessAlternate, At: at,
+				Subject:  ObservationIdentity{SessionID: "session"},
+				Evidence: &Report{Event: "session_start", Claim: new(PresenceLive)},
+			}
+
+			session, err := store.Observe(t.Context(), observation)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			input := State{Sessions: map[string]Session{session.ID: session}, UpdatedAt: at}
+
+			switch operation {
+			case "observe":
+			case "batch":
+				var sessions []Session
+
+				sessions, err = store.ObserveBatch(t.Context(), []Observation{observation})
+				if err == nil {
+					session = sessions[0]
+				}
+			case "get":
+				session, err = store.Get(t.Context(), session.ID)
+			case "state":
+				var state StateSnapshot
+
+				state, err = store.State(t.Context(), Filter{})
+				if err == nil {
+					session = state.Sessions[0]
+				}
+			case "reducer":
+				var state State
+
+				state, _, err = NewReducer(fixtureRules{}).Apply(input, nil, at)
+				if err == nil {
+					session = state.Sessions[session.ID]
+				}
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			*session.Observations.Native.Presence = PresenceGone
+
+			stored, err := store.Get(t.Context(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if *stored.Observations.Native.Presence != PresenceLive {
+				t.Fatal("mutating returned native presence changed stored evidence")
+			}
+
+			if operation == "reducer" &&
+				*input.Sessions[session.ID].Observations.Native.Presence != PresenceLive {
+				t.Fatal("mutating reducer output changed input evidence")
+			}
+		})
+	}
+}
+
 func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	t.Parallel()
 
@@ -33,11 +109,11 @@ func TestMemoryStorePublishesOnlyEffectiveStateChanges(t *testing.T) {
 	running := ActivityRunning
 
 	observation := Observation{
-		Harness: HarnessOmp,
+		Harness: harnessAlternate,
 		At:      base,
 		Subject: ObservationIdentity{SessionID: "live"},
 		Evidence: &Report{
-			Reporter: Reporter{Integration: "omp-extension"},
+			Reporter: Reporter{Integration: "alternate-extension"},
 			Event:    "agent_start",
 			Activity: &running,
 		},
@@ -101,13 +177,13 @@ func TestSequencedNativeReportsRejectStaleAndUnsequencedUpdates(t *testing.T) {
 
 	store.setNowForTest(func() time.Time { return base.Add(time.Minute) })
 
-	reporter := Reporter{Integration: "omp-extension"}
+	reporter := Reporter{Integration: "alternate-extension"}
 	running := ActivityRunning
 	sequence := uint64(20)
 	reporter.Sequence = &sequence
 
 	observation := Observation{
-		Harness:  HarnessOmp,
+		Harness:  harnessAlternate,
 		At:       base.Add(10 * time.Second),
 		Subject:  ObservationIdentity{SessionID: "sequenced"},
 		Evidence: &Report{Reporter: reporter, Event: "agent_start", Activity: &running},
@@ -179,11 +255,11 @@ func benchmarkRegistryObserve(b *testing.B, store Store) {
 	seed := make([]Observation, 65)
 	for index := range seed {
 		seed[index] = Observation{
-			Harness: HarnessOmp,
+			Harness: harnessAlternate,
 			At:      base.Add(time.Duration(index) * time.Nanosecond),
 			Subject: ObservationIdentity{SessionID: "session-" + strconv.Itoa(index)},
 			Evidence: &Report{
-				Reporter: Reporter{Integration: "omp-extension"},
+				Reporter: Reporter{Integration: "alternate-extension"},
 				Event:    "session_start",
 				Activity: &idle,
 			},
@@ -228,7 +304,7 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 	saved, err := s.Observe(
 		ctx,
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      now,
 			Subject: ObservationIdentity{SessionID: "reset-me"},
 			Evidence: &Report{
@@ -260,7 +336,7 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 	if _, err = s.Observe(
 		ctx,
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      now,
 			Subject: ObservationIdentity{SessionID: "unrelated"},
 			Evidence: &Report{
@@ -307,7 +383,7 @@ func TestMemoryStoreFlushPreservesExternalFallbackWrites(t *testing.T) {
 	saved, err := disk.Observe(
 		ctx,
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      now,
 			Subject: ObservationIdentity{SessionID: "arrived-before-socket"},
 			Evidence: &Report{
@@ -324,7 +400,7 @@ func TestMemoryStoreFlushPreservesExternalFallbackWrites(t *testing.T) {
 	if _, err = s.Observe(
 		ctx,
 		Observation{
-			Harness: HarnessPi,
+			Harness: harnessSecondary,
 			At:      now,
 			Subject: ObservationIdentity{SessionID: "broker-update"},
 			Evidence: &Report{

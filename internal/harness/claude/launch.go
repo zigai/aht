@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const claudeKeySuffixLength = 20
@@ -21,8 +20,14 @@ func (claudeHarness) LaunchPlan(
 	configDir := filepath.Join(paths.Root, "claude")
 
 	return harness.LaunchPlan{
+		TitleRequests: []harness.TitleRequest{
+			{
+				Role:   "system",
+				Prefix: "You are naming a coding session so the user can pick it out of a long list of sessions.",
+			},
+		},
 		Executable: claudeCommand,
-		Protocol:   fakeprovider.ProtocolAnthropicMessages,
+		Protocol:   harness.LaunchProtocolAnthropicMessages,
 		Env: []string{
 			"CLAUDE_CONFIG_DIR=" + configDir,
 			"ANTHROPIC_BASE_URL=" + model.Endpoint,
@@ -36,8 +41,6 @@ func (claudeHarness) LaunchPlan(
 				return launchState(existing, paths.Work, model.APIKey)
 			},
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			if prompt == "" {
 				return nil, errEmptyPrompt

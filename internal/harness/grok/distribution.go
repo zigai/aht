@@ -8,16 +8,10 @@ import (
 
 func (grokHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "channel",
-		Package:       "",
-		Repo:          "",
-		Asset:         "",
-		URL:           "https://x.ai/cli/stable",
-		MaxVersion:    "",
-		Directory:     "grok",
-		Family:        "",
-		PackageExtras: "",
-		Install:       distributionInstall,
+		Source:    harness.DistributionChannel,
+		URL:       "https://x.ai/cli/stable",
+		Directory: "grok",
+		Install:   distributionInstall,
 	}
 }
 

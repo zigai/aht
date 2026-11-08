@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,10 +62,7 @@ type Rule struct {
 	TitleAny      []string                `json:"title_any,omitempty"       toml:"title_any"`
 	TitleRegexAny []string                `json:"title_regex_any,omitempty" toml:"title_regex_any"`
 
-	regexAllCompiled      []*regexp.Regexp
-	regexAnyCompiled      []*regexp.Regexp
-	regexNoneCompiled     []*regexp.Regexp
-	titleRegexAnyCompiled []*regexp.Regexp
+	matchers []matcher
 }
 
 type Loader struct{ ConfigDir string }
@@ -93,7 +89,7 @@ func (l Loader) Supports(harnessID registry.Harness) bool {
 
 	_, err := os.Stat(l.overridePath(harnessID))
 
-	return err == nil
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 func (l Loader) Load(harnessID registry.Harness) (Manifest, error) {
@@ -220,7 +216,9 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
 
-	if catalog.SupportsScreen(harnessID) {
+	supported := catalog.SupportsScreen(harnessID)
+
+	if supported {
 		var err error
 
 		bundled, err = loadBundled(harnessID)
@@ -230,7 +228,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	}
 
 	if path == "" {
-		if catalog.SupportsScreen(harnessID) {
+		if supported {
 			return bundled, nil
 		}
 
@@ -243,7 +241,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 
 	data, readErr := readManifestFile(path)
 	if errors.Is(readErr, os.ErrNotExist) {
-		if catalog.SupportsScreen(harnessID) {
+		if supported {
 			return bundled, nil
 		}
 
@@ -255,7 +253,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	}
 
 	if readErr != nil {
-		if !catalog.SupportsScreen(harnessID) {
+		if !supported {
 			return Manifest{}, fmt.Errorf("reading local override %s: %w", path, readErr)
 		}
 
@@ -266,7 +264,7 @@ func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 
 	local, parseErr := ParseManifest(data, harnessID)
 	if parseErr != nil {
-		if !catalog.SupportsScreen(harnessID) {
+		if !supported {
 			return Manifest{}, fmt.Errorf("loading local override %s: %w", path, parseErr)
 		}
 
@@ -319,72 +317,30 @@ func readManifestFile(path string) ([]byte, error) {
 func (manifest *Manifest) compileRules() error {
 	for index := range manifest.Rules {
 		rule := &manifest.Rules[index]
+		rule.matchers = nil
 
-		var err error
-		if rule.regexAllCompiled, err = compileRuleExpressions(
-			rule.RegexAll,
-			rule.CaseSensitive,
-		); err != nil {
-			return fmt.Errorf(
-				"%w: compiling rule %q regex_all: %w",
-				errManifestInvalid,
-				rule.ID,
-				err,
-			)
-		}
+		for _, spec := range matcherSpecs {
+			values := spec.values(*rule)
+			if len(values) == 0 {
+				continue
+			}
 
-		if rule.regexAnyCompiled, err = compileRuleExpressions(
-			rule.RegexAny,
-			rule.CaseSensitive,
-		); err != nil {
-			return fmt.Errorf(
-				"%w: compiling rule %q regex_any: %w",
-				errManifestInvalid,
-				rule.ID,
-				err,
-			)
-		}
+			compiled, err := compileMatcher(spec, values, rule.CaseSensitive)
+			if err != nil {
+				return fmt.Errorf(
+					"%w: compiling rule %q %s: %w",
+					errManifestInvalid,
+					rule.ID,
+					spec.name,
+					err,
+				)
+			}
 
-		if rule.regexNoneCompiled, err = compileRuleExpressions(
-			rule.RegexNone,
-			rule.CaseSensitive,
-		); err != nil {
-			return fmt.Errorf(
-				"%w: compiling rule %q regex_none: %w",
-				errManifestInvalid,
-				rule.ID,
-				err,
-			)
-		}
-
-		if rule.titleRegexAnyCompiled, err = compileRuleExpressions(
-			rule.TitleRegexAny,
-			rule.CaseSensitive,
-		); err != nil {
-			return fmt.Errorf(
-				"%w: compiling rule %q title_regex_any: %w",
-				errManifestInvalid,
-				rule.ID,
-				err,
-			)
+			rule.matchers = append(rule.matchers, compiled)
 		}
 	}
 
 	return nil
-}
-
-func compileRuleExpressions(expressions []string, caseSensitive bool) ([]*regexp.Regexp, error) {
-	compiled := make([]*regexp.Regexp, 0, len(expressions))
-	for _, expression := range expressions {
-		pattern, err := regexp.Compile(ruleRegexExpression(expression, caseSensitive))
-		if err != nil {
-			return nil, fmt.Errorf("compiling regular expression %q: %w", expression, err)
-		}
-
-		compiled = append(compiled, pattern)
-	}
-
-	return compiled, nil
 }
 
 func loadBundled(harnessID registry.Harness) (Manifest, error) {
@@ -471,43 +427,24 @@ func (rule Rule) validate() error {
 }
 
 func (rule Rule) hasPositiveMatcher() bool {
-	return len(
-		rule.All,
-	)+len(
-		rule.Any,
-	)+len(
-		rule.RegexAll,
-	)+len(
-		rule.RegexAny,
-	)+len(
-		rule.TitleAny,
-	)+len(
-		rule.TitleRegexAny,
-	) > 0
+	for _, spec := range matcherSpecs {
+		if spec.mode != matchNone && len(spec.values(rule)) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (rule Rule) validateMatchers() error {
-	groups := []struct {
-		name   string
-		values []string
-	}{
-		{name: "all", values: rule.All},
-		{name: "any", values: rule.Any},
-		{name: "none", values: rule.None},
-		{name: "regex_all", values: rule.RegexAll},
-		{name: "regex_any", values: rule.RegexAny},
-		{name: "regex_none", values: rule.RegexNone},
-		{name: "title_any", values: rule.TitleAny},
-		{name: "title_regex_any", values: rule.TitleRegexAny},
-	}
-	for _, group := range groups {
-		for index, value := range group.values {
+	for _, spec := range matcherSpecs {
+		for index, value := range spec.values(rule) {
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf(
 					"%w: rule %q %s[%d] is empty",
 					errManifestInvalid,
 					rule.ID,
-					group.name,
+					spec.name,
 					index,
 				)
 			}

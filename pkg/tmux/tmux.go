@@ -10,6 +10,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -31,23 +32,16 @@ type Env struct {
 	TMUXPane string
 }
 
-// ServerProcess is the current-user process snapshot used as a fallback to
-// discover custom tmux sockets outside gotmux's standard directories.
-type ServerProcess struct {
-	PID  int
-	Args []string
-}
-
-// ServerProcessLister supplies current-user tmux server processes.
-type ServerProcessLister func(context.Context) ([]ServerProcess, error)
-
 // ListOptions controls pane discovery and is primarily useful for observer
 // injection and deterministic tests.
 //
 //exhaustruct:optional
 type ListOptions struct {
-	Env             Env
-	ServerProcesses ServerProcessLister
+	Env Env
+	// Processes is the current-user process snapshot searched for tmux
+	// servers outside gotmux's standard socket directories. Nil lists
+	// processes; an empty slice disables the search.
+	Processes []processinfo.Process
 	// SocketPaths overrides gotmux's standard socket discovery when non-nil.
 	// An empty slice disables it for deterministic tests or explicit discovery.
 	SocketPaths []string
@@ -85,52 +79,14 @@ func Current(ctx context.Context) (registry.Location, error) {
 
 func CurrentWithEnv(ctx context.Context, env Env) (registry.Location, error) {
 	if err := ctx.Err(); err != nil {
-		return registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}, fmt.Errorf(
+		return registry.Location{}, fmt.Errorf(
 			"current tmux location: %w",
 			err,
 		)
 	}
 
 	if env.TMUX == "" && env.TMUXPane == "" {
-		return registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}, ErrNotInTmux
+		return registry.Location{}, ErrNotInTmux
 	}
 
 	info, err := gotmux.CurrentFrom(ctx, gotmux.TmuxVars{TMUX: env.TMUX, TMUXPane: env.TMUXPane})
@@ -139,83 +95,20 @@ func CurrentWithEnv(ctx context.Context, env Env) (registry.Location, error) {
 	}
 
 	if contextErr := ctx.Err(); contextErr != nil {
-		return registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}, fmt.Errorf(
+		return registry.Location{}, fmt.Errorf(
 			"current tmux location: %w",
 			contextErr,
 		)
 	}
 
 	if paneID := env.TMUXPane; paneID != "" {
-		return LocationFromEnv(env), nil
+		return locationFromEnv(env), nil
 	}
 
-	return registry.Location{
-		Kind:            "",
-		ServerID:        "",
-		SessionID:       "",
-		SessionName:     "",
-		WorkspaceID:     "",
-		WorkspaceName:   "",
-		TabID:           "",
-		TabIndex:        "",
-		TabName:         "",
-		WindowID:        "",
-		WindowIndex:     "",
-		WindowName:      "",
-		PaneID:          "",
-		PaneIndex:       "",
-		PaneCurrentPath: "",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-	}, fmt.Errorf(
+	return registry.Location{}, fmt.Errorf(
 		"current tmux location: %w",
 		err,
 	)
-}
-
-func LocationFromEnv(env Env) registry.Location {
-	if env.TMUX == "" && env.TMUXPane == "" {
-		var tmux registry.Location
-
-		return tmux
-	}
-
-	return registry.Location{
-		WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "",
-		Kind:            registry.MultiplexerTmux,
-		ServerID:        tmuxServerSocket(env.TMUX),
-		SessionID:       "",
-		SessionName:     "",
-		WindowID:        "",
-		WindowIndex:     "",
-		WindowName:      "",
-		PaneID:          env.TMUXPane,
-		PaneIndex:       "",
-		PaneCurrentPath: "",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-	}
 }
 
 func ListPanes(ctx context.Context) ([]Pane, error) {
@@ -248,51 +141,7 @@ func PanePresence(ctx context.Context, location registry.Location) (registry.Pre
 }
 
 func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error) {
-	env := opts.Env
-	currentServerSocket := tmuxServerSocket(env.TMUX)
-
-	if opts.ServerProcesses == nil {
-		opts.ServerProcesses = listCurrentUserTmuxServers
-	}
-
-	servers, err := discoverServers(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		panes    []Pane
-		firstErr error
-	)
-
-	seenPanes := make(map[string]struct{})
-
-	for _, server := range servers {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("list tmux panes: %w", err)
-		}
-
-		serverPanes, queryErr := queryServerPanesGotmux(ctx, server)
-		if queryErr != nil {
-			if err := ctx.Err(); err != nil {
-				return nil, fmt.Errorf("list tmux panes: %w", err)
-			}
-
-			if server.Identity == currentServerSocket && firstErr == nil {
-				firstErr = queryErr
-			}
-
-			continue
-		}
-
-		panes = appendCanonicalPanes(panes, serverPanes, server.Identity, seenPanes)
-	}
-
-	if len(panes) == 0 && firstErr != nil {
-		return nil, firstErr
-	}
-
-	return panes, nil
+	return listPanesWithOptions(ctx, opts, queryServerPanesGotmux)
 }
 
 // SendInterruptTo sends an interrupt to a pane on the identified tmux server.
@@ -321,6 +170,59 @@ func SendInterruptTo(ctx context.Context, serverIdentity string, paneID string) 
 	}
 
 	return nil
+}
+
+func listPanesWithOptions(
+	ctx context.Context,
+	opts ListOptions,
+	query func(context.Context, serverSpec) ([]Pane, error),
+) ([]Pane, error) {
+	if opts.Processes == nil {
+		processes, err := processinfo.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("listing tmux server processes: %w", err)
+		}
+
+		opts.Processes = processes
+	}
+
+	servers, err := discoverServers(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		panes       []Pane
+		queryErrors []error
+	)
+
+	seenPanes := make(map[string]struct{})
+
+	for _, server := range servers {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("list tmux panes: %w", err)
+		}
+
+		serverPanes, queryErr := query(ctx, server)
+		if queryErr != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("list tmux panes: %w", err)
+			}
+
+			if !errors.Is(queryErr, gotmux.ErrNoServer) {
+				queryErrors = append(
+					queryErrors,
+					fmt.Errorf("tmux server %q: %w", server.Identity, queryErr),
+				)
+			}
+
+			continue
+		}
+
+		panes = appendCanonicalPanes(panes, serverPanes, server.Identity, seenPanes)
+	}
+
+	return panes, errors.Join(queryErrors...)
 }
 
 func resolveCurrentSession(info gotmux.CurrentInfo) (string, string) {
@@ -520,4 +422,29 @@ func tmuxServerSocket(tmuxEnv string) string {
 	}
 
 	return tmuxEnv[:start]
+}
+
+func locationFromEnv(env Env) registry.Location {
+	if env.TMUX == "" && env.TMUXPane == "" {
+		var tmux registry.Location
+
+		return tmux
+	}
+
+	return registry.Location{
+		WorkspaceID: "", WorkspaceName: "", TabID: "", TabIndex: "", TabName: "",
+		Kind:            registry.MultiplexerTmux,
+		ServerID:        tmuxServerSocket(env.TMUX),
+		SessionID:       "",
+		SessionName:     "",
+		WindowID:        "",
+		WindowIndex:     "",
+		WindowName:      "",
+		PaneID:          env.TMUXPane,
+		PaneIndex:       "",
+		PaneCurrentPath: "",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+	}
 }

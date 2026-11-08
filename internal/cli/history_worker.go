@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -149,7 +150,7 @@ func startHistoryRefresh(ctx context.Context, sources []history.Source) error {
 		return fmt.Errorf("find history refresh executable: %w", err)
 	}
 
-	args := []string{"--no-config", "--json", "manage", "history", "refresh"}
+	args := historyRefreshArgs()
 	for _, source := range sources {
 		args = append(args, "--source", string(source.Harness)+"="+source.Path)
 	}
@@ -159,7 +160,15 @@ func startHistoryRefresh(ctx context.Context, sources []history.Source) error {
 	)
 }
 
+func historyRefreshArgs() []string {
+	return []string{"--no-config", "--json", "manage", "history", "refresh"}
+}
+
 func startDetachedHistoryCommand(command *exec.Cmd) error {
+	environment := command.Environ()
+	environment = append(environment, processinfo.ChildRoleEnv+"=history-refresh")
+
+	command.Env = environment
 	if err := detachHistoryCommand(command); err != nil {
 		return err
 	}
@@ -189,7 +198,7 @@ func (app *application) refreshHistoryProcess(ctx context.Context) error {
 		return fmt.Errorf("find history refresh executable: %w", err)
 	}
 
-	args := []string{"--no-config", "--json", "manage", "history", "refresh"}
+	args := historyRefreshArgs()
 
 	var stderr bytes.Buffer
 	if err := runHistoryCommand(ctx, executable, args, io.Discard, &stderr); err != nil {

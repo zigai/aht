@@ -49,7 +49,7 @@ func TestFileStoreWatchSuppressesUnchangedSnapshots(t *testing.T) {
 	if _, err := store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessCodex,
+			Harness:  harnessPrimary,
 			At:       time.Time{},
 			Subject:  ObservationIdentity{SessionID: "changed"},
 			Evidence: &Report{Activity: &activity},

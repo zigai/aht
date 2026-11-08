@@ -3,6 +3,7 @@
 package processinfo
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,94 +31,59 @@ func TestParseLinuxStatHandlesParentheses(t *testing.T) {
 	}
 }
 
-func TestLinuxEnvironmentHintsKeepFirstRecognizedValues(t *testing.T) {
+func TestLinuxEnvironmentKeepsFirstRequestedValues(t *testing.T) {
 	t.Parallel()
 
-	got := parseLinuxEnvironmentHints(
+	got := parseEnvironment(
 		[]byte(
-			"PATH=/usr/bin\x00NOT_AHT_AGENT=wrong\x00AHT_AGENT= codex " +
-				"\x00AHT_AGENT=pi\x00HERDR_PANE_ID= \x00HERDR_PANE_ID=late\x00HERDR_SOCKE" +
-				"T_PATH=/tmp/socket=name\x00HERDR_SESSION= work " +
-				"\x00ZELLIJ_PANE_ID=7\x00ZELLIJ_SESSION_NAME= tabs\x00OTHER=value\x00",
+			"PATH=/usr/bin\x00NOT_PANE=wrong\x00PANE= 7 \x00PANE=8\x00EMPTY=\x00EMPTY=late"+
+				"\x00SOCKET=/tmp/socket=name\x00OTHER=value\x00",
 		),
+		[]string{"PANE", "EMPTY", "SOCKET", "MISSING"},
 	)
 
-	want := linuxEnvironmentHints{
-		agent:         "codex",
-		herdrServer:   "/tmp/socket=name",
-		herdrSession:  "work",
-		zellijPane:    "7",
-		zellijSession: "tabs",
-	}
-	if got != want {
-		t.Fatalf("environment hints = %#v, want %#v", got, want)
+	want := map[string]string{"PANE": "7", "EMPTY": "", "SOCKET": "/tmp/socket=name"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("environment = %#v, want %#v", got, want)
 	}
 }
 
-func TestReadLinuxProcessCapturesMultiplexerIdentity(t *testing.T) {
+func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 	t.Parallel()
 
-	for _, test := range []struct {
-		name, environment, kind, server, session, pane string
-	}{
-		{
-			name:        "zellij",
-			environment: "ZELLIJ_SESSION_NAME=work\x00ZELLIJ_PANE_ID=7\x00",
-			kind:        "zellij",
-			session:     "work",
-			pane:        "7",
-		},
-		{
-			name: "herdr precedence",
-			environment: "ZELLIJ_SESSION_NAME=work\x00ZELLIJ_PANE_ID=7\x00HERDR_PANE_ID=9\x00HE" +
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "stat"),
+		[]byte("123 (codex) S 1 42 42 0 0 0 0 0 0 0 0 0 0 0 0 0 0 987654 0 0"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 
-				"RDR_SESSION=main\x00HERDR_SOCKET_PATH=/tmp/herdr.sock\x00",
-			kind:    "herdr",
-			server:  "/tmp/herdr.sock",
-			session: "main",
-			pane:    "9",
-		},
-		{
-			name: "empty first herdr pane",
-			environment: "HERDR_PANE_ID= \x00HERDR_PANE_ID=9\x00ZELLIJ_SESSION_NAME=work\x00ZEL" +
+	if err := os.WriteFile(
+		filepath.Join(dir, "environ"),
+		[]byte("ZELLIJ_SESSION_NAME=work\x00ZELLIJ_PANE_ID=7\x00"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 
-				"LIJ_PANE_ID=7\x00",
-			kind:    "zellij",
-			session: "work",
-			pane:    "7",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	process, err := readLinuxProcess(dir, 123, "boot", []string{"ZELLIJ_PANE_ID"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			dir := t.TempDir()
-			if err := os.WriteFile(
-				filepath.Join(dir, "stat"),
-				[]byte("123 (codex) S 1 42 42 0 0 0 0 0 0 0 0 0 0 0 0 0 0 987654 0 0"),
-				0o600,
-			); err != nil {
-				t.Fatal(err)
-			}
+	if want := map[string]string{"ZELLIJ_PANE_ID": "7"}; !maps.Equal(process.Env, want) {
+		t.Fatalf("environment = %#v, want %#v", process.Env, want)
+	}
 
-			if err := os.WriteFile(
-				filepath.Join(dir, "environ"),
-				[]byte(test.environment),
-				0o600,
-			); err != nil {
-				t.Fatal(err)
-			}
+	process, err = readLinuxProcess(dir, 123, "boot", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			process, err := readLinuxProcess(dir, 123, "boot")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if process.MultiplexerKind != test.kind || process.MultiplexerServer != test.server ||
-				process.MultiplexerSession != test.session ||
-				process.MultiplexerPane != test.pane {
-				t.Fatalf("multiplexer identity = %#v", process)
-			}
-		})
+	if process.Env != nil {
+		t.Fatalf("environment read without requested keys: %#v", process.Env)
 	}
 }
 

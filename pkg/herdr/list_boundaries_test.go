@@ -36,7 +36,7 @@ func TestListPanesPreservesPartialResultsAndFatalErrorPrecedence(t *testing.T) {
 				case "lost:api snapshot":
 					return "", errUnexpectedCommand
 				case "work:api snapshot":
-					return `{"panes":[{"pane_id":"p1"},{"pane_id":"p2"}]}`, nil
+					return `{"result":{"snapshot":{"panes":[{"pane_id":"p1"},{"pane_id":"p2"}]}}}`, nil
 				case "work:pane process-info --pane p1":
 					return "", errBinaryNotFound
 				case "work:pane process-info --pane p2":
@@ -44,9 +44,9 @@ func TestListPanesPreservesPartialResultsAndFatalErrorPrecedence(t *testing.T) {
 						return "{", nil
 					}
 
-					return `{"shell_pid":12,"foreground_process_group_id":42}`, nil
+					return `{"result":{"process_info":{"shell_pid":12,"foreground_process_group_id":42}}}`, nil
 				case "later:api snapshot":
-					return `{}`, nil
+					return `{"result":{"snapshot":{}}}`, nil
 				default:
 					t.Fatalf("unexpected command: %s", call)
 					return "", errUnexpectedCommand

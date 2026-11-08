@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -87,11 +87,15 @@ func (app *application) runHistoryRefresh(
 
 	progress := app.newSearchProgress()
 	refreshed := map[history.Source]int{}
-	catalog := history.Catalog{Sources: sources, IndexPath: "", Progress: func(p history.Progress) {
-		refreshed[p.Source] = p.Refreshed
-		progress.update(p)
-	}}
-	result, refreshErr := catalog.Refresh(ctx)
+	historyCatalog := history.Catalog{
+		Sources:   sources,
+		IndexPath: "",
+		Progress: func(p history.Progress) {
+			refreshed[p.Source] = p.Refreshed
+			progress.update(p)
+		},
+	}
+	result, refreshErr := historyCatalog.Refresh(ctx)
 
 	progress.clear()
 
@@ -131,7 +135,7 @@ func historyRefreshSources(names []string, sources []history.Source) ([]history.
 	var selected []registry.Harness
 
 	for _, name := range names {
-		id, err := harness.Parse(strings.TrimSpace(name))
+		id, err := catalog.Parse(strings.TrimSpace(name))
 		if err != nil {
 			return nil, exitCode(fmt.Errorf("history refresh: %w", err), exitCodeUsage)
 		}

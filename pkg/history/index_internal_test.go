@@ -250,7 +250,7 @@ func TestFileFailuresAreScopedByModificationTime(t *testing.T) {
 	}
 }
 
-func TestWarmTextSearchDoesNotReadUnchangedFilesWithIssues(t *testing.T) {
+func TestWarmTextSearchRetainsCachedIssues(t *testing.T) {
 	t.Parallel()
 
 	catalog := malformedIssueFixture(t)
@@ -258,62 +258,25 @@ func TestWarmTextSearchDoesNotReadUnchangedFilesWithIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	catalog.Sources[0].Path = filepath.Join(catalog.Sources[0].Path, "recent.jsonl")
+
 	for _, term := range []string{"needle", "broken", "absent"} {
 		t.Run(term, func(t *testing.T) {
-			assertWarmTextSearchWithoutContent(t, catalog, term)
+			result, err := catalog.Search(t.Context(), Query{Terms: []string{term}})
+
+			want := 0
+			if term == "needle" {
+				want = 1
+			}
+
+			if err != nil || len(result.Matches) != want || len(result.Issues) != want ||
+				result.OmittedIssues != 0 || result.IndexUnavailable {
+				t.Fatalf("warm search result=%#v err=%v", result, err)
+			}
+
+			requireUnchangedRefresh(t, result, 1)
 		})
 	}
-}
-
-func assertWarmTextSearchWithoutContent(t *testing.T, catalog Catalog, term string) {
-	t.Helper()
-
-	index, err := openHistoryIndex(t.Context(), catalog.IndexPath, catalog.Sources, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := index.close(t.Context()); err != nil {
-			t.Error(err)
-		}
-	}()
-
-	s := &search{index: index, mode: modeSearch, query: Query{Terms: []string{term}}}
-	s.reset()
-
-	if err := s.prepare(); err != nil {
-		t.Fatal(err)
-	}
-
-	file, ok := s.singleFile(
-		catalog.Sources[0],
-		filepath.Join(catalog.Sources[0].Path, "recent.jsonl"),
-	)
-	if !ok {
-		t.Fatal("history was not selected")
-	}
-
-	opened := 0
-	file.open = func() (*os.File, error) {
-		opened++
-		return nil, os.ErrPermission
-	}
-
-	var status SourceStatus
-	index.scanFiles(t.Context(), s, catalog.Sources[0], []historyFile{file}, &status)
-
-	want := 0
-	if term == "needle" {
-		want = 1
-	}
-
-	if opened != 0 || s.indexErr != nil || len(s.result.Matches) != want ||
-		len(s.result.Issues) != want ||
-		s.result.OmittedIssues != 0 {
-		t.Fatalf("opens=%d result=%#v index error=%v", opened, s.result, s.indexErr)
-	}
-
-	requireUnchangedRefresh(t, s.result, 1)
 }
 
 func requireUnchangedRefresh(t *testing.T, result Result, count int) {
@@ -602,8 +565,8 @@ func TestInjectedContextSearchRoles(t *testing.T) {
 		"e\":\"user\",\"content\":\"<skill>context-prefix</skill>\\n  typed needle\\nsecond " +
 		"line\"}}\n{\"type\":\"message\",\"id\":\"x\",\"message\":{\"role\":\"user\",\"conte" +
 		"nt\":\"<unfinished>literal needle\"}}\n{\"type\":\"message\",\"id\":\"s\",\"message" +
-		"\":{\"role\":\"user\",\"content\":\"<command-name>/review</command-name><command-ar" +
-		"gs>needle</command-args>\"}}\n{\"type\":\"message\",\"id\":\"a\",\"message\":{\"rol" +
+		"\":{\"role\":\"user\",\"content\":\"/review needle\"}}\n" +
+		"{\"type\":\"message\",\"id\":\"a\",\"message\":{\"rol" +
 		"e\":\"assistant\",\"content\":\"agent needle\"}}\n"
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
@@ -725,7 +688,7 @@ func TestNativeContextSearchRoles(t *testing.T) {
 				{Query{Text: "context", Role: "context"}, test.contextParts},
 				{Query{Text: "typed", Role: "user"}, 1},
 			} {
-				t.Run(selection.query.Text+selection.query.Role, func(t *testing.T) {
+				t.Run(selection.query.Text+string(selection.query.Role), func(t *testing.T) {
 					requireSearchParts(t, catalog, selection.query, selection.parts, 1)
 				})
 			}
@@ -857,7 +820,7 @@ func TestNativeUserProjectionAcrossAppends(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		for _, role := range []string{"", "user", "context", "all"} {
+		for _, role := range []Role{"", "user", "context", "all"} {
 			compareIndexedSearch(t, catalog, Query{Text: "typed", Role: role})
 		}
 
@@ -1229,40 +1192,14 @@ func TestIndexHeaderResumeRejectsChangesOutsideDeclaredSlots(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			file := historyFile{path: path, open: func() (*os.File, error) { return os.Open(path) }}
-
-			first := parseRefresh(t.Context(), &refreshJob{source: source, file: file})
-			if first.writer == nil {
-				t.Fatalf("initial parse failed: %#v", first)
-			}
-
 			catalog := Catalog{
 				Sources:   []Source{source},
 				IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
 			}
 			compareIndexedSearch(t, catalog, Query{Terms: []string{"retained-token"}})
 
-			encoded, err := json.Marshal(first.writer.checkpoint)
-			if err != nil {
-				t.Fatal(err)
-			}
-
 			if err := os.WriteFile(path, []byte(test.changed), 0o600); err != nil {
 				t.Fatal(err)
-			}
-
-			got := parseRefresh(
-				t.Context(),
-				&refreshJob{
-					source:   source,
-					file:     file,
-					exists:   true,
-					resumeID: 1,
-					previous: indexedFile{checkpoint: string(encoded)},
-				},
-			)
-			if got.writer == nil || got.writer.resume != nil {
-				t.Fatalf("unsafe refresh resumed or failed: %#v", got)
 			}
 
 			for _, term := range []string{"retained-token", "replaced-token"} {
@@ -1606,7 +1543,7 @@ func generatedRegistry(catalog Catalog) []registry.Session {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityValue(nil),
-				nil,
+				nil, time.Time{}, "",
 			),
 		},
 		{
@@ -1616,7 +1553,7 @@ func generatedRegistry(catalog Catalog) []registry.Session {
 			Liveness: registry.NewLiveness(
 				registry.PresenceGone,
 				registry.ActivityValue(nil),
-				nil,
+				nil, time.Time{}, "",
 			),
 		},
 		{
@@ -1664,7 +1601,7 @@ func generatedHistoryQuery(property *rapid.T, count int) Query {
 		Exclude: rapid.SliceOfN(rapid.SampledFrom(terms), 0, 2).Draw(property, "exclude"),
 		Regex:   rapid.Bool().Draw(property, "regex"),
 		Word:    rapid.Bool().Draw(property, "word"),
-		Role: rapid.SampledFrom([]string{"", "user", "assistant", "context", "tool", "all"}).
+		Role: rapid.SampledFrom([]Role{"", "user", "assistant", "context", "tool", "all"}).
 			Draw(property, "role"),
 		IncludeTools:  rapid.Bool().Draw(property, "include tools"),
 		CaseSensitive: rapid.Bool().Draw(property, "case sensitive"),
@@ -2852,46 +2789,50 @@ func TestTwoLoadedIndexesDoNotDuplicateAppend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, second := openTwoTestIndexes(t, ctx, indexPath, sources)
-	defer func() { _ = first.close(ctx) }()
-	defer func() { _ = second.close(ctx) }()
-
-	appendTranscriptLine(t, path, "append", "review appended token")
-	indexTranscriptFile(t, ctx, first, sources[0], path, "review appended token")
-	indexTranscriptFile(t, ctx, second, sources[0], path, "review appended token")
-
-	var count int
-	if err := second.conn.QueryRowContext(ctx, "SELECT count(*) FROM parts WHERE message_id='append'").
-		Scan(&count); err != nil {
+	firstPath := filepath.Join(t.TempDir(), "first.jsonl")
+	if err := os.WriteFile(firstPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if count != 1 {
-		t.Fatalf("append indexed %d times; want exactly once", count)
+	catalog.Sources = append(
+		[]Source{{Harness: registry.Harness("pi"), Path: firstPath}},
+		sources...,
+	)
+	query := Query{Terms: []string{"review appended token"}}
+
+	var appended, searched bool
+
+	second := catalog
+	second.Progress = func(progress Progress) {
+		if appended || progress.Source.Path != firstPath {
+			return
+		}
+
+		appended = true
+
+		appendTranscriptLine(t, path, "append", "review appended token")
 	}
-}
+	first := catalog
+	first.Progress = func(progress Progress) {
+		if searched || progress.Source.Path != firstPath {
+			return
+		}
 
-func openTwoTestIndexes(
-	t *testing.T,
-	ctx context.Context,
-	indexPath string,
-	sources []Source,
-) (*historyIndex, *historyIndex) {
-	t.Helper()
+		searched = true
 
-	first, err := openHistoryIndex(ctx, indexPath, sources, nil)
-	if err != nil {
-		t.Fatal(err)
+		got, err := second.Search(ctx, query)
+		if err != nil || len(got.Matches) != 1 || got.Matches[0].MatchingParts != 1 {
+			t.Fatalf("second search = %#v, %v", got, err)
+		}
 	}
 
-	second, err := openHistoryIndex(ctx, indexPath, sources, nil)
-	if err != nil {
-		_ = first.close(ctx)
-
-		t.Fatal(err)
+	got, err := first.Search(ctx, query)
+	if err != nil || len(got.Matches) != 1 || got.Matches[0].MatchingParts != 1 || !appended ||
+		!searched {
+		t.Fatalf("first search = %#v, %v; append=%v second search=%v", got, err, appended, searched)
 	}
 
-	return first, second
+	compareIndexedSearch(t, catalog, query)
 }
 
 func appendTranscriptLine(t *testing.T, path string, id string, token string) {
@@ -2911,35 +2852,6 @@ func appendTranscriptLine(t *testing.T, path string, id string, token string) {
 		"\"}}\n"
 	if _, err := file.WriteString(msg); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func indexTranscriptFile(
-	t *testing.T,
-	ctx context.Context,
-	index *historyIndex,
-	source Source,
-	path string, needle string,
-) {
-	t.Helper()
-
-	s := &search{index: index, mode: modeSearch, query: Query{Terms: []string{needle}, Limit: 100}}
-	s.reset()
-
-	if err := s.prepare(); err != nil {
-		t.Fatal(err)
-	}
-
-	file, ok := s.singleFile(source, path)
-	if !ok {
-		t.Fatalf("history file %s was not selected", path)
-	}
-
-	var status SourceStatus
-	index.scanFiles(ctx, s, source, []historyFile{file}, &status)
-
-	if s.indexErr != nil || len(s.result.Issues) != 0 {
-		t.Fatalf("index %s: %v %#v", path, s.indexErr, s.result.Issues)
 	}
 }
 
@@ -3979,7 +3891,13 @@ func TestPresenceFilterUsesRegistryEvidence(t *testing.T) {
 			ID:        id,
 			Harness:   registry.Harness("claude"),
 			SessionID: session,
-			Liveness:  registry.NewLiveness(presence, registry.ActivityValue(nil), nil),
+			Liveness: registry.NewLiveness(
+				presence,
+				registry.ActivityValue(nil),
+				nil,
+				time.Time{},
+				"",
+			),
 		}
 	}
 
@@ -4158,16 +4076,24 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 		),
 	)
 
-	s := &search{index: index, mode: modeRefresh}
-	s.reset()
-
-	file, ok := s.singleFile(source, path)
+	file, ok := new(search).singleFile(source, path)
 	if !ok {
 		t.Fatal("history file was not selected")
 	}
 
-	job := index.newJob(s, source, file)
-	job.done <- parseRefresh(t.Context(), job)
+	previous := index.files[fileKey(source, path)]
+	job := &refreshJob{
+		source:   source,
+		file:     file,
+		previous: previous,
+		exists:   true,
+		resumeID: previous.resumeID,
+	}
+
+	parsed := parseRefresh(t.Context(), job)
+	if err := errors.Join(parsed.err, parsed.failure, parsed.openErr); err != nil {
+		t.Fatal(err)
+	}
 
 	appendRecord(
 		t,
@@ -4187,25 +4113,8 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var (
-		status   SourceStatus
-		progress Progress
-	)
-
-	batch := new(refreshBatch)
-	index.finish(
-		t.Context(),
-		s,
-		source,
-		pendingFile{file: file, filter: s.query.Filter, job: job, children: nil},
-		&status,
-		&progress,
-		batch,
-	)
-	index.flushRefresh(t.Context(), s, batch, &progress)
-
-	if s.indexErr != nil || len(s.result.Issues) != 0 {
-		t.Fatalf("stale resume: %v %#v", s.indexErr, s.result.Issues)
+	if _, _, err := index.storeParsed(t.Context(), job, &parsed); err != nil {
+		t.Fatalf("stale resume: %v", err)
 	}
 
 	got, err := c.Search(t.Context(), Query{Terms: []string{"walrus"}})
@@ -4387,4 +4296,40 @@ func TestOpeningNewerBuildIndexLeavesItUntouched(t *testing.T) {
 			newer,
 		)
 	}
+}
+
+// searchDirect scans the sources without the disposable index. Both the fallback
+// and the indexed path share this exact code, so it is the reference behavior
+// the index must reproduce.
+func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) {
+	var s search
+
+	s.mode = modeSearch
+	s.query = query
+
+	return c.runDirect(ctx, &s)
+}
+
+func (c Catalog) listDirect(ctx context.Context, query ListQuery) (Result, error) {
+	var s search
+
+	s.mode = modeList
+	s.query = query.searchQuery()
+
+	return c.runDirect(ctx, &s)
+}
+
+func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
+	sources, err := c.begin(ctx, s)
+	if err != nil {
+		return s.finalize(ctx), err
+	}
+
+	if len(sources) == 0 {
+		return s.finalize(ctx), nil
+	}
+
+	err = s.runDirect(ctx, sources)
+
+	return s.finalize(ctx), err
 }

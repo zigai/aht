@@ -607,7 +607,6 @@ func detectionObserverOptions(
 		PaneList:           func(context.Context) ([]mux.Pane, error) { return []mux.Pane{pane}, nil },
 		CatalogList:        func(context.Context) ([]CatalogEntry, error) { return nil, nil },
 		DetectionConfigDir: configDir,
-		HealthPath:         filepath.Join("", ""),
 		Now:                func() time.Time { return time.Now().UTC() },
 	}
 }

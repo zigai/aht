@@ -2,6 +2,7 @@
 package launch
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -80,7 +80,7 @@ type Harness struct {
 	Work       string
 	Store      string
 	Executable string
-	Protocol   fakeprovider.Protocol
+	Protocol   harness.LaunchProtocol
 	// Env is the complete environment of every process the launch starts.
 	Env       []string
 	ShellTool Tool
@@ -139,8 +139,8 @@ func newHarness(
 	if planner != nil {
 		model := harness.LaunchModel{
 			Endpoint: options.Endpoint,
-			Model:    valueOr(options.Model, defaultModel),
-			APIKey:   valueOr(options.APIKey, defaultAPIKey),
+			Model:    cmp.Or(options.Model, defaultModel),
+			APIKey:   cmp.Or(options.APIKey, defaultAPIKey),
 		}
 
 		var err error
@@ -190,7 +190,7 @@ func newHarness(
 }
 
 func chooseExecutable(options Options, plan harness.LaunchPlan, hasPlan bool) (string, error) {
-	name := valueOr(options.Executable, plan.Executable)
+	name := cmp.Or(options.Executable, plan.Executable)
 	if name == "" {
 		if !hasPlan {
 			return "", fmt.Errorf(
@@ -374,12 +374,4 @@ func resolveExecutable(name string) (string, error) {
 	}
 
 	return absolute, nil
-}
-
-func valueOr(value string, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-
-	return value
 }

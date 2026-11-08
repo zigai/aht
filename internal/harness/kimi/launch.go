@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 var (
@@ -41,10 +40,8 @@ capabilities = ["tool_use"]
 
 	return harness.LaunchPlan{
 		Executable: kimiCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIResponses,
+		Protocol:   harness.LaunchProtocolOpenAIResponses,
 		Env:        []string{"KIMI_CODE_HOME=" + home},
-		Setup:      nil,
-		Services:   nil,
 		Files: []harness.LaunchFile{{
 			Path: filepath.Join(home, "config.toml"),
 			Update: func(existing []byte) ([]byte, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -78,7 +79,7 @@ func selectedLocations(args []string, projectDir string) ([]harness.Location, er
 
 	selected := make([]registry.Harness, 0, len(args))
 	for _, arg := range args {
-		harnessID, err := harness.Parse(arg)
+		harnessID, err := catalog.Parse(arg)
 		if err != nil {
 			return nil, exitCode(
 				fmt.Errorf("%w %q", registry.ErrUnknownHarness, arg),

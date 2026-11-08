@@ -8,16 +8,11 @@ import (
 
 func (gooseHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "github",
-		Package:       "",
-		Repo:          "aaif-goose/goose",
-		Asset:         "download_cli.sh",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "goose",
-		Family:        "",
-		PackageExtras: "",
-		Install:       distributionInstall,
+		Source:    harness.DistributionGitHub,
+		Repo:      "aaif-goose/goose",
+		Asset:     "download_cli.sh",
+		Directory: "goose",
+		Install:   distributionInstall,
 	}
 }
 

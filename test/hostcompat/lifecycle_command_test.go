@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -18,16 +19,8 @@ const (
 	compatibilityFinalText = "compat complete"
 )
 
-func lifecycleShellCommand(id registry.Harness) string {
-	if id == registry.Harness("kimi-code") {
-		return "printf 'aht-compat-marker\\n'"
-	}
-
-	return "printf " + compatibilityMarker
-}
-
 func (host *isolatedHost) scriptCallID(resumed bool) string {
-	anthropic := host.launched.Protocol == fakeprovider.ProtocolAnthropicMessages
+	anthropic := host.launched.Protocol == harness.LaunchProtocolAnthropicMessages
 	switch {
 	case resumed && anthropic:
 		return "tool_resume"
@@ -35,7 +28,7 @@ func (host *isolatedHost) scriptCallID(resumed bool) string {
 		return "callresume"
 	case anthropic:
 		return "tool_compat"
-	case host.contract.ID == registry.Harness("openclaw"):
+	case host.contract.CompactCallID:
 		return "callcompat"
 	default:
 		return "call_compat"
@@ -79,4 +72,17 @@ func (host *isolatedHost) command(t *testing.T, env []string, args ...string) *e
 	command.Dir = host.launched.Work
 
 	return command
+}
+
+func lifecycleShellCommand(id registry.Harness) string {
+	contract, err := contractFor(id)
+	if err != nil {
+		panic(err)
+	}
+
+	if contract.ShellCommand != "" {
+		return contract.ShellCommand
+	}
+
+	return "printf " + compatibilityMarker
 }

@@ -1,13 +1,12 @@
 package harness_test
 
 import (
-	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"slices"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/install"
+	internalharness "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -28,26 +27,19 @@ func TestCapabilitiesForUnsupported(t *testing.T) {
 func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 	t.Parallel()
 
-	for _, id := range []registry.Harness{
-		registry.Harness("codex"), registry.Harness("pi"), registry.Harness("omp"),
-		registry.Harness("cline"), registry.Harness("kimi-code"), registry.Harness("grok"),
-		registry.Harness("goose"), registry.Harness("amp"), registry.Harness("opencode"),
-		registry.Harness("kilo"), registry.Harness("droid"), registry.Harness("openclaw"),
-		registry.Harness(
-			"hermes",
-		), registry.Harness(
-			"claude",
-		), registry.Harness(
-			"crush",
-		), registry.Harness(
-			"qwen",
-		), registry.Harness(
-			"prime-agent",
-		),
-	} {
+	for _, adapter := range catalog.All() {
+		id := adapter.Definition().ID
+		_, titleReader := adapter.(internalharness.TitleReader)
+
 		caps, ok := harness.CapabilitiesFor(id)
-		if !ok || !caps.TitleLookup {
-			t.Fatalf("%s title lookup capability = %t, %t", id, caps.TitleLookup, ok)
+		if !ok || caps.TitleLookup != titleReader {
+			t.Fatalf(
+				"%s title lookup capability = %t, %t; reader available = %t",
+				id,
+				caps.TitleLookup,
+				ok,
+				titleReader,
+			)
 		}
 	}
 }
@@ -56,35 +48,24 @@ func TestAllCapabilities(t *testing.T) {
 	t.Parallel()
 
 	all := harness.AllCapabilities()
-	supported := harness.Supported()
+	supported := catalog.Harnesses()
 
 	if len(all) != len(supported) {
 		t.Fatalf("len(AllCapabilities) = %d, len(Supported) = %d", len(all), len(supported))
 	}
 
-	foundPi := false
-	foundCodex := false
+	seen := make(map[registry.Harness]bool)
 
 	for _, c := range all {
-		if c.Harness == registry.Harness("pi") {
-			foundPi = true
+		if !slices.Contains(supported, c.Harness) || seen[c.Harness] {
+			t.Errorf("unexpected or duplicate capabilities for %s", c.Harness)
 		}
 
-		if c.Harness == registry.Harness("codex") {
-			foundCodex = true
-		}
+		seen[c.Harness] = true
 
 		if c.Authority == "" {
 			t.Errorf("harness %s has empty Authority", c.Harness)
 		}
-	}
-
-	if !foundPi || !foundCodex {
-		t.Fatalf(
-			"missing expected harnesses in AllCapabilities: pi=%v, codex=%v",
-			foundPi,
-			foundCodex,
-		)
 	}
 }
 
@@ -108,132 +89,12 @@ func TestCapabilitiesJSONCompatibility(t *testing.T) {
 
 	expectedFields := []string{
 		"harness", "session_start", "session_end", "running_idle", "waiting_permission",
-		"process_identity", "native_catalog", "tty_tmux_context", "installable",
+		"process_identity", "native_catalog", "installable",
 		"resumable", "title_lookup", "screen_support", "screen_fallback", "authority",
 	}
 	for _, field := range expectedFields {
 		if _, ok := raw[field]; !ok {
 			t.Errorf("missing expected field %q in capabilities JSON", field)
 		}
-	}
-}
-
-func TestInspectRuntimeSeparatesStaticFromRuntime(t *testing.T) {
-	tempHome := t.TempDir()
-	piDir := filepath.Join(tempHome, ".pi", "agent")
-	stateDir := filepath.Join(tempHome, "state")
-	t.Setenv("HOME", tempHome)
-	t.Setenv("PI_CODING_AGENT_DIR", piDir)
-	t.Setenv("AHT_STATE_DIR", stateDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempHome, ".config"))
-	t.Setenv("XDG_DATA_HOME", filepath.Join(tempHome, ".local", "share"))
-
-	ctx := context.Background()
-	fakeBin := "/path/to/fake-aht"
-
-	// 1. Missing state
-	status, err := harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
-	if err != nil {
-		t.Fatalf("unexpected error inspecting runtime: %v", err)
-	}
-
-	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), false, false, "missing")
-
-	// 2. Current state after installation
-	if _, err := install.Run(
-		ctx,
-		install.Options{Harness: registry.Harness("pi"), Binary: fakeBin, Force: true},
-	); err != nil {
-		t.Fatalf("installing pi extension: %v", err)
-	}
-
-	status, err = harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
-	if err != nil {
-		t.Fatalf("unexpected error inspecting runtime after install: %v", err)
-	}
-
-	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), true, true, "current")
-
-	// 3. Stale state when extension version is older
-	writeStalePiExtension(t, piDir)
-
-	status, err = harness.InspectRuntime(ctx, registry.Harness("pi"), fakeBin)
-	if err != nil {
-		t.Fatalf("unexpected error inspecting runtime after stale write: %v", err)
-	}
-
-	assertExpectedRuntimeStatus(t, status, registry.Harness("pi"), true, false, "stale")
-
-	// 4. Inspection error state for unsupported harness
-	errStatus, err := harness.InspectRuntime(ctx, "nonexistent", fakeBin)
-	if err == nil {
-		t.Fatal("expected error for nonexistent harness, got nil")
-	}
-
-	assertExpectedRuntimeStatus(t, errStatus, "nonexistent", false, false, "error")
-
-	// 5. Aggregate status check against known outcomes
-	all := harness.AllRuntimeStatuses(ctx, fakeBin)
-	if len(all) != len(harness.Supported()) {
-		t.Fatalf("AllRuntimeStatuses count = %d, want %d", len(all), len(harness.Supported()))
-	}
-
-	assertAllRuntimeStatusesContainsPiStale(t, all)
-}
-
-func assertAllRuntimeStatusesContainsPiStale(t *testing.T, all []harness.RuntimeStatus) {
-	t.Helper()
-
-	foundPi := false
-
-	for _, st := range all {
-		if st.Harness == registry.Harness("pi") {
-			foundPi = true
-
-			if !st.Installed || st.Current || st.Status != "stale" {
-				t.Fatalf("AllRuntimeStatuses Pi entry = %#v, want stale", st)
-			}
-		}
-
-		if st.Status == "" {
-			t.Errorf("harness %s has empty status in AllRuntimeStatuses", st.Harness)
-		}
-	}
-
-	if !foundPi {
-		t.Fatal("Pi not found in AllRuntimeStatuses")
-	}
-}
-
-func assertExpectedRuntimeStatus(
-	t *testing.T,
-	status harness.RuntimeStatus,
-	id registry.Harness,
-	installed bool, current bool,
-	statusStr string,
-) {
-	t.Helper()
-
-	if status.Harness != id || status.Installed != installed || status.Current != current ||
-		status.Status != statusStr {
-		t.Fatalf(
-			"status = %#v, want harness=%s, installed=%v, current=%v, status=%s",
-			status,
-			id,
-			installed,
-			current,
-			statusStr,
-		)
-	}
-}
-
-func writeStalePiExtension(t *testing.T, piDir string) {
-	t.Helper()
-
-	extPath := filepath.Join(piDir, "extensions", "aht-state.ts")
-
-	staleContent := "\"aht managed integration\";\n\"AHT_INTEGRATION_ID=pi\";\n\"AHT_INTEGRATION_VERSION=5\";\n"
-	if err := os.WriteFile(extPath, []byte(staleContent), 0o600); err != nil {
-		t.Fatalf("writing stale extension: %v", err)
 	}
 }

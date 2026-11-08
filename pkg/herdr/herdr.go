@@ -15,19 +15,21 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+const (
+	envEnabled     = "HERDR_ENV"
+	envSessionName = "HERDR_SESSION"
+	envSocketPath  = "HERDR_SOCKET_PATH"
+	envWorkspaceID = "HERDR_WORKSPACE_ID"
+	envTabID       = "HERDR_TAB_ID"
+	envPaneID      = "HERDR_PANE_ID"
+)
+
 var (
+	errMissingSnapshot       = errors.New("herdr response has no snapshot")
+	errMissingProcessInfo    = errors.New("herdr response has no process info")
 	errPaneRequired          = errors.New("herdr pane is required")
 	errInvalidSessionsOutput = errors.New("invalid herdr sessions output")
 )
-
-type Env struct {
-	Enabled     string
-	SessionName string
-	SocketPath  string
-	WorkspaceID string
-	TabID       string
-	PaneID      string
-}
 
 type CommandRunner func(context.Context, map[string]string, ...string) (string, error)
 
@@ -110,50 +112,6 @@ type herdrSessionItem struct {
 	Dead        bool   `json:"dead"`
 }
 
-func Current() registry.Location {
-	return CurrentWithEnv(Env{
-		Enabled: os.Getenv(
-			"HERDR_ENV",
-		),
-		SessionName: os.Getenv("HERDR_SESSION"),
-		SocketPath:  os.Getenv("HERDR_SOCKET_PATH"),
-		WorkspaceID: os.Getenv(
-			"HERDR_WORKSPACE_ID",
-		),
-		TabID:  os.Getenv("HERDR_TAB_ID"),
-		PaneID: os.Getenv("HERDR_PANE_ID"),
-	})
-}
-
-func CurrentWithEnv(env Env) registry.Location {
-	if strings.TrimSpace(env.PaneID) == "" ||
-		(env.Enabled != "1" && strings.TrimSpace(env.SocketPath) == "") {
-		var empty registry.Location
-		return empty
-	}
-
-	return registry.Location{
-		SessionID:       "",
-		WorkspaceName:   "",
-		TabIndex:        "",
-		TabName:         "",
-		WindowID:        "",
-		WindowIndex:     "",
-		WindowName:      "",
-		PaneIndex:       "",
-		PaneCurrentPath: "",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-		Kind:            registry.MultiplexerHerdr,
-		ServerID:        env.SocketPath,
-		SessionName:     env.SessionName,
-		WorkspaceID:     env.WorkspaceID,
-		TabID:           env.TabID,
-		PaneID:          env.PaneID,
-	}
-}
-
 func ListPanes(ctx context.Context) ([]mux.Pane, error) {
 	return ListPanesWithOptions(ctx, ListOptions{Run: nil, LookPath: nil})
 }
@@ -226,13 +184,13 @@ func CapturePaneWithOptions(
 		run = runHerdr
 	}
 
-	env := map[string]string{}
+	env := make(map[string]string)
 	if pane.Location.SessionName != "" {
-		env["HERDR_SESSION"] = pane.Location.SessionName
+		env[envSessionName] = pane.Location.SessionName
 	}
 
 	if pane.Location.ServerID != "" {
-		env["HERDR_SOCKET_PATH"] = pane.Location.ServerID
+		env[envSocketPath] = pane.Location.ServerID
 	}
 
 	output, err := run(ctx, env, "pane", "read", pane.Location.PaneID, "--source", "detection")
@@ -240,7 +198,7 @@ func CapturePaneWithOptions(
 		return mux.ScreenSnapshot{}, fmt.Errorf("capture herdr pane: %w", err)
 	}
 
-	return mux.ScreenSnapshot{Text: parseReadOutput(output), Title: pane.Title}, nil
+	return mux.ScreenSnapshot{Text: output, Title: pane.Title}, nil
 }
 
 func (n herdrNamedItem) Key() string {
@@ -355,11 +313,7 @@ func parseContainerSessions(output string) ([]string, bool) {
 	var sessions []string
 
 	for _, s := range list {
-		if s.Exited || s.Dead || (s.Running != nil && !*s.Running) {
-			continue
-		}
-
-		name := cmp.Or(s.Name, s.SessionName, s.ID)
+		name := s.liveName()
 		if name != "" {
 			sessions = append(sessions, name)
 		}
@@ -385,11 +339,7 @@ func parseListSessions(output string) ([]string, bool) {
 
 		var obj herdrSessionItem
 		if err := json.Unmarshal(item, &obj); err == nil {
-			if obj.Exited || obj.Dead || (obj.Running != nil && !*obj.Running) {
-				continue
-			}
-
-			name := cmp.Or(obj.Name, obj.SessionName, obj.ID)
+			name := obj.liveName()
 			if name != "" {
 				sessions = append(sessions, name)
 			}
@@ -412,27 +362,17 @@ func snapshotNames(items []herdrNamedItem) map[string]string {
 
 func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 	var resp struct {
-		herdrSnapshotData
-
 		Result struct {
-			herdrSnapshotData
-
 			Snapshot *herdrSnapshotData `json:"snapshot"`
 		} `json:"result"`
-		Snapshot *herdrSnapshotData `json:"snapshot"`
 	}
 	if err := json.Unmarshal([]byte(output), &resp); err != nil {
 		return nil, fmt.Errorf("parse herdr snapshot: %w", err)
 	}
 
-	data := resp.herdrSnapshotData
-	switch {
-	case resp.Snapshot != nil:
-		data = *resp.Snapshot
-	case resp.Result.Snapshot != nil:
-		data = *resp.Result.Snapshot
-	case len(resp.Result.Panes) > 0 || len(resp.Result.Workspaces) > 0:
-		data = resp.Result.herdrSnapshotData
+	data := resp.Result.Snapshot
+	if data == nil {
+		return nil, errMissingSnapshot
 	}
 
 	agentsByPane := make(map[string]herdrAgentItem, len(data.Agents))
@@ -504,27 +444,17 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 
 func parseProcessInfo(output string) ([]mux.ProcessRef, int, error) {
 	var resp struct {
-		herdrProcessInfoData
-
 		Result struct {
-			herdrProcessInfoData
-
 			ProcessInfo *herdrProcessInfoData `json:"process_info"`
 		} `json:"result"`
-		ProcessInfo *herdrProcessInfoData `json:"process_info"`
 	}
 	if err := json.Unmarshal([]byte(output), &resp); err != nil {
 		return nil, 0, fmt.Errorf("parse herdr process info: %w", err)
 	}
 
-	data := resp.herdrProcessInfoData
-	switch {
-	case resp.ProcessInfo != nil:
-		data = *resp.ProcessInfo
-	case resp.Result.ProcessInfo != nil:
-		data = *resp.Result.ProcessInfo
-	case len(resp.Result.ForegroundProcesses) > 0 || resp.Result.ShellPID > 0:
-		data = resp.Result.herdrProcessInfoData
+	data := resp.Result.ProcessInfo
+	if data == nil {
+		return nil, 0, errMissingProcessInfo
 	}
 
 	processGroupID := cmp.Or(data.ProcessGroupID, data.ForegroundPgid)
@@ -563,33 +493,6 @@ func parseProcessInfo(output string) ([]mux.ProcessRef, int, error) {
 	}
 
 	return refs, processGroupID, nil
-}
-
-func parseReadOutput(output string) string {
-	var resp struct {
-		Result struct {
-			Text    string `json:"text"`
-			Content string `json:"content"`
-			Output  string `json:"output"`
-		} `json:"result"`
-		Text    string `json:"text"`
-		Content string `json:"content"`
-		Output  string `json:"output"`
-	}
-	if err := json.Unmarshal([]byte(output), &resp); err == nil {
-		if text := cmp.Or(
-			resp.Result.Text,
-			resp.Result.Content,
-			resp.Result.Output,
-			resp.Text,
-			resp.Content,
-			resp.Output,
-		); text != "" {
-			return text
-		}
-	}
-
-	return output
 }
 
 func herdrActivity(status string) *registry.Activity {
@@ -641,4 +544,42 @@ func runHerdr(ctx context.Context, env map[string]string, args ...string) (strin
 	}
 
 	return string(output), nil
+}
+
+func locationFromEnv(env func(string) string) registry.Location {
+	paneID, socketPath := env(envPaneID), env(envSocketPath)
+	if strings.TrimSpace(paneID) == "" ||
+		(env(envEnabled) != "1" && strings.TrimSpace(socketPath) == "") {
+		var empty registry.Location
+		return empty
+	}
+
+	return registry.Location{
+		SessionID:       "",
+		WorkspaceName:   "",
+		TabIndex:        "",
+		TabName:         "",
+		WindowID:        "",
+		WindowIndex:     "",
+		WindowName:      "",
+		PaneIndex:       "",
+		PaneCurrentPath: "",
+		PanePID:         0,
+		PaneTTY:         "",
+		ClientTTY:       "",
+		Kind:            registry.MultiplexerHerdr,
+		ServerID:        socketPath,
+		SessionName:     env(envSessionName),
+		WorkspaceID:     env(envWorkspaceID),
+		TabID:           env(envTabID),
+		PaneID:          strings.TrimSpace(paneID),
+	}
+}
+
+func (s herdrSessionItem) liveName() string {
+	if s.Exited || s.Dead || s.Running != nil && !*s.Running {
+		return ""
+	}
+
+	return cmp.Or(s.Name, s.SessionName, s.ID)
 }

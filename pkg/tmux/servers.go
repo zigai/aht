@@ -27,20 +27,9 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 			return nil, fmt.Errorf("discover tmux sockets: %w", err)
 		}
 	}
-	// gotmux discovers standard socket directories. Process inspection remains
-	// a fallback for custom -S paths outside those directories; it can only
-	// recover paths that the OS exposes in the server's process arguments.
-	processes, err := opts.ServerProcesses(ctx)
-	if err != nil {
-		return nil, err
-	}
 
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("discover tmux servers: %w", err)
-	}
-
-	servers := make([]serverSpec, 0, len(processes)+len(sockets)+1)
-	seen := make(map[string]struct{}, len(processes)+len(sockets)+1)
+	servers := make([]serverSpec, 0, len(sockets)+1)
+	seen := make(map[string]struct{}, len(sockets)+1)
 	add := func(server serverSpec) {
 		// Sockets are found as paths but processes as -L names; compare both as
 		// paths so one server is queried once.
@@ -63,7 +52,14 @@ func discoverServers(ctx context.Context, opts ListOptions) ([]serverSpec, error
 		}
 	}
 
-	for _, process := range processes {
+	// gotmux discovers standard socket directories. Process inspection remains
+	// a fallback for custom -S paths outside those directories; it can only
+	// recover paths that the OS exposes in the server's process arguments.
+	for _, process := range opts.Processes {
+		if !isServerProcess(process) {
+			continue
+		}
+
 		server, ok := serverSpecFromArgs(process.Args)
 		if !ok {
 			continue
@@ -91,12 +87,12 @@ func canonicalServerIdentity(identity string) string {
 
 func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if len(args) == 0 {
-		return serverSpec{Identity: ""}, false
+		return serverSpec{}, false
 	}
 
 	base := filepath.Base(args[0])
 	if !isTmuxBinaryName(base) {
-		return serverSpec{Identity: ""}, false
+		return serverSpec{}, false
 	}
 	// Some tmux builds expose a bare -d daemon process marker rather than a
 	// native root flag. It carries no endpoint, so retain the default fallback.
@@ -106,7 +102,7 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 
 	parsed, err := gotmux.ParseCommandLine(args[1:])
 	if err != nil {
-		return serverSpec{Identity: ""}, false
+		return serverSpec{}, false
 	}
 
 	if socket := parsed.Config.SocketPath; socket != "" {

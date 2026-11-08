@@ -20,7 +20,7 @@ func (h *Harness) Sessions(ctx context.Context) ([]registry.Session, error) {
 
 	var stdout, stderr bytes.Buffer
 
-	cmd := h.AHTCommand(ctx, "--json", "list", "--agent", string(h.ID))
+	cmd := h.AHTCommand(ctx, "--json", "list", "--harness", string(h.ID))
 	cmd.Stdout = &stdout
 
 	cmd.Stderr = &stderr

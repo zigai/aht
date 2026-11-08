@@ -59,12 +59,8 @@ func TestClientRealtimeOnlyFailsWhenOffline(t *testing.T) {
 		t.Fatalf("Mode() = %q, want %q", c.Mode(), client.ModeRealtimeOnly)
 	}
 
-	if c.Realtime() == nil {
-		t.Fatal("Realtime() returned nil")
-	}
-
 	_, err := c.List(t.Context(), registry.Filter{Presence: registry.PresenceLive})
-	if !client.IsUnavailable(err) {
+	if !broker.IsUnavailable(err) {
 		t.Fatalf("List() err = %v, want ErrUnavailable", err)
 	}
 }
@@ -409,7 +405,7 @@ func assertUnsupportedGroupByModes(
 		badOpts,
 	); !errors.Is(
 		err,
-		client.ErrUnsupportedGroupBy,
+		registry.ErrUnsupportedGroupBy,
 	) {
 		t.Fatalf("durable error = %v, want ErrUnsupportedGroupBy", err)
 	}

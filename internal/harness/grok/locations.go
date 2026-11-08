@@ -7,7 +7,7 @@ import (
 )
 
 func (grokHarness) Locations(projectDir string) []harness.Location {
-	home := grokHome()
+	home := grokHome(harness.HomeDir())
 
 	return harness.NewLocationBuilder(projectDir).
 		Global(harness.LocationKindConfig, filepath.Join(home, "config.toml")).

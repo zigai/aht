@@ -76,7 +76,7 @@ func TestBytePrefilterChunkBoundariesAndCancellation(t *testing.T) {
 	for split := 1; split < len("needle"); split++ {
 		body := "first" + strings.Repeat(
 			" ",
-			hashChunkBytes+filter.overlap-len("first")-split,
+			prefilterChunkBytes+filter.overlap-len("first")-split,
 		) + "needle"
 
 		candidate, err := filter.matches(t.Context(), strings.NewReader(body))
@@ -191,38 +191,6 @@ func TestRegexLiteralAppearsInEveryMatch(t *testing.T) {
 			t.Fatalf("body %q lacks literal %q of %q", body, m.literal, term.expression)
 		}
 	})
-}
-
-func TestRegexLiteralExamples(t *testing.T) {
-	t.Parallel()
-
-	for _, test := range []struct {
-		expression    string
-		caseSensitive bool
-		want          string
-	}{
-		{expression: "(?:abcd)?xy", want: "xy"},
-		{expression: "(?:abcd|e)xy", want: "xy"},
-		{expression: "a(?i:bcd)", caseSensitive: true, want: "a"},
-	} {
-		matchers, err := compileMatchers(
-			[]string{test.expression},
-			Query{Regex: true, CaseSensitive: test.caseSensitive},
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if got := matchers[0].literal; got != test.want {
-			t.Errorf(
-				"literal of %q (case sensitive %v) = %q, want %q",
-				test.expression,
-				test.caseSensitive,
-				got,
-				test.want,
-			)
-		}
-	}
 }
 
 var regexRunes = []rune("abkKsSK" + "ſßẞσςΣθϑϴİıi .")

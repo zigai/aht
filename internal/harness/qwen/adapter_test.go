@@ -168,3 +168,68 @@ func TestActivityDetail(t *testing.T) {
 		t.Fatalf("tool error text became usage-limit detail: %v", *got)
 	}
 }
+
+func TestPayloadDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tests := []struct {
+		name string
+
+		payload    string
+		wantID     string
+		wantPath   string
+		wantCWD    string
+		wantRoot   string
+		wantEvent  string
+		wantAttr   string
+		wantAttrKV string
+	}{
+		{
+			name: "qwen",
+
+			payload: `{"session_id":"qwen-session","transcript_path":"/home/user/` +
+				`.qwen/projects/-repo/chats/qwen-session.jsonl","cwd":"/` +
+				`repo","hook_event_name":"Notification",` +
+				`"notification_type":"permission_prompt",` +
+				`"permission_mode":"default"}`,
+			wantID:     "qwen-session",
+			wantPath:   "/home/user/.qwen/projects/-repo/chats/qwen-session.jsonl",
+			wantCWD:    "/repo",
+			wantRoot:   "",
+			wantEvent:  "Notification",
+			wantAttr:   "qwen_notification_type",
+			wantAttrKV: "permission_prompt",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(test.payload), &payload); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := New().PayloadDefaults(payload)
+			if err != nil {
+				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
+			}
+
+			if got.SessionID != test.wantID ||
+				got.SessionPath != test.wantPath ||
+				got.CWD != test.wantCWD ||
+				got.ProjectRoot != test.wantRoot ||
+				got.Event != test.wantEvent {
+				t.Fatalf("unexpected defaults: %#v", got)
+			}
+
+			if got.Attributes[test.wantAttr] != test.wantAttrKV {
+				t.Fatalf(
+					"expected attribute %s=%q, got %#v",
+					test.wantAttr,
+					test.wantAttrKV,
+					got.Attributes,
+				)
+			}
+		})
+	}
+}

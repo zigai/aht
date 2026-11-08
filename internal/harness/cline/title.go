@@ -1,17 +1,16 @@
 package cline
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/command"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -21,8 +20,6 @@ const (
 	clineTitleTimeout     = 5 * time.Second
 )
 
-var errClineHistoryOutputTooLarge = errors.New("cline history output exceeds 16 MiB")
-
 type clineHistoryMetadata struct {
 	Title string `json:"title"`
 }
@@ -30,12 +27,6 @@ type clineHistoryMetadata struct {
 type clineHistoryEntry struct {
 	SessionID string               `json:"-"`
 	Metadata  clineHistoryMetadata `json:"metadata"`
-}
-
-type clineHistoryOutput struct {
-	bytes.Buffer
-
-	exceeded bool
 }
 
 func (entry *clineHistoryEntry) UnmarshalJSON(data []byte) error {
@@ -57,20 +48,6 @@ func (entry *clineHistoryEntry) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
-}
-
-func (output *clineHistoryOutput) Write(data []byte) (int, error) {
-	if len(data) > maxHistoryOutputBytes-output.Len() {
-		output.exceeded = true
-		return 0, errClineHistoryOutputTooLarge
-	}
-
-	n, err := output.Buffer.Write(data)
-	if err != nil {
-		return n, fmt.Errorf("write Cline history output: %w", err)
-	}
-
-	return n, nil
 }
 
 func (clineHarness) SessionTitles(
@@ -114,45 +91,31 @@ func listClineSessionTitles(ctx context.Context) (map[string]clineHistoryEntry, 
 	entries := make(map[string]clineHistoryEntry)
 
 	binary, err := exec.LookPath(clineCommand)
-	if err != nil {
+	if errors.Is(err, exec.ErrNotFound) {
 		return entries, nil
 	}
 
-	requestCtx, cancel := context.WithTimeout(ctx, clineTitleTimeout)
-	defer cancel()
+	if err != nil {
+		return entries, fmt.Errorf("find Cline: %w", err)
+	}
 
-	command := exec.CommandContext(
-		requestCtx,
+	output, err := command.RunWithLimits(
+		ctx,
+		clineTitleTimeout,
+		maxHistoryOutputBytes,
 		binary,
+		nil,
 		"history",
 		"--json",
 		"--limit",
 		strconv.Itoa(maxHistoryEntries),
 	)
-
-	var output clineHistoryOutput
-
-	command.Stdout = &output
-
-	command.Stderr = io.Discard
-	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return entries, fmt.Errorf("list Cline session history: %w", ctx.Err())
-		}
-
-		if requestCtx.Err() != nil {
-			return entries, fmt.Errorf("list Cline session history: %w", requestCtx.Err())
-		}
-
-		if output.exceeded {
-			return entries, errClineHistoryOutputTooLarge
-		}
-
+	if err != nil {
 		return entries, fmt.Errorf("list Cline session history: %w", err)
 	}
 
 	var history []clineHistoryEntry
-	if err := json.Unmarshal(output.Bytes(), &history); err != nil {
+	if err := json.Unmarshal(output, &history); err != nil {
 		return entries, fmt.Errorf("decode Cline session history: %w", err)
 	}
 

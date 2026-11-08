@@ -14,7 +14,8 @@ func FuzzPayloadAdapters(f *testing.F) {
 	f.Setenv("HOME", f.TempDir())
 	f.Setenv("KIMI_CODE_HOME", f.TempDir())
 
-	for _, harness := range SupportedNames() {
+	for _, id := range Harnesses() {
+		harness := string(id)
 		f.Add(
 			harness,
 			[]byte(

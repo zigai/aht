@@ -1,27 +1,12 @@
 package amp
 
 import (
+	"reflect"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-func TestResumeCommand(t *testing.T) {
-	t.Parallel()
-
-	h := New()
-	if cmd := h.ResumeCommand(
-		"T-12345",
-		"",
-	); len(cmd) != 4 || cmd[0] != "amp" || cmd[1] != "threads" || cmd[2] != "continue" ||
-		cmd[3] != "T-12345" {
-		t.Fatalf("unexpected resume command: %v", cmd)
-	}
-
-	if cmd := h.ResumeCommand("", ""); cmd != nil {
-		t.Fatalf("expected nil for empty session ID, got: %v", cmd)
-	}
-}
 
 func TestConfigDirXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/custom-xdg")
@@ -31,19 +16,43 @@ func TestConfigDirXDG(t *testing.T) {
 	}
 }
 
-func TestDefinition(t *testing.T) {
+func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 	t.Parallel()
 
-	h := New()
+	for _, test := range []struct {
+		harness    registry.Harness
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{
+			"amp",
+			"thread.state",
+			registry.ActivityWaiting,
+			map[string]string{
+				"amp_thread_state": "awaiting-approval",
+			},
+			new(
+				registry.ActivityDetailPermission,
+			),
+		},
+	} {
+		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
+			report := &registry.Report{
+				Event:      test.event,
+				Activity:   &test.activity,
+				Attributes: test.attributes,
+			}
 
-	def := h.Definition()
-	if def.ID != registry.Harness("amp") {
-		t.Fatalf("expected ID %q, got %q", registry.Harness("amp"), def.ID)
-	}
+			var detail *registry.ActivityDetail
+			if reader, ok := any(New()).(harness.ActivityDetailer); ok {
+				detail = reader.ActivityDetail(report.Event, *report.Activity, report.Attributes)
+			}
 
-	if !def.Capabilities.SessionStart || !def.Capabilities.SessionEnd ||
-		!def.Capabilities.RunningIdle ||
-		!def.Capabilities.WaitingPermission {
-		t.Fatalf("unexpected capabilities: %+v", def.Capabilities)
+			if !reflect.DeepEqual(detail, test.want) {
+				t.Fatalf("detail = %v, want %v", detail, test.want)
+			}
+		})
 	}
 }

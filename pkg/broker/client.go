@@ -50,12 +50,8 @@ type RemoteError struct {
 	Message string
 }
 
-// NewClient returns a client for the broker associated with storePath.
-func NewClient(storePath string) *Client {
-	return NewClientForSocket(SocketPath(storePath))
-}
-
-func NewClientForSocket(socketPath string) *Client {
+// NewClient returns a client for the broker listening on socketPath.
+func NewClient(socketPath string) *Client {
 	return &Client{socketPath: socketPath, dialTimeout: defaultDialTimeout}
 }
 
@@ -123,7 +119,7 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 		return []registry.Session{}, nil
 	}
 
-	return registry.FilterSessions(response.Sessions, request.Filter), nil
+	return response.Sessions, nil
 }
 
 // Get returns one broker-owned session.
@@ -153,10 +149,6 @@ func (c *Client) SummaryWithOptions(
 		return nil, fmt.Errorf("%w: %q", registry.ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 
-	if needsSnapshotFiltering(filter) {
-		return c.summarizeLocally(ctx, filter, opts)
-	}
-
 	request := newRequest(MethodSummary)
 	request.Filter = filter.NormalizePaths()
 	request.SummaryOptions = opts
@@ -170,23 +162,12 @@ func (c *Client) SummaryWithOptions(
 		return []registry.Summary{}, nil
 	}
 
-	for _, summary := range response.Summaries {
-		if opts.GroupBy != "" && opts.GroupBy != registry.SummaryGroupByMultiplexerSession &&
-			summary.GroupBy != opts.GroupBy {
-			return c.summarizeLocally(ctx, filter, opts)
-		}
-	}
-
 	return response.Summaries, nil
 }
 
 // Summary returns filtered multiplexer-session summaries.
 func (c *Client) Summary(ctx context.Context, filter registry.Filter) ([]registry.Summary, error) {
-	return c.SummaryWithOptions(
-		ctx,
-		filter,
-		registry.SummaryOptions{GroupBy: registry.SummaryGroupByMultiplexerSession},
-	)
+	return c.SummaryWithOptions(ctx, filter, registry.SummaryOptions{GroupBy: ""})
 }
 
 // GC removes expired gone-session tombstones through the broker.
@@ -299,7 +280,6 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	snapshots := make(chan registry.StateSnapshot, 1)
 	errorsChannel := make(chan error, 1)
 
-	first.Snapshot.Sessions = registry.FilterSessions(first.Snapshot.Sessions, request.Filter)
 	snapshots <- *first.Snapshot
 
 	done := make(chan struct{})
@@ -376,35 +356,16 @@ func runSubscription(
 			return
 		}
 
-		if response.Type == "heartbeat" || response.Snapshot == nil {
+		if response.Type == ResponseHeartbeat || response.Snapshot == nil {
 			continue
 		}
 
-		response.Snapshot.Sessions = registry.FilterSessions(
-			response.Snapshot.Sessions,
-			request.Filter,
-		)
 		select {
 		case <-ctx.Done():
 			return
 		case snapshots <- *response.Snapshot:
 		}
 	}
-}
-
-// Older brokers ignore additive filter and grouping fields. Aggregate their
-// snapshots locally when a summary cannot prove it honored the requested group.
-func (c *Client) summarizeLocally(
-	ctx context.Context,
-	filter registry.Filter,
-	opts registry.SummaryOptions,
-) ([]registry.Summary, error) {
-	sessions, err := c.List(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-
-	return registry.SummariesWithOptions(sessions, opts), nil
 }
 
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
@@ -559,29 +520,18 @@ func (e *RemoteError) Error() string {
 
 // Unwrap classifies recognized broker and registry failures without changing the wire error.
 func (e *RemoteError) Unwrap() error {
-	switch e.Code {
-	case "busy":
-		return ErrBusy
-	case "not_found":
-		return registry.ErrSessionNotFound
-	case "observation_conflict":
-		return registry.ErrObservationConflict
-	case "process_ended":
-		return registry.ErrProcessEnded
-	default:
-		return nil
+	for _, classified := range classifiedCodes {
+		if classified.code == e.Code {
+			return classified.err
+		}
 	}
-}
 
-func needsSnapshotFiltering(filter registry.Filter) bool {
-	return filter.Project != "" || filter.CWD != "" || filter.MultiplexerKind != "" ||
-		filter.MultiplexerServer != "" ||
-		filter.MultiplexerPane != ""
+	return nil
 }
 
 func connectionBusyResponse(response Response) bool {
-	return response.ID == "" && response.Type == "error" && response.Error != nil &&
-		response.Error.Code == "busy" && response.Error.Message != "" &&
+	return response.ID == "" && response.Type == ResponseError && response.Error != nil &&
+		response.Error.Code == CodeBusy && response.Error.Message != "" &&
 		response.Session == nil && response.Sessions == nil && response.Summaries == nil &&
 		response.Snapshot == nil && response.GC == nil && response.Reset == nil && response.Now.IsZero()
 }

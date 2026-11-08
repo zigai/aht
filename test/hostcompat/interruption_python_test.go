@@ -5,7 +5,6 @@ package hostcompat
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -70,16 +69,7 @@ func runPythonInterruption(t *testing.T, host *isolatedHost, env []string) {
 		},
 	)
 
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first active Python provider request step = %d", hold.Request.Index)
-		}
-	case <-process.done:
-		t.Fatalf("Python host exited before active request: %v", process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatal("Python host did not reach active provider request")
-	}
+	host.awaitHold(t, process, 0)
 
 	host.waitForActiveSession(t)
 

@@ -17,6 +17,7 @@ const (
 	crushHookName                = "aht"
 	crushManagedIntegrationStart = "# BEGIN aht managed integration: crush"
 	crushManagedIntegrationEnd   = "# END aht managed integration: crush"
+	integrationVersion           = 16
 )
 
 type crushHarness struct{ harness.BaseAdapter }
@@ -31,34 +32,21 @@ type hookPayload struct {
 func New() crushHarness {
 	return crushHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("crush"),
-		Aliases:          nil,
 		ProcessNames:     []string{"crush"},
 		Env: harness.EnvKeys{
+			Config:      []string{"CRUSH_GLOBAL_CONFIG", "CRUSH_GLOBAL_DATA", "CRUSH_SKILLS_DIR"},
 			SessionID:   []string{"CRUSH_SESSION_ID"},
-			SessionPath: nil,
 			ProjectRoot: []string{"CRUSH_PROJECT_DIR"},
-			PID:         nil,
 			Event:       []string{"CRUSH_EVENT"},
 		},
-		Capabilities: harness.Capabilities{
-			SessionStart:      false,
-			SessionEnd:        false,
-			RunningIdle:       false,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			NativeCatalog:     true,
-			TTYTmuxContext:    false,
-		},
-		IntegrationVersion: harness.IntegrationVersion,
+		IntegrationVersion: integrationVersion,
 		IntegrationSource:  crushIntegrationSource,
 		StateAuthority:     registry.AuthorityScreen,
-		ScreenFallback:     false,
 	})}
 }
 
-func (crushHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter crushHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	path := crushGlobalShellConfigPath()
 	if path == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -72,23 +60,23 @@ func (crushHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "crush config",
 				StartMarker: crushManagedIntegrationStart,
 				EndMarker:   crushManagedIntegrationEnd,
-				Block:       crushHookBlock(binary),
+				Block:       crushHookBlock(binary, adapter.Definition()),
 			}},
 		},
 	}, nil
 }
 
-func crushHookBlock(binary string) string {
+func crushHookBlock(binary string, definition harness.Definition) string {
 	command := harness.ReportHookCommand(
 		binary,
-		registry.Harness("crush"),
+		definition,
+		harness.ReportStdinRaw,
 		registry.ActivityRunning,
-		harness.HookEventPreToolUse,
-		crushIntegrationSource,
+		"PreToolUse",
 	)
 
-	return crushManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=crush\n" +
-		"hook add " + harness.HookEventPreToolUse +
+	return crushManagedIntegrationStart + "\n" + definition.Identity().Marker("# ") +
+		"hook add " + "PreToolUse" +
 		" --name " + crushHookName +
 		" --timeout " + strconv.Itoa(
 		harness.HookTimeoutSeconds,
@@ -125,12 +113,10 @@ func (crushHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 	)
 
 	return harness.PayloadDefaults{
-		SessionID:   harness.PayloadString(payload, "session_id"),
-		SessionPath: "",
-		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
-		Event:       harness.PayloadString(payload, "event"),
-		Attributes:  attributes,
+		SessionID:  harness.PayloadString(payload, "session_id"),
+		CWD:        harness.PayloadString(payload, "cwd"),
+		Event:      harness.PayloadString(payload, "event"),
+		Attributes: attributes,
 	}, nil
 }
 

@@ -3,6 +3,7 @@
 package observer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -15,8 +16,7 @@ func openObserverLock(path string) (*os.File, error) {
 	}
 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("locking observer: %w", err)
+		return nil, errors.Join(fmt.Errorf("locking observer: %w", err), file.Close())
 	}
 
 	return file, nil
@@ -31,16 +31,12 @@ func closeObserverLock(file *os.File) error {
 	closeErr := file.Close()
 
 	if unlockErr != nil {
-		return fmt.Errorf("unlocking observer: %w", unlockErr)
+		unlockErr = fmt.Errorf("unlocking observer: %w", unlockErr)
 	}
 
 	if closeErr != nil {
-		return fmt.Errorf("closing observer lock: %w", closeErr)
+		closeErr = fmt.Errorf("closing observer lock: %w", closeErr)
 	}
 
-	return nil
-}
-
-func removeObserverLock(_ string) error {
-	return nil
+	return errors.Join(unlockErr, closeErr)
 }

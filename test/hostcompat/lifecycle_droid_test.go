@@ -7,10 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -278,17 +276,7 @@ func (host *isolatedHost) driveDroidCheckpoints(
 	}
 
 	for expected := range gates {
-		var hold *fakeprovider.Hold
-		select {
-		case hold = <-host.provider.Holds():
-			if hold.Request.Index != expected {
-				t.Fatalf("Droid provider checkpoint = %d, want %d", hold.Request.Index, expected)
-			}
-		case <-process.done:
-			t.Fatalf("Droid exited before provider checkpoint %d: %v", expected, process.waitErr())
-		case <-time.After(30 * time.Second):
-			t.Fatalf("Droid did not reach provider checkpoint %d", expected)
-		}
+		hold := host.awaitHold(t, process, expected)
 
 		host.waitForObservation(
 			t,

@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"slices"
 	"strconv"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,8 +15,8 @@ import (
 const (
 	eventListening = "listening"
 	eventRequest   = "request"
-	pollInterval   = 100 * time.Millisecond
-	portBits       = 16
+
+	portBits = 16
 )
 
 var errInvalidAddress = errors.New("invalid listen address")
@@ -69,7 +67,7 @@ func (app *application) runServe(ctx context.Context, address string) error {
 		Model:       "",
 		Script:      fakeprovider.Echo(),
 		Hold:        false,
-		SideMarkers: nil,
+		SideRequest: nil,
 	})
 	if err != nil {
 		return fmt.Errorf("start fake provider: %w", err)
@@ -79,37 +77,7 @@ func (app *application) runServe(ctx context.Context, address string) error {
 		return finish(err, server.Close())
 	}
 
-	return finish(app.streamRequests(ctx, server), server.Close())
-}
-
-func (app *application) streamRequests(ctx context.Context, server *fakeprovider.Server) error {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	printedConversation, printedSide := 0, 0
-
-	for {
-		conversation := server.Requests()
-		side := server.SideRequests()
-		pending := slices.Concat(conversation[printedConversation:], side[printedSide:])
-		slices.SortStableFunc(pending, func(a, b fakeprovider.Request) int {
-			return a.ReceivedAt.Compare(b.ReceivedAt)
-		})
-
-		for _, request := range pending {
-			if err := app.writeRequest(request); err != nil {
-				return err
-			}
-		}
-
-		printedConversation, printedSide = len(conversation), len(side)
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("stop serving requests: %w", ctx.Err())
-		case <-ticker.C:
-		}
-	}
+	return finish(server.StreamRequests(ctx, app.writeRequest), server.Close())
 }
 
 func (app *application) writeListening(url string) error {

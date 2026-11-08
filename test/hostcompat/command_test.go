@@ -10,49 +10,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 )
 
 const compatibilityWaitDelay = time.Second
-
-func buildCompatibilityOracle(t *testing.T) string {
-	t.Helper()
-
-	if binary := os.Getenv("AHT_COMPAT_BINARY"); binary != "" {
-		oracle, err := filepath.Abs(binary)
-		if err != nil {
-			t.Fatalf("resolve prebuilt compatibility binary: %v", err)
-		}
-
-		return oracle
-	}
-
-	oracle := filepath.Join(t.TempDir(), "aht-compat-oracle")
-
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
-
-	command := exec.CommandContext(
-		ctx,
-		"go",
-		"build",
-		"-ldflags",
-		"-X github.com/zigai/aht/v2/internal/cli.version=compat-oracle",
-		"-o",
-		oracle,
-		".",
-	)
-
-	command.Dir = filepath.Clean(filepath.Join(sourceDirectory(), "..", ".."))
-	if output, err := compatibilityOutput(ctx, command); err != nil {
-		t.Fatalf("building compatibility oracle: %v\n%s", err, output)
-	}
-
-	return oracle
-}
 
 func copyExecutable(t *testing.T, sourcePath string, target string) {
 	t.Helper()

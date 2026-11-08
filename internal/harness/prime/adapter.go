@@ -64,38 +64,30 @@ type catalogRecord struct {
 
 func New() primeHarness {
 	return primeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: false,
-		CatalogCreates:   false,
-		ID:               registry.Harness("prime-agent"),
-		Aliases:          []string{"prime", "primeagent", "prime_agent"},
-		ProcessNames:     []string{primeAgentCommand},
+		ID:           registry.Harness("prime-agent"),
+		Aliases:      []string{"prime", "primeagent", "prime_agent"},
+		ProcessNames: []string{primeAgentCommand},
 		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
+			Config: []string{
+				"PRIME_AGENT_CODING_AGENT_DIR",
+				"PRIME_AGENT_SESSION_DIR",
+				"PRIME_AGENT_DAEMON_SOCKET",
+			},
 			ProjectRoot: []string{"PRIME_AGENT_INTERNAL_DAEMON_WORKER_CWD"},
-			PID:         nil,
-			Event:       nil,
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      false,
-			SessionEnd:        false,
-			RunningIdle:       true,
-			WaitingPermission: false,
-			ProcessIdentity:   true,
-			NativeCatalog:     true,
-			TTYTmuxContext:    false,
+			RunningIdle:     true,
+			ProcessIdentity: true,
 		},
 		IntegrationVersion: primeIntegrationVersion,
 		IntegrationSource:  primeIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
 func (primeHarness) InstallPlan(string) (harness.InstallPlan, error) {
 	return harness.InstallPlan{Actions: []harness.InstallAction{harness.NativeCatalogAction{
-		Label:   primeNativeCatalogLabel,
-		Command: []string{primeAgentCommand, "sessions", "--all", "--json"},
+		Label: primeNativeCatalogLabel,
 	}}}, nil
 }
 

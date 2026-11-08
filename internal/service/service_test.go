@@ -119,7 +119,7 @@ func TestInstallUsesAtomicContentAndManagerArgv(t *testing.T) {
 		Interval:  3 * time.Second,
 	}
 
-	result, err := New(executor).Install(context.Background(), options)
+	result, err := New(executor).Update(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestInstallDryRunAndForeignRefusal(t *testing.T) {
 
 	_, err := New(
 		&recordingExecutor{},
-	).Update(context.Background(), Options{Binary: "/bin/aht", StorePath: "/tmp/store"})
+	).Update(context.Background(), Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second})
 	if !errors.Is(err, ErrForeign) {
 		t.Fatalf("error = %v, want ErrForeign", err)
 	}
@@ -172,9 +172,14 @@ func TestInstallDryRunAndForeignRefusal(t *testing.T) {
 
 	executor := &recordingExecutor{}
 
-	result, err := New(
-		executor,
-	).Install(context.Background(), Options{Binary: "/bin/aht", StorePath: "/tmp/store", DryRun: true})
+	options := Options{
+		Binary:    "/bin/aht",
+		StorePath: "/tmp/store",
+		Interval:  time.Second,
+		DryRun:    true,
+	}
+
+	result, err := New(executor).Update(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +203,8 @@ func TestStatusManagerStoppedIsRepresented(t *testing.T) {
 
 	executor := &recordingExecutor{}
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
-	if _, err := New(executor).Install(context.Background(), options); err != nil {
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
+	if _, err := New(executor).Update(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,10 +231,10 @@ func TestStatusPropagatesManagerCancellation(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
 	manager := New(&recordingExecutor{})
-	if _, err := manager.Install(context.Background(), options); err != nil {
+	if _, err := manager.Update(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -243,7 +248,7 @@ func TestStatusReportsRunningStaleService(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
 	path := filepath.Join(config, "systemd", "user", linuxUnitName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -272,7 +277,7 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
 	if err := os.MkdirAll(filepath.Join(config, "systemd", "user"), 0o755); err != nil {
 		t.Fatal(err)
@@ -318,11 +323,11 @@ func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 	executor := &recordingExecutor{}
 
 	manager := New(executor)
-	if _, err := manager.Install(context.Background(), options); err != nil {
+	if _, err := manager.Update(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -347,11 +352,11 @@ func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 func TestUpdateCurrentRunningServiceDryRunAndFailure(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 	executor := &recordingExecutor{}
 
 	manager := New(executor)
-	if _, err := manager.Install(t.Context(), options); err != nil {
+	if _, err := manager.Update(t.Context(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -406,7 +411,7 @@ func requireRetryableUpdateAfterManagerFailure(t *testing.T, failAt int) {
 	executor := &recordingExecutor{failAt: failAt}
 	manager := New(executor)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 	if _, err := manager.Update(
 		context.Background(),
 		options,
@@ -457,21 +462,21 @@ func requireRetryableInstallAfterManagerFailure(t *testing.T, failAt int) {
 
 	executor := &recordingExecutor{failAt: failAt}
 	manager := New(executor)
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
-	result, err := manager.Install(context.Background(), options)
+	result, err := manager.Update(context.Background(), options)
 	if !errors.Is(err, errManagerTestFailure) {
 		t.Fatalf("Install() error = %v, want manager failure", err)
 	}
 
-	if _, statErr := os.Stat(result.Path); !errors.Is(statErr, os.ErrNotExist) {
+	if _, statErr := os.Stat(result.ManagedPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("failed install definition remains: %v", statErr)
 	}
 
 	executor.calls = nil
 	executor.failAt = 0
 
-	if _, err := manager.Install(context.Background(), options); err != nil {
+	if _, err := manager.Update(context.Background(), options); err != nil {
 		t.Fatalf("retry Install() error = %v", err)
 	}
 }
@@ -480,18 +485,18 @@ func TestUninstallRemovesManagedServiceAndIsIdempotent(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 	executor := &recordingExecutor{}
 	manager := New(executor)
 
-	installed, err := manager.Install(context.Background(), options)
+	installed, err := manager.Update(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	executor.calls = nil
 
-	result, err := manager.Uninstall(context.Background(), options)
+	result, err := manager.Uninstall(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +505,7 @@ func TestUninstallRemovesManagedServiceAndIsIdempotent(t *testing.T) {
 		t.Fatalf("unexpected uninstall result: %+v", result)
 	}
 
-	if _, err := os.Stat(installed.Path); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(installed.ManagedPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed service remains: %v", err)
 	}
 
@@ -510,7 +515,7 @@ func TestUninstallRemovesManagedServiceAndIsIdempotent(t *testing.T) {
 
 	executor.calls = nil
 
-	result, err = manager.Uninstall(context.Background(), options)
+	result, err = manager.Uninstall(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,9 +531,9 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 
 	executor := &recordingExecutor{}
 	manager := New(executor)
-	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store"}
+	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
-	installed, err := manager.Install(context.Background(), options)
+	installed, err := manager.Update(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +543,7 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 
 	if _, err := manager.Uninstall(
 		context.Background(),
-		options,
+		false,
 	); !errors.Is(
 		err,
 		errManagerTestFailure,
@@ -546,14 +551,14 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 		t.Fatalf("Uninstall() error = %v, want manager failure", err)
 	}
 
-	if _, err := os.Stat(installed.Path); err != nil {
+	if _, err := os.Stat(installed.ManagedPath); err != nil {
 		t.Fatalf("service definition was not restored: %v", err)
 	}
 
 	executor.calls = nil
 	executor.failAt = 0
 
-	result, err := manager.Uninstall(context.Background(), options)
+	result, err := manager.Uninstall(context.Background(), false)
 	if err != nil {
 		t.Fatalf("retry Uninstall() error = %v", err)
 	}
@@ -573,7 +578,9 @@ func TestNormalizeOptionsResolvesBinaryFromPath(t *testing.T) {
 
 	t.Setenv("PATH", binDir)
 
-	options, err := normalizeOptions(Options{Binary: "aht", StorePath: "state.json"})
+	options, err := normalizeOptions(
+		Options{Binary: "aht", StorePath: "state.json", Interval: time.Second},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +589,9 @@ func TestNormalizeOptionsResolvesBinaryFromPath(t *testing.T) {
 		t.Fatalf("resolved executable = %q, want %q", options.Binary, binary)
 	}
 
-	_, err = normalizeOptions(Options{Binary: "missing-aht", StorePath: "state.json"})
+	_, err = normalizeOptions(
+		Options{Binary: "missing-aht", StorePath: "state.json", Interval: time.Second},
+	)
 	if !errors.Is(err, exec.ErrNotFound) {
 		t.Fatalf("missing executable error = %v", err)
 	}
@@ -593,7 +602,7 @@ func TestStatusPropagatesManagerFailures(t *testing.T) {
 
 	backend := linuxBackend{}
 	for _, cause := range []error{exec.ErrNotFound, os.ErrPermission, errManagerTestFailure, context.Canceled} {
-		state, err := backend.running(t.Context(), &recordingExecutor{err: cause}, false)
+		state, err := backend.running(t.Context(), &recordingExecutor{err: cause})
 		if state.Running || !errors.Is(err, cause) {
 			t.Errorf("status for %v = (%v, %v), want original failure", cause, state.Running, err)
 		}
@@ -621,7 +630,7 @@ func TestUpdateReloadsCurrentUnitBeforeRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, err := systemdUnitPath()
+	path, err := definitionPath()
 	if err != nil {
 		t.Fatal(err)
 	}

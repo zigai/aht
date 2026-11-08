@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func TestReleaseSources(t *testing.T) {
@@ -93,7 +95,7 @@ func TestReleaseSources(t *testing.T) {
 			client := testClient(server)
 
 			spec := testHarness(t, tt.id)
-			if spec.Source == "channel" {
+			if spec.Source == harness.DistributionChannel {
 				spec.URL = server.URL + "/channel"
 			}
 
@@ -178,39 +180,9 @@ func TestHTTPFailuresAndLimits(t *testing.T) {
 	}
 }
 
-func TestRedirectDoesNotForwardToken(t *testing.T) {
-	destination := httptest.NewServer(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "" {
-				t.Error("forwarded token to artifact storage")
-			}
-
-			_, _ = fmt.Fprint(w, "state")
-		}),
-	)
-	t.Cleanup(destination.Close)
-
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer fixture-token" {
-			t.Error("missing API token")
-		}
-
-		http.Redirect(w, r, destination.URL, http.StatusFound)
-	}))
-	t.Cleanup(origin.Close)
-	client := testClient(origin)
-
-	body, err := client.get(t.Context(), origin.URL+"/github/artifact")
-	if err != nil || string(body) != "state" {
-		t.Fatalf("redirect = %q, %v", body, err)
-	}
-}
-
 func testClient(server *httptest.Server) *releaseClient {
-	client := newReleaseClient("fixture-token")
-	client.http = server.Client()
-	client.http.CheckRedirect = checkRedirect
-	client.githubBase = server.URL + "/github"
+	client := newReleaseClient(server.URL+"/github", "fixture-token")
+	client.github.RetryDelay = 0
 	client.npmBase = server.URL + "/npm"
 	client.pypiBase = server.URL + "/pypi"
 

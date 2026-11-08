@@ -2,7 +2,6 @@ package registry
 
 import (
 	"reflect"
-	"slices"
 	"time"
 )
 
@@ -136,10 +135,10 @@ func (s Session) selectedDetail(
 
 		return nil, policy.Details.Screen
 	case AuthorityProcess:
-		return nil, DetailSupport{Permission: false, Question: false, UsageLimit: false}
+		return nil, DetailSupport{}
 	}
 
-	return nil, DetailSupport{Permission: false, Question: false, UsageLimit: false}
+	return nil, DetailSupport{}
 }
 
 func (s Session) matchingNativeDetail(policy Policy) *DetailEvidence {
@@ -148,8 +147,7 @@ func (s Session) matchingNativeDetail(policy Policy) *DetailEvidence {
 		return nil
 	}
 
-	if native.Reporter.Integration != policy.Reporter &&
-		!slices.Contains(policy.DetailReporters, native.Reporter.Integration) {
+	if native.Reporter.Integration != policy.Reporter {
 		return nil
 	}
 
@@ -161,7 +159,7 @@ func (s Session) nativeDetail(
 	process ProcessIdentity,
 	at time.Time,
 ) *DetailEvidence {
-	if reportEnds(report) || startsNativeLifecycle(report.Lifecycle) {
+	if report.Ends() || report.starts() {
 		return nil
 	}
 
@@ -188,11 +186,6 @@ func (s Session) nativeDetail(
 	return clonePtr(s.Observations.Native.Detail)
 }
 
-func startsNativeLifecycle(lifecycle *NativeLifecycle) bool {
-	return lifecycle != nil &&
-		(*lifecycle == NativeLifecycleStart || *lifecycle == NativeLifecycleResume)
-}
-
 func (s Session) retainNativeDetail(report *Report, process ProcessIdentity) bool {
 	previous := s.Observations.Native
 
@@ -217,15 +210,11 @@ func validStateDetail(detail *StateDetail, activity *Activity) bool {
 		return true
 	}
 
-	if !hasDetailActivity(activity) {
+	if !hasDetailActivity(activity) || !optionalAuthorityValid(detail.Authority) {
 		return false
 	}
 
 	if detail.Value != "" && !detail.Value.ValidFor(*activity) {
-		return false
-	}
-
-	if !validDetailAuthority(detail.Authority) {
 		return false
 	}
 
@@ -235,15 +224,6 @@ func validStateDetail(detail *StateDetail, activity *Activity) bool {
 	case DetailQualityMissing, DetailQualityUnsupported:
 		return detail.ObservedAt.IsZero() &&
 			(detail.Value == "" || detail.Value == ActivityDetailGeneral)
-	}
-
-	return false
-}
-
-func validDetailAuthority(authority Authority) bool {
-	switch authority {
-	case "", AuthorityHook, AuthorityScreen, AuthorityProcess:
-		return true
 	}
 
 	return false
@@ -284,4 +264,10 @@ func validReportDetail(report Report) bool {
 
 	return report.DetailObservedAt == nil ||
 		report.Detail != nil && *report.Detail != "" && !report.DetailObservedAt.IsZero()
+}
+
+func optionalAuthorityValid(
+	authority Authority,
+) bool {
+	return authority == "" || authority.Valid()
 }

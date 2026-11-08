@@ -39,7 +39,9 @@ if [ "$1 $2" = "plugins list" ]; then
   fi
   status="not enabled"
   if [ -f "$state/enabled" ]; then status=enabled; fi
-  printf '[{"name":"aht-state","status":"%s","version":"0.0.9","description":"test","source":"user"}]\n' "$status"
+  version=$(sed -n 's/^version: "\(.*\)"$/\1/p' "$plugin/plugin.yaml")
+  printf '[{"name":"aht-state","status":"%s","version":"%s",' "$status" "$version"
+  printf '"description":"test","source":"user"}]\n'
   exit 0
 fi
 if [ "$1 $2" = "plugins enable" ]; then

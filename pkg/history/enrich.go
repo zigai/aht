@@ -5,6 +5,7 @@ import (
 
 	adapter "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	native "github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -17,7 +18,7 @@ func enrich(ctx context.Context, matches []Match) {
 		c := matches[i].Conversation
 
 		path := c.Path
-		if isDatabase(path) {
+		if catalog.TranscriptFor(c.Harness).Format(path) == native.FormatDatabase {
 			path = ""
 		}
 

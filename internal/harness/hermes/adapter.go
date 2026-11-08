@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	integrationVersion      = 9
+	integrationVersion      = 10
 	hermesCommand           = "hermes"
 	hermesPluginName        = "aht-state"
-	hermesMarkerFileName    = ".aht-managed"
 	hermesIntegrationSource = "hermes-plugin"
 )
 
@@ -27,66 +26,50 @@ type hermesHarness struct{ harness.BaseAdapter }
 
 func New() hermesHarness {
 	return hermesHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Env:              harness.EnvKeys{Config: []string{"HERMES_HOME", "HERMES_MANAGED"}},
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("hermes"),
 		Aliases:          []string{"hermes-agent", "hermes_agent"},
 		ProcessNames:     []string{"hermes", "hermes-agent"},
-		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
-		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			ProcessIdentity:   false,
-			NativeCatalog:     false,
-			TTYTmuxContext:    false,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  hermesIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
 	})}
 }
 
-func (hermesHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter hermesHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := hermesHome()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
 	version := strconv.Itoa(integrationVersion)
-	dir := filepath.Join(base, "plugins", hermesPluginName)
+	definition := adapter.Definition()
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
 			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
-				Dir:   dir,
+				Dir:   filepath.Join(base, "plugins", hermesPluginName),
 				Label: "Hermes plugin",
 				Files: []harness.RenderedFileInstallSpec{
-					{Name: "plugin.yaml", Content: hermesPluginManifest(version), JSONContent: nil},
+					{Name: "plugin.yaml", Content: hermesPluginManifest(version)},
 					{
-						Name:        "__init__.py",
-						Content:     renderHermesPlugin(binary, version),
-						JSONContent: nil,
-					},
-					{
-						Name:        hermesMarkerFileName,
-						Content:     hermesMarkerContent(version),
-						JSONContent: nil,
+						Name: "__init__.py",
+						Content: harness.RenderScriptTemplate(
+							hermesPluginTemplate,
+							binary,
+							definition,
+						),
 					},
 				},
-				SnippetOrder:   []string{"plugin.yaml", "__init__.py", hermesMarkerFileName},
-				MarkerFile:     hermesMarkerFileName,
-				ImportManifest: nil,
-				Retired:        nil,
-				Registration:   newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
+				Identity:     definition.Identity(),
+				Registration: newRegistration(hermesCommand, hermesPluginName, "0.0."+version),
 			}},
 		},
 	}, nil
@@ -126,22 +109,4 @@ provides_hooks:
   - pre_approval_request
   - post_approval_response
 `, version)
-}
-
-func renderHermesPlugin(binary string, version string) string {
-	replacer := strings.NewReplacer(
-		"{{BINARY}}", harness.ScriptString(binary),
-		"{{INTEGRATION_VERSION}}", strconv.Quote(version),
-	)
-
-	return replacer.Replace(hermesPluginTemplate)
-}
-
-func hermesMarkerContent(version string) string {
-	return fmt.Sprintf(
-		"%s\nAHT_INTEGRATION_ID=hermes\nAHT_INTEGRATION_VERSION=%s\nAHT_SOURCE=%s\n",
-		harness.ManagedMarker,
-		version,
-		hermesIntegrationSource,
-	)
 }

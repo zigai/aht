@@ -5,16 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
-
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
-
-var errHermesDatabaseNotRegular = errors.New("hermes session database is not a regular file")
 
 func (hermesHarness) SessionTitles(
 	ctx context.Context,
@@ -34,13 +30,13 @@ func (hermesHarness) SessionTitles(
 		return titles, nil
 	}
 
-	db, err := openHermesSessionDatabase(home)
+	db, err := transcript.OpenDatabase(filepath.Join(home, "state.db"))
 	if errors.Is(err, os.ErrNotExist) {
 		return titles, nil
 	}
 
 	if err != nil {
-		return titles, err
+		return titles, fmt.Errorf("open Hermes state database: %w", err)
 	}
 
 	defer func() { _ = db.Close() }()
@@ -74,36 +70,4 @@ func (hermesHarness) SessionTitles(
 	}
 
 	return titles, errors.Join(failures...)
-}
-
-func openHermesSessionDatabase(home string) (*sql.DB, error) {
-	databasePath := filepath.Join(home, "state.db")
-
-	info, err := os.Stat(databasePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect hermes session database: %w", err)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("inspect Hermes session database: %w", err)
-	}
-
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %q", errHermesDatabaseNotRegular, databasePath)
-	}
-
-	var databaseURL url.URL
-
-	databaseURL.Scheme = "file"
-	databaseURL.Path = databasePath
-	databaseURL.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", databaseURL.String())
-	if err != nil {
-		return nil, fmt.Errorf("open Hermes session database: %w", err)
-	}
-
-	db.SetMaxOpenConns(1)
-
-	return db, nil
 }

@@ -106,40 +106,6 @@ func TestSanitizeHumanTextNeutralizesEveryC0AndC1Control(t *testing.T) {
 	}
 }
 
-func TestGoPrettyStyleRendering(t *testing.T) {
-	t.Parallel()
-
-	app := &application{}
-
-	var out bytes.Buffer
-
-	app.stdout = &out
-	cols := []humanColumn{
-		{heading: "ID", width: 10},
-		{heading: "Agent", width: 10},
-		{heading: "Status", width: 10},
-	}
-
-	rows := [][]string{
-		{"omp-1234", "omp", "running"},
-		{"pi-5678", "pi", "idle"},
-	}
-	if err := app.writeHumanTable(cols, rows); err != nil {
-		t.Fatal(err)
-	}
-
-	output := out.String()
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) != 4 || lines[1] == "" || strings.Trim(lines[1], "─") != "" {
-		t.Fatalf("table lacks a continuous thin header rule: %q", output)
-	}
-
-	if strings.ContainsAny(output, "│+|") {
-		t.Fatalf("table contains vertical borders: %q", output)
-	}
-}
-
 func assertHumanLinesBounded(t *testing.T, output string) {
 	t.Helper()
 

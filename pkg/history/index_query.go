@@ -30,9 +30,9 @@ type indexQueries struct {
 // indexedMatches plans one conversation's matches: the number of distinct
 // matching parts, the first parts used for excerpts, and which terms matched.
 type indexedMatches struct {
-	count int
-	ids   []int64
-	hits  []bool
+	conversationHits
+
+	ids []int64
 }
 
 // groupFile is one indexed history of a parent history and its children;
@@ -48,13 +48,13 @@ type indexedConversation struct {
 }
 
 func (plan *indexedMatches) qualifies() bool {
-	return plan != nil && plan.count > 0 && !slices.Contains(plan.hits, false)
+	return plan != nil && plan.conversationHits.qualifies(len(plan.hits))
 }
 
 // prepareQuery computes the candidate conversations once per search. It reads the
 // committed index in autocommit: each changed file is refreshed and committed
 // before the matches of that file are read.
-func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err error) {
+func (index *historyIndex) prepareQuery(ctx context.Context, s *queryPlan) (err error) {
 	if index.queries != nil {
 		return nil
 	}
@@ -111,7 +111,7 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *search) (err err
 
 // findParts plans every conversation with a part matching a term, scoped to one
 // file when fileID is nonzero, and records conversations with excluded text.
-func (index *historyIndex) findParts(ctx context.Context, s *search, fileID int64) error {
+func (index *historyIndex) findParts(ctx context.Context, s *queryPlan, fileID int64) error {
 	found := map[int64][]int64{}
 	hits := map[int64][]bool{}
 
@@ -160,7 +160,7 @@ func (index *historyIndex) findParts(ctx context.Context, s *search, fileID int6
 
 func (index *historyIndex) eachPart(
 	ctx context.Context,
-	s *search,
+	s *queryPlan,
 	m matcher,
 	fileID int64,
 	visit func(file, conversation, part int64),
@@ -214,7 +214,7 @@ func (index *historyIndex) eachPart(
 
 func (index *historyIndex) partQuery(
 	ctx context.Context,
-	s *search,
+	s *queryPlan,
 	m matcher,
 	fileID int64,
 ) (string, []any, bool, error) {
@@ -270,9 +270,9 @@ func (index *historyIndex) partQuery(
 // scans normalize the stored body in Go, preserving Unicode folding without a
 // second text copy. Case-sensitive literals use the original body; regular
 // expressions and word boundaries are checked in Go, which also builds excerpts.
-func (index *historyIndex) candidatePredicate(s *search, fileID int64) (string, []any) {
+func (index *historyIndex) candidatePredicate(s *queryPlan, fileID int64) (string, []any) {
 	filter, args := index.selectionSQL(s.query.Filter)
-	predicate, args := rolePredicate(filter, s.query.Role, args)
+	predicate, args := s.query.rolePredicate(filter, args)
 	// A selected literal scan avoids enumerating common trigrams across the
 	// whole index. Indexed text lengths account for oversized message bodies;
 	// CROSS JOIN keeps metadata selection ahead of reading those bodies.
@@ -302,30 +302,7 @@ func partJoin(trigrams bool, caseSensitive bool) string {
 // accepts remains the authority for every filter. Child histories are judged
 // by their parent's metadata, so only the source and harness narrow them.
 func (index *historyIndex) selectionSQL(f Filter) (string, []any) {
-	metadata, metadataArgs := directorySQL(f.Dirs)
-	if !f.Since.IsZero() {
-		metadata += " AND c.active>=?"
-
-		metadataArgs = append(metadataArgs, f.Since.Unix())
-	}
-
-	if !f.Until.IsZero() {
-		metadata += " AND c.started<=?"
-
-		metadataArgs = append(metadataArgs, f.Until.Unix())
-	}
-
-	if f.MinMessages > 0 {
-		metadata += " AND c.messages>=?"
-
-		metadataArgs = append(metadataArgs, f.MinMessages)
-	}
-
-	if f.GitBranch != "" {
-		metadata += " AND c.branch=?"
-
-		metadataArgs = append(metadataArgs, f.GitBranch)
-	}
+	metadata, metadataArgs := f.selectionSQL()
 
 	filter := index.sourceFilter
 	args := append([]any{}, index.sourceArgs...)
@@ -412,22 +389,15 @@ func (index *historyIndex) preferLiteral(
 	return candidates > pages, nil
 }
 
-func rolePredicate(filter string, role string, args []any) (string, []any) {
-	if role != "" && role != "all" {
-		return "(" + filter + ") AND p.role = ?", append(args, role)
-	}
-
-	if role == "" {
-		filter = "(" + filter + ") AND p.role <> 'context'"
-	}
-
-	return filter, args
-}
-
 // matches reads one history group. Child conversations with the parent's
 // session identity fold their text matches into the parent conversation; any
 // other child conversation is matched on its own.
-func (index *historyIndex) matches(ctx context.Context, s *search, group []groupFile) error {
+func (index *historyIndex) matches(
+	ctx context.Context,
+	s *queryPlan,
+	group []groupFile,
+	keep func(context.Context, Match, int64),
+) error {
 	if s.mode == modeRefresh {
 		return nil
 	}
@@ -444,14 +414,14 @@ func (index *historyIndex) matches(ctx context.Context, s *search, group []group
 		return err
 	}
 
-	return index.collectMatches(ctx, s, conversations)
+	return index.collectMatches(ctx, s, conversations, keep)
 }
 
 // groupCandidate refreshes the plans of changed files and reports whether any
 // file of the group has a matching part.
 func (index *historyIndex) groupCandidate(
 	ctx context.Context,
-	s *search,
+	s *queryPlan,
 	group []groupFile,
 ) (bool, error) {
 	candidate := false
@@ -532,10 +502,7 @@ func foldPlan(owner *indexedMatches, child *indexedMatches) *indexedMatches {
 		}
 	}
 
-	owner.count += child.count
-	for i, hit := range child.hits {
-		owner.hits[i] = owner.hits[i] || hit
-	}
+	owner.conversationHits.absorb(child.conversationHits)
 
 	used := slices.Index(owner.ids, 0)
 	if used < 0 {
@@ -610,8 +577,9 @@ func (index *historyIndex) eachConversation(
 
 func (index *historyIndex) collectMatches(
 	ctx context.Context,
-	s *search,
+	s *queryPlan,
 	conversations []indexedConversation,
+	keep func(context.Context, Match, int64),
 ) error {
 	for _, c := range conversations {
 		plan := index.plans[c.id]
@@ -632,7 +600,7 @@ func (index *historyIndex) collectMatches(
 				match.MatchingParts = plan.count
 			}
 
-			s.keep(ctx, match, c.id)
+			keep(ctx, match, c.id)
 
 			continue
 		}
@@ -641,34 +609,7 @@ func (index *historyIndex) collectMatches(
 			return err
 		}
 
-		s.keep(ctx, match, 0)
-	}
-
-	return nil
-}
-
-// readRetained hydrates only the final heap after every selected history has
-// been checked. Failed or canceled reads cannot expose metadata-only matches.
-func (index *historyIndex) readRetained(ctx context.Context, s *search) error {
-	if s.mode != modeSearch || s.query.IncludeTools {
-		return nil
-	}
-
-	retained := s.recent.items
-	s.recent.items = nil
-
-	for _, match := range retained {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("read retained excerpts: %w", err)
-		}
-
-		if err := index.readExcerpts(ctx, s, match.indexID, &match.Match); err != nil {
-			// Re-run native discovery to preserve source coverage and diagnostics
-			// if the deferred index read fails after the source walk has finished.
-			return indexUnavailable(err)
-		}
-
-		s.recent.items = append(s.recent.items, match)
+		keep(ctx, match, 0)
 	}
 
 	return nil
@@ -678,7 +619,7 @@ func (index *historyIndex) readRetained(ctx context.Context, s *search) error {
 // conversations extend after the owner's own parts.
 func (index *historyIndex) readExcerpts(
 	ctx context.Context,
-	s *search,
+	s *queryPlan,
 	id int64,
 	match *Match,
 ) error {
@@ -764,7 +705,11 @@ func (index *historyIndex) eachPartText(
 	return nil
 }
 
-func (index *historyIndex) refreshPlans(ctx context.Context, s *search, fileID int64) (err error) {
+func (index *historyIndex) refreshPlans(
+	ctx context.Context,
+	s *queryPlan,
+	fileID int64,
+) (err error) {
 	// Refresh plans for rewritten/appended conversations before using them.
 	rows, err := index.conn.QueryContext(
 		ctx,

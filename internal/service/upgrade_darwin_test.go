@@ -52,7 +52,7 @@ func verifyLaunchAgentUpgrade(t *testing.T, state string) {
 
 	previous := strings.ReplaceAll(want, "/tmp/new aht", "/tmp/old aht")
 
-	path, err := launchAgentPath()
+	path, err := definitionPath()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	native "github.com/zigai/aht/v2/internal/harness/transcript"
@@ -22,33 +21,34 @@ var errCompressedArchive = errors.New(
 
 // scanTranscript parses one transcript file and returns its conversation, or
 // nil when the file could not be read.
-func (s *search) scanTranscript(
+func (s *parser) scanTranscript(
 	ctx context.Context,
 	source Source,
 	path string,
 	file *os.File,
 	buffer *fileIssueBuffer,
 ) *transcript {
-	if strings.HasSuffix(path, ".zst") {
+	reader := catalog.TranscriptFor(source.Harness)
+	if reader.Format(path) == native.FormatCompressed {
 		buffer.issue(source, path, errCompressedArchive)
 		return nil
 	}
 
-	if parse := catalog.TranscriptFor(source.Harness).Document; parse != nil {
-		return s.scanDocument(ctx, source, path, file, parse, buffer)
+	if reader.Format(path) == native.FormatDocument {
+		return s.scanDocument(ctx, source, path, file, reader.Document, buffer)
 	}
 
 	return s.scanJSONL(ctx, source, path, file, buffer, false)
 }
 
-func (s *search) checkTranscriptFormat(
+func (s *parser) checkTranscriptFormat(
 	ctx context.Context,
 	source Source,
 	path string,
 	file *os.File,
 	buffer *fileIssueBuffer,
 ) {
-	if catalog.TranscriptFor(source.Harness).Document != nil {
+	if catalog.TranscriptFor(source.Harness).Format(path) != native.FormatJSONL {
 		s.scanTranscript(ctx, source, path, file, buffer)
 		return
 	}
@@ -56,7 +56,7 @@ func (s *search) checkTranscriptFormat(
 	s.scanJSONL(ctx, source, path, file, buffer, true)
 }
 
-func (s *search) scanDocument(
+func (s *parser) scanDocument(
 	ctx context.Context,
 	source Source,
 	path string,

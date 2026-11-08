@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -24,7 +25,7 @@ func (app *application) newCapabilitiesCommand() *cobra.Command {
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if options.harness != "" {
-				harnessID, err := harness.Parse(options.harness)
+				harnessID, err := catalog.Parse(options.harness)
 				if err != nil {
 					return exitCode(
 						fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness),
@@ -82,7 +83,6 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 			yesNo(c.WaitingPermission),
 			yesNo(c.ProcessIdentity),
 			yesNo(c.NativeCatalog),
-			yesNo(c.TTYTmuxContext),
 			yesNo(c.Installable),
 			yesNo(c.Resumable),
 			yesNo(c.ScreenSupport),
@@ -99,7 +99,6 @@ func (app *application) writeCapabilitiesTable(capabilities []harness.Capabiliti
 			{heading: "Wait", width: capabilityWaitingWidth},
 			{heading: "Process", width: capabilitySignalWidth},
 			{heading: "Catalog", width: capabilitySignalWidth},
-			{heading: "TTY/MUX", width: capabilitySignalWidth},
 			{heading: "Install", width: capabilityFeatureWidth},
 			{heading: "Resume", width: capabilityFeatureWidth},
 			{heading: "Screen", width: capabilityFeatureWidth},
@@ -120,7 +119,6 @@ func (app *application) writeSingleHarnessCapabilities(c harness.Capabilities) e
 		{label: "Waiting permission", value: yesNo(c.WaitingPermission)},
 		{label: "Process identity", value: yesNo(c.ProcessIdentity)},
 		{label: "Native catalog", value: yesNo(c.NativeCatalog)},
-		{label: "TTY/MUX context", value: yesNo(c.TTYTmuxContext)},
 		{label: "Installable", value: yesNo(c.Installable)},
 		{label: "Resumable", value: yesNo(c.Resumable)},
 		{label: "Screen support", value: yesNo(c.ScreenSupport)},

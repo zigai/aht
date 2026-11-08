@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/reporting"
+
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -187,22 +189,22 @@ func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 	at := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
 
-	start, err := prepareReport(
+	start, err := reporting.Prepare(
 		strings.NewReader(
 			`{"session_id":"codex-session","cwd":"/work",`+
 				`"hook_event_name":"SessionStart","source":"startup",`+
 				`"model":"gpt-5"}`,
 		),
-		reportOptions{harness: "codex", activity: "idle", rawDefaultsOnly: true},
-		reportRuntimeContext{defaultObservedAt: at},
+		reporting.Options{Harness: "codex", Activity: "idle", RawDefaultsOnly: true},
+		reporting.Runtime{DefaultObservedAt: at},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	start.observation.SetProcess(process)
+	start.Observation.SetProcess(process)
 
-	session, err := store.Observe(context.Background(), start.observation)
+	session, err := store.Observe(context.Background(), start.Observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,22 +213,22 @@ func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 		t.Fatalf("start presence = %q, want live", session.Presence())
 	}
 
-	end, err := prepareReport(
+	end, err := reporting.Prepare(
 		strings.NewReader(
 			`{"session_id":"codex-session","cwd":"/work",`+
 				`"hook_event_name":"SessionEnd","reason":"other",`+
 				`"model":"gpt-5"}`,
 		),
-		reportOptions{harness: "codex", rawDefaultsOnly: true},
-		reportRuntimeContext{defaultObservedAt: at.Add(time.Second)},
+		reporting.Options{Harness: "codex", RawDefaultsOnly: true},
+		reporting.Runtime{DefaultObservedAt: at.Add(time.Second)},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	end.observation.SetProcess(process)
+	end.Observation.SetProcess(process)
 
-	session, err = store.Observe(context.Background(), end.observation)
+	session, err = store.Observe(context.Background(), end.Observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,19 +452,19 @@ func testLifecycleReports(
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 
 	for index, test := range tests {
-		prepared, err := prepareReport(nil, reportOptions{
-			harness:   harness,
-			lifecycle: test.lifecycle,
-			presence:  test.presence,
-			activity:  test.activity,
-			sessionID: harness + "-session",
-			event:     test.name,
-		}, reportRuntimeContext{defaultObservedAt: base.Add(time.Duration(index) * time.Second)})
+		prepared, err := reporting.Prepare(nil, reporting.Options{
+			Harness:   harness,
+			Lifecycle: test.lifecycle,
+			Presence:  test.presence,
+			Activity:  test.activity,
+			SessionID: harness + "-session",
+			Event:     test.name,
+		}, reporting.Runtime{DefaultObservedAt: base.Add(time.Duration(index) * time.Second)})
 		if err != nil {
 			t.Fatalf("preparing %s report: %v", test.name, err)
 		}
 
-		session, err := store.Observe(context.Background(), prepared.observation)
+		session, err := store.Observe(context.Background(), prepared.Observation)
 		if err != nil {
 			t.Fatalf("recording %s report: %v", test.name, err)
 		}
@@ -491,7 +493,7 @@ func TestReportIgnoresAnotherHarnessEnvironment(t *testing.T) {
 	agent := startNamedProcess(t, "pi")
 	t.Setenv("CLAUDE_PID", strconv.Itoa(agent))
 
-	session := reportFromEnvironment(t, "pi", "--session-id", "inner-pi")
+	session := reportFromEnvironment(t, "--session-id", "inner-pi")
 	if session.Process != nil && session.Process.PID == agent {
 		t.Fatal("pi report took its process from an outer Claude session's PID")
 	}
@@ -503,7 +505,7 @@ func TestReportReadsTheReportingHarnessEnvironment(t *testing.T) {
 	t.Setenv("PI_SESSION_ID", "inner-pi")
 	t.Setenv("PI_PID", strconv.Itoa(agent))
 
-	session := reportFromEnvironment(t, "pi")
+	session := reportFromEnvironment(t)
 	if session.SessionID != "inner-pi" {
 		t.Fatalf("session id = %q, want inner-pi", session.SessionID)
 	}
@@ -513,44 +515,38 @@ func TestReportReadsTheReportingHarnessEnvironment(t *testing.T) {
 	}
 }
 
-func TestReportPrefersGenericEnvironmentAndFlags(t *testing.T) {
-	t.Setenv("AHT_SESSION_ID", "generic")
-	t.Setenv("PI_SESSION_ID", "harness")
+func TestReportPrefersFlagsToNativeEnvironment(t *testing.T) {
+	t.Setenv("PI_SESSION_ID", "native")
 
-	if session := reportFromEnvironment(t, "pi"); session.SessionID != "generic" {
-		t.Fatalf("session id = %q, want the generic variable", session.SessionID)
+	if session := reportFromEnvironment(t); session.SessionID != "native" {
+		t.Fatalf("session id = %q", session.SessionID)
 	}
 
 	if session := reportFromEnvironment(
 		t,
-		"pi",
 		"--session-id",
 		"flag",
 	); session.SessionID != "flag" {
-		t.Fatalf("session id = %q, want the flag", session.SessionID)
+		t.Fatalf("session id = %q", session.SessionID)
 	}
 }
 
-func TestReportScopesEnvironmentToTheHarnessNamedInTheEnvironment(t *testing.T) {
-	t.Setenv("AHT_HARNESS", "pi")
-	t.Setenv("CLAUDE_SESSION_ID", "outer-claude")
-	t.Setenv("PI_SESSION_ID", "inner-pi")
-
-	if session := reportFromEnvironment(t, ""); session.SessionID != "inner-pi" {
-		t.Fatalf("session id = %q, want inner-pi", session.SessionID)
-	}
-}
-
-func reportFromEnvironment(t *testing.T, harnessID string, extra ...string) registry.Session {
+func reportFromEnvironment(t *testing.T, extra ...string) registry.Session {
 	t.Helper()
 
-	args := []string{"--store", filepath.Join(t.TempDir(), "sessions.json"), "--json", "report"}
-	if harnessID != "" {
-		args = append(args, harnessID)
-	}
-
-	args = append(args, "--event", "session_start", "--no-tmux")
-	args = append(args, extra...)
+	args := append(
+		[]string{
+			"--store",
+			filepath.Join(t.TempDir(), "sessions.json"),
+			"--json",
+			"report",
+			"pi",
+			"--event",
+			"session_start",
+			"--no-tmux",
+		},
+		extra...,
+	)
 
 	var stdout bytes.Buffer
 	if err := runTestCLI(t.Context(), args, &stdout, &bytes.Buffer{}); err != nil {
@@ -593,7 +589,6 @@ func TestReportKeepsExplicitProjectRootWhenPayloadCarriesCWD(t *testing.T) {
 		args []string
 	}{
 		{name: "droid environment", env: map[string]string{"FACTORY_PROJECT_DIR": "/srv/project"}},
-		{name: "generic environment", env: map[string]string{"AHT_PROJECT_ROOT": "/srv/project"}},
 		{name: "flag", args: []string{"--project-root", "/srv/project"}},
 	}
 

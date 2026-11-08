@@ -31,15 +31,16 @@ var (
 )
 
 type harnessSpec struct {
-	Directory, Family, PackageExtras string
-	Install                          func(string, string, string) []harness.DistributionCommand
-	ID                               string
-	Source                           string
-	Package                          string
-	Repo                             string
-	Asset                            string
-	URL                              string
-	MaxVersion                       string
+	Directory, PackageExtras string
+	Family                   harness.DistributionFamily
+	Install                  func(string, string, string) []harness.DistributionCommand
+	ID                       string
+	Source                   harness.DistributionSource
+	Package                  string
+	Repo                     string
+	Asset                    string
+	URL                      string
+	MaxVersion               string
 }
 
 type candidate struct {
@@ -98,10 +99,10 @@ func findHarness(id string) (harnessSpec, error) {
 func (h harnessSpec) sourceKey() string {
 	target := cmp.Or(h.Package, h.Repo, h.URL, h.ID)
 	if target != "" {
-		return h.Source + ":" + target
+		return string(h.Source) + ":" + target
 	}
 
-	return h.Source
+	return string(h.Source)
 }
 
 func parseVersion(value string) ([versionComponents]uint64, error) {
@@ -209,7 +210,7 @@ func detect(
 			return plan, err
 		}
 
-		if spec.Source == "weekly" {
+		if spec.Source == harness.DistributionWeekly {
 			return plan, fmt.Errorf("%w: %s uses the weekly workflow", errCompatibility, selection)
 		}
 	}
@@ -250,7 +251,8 @@ func selectReleased(selection string, released func(harnessSpec) bool) ([]harnes
 	)
 
 	for _, spec := range defaultCatalog {
-		if spec.Source == "weekly" || (selection != "all" && selection != spec.ID) {
+		if spec.Source == harness.DistributionWeekly ||
+			(selection != "all" && selection != spec.ID) {
 			continue
 		}
 

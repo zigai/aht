@@ -5,13 +5,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/install"
-	"github.com/zigai/aht/v2/internal/service"
+	"github.com/zigai/aht/v2/pkg/manage"
 )
 
 type upgradeResult struct {
-	Integrations []install.Result `json:"integrations"`
-	Tracker      service.Result   `json:"tracker"`
+	Integrations []manage.IntegrationResult `json:"integrations"`
+	Tracker      manage.TrackerResult       `json:"tracker"`
 	//exhaustruct:optional
 	TrackerError string `json:"tracker_error,omitempty"`
 }
@@ -29,17 +28,16 @@ func (app *application) newUpgradeCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if binary == "" {
-				binary = defaultInstallBinary()
-			}
+			manager := app.manager(binary)
 
-			integrations, integrationErr := install.Upgrade(cmd.Context(), binary, dryRun)
-
-			tracker, trackerErr := service.Upgrade(cmd.Context(), binary, dryRun)
-			if errors.Is(trackerErr, service.ErrUnsupported) {
-				tracker.Message = "unsupported platform; skipped"
-				trackerErr = nil
-			}
+			integrations, integrationErr := manager.UpgradeIntegrations(
+				cmd.Context(),
+				manage.IntegrationOptions{DryRun: dryRun},
+			)
+			tracker, trackerErr := manager.UpgradeTracker(
+				cmd.Context(),
+				manage.TrackerOptions{DryRun: dryRun},
+			)
 
 			result := upgradeResult{Integrations: integrations, Tracker: tracker}
 			if trackerErr != nil {
@@ -68,7 +66,7 @@ func (app *application) newUpgradeCommand() *cobra.Command {
 				return exitCode(errors.Join(integrationErr, trackerErr, writeErr), exitCodeGeneral)
 			}
 
-			return errors.Join(integrationErr, trackerErr, writeErr)
+			return writeErr
 		},
 	}
 	command.Flags().

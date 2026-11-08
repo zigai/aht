@@ -20,7 +20,7 @@ func TestSessionsReportsEveryViolation(t *testing.T) {
 			Liveness: registry.NewLiveness(
 				registry.PresenceLive,
 				registry.ActivityRunning,
-				nil,
+				nil, time.Time{}, "",
 			),
 			Observations: registry.Observations{
 				Native: &registry.NativeObservation{Lifecycle: &end},

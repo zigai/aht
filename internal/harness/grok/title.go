@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/titlefile"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -113,7 +114,7 @@ func grokSummaryPaths(identity registry.ObservationIdentity) ([]string, error) {
 		return nil, nil
 	}
 
-	home := grokHome()
+	home := grokHome(harness.HomeDir())
 	if home == "" {
 		return nil, nil
 	}

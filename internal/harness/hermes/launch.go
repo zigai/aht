@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const customProvider = "custom"
@@ -32,14 +31,13 @@ func (hermesHarness) LaunchPlan(
 	)
 
 	return harness.LaunchPlan{
-		Executable: hermesCommand,
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		TitleRequests: []harness.TitleRequest{{Role: "system", Prefix: "You name chat sessions."}},
+		Executable:    hermesCommand,
+		Protocol:      harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"HERMES_HOME=" + home,
 			"OPENAI_API_KEY=" + model.APIKey,
 		},
-		Setup:    nil,
-		Services: nil,
 		Files: []harness.LaunchFile{{
 			Path:   filepath.Join(home, "config.yaml"),
 			Update: func([]byte) ([]byte, error) { return []byte(config), nil },

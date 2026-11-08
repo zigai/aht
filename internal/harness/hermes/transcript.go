@@ -8,20 +8,10 @@ import (
 
 func (hermesHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"state.db"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            nil,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             transcriptQuery,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		DefaultFormat: transcript.FormatDatabase,
+		Patterns:      []string{"state.db"},
+		Sources:       transcriptSources,
+		Query:         transcriptQuery,
 	}
 }
 

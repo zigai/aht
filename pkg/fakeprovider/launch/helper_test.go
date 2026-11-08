@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -46,15 +49,48 @@ func runHelper(args []string) int {
 			return 2
 		}
 
-		if err := listen("tcp", args[1]); err != nil {
-			return reportHelperError(err)
-		}
-
-		return sleepHelper()
+		return reportHelperError(listen("tcp", args[1]))
 	case "sleep":
 		return sleepHelper()
 	case "exit":
 		return 3
+	case "group":
+		if len(args) != 2 {
+			return 2
+		}
+
+		child := exec.CommandContext(
+			context.Background(),
+			os.Args[0],
+			helperArgument,
+			"connect",
+			args[1],
+		)
+		if err := child.Run(); err != nil {
+			return reportHelperError(err)
+		}
+
+		return 0
+	case "connect":
+		if len(args) != 2 {
+			return 2
+		}
+
+		var dialer net.Dialer
+
+		connection, err := dialer.DialContext(context.Background(), "tcp", args[1])
+		if err != nil {
+			return reportHelperError(err)
+		}
+
+		defer func() { _ = connection.Close() }()
+
+		_, err = io.Copy(io.Discard, connection)
+		if err != nil {
+			return reportHelperError(err)
+		}
+
+		return 0
 	case "record":
 		if len(args) != 2 {
 			return 2
@@ -119,11 +155,7 @@ func runTracker(store string) int {
 		return 1
 	}
 
-	if err := listen("unix", store+".sock"); err != nil {
-		return reportHelperError(err)
-	}
-
-	return sleepHelper()
+	return reportHelperError(listen("unix", store+".sock"))
 }
 
 func listSessions() int {
@@ -143,11 +175,26 @@ func listSessions() int {
 
 func listen(network string, address string) error {
 	var config net.ListenConfig
-	if _, err := config.Listen(context.Background(), network, address); err != nil {
+
+	listener, err := config.Listen(context.Background(), network, address)
+	if err != nil {
 		return fmt.Errorf("listen %s %s: %w", network, address, err)
 	}
 
-	return nil
+	defer func() { _ = listener.Close() }()
+
+	runtime.GC()
+
+	for {
+		connection, err := listener.Accept()
+		if err != nil {
+			return fmt.Errorf("accept %s %s: %w", network, address, err)
+		}
+
+		if err := connection.Close(); err != nil {
+			return fmt.Errorf("close connection: %w", err)
+		}
+	}
 }
 
 func fakeInstall(args []string) int {
@@ -363,26 +410,4 @@ func readText(t *testing.T, path string) string {
 	}
 
 	return string(data)
-}
-
-func waitForPath(t *testing.T, path string) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			t.Fatalf("%s never appeared: %v", path, ctx.Err())
-		case <-ticker.C:
-		}
-	}
 }

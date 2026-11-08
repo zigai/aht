@@ -16,7 +16,6 @@ import (
 	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -48,13 +47,27 @@ var (
 	}
 )
 
+var errSilentDoctorFailure = errors.New("")
+
+type doctorCheck struct {
+	manage.DoctorCheck
+
+	Fix *doctorFix `json:"fix"`
+}
+
+type doctorFix struct {
+	Command   string `json:"command,omitempty"`
+	Manual    string `json:"manual,omitempty"`
+	Automatic bool   `json:"automatic"`
+}
+
 type doctorReport struct {
 	Version string               `json:"version"`
 	Build   doctorBuild          `json:"build"`
 	Install doctorInstall        `json:"install"`
 	Paths   doctorPaths          `json:"paths"`
 	Env     map[string]string    `json:"env"`
-	Checks  []manage.DoctorCheck `json:"checks"`
+	Checks  []doctorCheck        `json:"checks"`
 	Summary manage.DoctorSummary `json:"summary"`
 	Fixes   []doctorFixResult    `json:"fixes,omitempty"`
 }
@@ -118,13 +131,8 @@ func (app *application) newDoctorCommand() *cobra.Command {
 				return exitCode(errDoctorYesWithoutFix, exitCodeUsage)
 			}
 
-			manager := app.doctorManager(cmd)
-			opts := manage.DoctorOptions{
-				IncludeAll:   verbose,
-				ConfigPath:   app.configPath,
-				NoConfig:     app.noConfig,
-				MaxHealthAge: 0,
-			}
+			manager := app.manager("")
+			opts := manage.DoctorOptions{IncludeAll: verbose, MaxHealthAge: 0}
 			result := manager.Doctor(cmd.Context(), opts)
 
 			var fixes []doctorFixResult
@@ -166,32 +174,6 @@ func (app *application) newDoctorCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) doctorManager(cmd *cobra.Command) *manage.Manager {
-	defaults := serviceOptions{binary: defaultInstallBinary(), interval: serviceDefaultInterval}
-
-	opts, err := app.configuredServiceOptions(cmd, defaults)
-	if err != nil {
-		// The config.file check reports the failure and tracker.service is
-		// skipped, so these defaults are never compared against the service.
-		opts = service.Options{
-			Binary:      defaults.binary,
-			StorePath:   app.resolvedStorePath(),
-			Interval:    defaults.interval,
-			GracePeriod: defaults.grace,
-			DryRun:      defaults.dryRun,
-		}
-	}
-
-	return manage.New(
-		manage.Config{
-			Binary:             opts.Binary,
-			StorePath:          opts.StorePath,
-			TrackerInterval:    opts.Interval,
-			TrackerGracePeriod: opts.GracePeriod,
-		},
-	)
-}
-
 func (app *application) applyDoctorFixes(
 	ctx context.Context,
 	result manage.DoctorResult,
@@ -204,7 +186,7 @@ func (app *application) applyDoctorFixes(
 			continue
 		}
 
-		action := check.Fix.Command
+		action := app.doctorFixCommand(check.Fix)
 		if !yes {
 			confirmed, err := app.confirmAction(
 				ctx,
@@ -260,22 +242,22 @@ func (app *application) newDoctorReport(
 			Target: runtime.GOOS + "/" + runtime.GOARCH,
 		},
 		Install: doctorInstall{
-			Executable: abbreviateHome(executable, home),
+			Executable: formatHumanPath(executable),
 			Method:     installMethod(executable),
 		},
 		Paths: doctorPaths{
-			Config: app.doctorConfigFiles(home),
+			Config: app.doctorConfigFiles(result),
 			State: doctorPath{
-				Path:   abbreviateHome(registry.DefaultStateDir(), home),
+				Path:   formatHumanPath(registry.DefaultStateDir()),
 				Source: firstSetEnv(registry.StateDirEnv, "XDG_STATE_HOME"),
 			},
 			Store: doctorPath{
-				Path:   abbreviateHome(app.resolvedStorePath(), home),
+				Path:   formatHumanPath(app.resolvedStorePath()),
 				Source: app.storeSource(),
 			},
 		},
-		Env:     doctorEnv(home),
-		Checks:  make([]manage.DoctorCheck, 0, len(result.Checks)),
+		Env:     doctorEnv(),
+		Checks:  make([]doctorCheck, 0, len(result.Checks)),
 		Summary: result.Summary,
 		Fixes:   fixes,
 	}
@@ -288,33 +270,33 @@ func (app *application) newDoctorReport(
 		}
 
 		check.Details = slices.Clip(details)
+
+		rendered := doctorCheck{DoctorCheck: check, Fix: nil}
 		if check.Fix != nil {
 			fix := *check.Fix
-			fix.Command, fix.Manual = abbreviateHome(
-				fix.Command,
-				home,
-			), abbreviateHome(
-				fix.Manual,
-				home,
-			)
-			check.Fix = &fix
+			fix.Manual = abbreviateHome(fix.Manual, home)
+			rendered.Fix = &doctorFix{
+				Command:   app.doctorFixCommand(&fix),
+				Manual:    app.doctorFixManual(&fix),
+				Automatic: fix.Automatic,
+			}
 		}
 
-		report.Checks = append(report.Checks, check)
+		report.Checks = append(report.Checks, rendered)
 	}
 
 	return report
 }
 
-func (app *application) doctorConfigFiles(home string) []doctorConfigFile {
+func (app *application) doctorConfigFiles(result manage.DoctorResult) []doctorConfigFile {
 	explicit, source := app.configPath, "--config"
 	if explicit == "" {
 		explicit, source = strings.TrimSpace(os.Getenv(config.ConfigEnv)), config.ConfigEnv
 	}
 
-	user := filepath.Join(config.UserConfigDir(), "aht", "config.toml")
-	_, loadErr := app.loadConfig()
-	active := app.cfgMeta.ActiveFiles()
+	user := config.UserPath()
+	loadErr := result.ConfigError
+	active := result.ConfigFiles
 	status := func(path string) string {
 		return app.doctorConfigStatus(path, active, loadErr)
 	}
@@ -326,7 +308,7 @@ func (app *application) doctorConfigFiles(home string) []doctorConfigFile {
 			files = append(
 				files,
 				doctorConfigFile{
-					Path:   abbreviateHome(path, home),
+					Path:   formatHumanPath(path),
 					Status: doctorConfigLoaded,
 					Source: "",
 				},
@@ -337,7 +319,7 @@ func (app *application) doctorConfigFiles(home string) []doctorConfigFile {
 	if user != explicit {
 		files = append(
 			files,
-			doctorConfigFile{Path: abbreviateHome(user, home), Status: status(user), Source: ""},
+			doctorConfigFile{Path: formatHumanPath(user), Status: status(user), Source: ""},
 		)
 	}
 
@@ -345,7 +327,7 @@ func (app *application) doctorConfigFiles(home string) []doctorConfigFile {
 		files = append(
 			files,
 			doctorConfigFile{
-				Path:   abbreviateHome(explicit, home),
+				Path:   formatHumanPath(explicit),
 				Status: status(explicit),
 				Source: source,
 			},
@@ -428,7 +410,7 @@ func (app *application) writeDoctorReport(report doctorReport) error {
 	return app.writef("%s", out.String())
 }
 
-func (layout doctorLayout) writeCheck(out *strings.Builder, check manage.DoctorCheck) {
+func (layout doctorLayout) writeCheck(out *strings.Builder, check doctorCheck) {
 	status := string(check.Status)
 
 	padding := strings.Repeat(" ", doctorStatusWidth-len(status))
@@ -605,7 +587,7 @@ func hasAutomaticFix(check manage.DoctorCheck) bool {
 		(check.Status == manage.DoctorStatusWarn || check.Status == manage.DoctorStatusFail)
 }
 
-func doctorEnv(home string) map[string]string {
+func doctorEnv() map[string]string {
 	names := []string{
 		config.ConfigEnv,
 		registry.StorePathEnv,
@@ -632,7 +614,7 @@ func doctorEnv(home string) map[string]string {
 		case secrets[name]:
 			env[name] = "set"
 		default:
-			env[name] = abbreviateHome(value, home)
+			env[name] = formatHumanPath(value)
 		}
 	}
 
@@ -674,18 +656,6 @@ func homeDir() string {
 	}
 
 	return filepath.Clean(home)
-}
-
-func abbreviateHome(text string, home string) string {
-	if home == "" || home == string(filepath.Separator) {
-		return text
-	}
-
-	if text == home {
-		return "~"
-	}
-
-	return strings.ReplaceAll(text, home+string(filepath.Separator), "~"+string(filepath.Separator))
 }
 
 func countNoun(count int, singular string, pluralForm string) string {

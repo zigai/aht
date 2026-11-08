@@ -404,7 +404,7 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 		t.Fatal("expected UserPromptSubmit hook")
 	}
 
-	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", harnesspkg.HookEventSessionEnd} {
+	for _, event := range []string{"PostToolUse", "PreCompact", "PostCompact", "SessionEnd"} {
 		if _, ok := hooks[event]; !ok {
 			t.Fatalf("expected %s hook", event)
 		}
@@ -423,7 +423,7 @@ func TestInstallCodexMergesHooks(t *testing.T) {
 	if timeoutSeconds := requireTestHookTimeoutSeconds(
 		t,
 		hooks,
-		harnesspkg.HookEventSessionEnd,
+		"SessionEnd",
 	); timeoutSeconds != 3 {
 		t.Fatalf("Codex SessionEnd hook timeout = %v, want 3", timeoutSeconds)
 	}
@@ -765,7 +765,7 @@ func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
 				t.Context(),
 				Options{Harness: registry.Harness(test.harness), Binary: testInstallBinary},
 			)
-			if !errors.Is(err, errHookConfigShape) {
+			if !errors.Is(err, harnesspkg.ErrHookConfigShape) {
 				t.Fatalf("install error = %v, want errHookConfigShape", err)
 			}
 

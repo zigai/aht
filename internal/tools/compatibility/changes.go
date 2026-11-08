@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 // affectedHosts ignores only known non-harness tooling, tests, and documentation.
@@ -179,7 +181,7 @@ func (a application) changes(ctx context.Context) error {
 			return err
 		}
 
-		if spec.Source == "weekly" {
+		if spec.Source == harness.DistributionWeekly {
 			plan.Matrix.Include = append(plan.Matrix.Include, candidate{Harness: id, Version: ""})
 			continue
 		}

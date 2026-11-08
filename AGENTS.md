@@ -44,12 +44,14 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
 2. Implement only the optional capabilities the native surface supports, as
    methods on the adapter type:
    - `InstallPlan` (+ `InstallNextStep`/`StatusNextStep`) for managed hooks,
-     plugins, or extensions; templates live in `assets/`.
+     plugins, or extensions; templates live in `assets/`. Build command hooks
+     with `harness.CommandHookSpecs` and render templates with
+     `harness.RenderScriptTemplate`.
    - `ResumeCommand`, `PayloadCompatible`/`PayloadDefaults`, `HandleHook` for
      request/response hooks, `ObservableProcess`, and `RunWire` where applicable.
-   - `LifecycleDefaults` when native event names or resume sources differ from
-     the generic mapping in `internal/harness/lifecycle.go`
-     (`harness.TranslateLifecycle`).
+   - `LifecycleEventAttribute` and `LifecycleSourceAttributes` in the
+     `Definition` when native event names or resume sources live in attributes
+     the generic mapping in `internal/harness/lifecycle.go` does not read.
    - `transcript.go`: `Transcript() transcript.Reader` for history search. Reuse
      the shared grammars in `internal/harness/transcript` before writing a parser.
    - `title.go`: `SessionTitles`. Reuse the transcript parser when titles come
@@ -68,8 +70,8 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
    plus `--sequence` for ordered reporters and `--multi-session` when one process
    reports several native identities. Never encode aht metadata as
    `--attribute aht_*`; native metadata may use ordinary `--attribute key=value`.
-   Bump the adapter's integration version (or `harness.IntegrationVersion` for
-   shared command hooks) whenever generated content changes, so
+   Bump the adapter's integration version whenever its generated content
+   changes, including changes to shared templates or hook commands, so
    `aht manage integrations status` reports stale artifacts and
    `aht manage integrations upgrade` replaces them.
 4. Register the harness:
@@ -86,15 +88,15 @@ no remaining references. `internal/harness/amp` is a compact reference adapter.
    `depguard`, `forbidigo`, and `internal/architecture/conventions_test.go`
    enforce this.
 6. Tests:
-   - `adapter_test.go` for the definition, payload defaults, and lifecycle
-     translation.
+   - `adapter_test.go` for native payloads, lifecycle translation, and
+     adapter-specific behavior.
    - Installed-shape tests in `internal/install` (for example
      `typescript_install_test.go`), and generated runtime fixtures in
      `internal/install/testdata/node` used by
      `generated_runtime_integration_test.go`.
-   - Resume commands in `internal/harness/catalog/catalog_test.go`, history
-     fixtures in `pkg/history/history_test.go`, and title capability in
-     `pkg/harness/capabilities_test.go` when those capabilities exist.
+   - Catalog properties cover aliases, native resume identities, and title
+     capabilities automatically. Keep adapter payload fixtures in
+     `adapter_test.go` and history fixtures in `pkg/history/history_test.go`.
    - The adapter is picked up automatically by the generated lifecycle
      properties in `internal/harness/catalog/lifecycle_property_test.go`. It
      must pass them without per-harness exceptions.

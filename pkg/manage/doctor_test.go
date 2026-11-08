@@ -19,8 +19,8 @@ import (
 func TestManagerDoctorReportsHistoryRefreshWithoutCreatingIndex(t *testing.T) {
 	for _, scenario := range []string{"missing", "complete", "partial", "corrupt", "stale"} {
 		t.Run(scenario, func(t *testing.T) {
-			manager, opts, catalog, indexPath := prepareHistoryDoctor(t, scenario)
-			result := manager.Doctor(t.Context(), opts)
+			manager, catalog, indexPath := prepareHistoryDoctor(t, scenario)
+			result := manager.Doctor(t.Context(), manage.DoctorOptions{})
 			assertDoctorInvariants(t, result)
 			found := historyDoctorCheck(t, result)
 
@@ -74,16 +74,17 @@ func requireHistoryDoctorJSON(t *testing.T, result manage.DoctorResult, wantMess
 func prepareHistoryDoctor(
 	t *testing.T,
 	scenario string,
-) (*manage.Manager, manage.DoctorOptions, history.Catalog, string) {
+) (*manage.Manager, history.Catalog, string) {
 	t.Helper()
 	home := isolateDoctorEnvironment(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
-	manager := manage.New(
-		manage.Config{Binary: "aht", StorePath: filepath.Join(home, "sessions.json")},
-	)
-	opts := manage.DoctorOptions{ConfigPath: filepath.Join(home, "config.toml")}
+	manager := manage.New(manage.Config{
+		Binary:     "aht",
+		StorePath:  filepath.Join(home, "sessions.json"),
+		ConfigPath: filepath.Join(home, "config.toml"),
+	})
 
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
@@ -98,7 +99,7 @@ func prepareHistoryDoctor(
 		},
 	}
 	if scenario == "missing" {
-		return manager, opts, historyCatalog, indexPath
+		return manager, historyCatalog, indexPath
 	}
 
 	if err := os.MkdirAll(historyCatalog.Sources[0].Path, 0o700); err != nil {
@@ -140,7 +141,7 @@ func prepareHistoryDoctor(
 		}
 	}
 
-	return manager, opts, historyCatalog, indexPath
+	return manager, historyCatalog, indexPath
 }
 
 func historyDoctorCheck(t *testing.T, result manage.DoctorResult) manage.DoctorCheck {
@@ -242,11 +243,11 @@ func TestDoctorNoConfigIgnoresConfigFiles(t *testing.T) {
 	home := isolateDoctorEnvironment(t)
 	writeDoctorFile(t, filepath.Join(home, ".config", "aht", "config.toml"), "not toml [")
 
-	result := newDoctorManager(
-		t,
-		home,
-		"",
-	).Doctor(t.Context(), manage.DoctorOptions{NoConfig: true})
+	result := manage.New(manage.Config{
+		Binary:    filepath.Join(home, "bin", "aht"),
+		StorePath: filepath.Join(home, "state.json"),
+		NoConfig:  true,
+	}).Doctor(t.Context(), manage.DoctorOptions{})
 
 	assertDoctorInvariants(t, result)
 
@@ -332,8 +333,8 @@ func TestDoctorStoreFailuresOfferReset(t *testing.T) {
 				t.Fatalf("store.read = %+v, want failure containing %q", check, test.message)
 			}
 
-			if want := "aht --store " + storePath + " manage state reset --force"; check.Fix.Command != want {
-				t.Fatalf("store.read fix = %q, want %q", check.Fix.Command, want)
+			if check.Fix.Action != manage.DoctorActionResetStore || check.Fix.Target != storePath {
+				t.Fatalf("store.read fix = %+v", check.Fix)
 			}
 		})
 	}
@@ -497,6 +498,88 @@ func TestDoctorIntegrationInstalledByAnotherExecutable(t *testing.T) {
 		"integrations.claude",
 	); check.Status != manage.DoctorStatusOK {
 		t.Fatalf("integration after repair = %+v, want ok", check)
+	}
+}
+
+func TestDoctorReportsIncompleteAndDisabledIntegrations(t *testing.T) {
+	for _, test := range []struct{ name, id string }{
+		{"missing plugin file", "goose"},
+		{"disabled native registration", "hermes"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := isolateDoctorEnvironment(t)
+			binary := writeExecutable(t, filepath.Join(home, "bin", "aht"))
+
+			manager := manage.New(
+				manage.Config{Binary: binary, StorePath: filepath.Join(home, "state.json")},
+			)
+			if test.id == "hermes" {
+				t.Setenv("HERMES_HOME", filepath.Join(home, ".hermes"))
+				t.Setenv("HERMES_MANAGED", "")
+				path := writeExecutable(t, filepath.Join(home, "bin", "hermes"))
+
+				script := `#!/bin/sh
+if [ "$1 $2" = "plugins list" ]; then
+ printf '%s\n' '[{"name":"aht-state","status":"disabled","version":"0.0.1","source":"user"}]'
+fi
+`
+				if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			t.Setenv("PATH", filepath.Join(home, "bin"))
+
+			if _, err := manager.InstallIntegration(
+				t.Context(),
+				registry.Harness(test.id),
+				manage.IntegrationOptions{},
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			if test.id == "goose" {
+				if err := os.Remove(
+					filepath.Join(home, ".agents", "plugins", "aht-state", "scripts", "report.sh"),
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			check := findDoctorCheck(
+				t,
+				manager.Doctor(t.Context(), manage.DoctorOptions{}),
+				"integrations."+test.id,
+			)
+			if check.Status != manage.DoctorStatusWarn || check.Message == "" || check.Fix == nil {
+				t.Fatalf("unhealthy integration = %+v, want warning and repair guidance", check)
+			}
+
+			if test.id == "hermes" {
+				if check.Fix.Automatic || check.Fix.Manual == "" {
+					t.Fatalf("disabled integration fix = %+v, want manual enablement", check.Fix)
+				}
+
+				return
+			}
+
+			if !check.Fix.Automatic {
+				t.Fatalf("incomplete integration has no automatic repair: %+v", check.Fix)
+			}
+
+			if _, err := check.Repair(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			repaired := findDoctorCheck(
+				t,
+				manager.Doctor(t.Context(), manage.DoctorOptions{}),
+				"integrations."+test.id,
+			)
+			if repaired.Status != manage.DoctorStatusOK {
+				t.Fatalf("repaired integration = %+v", repaired)
+			}
+		})
 	}
 }
 

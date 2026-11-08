@@ -15,54 +15,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestDefinition(t *testing.T) {
-	definition := New().Definition()
-	if definition.ID != registry.Harness("prime-agent") ||
-		!reflect.DeepEqual(definition.Aliases, []string{"prime", "primeagent", "prime_agent"}) ||
-		!reflect.DeepEqual(definition.ProcessNames, []string{"prime-agent"}) {
-		t.Fatalf("identity = %#v", definition)
-	}
-
-	if definition.ExclusiveProcess || definition.CatalogCreates ||
-		definition.Capabilities.SessionStart || definition.Capabilities.SessionEnd ||
-		!definition.Capabilities.RunningIdle || definition.Capabilities.WaitingPermission ||
-		!definition.Capabilities.ProcessIdentity || !definition.Capabilities.NativeCatalog ||
-		definition.Capabilities.TTYTmuxContext {
-		t.Fatalf("capabilities = %#v", definition)
-	}
-
-	if len(definition.Env.SessionID) != 0 || len(definition.Env.SessionPath) != 0 ||
-		len(definition.Env.PID) != 0 ||
-		len(definition.Env.Event) != 0 ||
-		!reflect.DeepEqual(
-			definition.Env.ProjectRoot,
-			[]string{"PRIME_AGENT_INTERNAL_DAEMON_WORKER_CWD"},
-		) {
-		t.Fatalf("environment = %#v", definition.Env)
-	}
-
-	if definition.IntegrationSource != "prime-agent-catalog" ||
-		definition.IntegrationVersion != 1 ||
-		definition.StateAuthority != registry.AuthorityHook || definition.ScreenFallback {
-		t.Fatalf("integration = %#v", definition)
-	}
-}
-
-func TestInstallPlanDeclaresNativeCatalog(t *testing.T) {
-	plan, err := New().InstallPlan("unused")
-	if err != nil || len(plan.Actions) != 1 {
-		t.Fatalf("InstallPlan() = %#v, %v", plan, err)
-	}
-
-	action, ok := plan.Actions[0].(harness.NativeCatalogAction)
-	if !ok || action.Label != "native session catalog" ||
-		!reflect.DeepEqual(action.Command, []string{"prime-agent", "sessions", "--all", "--json"}) {
-		t.Fatalf("action = %#v", plan.Actions[0])
-	}
-
-	var _ harness.NoInstallRequired = New()
-}
-
 func TestDistributionInstallUsesPinnedOfficialInstaller(t *testing.T) {
 	distribution := New().Distribution()
 	if distribution.Source != "channel" || distribution.Directory != "prime" ||
@@ -159,7 +111,6 @@ func TestObservableProcessRequiresPrimeWorkerExecutable(t *testing.T) {
 		{
 			process: processinfo.Process{
 				Executable: "/usr/bin/other",
-				AgentHint:  "prime-agent",
 				Args: []string{
 					"prime-agent",
 					"worker",

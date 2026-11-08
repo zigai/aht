@@ -159,14 +159,6 @@ func TestStartRejectsTakenAddress(t *testing.T) {
 	}
 }
 
-func TestStartRejectsEmptySideMarker(t *testing.T) {
-	if _, err := fakeprovider.Start(fakeprovider.Options{SideMarkers: []string{""}}); err == nil {
-		t.Fatal(
-			"Start accepted an empty side marker, which would classify every request as a side request",
-		)
-	}
-}
-
 func TestURLIsOriginWithoutVersionPrefix(t *testing.T) {
 	server := startServer(t, fakeprovider.Options{})
 
@@ -344,20 +336,17 @@ func TestMalformedBodiesAreRejectedAndNotRecorded(t *testing.T) {
 func TestSideRequestsAreAnsweredApartAndNeverHeld(t *testing.T) {
 	server := startServer(
 		t,
-		fakeprovider.Options{Hold: true, SideMarkers: []string{"custom-title-cue"}},
+		fakeprovider.Options{Hold: true, SideRequest: func(value map[string]any) bool {
+			return value["operation"] == "name"
+		}},
 	)
 
-	markers := []string{
-		"You are a title generator",
-		"ultra-short dashboard line",
-		"generate_session_title",
-		"Generate a session title",
-		"Write the title in the predominant language",
-		"Generate a short, descriptive title",
-		"custom-title-cue",
-	}
+	markers := []string{"first", "second"}
 	for _, marker := range markers {
-		body := fmt.Sprintf(`{"messages":[{"role":"system","content":%q}]}`, marker)
+		body := fmt.Sprintf(
+			`{"operation":"name","messages":[{"role":"system","content":%q}]}`,
+			marker,
+		)
 
 		status, data := postJSON(t, server.URL()+"/v1/chat/completions", body)
 		if status != http.StatusOK ||
@@ -375,7 +364,26 @@ func TestSideRequestsAreAnsweredApartAndNeverHeld(t *testing.T) {
 	}
 }
 
-func TestSideClassificationByToolAndStructuredOutput(t *testing.T) {
+func TestUndeclaredTitleTextUsesConversationScript(t *testing.T) {
+	server := startServer(t, fakeprovider.Options{})
+
+	const text = "Explain the phrase Generate a session title"
+
+	body := fmt.Sprintf(`{"messages":[{"role":"user","content":%q}]}`, text)
+
+	status, data := postJSON(t, server.URL()+"/v1/chat/completions", body)
+	if status != http.StatusOK || replyText(t, fakeprovider.ProtocolOpenAIChat, data) != text {
+		t.Fatalf("conversation reply = %d %s", status, data)
+	}
+
+	requests := closeAndRequests(t, server)
+	if len(requests) != 1 || requests[0].Kind != fakeprovider.KindConversation ||
+		len(server.SideRequests()) != 0 {
+		t.Fatalf("requests = %+v, side = %+v", requests, server.SideRequests())
+	}
+}
+
+func TestStructuredSideReplies(t *testing.T) {
 	tests := []struct {
 		name     string
 		protocol fakeprovider.Protocol
@@ -383,21 +391,9 @@ func TestSideClassificationByToolAndStructuredOutput(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "session title tool",
-			protocol: fakeprovider.ProtocolAnthropicMessages,
-			body:     `{"tools":[{"name":"session_title"}],"messages":[]}`,
-			want:     "Fake session",
-		},
-		{
-			name:     "session title function",
-			protocol: fakeprovider.ProtocolOpenAIChat,
-			body:     `{"tools":[{"type":"function","function":{"name":"session_title"}}],"messages":[]}`,
-			want:     "Fake session",
-		},
-		{
 			name:     "responses structured output fills required string fields",
 			protocol: fakeprovider.ProtocolOpenAIResponses,
-			body: `{"input":"x","text":{"format":{"type":"json_schema",` +
+			body: `{"operation":"name","input":"x","text":{"format":{"type":"json_schema",` +
 				`"schema":{"type":"object","properties":{"title":{"type":"str` +
 				`ing"},"count":{"type":"integer"}},"required":["title",` +
 				`"count"]}}}}`,
@@ -406,7 +402,7 @@ func TestSideClassificationByToolAndStructuredOutput(t *testing.T) {
 		{
 			name:     "chat structured output without required list",
 			protocol: fakeprovider.ProtocolOpenAIChat,
-			body: `{"messages":[],"response_format":{"type":"json_schema",` +
+			body: `{"operation":"name","messages":[],"response_format":{"type":"json_schema",` +
 				`"json_schema":{"name":"t","schema":{"type":"object",` +
 				`"properties":{"name":{"type":"string"}}}}}}`,
 			want: `{"name":"Fake session"}`,
@@ -414,7 +410,12 @@ func TestSideClassificationByToolAndStructuredOutput(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := startServer(t, fakeprovider.Options{Hold: true})
+			server := startServer(
+				t,
+				fakeprovider.Options{Hold: true, SideRequest: func(value map[string]any) bool {
+					return value["operation"] == "name"
+				}},
+			)
 
 			status, data := postJSON(t, server.URL()+pathFor(test.protocol), test.body)
 			if status != http.StatusOK {
@@ -858,6 +859,60 @@ func TestResetAbandonsHeldRequestsAndStartsNewSession(t *testing.T) {
 	hold.Release()
 }
 
+func TestStreamRequestsIncludesExistingAndNewSideRequests(t *testing.T) {
+	server := startServer(t, fakeprovider.Options{SideRequest: func(value map[string]any) bool {
+		return value["operation"] == "name"
+	}})
+	postJSON(
+		t,
+		server.URL()+"/v1/chat/completions",
+		`{"messages":[{"role":"user","content":"hello"}]}`,
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	requests := make(chan fakeprovider.Request)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- server.StreamRequests(ctx, func(request fakeprovider.Request) error {
+			select {
+			case requests <- request:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+
+	if request := <-requests; request.Kind != fakeprovider.KindConversation ||
+		request.UserText != "hello" {
+		t.Fatalf("existing request = %+v", request)
+	}
+
+	postJSON(
+		t,
+		server.URL()+"/v1/chat/completions",
+		`{"operation":"name","messages":[]}`,
+	)
+
+	select {
+	case request := <-requests:
+		if request.Kind != fakeprovider.KindSide {
+			t.Fatalf("new request = %+v", request)
+		}
+	case <-time.After(waitTimeout):
+		t.Error("side request did not reach the stream")
+	}
+
+	cancel()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stream cancellation = %v", err)
+	}
+}
+
 func TestWaitRequestsReturnsOnceCountIsReached(t *testing.T) {
 	server := startServer(t, fakeprovider.Options{})
 
@@ -894,11 +949,13 @@ func TestWaitRequestsStopsOnContextSideRequestsAndClose(t *testing.T) {
 		}
 	})
 	t.Run("side requests do not count", func(t *testing.T) {
-		server := startServer(t, fakeprovider.Options{})
+		server := startServer(t, fakeprovider.Options{SideRequest: func(value map[string]any) bool {
+			return value["operation"] == "name"
+		}})
 		postJSON(
 			t,
 			server.URL()+"/v1/chat/completions",
-			`{"messages":[{"role":"system","content":"Generate a session title"}]}`,
+			`{"operation":"name","messages":[]}`,
 		)
 
 		ctx, cancel := context.WithTimeout(t.Context(), probeTimeout)

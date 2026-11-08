@@ -1,10 +1,17 @@
 package codex_test
 
 import (
+	"encoding/json"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -260,5 +267,229 @@ func requireClockState(
 
 	if !session.ActivityChangedAt.Equal(since) {
 		t.Fatalf("activity clock = %s, want %s", session.ActivityChangedAt, since)
+	}
+}
+
+func TestPayloadDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tests := []struct {
+		name       string
+		harness    registry.Harness
+		payload    string
+		wantID     string
+		wantPath   string
+		wantCWD    string
+		wantRoot   string
+		wantEvent  string
+		wantAttr   string
+		wantAttrKV string
+	}{
+		{
+			name:    "codex",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"codex-session","transcript_path":"/tmp/` +
+				`codex.jsonl","cwd":"/tmp","hook_event_name":"UserPromptSubmi` +
+				`t","model":"gpt-5-codex"}`,
+			wantID:     "codex-session",
+			wantPath:   "/tmp/codex.jsonl",
+			wantCWD:    "/tmp",
+			wantRoot:   "",
+			wantEvent:  "UserPromptSubmit",
+			wantAttr:   "codex_model",
+			wantAttrKV: "gpt-5-codex",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := catalog.PayloadDefaults(test.harness, json.RawMessage(test.payload))
+			if err != nil {
+				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
+			}
+
+			if got.SessionID != test.wantID ||
+				got.SessionPath != test.wantPath ||
+				got.CWD != test.wantCWD ||
+				got.ProjectRoot != test.wantRoot ||
+				got.Event != test.wantEvent {
+				t.Fatalf("unexpected defaults: %#v", got)
+			}
+
+			if got.Attributes[test.wantAttr] != test.wantAttrKV {
+				t.Fatalf(
+					"expected attribute %s=%q, got %#v",
+					test.wantAttr,
+					test.wantAttrKV,
+					got.Attributes,
+				)
+			}
+		})
+	}
+}
+
+func TestPayloadCompatible(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		harness registry.Harness
+		payload string
+		want    bool
+	}{
+		{
+			name:    "codex accepts native hook payload",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"codex-session","transcript_path":"/home/user/` +
+				`.codex/sessions/2026/06/18/rollout.jsonl","cwd":"/repo",` +
+				`"hook_event_name":"Stop","model":"gpt-5-codex"}`,
+			want: true,
+		},
+		{
+			name:    "codex accepts null transcript path",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"codex-session","transcript_path":null,` +
+				`"cwd":"/repo","hook_event_name":"Stop",` +
+				`"model":"gpt-5-codex"}`,
+			want: true,
+		},
+		{
+			name:    "codex accepts session end payload without model",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"codex-session","transcript_path":null,` +
+				`"cwd":"/repo","hook_event_name":"SessionEnd",` +
+				`"reason":"other"}`,
+			want: true,
+		},
+		{
+			name:    "codex accepts configurable transcript path",
+			harness: registry.Harness("codex"),
+			payload: `{"session_id":"claude-session","transcript_path":"/home/` +
+				`user/.claude/projects/-repo/claude-session.jsonl","cwd":"/` +
+				`repo","hook_event_name":"SessionStart",` +
+				`"model":"claude-sonnet-4-6"}`,
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := catalog.PayloadCompatible(test.harness, json.RawMessage(test.payload))
+			if got != test.want {
+				t.Fatalf("expected %t, got %t", test.want, got)
+			}
+		})
+	}
+}
+
+func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
+	for _, test := range []struct {
+		harness  registry.Harness
+		variable string
+		value    func(dir string) string
+	}{
+		{harness: registry.Harness("codex"), variable: "CODEX_HOME"},
+	} {
+		for _, knownHome := range []bool{true, false} {
+			name := string(test.harness) + "/" + test.variable
+			if !knownHome {
+				name += "/without home"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				testharness.Isolate(t, catalog.All()...)
+
+				if !knownHome {
+					t.Setenv("HOME", "")
+					t.Setenv("USERPROFILE", "")
+				}
+
+				override := t.TempDir()
+
+				value := override
+				if test.value != nil {
+					value = test.value(override)
+				}
+
+				t.Setenv(test.variable, value)
+				locations, _ := catalog.LocationsFor(test.harness, "")
+
+				config := testharness.LocationPaths(locations, harness.LocationKindConfig)
+				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
+					return !strings.HasPrefix(path, override+string(filepath.Separator)) &&
+						!strings.HasPrefix(path, "/etc/")
+				}) {
+					t.Errorf("config locations with %s=%s = %v", test.variable, value, config)
+				}
+			})
+		}
+	}
+}
+
+func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
+	for _, test := range []struct {
+		harness registry.Harness
+		plant   func(t *testing.T, workDir string)
+	}{
+		{registry.Harness("codex"), func(t *testing.T, workDir string) {
+			t.Helper()
+			testharness.PlantFile(
+				t, workDir, `{"id":"abc","thread_name":"Decoy"}`+"\n", ".codex", "session_index.jsonl",
+			)
+		}},
+	} {
+		t.Run(string(test.harness), func(t *testing.T) {
+			workDir := testharness.WithoutHome(t, catalog.All()...)
+			test.plant(t, workDir)
+
+			adapter, ok := catalog.Find(test.harness)
+			if !ok {
+				t.Fatalf("adapter %s not found", test.harness)
+			}
+
+			reader, ok := adapter.(harness.TitleReader)
+			if !ok {
+				t.Fatalf("adapter %s has no title reader", test.harness)
+			}
+
+			titles, err := reader.SessionTitles(
+				t.Context(),
+				[]registry.ObservationIdentity{{SessionID: "abc"}},
+			)
+			if err != nil || len(titles) != 1 || titles[0] != "" {
+				t.Fatalf("SessionTitles without a home = %q, %v, want one empty title", titles, err)
+			}
+		})
+	}
+}
+
+func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		harness    registry.Harness
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{"codex", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+	} {
+		t.Run(string(test.harness)+"/"+test.event+string(test.activity), func(t *testing.T) {
+			report := &registry.Report{
+				Event:      test.event,
+				Activity:   &test.activity,
+				Attributes: test.attributes,
+			}
+
+			observation := catalog.PrepareObservation(
+				registry.Observation{Harness: test.harness, Evidence: report},
+			)
+			if !reflect.DeepEqual(observation.Report().Detail, test.want) {
+				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
+			}
+		})
 	}
 }

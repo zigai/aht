@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
@@ -56,18 +58,66 @@ func (f *confirmationFixture) listCatalog(context.Context) ([]CatalogEntry, erro
 	return append([]CatalogEntry(nil), f.catalog...), nil
 }
 
-// continuousCycle runs one cycle the way Run does, without its timer.
-func continuousCycle(t *testing.T, watcher *Observer) Result {
+func confirmationCycles(t *testing.T, watcher *Observer) func() Result {
 	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	results := make(chan Result)
+	resume := make(chan struct{})
+	done := make(chan error, 1)
 
-	watcher.continuous = true
+	go func() {
+		done <- watcher.RunWithResults(ctx, func(result Result) error {
+			select {
+			case results <- result:
+			case <-ctx.Done():
+				return nil
+			}
 
-	result, err := watcher.runCycle(context.Background())
-	if err != nil {
-		t.Fatal(err)
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+
+			return nil
+		})
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+
+	started := false
+
+	return func() Result {
+		t.Helper()
+
+		if started {
+			select {
+			case resume <- struct{}{}:
+			case err := <-done:
+				done <- err
+
+				t.Fatalf("observer stopped before next cycle: %v", err)
+			}
+		}
+
+		started = true
+
+		select {
+		case result := <-results:
+			return result
+		case err := <-done:
+			done <- err
+
+			t.Fatalf("observer stopped before next cycle: %v", err)
+
+			return Result{}
+		}
 	}
-
-	return result
 }
 
 func newConfirmationObserver(
@@ -99,22 +149,90 @@ func agentProcess(pid int) processinfo.Process {
 
 func TestObserverNeverRecordsShortLivedUnconfirmedProcess(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "state.json")
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "state.json")
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
-	if err != nil {
-		t.Fatal(err)
-	}
+		store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	t.Cleanup(func() { _ = store.Close() })
+		t.Cleanup(func() { _ = store.Close() })
 
-	short := agentProcess(4100)
-	fixture := &confirmationFixture{at: time.Now().UTC(), processes: []processinfo.Process{short}}
-	watcher := newConfirmationObserver(store, fixture, 3*time.Second)
+		short := agentProcess(4100)
+		fixture := &confirmationFixture{
+			at:        time.Now().UTC(),
+			processes: []processinfo.Process{short},
+		}
+		watcher := newConfirmationObserver(store, fixture, 3*time.Second)
+		next := confirmationCycles(t, watcher)
 
-	for range 8 {
-		if result := continuousCycle(t, watcher); result.Present != 0 || result.Observations != 0 {
-			t.Fatalf("unconfirmed process produced observations: %#v", result)
+		for range 8 {
+			if result := next(); result.Present != 0 || result.Observations != 0 {
+				t.Fatalf("unconfirmed process produced observations: %#v", result)
+			}
+
+			sessions, err := store.List(context.Background(), registry.Filter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(sessions) != 0 {
+				t.Fatalf("unconfirmed process listed: %#v", sessions)
+			}
+
+			fixture.advance(300*time.Millisecond, short)
+		}
+
+		fixture.advance(300 * time.Millisecond)
+
+		for range 3 {
+			next()
+			fixture.advance(300 * time.Millisecond)
+		}
+
+		if err := store.Flush(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+
+		persisted, err := registry.NewJournal(path, catalog.Rules{}).
+			List(context.Background(), registry.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(persisted) != 0 {
+			t.Fatalf("short-lived process persisted = %#v", persisted)
+		}
+
+		fixture.advance(time.Second, short)
+
+		if result := next(); result.Present != 0 || result.Observations != 0 {
+			t.Fatalf("reappearing process bypassed confirmation: %#v", result)
+		}
+	})
+}
+
+func TestObserverRecordsProcessAfterConfirmationPeriod(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		process := agentProcess(4200)
+		fixture := &confirmationFixture{
+			at:        time.Now().UTC(),
+			processes: []processinfo.Process{process},
+		}
+		watcher := newConfirmationObserver(store, fixture, time.Second)
+		next := confirmationCycles(t, watcher)
+
+		if result := next(); result.Present != 0 {
+			t.Fatalf("first sighting recorded before confirmation: %#v", result)
+		}
+
+		fixture.advance(time.Second, process)
+
+		if result := next(); result.Present != 1 {
+			t.Fatalf("process not recorded after confirmation period: %#v", result)
 		}
 
 		sessions, err := store.List(context.Background(), registry.Filter{})
@@ -122,84 +240,38 @@ func TestObserverNeverRecordsShortLivedUnconfirmedProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(sessions) != 0 {
-			t.Fatalf("unconfirmed process listed: %#v", sessions)
+		if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceLive {
+			t.Fatalf("confirmed sessions = %#v, want one live session", sessions)
 		}
-
-		fixture.advance(300*time.Millisecond, short)
-	}
-
-	fixture.advance(300 * time.Millisecond)
-
-	for range 3 {
-		continuousCycle(t, watcher)
-		fixture.advance(300 * time.Millisecond)
-	}
-
-	if err := store.Flush(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	persisted, err := registry.NewJournal(path, catalog.Rules{}).
-		List(context.Background(), registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(persisted) != 0 || len(watcher.candidates) != 0 {
-		t.Fatalf(
-			"short-lived process persisted = %#v, pending = %#v",
-			persisted,
-			watcher.candidates,
-		)
-	}
-}
-
-func TestObserverRecordsProcessAfterConfirmationPeriod(t *testing.T) {
-	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
-	process := agentProcess(4200)
-	fixture := &confirmationFixture{at: time.Now().UTC(), processes: []processinfo.Process{process}}
-	watcher := newConfirmationObserver(store, fixture, time.Second)
-
-	if result := continuousCycle(t, watcher); result.Present != 0 {
-		t.Fatalf("first sighting recorded before confirmation: %#v", result)
-	}
-
-	fixture.advance(time.Second, process)
-
-	if result := continuousCycle(t, watcher); result.Present != 1 {
-		t.Fatalf("process not recorded after confirmation period: %#v", result)
-	}
-
-	sessions, err := store.List(context.Background(), registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(sessions) != 1 || sessions[0].Presence() != registry.PresenceLive {
-		t.Fatalf("confirmed sessions = %#v, want one live session", sessions)
-	}
+	})
 }
 
 func TestObserverConfirmsNativeAndCatalogProcessesImmediately(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
-	native := agentProcess(4300)
-	listed := agentProcess(4301)
-	fixture := &confirmationFixture{
-		at:        time.Now().UTC(),
-		processes: []processinfo.Process{native, listed},
-		catalog: []CatalogEntry{
-			{Harness: "codex", SessionID: "catalog-session", ProcessPID: listed.PID, Current: true},
-		},
-	}
-	seedHookCreatedLiveSessionFor(t, store, fixture.at.Add(-time.Second), native)
-	watcher := newConfirmationObserver(store, fixture, time.Hour)
+	synctest.Test(t, func(t *testing.T) {
+		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		native := agentProcess(4300)
+		listed := agentProcess(4301)
+		fixture := &confirmationFixture{
+			at:        time.Now().UTC(),
+			processes: []processinfo.Process{native, listed},
+			catalog: []CatalogEntry{
+				{
+					Harness:    "codex",
+					SessionID:  "catalog-session",
+					ProcessPID: listed.PID,
+					Current:    true,
+				},
+			},
+		}
+		seedHookCreatedLiveSessionFor(t, store, fixture.at.Add(-time.Second), native)
+		watcher := newConfirmationObserver(store, fixture, time.Hour)
+		next := confirmationCycles(t, watcher)
 
-	if result := continuousCycle(t, watcher); result.Present != 2 {
-		t.Fatalf("native and catalog processes not confirmed at once: %#v", result)
-	}
+		if result := next(); result.Present != 2 {
+			t.Fatalf("native and catalog processes not confirmed at once: %#v", result)
+		}
+	})
 }
 
 func seedHookCreatedLiveSessionFor(
@@ -262,197 +334,177 @@ func statIdentity(t *testing.T, path string) fileIdentity {
 	return fileIdentity{inode: stat.Ino, modTime: info.ModTime(), size: info.Size()}
 }
 
-func waitForScreenIdleSession(t *testing.T, store Store, count int) {
-	t.Helper()
-
-	deadline := time.Now().Add(10 * time.Second)
-
-	for {
-		sessions, err := store.List(context.Background(), registry.Filter{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		idle := false
-		for _, session := range sessions {
-			idle = idle ||
-				(session.Activity() != nil && *session.Activity() == registry.ActivityIdle)
-		}
-
-		if len(sessions) == count && idle {
-			return
-		}
-
-		if time.Now().After(deadline) {
-			t.Fatalf("tracker did not settle: %#v", sessions)
-		}
-
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-// TestTrackerSteadyStateDoesNotRewriteState runs the realtime tracker pieces at
+// TestTrackerSteadyStateDoesNotRewriteState runs the tracker with a virtual clock at
 // the default 300 ms interval with unchanged live sessions and fails if
 // heartbeat cycles rewrite the snapshot, append the journal, or rewrite the
 // observer health file.
 func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "state.json")
 
-	if testing.Short() {
-		t.Skip("runs the tracker for several seconds")
-	}
-
-	path := filepath.Join(t.TempDir(), "state.json")
-
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = store.Close() })
-
-	plain := processinfo.Process{
-		PID:            4400,
-		PPID:           1,
-		ProcessGroupID: 4400,
-		Foreground:     true,
-		StartIdentity:  "boot:4400",
-		Executable:     "/usr/bin/codex",
-		CWD:            "/plain",
-		TTY:            "/dev/pts/2",
-	}
-	paned := processinfo.Process{
-		PID:                4401,
-		PPID:               1,
-		ProcessGroupID:     4401,
-		Foreground:         true,
-		StartIdentity:      "boot:4401",
-		Executable:         "/usr/bin/codex",
-		CWD:                "/repo",
-		MultiplexerKind:    "zellij",
-		MultiplexerSession: "work",
-		MultiplexerPane:    "7",
-	}
-	pane := mux.Pane{
-		Location: registry.Location{
-			Kind:            registry.MultiplexerZellij,
-			SessionName:     "work",
-			TabID:           "3",
-			TabName:         "agents",
-			PaneID:          "terminal_7",
-			PaneCurrentPath: "/repo",
-		},
-		Command: "codex",
-		CWD:     "/repo",
-		Title:   "Codex",
-	}
-	watcher := New(Options{
-		Store:     store,
-		StorePath: path,
-		Interval:  300 * time.Millisecond,
-		ProcessList: func(context.Context) ([]processinfo.Process, error) {
-			return []processinfo.Process{plain, paned}, nil
-		},
-		PaneList: func(context.Context) ([]mux.Pane, error) { return []mux.Pane{pane}, nil },
-		ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
-			return mux.ScreenSnapshot{Text: "› next task\nContext 63% used", Title: "Codex"}, nil
-		},
-		CatalogList:         func(context.Context) ([]CatalogEntry, error) { return nil, nil },
-		ProcessConfirmation: 600 * time.Millisecond,
-		Quiet:               true,
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var (
-		group                  sync.WaitGroup
-		observeErr, persistErr error
-	)
-
-	group.Go(func() { observeErr = watcher.Run(ctx) })
-	group.Go(func() { persistErr = store.RunPersistence(ctx, 0, 0) })
-	t.Cleanup(func() {
-		cancel()
-		group.Wait()
-
-		if observeErr != nil || persistErr != nil {
-			t.Errorf("tracker errors: observer %v, persistence %v", observeErr, persistErr)
-		}
-	})
-
-	// Let both sessions be confirmed, created, and reach a stable screen state.
-	waitForScreenIdleSession(t, store, 2)
-	time.Sleep(time.Second)
-	// Every visible change is journaled at once, so an empty journal means the
-	// automatic checkpoint has caught up.
-	deadline := time.Now().Add(10 * time.Second)
-	for statIdentity(t, path+".journal.jsonl").size != 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("journal was not checkpointed")
+		store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+		if err != nil {
+			t.Fatal(err)
 		}
 
-		time.Sleep(20 * time.Millisecond)
-	}
+		t.Cleanup(func() { _ = store.Close() })
 
-	snapshot := statIdentity(t, path)
-	journal := statIdentity(t, path+".journal.jsonl")
-	health := statIdentity(t, path+".observer-health.json")
+		plain := processinfo.Process{
+			PID:            4400,
+			PPID:           1,
+			ProcessGroupID: 4400,
+			Foreground:     true,
+			StartIdentity:  "boot:4400",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/plain",
+			TTY:            "/dev/pts/2",
+		}
+		paned := processinfo.Process{
+			PID:            4401,
+			PPID:           1,
+			ProcessGroupID: 4401,
+			Foreground:     true,
+			StartIdentity:  "boot:4401",
+			Executable:     "/usr/bin/codex",
+			CWD:            "/repo",
+			Env:            map[string]string{"ZELLIJ_SESSION_NAME": "work", "ZELLIJ_PANE_ID": "7"},
+		}
+		pane := mux.Pane{
+			Location: registry.Location{
+				Kind:            registry.MultiplexerZellij,
+				SessionName:     "work",
+				TabID:           "3",
+				TabName:         "agents",
+				PaneID:          "terminal_7",
+				PaneCurrentPath: "/repo",
+			},
+			Command: "codex",
+			CWD:     "/repo",
+			Title:   "Codex",
+		}
+		watcher := New(Options{
+			Store:     store,
+			StorePath: path,
+			Interval:  300 * time.Millisecond,
+			ProcessList: func(context.Context) ([]processinfo.Process, error) {
+				return []processinfo.Process{plain, paned}, nil
+			},
+			PaneList: func(context.Context) ([]mux.Pane, error) { return []mux.Pane{pane}, nil },
+			ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+				return mux.ScreenSnapshot{
+					Text:  "› next task\nContext 63% used",
+					Title: "Codex",
+				}, nil
+			},
+			CatalogList:         func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+			ProcessConfirmation: 600 * time.Millisecond,
+			Quiet:               true,
+		})
+		ctx, cancel := context.WithCancel(context.Background())
 
-	before, err := store.State(ctx, registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
+		var (
+			group                  sync.WaitGroup
+			observeErr, persistErr error
+		)
 
-	cyclesBefore := watcher.Health().Cycles
+		group.Go(func() { observeErr = watcher.Run(ctx) })
+		group.Go(func() { persistErr = store.RunPersistence(ctx) })
+		t.Cleanup(func() {
+			cancel()
+			group.Wait()
 
-	time.Sleep(3 * time.Second)
+			if observeErr != nil || persistErr != nil {
+				t.Errorf("tracker errors: observer %v, persistence %v", observeErr, persistErr)
+			}
+		})
 
-	if cycles := watcher.Health().Cycles - cyclesBefore; cycles < 8 {
-		t.Fatalf("tracker ran %d cycles in 3s, want at least 8", cycles)
-	}
+		synctest.Wait()
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
 
-	for file, before := range map[string]fileIdentity{
-		path:                           snapshot,
-		path + ".journal.jsonl":        journal,
-		path + ".observer-health.json": health,
-	} {
-		if after := statIdentity(t, file); after != before {
+		snapshot := statIdentity(t, path)
+		journal := statIdentity(t, path+".journal.jsonl")
+		health := statIdentity(t, path+".observer-health.json")
+
+		before, err := store.State(ctx, registry.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(before.Sessions) != 2 {
+			t.Fatalf("settled sessions = %#v, want two live sessions", before.Sessions)
+		}
+
+		var idle int
+
+		for _, session := range before.Sessions {
+			if session.Activity() != nil && *session.Activity() == registry.ActivityIdle {
+				idle++
+			}
+		}
+
+		if idle != 1 {
 			t.Fatalf(
-				"steady-state cycles wrote %s: before %+v after %+v",
-				filepath.Base(file),
-				before,
-				after,
+				"settled sessions = %#v, want one screen-derived idle session",
+				before.Sessions,
 			)
 		}
-	}
 
-	if journal.size != 0 {
-		t.Fatalf("journal holds %d bytes after checkpoint, want 0", journal.size)
-	}
+		cyclesBefore := watcher.Health().Cycles
 
-	after, err := store.State(ctx, registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
 
-	if after.Revision != before.Revision {
-		t.Fatalf(
-			"steady-state heartbeats advanced revision %d -> %d",
-			before.Revision,
-			after.Revision,
-		)
-	}
+		if cycles := watcher.Health().Cycles - cyclesBefore; cycles < 8 {
+			t.Fatalf("tracker ran %d cycles in 3s, want at least 8", cycles)
+		}
+
+		for file, before := range map[string]fileIdentity{
+			path:                           snapshot,
+			path + ".journal.jsonl":        journal,
+			path + ".observer-health.json": health,
+		} {
+			if after := statIdentity(t, file); after != before {
+				t.Fatalf(
+					"steady-state cycles wrote %s: before %+v after %+v",
+					filepath.Base(file),
+					before,
+					after,
+				)
+			}
+		}
+
+		if journal.size != 0 {
+			t.Fatalf("journal holds %d bytes after checkpoint, want 0", journal.size)
+		}
+
+		after, err := store.State(ctx, registry.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if after.Revision != before.Revision {
+			t.Fatalf(
+				"steady-state heartbeats advanced revision %d -> %d",
+				before.Revision,
+				after.Revision,
+			)
+		}
+	})
 }
 
 func TestObserverHealthFileWrittenOnStatusChangeOrSlowInterval(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	healthPath := filepath.Join(dir, "health.json")
+	storePath := filepath.Join(dir, "state.json")
+	healthPath := HealthPath(storePath)
 	at := time.Now().UTC()
 	paneErr := errConfirmationPanes
 	failPanes := true
 	watcher := New(Options{
-		Store:       registry.NewJournal(filepath.Join(dir, "state.json"), catalog.Rules{}),
-		HealthPath:  healthPath,
+		Store:       registry.NewJournal(storePath, catalog.Rules{}),
+		StorePath:   storePath,
 		Now:         func() time.Time { return at },
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 		PaneList: func(context.Context) ([]mux.Pane, error) {
@@ -527,38 +579,45 @@ func (store *failFirstBatchStore) ObserveBatch(
 
 func TestObserverRecordsConfirmedProcessAfterFailedWrite(t *testing.T) {
 	t.Parallel()
-	journal := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
-	store := &failFirstBatchStore{Store: journal}
-	process := agentProcess(4250)
-	fixture := &confirmationFixture{at: time.Now().UTC(), processes: []processinfo.Process{process}}
-	watcher := newConfirmationObserver(store, fixture, 3*time.Second)
+	synctest.Test(t, func(t *testing.T) {
+		journal := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		store := &failFirstBatchStore{Store: journal}
+		process := agentProcess(4250)
+		fixture := &confirmationFixture{
+			at:        time.Now().UTC(),
+			processes: []processinfo.Process{process},
+		}
+		watcher := newConfirmationObserver(store, fixture, 3*time.Second)
+		next := confirmationCycles(t, watcher)
 
-	for range 3 {
-		if result := continuousCycle(t, watcher); result.Observations != 0 {
-			t.Fatalf("process observed before confirmation: %#v", result)
+		for range 3 {
+			if result := next(); result.Observations != 0 {
+				t.Fatalf("process observed before confirmation: %#v", result)
+			}
+
+			fixture.advance(time.Second, process)
+		}
+
+		if result := next(); !result.Degraded ||
+			!strings.Contains(result.Error, errBatchWriteOnce.Error()) {
+			t.Fatalf("confirming cycle = %#v, want injected write failure", result)
 		}
 
 		fixture.advance(time.Second, process)
-	}
+		next()
 
-	watcher.continuous = true
-	if _, err := watcher.runCycle(context.Background()); !errors.Is(err, errBatchWriteOnce) {
-		t.Fatalf("confirming cycle error = %v, want injected write failure", err)
-	}
+		sessions, err := journal.List(context.Background(), registry.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	fixture.advance(time.Second, process)
-	continuousCycle(t, watcher)
-
-	sessions, err := journal.List(context.Background(), registry.Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(sessions) != 1 || sessions[0].Process == nil || sessions[0].Process.PID != process.PID {
-		t.Fatalf(
-			"sessions after the write retry cycle = %#v, want one session for pid %d",
-			sessions,
-			process.PID,
-		)
-	}
+		if len(sessions) != 1 || sessions[0].Process == nil ||
+			sessions[0].Process.PID != process.PID {
+			t.Fatalf(
+				"sessions after the write retry cycle = %#v, want one session for pid %d",
+				sessions,
+				process.PID,
+			)
+		}
+	})
 }

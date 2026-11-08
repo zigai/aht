@@ -8,14 +8,14 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func ExampleNewClientForSocket() {
-	client := broker.NewClientForSocket("/path/to/aht.sock")
+func ExampleNewClient() {
+	client := broker.NewClient("/path/to/aht.sock")
 	fmt.Printf("Socket: %s\n", client.SocketPath())
 	// Output: Socket: /path/to/aht.sock
 }
 
 func ExampleClient_List() {
-	client := broker.NewClientForSocket("/path/to/offline.sock")
+	client := broker.NewClient("/path/to/offline.sock")
 
 	_, err := client.List(context.Background(), registry.Filter{})
 	if broker.IsUnavailable(err) {

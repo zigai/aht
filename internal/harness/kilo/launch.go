@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const launchModelName = "AHT fakeprovider"
@@ -25,15 +24,16 @@ func (kiloHarness) LaunchPlan(
 	selected := harness.LaunchProviderName + "/" + model.Model
 
 	return harness.LaunchPlan{
+		TitleRequests: []harness.TitleRequest{
+			{Role: "system", Prefix: "You are a title generator."},
+		},
 		Executable: "kilo",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env:        []string{"KILO_CONFIG_DIR=" + configDir},
 		Files: []harness.LaunchFile{{
 			Path:   filepath.Join(configDir, "opencode.json"),
 			Update: func([]byte) ([]byte, error) { return configJSON, nil },
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			return []string{"run", "--model", selected, "--auto", "--dir", paths.Work, prompt}, nil
 		},

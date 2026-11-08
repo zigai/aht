@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 const launchModelName = "AHT fakeprovider"
@@ -26,14 +25,13 @@ func (opencodeHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: "opencode",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env:        []string{"OPENCODE_CONFIG_DIR=" + configDir},
 		Files: []harness.LaunchFile{{
 			Path:   filepath.Join(configDir, "opencode.json"),
 			Update: func([]byte) ([]byte, error) { return configJSON, nil },
 		}},
-		Setup:    [][]string{{"service", "set", "disabled", "true"}, {"debug", "config"}},
-		Services: nil,
+		Setup: [][]string{{"service", "set", "disabled", "true"}, {"debug", "config"}},
 		Headless: func(prompt string) ([]string, error) {
 			return []string{"run", "--model", selected, "--auto", prompt}, nil
 		},

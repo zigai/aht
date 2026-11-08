@@ -4,6 +4,8 @@ package testdir
 import (
 	"os"
 	"testing"
+
+	"github.com/zigai/aht/v2/internal/terminal"
 )
 
 // Short returns a new directory under /tmp that is removed when the test ends.
@@ -12,8 +14,7 @@ import (
 func Short(tb testing.TB, prefix string) string {
 	tb.Helper()
 
-	//nolint:usetesting // t.TempDir paths can be too long for a Unix socket.
-	dir, err := os.MkdirTemp("/tmp", prefix)
+	dir, err := terminal.NewSocketDir(prefix)
 	if err != nil {
 		tb.Fatalf("create short temporary directory: %v", err)
 	}

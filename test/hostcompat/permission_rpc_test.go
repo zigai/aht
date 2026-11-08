@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
@@ -27,11 +26,24 @@ func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
-			switch contract.ID {
-			case registry.Harness("pi"):
+			switch contract.PermissionDriver {
+			case driverCompletionRPC:
 				runPiPermission(t, host, allow)
-			case registry.Harness("omp"):
+			case driverExtensionRPC:
 				runOmpPermission(t, host, allow)
+			case driverProcess,
+				driverExecRPC,
+				driverACP,
+				driverPythonACP,
+				driverExecutionServer,
+				driverPluginServer,
+				driverTerminalQuit,
+				driverTerminalDialog,
+				driverCLIACP,
+				driverControlCLI,
+				driverAppServer,
+				driverSDKCLI:
+				fallthrough
 			default:
 				t.Fatalf("no RPC-family permission driver for %s", contract.ID)
 			}

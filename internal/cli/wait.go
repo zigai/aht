@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -64,42 +63,12 @@ func (app *application) newWaitCommand() *cobra.Command {
 }
 
 func (app *application) executeWait(ctx context.Context, sessionArg string, flags waitFlags) error {
-	sessionRef := strings.TrimSpace(sessionArg)
-	if sessionRef == "" {
-		return exitCode(client.ErrSessionRequired, exitCodeUsage)
-	}
-
-	options, err := parseWaitConditions(flags)
+	options, err := waitOptions(strings.TrimSpace(sessionArg), flags)
 	if err != nil {
-		return err
+		return exitCode(err, exitCodeUsage)
 	}
 
-	if options.Timeout > 0 {
-		var cancel context.CancelFunc
-
-		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
-		defer cancel()
-	}
-
-	session, err := app.resolveSession(ctx, sessionRef)
-	if err != nil {
-		return err
-	}
-
-	options.ID = session.ID
-
-	ahtClient := app.registryStore()
-
-	res, err := ahtClient.Wait(ctx, options)
-	if errors.Is(err, registry.ErrSessionNotFound) && options.Presence == registry.PresenceGone {
-		// The tracker removed the session between resolution and the first
-		// snapshot. Removal only follows the gone transition.
-		res, err = client.WaitResult{
-			Session: removedWaitSession(session, time.Now().UTC()),
-			Initial: true,
-		}, nil
-	}
-
+	res, err := app.registryStore().Wait(ctx, options)
 	if err != nil {
 		return fmt.Errorf("waiting for session: %w", err)
 	}
@@ -111,109 +80,36 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 	return app.writeSessionDetails(res.Session)
 }
 
-func removedWaitSession(session registry.Session, at time.Time) registry.Session {
-	if session.Presence() == registry.PresenceGone {
-		return session
-	}
-
-	session.Liveness = registry.Gone{
-		At:       at,
-		Reason:   "session_removed",
-		Decision: session.Decision(),
-	}
-	session.PresenceChangedAt = at
-
-	return session
-}
-
-func parseWaitConditions(flags waitFlags) (client.WaitOptions, error) {
-	if !flags.hasActivity && !flags.hasPresence {
-		return client.WaitOptions{}, exitCode(client.ErrConditionRequired, exitCodeUsage)
-	}
-
-	if flags.timeout < 0 {
-		return client.WaitOptions{}, exitCode(
-			fmt.Errorf("%w: timeout cannot be negative", client.ErrInvalidDuration),
-			exitCodeUsage,
-		)
-	}
-
-	if flags.stableFor < 0 {
-		return client.WaitOptions{}, exitCode(
-			fmt.Errorf("%w: stable-for cannot be negative", client.ErrInvalidDuration),
-			exitCodeUsage,
-		)
-	}
-
-	if flags.timeout > 0 && flags.stableFor > flags.timeout {
-		return client.WaitOptions{}, exitCode(
-			fmt.Errorf("%w: stable-for duration cannot exceed timeout", client.ErrInvalidDuration),
-			exitCodeUsage,
-		)
-	}
-
-	presence, err := parseTargetPresence(flags.presence, flags.hasPresence)
-	if err != nil {
-		return client.WaitOptions{}, err
-	}
-
-	activity, err := parseTargetActivity(flags.activity, flags.hasActivity)
-	if err != nil {
-		return client.WaitOptions{}, err
-	}
-
-	if err := validateConditionCombination(presence, activity); err != nil {
-		return client.WaitOptions{}, err
-	}
-
-	return client.WaitOptions{
-		ID:        "",
-		Activity:  activity,
-		Presence:  presence,
+func waitOptions(reference string, flags waitFlags) (client.WaitOptions, error) {
+	options := client.WaitOptions{
+		Reference: reference,
+		Activity:  "",
+		Presence:  "",
 		Timeout:   flags.timeout,
 		StableFor: flags.stableFor,
-	}, nil
-}
-
-func parseTargetPresence(presence string, changed bool) (registry.Presence, error) {
-	if !changed {
-		return "", nil
 	}
 
-	p, err := registry.NormalizePresence(presence)
-	if err != nil {
-		return "", exitCode(err, exitCodeUsage)
+	if flags.hasPresence {
+		presence, err := registry.NormalizePresence(flags.presence)
+		if err != nil {
+			return options, fmt.Errorf("normalize presence: %w", err)
+		}
+
+		options.Presence = presence
 	}
 
-	return p, nil
-}
+	if flags.hasActivity {
+		activity, err := registry.NormalizeActivity(flags.activity)
+		if err != nil {
+			return options, fmt.Errorf("normalize activity: %w", err)
+		}
 
-func parseTargetActivity(activity string, changed bool) (registry.Activity, error) {
-	if !changed {
-		return "", nil
+		options.Activity = activity
 	}
 
-	a, err := registry.NormalizeActivity(activity)
-	if err != nil {
-		return "", exitCode(err, exitCodeUsage)
+	if err := options.Validate(); err != nil {
+		return options, fmt.Errorf("invalid wait: %w", err)
 	}
 
-	return a, nil
-}
-
-func validateConditionCombination(presence registry.Presence, activity registry.Activity) error {
-	if (presence == registry.PresenceGone || presence == registry.PresenceUnknown) &&
-		activity != "" {
-		return exitCode(
-			fmt.Errorf(
-				"%w: presence %q cannot be combined with activity %q",
-				client.ErrContradictoryCondition,
-				presence,
-				activity,
-			),
-			exitCodeUsage,
-		)
-	}
-
-	return nil
+	return options, nil
 }

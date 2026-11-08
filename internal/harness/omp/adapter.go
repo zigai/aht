@@ -25,26 +25,25 @@ type ompHarness struct{ harness.BaseAdapter }
 
 func New() ompHarness {
 	return ompHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Env: harness.EnvKeys{
+			Config: []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"},
+		},
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("omp"),
 		Aliases:          []string{"ohmypi", "oh-my-pi", "oh_my_pi"},
 		ProcessNames:     []string{"omp", "ohmypi", "oh-my-pi"},
-		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
-		},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
+		},
+		LifecycleEventAttribute: "omp_event",
+		LifecycleSourceAttributes: []string{
+			"omp_reason",
+			"omp_approval_reason",
+			"source",
+			"reason",
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ompIntegrationSourceID,
@@ -53,7 +52,7 @@ func New() ompHarness {
 	})}
 }
 
-func (ompHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter ompHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := ompAgentDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -67,12 +66,9 @@ func (ompHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "oh-my-pi extension",
 				Content: harness.RenderScriptTemplate(
 					ompExtensionTemplate,
-					ompIntegrationID,
 					binary,
-					ompIntegrationSourceID,
-					integrationVersion,
+					adapter.Definition(),
 				),
-				JSONContent: nil,
 			}},
 		},
 	}, nil
@@ -98,18 +94,4 @@ func (ompHarness) ObservableProcess(process processinfo.Process) bool {
 	}
 
 	return true
-}
-
-func (ompHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["omp_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "omp_reason", "omp_approval_reason", "source", "reason"),
-	)
 }

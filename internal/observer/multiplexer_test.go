@@ -10,15 +10,25 @@ import (
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
+	"github.com/zigai/aht/v2/pkg/tmux"
 )
+
+func multiplexerPanesFromTmux(panes []tmux.Pane) []mux.Pane {
+	result := make([]mux.Pane, 0, len(panes))
+	for _, pane := range panes {
+		result = append(result, pane.ToMuxPane())
+	}
+
+	return result
+}
 
 func TestObserverCorrelatesZellijEnvironmentIdentityAndDetectsScreen(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	process := processinfo.Process{
 		PID: 42, PPID: 1, ProcessGroupID: 42, Foreground: true, StartIdentity: "boot:42",
-		Executable: "/usr/bin/codex", CWD: "/repo", MultiplexerKind: "zellij",
-		MultiplexerSession: "work", MultiplexerPane: "7",
+		Executable: "/usr/bin/codex", CWD: "/repo",
+		Env: map[string]string{"ZELLIJ_SESSION_NAME": "work", "ZELLIJ_PANE_ID": "7"},
 	}
 	pane := mux.Pane{
 		Location: registry.Location{
@@ -126,15 +136,13 @@ func TestObserverPrefersRicherNestedMultiplexerLocation(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
 	process := processinfo.Process{
-		PID:                42,
-		PPID:               40,
-		ProcessGroupID:     42,
-		StartIdentity:      "boot:42",
-		Executable:         "/usr/bin/codex",
-		CWD:                "/repo",
-		MultiplexerKind:    "zellij",
-		MultiplexerSession: "outer",
-		MultiplexerPane:    "7",
+		PID:            42,
+		PPID:           40,
+		ProcessGroupID: 42,
+		StartIdentity:  "boot:42",
+		Executable:     "/usr/bin/codex",
+		CWD:            "/repo",
+		Env:            map[string]string{"ZELLIJ_SESSION_NAME": "outer", "ZELLIJ_PANE_ID": "7"},
 	}
 	panes := []mux.Pane{
 		{
@@ -225,7 +233,7 @@ func TestCommandCWDFallbackRequiresUniquePane(t *testing.T) {
 	if _, _, ok := multiplexerPaneProcess(
 		panes[0],
 		[]processinfo.Process{process},
-		byPID,
+		newProcessTree(byPID),
 		harnessByPID,
 		counts,
 	); ok {

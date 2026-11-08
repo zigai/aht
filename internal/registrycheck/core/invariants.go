@@ -6,15 +6,16 @@ import (
 	"time"
 )
 
+// Event is the projection of one observation. NativeEnd marks a native report
+// that ends its session; Absent marks a process sighting that found no process.
 type Event struct {
-	Kind        string
 	Process     string
 	Harness     string
 	SessionID   string
 	SessionPath string
 	At          time.Time
-	Ends        bool
-	Present     bool
+	NativeEnd   bool
+	Absent      bool
 }
 
 func Transition(before Session, after Session, event Event) error {
@@ -54,7 +55,7 @@ func nativeIdentityEndInvariant(before Session, after Session, event Event) erro
 	changed := after.Process != before.Process || after.Incarnation != before.Incarnation ||
 		after.Presence != before.Presence || after.Activity != before.Activity ||
 		after.NativeEnded != before.NativeEnded || !after.DecisionAt.Equal(before.DecisionAt)
-	if event.Kind == "report" && event.Ends && !eventTargetsSession(event, before) && changed {
+	if event.NativeEnd && !eventTargetsSession(event, before) && changed {
 		return fmt.Errorf("%w: another native identity's end changed %q", ErrNativeEnd, before.ID)
 	}
 
@@ -82,8 +83,8 @@ func retiredProcessInvariant(before Session, after Session, event Event) error {
 }
 
 func ownProcessTerminalEvent(event Event, session Session) bool {
-	return event.Kind == "sighting" && !event.Present && event.Process == session.Process ||
-		event.Kind == "report" && event.Ends && eventTargetsSession(event, session) &&
+	return event.Absent && event.Process == session.Process ||
+		event.NativeEnd && eventTargetsSession(event, session) &&
 			(event.Process == session.Process || event.Process == "")
 }
 
@@ -116,7 +117,7 @@ func ownProcessTerminalInvariant(before Session, after Session, event Event) err
 }
 
 func oldProcessEndInvariant(before Session, after Session, event Event) error {
-	if event.Kind == "report" && event.Ends && event.Process != "" && before.Process != "" &&
+	if event.NativeEnd && event.Process != "" && before.Process != "" &&
 		event.Process != before.Process &&
 		(after.Process != before.Process || after.Incarnation != before.Incarnation) {
 		return fmt.Errorf("%w: old process end changed current incarnation", ErrNativeEnd)
@@ -126,7 +127,7 @@ func oldProcessEndInvariant(before Session, after Session, event Event) error {
 }
 
 func exitEvidenceInvariant(before Session, after Session, event Event) error {
-	if event.Kind == "sighting" && !event.Present && after.Process == before.Process &&
+	if event.Absent && after.Process == before.Process &&
 		!after.EvidenceAt.Equal(before.EvidenceAt) {
 		return fmt.Errorf("%w: exit scan became own-process evidence", ErrTime)
 	}

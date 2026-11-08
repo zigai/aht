@@ -63,29 +63,30 @@ func TestWaitForSessionReturnsWhenSessionAppears(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeSessions(sessionsPath); err != nil {
+	if err := writeSessions(
+		sessionsPath,
+		sessionFixture("s-pending", s.Work, "native-pending"),
+	); err != nil {
 		t.Fatal(err)
 	}
-
-	updated := make(chan error, 1)
-
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-
-		updated <- writeSessions(sessionsPath, sessionFixture("s-late", s.Work, "native-late"))
-	}()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	got, err := s.WaitForSession(ctx, func(session registry.Session) bool {
+		if session.ID == "s-pending" {
+			if err := writeSessions(
+				sessionsPath,
+				sessionFixture("s-late", s.Work, "native-late"),
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			return false
+		}
+
 		return session.ID == "s-late"
 	})
-
-	if writeErr := <-updated; writeErr != nil {
-		t.Fatal(writeErr)
-	}
-
 	if err != nil {
 		t.Fatalf("WaitForSession() error = %v", err)
 	}

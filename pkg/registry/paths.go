@@ -40,3 +40,9 @@ func DefaultStorePath() string {
 func stringsTrimmedEnv(name string) string {
 	return strings.TrimSpace(os.Getenv(name))
 }
+
+func journalPath(storePath string) string { return storePath + ".journal.jsonl" }
+
+func storeLockPath(storePath string) string { return storePath + ".lock" }
+
+func ownerLockPath(storePath string) string { return storePath + ".owner.lock" }

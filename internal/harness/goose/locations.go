@@ -1,15 +1,13 @@
 package goose
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func (gooseHarness) Locations(projectDir string) []harness.Location {
-	dir := gooseConfigDir()
+	dir := configDir(harness.HomeDir())
 
 	return harness.NewLocationBuilder(projectDir).
 		Global(harness.LocationKindConfig, filepath.Join(dir, "config.yaml")).
@@ -28,31 +26,4 @@ func (gooseHarness) Locations(projectDir string) []harness.Location {
 			"skills",
 		)).
 		Locations()
-}
-
-func gooseConfigDir() string {
-	if root := os.Getenv("GOOSE_PATH_ROOT"); filepath.IsAbs(root) {
-		return filepath.Join(root, "config")
-	}
-
-	if runtime.GOOS == "windows" {
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
-			home := harness.HomeDir()
-			if home == "" {
-				return ""
-			}
-
-			appData = filepath.Join(home, "AppData", "Roaming")
-		}
-
-		return filepath.Join(appData, "Block", "goose", "config")
-	}
-
-	home := harness.HomeDir()
-	if home == "" {
-		return ""
-	}
-
-	return filepath.Join(home, ".config", "goose")
 }

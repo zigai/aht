@@ -3,6 +3,7 @@ package prime
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -114,7 +115,7 @@ func scanSessionTitle(ctx context.Context, reader *bufio.Reader, title string) (
 	for {
 		line, err := titlefile.ReadLine(ctx, reader)
 		if errors.Is(err, io.EOF) {
-			return firstNonEmpty(title, firstMessage), nil
+			return cmp.Or(strings.TrimSpace(title), strings.TrimSpace(firstMessage)), nil
 		}
 
 		if errors.Is(err, titlefile.ErrRecordTooLarge) {
@@ -143,16 +144,6 @@ func titleFromLine(line []byte, title string) string {
 	}
 
 	return strings.TrimSpace(entry.Name)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-
-	return ""
 }
 
 func firstUserMessage(line []byte) string {

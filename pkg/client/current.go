@@ -6,10 +6,9 @@ import (
 	"os"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
-	"github.com/zigai/aht/v2/pkg/herdr"
+	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
-	"github.com/zigai/aht/v2/pkg/tmux"
-	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 // CurrentOptions identifies the process whose enclosing agent session is requested.
@@ -17,12 +16,10 @@ import (
 type CurrentOptions struct{ PID int }
 
 type currentInspectors struct {
-	PID           int
-	ProcessList   func(context.Context) ([]processinfo.Process, error)
-	ProcessFind   func(context.Context, int) (processinfo.Process, bool, error)
-	TmuxCurrent   func(context.Context) (registry.Location, error)
-	ZellijCurrent func() registry.Location
-	HerdrCurrent  func() registry.Location
+	PID         int
+	ProcessList func(context.Context) ([]processinfo.Process, error)
+	ProcessFind func(context.Context, int) (processinfo.Process, bool, error)
+	Locations   func(context.Context) []registry.Location
 }
 
 // Current resolves the session for the calling agent context.
@@ -35,19 +32,23 @@ func (c *Client) CurrentWithOptions(
 	ctx context.Context,
 	opts CurrentOptions,
 ) (registry.Session, error) {
-	return c.currentWithInspectors(
+	session, err := c.currentWithInspectors(
 		ctx,
 		currentInspectors{
-			PID:           opts.PID,
-			ProcessList:   nil,
-			ProcessFind:   nil,
-			TmuxCurrent:   nil,
-			ZellijCurrent: nil,
-			HerdrCurrent:  nil,
+			PID:         opts.PID,
+			ProcessList: nil,
+			ProcessFind: nil,
+			Locations:   nil,
 		},
 	)
+	if err != nil {
+		return session, fmt.Errorf("current session: %w", err)
+	}
+
+	return session, nil
 }
 
+//nolint:wrapcheck // CurrentWithOptions adds operation context at the public boundary.
 func (c *Client) currentWithInspectors(
 	ctx context.Context,
 	opts currentInspectors,
@@ -57,7 +58,7 @@ func (c *Client) currentWithInspectors(
 	}
 
 	if err := ctx.Err(); err != nil {
-		return registry.Session{}, fmt.Errorf("current session: %w", err)
+		return registry.Session{}, err
 	}
 
 	opts = normalizeCurrentOptions(opts)
@@ -66,7 +67,7 @@ func (c *Client) currentWithInspectors(
 		Presence: registry.PresenceLive,
 	})
 	if err != nil {
-		return registry.Session{}, publicError(err)
+		return registry.Session{}, err
 	}
 
 	if len(sessions) == 0 {
@@ -88,7 +89,7 @@ func (c *Client) currentWithInspectors(
 	}
 
 	if err := ctx.Err(); err != nil {
-		return registry.Session{}, fmt.Errorf("current session: %w", err)
+		return registry.Session{}, err
 	}
 
 	return registry.Session{}, ErrNoCurrentSession
@@ -107,16 +108,8 @@ func normalizeCurrentOptions(opts currentInspectors) currentInspectors {
 		opts.ProcessFind = processinfo.Find
 	}
 
-	if opts.TmuxCurrent == nil {
-		opts.TmuxCurrent = tmux.Current
-	}
-
-	if opts.ZellijCurrent == nil {
-		opts.ZellijCurrent = zellij.Current
-	}
-
-	if opts.HerdrCurrent == nil {
-		opts.HerdrCurrent = herdr.Current
+	if opts.Locations == nil {
+		opts.Locations = currentLocations
 	}
 
 	return opts
@@ -240,126 +233,45 @@ func matchAncestorSession(
 	}
 }
 
+func currentLocations(ctx context.Context) []registry.Location {
+	var locations []registry.Location
+
+	for _, driver := range drivers.All() {
+		location, err := driver.Current(ctx)
+		if err == nil && !location.Empty() {
+			locations = append(locations, location)
+		}
+	}
+
+	return locations
+}
+
 func resolveCurrentFromTerminal(
 	ctx context.Context,
 	sessions []registry.Session,
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
-	if s, found, err := resolveCurrentTmux(ctx, sessions, opts); err != nil || found {
-		return s, found, err
-	}
+	for _, location := range opts.Locations(ctx) {
+		driver, ok := drivers.Find(location.Kind)
+		if !ok {
+			continue
+		}
 
-	if s, found, err := resolveCurrentZellij(ctx, sessions, opts); err != nil || found {
-		return s, found, err
-	}
-
-	if s, found, err := resolveCurrentHerdr(ctx, sessions, opts); err != nil || found {
-		return s, found, err
+		if s, found, err := resolvePaneSession(
+			ctx,
+			sessions,
+			driver,
+			location,
+			opts,
+		); err != nil ||
+			found {
+			return s, found, err
+		}
 	}
 
 	var zero registry.Session
 
 	return zero, false, nil
-}
-
-func resolveCurrentTmux(
-	ctx context.Context,
-	sessions []registry.Session,
-	opts currentInspectors,
-) (registry.Session, bool, error) {
-	var zero registry.Session
-
-	tmuxLocation, err := opts.TmuxCurrent(ctx)
-	if err != nil {
-		return zero, false, nil //nolint:nilerr // tmux discovery errors fall back to other multiplexer detection
-	}
-
-	if tmuxLocation.Empty() || tmuxLocation.PaneID == "" || tmuxLocation.ServerID == "" ||
-		tmuxLocation.PaneTTY == "" {
-		return zero, false, nil
-	}
-
-	return resolvePaneSession(
-		ctx,
-		sessions,
-		registry.MultiplexerTmux,
-		tmuxLocation.ServerID,
-		tmuxLocation.PaneID,
-		"",
-		opts,
-	)
-}
-
-func resolveCurrentZellij(
-	ctx context.Context,
-	sessions []registry.Session,
-	opts currentInspectors,
-) (registry.Session, bool, error) {
-	var zero registry.Session
-
-	zellijLocation := opts.ZellijCurrent()
-	if zellijLocation.Empty() || zellijLocation.PaneID == "" || zellijLocation.SessionName == "" {
-		return zero, false, nil
-	}
-
-	return resolvePaneSession(
-		ctx,
-		sessions,
-		registry.MultiplexerZellij,
-		"",
-		zellijLocation.PaneID,
-		zellijLocation.SessionName,
-		opts,
-	)
-}
-
-func resolveCurrentHerdr(
-	ctx context.Context,
-	sessions []registry.Session,
-	opts currentInspectors,
-) (registry.Session, bool, error) {
-	var zero registry.Session
-
-	herdrLocation := opts.HerdrCurrent()
-	if herdrLocation.Empty() || herdrLocation.PaneID == "" {
-		return zero, false, nil
-	}
-
-	return resolvePaneSession(
-		ctx,
-		sessions,
-		registry.MultiplexerHerdr,
-		herdrLocation.ServerID,
-		herdrLocation.PaneID,
-		herdrLocation.SessionName,
-		opts,
-	)
-}
-
-func matchesPaneLocation(
-	s registry.Session,
-	kind registry.MultiplexerKind,
-	serverID string,
-	paneID string,
-	sessionName string,
-) bool {
-	if s.Location.Kind != kind {
-		return false
-	}
-
-	if s.Location.PaneID != paneID {
-		return false
-	}
-
-	if serverID != "" && !registry.MatchesServer(s, serverID) {
-		return false
-	}
-
-	if sessionName != "" && s.Location.SessionName != sessionName {
-		return false
-	}
-
-	return true
 }
 
 func verifyCandidateProcess(
@@ -385,10 +297,8 @@ func verifyCandidateProcess(
 func resolvePaneSession(
 	ctx context.Context,
 	sessions []registry.Session,
-	kind registry.MultiplexerKind,
-	serverID string,
-	paneID string,
-	sessionName string,
+	driver mux.Driver,
+	location registry.Location,
 	opts currentInspectors,
 ) (registry.Session, bool, error) {
 	var (
@@ -397,7 +307,7 @@ func resolvePaneSession(
 	)
 
 	for _, s := range sessions {
-		if matchesPaneLocation(s, kind, serverID, paneID, sessionName) &&
+		if driver.SamePane(s.Location, location) &&
 			verifyCandidateProcess(ctx, s, opts) {
 			paneMatches = append(paneMatches, s)
 		}
@@ -412,7 +322,7 @@ func resolvePaneSession(
 		return zero, false, fmt.Errorf(
 			"%w: multiple live sessions in pane %s",
 			ErrAmbiguousSession,
-			paneID,
+			location.PaneID,
 		)
 	}
 }

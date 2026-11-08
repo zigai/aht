@@ -10,6 +10,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestRenderScriptTemplateExpandsQueueAndLeavesNoPlaceholders(t *testing.T) {
@@ -21,10 +22,12 @@ func TestRenderScriptTemplateExpandsQueueAndLeavesNoPlaceholders(t *testing.T) {
 		"{nested:{}};\n"
 	rendered := harness.RenderScriptTemplate(
 		sampleTemplate,
-		"test-integration",
 		"/bin/test-aht",
-		"test-source",
-		42,
+		harness.Definition{
+			ID:                 "test-integration",
+			IntegrationVersion: 42,
+			IntegrationSource:  "test-source",
+		},
 	)
 
 	placeholderPattern := regexp.MustCompile(`\{\{[A-Z0-9_]+\}\}`)
@@ -75,4 +78,59 @@ func TestShellQuoteRecoversArguments(t *testing.T) {
 			property.Fatalf("shell arguments = %q, want %q", output, expected)
 		}
 	})
+}
+
+func TestReportHookCommandRendersTypedTransitionDimension(t *testing.T) {
+	t.Parallel()
+
+	activity := harness.ReportHookCommand(
+		"aht",
+		harness.Definition{ID: "sample", IntegrationSource: "sample-hook", IntegrationVersion: 1},
+		harness.ReportStdinRaw,
+		registry.ActivityRunning,
+		"turn",
+	)
+	if !strings.Contains(activity, "--activity running") ||
+		strings.Contains(activity, "--presence") {
+		t.Fatalf("activity command = %q", activity)
+	}
+
+	presence := harness.ReportHookCommand(
+		"aht",
+		harness.Definition{ID: "sample", IntegrationSource: "sample-hook", IntegrationVersion: 1},
+		harness.ReportStdinRaw,
+		registry.PresenceGone,
+		"stop",
+	)
+	if !strings.Contains(presence, "--presence gone") || strings.Contains(presence, "--activity") {
+		t.Fatalf("presence command = %q", presence)
+	}
+}
+
+func TestReportHookCommandRejectsInvalidTypedTransition(t *testing.T) {
+	t.Parallel()
+
+	deferredPanic := false
+
+	func() {
+		defer func() {
+			deferredPanic = recover() != nil
+		}()
+
+		_ = harness.ReportHookCommand(
+			"aht",
+			harness.Definition{
+				ID:                 "sample",
+				IntegrationSource:  "sample-hook",
+				IntegrationVersion: 1,
+			},
+			harness.ReportStdinRaw,
+			registry.Activity("bogus"),
+			"turn",
+		)
+	}()
+
+	if !deferredPanic {
+		t.Fatal("ReportHookCommand accepted an invalid activity")
+	}
 }

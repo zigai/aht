@@ -18,6 +18,8 @@ import (
 const (
 	darwinLabel     = "dev.zigai.aht.observer"
 	darwinPlistName = "dev.zigai.aht.observer.plist"
+	platformName    = "darwin"
+	managerName     = "launchctl"
 )
 
 var (
@@ -39,19 +41,7 @@ func RenderLaunchAgent(opts Options) (string, error) {
 		return "", err
 	}
 
-	args := []string{
-		normalized.Binary,
-		"--store",
-		normalized.StorePath,
-		"manage",
-		"tracker",
-		"run",
-		"--interval",
-		normalized.Interval.String(),
-		"--grace-period",
-		normalized.GracePeriod.String(),
-		"--quiet",
-	}
+	args := trackerCommand(normalized)
 
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -89,7 +79,11 @@ func platformBackend(opts Options) (backend, error) {
 		return nil, err
 	}
 
-	path, err := launchAgentPath()
+	return definitionBackend(rendered)
+}
+
+func definitionBackend(rendered string) (backend, error) {
+	path, err := definitionPath()
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +95,7 @@ func platformBackend(opts Options) (backend, error) {
 	}, nil
 }
 
-func launchAgentPath() (string, error) {
+func definitionPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
@@ -111,19 +105,7 @@ func launchAgentPath() (string, error) {
 }
 
 func (b *darwinBackend) describe() Result {
-	return Result{
-		Platform:       "darwin",
-		Manager:        "launchctl",
-		ManagedPath:    b.path,
-		ManagedVersion: ManagedVersion,
-		Path:           b.path,
-		Version:        ManagedVersion,
-		Installed:      false,
-		Current:        false,
-		Running:        false,
-		Changed:        false,
-		Message:        "",
-	}
+	return describeDefinition(b.path)
 }
 func (b *darwinBackend) content() string                               { return b.rendered }
 func (b *darwinBackend) reload(context.Context, CommandExecutor) error { return nil }
@@ -159,7 +141,6 @@ func (b *darwinBackend) unload(ctx context.Context, executor CommandExecutor) er
 func (b *darwinBackend) running(
 	ctx context.Context,
 	executor CommandExecutor,
-	_ bool,
 ) (runtimeState, error) {
 	output, err := executor.Run(ctx, "launchctl", "print", b.domain+"/"+darwinLabel)
 	if err == nil {
@@ -168,7 +149,6 @@ func (b *darwinBackend) running(
 				return runtimeState{
 					Running: state == "running",
 					Loaded:  true,
-					Enabled: true,
 					Message: state,
 				}, nil
 			}
@@ -192,7 +172,6 @@ func (b *darwinBackend) running(
 		return runtimeState{
 			Running: false,
 			Loaded:  false,
-			Enabled: false,
 			Message: "not running",
 		}, nil
 	}

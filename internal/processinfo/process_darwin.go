@@ -15,7 +15,7 @@ import (
 	"github.com/zigai/aht/v2/internal/command"
 )
 
-const darwinPSMinimumFieldCount = 6
+const darwinPSFieldCount = 5
 
 var (
 	errNilDarwinProcessTable        = errors.New("nil process table")
@@ -34,13 +34,16 @@ type darwinPSRow struct {
 	ProcessGroupID int
 	Foreground     bool
 	TTY            string
-	Executable     string
-	Args           []string
 }
 
 // List returns a current-user process snapshot from the kernel process table,
-// enriched by one ps and one lsof invocation.
+// enriched by kern.procargs2, one ps, and one lsof invocation.
 func List(ctx context.Context) ([]Process, error) {
+	return ListWithEnv(ctx, nil)
+}
+
+// ListWithEnv also reads requested environment keys when kern.procargs2 exposes them.
+func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
@@ -65,6 +68,10 @@ func List(ctx context.Context) ([]Process, error) {
 	}
 
 	enrichDarwinProcesses(processes, byPID)
+
+	if err := readDarwinArguments(ctx, processes, envKeys); err != nil {
+		return nil, err
+	}
 
 	if cwd, err := darwinLsofCWD(ctx, pids); err == nil {
 		for i := range processes {
@@ -131,7 +138,7 @@ func CommandName(ctx context.Context, pid int) (string, error) {
 			return "", fmt.Errorf("checking context: %w", ctxErr)
 		}
 
-		return "", nil
+		return "", classifyDarwinError("/bin/ps", err)
 	}
 
 	return strings.TrimSpace(string(output)), nil
@@ -143,7 +150,7 @@ func darwinPSInventory(ctx context.Context, pids []string) (map[int]darwinPSRow,
 		"/bin/ps",
 		nil,
 		"-o",
-		"pid=,ppid=,pgid=,tpgid=,tty=,comm=,args=",
+		"pid=,ppid=,pgid=,tpgid=,tty=",
 		"-p",
 		strings.Join(pids, ","),
 	)
@@ -174,13 +181,41 @@ func enrichDarwinProcesses(processes []Process, rows map[int]darwinPSRow) {
 		processes[i].ProcessGroupID = row.ProcessGroupID
 
 		processes[i].Foreground = row.Foreground
-		if row.Executable != "" {
-			processes[i].Executable = row.Executable
+		processes[i].TTY = row.TTY
+	}
+}
+
+func readDarwinArguments(ctx context.Context, processes []Process, envKeys []string) error {
+	for i := range processes {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read process arguments: %w", err)
 		}
 
-		processes[i].TTY = row.TTY
-		processes[i].Args = row.Args
+		data, err := unix.SysctlRaw("kern.procargs2", processes[i].PID)
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) ||
+			errors.Is(err, unix.EACCES) || errors.Is(err, unix.EINVAL) {
+			// The process exited or denies access; keep the kernel command name.
+			continue
+		}
+
+		if err != nil {
+			return classifyDarwinError("kern.procargs2", err)
+		}
+
+		executable, args, environment, err := parseDarwinProcArgs(data)
+		if err != nil {
+			return &TableError{Path: "kern.procargs2", Err: err}
+		}
+
+		if executable != "" {
+			processes[i].Executable = executable
+		}
+
+		processes[i].Args = args
+		processes[i].Env = parseEnvironment(environment, envKeys)
 	}
+
+	return nil
 }
 
 func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) {
@@ -204,21 +239,17 @@ func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) 
 
 		pids = append(pids, strconv.Itoa(pid))
 		processes = append(processes, Process{
-			PID:                pid,
-			Name:               darwinCString(process.Proc.P_comm[:]),
-			PPID:               int(process.Eproc.Ppid),
-			ProcessGroupID:     int(process.Eproc.Pgid),
-			Foreground:         false,
-			StartIdentity:      startIdentity,
-			Executable:         darwinCString(process.Proc.P_comm[:]),
-			CWD:                "",
-			TTY:                "",
-			AgentHint:          "",
-			MultiplexerKind:    "",
-			MultiplexerServer:  "",
-			MultiplexerSession: "",
-			MultiplexerPane:    "",
-			Args:               nil,
+			PID:            pid,
+			Name:           darwinCString(process.Proc.P_comm[:]),
+			PPID:           int(process.Eproc.Ppid),
+			ProcessGroupID: int(process.Eproc.Pgid),
+			Foreground:     false,
+			StartIdentity:  startIdentity,
+			Executable:     darwinCString(process.Proc.P_comm[:]),
+			CWD:            "",
+			TTY:            "",
+			Env:            nil,
+			Args:           nil,
 		})
 	}
 
@@ -245,7 +276,7 @@ func parseDarwinPS(output string) (map[int]darwinPSRow, error) {
 }
 
 func parseDarwinPSRow(fields []string) (darwinPSRow, error) {
-	if len(fields) < darwinPSMinimumFieldCount {
+	if len(fields) < darwinPSFieldCount {
 		return darwinPSRow{}, errTruncatedDarwinPSRecord
 	}
 
@@ -275,8 +306,6 @@ func parseDarwinPSRow(fields []string) (darwinPSRow, error) {
 		ProcessGroupID: pgid,
 		Foreground:     tpgid > 0 && pgid == tpgid,
 		TTY:            fields[4],
-		Executable:     fields[5],
-		Args:           append([]string(nil), fields[darwinPSMinimumFieldCount:]...),
 	}, nil
 }
 

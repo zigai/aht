@@ -37,14 +37,14 @@ func TestDiffWatchEventsSeparatesPresenceAndActivity(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&oldActivity),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 	next := old
 	next.Liveness = registry.NewLiveness(
 		next.Presence(),
 		registry.ActivityValue(&newActivity),
-		next.Decision(),
+		next.Decision(), time.Time{}, "",
 	)
 	next.ActivityChangedAt = at.Add(time.Minute)
 	next.UpdatedAt = at.Add(time.Minute)
@@ -75,7 +75,7 @@ func TestDiffWatchEventsReportsMultiplexerLocationChanges(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&activity),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 	next := old
@@ -117,10 +117,13 @@ func TestDiffWatchEventsIgnoresTransientWindowNameAndPathChanges(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&activity),
-			nil,
+			nil, time.Time{},
+
+			// Only WindowName (fleeting command name) and PaneCurrentPath change
+			"",
 		),
 	}
-	// Only WindowName (fleeting command name) and PaneCurrentPath change
+
 	next := old
 	next.Location.WindowName = "git"
 	next.Location.PaneCurrentPath = "/home/user/src/app/internal"
@@ -155,7 +158,7 @@ func TestDiffWatchEventsIgnoresTransientMultiplexerTabNameChanges(t *testing.T) 
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&activity),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 	next := old
@@ -401,14 +404,14 @@ func TestDiffWatchEventsReportsProcessTransitions(t *testing.T) {
 		Liveness: registry.NewLiveness(
 			registry.PresenceUnknown,
 			registry.ActivityValue(&activity),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 	next := old
 	next.Liveness = registry.NewLiveness(
 		registry.PresenceLive,
 		registry.ActivityValue(next.Activity()),
-		next.Decision(),
+		next.Decision(), time.Time{}, "",
 	)
 	next.PresenceChangedAt = at.Add(time.Second)
 	next.UpdatedAt = at.Add(time.Second)
@@ -437,7 +440,7 @@ func TestDiffWatchEventsReportsProcessBindingWithoutPresenceChange(t *testing.T)
 		Liveness: registry.NewLiveness(
 			registry.PresenceLive,
 			registry.ActivityValue(&activity),
-			nil,
+			nil, time.Time{}, "",
 		),
 	}
 	next := old
@@ -531,7 +534,7 @@ func TestWatchEmitsTransitionsAcrossBrokerDropToFilesystem(t *testing.T) {
 
 			serveSnapshotThenClose(t, listenFakeBroker(t), before)
 
-			var stdout lockedBuffer
+			stdout := lockedBuffer{changed: make(chan struct{}, 1)}
 
 			app := &application{
 				storePath:  path,
@@ -539,7 +542,10 @@ func TestWatchEmitsTransitionsAcrossBrokerDropToFilesystem(t *testing.T) {
 				stdout:     &stdout,
 				stderr:     &bytes.Buffer{},
 			}
+
 			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
 			done := make(chan error, 1)
 
 			go func() {
@@ -639,7 +645,8 @@ func serveSnapshotThenClose(t *testing.T, listener net.Listener, sessions []regi
 }
 
 func waitWatchLines(output *lockedBuffer, want int, timeout time.Duration) []string {
-	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	for {
 		lines := strings.Split(strings.TrimSpace(output.String()), "\n")
@@ -647,17 +654,22 @@ func waitWatchLines(output *lockedBuffer, want int, timeout time.Duration) []str
 			lines = nil
 		}
 
-		if len(lines) >= want || time.Now().After(deadline) {
+		if len(lines) >= want {
 			return lines
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-output.changed:
+		case <-timer.C:
+			return lines
+		}
 	}
 }
 
 type lockedBuffer struct {
-	mu     sync.Mutex
-	buffer bytes.Buffer
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	changed chan struct{}
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {
@@ -666,6 +678,10 @@ func (b *lockedBuffer) Write(p []byte) (int, error) {
 
 	// bytes.Buffer.Write always returns a nil error.
 	n, _ := b.buffer.Write(p)
+	select {
+	case b.changed <- struct{}{}:
+	default:
+	}
 
 	return n, nil
 }

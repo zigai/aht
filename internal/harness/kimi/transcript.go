@@ -113,20 +113,13 @@ func readTranscriptLoopEvent(
 
 func (kimiCodeHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"wire.jsonl"},
-		Sources:           transcriptSources,
-		SkipDirectory:     skipTranscriptDirectory,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        initializeTranscript,
-		Extra:             transcriptExtra,
-		Record:            readTranscriptRecord,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             nil,
-		LocalTitles:       true,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		Patterns:      []string{"wire.jsonl"},
+		Sources:       transcriptSources,
+		SkipDirectory: skipTranscriptDirectory,
+		Initialize:    initializeTranscript,
+		Extra:         transcriptExtra,
+		Record:        readTranscriptRecord,
+		LocalTitles:   true,
 	}
 }
 

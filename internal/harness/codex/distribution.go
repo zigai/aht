@@ -6,15 +6,8 @@ import (
 
 func (codexHarness) Distribution() harness.Distribution {
 	return harness.Distribution{
-		Source:        "npm",
-		Package:       "@openai/codex",
-		Repo:          "",
-		Asset:         "",
-		URL:           "",
-		MaxVersion:    "",
-		Directory:     "codex",
-		Family:        "",
-		PackageExtras: "",
-		Install:       nil,
+		Source:    harness.DistributionNPM,
+		Package:   "@openai/codex",
+		Directory: "codex",
 	}
 }

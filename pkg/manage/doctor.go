@@ -28,6 +28,13 @@ import (
 )
 
 const (
+	DoctorActionRefreshHistory     DoctorAction = "refresh_history"
+	DoctorActionResetStore         DoctorAction = "reset_store"
+	DoctorActionEnableTracker      DoctorAction = "enable_tracker"
+	DoctorActionInspectTracker     DoctorAction = "inspect_tracker"
+	DoctorActionRemoveHealth       DoctorAction = "remove_health"
+	DoctorActionReplaceIntegration DoctorAction = "replace_integration"
+	DoctorActionUpgrade            DoctorAction = "upgrade"
 	// DoctorStatusOK means the check passed.
 	DoctorStatusOK DoctorStatus = "ok"
 
@@ -58,8 +65,6 @@ const (
 
 	doctorCoreCheckCount = 9
 	executableName       = "aht"
-	trackerEnableCommand = "aht manage tracker enable"
-	trackerStatusCommand = "aht manage tracker status"
 	supportedPlatforms   = "aht runs on Linux and macOS"
 	issuesURL            = "https://github.com/zigai/aht/issues"
 )
@@ -68,6 +73,7 @@ const (
 var ErrNoRepair = errors.New("doctor check has no automatic repair")
 
 type (
+	DoctorAction string
 	// DoctorStatus is the outcome of one doctor check.
 	DoctorStatus string
 
@@ -87,11 +93,12 @@ type (
 		repair func(context.Context) (string, error)
 	}
 
-	// DoctorFix says how to resolve a warn or fail check. Manual, when set, is
-	// the full instruction and includes Command.
+	// DoctorFix describes a repair and any manual steps required before it.
+	//exhaustruct:optional
 	DoctorFix struct {
-		Command string `json:"command,omitempty"`
-		Manual  string `json:"manual,omitempty"`
+		Action DoctorAction `json:"action,omitempty"`
+		Target string       `json:"target,omitempty"`
+		Manual string       `json:"manual,omitempty"`
 		// Automatic reports whether [DoctorCheck.Repair] applies the fix.
 		Automatic bool `json:"automatic"`
 	}
@@ -107,8 +114,10 @@ type (
 
 	// DoctorResult is the complete diagnostic report, in check order.
 	DoctorResult struct {
-		Checks  []DoctorCheck `json:"checks"`
-		Summary DoctorSummary `json:"summary"`
+		Checks      []DoctorCheck `json:"checks"`
+		Summary     DoctorSummary `json:"summary"`
+		ConfigFiles []string      `json:"-"`
+		ConfigError error         `json:"-"`
 	}
 
 	// DoctorOptions controls what Doctor evaluates.
@@ -116,11 +125,6 @@ type (
 		// IncludeAll also reports harnesses whose integration is not installed
 		// or needs no setup.
 		IncludeAll bool
-		// ConfigPath selects the config file, as --config does.
-		ConfigPath string
-		// NoConfig skips configuration files, as --no-config does. Checks that
-		// need configured values are then skipped.
-		NoConfig bool
 		// MaxHealthAge is the age after which tracker health is stale. Zero
 		// derives it from the tracker interval.
 		MaxHealthAge time.Duration
@@ -134,6 +138,8 @@ type (
 	configState struct {
 		cfg   config.Config
 		ready bool
+		files []string
+		err   error
 	}
 )
 
@@ -142,7 +148,7 @@ type (
 // It changes nothing on disk; checks that cannot run are reported as skipped.
 func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	copies := executableCopies()
-	configCheck, cfg := checkConfigFile(opts)
+	configCheck, cfg := m.checkConfigFile()
 	platform := checkPlatform()
 	serviceCheck := m.checkService(ctx, cfg, platform)
 	checks := make([]DoctorCheck, 0, doctorCoreCheckCount+len(catalog.All()))
@@ -159,7 +165,12 @@ func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	)
 	checks = append(checks, m.checkIntegrations(ctx, opts.IncludeAll, copies)...)
 
-	return DoctorResult{Checks: checks, Summary: summarizeDoctorChecks(checks)}
+	return DoctorResult{
+		Checks:      checks,
+		Summary:     summarizeDoctorChecks(checks),
+		ConfigFiles: cfg.files,
+		ConfigError: cfg.err,
+	}
 }
 
 // Failed reports whether any check failed.
@@ -228,10 +239,9 @@ func checkHistoryRefresh(ctx context.Context) DoctorCheck {
 	}
 
 	if check.Status == DoctorStatusWarn {
-		command := "aht manage history refresh"
 		check.Fix = &DoctorFix{
-			Command:   command,
-			Manual:    "Refresh the history index: " + command,
+			Action:    DoctorActionRefreshHistory,
+			Manual:    "Refresh the history index",
 			Automatic: false,
 		}
 	}
@@ -299,14 +309,9 @@ func (m *Manager) checkStore(ctx context.Context) DoctorCheck {
 		)
 	}
 
-	reset := "aht manage state reset --force"
-	if m.config.StorePath != registry.DefaultStorePath() {
-		reset = "aht --store " + m.config.StorePath + " manage state reset --force"
-	}
-
 	check.Fix = &DoctorFix{
-		Command:   reset,
-		Manual:    "Reset the store, which deletes recorded sessions: " + reset,
+		Action: DoctorActionResetStore, Target: m.config.StorePath,
+		Manual:    "Reset the store, which deletes recorded sessions",
 		Automatic: false,
 	}
 
@@ -332,20 +337,20 @@ func (m *Manager) checkService(
 	case errors.Is(err, ErrForeignTracker):
 		check.Status, check.Message = DoctorStatusFail, sentence(err.Error())
 		check.Fix = &DoctorFix{
-			Command:   trackerEnableCommand,
-			Manual:    "Move the existing service definition aside, then run: " + trackerEnableCommand,
+			Action:    DoctorActionEnableTracker,
+			Manual:    "Move the existing service definition aside, then run",
 			Automatic: false,
 		}
 	case err != nil:
 		check.Status, check.Message = DoctorStatusFail, sentence(err.Error())
 		check.Fix = &DoctorFix{
-			Command:   trackerStatusCommand,
-			Manual:    "Inspect the service manager's report: " + trackerStatusCommand,
+			Action:    DoctorActionInspectTracker,
+			Manual:    "Inspect the service manager's report",
 			Automatic: false,
 		}
 	case !status.Installed, !status.Current, !status.Running:
 		check.Status, check.Message = DoctorStatusWarn, trackerProblem(status)
-		check.Fix = &DoctorFix{Command: trackerEnableCommand, Manual: "", Automatic: true}
+		check.Fix = &DoctorFix{Action: DoctorActionEnableTracker, Manual: "", Automatic: true}
 		check.repair = func(ctx context.Context) (string, error) {
 			result, err := m.EnableTracker(ctx, TrackerOptions{DryRun: false})
 			return result.Message, err
@@ -369,8 +374,8 @@ func (m *Manager) checkHealth(maxAge time.Duration, serviceCheck DoctorCheck) Do
 	path := m.HealthPath()
 	health, err := ReadTrackerHealth(path, time.Now().UTC(), maxAge)
 	waitFix := &DoctorFix{
-		Command:   trackerStatusCommand,
-		Manual:    "Wait one tracker cycle; if this persists, inspect the tracker: " + trackerStatusCommand,
+		Action:    DoctorActionInspectTracker,
+		Manual:    "Wait one tracker cycle; if this persists, inspect the tracker",
 		Automatic: false,
 	}
 
@@ -384,16 +389,16 @@ func (m *Manager) checkHealth(maxAge time.Duration, serviceCheck DoctorCheck) Do
 	case errors.Is(err, ErrHealthStale), errors.Is(err, ErrHealthDegraded):
 		check.Status, check.Message = DoctorStatusWarn, sentence(health.Message)
 		check.Fix = &DoctorFix{
-			Command:   trackerStatusCommand,
-			Manual:    "Inspect the tracker: " + trackerStatusCommand,
+			Action:    DoctorActionInspectTracker,
+			Manual:    "Inspect the tracker",
 			Automatic: false,
 		}
 	default:
 		check.Status, check.Message = DoctorStatusFail, "Health record is unreadable"
 		check.Details = []string{sentence(health.Message)}
 		check.Fix = &DoctorFix{
-			Command:   "rm " + path,
-			Manual:    "Delete the record; the tracker rewrites it on its next cycle: rm " + path,
+			Action: DoctorActionRemoveHealth, Target: path,
+			Manual:    "Delete the record; the tracker rewrites it on its next cycle",
 			Automatic: false,
 		}
 	}
@@ -431,22 +436,24 @@ func (m *Manager) checkIntegrations(
 		}
 
 		switch status.Status {
-		case ArtifactCurrent:
+		case install.ArtifactCurrent:
 			check.Status, check.Message = DoctorStatusOK, "Current"
-		case ArtifactMissing:
+		case install.ArtifactMissing:
 			if !includeAll {
 				continue
 			}
 
 			check.Status, check.Message = DoctorStatusInfo, "Not installed"
-		case ArtifactStale:
+		case install.ArtifactStale, install.ArtifactPartial:
 			m.describeStaleIntegration(ctx, &check, status, copies)
-		case ArtifactForeign:
-			command := fmt.Sprintf("aht manage integrations install %s --force", id)
+		case install.ArtifactDisabled:
+			check.Status, check.Message = DoctorStatusWarn, sentence(status.Message)
+			check.Fix = manualFix(sentence(status.NextStep))
+		case install.ArtifactForeign:
 			check.Status, check.Message = DoctorStatusFail, sentence(status.Message)
 			check.Fix = &DoctorFix{
-				Command:   command,
-				Manual:    "Back up the file, then let aht replace it: " + command,
+				Action: DoctorActionReplaceIntegration, Target: string(id),
+				Manual:    "Back up the file, then let aht replace it",
 				Automatic: false,
 			}
 		}
@@ -460,7 +467,7 @@ func (m *Manager) checkIntegrations(
 func (m *Manager) describeStaleIntegration(
 	ctx context.Context,
 	check *DoctorCheck,
-	status IntegrationStatus,
+	status install.IntegrationStatus,
 	copies []executableCopy,
 ) {
 	self := resolvedExecutable(m.config.Binary)
@@ -482,7 +489,7 @@ func (m *Manager) describeStaleIntegration(
 
 	check.Status, check.Message = DoctorStatusWarn, sentence(status.Message)
 	check.Fix = &DoctorFix{
-		Command:   "aht manage upgrade",
+		Action:    DoctorActionUpgrade,
 		Manual:    sentence(status.NextStep),
 		Automatic: true,
 	}
@@ -518,23 +525,20 @@ func skipDoctorCheck(check DoctorCheck, needs string) DoctorCheck {
 }
 
 func manualFix(manual string) *DoctorFix {
-	return &DoctorFix{Command: "", Manual: manual, Automatic: false}
+	return &DoctorFix{Action: "", Manual: manual, Automatic: false}
 }
 
-func checkConfigFile(opts DoctorOptions) (DoctorCheck, configState) {
+func (m *Manager) checkConfigFile() (DoctorCheck, configState) {
 	check := newDoctorCheck(doctorGroupConfig, "file")
-	if opts.NoConfig {
+	if m.config.NoConfig {
 		check.Status, check.Message = DoctorStatusSkip, "--no-config"
-		return check, configState{cfg: config.Defaults(), ready: false}
+		return check, configState{cfg: config.Defaults(), ready: false, files: nil, err: nil}
 	}
 
-	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
-		Path:     opts.ConfigPath,
-		Explicit: opts.ConfigPath != "",
-	})
+	cfg, meta, resolved, err := m.loadConfigWithMetadata()
 	if err != nil {
-		describeConfigError(&check, opts.ConfigPath, resolved, err)
-		return check, configState{cfg: config.Defaults(), ready: false}
+		describeConfigError(&check, m.config.ConfigPath, resolved, err)
+		return check, configState{cfg: config.Defaults(), ready: false, files: nil, err: err}
 	}
 
 	switch active := meta.ActiveFiles(); len(active) {
@@ -547,7 +551,7 @@ func checkConfigFile(opts DoctorOptions) (DoctorCheck, configState) {
 		check.Details = active
 	}
 
-	return check, configState{cfg: cfg, ready: true}
+	return check, configState{cfg: cfg, ready: true, files: meta.ActiveFiles(), err: nil}
 }
 
 func describeConfigError(check *DoctorCheck, explicit string, resolved string, err error) {
@@ -672,8 +676,6 @@ func checkProcessEnumeration(ctx context.Context) DoctorCheck {
 	check.Status, check.Message = DoctorStatusFail, sentence(err.Error())
 	if permission, ok := errors.AsType[*processinfo.PermissionError](err); ok {
 		check.Fix = manualFix("Give this user read access to " + permission.Path)
-	} else if _, ok := errors.AsType[*processinfo.UnsupportedError](err); ok {
-		check.Fix = manualFix("Use Linux or macOS; " + supportedPlatforms)
 	} else {
 		check.Fix = manualFix("Report this at " + issuesURL)
 	}

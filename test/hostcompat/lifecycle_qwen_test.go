@@ -13,8 +13,6 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/testtmux"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -29,7 +27,7 @@ func (host *isolatedHost) runQwenTUI(t *testing.T, command *exec.Cmd, interrupt 
 		t.Fatal("Qwen Code native lifecycle requires tmux")
 	}
 
-	pane := host.startQwenPane(t, qwenTUIArgs(command, false))
+	pane := host.startNativePane(t, qwenTUIArgs(command, false))
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("native Qwen Code presented screen:\n%s", captureQwenPane(t, pane))
@@ -37,7 +35,7 @@ func (host *isolatedHost) runQwenTUI(t *testing.T, command *exec.Cmd, interrupt 
 	})
 
 	for step := range 2 {
-		hold := awaitQwenHold(t, host, step)
+		hold := host.awaitHold(t, nil, step)
 		if step == 0 {
 			host.waitForActiveSession(t)
 		}
@@ -79,7 +77,7 @@ func runQwenPermissionScenarios(t *testing.T, contract hostContract, oracle stri
 
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
-			pane := host.startQwenPane(t, qwenTUIArgs(host.lifecycleCommand(t), true))
+			pane := host.startNativePane(t, qwenTUIArgs(host.lifecycleCommand(t), true))
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("native Qwen Code presented screen:\n%s", captureQwenPane(t, pane))
@@ -118,56 +116,6 @@ func qwenTUIArgs(command *exec.Cmd, ask bool) *exec.Cmd {
 	command.Args = args
 
 	return command
-}
-
-func (host *isolatedHost) startQwenPane(t *testing.T, command *exec.Cmd) gotmux.Pane {
-	t.Helper()
-	server := testtmux.New(t, gotmux.NewSessionOptions{
-		Name: "qwen", Size: gotmux.Size{Width: 160, Height: 45}, Program: gotmux.Exec("/bin/sh"),
-	})
-
-	panes, err := server.Tmux.Panes(t.Context())
-	if err != nil || len(panes) != 1 {
-		t.Fatalf("native Qwen Code initial pane: count=%d error=%v", len(panes), err)
-	}
-
-	pane := panes[0].Handle()
-	if err := pane.Options().SetRemainOnExit(t.Context(), gotmux.RemainOn); err != nil {
-		t.Fatal(err)
-	}
-
-	args := append([]string{"-i"}, command.Env...)
-	args = append(args, command.Path)
-
-	args = append(args, command.Args[1:]...)
-	if err := pane.Respawn(t.Context(), gotmux.RespawnOptions{
-		Dir: host.launched.Work, Program: gotmux.Exec("env", args...), KillRunning: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	return pane
-}
-
-func awaitQwenHold(t *testing.T, host *isolatedHost, expected int) *fakeprovider.Hold {
-	t.Helper()
-
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != expected {
-			t.Fatalf("Qwen Code provider request = %d, want %d", hold.Request.Index, expected)
-		}
-
-		return hold
-	case <-time.After(30 * time.Second):
-		t.Fatalf(
-			"Qwen Code did not reach provider request %d\nprovider requests: %s",
-			expected,
-			providerRequestSummary(host.provider),
-		)
-	}
-
-	return nil
 }
 
 // The interactive UI follows Stop with an idle_prompt notification, so either

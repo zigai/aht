@@ -135,7 +135,7 @@ func (s *Journal) transact(ctx context.Context, entry journalEntry) (journalResu
 		return journalResult{}, fmt.Errorf("creating state directory: %w", err)
 	}
 
-	lock, err := openStoreLock(ctx, s.path+".lock", s.onLockContention)
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), s.onLockContention)
 	if err != nil {
 		return journalResult{}, err
 	}
@@ -180,7 +180,7 @@ func (s *Journal) transactLocked(ctx context.Context, entry journalEntry) (journ
 		return journalResult{}, fmt.Errorf("updating registry: %w", err)
 	}
 
-	owner, err := tryStoreLock(s.path + ".owner.lock")
+	owner, err := tryStoreLock(ownerLockPath(s.path))
 	if err != nil && !errors.Is(err, ErrStoreOwned) {
 		return journalResult{}, err
 	}
@@ -271,7 +271,7 @@ func (r Reducer) foldJournal(
 }
 
 func readJournal(path string) ([]decodedJournalEntry, error) {
-	data, err := readSnapshotFile(path + ".journal.jsonl")
+	data, err := readSnapshotFile(journalPath(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -314,7 +314,7 @@ func appendJournal(path string, entry journalEntry) error {
 
 	file, err := registryFSFor(
 		path,
-	).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	).OpenFile(journalPath(path), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening journal: %w", err)
 	}
@@ -331,7 +331,7 @@ func appendJournal(path string, entry journalEntry) error {
 }
 
 func journalMissing(path string) (bool, error) {
-	_, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
+	_, err := registryFSFor(path).Lstat(journalPath(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
@@ -373,7 +373,7 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 		return err
 	}
 
-	info, err := registryFSFor(path).Lstat(path + ".journal.jsonl")
+	info, err := registryFSFor(path).Lstat(journalPath(path))
 	if err == nil && info.Size() == 0 {
 		return nil
 	}
@@ -386,7 +386,7 @@ func persistJournalSnapshot(path string, snap snapshot) error {
 
 	file, err := registryFSFor(
 		path,
-	).OpenFile(path+".journal.jsonl", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	).OpenFile(journalPath(path), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("truncating journal: %w", err)
 	}
@@ -509,7 +509,7 @@ func resetJournalSnapshot(
 
 	// Publish the reset before the checkpoint so crashes and a live owner
 	// cannot replay discarded entries or restore pre-reset memory.
-	if err := writeRegistryAtomic(path+".journal.jsonl", append(data, '\n')); err != nil {
+	if err := writeRegistryAtomic(journalPath(path), append(data, '\n')); err != nil {
 		return snapshot{}, journalResult{}, err
 	}
 
@@ -605,7 +605,7 @@ func resetJournalPosition(path string, sequence uint64, cleared int) (uint64, in
 
 	cleared = max(cleared, 0)
 
-	data, err = readSnapshotFile(path + ".journal.jsonl")
+	data, err = readSnapshotFile(journalPath(path))
 	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrStoreTooLarge) {
 		return 0, 0, err
 	}

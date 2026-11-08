@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/broker"
 )
 
@@ -26,17 +27,7 @@ func (h *Harness) StartTracker(ctx context.Context) error {
 		return errTrackerRun
 	}
 
-	p, err := h.startProcess(
-		ctx,
-		"tracker",
-		h.aht,
-		"--store",
-		h.Store,
-		"manage",
-		"tracker",
-		"run",
-		"--quiet",
-	)
+	p, err := h.startProcess(ctx, "tracker", h.aht, service.TrackerArgs(h.Store, 0, 0)...)
 	if err != nil {
 		return err
 	}
@@ -52,28 +43,28 @@ func (h *Harness) StartTracker(ctx context.Context) error {
 func (h *Harness) startService(
 	ctx context.Context,
 	index int,
-	service harness.LaunchService,
+	spec harness.LaunchService,
 ) error {
 	name := "service-" + strconv.Itoa(index)
 
-	if service.Address != "" {
-		if _, _, err := net.SplitHostPort(service.Address); err != nil {
-			return fmt.Errorf("%s address %q: %w", name, service.Address, err)
+	if spec.Address != "" {
+		if _, _, err := net.SplitHostPort(spec.Address); err != nil {
+			return fmt.Errorf("%s address %q: %w", name, spec.Address, err)
 		}
 	}
 
-	p, err := h.startProcess(ctx, name, h.Executable, service.Args...)
+	p, err := h.startProcess(ctx, name, h.Executable, spec.Args...)
 	if err != nil {
 		return err
 	}
 
 	h.services = append(h.services, p)
 
-	if service.Address == "" {
+	if spec.Address == "" {
 		return nil
 	}
 
-	return waitForAddress(ctx, p, service.Address)
+	return waitForAddress(ctx, p, spec.Address)
 }
 
 func (h *Harness) stopTracker() error {

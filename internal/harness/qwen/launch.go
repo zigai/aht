@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 )
 
 func (qwenHarness) LaunchPlan(
@@ -17,7 +16,7 @@ func (qwenHarness) LaunchPlan(
 
 	return harness.LaunchPlan{
 		Executable: "qwen",
-		Protocol:   fakeprovider.ProtocolOpenAIChat,
+		Protocol:   harness.LaunchProtocolOpenAIChat,
 		Env: []string{
 			"OPENAI_API_KEY=" + model.APIKey,
 			"OPENAI_BASE_URL=" + model.Endpoint + "/v1",
@@ -28,8 +27,6 @@ func (qwenHarness) LaunchPlan(
 			Path:   filepath.Join(paths.Home, ".qwen", "settings.json"),
 			Update: launchSettings,
 		}},
-		Setup:    nil,
-		Services: nil,
 		Headless: func(prompt string) ([]string, error) {
 			return append([]string{"-p", prompt, "--yolo"}, common...), nil
 		},

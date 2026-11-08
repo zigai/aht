@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 package brokerserver
 
 import (
@@ -65,7 +63,7 @@ func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 		result <- server.serve(ctx, &failingListener{Listener: listener, fail: fail})
 	}()
 
-	subscription, err := broker.NewClient(path).Subscribe(ctx, registry.Filter{})
+	subscription, err := broker.NewClient(broker.SocketPath(path)).Subscribe(ctx, registry.Filter{})
 
 	close(fail)
 

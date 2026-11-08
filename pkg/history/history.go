@@ -114,7 +114,7 @@ type Query struct {
 	Exclude       []string         `json:"exclude,omitempty"`
 	Regex         bool             `json:"regex"`
 	Word          bool             `json:"word"`
-	Role          string           `json:"role,omitempty"`
+	Role          Role             `json:"role,omitempty"`
 	IncludeTools  bool             `json:"include_tools"`
 	CaseSensitive bool             `json:"case_sensitive"`
 	Excerpts      int              `json:"excerpts,omitempty"`
@@ -171,10 +171,10 @@ type Span struct {
 
 // Excerpt is a bounded window around the first match in a message. Matches lists
 // every term match inside Text. Line is a one-based JSONL line, or zero for
-// databases. MessageID is native when available. Role is user, assistant, context, or tool.
+// databases. MessageID is native when available.
 // Reasoning and system text are excluded.
 type Excerpt struct {
-	Role      string    `json:"role"`
+	Role      Role      `json:"role"`
 	Text      string    `json:"text"`
 	Spans     []Span    `json:"spans,omitempty"`
 	MessageID string    `json:"message_id,omitempty"`
@@ -203,11 +203,11 @@ type Match struct {
 	RegistryStates []RegistryState `json:"live"`
 }
 
-// SourceStatus reports a source's coverage: searched, skipped, missing,
-// unsupported, or failed. Files counts inspected transcript files/databases.
+// SourceStatus reports a source's coverage. Files counts inspected transcript
+// files/databases.
 type SourceStatus struct {
 	Source Source `json:"source"`
-	Status string `json:"status"`
+	Status Status `json:"status"`
 	Files  int    `json:"files"`
 }
 
@@ -239,36 +239,35 @@ type Result struct {
 type scanMode int
 
 type search struct {
+	scanEnvironment
+	queryPlan
+
 	mu               sync.Mutex
 	index            *historyIndex
-	writer           *indexWriter
 	indexErr         error
-	explicitSources  bool
-	sourceMetadata   map[string]string
-	mode             scanMode
-	query            Query
-	terms            []matcher
-	prefilter        *bytePrefilter
 	metadataFailures map[string]bool
 	toolsFailures    map[string]bool
-	exclude          []matcher
 	stream           func(Match) bool
 	stopped          bool
-	progress         func(Progress)
 	matched          int
 	failures         int
 	recent           matchHeap
 	result           Result
-	registry         map[registry.Harness]*registryLookup
-	last             *lastMessage
 }
 
-// lastMessage collects the last message with role of the conversation session for LastMessage.
-type lastMessage struct {
-	session string
-	role    string
-	message Excerpt
-	found   bool
+type scanEnvironment struct {
+	explicitSources bool
+	sourceMetadata  map[string]string
+	progress        func(Progress)
+	registry        map[registry.Harness]*registryLookup
+}
+
+type queryPlan struct {
+	mode      scanMode
+	query     Query
+	terms     []matcher
+	prefilter *bytePrefilter
+	exclude   []matcher
 }
 
 type retainedMatch struct {
@@ -340,34 +339,9 @@ func (f Filter) Validate() error {
 	return fmt.Errorf("%w: invalid presence %q; choose live or gone", ErrInvalidQuery, f.Presence)
 }
 
-// Validate checks the public query contract without reading any history.
 func (q Query) Validate() error {
 	q = q.combined()
-	if err := q.Filter.Validate(); err != nil {
-		return err
-	}
-
-	if len(q.Terms) == 0 {
-		return fmt.Errorf("%w: provide at least one search term", ErrInvalidQuery)
-	}
-
-	if err := validateTermText(slices.Concat(q.Terms, q.Exclude)); err != nil {
-		return err
-	}
-
-	if q.Limit < 0 {
-		return fmt.Errorf("%w: limit must be nonnegative (0 means unlimited)", ErrInvalidQuery)
-	}
-
-	if q.Excerpts < 0 {
-		return fmt.Errorf("%w: excerpts must be nonnegative", ErrInvalidQuery)
-	}
-
-	if err := validateSort(q.Sort, true); err != nil {
-		return err
-	}
-
-	if err := validateRole(q.Role); err != nil {
+	if err := q.validate(); err != nil {
 		return err
 	}
 
@@ -375,11 +349,9 @@ func (q Query) Validate() error {
 		return err
 	}
 
-	if _, err := compileMatchers(q.Exclude, q); err != nil {
-		return err
-	}
+	_, err := compileMatchers(q.Exclude, q)
 
-	return nil
+	return err
 }
 
 // combined folds Text into Terms and Harness into Harnesses.
@@ -428,12 +400,6 @@ func (q ListQuery) searchQuery() Query {
 	}
 }
 
-// Search searches the machine's default local history sources.
-func Search(ctx context.Context, query Query) (Result, error) {
-	var catalog Catalog
-	return catalog.Search(ctx, query)
-}
-
 func validateTermText(terms []string) error {
 	for _, term := range terms {
 		if strings.TrimSpace(term) == "" {
@@ -448,9 +414,8 @@ func validateTermText(terms []string) error {
 	return nil
 }
 
-func validateRole(role string) error {
-	if role != "" &&
-		!slices.Contains([]string{"user", "assistant", "agent", "context", "tool", "all"}, role) {
+func validateRole(role Role) error {
+	if role != "" && !role.Valid() {
 		return fmt.Errorf(
 			"%w: invalid role %q; choose user, agent, assistant, context, tool, or all",
 			ErrInvalidQuery,
@@ -567,37 +532,6 @@ func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	return result, errors.Join(runErr, closeErr, statusErr)
 }
 
-// LastMessage returns the last message with role, "user" or "assistant", of the conversation
-// sessionID in the catalog's sources. It reads the sources directly instead of the index, so it
-// sees what the harness wrote last; name the conversation's transcript as the only source to read
-// just that file. Text parts of one native message are joined with newlines. found is false
-// when the conversation has no such message or is not in the sources.
-func (c Catalog) LastMessage(
-	ctx context.Context,
-	sessionID string,
-	role string,
-) (Excerpt, bool, error) {
-	var none Excerpt
-	if sessionID == "" || (role != "user" && role != "assistant") {
-		return none, false, fmt.Errorf(
-			"%w: a last message needs a session and the role user or assistant",
-			ErrInvalidQuery,
-		)
-	}
-
-	var (
-		everything ListQuery
-		s          search
-	)
-
-	s.mode = modeList
-	s.query = everything.searchQuery()
-	s.last = &lastMessage{session: sessionID, role: role, message: none, found: false}
-	_, err := c.runDirect(ctx, &s)
-
-	return s.last.message, s.last.found, err
-}
-
 func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
 	sources, err := c.begin(ctx, s)
 	if err != nil {
@@ -609,42 +543,6 @@ func (c Catalog) run(ctx context.Context, s *search) (Result, error) {
 	}
 
 	err = c.searchIndexed(ctx, s, sources)
-
-	return s.finalize(ctx), err
-}
-
-// searchDirect scans the sources without the disposable index. Both the fallback
-// and the indexed path share this exact code, so it is the reference behavior
-// the index must reproduce.
-func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) {
-	var s search
-
-	s.mode = modeSearch
-	s.query = query
-
-	return c.runDirect(ctx, &s)
-}
-
-func (c Catalog) listDirect(ctx context.Context, query ListQuery) (Result, error) {
-	var s search
-
-	s.mode = modeList
-	s.query = query.searchQuery()
-
-	return c.runDirect(ctx, &s)
-}
-
-func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
-	sources, err := c.begin(ctx, s)
-	if err != nil {
-		return s.finalize(ctx), err
-	}
-
-	if len(sources) == 0 {
-		return s.finalize(ctx), nil
-	}
-
-	err = s.runDirect(ctx, sources)
 
 	return s.finalize(ctx), err
 }
@@ -742,7 +640,7 @@ func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 
 	var excerptErr error
 	if s.mode != modeRefresh {
-		excerptErr = s.index.readRetained(ctx, s)
+		excerptErr = s.readRetained(ctx, s.index)
 	}
 
 	return errors.Join(scanErr, s.indexErr, commitErr, excerptErr, ctx.Err(), s.resultError())
@@ -807,7 +705,7 @@ func (s *search) forEachSource(ctx context.Context, sources []Source) error {
 
 		s.result.Sources = append(
 			s.result.Sources,
-			SourceStatus{Source: source, Status: "skipped", Files: 0},
+			SourceStatus{Source: source, Status: StatusSkipped, Files: 0},
 		)
 		skipped = append(
 			skipped,
@@ -825,33 +723,55 @@ func (s *search) forEachSource(ctx context.Context, sources []Source) error {
 }
 
 func (s *search) prepare() error {
+	if err := s.queryPlan.compile(); err != nil {
+		return err
+	}
+
+	s.prepareRegistry()
+	s.recent.compare = resultOrder(s.query.Sort)
+
+	return nil
+}
+
+func (s *queryPlan) compile() error {
 	if err := s.validate(); err != nil {
 		return err
 	}
 
 	s.query = s.query.combined()
 
-	s.query.Harnesses = uniqueHarnesses(s.query.Harnesses)
+	harnesses, err := uniqueHarnesses(s.query.Harnesses)
+	if err != nil {
+		return err
+	}
+
+	s.query.Harnesses = harnesses
 	if err := s.absolutePaths(); err != nil {
 		return err
 	}
 
 	switch s.query.Role {
-	case "agent":
-		s.query.Role = "assistant"
-	case "tool":
+	case RoleAgent:
+		s.query.Role = RoleAssistant
+	case RoleTool:
 		s.query.IncludeTools = true
+	case "", RoleUser, RoleAssistant, RoleContext, RoleAll:
 	}
 
 	if s.query.Excerpts == 0 {
 		s.query.Excerpts = defaultExcerpts
 	}
 
-	s.prepareRegistry()
-	s.recent.compare = resultOrder(s.query.Sort)
-	s.terms, _ = compileMatchers(s.query.Terms, s.query)
+	s.terms, err = compileMatchers(s.query.Terms, s.query)
+	if err != nil {
+		return err
+	}
 
-	s.exclude, _ = compileMatchers(s.query.Exclude, s.query)
+	s.exclude, err = compileMatchers(s.query.Exclude, s.query)
+	if err != nil {
+		return err
+	}
+
 	if s.mode == modeSearch {
 		s.prefilter = newBytePrefilter(s.terms)
 	}
@@ -859,10 +779,10 @@ func (s *search) prepare() error {
 	return nil
 }
 
-func (s *search) validate() error {
+func (s *queryPlan) validate() error {
 	switch s.mode {
 	case modeSearch:
-		return s.query.Validate()
+		return s.query.validate()
 	case modeList:
 		return (ListQuery{Filter: s.query.Filter, Sort: s.query.Sort, Limit: s.query.Limit}).Validate()
 	case modeRefresh:
@@ -871,19 +791,23 @@ func (s *search) validate() error {
 	return nil
 }
 
-func uniqueHarnesses(ids []registry.Harness) []registry.Harness {
+func uniqueHarnesses(ids []registry.Harness) ([]registry.Harness, error) {
 	harnesses := make([]registry.Harness, 0, len(ids))
 	for _, id := range ids {
-		parsed, _ := harness.Parse(string(id))
+		parsed, err := harness.Parse(string(id))
+		if err != nil {
+			return nil, fmt.Errorf("normalize history harness: %w", err)
+		}
+
 		if !slices.Contains(harnesses, parsed) {
 			harnesses = append(harnesses, parsed)
 		}
 	}
 
-	return harnesses
+	return harnesses, nil
 }
 
-func (s *search) absolutePaths() error {
+func (s *queryPlan) absolutePaths() error {
 	directories := make([]string, 0, len(s.query.Dirs))
 	for _, dir := range s.query.Dirs {
 		path, err := filepath.Abs(dir)
@@ -1139,24 +1063,7 @@ func activeSince(c Conversation) time.Time {
 	return c.CreatedAt
 }
 
-// accepts applies the metadata filter. Index queries prefilter with weaker SQL
-// predicates, so this is the authority for both scan paths.
-func (s *search) accepts(c Conversation) bool {
-	f := s.query.Filter
-	if !f.acceptsDirs(c) || !f.acceptsTimes(c) {
-		return false
-	}
-
-	if f.GitBranch != "" && c.GitBranch != f.GitBranch {
-		return false
-	}
-
-	if f.Model != "" && !strings.Contains(strings.ToLower(c.Model), strings.ToLower(f.Model)) {
-		return false
-	}
-
-	return c.Messages >= f.MinMessages
-}
+func (s *search) accepts(c Conversation) bool { return s.query.Filter.accepts(c) }
 
 func (f Filter) acceptsDirs(c Conversation) bool {
 	if len(f.Dirs) > 0 {
@@ -1180,13 +1087,7 @@ func (f Filter) acceptsDirs(c Conversation) bool {
 		}
 	}
 
-	for _, path := range f.IgnorePaths {
-		if pathmatch.Match(c.CWD, path) || pathmatch.Match(c.ProjectRoot, path) {
-			return false
-		}
-	}
-
-	return true
+	return !pathmatch.MatchAny(f.IgnorePaths, c.CWD, c.ProjectRoot)
 }
 
 func (f Filter) acceptsTimes(c Conversation) bool {
@@ -1221,21 +1122,6 @@ func presence(states []RegistryState) registry.Presence {
 // add accepts a parsed conversation: an index refresh stores it, and a scan
 // keeps it when it satisfies every term and no exclusion.
 func (s *search) add(ctx context.Context, t *transcript) {
-	if s.writer != nil {
-		s.writer.finish(t.match.Conversation)
-		return
-	}
-
-	if s.last != nil {
-		if t.hasLast && t.match.Conversation.SessionID == s.last.session {
-			s.mu.Lock()
-			s.last.message, s.last.found = t.last, true
-			s.mu.Unlock()
-		}
-
-		return
-	}
-
 	if s.mode == modeSearch && !t.qualifies(len(s.terms)) {
 		return
 	}
@@ -1416,10 +1302,76 @@ func (s *search) resultError() error {
 	}
 
 	for _, source := range s.result.Sources {
-		if source.Status == "unsupported" && (s.explicitSources || len(s.query.Harnesses) > 0) {
+		if source.Status == StatusUnsupported && (s.explicitSources || len(s.query.Harnesses) > 0) {
 			return errors.Join(ErrIncomplete, ErrUnsupportedHarness)
 		}
 	}
 
 	return ErrIncomplete
+}
+
+// readRetained hydrates only the final heap after every selected history has
+// been checked. Failed or canceled reads cannot expose metadata-only matches.
+func (s *search) readRetained(ctx context.Context, index *historyIndex) error {
+	if s.mode != modeSearch || s.query.IncludeTools {
+		return nil
+	}
+
+	retained := s.recent.items
+	s.recent.items = nil
+
+	for _, match := range retained {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read retained excerpts: %w", err)
+		}
+
+		if err := index.readExcerpts(ctx, &s.queryPlan, match.indexID, &match.Match); err != nil {
+			// Re-run native discovery to preserve source coverage and diagnostics
+			// if the deferred index read fails after the source walk has finished.
+			return indexUnavailable(err)
+		}
+
+		s.recent.items = append(s.recent.items, match)
+	}
+
+	return nil
+}
+
+func (s *search) reportIndexError(source Source, path string, err error) {
+	if errors.Is(err, ErrIndexUnavailable) {
+		s.indexErr = errors.Join(s.indexErr, err)
+		return
+	}
+
+	s.fileIssue(source, path, err)
+}
+
+// Validate checks the public query contract without reading any history.
+func (q Query) validate() error {
+	q = q.combined()
+	if err := q.Filter.Validate(); err != nil {
+		return err
+	}
+
+	if len(q.Terms) == 0 {
+		return fmt.Errorf("%w: provide at least one search term", ErrInvalidQuery)
+	}
+
+	if err := validateTermText(slices.Concat(q.Terms, q.Exclude)); err != nil {
+		return err
+	}
+
+	if q.Limit < 0 {
+		return fmt.Errorf("%w: limit must be nonnegative (0 means unlimited)", ErrInvalidQuery)
+	}
+
+	if q.Excerpts < 0 {
+		return fmt.Errorf("%w: excerpts must be nonnegative", ErrInvalidQuery)
+	}
+
+	if err := validateSort(q.Sort, true); err != nil {
+		return err
+	}
+
+	return validateRole(q.Role)
 }

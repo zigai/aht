@@ -1,6 +1,8 @@
 package agentstate
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,10 +13,20 @@ import (
 
 const maxSnapshotLines = 100
 
+const (
+	// ReasonManifestRule marks a decision taken by a manifest rule.
+	ReasonManifestRule = "manifest_rule"
+	// ReasonNoRuleMatched marks a decision where no manifest rule matched.
+	ReasonNoRuleMatched = "no_rule_matched"
+)
+
 // CSI parameter, intermediate, and final bytes use their standard ASCII ranges.
 var ansiEscapePattern = regexp.MustCompile(
 	`\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][^\a\x1b]*(?:\a|\x1b\\)|)`,
 )
+
+// ErrManifestOptions reports conflicting explicit and ambient manifest sources.
+var ErrManifestOptions = errors.New("manifest path and config directory cannot be used together")
 
 type Snapshot struct {
 	Lines []string
@@ -67,6 +79,71 @@ type Inspection struct {
 	Screen          string           `json:"screen,omitempty"`
 }
 
+// InspectOptions selects the screen title, rule source, and optional screen output.
+//
+//exhaustruct:optional
+type InspectOptions struct {
+	Title         string
+	ManifestPath  string
+	ConfigDir     string
+	IncludeScreen bool
+}
+
+type ruleResult struct {
+	matched      bool
+	matchers     []MatcherInspection
+	firstFailure string
+}
+
+// InspectScreen evaluates a saved screen with the same normalization and
+// matching as live tracking. An explicit manifest fails on invalid input;
+// ambient overrides keep the bundled fallback. Custom harness names require
+// an explicit manifest.
+func InspectScreen(
+	ctx context.Context,
+	harnessID registry.Harness,
+	screen string,
+	opts InspectOptions,
+) (Inspection, error) {
+	var empty Inspection
+	if err := ctx.Err(); err != nil {
+		return empty, fmt.Errorf("inspect screen: %w", err)
+	}
+
+	if len(screen) > MaxScreenBytes {
+		return empty, ErrScreenTooLarge
+	}
+
+	if opts.ManifestPath != "" && opts.ConfigDir != "" {
+		return empty, ErrManifestOptions
+	}
+
+	var (
+		manifest Manifest
+		err      error
+	)
+	if opts.ManifestPath != "" {
+		manifest, err = LoadExplicitManifest(opts.ManifestPath, harnessID)
+	} else {
+		manifest, err = (Loader{ConfigDir: opts.ConfigDir}).Load(harnessID)
+	}
+
+	if err != nil {
+		return empty, fmt.Errorf("load detection manifest: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return empty, fmt.Errorf("inspect screen: %w", err)
+	}
+
+	inspection := manifest.Inspect(NormalizeSnapshot(screen, opts.Title))
+	if opts.IncludeScreen {
+		inspection.Screen = screen
+	}
+
+	return inspection, nil
+}
+
 func NormalizeSnapshot(text string, title string) Snapshot {
 	text = ansiEscapePattern.ReplaceAllString(text, "")
 	lines := mux.BoundBottomLines(text, maxSnapshotLines)
@@ -75,94 +152,13 @@ func NormalizeSnapshot(text string, title string) Snapshot {
 }
 
 func (manifest *Manifest) Evaluate(snapshot Snapshot) Decision {
-	decision := manifest.initialDecision()
-	for _, rule := range sortedRules(manifest.Rules) {
-		matched := rule.matches(snapshot)
-
-		decision.Evidence = append(
-			decision.Evidence,
-			RuleEvidence{RuleID: rule.ID, Matched: matched},
-		)
-		if !matched {
-			continue
-		}
-
-		activity, _ := registry.NormalizeActivity(rule.State)
-		decision.Activity = activity
-		decision.Reason = "manifest_rule"
-		decision.Detail = rule.Detail
-		decision.RuleID = rule.ID
-
-		return decision
-	}
+	decision, _ := manifest.decide(snapshot, false)
 
 	return decision
 }
 
 func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
-	decision := manifest.initialDecision()
-	sorted := sortedRules(manifest.Rules)
-
-	var winnerPriority int
-
-	candidates := make([]CandidateRule, 0, len(sorted))
-	for _, rule := range sorted {
-		matched, matchers, firstFailure := rule.inspect(snapshot)
-
-		winner := matched && decision.RuleID == ""
-		if decision.RuleID == "" {
-			decision.Evidence = append(
-				decision.Evidence,
-				RuleEvidence{RuleID: rule.ID, Matched: matched},
-			)
-			if winner {
-				decision.Activity, _ = registry.NormalizeActivity(rule.State)
-				decision.Reason = "manifest_rule"
-				decision.Detail = rule.Detail
-				decision.RuleID = rule.ID
-				winnerPriority = rule.Priority
-			}
-		}
-
-		var reason string
-
-		switch {
-		case winner:
-			reason = "matched"
-		case matched:
-			if winnerPriority == rule.Priority {
-				reason = fmt.Sprintf(
-					"matched (shadowed by %q: equal priority %d, earlier in manifest)",
-					decision.RuleID,
-					rule.Priority,
-				)
-			} else {
-				reason = fmt.Sprintf(
-					"matched (shadowed by %q: higher priority %d > %d)",
-					decision.RuleID,
-					winnerPriority,
-					rule.Priority,
-				)
-			}
-		default:
-			if firstFailure != "" {
-				reason = firstFailure
-			} else {
-				reason = "did not match"
-			}
-		}
-
-		candidates = append(candidates, CandidateRule{
-			ID:       rule.ID,
-			State:    rule.State,
-			Priority: rule.Priority,
-			Region:   rule.Region,
-			Matched:  matched,
-			Winner:   winner,
-			Reason:   reason,
-			Matchers: matchers,
-		})
-	}
+	decision, candidates := manifest.decide(snapshot, true)
 
 	return Inspection{
 		Harness:         registry.Harness(manifest.Agent),
@@ -178,10 +174,10 @@ func (manifest *Manifest) Inspect(snapshot Snapshot) Inspection {
 	}
 }
 
-func (manifest *Manifest) initialDecision() Decision {
-	return Decision{
+func (manifest *Manifest) decide(snapshot Snapshot, explain bool) (Decision, []CandidateRule) {
+	decision := Decision{
 		Activity:        registry.ActivityUnknown,
-		Reason:          "no_rule_matched",
+		Reason:          ReasonNoRuleMatched,
 		RuleID:          "",
 		ManifestSource:  manifest.Source,
 		ManifestVersion: manifest.Version,
@@ -189,369 +185,159 @@ func (manifest *Manifest) initialDecision() Decision {
 		Evidence:        make([]RuleEvidence, 0, len(manifest.Rules)),
 		Detail:          "",
 	}
-}
+	sorted := sortedRules(manifest.Rules)
 
-func (rule Rule) inspect(snapshot Snapshot) (bool, []MatcherInspection, string) {
 	var (
-		matchers     []MatcherInspection
-		firstFailure string
+		candidates     []CandidateRule
+		winnerPriority int
 	)
+	if explain {
+		candidates = make([]CandidateRule, 0, len(sorted))
+	}
 
-	regionLines, regionInspection, regionOK, regionConfigured := inspectRegionMatcher(
-		rule,
-		snapshot.Lines,
-	)
-	if regionConfigured {
-		matchers = append(matchers, regionInspection)
-		if !regionOK {
-			return false, matchers, "region: " + regionInspection.Details
+	for _, rule := range sorted {
+		result := rule.evaluate(snapshot, explain)
+
+		winner := result.matched && decision.RuleID == ""
+		if decision.RuleID == "" {
+			decision.Evidence = append(
+				decision.Evidence,
+				RuleEvidence{RuleID: rule.ID, Matched: result.matched},
+			)
+		}
+
+		if winner {
+			decision.Activity, _ = registry.NormalizeActivity(rule.State)
+			decision.Reason = ReasonManifestRule
+			decision.Detail = rule.Detail
+			decision.RuleID = rule.ID
+			winnerPriority = rule.Priority
+
+			if !explain {
+				return decision, nil
+			}
+		}
+
+		if explain {
+			candidates = append(candidates, CandidateRule{
+				ID:       rule.ID,
+				State:    rule.State,
+				Priority: rule.Priority,
+				Region:   rule.Region,
+				Matched:  result.matched,
+				Winner:   winner,
+				Reason: candidateReason(
+					result,
+					winner,
+					decision.RuleID,
+					winnerPriority,
+					rule.Priority,
+				),
+				Matchers: result.matchers,
+			})
 		}
 	}
 
-	text := strings.Join(regionLines, "\n")
-	title := snapshot.Title
-
-	if !rule.CaseSensitive {
-		text = strings.ToLower(text)
-		title = strings.ToLower(title)
-	}
-
-	appendMatcher := func(m MatcherInspection, ok bool, fail string) {
-		matchers = append(matchers, m)
-
-		if !ok && firstFailure == "" {
-			firstFailure = fail
-		}
-	}
-	inspectTextMatchers(rule, text, appendMatcher)
-	inspectTitleMatchers(rule, title, appendMatcher)
-
-	return firstFailure == "", matchers, firstFailure
+	return decision, candidates
 }
 
-func inspectRegionMatcher(rule Rule, lines []string) ([]string, MatcherInspection, bool, bool) {
-	regionLines, regionErr := selectRegion(rule.Region, lines)
-	if rule.Region == "" || rule.Region == "all" {
-		return regionLines, MatcherInspection{
-			Name:    "region",
-			Passed:  true,
-			Details: "",
-		}, true, false
+func candidateReason(
+	result ruleResult,
+	winner bool,
+	winnerID string,
+	winnerPriority int,
+	priority int,
+) string {
+	switch {
+	case winner:
+		return "matched"
+	case result.matched && winnerPriority == priority:
+		return fmt.Sprintf(
+			"matched (shadowed by %q: equal priority %d, earlier in manifest)",
+			winnerID,
+			priority,
+		)
+	case result.matched:
+		return fmt.Sprintf(
+			"matched (shadowed by %q: higher priority %d > %d)",
+			winnerID,
+			winnerPriority,
+			priority,
+		)
+	case result.firstFailure != "":
+		return result.firstFailure
+	default:
+		return "did not match"
+	}
+}
+
+func (rule Rule) evaluate(snapshot Snapshot, explain bool) ruleResult {
+	var result ruleResult
+
+	region := strings.TrimSpace(rule.Region)
+
+	lines, err := selectRegion(region, snapshot.Lines)
+	if region != "" && region != "all" && explain {
+		result.matchers = append(result.matchers, regionInspection(lines, err))
 	}
 
-	if regionErr != nil {
-		return nil, MatcherInspection{
-			Name:    "region",
-			Passed:  false,
-			Details: regionErr.Error(),
-		}, false, true
+	if err != nil {
+		if explain {
+			result.firstFailure = "region: " + err.Error()
+		}
+
+		return result
 	}
 
-	return regionLines, MatcherInspection{
+	text, title := rule.matchTargets(lines, snapshot.Title)
+	for _, matcher := range rule.matchers {
+		target := text
+		if matcher.title {
+			target = title
+		}
+
+		passed, index := matcher.check(target)
+		if !explain {
+			if !passed {
+				return result
+			}
+
+			continue
+		}
+
+		details := matcher.describe(index)
+		result.matchers = append(
+			result.matchers,
+			MatcherInspection{Name: matcher.name, Passed: passed, Details: details},
+		)
+
+		if !passed && result.firstFailure == "" {
+			result.firstFailure = matcher.name + ": " + details
+		}
+	}
+
+	result.matched = result.firstFailure == ""
+
+	return result
+}
+
+func (rule Rule) matchTargets(lines []string, title string) (string, string) {
+	text := strings.Join(lines, "\n")
+	if rule.CaseSensitive {
+		return text, title
+	}
+
+	return strings.ToLower(text), strings.ToLower(title)
+}
+
+func regionInspection(lines []string, err error) MatcherInspection {
+	if err != nil {
+		return MatcherInspection{Name: "region", Passed: false, Details: err.Error()}
+	}
+
+	return MatcherInspection{
 		Name:    "region",
 		Passed:  true,
-		Details: fmt.Sprintf("%d lines selected", len(regionLines)),
-	}, true, true
-}
-
-func inspectTextMatchers(
-	rule Rule,
-	text string,
-	appendMatcher func(MatcherInspection, bool, string),
-) {
-	if len(rule.All) > 0 {
-		appendMatcher(inspectAllMatcher(rule, text))
+		Details: fmt.Sprintf("%d lines selected", len(lines)),
 	}
-
-	if len(rule.Any) > 0 {
-		appendMatcher(inspectAnyMatcher(rule, text))
-	}
-
-	if len(rule.None) > 0 {
-		appendMatcher(inspectNoneMatcher(rule, text))
-	}
-
-	if len(rule.regexAllCompiled) > 0 {
-		appendMatcher(inspectRegexAllMatcher(rule, text))
-	}
-
-	if len(rule.regexAnyCompiled) > 0 {
-		appendMatcher(inspectRegexAnyMatcher(rule, text))
-	}
-
-	if len(rule.regexNoneCompiled) > 0 {
-		appendMatcher(inspectRegexNoneMatcher(rule, text))
-	}
-}
-
-func inspectTitleMatchers(
-	rule Rule,
-	title string,
-	appendMatcher func(MatcherInspection, bool, string),
-) {
-	if len(rule.TitleAny) > 0 {
-		appendMatcher(inspectTitleAnyMatcher(rule, title))
-	}
-
-	if len(rule.titleRegexAnyCompiled) > 0 {
-		appendMatcher(inspectTitleRegexAnyMatcher(rule, title))
-	}
-}
-
-func inspectAllMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for _, literal := range rule.All {
-		if !strings.Contains(text, normalizedLiteral(literal, rule.CaseSensitive)) {
-			failMsg := fmt.Sprintf("missing literal %q", literal)
-
-			return MatcherInspection{
-				Name:    "all",
-				Passed:  false,
-				Details: failMsg,
-			}, false, "all: " + failMsg
-		}
-	}
-
-	return MatcherInspection{
-		Name:    "all",
-		Passed:  true,
-		Details: fmt.Sprintf("all %d literals matched", len(rule.All)),
-	}, true, ""
-}
-
-func inspectAnyMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for _, literal := range rule.Any {
-		if strings.Contains(text, normalizedLiteral(literal, rule.CaseSensitive)) {
-			return MatcherInspection{
-				Name:    "any",
-				Passed:  true,
-				Details: fmt.Sprintf("matched literal %q", literal),
-			}, true, ""
-		}
-	}
-
-	failMsg := fmt.Sprintf("none of %d literals matched", len(rule.Any))
-
-	return MatcherInspection{
-		Name:    "any",
-		Passed:  false,
-		Details: failMsg,
-	}, false, "any: " + failMsg
-}
-
-func inspectNoneMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for _, literal := range rule.None {
-		if strings.Contains(text, normalizedLiteral(literal, rule.CaseSensitive)) {
-			failMsg := fmt.Sprintf("matched excluded literal %q", literal)
-
-			return MatcherInspection{
-				Name:    "none",
-				Passed:  false,
-				Details: failMsg,
-			}, false, "none: " + failMsg
-		}
-	}
-
-	return MatcherInspection{
-		Name:    "none",
-		Passed:  true,
-		Details: fmt.Sprintf("none of %d excluded literals matched", len(rule.None)),
-	}, true, ""
-}
-
-func inspectRegexAllMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for i, expr := range rule.regexAllCompiled {
-		if !expr.MatchString(text) {
-			failMsg := fmt.Sprintf("regular expression %q did not match", rule.RegexAll[i])
-
-			return MatcherInspection{
-				Name:    "regex_all",
-				Passed:  false,
-				Details: failMsg,
-			}, false, "regex_all: " + failMsg
-		}
-	}
-
-	return MatcherInspection{
-		Name:    "regex_all",
-		Passed:  true,
-		Details: fmt.Sprintf("all %d regular expressions matched", len(rule.RegexAll)),
-	}, true, ""
-}
-
-func inspectRegexAnyMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for i, expr := range rule.regexAnyCompiled {
-		if expr.MatchString(text) {
-			return MatcherInspection{
-				Name:    "regex_any",
-				Passed:  true,
-				Details: fmt.Sprintf("matched regular expression %q", rule.RegexAny[i]),
-			}, true, ""
-		}
-	}
-
-	failMsg := fmt.Sprintf("none of %d regular expressions matched", len(rule.RegexAny))
-
-	return MatcherInspection{
-		Name:    "regex_any",
-		Passed:  false,
-		Details: failMsg,
-	}, false, "regex_any: " + failMsg
-}
-
-func inspectRegexNoneMatcher(rule Rule, text string) (MatcherInspection, bool, string) {
-	for i, expr := range rule.regexNoneCompiled {
-		if expr.MatchString(text) {
-			failMsg := fmt.Sprintf("matched excluded regular expression %q", rule.RegexNone[i])
-
-			return MatcherInspection{
-				Name:    "regex_none",
-				Passed:  false,
-				Details: failMsg,
-			}, false, "regex_none: " + failMsg
-		}
-	}
-
-	return MatcherInspection{
-		Name:   "regex_none",
-		Passed: true,
-		Details: fmt.Sprintf(
-			"none of %d excluded regular expressions matched",
-			len(rule.RegexNone),
-		),
-	}, true, ""
-}
-
-func inspectTitleAnyMatcher(rule Rule, title string) (MatcherInspection, bool, string) {
-	for _, literal := range rule.TitleAny {
-		if strings.Contains(title, normalizedLiteral(literal, rule.CaseSensitive)) {
-			return MatcherInspection{
-				Name:    "title_any",
-				Passed:  true,
-				Details: fmt.Sprintf("matched title literal %q", literal),
-			}, true, ""
-		}
-	}
-
-	failMsg := fmt.Sprintf("none of %d title literals matched", len(rule.TitleAny))
-
-	return MatcherInspection{
-		Name:    "title_any",
-		Passed:  false,
-		Details: failMsg,
-	}, false, "title_any: " + failMsg
-}
-
-func inspectTitleRegexAnyMatcher(rule Rule, title string) (MatcherInspection, bool, string) {
-	for i, expr := range rule.titleRegexAnyCompiled {
-		if expr.MatchString(title) {
-			return MatcherInspection{
-				Name:    "title_regex_any",
-				Passed:  true,
-				Details: fmt.Sprintf("matched title regular expression %q", rule.TitleRegexAny[i]),
-			}, true, ""
-		}
-	}
-
-	failMsg := fmt.Sprintf("none of %d title regular expressions matched", len(rule.TitleRegexAny))
-
-	return MatcherInspection{
-		Name:    "title_regex_any",
-		Passed:  false,
-		Details: failMsg,
-	}, false, "title_regex_any: " + failMsg
-}
-
-func (rule Rule) matches(snapshot Snapshot) bool {
-	region, err := selectRegion(rule.Region, snapshot.Lines)
-	if err != nil {
-		return false
-	}
-
-	text := strings.Join(region, "\n")
-	title := snapshot.Title
-
-	if !rule.CaseSensitive {
-		text = strings.ToLower(text)
-		title = strings.ToLower(title)
-	}
-
-	return rule.matchesText(text) && rule.matchesTitle(title)
-}
-
-func (rule Rule) matchesText(text string) bool {
-	for _, literal := range rule.All {
-		if !strings.Contains(text, normalizedLiteral(literal, rule.CaseSensitive)) {
-			return false
-		}
-	}
-
-	if len(rule.Any) > 0 && !containsAny(text, rule.Any, rule.CaseSensitive) {
-		return false
-	}
-
-	if containsAny(text, rule.None, rule.CaseSensitive) ||
-		!matchesAllRegex(text, rule.regexAllCompiled) {
-		return false
-	}
-
-	if len(rule.regexAnyCompiled) > 0 && !matchesAnyRegex(text, rule.regexAnyCompiled) {
-		return false
-	}
-
-	return !matchesAnyRegex(text, rule.regexNoneCompiled)
-}
-
-func (rule Rule) matchesTitle(title string) bool {
-	if len(rule.TitleAny) > 0 && !containsAny(title, rule.TitleAny, rule.CaseSensitive) {
-		return false
-	}
-
-	return len(rule.titleRegexAnyCompiled) == 0 ||
-		matchesAnyRegex(title, rule.titleRegexAnyCompiled)
-}
-
-func normalizedLiteral(value string, caseSensitive bool) string {
-	if caseSensitive {
-		return value
-	}
-
-	return strings.ToLower(value)
-}
-
-func containsAny(text string, values []string, caseSensitive bool) bool {
-	for _, value := range values {
-		if strings.Contains(text, normalizedLiteral(value, caseSensitive)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func matchesAllRegex(text string, expressions []*regexp.Regexp) bool {
-	for _, expression := range expressions {
-		if !expression.MatchString(text) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func ruleRegexExpression(expression string, caseSensitive bool) string {
-	if caseSensitive {
-		return expression
-	}
-
-	return "(?i:" + expression + ")"
-}
-
-func matchesAnyRegex(text string, expressions []*regexp.Regexp) bool {
-	for _, expression := range expressions {
-		if expression.MatchString(text) {
-			return true
-		}
-	}
-
-	return false
 }

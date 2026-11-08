@@ -22,7 +22,7 @@ func testFileStoreMutationCancelsWhileLockHeld(t *testing.T, operation string) {
 	t.Helper()
 	store := NewJournal(filepath.Join(t.TempDir(), "state.json"), fixtureRules{})
 
-	lock, err := openStoreLock(t.Context(), store.Path()+".lock")
+	lock, err := openStoreLock(t.Context(), storeLockPath(store.Path()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func runBlockedMutation(ctx context.Context, store *Journal, operation string) e
 		_, err := store.Observe(
 			ctx,
 			Observation{
-				Harness:  HarnessCodex,
+				Harness:  harnessPrimary,
 				At:       time.Now().UTC(),
 				Subject:  ObservationIdentity{SessionID: "blocked"},
 				Evidence: &Report{Event: "agent_start", Activity: &act},

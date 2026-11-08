@@ -1,31 +1,17 @@
 package catalog
 
 import (
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TranscriptFor(id registry.Harness) transcript.Reader {
 	if adapter, ok := Find(id); ok {
-		if reader, ok := adapter.(interface{ Transcript() transcript.Reader }); ok {
-			return reader.Transcript()
+		if provider, ok := adapter.(harness.TranscriptProvider); ok {
+			return provider.Transcript()
 		}
 	}
 
-	return transcript.Reader{
-		Patterns:          nil,
-		Sources:           nil,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             nil,
-		Record:            nil,
-		FastRecord:        nil,
-		Document:          nil,
-		Query:             nil,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
-	}
+	return transcript.Reader{}
 }

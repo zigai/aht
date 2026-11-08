@@ -2,84 +2,249 @@ package cli
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strconv"
+	"strings"
 
-	"github.com/zigai/aht/v2/pkg/client"
-	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/spf13/cobra"
+
+	"github.com/zigai/aht/v2/internal/agentstate"
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-var errTmuxPaneNotLive = manage.ErrPaneNotLive
+const (
+	detectionRuleWidth     = 24
+	detectionStateWidth    = 12
+	detectionPriorityWidth = 8
+	detectionRegionWidth   = 10
+	detectionMatchWidth    = 8
+	detectionReasonWidth   = 44
+)
 
-type explainResult = manage.Explanation
+var (
+	errDetectionTestHarnessRequired    = errors.New("harness argument is required")
+	errDetectionScreenRequired         = errors.New("--screen is required")
+	errDetectionManifestConfigConflict = errors.New(
+		"--manifest and --config-dir cannot be used together",
+	)
+)
 
-func (app *application) resolvePaneSession(
+//exhaustruct:optional
+type detectionTestOptions struct {
+	screenPath   string
+	manifestPath string
+	configDir    string
+	title        string
+	showScreen   bool
+}
+
+func (app *application) newDetectionCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:           "detection",
+		Short:         "Inspect and test agent state detection rules",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = cmd.Help()
+			return exitCode(errSilentUsageError, exitCodeUsage)
+		},
+	}
+	command.AddCommand(app.newDetectionTestCommand())
+
+	return command
+}
+
+func (app *application) newDetectionTestCommand() *cobra.Command {
+	options := detectionTestOptions{}
+
+	var harnessID registry.Harness
+
+	command := &cobra.Command{
+		Use:           "test <harness>",
+		Short:         "Test detection rules against a saved screen fixture",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return exitCode(errDetectionTestHarnessRequired, exitCodeUsage)
+			}
+
+			return nil
+		},
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if options.screenPath == "" {
+				return exitCode(errDetectionScreenRequired, exitCodeUsage)
+			}
+
+			if options.manifestPath != "" && options.configDir != "" {
+				return exitCode(errDetectionManifestConfigConflict, exitCodeUsage)
+			}
+
+			cfg, err := app.loadConfig()
+			if err != nil {
+				return err
+			}
+
+			if options.manifestPath == "" && !cmd.Flags().Changed("config-dir") {
+				options.configDir = cfg.Detection.ManifestsDir
+			}
+
+			harnessID, err = catalog.Parse(args[0])
+			if err != nil {
+				if options.manifestPath == "" {
+					return exitCode(err, exitCodeUsage)
+				}
+
+				harnessID = registry.Harness(strings.TrimSpace(args[0]))
+			}
+
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return app.runDetectionTest(cmd.Context(), harnessID, options)
+		},
+	}
+
+	command.Flags().
+		StringVar(&options.screenPath, "screen", "", "saved terminal screen fixture `<path>` or - for stdin")
+	command.Flags().
+		StringVar(&options.manifestPath, "manifest", "", "explicit detection manifest `<path>`")
+	command.Flags().
+		StringVar(&options.configDir, "config-dir", "", "detection manifest override `<dir>`")
+	command.Flags().StringVar(&options.title, "title", "", "terminal window or pane `<title>`")
+	command.Flags().BoolVar(&options.showScreen, "show-screen", false, "echo screen text in output")
+
+	return command
+}
+
+func (app *application) runDetectionTest(
 	ctx context.Context,
-	paneID string, serverID string, multiplexerKind string,
-) (registry.Session, error) {
-	session, err := app.registryStore().Resolve(ctx, client.Selector{
-		ID:                "",
-		Reference:         "",
-		Harness:           "",
-		MultiplexerKind:   registry.MultiplexerKind(multiplexerKind),
-		MultiplexerServer: serverID,
-		MultiplexerPane:   paneID,
-		Project:           "",
-		ProjectSubtree:    false,
-		CWD:               "",
-	})
+	harnessID registry.Harness,
+	opts detectionTestOptions,
+) error {
+	rawScreen, err := agentstate.ReadScreenInput(opts.screenPath, app.stdin)
 	if err != nil {
-		return registry.Session{}, fmt.Errorf("resolve pane %q: %w", paneID, err)
+		return exitCode(err, exitCodeGeneral)
 	}
 
-	return session, nil
-}
-
-func evaluateExplanation(
-	ctx context.Context,
-	session registry.Session,
-	opts infoOptions,
-) (manage.Explanation, error) {
-	exp, err := manage.ExplainSession(ctx, session, manage.ExplainOptions{
-		LiveScreen: !opts.disableScreenInspection,
-		ConfigDir:  opts.configDir,
-	})
+	inspection, err := agentstate.InspectScreen(
+		ctx,
+		harnessID,
+		rawScreen,
+		agentstate.InspectOptions{
+			Title:         opts.title,
+			ManifestPath:  opts.manifestPath,
+			ConfigDir:     opts.configDir,
+			IncludeScreen: opts.showScreen,
+		},
+	)
 	if err != nil {
-		return exp, fmt.Errorf("explain session: %w", err)
+		return exitCode(err, exitCodeGeneral)
 	}
 
-	return exp, nil
-}
-
-func (app *application) writeExplanationDetails(result explainResult) error {
-	return app.writeHumanDetails([]humanDetail{
-		{label: "Registry activity", value: activityString(result.RegistryActivity)},
-		{label: "Effective activity", value: result.FinalActivity},
-		{label: "Authority", value: result.SelectedAuthority},
-		{label: "Process match", value: result.ProcessMatch},
-		{label: "Fallback", value: result.FallbackReason},
-		{label: "Hook event", value: result.Hook.Event},
-		{label: "Hook integration", value: result.Hook.Integration},
-		{label: "Hook age", value: result.Hook.Age},
-		{label: "Hook fresh", value: strconv.FormatBool(result.Hook.Fresh)},
-		{label: "Hook reason", value: result.Hook.FreshnessReason},
-		{label: "Screen evaluated", value: strconv.FormatBool(result.Screen.Evaluated)},
-		{label: "Screen unavailable", value: result.Screen.UnavailableReason},
-		{label: "Screen activity", value: string(result.Screen.Decision.Activity)},
-		{label: "Screen reason", value: result.Screen.Decision.Reason},
-		{label: "Screen rule", value: result.Screen.Decision.RuleID},
-		{label: "Manifest", value: result.Screen.Decision.ManifestSource},
-		{label: "Manifest version", value: strconv.Itoa(result.Screen.Decision.ManifestVersion)},
-		{label: "Screen warning", value: result.Screen.Decision.Warning},
-		{label: "Screen error", value: result.Screen.Error},
-	})
-}
-
-func activityString(activity *registry.Activity) string {
-	if activity == nil {
-		return "none"
+	if app.outputJSON {
+		return app.writeJSON(inspection)
 	}
 
-	return string(*activity)
+	return app.writeDetectionInspection(inspection)
+}
+
+func (app *application) writeDetectionInspection(inspection agentstate.Inspection) error {
+	details := []humanDetail{
+		{label: "Harness", value: string(inspection.Harness)},
+		{label: "Manifest source", value: inspection.ManifestSource},
+		{label: "Manifest version", value: strconv.Itoa(inspection.ManifestVersion)},
+	}
+	if inspection.Warning != "" {
+		details = append(details, humanDetail{label: "Warning", value: inspection.Warning})
+	}
+
+	if inspection.Title != "" {
+		details = append(details, humanDetail{label: "Title", value: inspection.Title})
+	}
+
+	details = append(details,
+		humanDetail{label: "Lines evaluated", value: strconv.Itoa(inspection.LinesEvaluated)},
+		humanDetail{label: "Effective activity", value: string(inspection.Decision.Activity)},
+		humanDetail{label: "Reason", value: inspection.Decision.Reason},
+	)
+
+	winning := inspection.WinningRule
+	if winning == "" {
+		winning = "none"
+	}
+
+	details = append(details, humanDetail{label: "Winning rule", value: winning})
+
+	if err := app.writeHumanDetails(details); err != nil {
+		return err
+	}
+
+	if err := app.writeDetectionCandidatesTable(inspection.Candidates); err != nil {
+		return err
+	}
+
+	if inspection.Screen != "" {
+		if err := app.writeln(""); err != nil {
+			return err
+		}
+
+		if err := app.writeln("Screen:"); err != nil {
+			return err
+		}
+
+		if err := app.writeln(inspection.Screen); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (app *application) writeDetectionCandidatesTable(candidates []agentstate.CandidateRule) error {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	if err := app.writeln(""); err != nil {
+		return err
+	}
+
+	columns := []humanColumn{
+		{heading: "Rule", width: detectionRuleWidth, wrap: wrapHumanIdentifier},
+		{heading: "State", width: detectionStateWidth},
+		{heading: "Priority", width: detectionPriorityWidth, align: text.AlignRight},
+		{heading: "Region", width: detectionRegionWidth},
+		{heading: "Match", width: detectionMatchWidth},
+		{heading: "Reason", width: detectionReasonWidth},
+	}
+
+	rows := make([][]string, 0, len(candidates))
+	for _, c := range candidates {
+		matchLabel := "no"
+		if c.Winner {
+			matchLabel = "winner"
+		} else if c.Matched {
+			matchLabel = "match"
+		}
+
+		region := c.Region
+		if region == "" {
+			region = "all"
+		}
+
+		rows = append(rows, []string{
+			c.ID,
+			c.State,
+			strconv.Itoa(c.Priority),
+			region,
+			matchLabel,
+			c.Reason,
+		})
+	}
+
+	return app.writeWrappedHumanTable(columns, rows)
 }

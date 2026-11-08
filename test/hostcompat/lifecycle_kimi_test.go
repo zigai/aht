@@ -10,9 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -125,7 +123,7 @@ func (host *isolatedHost) driveKimiCheckpoints(
 	t.Helper()
 
 	for expected := range 2 {
-		hold := awaitKimiCheckpoint(t, host, process, expected)
+		hold := host.awaitHold(t, process, expected)
 		if expected == 0 {
 			host.waitForKimiEvent(t, sessionID, "TurnStarted", registry.ActivityRunning)
 		}
@@ -157,30 +155,6 @@ func (host *isolatedHost) driveKimiCheckpoints(
 
 		hold.Release()
 	}
-}
-
-func awaitKimiCheckpoint(
-	t *testing.T,
-	host *isolatedHost,
-	process *permissionProcess,
-	expected int,
-) *fakeprovider.Hold {
-	t.Helper()
-
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != expected {
-			t.Fatalf("Kimi provider checkpoint = %d, want %d", hold.Request.Index, expected)
-		}
-
-		return hold
-	case <-process.done:
-		t.Fatalf("Kimi ACP exited before provider checkpoint %d: %v", expected, process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatalf("Kimi did not reach provider checkpoint %d", expected)
-	}
-
-	return nil
 }
 
 func kimiNativeSession(session registry.Session, sessionID string) bool {

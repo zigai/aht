@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 )
@@ -39,16 +38,7 @@ func (host *isolatedHost) runServerInterruption(t *testing.T, env []string) {
 			"parts": []map[string]string{{"type": "text", "text": compatibilityPrompt}},
 		}, nil)
 
-	select {
-	case hold := <-host.provider.Holds():
-		if hold.Request.Index != 0 {
-			t.Fatalf("first active request step = %d", hold.Request.Index)
-		}
-	case <-process.done:
-		t.Fatalf("server exited before active request: %v", process.waitErr())
-	case <-time.After(30 * time.Second):
-		t.Fatal("native server did not reach active provider request")
-	}
+	host.awaitHold(t, process, 0)
 
 	host.waitForActiveSession(t)
 

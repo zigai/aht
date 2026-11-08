@@ -115,7 +115,7 @@ func (s *Server) serveModel(
 	}
 
 	request := newRequest(protocol, r.Method, r.URL.Path, body, value)
-	if s.isSideRequest(request, body, value) {
+	if s.isSideRequest(value) {
 		s.serveSide(w, request, value)
 		return
 	}

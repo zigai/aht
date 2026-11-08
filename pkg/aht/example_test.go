@@ -47,8 +47,8 @@ func ExampleClient_Wait() {
 	})
 
 	_, err := client.Wait(context.Background(), aht.WaitOptions{
-		ID:       "session-id",
-		Activity: aht.ActivityIdle,
+		Reference: "session-id",
+		Activity:  aht.ActivityIdle,
 	})
 	if aht.IsUnavailable(err) {
 		fmt.Println("AHT broker is offline")

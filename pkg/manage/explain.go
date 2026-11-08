@@ -11,11 +11,9 @@ import (
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/pkg/broker"
-	"github.com/zigai/aht/v2/pkg/herdr"
 	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
-	"github.com/zigai/aht/v2/pkg/tmux"
-	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
 var (
@@ -389,18 +387,35 @@ func evaluateLiveScreen(
 	session registry.Session,
 	configDir string,
 ) (ScreenDecision, bool, error) {
-	if session.Location.Kind != registry.MultiplexerTmux {
-		return evaluateNonTmuxLiveScreen(ctx, session, configDir)
+	unknown := ScreenDecision{
+		Activity:        registry.ActivityUnknown,
+		Reason:          "",
+		RuleID:          "",
+		ManifestSource:  "",
+		ManifestVersion: 0,
+		Warning:         "",
+		Detail:          "",
+		Evidence:        nil,
 	}
 
-	return evaluateTmuxLiveScreen(ctx, session, configDir)
-}
+	driver, ok := drivers.Find(session.Location.Kind)
+	if !ok {
+		return unknown, false, fmt.Errorf(
+			"%w: %s",
+			ErrUnsupportedMultiplexer,
+			session.Location.Kind,
+		)
+	}
 
-func evaluateNonTmuxLiveScreen(
-	ctx context.Context,
-	session registry.Session,
-	configDir string,
-) (ScreenDecision, bool, error) {
+	presence, err := driver.Presence(ctx, session.Location)
+	if err != nil {
+		return unknown, false, fmt.Errorf("check %s pane: %w", session.Location.Kind, err)
+	}
+
+	if presence == registry.PresenceGone {
+		return unknown, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
+	}
+
 	pane := mux.Pane{
 		Location:    session.Location,
 		Processes:   nil,
@@ -412,117 +427,12 @@ func evaluateNonTmuxLiveScreen(
 		StateReason: "",
 	}
 
-	var (
-		text  string
-		title string
-	)
-
-	if session.Location.Kind == registry.MultiplexerTmux {
-		return ScreenDecision{
-			Activity:        registry.ActivityUnknown,
-			Reason:          "",
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			Warning:         "",
-			Detail:          "",
-			Evidence:        nil,
-		}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
-	}
-
-	var driver mux.Driver
-
-	for _, d := range []mux.Driver{zellij.NewDriver(), herdr.NewDriver()} {
-		if d.Kind() == session.Location.Kind {
-			driver = d
-			break
-		}
-	}
-
-	if driver == nil {
-		return ScreenDecision{
-			Activity:        registry.ActivityUnknown,
-			Reason:          "",
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			Warning:         "",
-			Detail:          "",
-			Evidence:        nil,
-		}, false, fmt.Errorf("%w: %s", ErrUnsupportedMultiplexer, session.Location.Kind)
-	}
-
 	snapshot, err := driver.CapturePane(ctx, pane)
 	if err != nil {
-		return ScreenDecision{
-			Activity:        registry.ActivityUnknown,
-			Reason:          "",
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			Warning:         "",
-			Detail:          "",
-			Evidence:        nil,
-		}, false, fmt.Errorf("capture %s pane: %w", session.Location.Kind, err)
+		return unknown, false, fmt.Errorf("capture %s pane: %w", session.Location.Kind, err)
 	}
 
-	text, title = snapshot.Text, snapshot.Title
-
-	return evaluateSnapshotText(session.Harness, text, title, configDir)
-}
-
-func evaluateTmuxLiveScreen(
-	ctx context.Context,
-	session registry.Session,
-	configDir string,
-) (ScreenDecision, bool, error) {
-	panes, err := tmux.ListPanes(ctx)
-	if err != nil {
-		return ScreenDecision{
-			Activity:        registry.ActivityUnknown,
-			Reason:          "",
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			Warning:         "",
-			Detail:          "",
-			Evidence:        nil,
-		}, false, fmt.Errorf("list tmux panes: %w", err)
-	}
-
-	for _, pane := range panes {
-		if pane.Location.PaneID != session.Location.PaneID ||
-			!sameTmuxServer(pane.Location.ServerID, session.Location.ServerID) {
-			continue
-		}
-
-		snapshot, captureErr := tmux.CapturePane(ctx, pane)
-		if captureErr != nil {
-			return ScreenDecision{
-				Activity:        registry.ActivityUnknown,
-				Reason:          "",
-				RuleID:          "",
-				ManifestSource:  "",
-				ManifestVersion: 0,
-				Warning:         "",
-				Detail:          "",
-				Evidence:        nil,
-			}, false, fmt.Errorf("capture tmux pane: %w", captureErr)
-		}
-
-		return evaluateSnapshotText(session.Harness, snapshot.Text, snapshot.Title, configDir)
-	}
-
-	return ScreenDecision{
-		Activity:        registry.ActivityUnknown,
-		Reason:          "",
-		RuleID:          "",
-		ManifestSource:  "",
-		ManifestVersion: 0,
-		Warning:         "",
-		Detail:          "",
-		Evidence:        nil,
-	}, false, fmt.Errorf("%w: %s", ErrPaneNotLive, session.Location.PaneID)
+	return evaluateSnapshotText(session.Harness, snapshot.Text, snapshot.Title, configDir)
 }
 
 func evaluateSnapshotText(
@@ -582,23 +492,11 @@ func processMatchExplanation(session registry.Session) string {
 	}
 
 	if session.Observations.Location != nil &&
-		session.Observations.Location.Process.Equal(*session.Process) {
+		session.Observations.Location.Placement.Process.Equal(*session.Process) {
 		return "pid_start_identity"
 	}
 
 	return "unverified"
-}
-
-func sameTmuxServer(left string, right string) bool {
-	if left == "" {
-		left = "default"
-	}
-
-	if right == "" {
-		right = "default"
-	}
-
-	return left == right
 }
 
 func activityString(activity *registry.Activity) string {

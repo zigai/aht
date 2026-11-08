@@ -18,30 +18,6 @@ import (
 
 const permissionMarker = ".aht-permission-marker"
 
-func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
-	t.Helper()
-
-	switch contract.ID {
-	case registry.Harness("claude"), registry.Harness("codex"), registry.Harness("copilot"):
-		runCLIPermissionScenarios(t, contract, oracle)
-	case registry.Harness("pi"), registry.Harness("omp"):
-		runRPCPermissionScenarios(t, contract, oracle)
-	case registry.Harness("kimi-code"):
-		runKimiPermissionScenarios(t, contract, oracle)
-	case registry.Harness("hermes"):
-		runPythonPermissionScenarios(t, contract, oracle)
-	case registry.Harness("opencode"):
-		runOpenCodePermissionScenarios(t, contract, oracle)
-	case registry.Harness("kilo"):
-		runServerPermissionScenarios(t, contract, oracle)
-	case registry.Harness("qwen"):
-		runQwenPermissionScenarios(t, contract, oracle)
-	default:
-		// These lifecycle adapters do not advertise permission-wait coverage.
-		// Cursor and Antigravity are separately tested as discovery-only hosts.
-	}
-}
-
 func newPermissionHost(
 	t *testing.T,
 	contract hostContract,
@@ -52,7 +28,7 @@ func newPermissionHost(
 	host := newIsolatedHost(t, contract, oracle, false)
 
 	command := "printf " + compatibilityMarker + " > " + permissionMarker + "; cat " + permissionMarker
-	if contract.ID == registry.Harness("hermes") {
+	if contract.DangerousPermission {
 		// Hermes asks only for dangerous shell operations. This nonexistent
 		// relative target cannot affect anything outside the work directory.
 		command = "rm -rf .aht-permission-unused; " + command
@@ -297,5 +273,35 @@ func (process *permissionProcess) interrupt(t *testing.T) {
 	); err != nil &&
 		!errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("interrupt owned permission host: %v", err)
+	}
+}
+
+func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) {
+	t.Helper()
+
+	switch contract.PermissionDriver {
+	case driverControlCLI, driverAppServer, driverSDKCLI:
+		runCLIPermissionScenarios(t, contract, oracle)
+	case driverCompletionRPC, driverExtensionRPC:
+		runRPCPermissionScenarios(t, contract, oracle)
+	case driverACP:
+		runKimiPermissionScenarios(t, contract, oracle)
+	case driverPythonACP:
+		runPythonPermissionScenarios(t, contract, oracle)
+	case driverExecutionServer:
+		runOpenCodePermissionScenarios(t, contract, oracle)
+	case driverPluginServer:
+		runServerPermissionScenarios(t, contract, oracle)
+	case driverTerminalDialog:
+		runQwenPermissionScenarios(t, contract, oracle)
+	case driverProcess:
+		t.Run(
+			"permission",
+			func(t *testing.T) { t.Skipf("%s has no permission-wait host claim", contract.ID) },
+		)
+	case driverExecRPC, driverTerminalQuit, driverCLIACP:
+		fallthrough
+	default:
+		t.Fatalf("unknown permission driver %q", contract.PermissionDriver)
 	}
 }

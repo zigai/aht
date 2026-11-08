@@ -286,13 +286,13 @@ ignore_paths = ["/tmp/scratch"]
 			storePath,
 			"--json",
 			"list",
-			"--agent",
+			"--harness",
 			"copilot",
 		},
 		&stdout,
 		&bytes.Buffer{},
 	); err != nil {
-		t.Fatalf("list with --agent failed: %v", err)
+		t.Fatalf("list with --harness failed: %v", err)
 	}
 
 	sessions = nil
@@ -509,7 +509,7 @@ interval = "5s"
 
 	for i := range docRes.Checks {
 		if docRes.Checks[i].ID == "config.file" {
-			configCheck = &docRes.Checks[i]
+			configCheck = &docRes.Checks[i].DoctorCheck
 			break
 		}
 	}
@@ -567,7 +567,7 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 
 	for i := range docRes.Checks {
 		if docRes.Checks[i].ID == "config.file" {
-			configCheck = &docRes.Checks[i]
+			configCheck = &docRes.Checks[i].DoctorCheck
 			break
 		}
 	}
@@ -989,7 +989,7 @@ func TestCLIManageConfigIgnoresExistingUserYAML(t *testing.T) {
 
 	tomlPath := filepath.Join(dir, "aht", "config.toml")
 
-	cfg, resolved, err := config.Load("")
+	cfg, _, resolved, err := config.LoadWithMetadata(config.Options{})
 	if err != nil || cfg.UI.Sort != "created" || resolved != tomlPath {
 		t.Fatalf("TOML config: sort = %q, path = %q, error = %v", cfg.UI.Sort, resolved, err)
 	}

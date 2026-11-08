@@ -112,12 +112,7 @@ func matchingHookObservation(
 		}, false
 	}
 
-	return native, HookEvaluation{
-		Active:         false,
-		Fresh:          false,
-		ProcessMatches: false,
-		Reason:         "",
-	}, true
+	return native, HookEvaluation{}, true
 }
 
 func invalidHookTimeReason(observedAt time.Time, now time.Time) string {

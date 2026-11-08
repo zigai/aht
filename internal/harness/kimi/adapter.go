@@ -18,7 +18,7 @@ const (
 	kimiCommand                     = "kimi"
 	kimiSessionFlag                 = "--session"
 	kimiCodeIntegrationSource       = "kimi-code-hook"
-	kimiCodeIntegrationVersion      = 15
+	kimiCodeIntegrationVersion      = 16
 	kimiCodeManagedIntegrationStart = "# BEGIN aht managed integration: kimi-code"
 	kimiCodeManagedIntegrationEnd   = "# END aht managed integration: kimi-code"
 )
@@ -32,43 +32,27 @@ type hookPayload struct {
 	ClientType    string `json:"client_type"     validate:"required,eq=kimi_code_cli"`
 }
 
-type kimiCodeHookSpec struct {
-	event      string
-	matcher    string
-	transition harness.HookTransition
-}
-
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
-		ExclusiveProcess: false,
-		CatalogCreates:   false,
-		ID:               registry.Harness("kimi-code"),
-		Aliases:          []string{"kimi", "kimi_code", "kimicode"},
-		ProcessNames:     []string{"kimi", "kimi-code"},
-		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
-		},
+		Env:          harness.EnvKeys{Config: []string{"KIMI_CODE_HOME"}},
+		ID:           registry.Harness("kimi-code"),
+		Aliases:      []string{"kimi", "kimi_code", "kimicode"},
+		ProcessNames: []string{"kimi", "kimi-code"},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
-			NativeCatalog:     true,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
 		},
-		IntegrationVersion: kimiCodeIntegrationVersion,
-		IntegrationSource:  kimiCodeIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "kimi_code_hook_event_name",
+		LifecycleSourceAttributes: []string{"kimi_code_source", "source", "reason"},
+		IntegrationVersion:        kimiCodeIntegrationVersion,
+		IntegrationSource:         kimiCodeIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
-func (kimiCodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter kimiCodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := kimiCodeHome()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
@@ -82,7 +66,7 @@ func (kimiCodeHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				ConfigLabel: "kimi-code config",
 				StartMarker: kimiCodeManagedIntegrationStart,
 				EndMarker:   kimiCodeManagedIntegrationEnd,
-				Block:       kimiCodeHookBlock(binary),
+				Block:       kimiCodeHookBlock(binary, adapter.Definition()),
 			}},
 		},
 	}, nil
@@ -138,46 +122,41 @@ func (kimiCodeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadD
 		SessionID:   sessionID,
 		SessionPath: sessionPath,
 		CWD:         harness.PayloadString(payload, "cwd"),
-		ProjectRoot: "",
 		Event:       harness.PayloadString(payload, "hook_event_name"),
 		Attributes:  attributes,
 	}, nil
 }
 
-func kimiCodeHookBlock(binary string) string {
-	specs := []kimiCodeHookSpec{
-		{event: "SessionStart", matcher: "startup|resume", transition: harness.HookActivityIdle},
-		{event: "SessionHeartbeat", matcher: "", transition: harness.HookPresenceLive},
-		{event: "UserPromptSubmit", matcher: "", transition: harness.HookActivityRunning},
-		{event: "TurnStarted", matcher: "", transition: harness.HookActivityRunning},
-		{event: "PreToolUse", matcher: "", transition: harness.HookActivityRunning},
-		{event: "PostToolUse", matcher: "", transition: harness.HookActivityRunning},
-		{event: "PostToolUseFailure", matcher: "", transition: harness.HookActivityRunning},
-		{event: "PermissionRequest", matcher: "", transition: harness.HookActivityWaiting},
-		{event: "PermissionResult", matcher: "", transition: harness.HookActivityRunning},
-		{event: "Stop", matcher: "", transition: harness.HookActivityIdle},
-		{event: "Interrupt", matcher: "", transition: harness.HookActivityInterrupted},
-		{event: "StopFailure", matcher: "", transition: harness.HookActivityFailed},
-		{event: "PreCompact", matcher: "", transition: harness.HookActivityRunning},
-		{event: "PostCompact", matcher: "^manual", transition: harness.HookActivityIdle},
-		{event: "SessionEnd", matcher: "exit|archive", transition: harness.HookPresenceGone},
-	}
+func kimiCodeHookBlock(binary string, definition harness.Definition) string {
+	specs := harness.CommandHookSpecs(binary, definition, []harness.CommandHook{
+		{Event: "SessionStart", Matcher: "startup|resume", Transition: harness.HookActivityIdle},
+		{Event: "SessionHeartbeat", Transition: harness.HookPresenceLive},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "TurnStarted", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
+		{Event: "PermissionRequest", Transition: harness.HookActivityWaiting},
+		{Event: "PermissionResult", Transition: harness.HookActivityRunning},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "Interrupt", Transition: harness.HookActivityInterrupted},
+		{Event: "StopFailure", Transition: harness.HookActivityFailed},
+		{Event: "PreCompact", Transition: harness.HookActivityRunning},
+		{Event: "PostCompact", Matcher: "^manual", Transition: harness.HookActivityIdle},
+		{Event: "SessionEnd", Matcher: "exit|archive", Transition: harness.HookPresenceGone},
+	})
 
 	var builder strings.Builder
-	builder.WriteString(
-		kimiCodeManagedIntegrationStart + "\n# " + harness.ManagedMarker + "\n# AHT_INTEGRATION_ID=kimi-code\n",
-	)
+	builder.WriteString(kimiCodeManagedIntegrationStart + "\n" + definition.Identity().Marker("# "))
 
 	for _, spec := range specs {
-		builder.WriteString("\n[[hooks]]\nevent = " + tomlQuoteString(spec.event) + "\n")
+		builder.WriteString("\n[[hooks]]\nevent = " + tomlQuoteString(spec.Event) + "\n")
 
-		if spec.matcher != "" {
-			builder.WriteString("matcher = " + tomlQuoteString(spec.matcher) + "\n")
+		if spec.Matcher != "" {
+			builder.WriteString("matcher = " + tomlQuoteString(spec.Matcher) + "\n")
 		}
 
-		builder.WriteString(
-			"command = " + tomlQuoteString(kimiCodeHookCommand(binary, spec)) + "\n",
-		)
+		builder.WriteString("command = " + tomlQuoteString(spec.Command) + "\n")
 		builder.WriteString("timeout = " + strconv.Itoa(harness.HookTimeoutSeconds) + "\n")
 	}
 
@@ -195,17 +174,6 @@ func tomlQuoteString(value string) string {
 	encoded = bytes.ReplaceAll(encoded, []byte{0x7f}, []byte(`\u007f`))
 
 	return string(encoded)
-}
-
-func kimiCodeHookCommand(binary string, spec kimiCodeHookSpec) string {
-	dimension, _, _ := strings.Cut(string(spec.transition), ":")
-
-	return strings.Join([]string{
-		harness.ShellQuote(binary), "report", "kimi-code",
-		"--" + dimension, spec.transition.State(), "--event", spec.event,
-		"--reporter-version", strconv.Itoa(kimiCodeIntegrationVersion),
-		"--reporter", kimiCodeIntegrationSource, "--multi-session", "--raw-stdin", "--quiet",
-	}, " ")
 }
 
 func payloadScalarString(payload map[string]any, key string) string {
@@ -278,18 +246,4 @@ func kimiCodeHome() string {
 	}
 
 	return filepath.Join(home, ".kimi-code")
-}
-
-func (kimiCodeHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["kimi_code_hook_event_name"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "kimi_code_source", "source", "reason"),
-	)
 }

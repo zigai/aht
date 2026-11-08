@@ -5,9 +5,11 @@ package hostcompat
 import (
 	"encoding/json"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -30,18 +32,18 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 
 	var output []byte
 
-	switch host.contract.ID {
-	case registry.Harness("kimi-code"):
+	switch {
+	case host.contract.LifecycleDriver == driverACP:
 		host.runKimiACP(t, host.headlessCommand(t, original.Env), &previous, false)
-	case registry.Harness("cline"):
+	case host.contract.InterruptionDriver == driverCLIACP:
 		host.runClineResume(t, original.Env, previous)
-	case registry.Harness("droid"):
+	case host.contract.LifecycleDriver == driverExecRPC:
 		output = host.runDroidRPC(t, original.Env, &previous, false)
 	default:
 		command := exec.CommandContext(
 			t.Context(),
 			original.Path,
-			resumeArguments(host.contract.ID, original.Args[1:], previous)...,
+			resumeArguments(t, host.contract, original.Args[1:], previous)...,
 		)
 		command.Env = original.Env
 		command.Dir = host.launched.Work
@@ -88,7 +90,7 @@ func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID st
 		)
 	}
 
-	if host.contract.ID == registry.Harness("droid") {
+	if host.contract.LifecycleDriver == driverExecRPC {
 		if !jsonContainsString(requests[0].Body, compatibilityFinalText) {
 			t.Fatal("resumed model request did not restore the prior native conversation")
 		}
@@ -127,32 +129,39 @@ func containsString(value any, expected string) bool {
 	return false
 }
 
-func resumeArguments(id registry.Harness, original []string, session registry.Session) []string {
-	args := append([]string(nil), original...)
+func resumeArguments(
+	t *testing.T,
+	contract hostContract,
+	original []string,
+	session registry.Session,
+) []string {
+	t.Helper()
 
-	switch id {
-	case registry.Harness("codex"):
-		return []string{
+	native := catalog.ResumeCommandFor(contract.ID, session.SessionID, session.SessionPath)
+	if len(native) < 2 {
+		t.Fatalf("%s has no native resume command for %q", contract.ID, session.SessionID)
+	}
+
+	selector := native[1:]
+	args := slices.Clone(original)
+
+	switch contract.Resume {
+	case resumeExec:
+		args = []string{
 			"exec",
 			"--dangerously-bypass-approvals-and-sandbox",
 			"--dangerously-bypass-hook-trust",
 			"--skip-git-repo-check",
-			"resume",
-			session.SessionID,
-			compatibilityPrompt,
 		}
-	case registry.Harness("copilot"):
-		return append(args, "--resume="+session.SessionID)
-	case registry.Harness("pi"):
-		return append(args, "--session", resumeReference(session))
-	case registry.Harness("omp"):
-		return append(args, "--resume", resumeReference(session))
-	case registry.Harness("goose"):
-		return append(args, "--resume", "--session-id", session.SessionID)
-	case registry.Harness("hermes"):
-		// Oneshot (-z) persists history but ignores --resume. The native chat
-		// query path loads that same session's full conversation from SQLite.
-		return []string{
+		args = append(args, selector...)
+
+		return append(args, compatibilityPrompt)
+	case resumeSubcommand:
+		// The headless run subcommand shares the session selector with interactive resume.
+		return append(args, selector[1:]...)
+	case resumeQuery:
+		// Oneshot ignores resume; the query path restores the persisted conversation.
+		args = []string{
 			"chat",
 			"-q",
 			compatibilityPrompt,
@@ -163,23 +172,25 @@ func resumeArguments(id registry.Harness, original []string, session registry.Se
 			fakeModel,
 			"--yolo",
 			"--accept-hooks",
-			"--resume",
-			session.SessionID,
 		}
-	case registry.Harness("opencode"), registry.Harness("kilo"):
-		return append(args, "--session", session.SessionID)
-	case registry.Harness("openclaw"):
-		// agent --session-id addresses the durable Gateway session on both turns.
-		return args
+
+		return append(args, selector...)
+	case resumeGateway:
+		// The durable Gateway session is addressed by the agent command, not the TUI selector.
+		for i := range args {
+			if args[i] == "--session-id" && i+1 < len(args) {
+				args[i+1] = session.SessionID
+				return args
+			}
+		}
+
+		t.Fatal("Gateway launch has no durable session selector")
+
+		return nil
+	case resumeAppend:
+		return append(args, selector...)
 	default:
-		return append(args, "--resume", session.SessionID)
+		t.Fatalf("unknown resume mode %q", contract.Resume)
+		return nil
 	}
-}
-
-func resumeReference(session registry.Session) string {
-	if session.SessionPath != "" {
-		return session.SessionPath
-	}
-
-	return session.SessionID
 }

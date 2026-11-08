@@ -152,9 +152,9 @@ func TestIncarnationCrossStepInvariants(t *testing.T) {
 		}
 
 		if err := Transition(before, after, Event{
-			Kind: kind, Process: process, Harness: harness,
-			SessionID: sessionID, SessionPath: sessionPath,
-			At: eventAt, Ends: ends, Present: present,
+			Process: process, Harness: harness,
+			SessionID: sessionID, SessionPath: sessionPath, At: eventAt,
+			NativeEnd: kind == "report" && ends, Absent: kind == "sighting" && !present,
 		}); err == nil {
 			t.Errorf("missing %s invariant", situation)
 		}
@@ -165,8 +165,8 @@ func TestIncarnationCrossStepInvariants(t *testing.T) {
 	for _, kind := range []string{"report", "sighting"} {
 		for _, boundary := range []string{"stale", "equal", "fresh"} {
 			event := Event{
-				Kind: kind, Process: before.Process, Harness: before.Harness,
-				SessionID: before.SessionID, At: at, Ends: kind == "report",
+				Process: before.Process, Harness: before.Harness, SessionID: before.SessionID,
+				At: at, NativeEnd: kind == "report", Absent: kind == "sighting",
 			}
 			after := before
 

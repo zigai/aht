@@ -203,7 +203,7 @@ func installedNative(ctx context.Context, id registry.Harness, binary string) (b
 func installedShim(id registry.Harness) (string, bool, error) {
 	path := filepath.Join(registry.DefaultStateDir(), "shims", string(id))
 
-	status, err := ClassifyArtifact(path)
+	status, err := classifyShimArtifact(path, id)
 	if err != nil {
 		return "", false, err
 	}
@@ -244,7 +244,7 @@ func recoverPluginDirectories(plan harnesspkg.InstallPlan, dryRun bool) (bool, e
 
 	for _, action := range plan.Actions {
 		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
-			directory := newPluginDirectoryInstall(plugin.Plan, nil)
+			directory := newPluginDirectoryInstall(plugin.Plan, nil, nil)
 
 			changed, err := directory.recover(dryRun)
 			if err != nil {

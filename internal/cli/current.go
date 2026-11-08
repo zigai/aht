@@ -1,10 +1,6 @@
 package cli
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 func (app *application) newCurrentCommand() *cobra.Command {
 	command := &cobra.Command{
@@ -20,7 +16,7 @@ func (app *application) newCurrentCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			session, err := app.registryStore().Current(cmd.Context())
 			if err != nil {
-				return fmt.Errorf("current session: %w", err)
+				return err //nolint:wrapcheck // Client.Current supplies the operation context.
 			}
 
 			if app.outputJSON {

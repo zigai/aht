@@ -4,40 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"reflect"
-
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 )
-
-func commandHookGroup(
-	command string,
-	matcher string,
-	statusMessage string,
-	timeoutSeconds int,
-) map[string]any {
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = harnesspkg.HookTimeoutSeconds
-	}
-
-	hook := map[string]any{
-		"type":    harnesspkg.HookTypeCommand,
-		"command": command,
-		"timeout": float64(timeoutSeconds),
-	}
-	if statusMessage != "" {
-		hook["statusMessage"] = statusMessage
-	}
-
-	group := map[string]any{
-		"hooks": []any{
-			hook,
-		},
-	}
-	if matcher != "" {
-		group["matcher"] = matcher
-	}
-
-	return group
-}
 
 func upsertManagedCommandHookGroups(
 	hooks map[string]any,

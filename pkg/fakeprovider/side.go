@@ -4,44 +4,12 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"slices"
-	"strings"
 )
 
 const sideTitle = "Fake session"
 
-var defaultTitleMarkers = []string{
-	"You are a title generator",
-	"ultra-short dashboard line",
-	"generate_session_title",
-	"Generate a session title",
-	"Write the title in the predominant language",
-	"Generate a short, descriptive title",
-	"generates concise session titles",
-	"You name coding-agent sessions",
-	"Your goal is to pick a coding session name",
-	"<title-request>",
-}
-
-func (s *Server) isSideRequest(request Request, body []byte, value map[string]any) bool {
-	if _, structured := structuredSchema(value); structured {
-		return true
-	}
-
-	if request.HasTool("session_title") {
-		return true
-	}
-
-	text := string(body)
-
-	for _, markers := range [][]string{defaultTitleMarkers, s.sideMarkers} {
-		for _, marker := range markers {
-			if strings.Contains(text, marker) {
-				return true
-			}
-		}
-	}
-
-	return false
+func (s *Server) isSideRequest(value map[string]any) bool {
+	return s.sideRequest != nil && s.sideRequest(value)
 }
 
 func structuredSchema(value map[string]any) (map[string]any, bool) {

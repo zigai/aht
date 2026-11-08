@@ -7,19 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	_ "modernc.org/sqlite" // Registers the SQLite driver used to read session titles.
+
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
-var (
-	errStateNotRegular = errors.New("codex state database is not a regular file")
-	errConfigTooLarge  = errors.New("codex config exceeds 1 MiB")
-)
+var errConfigTooLarge = errors.New("codex config exceeds 1 MiB")
 
 func readStateTitles(
 	ctx context.Context,
@@ -32,35 +29,15 @@ func readStateTitles(
 		return err
 	}
 
-	path := filepath.Join(sqliteHome, "state_5.sqlite")
-
-	info, err := os.Lstat(path)
+	db, err := transcript.OpenDatabase(filepath.Join(sqliteHome, "state_5.sqlite"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 
 	if err != nil {
-		return fmt.Errorf("inspect Codex state database: %w", err)
-	}
-
-	if !info.Mode().IsRegular() {
-		return errStateNotRegular
-	}
-
-	// A read-only connection sees committed WAL transactions and cannot create
-	// the database. Immutable mode would hide names Codex has not checkpointed.
-	var uri url.URL
-
-	uri.Scheme = "file"
-	uri.Path = path
-	uri.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(250)"
-
-	db, err := sql.Open("sqlite", uri.String())
-	if err != nil {
 		return fmt.Errorf("open Codex state database: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	ids := make([]string, 0, len(indices))

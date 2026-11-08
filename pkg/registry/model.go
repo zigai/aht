@@ -109,18 +109,15 @@ type Reporter struct {
 }
 
 type NativeObservation struct {
-	Detail      *DetailEvidence   `json:"detail,omitempty"`
-	Reporter    Reporter          `json:"reporter"`
-	Event       string            `json:"event,omitempty"`
-	Lifecycle   *NativeLifecycle  `json:"lifecycle,omitempty"`
-	Presence    *Presence         `json:"presence,omitempty"`
-	Activity    *Activity         `json:"activity,omitempty"`
-	SessionID   string            `json:"session_id,omitempty"`
-	SessionPath string            `json:"session_path,omitempty"`
-	ObservedAt  time.Time         `json:"observed_at"`
-	Attributes  map[string]string `json:"attributes,omitempty"`
-	RawPayload  json.RawMessage   `json:"raw_payload,omitempty"`
-	Process     ProcessIdentity   `json:"process,omitzero"`
+	NativeEvidence
+
+	Detail      *DetailEvidence `json:"detail,omitempty"`
+	Presence    *Presence       `json:"presence,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
+	SessionPath string          `json:"session_path,omitempty"`
+	ObservedAt  time.Time       `json:"observed_at"`
+	RawPayload  json.RawMessage `json:"raw_payload,omitempty"`
+	Process     ProcessIdentity `json:"process,omitzero"`
 }
 
 type ScreenObservation struct {
@@ -149,25 +146,21 @@ type ActivityDecision struct {
 }
 
 type ProcessObservation struct {
-	Present    bool            `json:"present"`
-	Process    ProcessIdentity `json:"process"`
-	ObservedAt time.Time       `json:"observed_at"`
+	Sighting   Sighting  `json:"-"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type MultiplexerObservation struct {
-	Process    ProcessIdentity `json:"process"`
-	Location   Location        `json:"context"`
-	ObservedAt time.Time       `json:"observed_at"`
+	Placement  Placement `json:"-"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type CatalogObservation struct {
-	SessionID     string    `json:"session_id,omitempty"`
-	SessionPath   string    `json:"session_path,omitempty"`
-	ResumeCommand []string  `json:"resume_command,omitempty"`
-	CWD           string    `json:"cwd,omitempty"`
-	ProjectRoot   string    `json:"project_root,omitempty"`
-	ProcessPID    int       `json:"process_pid,omitempty"`
-	ObservedAt    time.Time `json:"observed_at"`
+	ListingMetadata
+
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionPath string    `json:"session_path,omitempty"`
+	ObservedAt  time.Time `json:"observed_at"`
 }
 
 type Observations struct {
@@ -208,12 +201,17 @@ type ObservationIdentity struct {
 	Attributes  map[string]string `json:"attributes,omitempty"`
 }
 
-type Listing struct {
+type ListingMetadata struct {
 	ResumeCommand []string `json:"resume_command,omitempty"`
 	CWD           string   `json:"cwd,omitempty"`
 	ProjectRoot   string   `json:"project_root,omitempty"`
 	//exhaustruct:optional
 	ProcessPID int `json:"process_pid,omitempty"`
+}
+
+type Listing struct {
+	ListingMetadata
+
 	//exhaustruct:optional
 	ProcessStartIdentity string `json:"process_start_identity,omitempty"`
 	//exhaustruct:optional
@@ -315,27 +313,23 @@ func (k MultiplexerKind) Valid() bool {
 	return false
 }
 
+// SameAddress reports whether two locations name the same multiplexer pane at
+// the same place, ignoring display names, paths, processes, and terminals.
+func (l Location) SameAddress(other Location) bool {
+	l.WindowName, other.WindowName = "", ""
+	l.TabName, other.TabName = "", ""
+	l.WorkspaceName, other.WorkspaceName = "", ""
+	l.PaneCurrentPath, other.PaneCurrentPath = "", ""
+	l.PanePID, other.PanePID = 0, 0
+	l.PaneTTY, other.PaneTTY = "", ""
+	l.ClientTTY, other.ClientTTY = "", ""
+
+	return l == other
+}
+
 func (l Location) Empty() bool {
-	return l == (Location{
-		Kind:            "",
-		ServerID:        "",
-		SessionID:       "",
-		SessionName:     "",
-		WorkspaceID:     "",
-		WorkspaceName:   "",
-		TabID:           "",
-		TabIndex:        "",
-		TabName:         "",
-		WindowID:        "",
-		WindowIndex:     "",
-		WindowName:      "",
-		PaneID:          "",
-		PaneIndex:       "",
-		PaneCurrentPath: "",
-		PanePID:         0,
-		PaneTTY:         "",
-		ClientTTY:       "",
-	})
+	var empty Location
+	return l == empty
 }
 
 func (p ProcessIdentity) Complete() bool { return p.PID > 0 && p.StartIdentity != "" }
@@ -359,29 +353,44 @@ func NormalizePresence(value string) (Presence, error) {
 	}
 }
 
+// ActivityAliases maps every lowercase name NormalizeActivity accepts to its
+// activity.
+func ActivityAliases() map[string]Activity {
+	return map[string]Activity{
+		string(ActivityRunning):     ActivityRunning,
+		"working":                   ActivityRunning,
+		"busy":                      ActivityRunning,
+		"retry":                     ActivityRunning,
+		string(ActivityWaiting):     ActivityWaiting,
+		"blocked":                   ActivityWaiting,
+		string(ActivityIdle):        ActivityIdle,
+		"offline":                   ActivityIdle,
+		string(ActivityFailed):      ActivityFailed,
+		"error":                     ActivityFailed,
+		"errored":                   ActivityFailed,
+		"crash":                     ActivityFailed,
+		"crashed":                   ActivityFailed,
+		string(ActivityInterrupted): ActivityInterrupted,
+		"paused":                    ActivityInterrupted,
+		"stopped":                   ActivityInterrupted,
+		"canceled":                  ActivityInterrupted,
+		"cancelled":                 ActivityInterrupted,
+		string(ActivityUnknown):     ActivityUnknown,
+	}
+}
+
 func NormalizeActivity(value string) (Activity, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "":
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
 		return "", nil
-	case string(ActivityRunning), "working", "busy", "retry":
-		return ActivityRunning, nil
-	case string(ActivityWaiting), "blocked":
-		return ActivityWaiting, nil
-	case string(ActivityIdle), "offline":
-		return ActivityIdle, nil
-	case string(ActivityFailed), "error", "errored", "crash", "crashed":
-		return ActivityFailed, nil
-	case string(ActivityInterrupted),
-		"paused",
-		"stopped",
-		"canceled",
-		"cancelled":
-		return ActivityInterrupted, nil
-	case string(ActivityUnknown):
-		return ActivityUnknown, nil
-	default:
+	}
+
+	activity, ok := ActivityAliases()[normalized]
+	if !ok {
 		return "", fmt.Errorf("%w: %q", ErrUnknownActivity, value)
 	}
+
+	return activity, nil
 }
 
 func NormalizeLifecycle(value string) (NativeLifecycle, error) {

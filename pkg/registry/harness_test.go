@@ -1,30 +1,22 @@
 package registry
 
 const (
-	HarnessClaude   Harness = "claude"
-	HarnessCodex    Harness = "codex"
-	HarnessCursor   Harness = "cursor"
-	HarnessCopilot  Harness = "copilot"
-	HarnessCline    Harness = "cline"
-	HarnessKimiCode Harness = "kimi-code"
-	HarnessGrok     Harness = "grok"
-	HarnessGoose    Harness = "goose"
-	HarnessPi       Harness = "pi"
-	HarnessOmp      Harness = "omp"
-	HarnessOpenCode Harness = "opencode"
-	HarnessAgy      Harness = "agy"
-	HarnessKilo     Harness = "kilo"
-	HarnessDroid    Harness = "droid"
-	HarnessOpenClaw Harness = "openclaw"
-	HarnessHermes   Harness = "hermes"
-	HarnessAmp      Harness = "amp"
+	harnessCatalog   Harness = "catalog"
+	harnessPrimary   Harness = "primary"
+	harnessOther     Harness = "other"
+	harnessSecondary Harness = "secondary"
+	harnessAlternate Harness = "alternate"
+	harnessOrdered   Harness = "ordered"
+	harnessShared    Harness = "shared"
 )
 
 type fixtureRules struct{ authority Authority }
 
+func (fixtureRules) SamePane(a Location, b Location) bool { return !a.Empty() && a == b }
+
 func (fixtureRules) Known(id Harness) bool {
 	return id != "" && id != "invalid" && id != "unknown" && id != "not-a-harness" &&
-		id != "claude-code"
+		id != "catalog-code"
 }
 
 func (r fixtureRules) Policy(id Harness) Policy {
@@ -37,9 +29,9 @@ func (r fixtureRules) Policy(id Harness) Policy {
 
 	return Policy{
 		Reporter:         reporter,
-		ExclusiveProcess: id != HarnessOpenClaw,
+		ExclusiveProcess: id != harnessShared,
 		Authority:        authority,
 		ScreenFallback:   true,
-		CatalogCreates:   id == HarnessClaude,
+		CatalogCreates:   id == harnessCatalog,
 	}
 }

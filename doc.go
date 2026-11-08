@@ -5,7 +5,7 @@
 //
 //	go install github.com/zigai/aht/v2@latest
 //
-// Run aht --help for commands and options. Go programs can read live state
-// through package client, embed the state engine through package registry, and
-// manage integrations and background tracking through package manage.
+// Run aht --help for commands and options. Go programs use package
+// github.com/zigai/aht/v2/pkg/aht to read live state, manage integrations, and
+// control background tracking.
 package main

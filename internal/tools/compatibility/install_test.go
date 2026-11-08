@@ -5,11 +5,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 func TestInstallationsPinTheSelectedRelease(t *testing.T) {
 	for _, spec := range defaultCatalog {
-		if spec.Source != "weekly" {
+		if spec.Source != harness.DistributionWeekly {
 			t.Run(spec.ID, func(t *testing.T) { assertVersionPin(t, spec) })
 		}
 	}
@@ -37,14 +39,16 @@ func assertVersionPin(t *testing.T, spec harnessSpec) {
 	assertNoLatestReferences(t, spec, commands)
 
 	switch spec.Source {
-	case "npm":
+	case harness.DistributionNPM:
 		assertNPMPin(t, spec, version, commands)
-	case "pypi":
+	case harness.DistributionPyPI:
 		assertPyPIPin(t, spec, version, commands)
-	case "github":
+	case harness.DistributionGitHub:
 		assertGitHubPin(t, spec, version, work, commands)
-	case "channel":
+	case harness.DistributionChannel:
 		assertChannelPin(t, spec, version, work, bin, commands)
+	case harness.DistributionWeekly:
+		// Weekly harnesses install the current build and have no pin.
 	}
 }
 

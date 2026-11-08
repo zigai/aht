@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -364,32 +366,9 @@ func checkDocumentedLocation(t *testing.T, tt locationCase) {
 
 func createLocationFixture(t *testing.T, tt locationCase) (string, string) {
 	t.Helper()
-	home := t.TempDir()
+	home := testharness.Isolate(t, catalog.All()...)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-
-	for _, key := range []string{
-		"PI_CODING_AGENT_DIR",
-		"PI_CONFIG_DIR",
-		"OMP_PROFILE",
-		"PI_PROFILE",
-		"OPENCODE_CONFIG_DIR",
-		"OPENCLAW_STATE_DIR",
-		"OPENCLAW_HOME",
-		"OPENCLAW_PROFILE",
-		"OPENCLAW_WORKSPACE_DIR",
-		"CLAUDE_CONFIG_DIR",
-		"CLINE_DATA_DIR",
-		"CLINE_GLOBAL_SETTINGS_PATH",
-		"CLINE_MCP_SETTINGS_PATH",
-		"KIMI_CODE_HOME",
-		"CRUSH_GLOBAL_CONFIG",
-		"CRUSH_GLOBAL_DATA",
-		"CRUSH_SKILLS_DIR",
-	} {
-		t.Setenv(key, "")
-	}
 
 	base := project
 	if tt.global {

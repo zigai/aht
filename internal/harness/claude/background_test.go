@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -74,7 +73,7 @@ func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 			}
 
 			if got := New().PayloadActivity(
-				harness.HookEventStop,
+				"Stop",
 				registry.ActivityIdle,
 				payload,
 				at,
@@ -100,7 +99,7 @@ func TestPayloadActivityOnlyRefinesIdleStop(t *testing.T) {
 		{"StopFailure", registry.ActivityFailed},
 		{"PermissionDenied", registry.ActivityIdle},
 		{"PostCompact", registry.ActivityIdle},
-		{harness.HookEventStop, registry.ActivityFailed},
+		{"Stop", registry.ActivityFailed},
 	} {
 		if got := New().PayloadActivity(test.event, test.activity, payload, at); got != test.activity {
 			t.Fatalf("%s %s refined to %s", test.event, test.activity, got)

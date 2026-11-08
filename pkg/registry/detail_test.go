@@ -11,8 +11,9 @@ import (
 
 type detailRules struct{ policy Policy }
 
-func (detailRules) Known(id Harness) bool   { return id == HarnessClaude }
-func (r detailRules) Policy(Harness) Policy { return r.policy }
+func (detailRules) Known(id Harness) bool                { return id == harnessCatalog }
+func (detailRules) SamePane(a Location, b Location) bool { return fixtureRules{}.SamePane(a, b) }
+func (r detailRules) Policy(Harness) Policy              { return r.policy }
 
 func detailPolicy(authority Authority) Policy {
 	return Policy{
@@ -28,7 +29,7 @@ func detailPolicy(authority Authority) Policy {
 
 func detailReport(at time.Time, activity *Activity, detail *ActivityDetail) Observation {
 	return Observation{
-		Harness: HarnessClaude,
+		Harness: harnessCatalog,
 		At:      at,
 		Subject: ObservationIdentity{SessionID: "detail-session"},
 		Evidence: &Report{
@@ -354,7 +355,7 @@ func TestDetailUsesSelectedScreenAuthority(t *testing.T) {
 	session, err = store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessClaude,
+			Harness:  harnessCatalog,
 			At:       at,
 			Subject:  ObservationIdentity{SessionID: session.SessionID},
 			Evidence: (*Reading)(&reading),
@@ -376,7 +377,7 @@ func TestDetailUsesSelectedScreenAuthority(t *testing.T) {
 	session, err = store.Observe(
 		t.Context(),
 		Observation{
-			Harness:  HarnessClaude,
+			Harness:  harnessCatalog,
 			At:       reading.ObservedAt,
 			Subject:  ObservationIdentity{SessionID: session.SessionID},
 			Evidence: (*Reading)(&reading),
@@ -448,7 +449,7 @@ func TestFileWatchPublishesDetailExpiryWithoutNewObservation(t *testing.T) {
 
 	err := store.Watch(
 		ctx,
-		WatchOptions{ReconcileInterval: time.Millisecond},
+		ReconcilingWatchOptions(WatchOptions{}, time.Millisecond),
 		func(result WatchResult) error {
 			if result.Err != nil {
 				return result.Err

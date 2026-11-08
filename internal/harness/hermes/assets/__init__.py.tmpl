@@ -157,7 +157,7 @@ def _report(event: str, transition: dict[str, str], values: dict[str, Any]) -> N
         "--observed-at", datetime.now(timezone.utc).isoformat(),
         "--cwd", cwd, "--project-root", cwd,
         "--quiet", "--no-tmux",
-        "--reporter", "hermes-plugin",
+        "--reporter", {{SOURCE}},
         "--reporter-version", str(_INTEGRATION_VERSION),
     ]
     for flag in ("lifecycle", "presence", "activity"):

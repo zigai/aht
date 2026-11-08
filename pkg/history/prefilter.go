@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 )
 
+const prefilterChunkBytes = 64 << 10
+
 const (
 	asciiWordBytes       = 8
 	asciiHighBits        = uint64(0x8080808080808080)
@@ -80,7 +82,7 @@ func (filter *bytePrefilter) matches(ctx context.Context, input io.Reader) (bool
 	found := make([]bool, len(filter.patterns))
 	foldedRunes := make(map[rune]bool)
 	remaining := len(found)
-	buffer := make([]byte, hashChunkBytes+filter.overlap)
+	buffer := make([]byte, prefilterChunkBytes+filter.overlap)
 	retained := 0
 
 	for {

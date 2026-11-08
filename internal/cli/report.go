@@ -2,92 +2,25 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
+
+	"github.com/zigai/aht/v2/internal/reporting"
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/internal/observer"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
-
-	"github.com/zigai/aht/v2/pkg/herdr"
 	"github.com/zigai/aht/v2/pkg/registry"
-	"github.com/zigai/aht/v2/pkg/tmux"
-	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
-//exhaustruct:optional
-type reportOptions struct {
-	detailObservedAt string
-	detail           string
-	reporter         string
-	reporterVersion  int
-	multiSession     bool
-	harness          string
-	presence         string
-	activity         string
-	lifecycle        string
-	sessionID        string
-	sessionPath      string
-	cwd              string
-	cwdAuto          bool
-	projectRoot      string
-	pid              int
-	ppid             int
-	processGroupID   int
-	startIdentity    string
-	executable       string
-	tty              string
-	event            string
-	observedAt       string
-	sequence         string
-	attributes       []string
-	rawStdin         bool
-	rawDefaultsOnly  bool
-	noTmux           bool
-	quiet            bool
-	resumeCommand    []string
-	evidence         string
-}
-
-type preparedReport struct {
-	harness registry.Harness
-	//exhaustruct:optional
-	observation registry.Observation
-	//exhaustruct:optional
-	ignored bool
-}
-
-type reportState struct {
-	presence   registry.Presence
-	activity   registry.Activity
-	lifecycle  registry.NativeLifecycle
-	observedAt time.Time
-}
-
-type reportRuntimeContext struct {
-	tmux        registry.Location
-	multiplexer registry.Location
-	processes   []processinfo.Process
-
-	//exhaustruct:optional
-	defaultObservedAt time.Time
-}
-
 func (app *application) newReportCommand() *cobra.Command {
-	options := defaultReportOptionsFromEnv()
+	options := reporting.Options{CWDAuto: true}
+
+	var quiet bool
+
 	cmd := &cobra.Command{
 		Use:           "report [harness]",
 		Short:         "Record a harness observation",
@@ -97,227 +30,182 @@ func (app *application) newReportCommand() *cobra.Command {
 		Args:          cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
-				if options.harness != "" {
-					return exitCode(
-						fmt.Errorf("%w: harness already set", errUnexpectedReportArg),
-						exitCodeUsage,
-					)
-				}
-
-				options.harness = args[0]
+				options.Harness = args[0]
 			}
 
 			if cmd.Flags().Changed("cwd") {
-				options.cwdAuto = false
+				options.CWDAuto = false
 			}
 
-			applyReportHarnessEnv(&options)
+			reporting.ApplyHarnessEnv(&options)
 
 			stdin := app.stdin
 			if stdin == nil {
 				stdin = os.Stdin
 			}
 
-			return app.runReport(cmd.Context(), stdin, options)
+			return app.runReport(cmd.Context(), stdin, options, quiet)
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(
-		&options.detailObservedAt,
+		&options.DetailObservedAt,
 		"detail-observed-at",
 		"",
 		"original detail evidence RFC3339 timestamp",
 	)
 	f.StringVar(
-		&options.detail,
+		&options.Detail,
 		"detail",
 		"",
 		"activity detail: permission, question, general, usage_limit, or clear",
 	)
-	f.StringVar(&options.reporter, "reporter", options.reporter, "reporting integration identity")
+	f.StringVar(&options.Reporter, "reporter", options.Reporter, "reporting integration identity")
 	f.IntVar(
-		&options.reporterVersion,
+		&options.ReporterVersion,
 		"reporter-version",
-		options.reporterVersion,
+		options.ReporterVersion,
 		"reporting integration version",
 	)
 	f.BoolVar(
-		&options.multiSession,
+		&options.MultiSession,
 		"multi-session",
-		options.multiSession,
+		options.MultiSession,
 		"reporter supports multiple sessions per process",
 	)
 	f.StringVar(
-		&options.presence,
+		&options.Presence,
 		"presence",
-		options.presence,
+		options.Presence,
 		"presence: `<val>` (live, gone, unknown)",
 	)
 	f.StringVar(
-		&options.activity,
+		&options.Activity,
 		"activity",
-		options.activity,
+		options.Activity,
 		"reported activity hint: `<val>` (running, waiting, idle, unknown)",
 	)
 	f.StringVar(
-		&options.lifecycle,
+		&options.Lifecycle,
 		"lifecycle",
-		options.lifecycle,
+		options.Lifecycle,
 		"native lifecycle: `<val>` (start, resume, end)",
 	)
 	_ = f.MarkHidden("lifecycle")
-	f.StringVar(&options.sessionID, "session-id", options.sessionID, "harness session `<id>`")
+	f.StringVar(&options.SessionID, "session-id", options.SessionID, "harness session `<id>`")
 	f.StringVar(
-		&options.sessionPath,
+		&options.SessionPath,
 		"session-path",
-		options.sessionPath,
+		options.SessionPath,
 		"harness session file `<path>`",
 	)
-	f.StringVar(&options.cwd, "cwd", options.cwd, "agent current working `<dir>`")
-	f.StringVar(&options.projectRoot, "project-root", options.projectRoot, "project `<root>`")
-	f.IntVar(&options.pid, "pid", options.pid, "agent process `<id>`")
-	f.IntVar(&options.ppid, "ppid", options.ppid, "agent parent process `<id>`")
+	f.StringVar(&options.CWD, "cwd", options.CWD, "agent current working `<dir>`")
+	f.StringVar(&options.ProjectRoot, "project-root", options.ProjectRoot, "project `<root>`")
+	f.IntVar(&options.PID, "pid", options.PID, "agent process `<id>`")
+	f.IntVar(&options.PPID, "ppid", options.PPID, "agent parent process `<id>`")
 	f.IntVar(
-		&options.processGroupID,
+		&options.ProcessGroupID,
 		"process-group-id",
-		options.processGroupID,
+		options.ProcessGroupID,
 		"agent process group `<id>`",
 	)
 	f.StringVar(
-		&options.startIdentity,
+		&options.StartIdentity,
 		"start-identity",
-		options.startIdentity,
+		options.StartIdentity,
 		"process start `<identity>`",
 	)
 	f.StringVar(
-		&options.executable,
+		&options.Executable,
 		"executable",
-		options.executable,
+		options.Executable,
 		"resolved executable `<path>`",
 	)
-	f.StringVar(&options.tty, "tty", options.tty, "agent `<tty>`")
-	f.StringVar(&options.event, "event", options.event, "native harness event `<name>`")
-	f.StringVar(&options.observedAt, "observed-at", options.observedAt, "RFC3339 `<timestamp>`")
+	f.StringVar(&options.TTY, "tty", options.TTY, "agent `<tty>`")
+	f.StringVar(&options.Event, "event", options.Event, "native harness event `<name>`")
+	f.StringVar(&options.ObservedAt, "observed-at", options.ObservedAt, "RFC3339 `<timestamp>`")
 	f.StringVar(
-		&options.sequence,
+		&options.Sequence,
 		"sequence",
-		options.sequence,
+		options.Sequence,
 		"strictly increasing integration report `<seq>`",
 	)
-	f.StringArrayVar(&options.attributes, "attribute", nil, "extra `<key=value>` attribute")
+	f.StringArrayVar(&options.Attributes, "attribute", nil, "extra `<key=value>` attribute")
 	f.StringArrayVar(
-		&options.resumeCommand,
+		&options.ResumeCommand,
 		"resume-command",
 		nil,
 		"resume command argv `<item>`, repeatable",
 	)
 	f.StringVar(
-		&options.evidence,
+		&options.Evidence,
 		"evidence",
-		options.evidence,
+		options.Evidence,
 		"evidence `<kind>` (managed shims)",
 	)
 	f.BoolVar(
-		&options.rawStdin,
+		&options.RawStdin,
 		"raw-stdin",
 		false,
 		"store stdin as the hook payload, without tool input and output",
 	)
 	f.BoolVar(
-		&options.rawDefaultsOnly,
+		&options.RawDefaultsOnly,
 		"raw-stdin-defaults-only",
 		false,
 		"read stdin for defaults without storing raw payload",
 	)
-	f.BoolVar(&options.noTmux, "no-tmux", false, "do not collect tmux context")
+	f.BoolVar(&options.NoTmux, "no-tmux", false, "do not collect tmux context")
 	_ = f.MarkHidden("evidence")
-	f.BoolVarP(&options.quiet, "quiet", "q", false, "suppress human-readable output")
+	f.BoolVarP(&quiet, "quiet", "q", false, "suppress human-readable output")
 
 	return cmd
 }
 
-func defaultReportOptionsFromEnv() reportOptions {
-	return reportOptions{
-		harness:  firstEnv("AHT_HARNESS", "AGENT_HARNESS"),
-		cwdAuto:  true,
-		ppid:     firstEnvInt("AHT_PPID", "AGENT_PPID"),
-		tty:      firstEnv("AHT_TTY", "TTY"),
-		sequence: firstEnv("AHT_SEQUENCE"),
-	}
-}
-
-func applyReportHarnessEnv(opts *reportOptions) {
-	harnessID, err := catalog.Parse(opts.harness)
+func (app *application) runReport(
+	ctx context.Context,
+	stdin io.Reader,
+	opts reporting.Options,
+	quiet bool,
+) error {
+	prepared, err := reporting.Prepare(
+		stdin,
+		opts,
+		reporting.CollectRuntime(ctx, opts.PID, opts.NoTmux),
+	)
 	if err != nil {
-		return
+		if _, ok := errors.AsType[*reporting.InputError](err); ok {
+			return exitCode(err, exitCodeUsage)
+		}
+
+		return fmt.Errorf("preparing report: %w", err)
 	}
 
-	if opts.sessionID == "" {
-		opts.sessionID = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionID)...)
-	}
-
-	if opts.sessionPath == "" {
-		opts.sessionPath = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionPath)...)
-	}
-
-	if opts.pid <= 0 {
-		opts.pid = firstEnvInt(catalog.EnvNames(harnessID, harness.EnvPID)...)
-	}
-
-	if opts.event == "" {
-		opts.event = firstEnv(catalog.EnvNames(harnessID, harness.EnvEvent)...)
-	}
-}
-
-func parseReportSequence(value string) (uint64, bool, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, false, nil
-	}
-
-	sequence, err := strconv.ParseUint(value, 10, 64)
-	if err != nil {
-		return 0, false, fmt.Errorf("parsing sequence: %w", err)
-	}
-
-	return sequence, true, nil
-}
-
-func (app *application) runReport(ctx context.Context, stdin io.Reader, opts reportOptions) error {
-	prepared, err := prepareReport(stdin, opts, reportRuntimeContext{
-		tmux:        reportTmuxLocation(ctx, opts.noTmux),
-		multiplexer: reportMultiplexerLocation(),
-		processes:   reportProcessAncestors(ctx, opts.pid),
-	})
-	if err != nil {
-		return err
-	}
-
-	if prepared.ignored {
+	if prepared.Ignored {
 		return app.writeReportIgnored(
-			prepared.harness,
+			prepared.Harness,
 			"payload_mismatch",
 			"hook payload does not match harness",
-			opts.quiet,
+			quiet,
 		)
 	}
 
-	session, err := app.registryStore().Observe(ctx, prepared.observation)
+	session, err := app.registryStore().Observe(ctx, prepared.Observation)
 	if errors.Is(err, registry.ErrProcessEnded) {
 		// A late hook from an exited process is expected, not a hook failure.
 		return app.writeReportIgnored(
-			prepared.harness,
+			prepared.Harness,
 			"process_ended",
 			"reporting process already ended",
-			opts.quiet,
+			quiet,
 		)
 	}
 
 	if err != nil {
-		return fmt.Errorf("recording observation: %w", err)
+		return err //nolint:wrapcheck // Client.Observe supplies the operation context.
 	}
 
-	return app.writeReportResult(session, opts.quiet)
+	return app.writeReportResult(session, quiet)
 }
 
 func (app *application) writeReportIgnored(
@@ -340,463 +228,6 @@ func (app *application) writeReportIgnored(
 	}
 
 	return app.writef("ignored %s report: %s\n", harnessID, detail)
-}
-
-func prepareReport(
-	stdin io.Reader,
-	opts reportOptions,
-	runtime reportRuntimeContext,
-) (preparedReport, error) {
-	harnessID, attrs, err := parseReportTarget(opts)
-	if err != nil {
-		return preparedReport{}, err
-	}
-
-	rawPayload, defaultsPayload, err := readStdinPayloadData(
-		stdin,
-		opts.rawStdin,
-		opts.rawDefaultsOnly,
-	)
-	if err != nil {
-		return preparedReport{}, err
-	}
-
-	if !catalog.PayloadCompatible(harnessID, defaultsPayload) {
-		return preparedReport{harness: harnessID, ignored: true}, nil
-	}
-
-	defaults, err := catalog.PayloadDefaults(harnessID, defaultsPayload)
-	if err != nil {
-		return preparedReport{}, fmt.Errorf("derive payload defaults: %w", err)
-	}
-
-	opts.projectRoot = resolveReportProjectRoot(harnessID, opts.projectRoot, defaults, opts.cwd)
-	applyPayloadDefaults(&opts, attrs, defaults)
-	applyReportRuntimeDefaults(&opts)
-	translateReportLifecycle(&opts, harnessID, attrs)
-
-	state, err := normalizeReportState(opts, runtime.defaultObservedAt)
-	if err != nil {
-		return preparedReport{}, err
-	}
-
-	state.activity, err = catalog.ActivityFromPayload(
-		harnessID,
-		opts.event,
-		state.activity,
-		defaultsPayload,
-		state.observedAt,
-	)
-	if err != nil {
-		return preparedReport{}, fmt.Errorf("derive payload activity: %w", err)
-	}
-
-	observation, err := buildReportObservation(harnessID, opts, runtime, attrs, rawPayload, state)
-	if err != nil {
-		return preparedReport{}, err
-	}
-
-	observation = catalog.PrepareObservation(observation)
-	if err := applyReportDetail(&observation, opts, state.activity, state.observedAt); err != nil {
-		return preparedReport{}, err
-	}
-
-	return preparedReport{harness: harnessID, observation: observation}, nil
-}
-
-func parseReportTarget(opts reportOptions) (registry.Harness, map[string]string, error) {
-	if opts.rawStdin && opts.rawDefaultsOnly {
-		return "", nil, exitCode(errConflictingReportStdin, exitCodeUsage)
-	}
-
-	if strings.TrimSpace(opts.harness) == "" {
-		return "", nil, exitCode(errMissingReportHarness, exitCodeUsage)
-	}
-
-	harnessID, err := catalog.Parse(opts.harness)
-	if err != nil {
-		return "", nil, exitCode(fmt.Errorf("normalizing harness: %w", err), exitCodeUsage)
-	}
-
-	attrs, err := parseAttributes(opts.attributes)
-	if err != nil {
-		return "", nil, exitCode(err, exitCodeUsage)
-	}
-
-	return harnessID, attrs, nil
-}
-
-func translateReportLifecycle(
-	opts *reportOptions,
-	harnessID registry.Harness,
-	attrs map[string]string,
-) {
-	if strings.EqualFold(opts.evidence, "process") {
-		return
-	}
-
-	translated := catalog.LifecycleFor(harnessID, opts.event, attrs)
-
-	opts.event = translated.Event
-	if opts.lifecycle == "" {
-		opts.lifecycle = string(translated.Lifecycle)
-	}
-
-	if opts.presence == "" {
-		opts.presence = string(translated.Presence)
-	}
-}
-
-func normalizeReportState(opts reportOptions, defaultObservedAt time.Time) (reportState, error) {
-	presence, err := registry.NormalizePresence(opts.presence)
-	if err != nil {
-		return reportState{}, exitCode(fmt.Errorf("normalize presence: %w", err), exitCodeUsage)
-	}
-
-	activity, err := registry.NormalizeActivity(opts.activity)
-	if err != nil {
-		return reportState{}, exitCode(fmt.Errorf("normalize activity: %w", err), exitCodeUsage)
-	}
-
-	if presence == registry.PresenceGone && activity != "" {
-		return reportState{}, exitCode(errGonePresenceActivity, exitCodeUsage)
-	}
-
-	lifecycle, err := normalizeReportLifecycle(opts.lifecycle)
-	if err != nil {
-		return reportState{}, exitCode(err, exitCodeUsage)
-	}
-
-	if lifecycle == registry.NativeLifecycleEnd && activity != "" {
-		return reportState{}, exitCode(errGonePresenceActivity, exitCodeUsage)
-	}
-
-	observedAt, err := parseObservedAt(opts.observedAt)
-	if err != nil {
-		return reportState{}, exitCode(err, exitCodeUsage)
-	}
-
-	if observedAt.IsZero() {
-		observedAt = defaultObservedAt
-	}
-
-	if observedAt.IsZero() {
-		observedAt = time.Now().UTC()
-	}
-
-	return reportState{
-		presence:   presence,
-		activity:   activity,
-		lifecycle:  lifecycle,
-		observedAt: observedAt,
-	}, nil
-}
-
-func buildReportObservation(
-	harnessID registry.Harness,
-	opts reportOptions,
-	runtime reportRuntimeContext,
-	attrs map[string]string,
-	rawPayload json.RawMessage,
-	state reportState,
-) (registry.Observation, error) {
-	sequence, sequenceSet, err := parseReportSequence(opts.sequence)
-	if err != nil {
-		return registry.Observation{}, exitCode(err, exitCodeUsage)
-	}
-
-	if !reportHasIdentity(opts, state) {
-		return registry.Observation{}, exitCode(errMissingReportIdentity, exitCodeUsage)
-	}
-
-	identity := registry.ObservationIdentity{
-		CWD:         "",
-		Attributes:  nil,
-		SessionID:   opts.sessionID,
-		SessionPath: opts.sessionPath,
-	}
-
-	var observation registry.Observation
-
-	if strings.EqualFold(opts.evidence, "process") {
-		observation, err = processReportObservation(
-			harnessID,
-			identity,
-			opts,
-			runtime.processes,
-			state.presence,
-			state.activity,
-			state.observedAt,
-			sequenceSet,
-		)
-		if err != nil {
-			return registry.Observation{}, err
-		}
-	} else {
-		observation = nativeReportObservation(
-			harnessID,
-			identity,
-			opts,
-			runtime,
-			attrs,
-			rawPayload,
-			state.presence,
-			state.activity,
-			state.lifecycle,
-			state.observedAt,
-		)
-		if sequenceSet {
-			observation.Report().Reporter.Sequence = &sequence
-		}
-	}
-
-	if opts.cwd != "" || opts.projectRoot != "" || len(opts.resumeCommand) > 0 {
-		observation.SetListing(
-			&registry.Listing{
-				ResumeCommand: append([]string(nil), opts.resumeCommand...),
-				CWD:           opts.cwd,
-				ProjectRoot:   opts.projectRoot,
-			},
-		)
-	}
-
-	return observation, nil
-}
-
-func reportHasIdentity(opts reportOptions, state reportState) bool {
-	return state.presence != "" || state.activity != "" || state.lifecycle != "" ||
-		opts.event != "" ||
-		opts.sessionID != "" ||
-		opts.sessionPath != ""
-}
-
-// processReportObservation validates sighting-only evidence before constructing it.
-func processReportObservation(
-	harnessID registry.Harness,
-	identity registry.ObservationIdentity,
-	opts reportOptions,
-	processes []processinfo.Process,
-	presence registry.Presence,
-	activity registry.Activity,
-	observedAt time.Time,
-	sequenceSet bool,
-) (registry.Observation, error) {
-	if opts.pid <= 0 {
-		return registry.Observation{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
-	}
-
-	if activity != "" {
-		return registry.Observation{}, exitCode(errProcessEvidenceActivity, exitCodeUsage)
-	}
-
-	if sequenceSet {
-		return registry.Observation{}, exitCode(errProcessEvidenceSequence, exitCodeUsage)
-	}
-
-	process := processEvidenceIdentity(opts, processes)
-	if process == nil || !process.Complete() {
-		return registry.Observation{}, exitCode(errProcessEvidenceIdentity, exitCodeUsage)
-	}
-
-	present := presence != registry.PresenceGone
-
-	return registry.Observation{
-		Harness:  harnessID,
-		At:       observedAt,
-		Subject:  identity,
-		Evidence: &registry.Sighting{Process: *process, Present: present},
-	}, nil
-}
-
-// applyReportDetail applies explicit detail overrides after harness preparation.
-func applyReportDetail(
-	observation *registry.Observation,
-	opts reportOptions,
-	activity registry.Activity,
-	observedAt time.Time,
-) error {
-	if opts.detail != "" {
-		if observation.Kind() != "report" {
-			return exitCode(
-				fmt.Errorf("%w: detail requires a native report", registry.ErrInvalidObservation),
-				exitCodeUsage,
-			)
-		}
-
-		detail := registry.ActivityDetail(opts.detail)
-		if opts.detail == "clear" {
-			detail = ""
-		}
-
-		if detail != "" && !detail.ValidFor(activity) {
-			return exitCode(
-				fmt.Errorf("%w: detail does not match activity", registry.ErrInvalidObservation),
-				exitCodeUsage,
-			)
-		}
-
-		observation.Report().Detail = &detail
-	}
-
-	return applyReportDetailTimestamp(observation, opts.detailObservedAt, observedAt)
-}
-
-// applyReportDetailTimestamp validates the producer time against the final detail.
-func applyReportDetailTimestamp(
-	observation *registry.Observation,
-	timestamp string,
-	observedAt time.Time,
-) error {
-	if timestamp != "" {
-		detailAt, err := parseObservedAt(timestamp)
-		if err != nil || detailAt.IsZero() || detailAt.After(observedAt) {
-			return exitCode(
-				fmt.Errorf("%w: invalid detail timestamp", registry.ErrInvalidObservation),
-				exitCodeUsage,
-			)
-		}
-
-		if observation.Kind() != "report" || observation.Report().Detail == nil ||
-			*observation.Report().Detail == "" {
-			return exitCode(
-				fmt.Errorf(
-					"%w: detail timestamp requires specific detail",
-					registry.ErrInvalidObservation,
-				),
-				exitCodeUsage,
-			)
-		}
-
-		observation.Report().DetailObservedAt = &detailAt
-	}
-
-	return nil
-}
-
-func nativeReportObservation(
-	harnessID registry.Harness,
-	identity registry.ObservationIdentity,
-	opts reportOptions,
-	runtime reportRuntimeContext,
-	attributes map[string]string,
-	rawPayload json.RawMessage,
-	presence registry.Presence,
-	activity registry.Activity,
-	lifecycle registry.NativeLifecycle,
-	observedAt time.Time,
-) registry.Observation {
-	observation := registry.Observation{
-		Harness: harnessID,
-		At:      observedAt,
-		Subject: identity,
-		Evidence: &registry.Report{
-			Lifecycle: nil,
-			Claim:     nil,
-			Activity:  nil,
-			Location:  nil,
-			Listing:   nil,
-			Reporter: registry.Reporter{
-				Sequence:     nil,
-				Integration:  opts.reporter,
-				Version:      opts.reporterVersion,
-				MultiSession: opts.multiSession,
-			},
-			Event:      opts.event,
-			Process:    reportProcessIdentity(harnessID, runtime.processes),
-			Attributes: attributes,
-			Payload:    rawPayload,
-			Detail:     nil,
-		},
-	}
-	if lifecycle != "" {
-		observation.Report().Lifecycle = &lifecycle
-	}
-
-	if !runtime.tmux.Empty() {
-		location := runtime.tmux
-		observation.SetLocation(&location)
-	}
-
-	if !runtime.multiplexer.Empty() {
-		multiplexer := runtime.multiplexer
-		observation.SetLocation(&multiplexer)
-	}
-
-	if presence != "" {
-		observation.Report().Claim = &presence
-	}
-
-	if activity != "" {
-		observation.SetActivity(&activity)
-	}
-
-	if observation.Report().Event == "" && (presence != "" || activity != "" || lifecycle != "") {
-		observation.Report().Event = "cli"
-	}
-
-	return observation
-}
-
-func normalizeReportLifecycle(value string) (registry.NativeLifecycle, error) {
-	if strings.TrimSpace(value) == "" {
-		return "", nil
-	}
-
-	lifecycle, err := registry.NormalizeLifecycle(value)
-	if err != nil {
-		return "", fmt.Errorf("normalize lifecycle: %w", err)
-	}
-
-	return lifecycle, nil
-}
-
-func processEvidenceIdentity(
-	opts reportOptions,
-	processes []processinfo.Process,
-) *registry.ProcessIdentity {
-	if opts.startIdentity != "" {
-		return &registry.ProcessIdentity{
-			Foreground:     false,
-			PID:            opts.pid,
-			PPID:           opts.ppid,
-			ProcessGroupID: opts.processGroupID,
-			StartIdentity:  opts.startIdentity,
-			Executable:     opts.executable,
-			CWD:            opts.cwd,
-			TTY:            opts.tty,
-		}
-	}
-
-	for _, process := range processes {
-		if process.PID != opts.pid {
-			continue
-		}
-
-		return &registry.ProcessIdentity{
-			PID:            process.PID,
-			PPID:           process.PPID,
-			ProcessGroupID: process.ProcessGroupID,
-			Foreground:     process.Foreground,
-			StartIdentity:  process.StartIdentity,
-			Executable:     process.Executable,
-			CWD:            process.CWD,
-			TTY:            process.TTY,
-		}
-	}
-
-	return nil
-}
-
-func appReportActivity(session registry.Session) string {
-	return formatActivity(session.Activity())
-}
-
-func formatActivity(activity *registry.Activity) string {
-	if activity == nil {
-		return "null"
-	}
-
-	return string(*activity)
 }
 
 func (app *application) writeReportResult(session registry.Session, quiet bool) error {
@@ -843,234 +274,9 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 				string(session.Harness),
 				string(session.Presence()),
 				reportedActivity,
-				appReportActivity(session),
+				formatActivity(session.Activity()),
 				authoritative,
 			},
 		},
 	)
-}
-
-func reportTmuxLocation(ctx context.Context, noTmux bool) registry.Location {
-	if noTmux {
-		return registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}
-	}
-
-	t, err := tmux.Current(ctx)
-	if err != nil {
-		return registry.Location{
-			Kind:            "",
-			ServerID:        "",
-			SessionID:       "",
-			SessionName:     "",
-			WorkspaceID:     "",
-			WorkspaceName:   "",
-			TabID:           "",
-			TabIndex:        "",
-			TabName:         "",
-			WindowID:        "",
-			WindowIndex:     "",
-			WindowName:      "",
-			PaneID:          "",
-			PaneIndex:       "",
-			PaneCurrentPath: "",
-			PanePID:         0,
-			PaneTTY:         "",
-			ClientTTY:       "",
-		}
-	}
-
-	return t
-}
-
-func reportMultiplexerLocation() registry.Location {
-	if location := herdr.Current(); !location.Empty() {
-		return location
-	}
-
-	return zellij.Current()
-}
-
-func reportProcessAncestors(ctx context.Context, pid int) []processinfo.Process {
-	if pid <= 0 {
-		pid = os.Getppid()
-	}
-
-	var processes []processinfo.Process
-
-	for range reportProcessAncestorLimit {
-		process, found, err := processinfo.Find(ctx, pid)
-		if err != nil || !found {
-			break
-		}
-
-		processes = append(processes, process)
-		if process.PPID <= 0 || process.PPID == process.PID {
-			break
-		}
-
-		pid = process.PPID
-	}
-
-	return processes
-}
-
-func reportProcessIdentity(
-	harnessID registry.Harness,
-	processes []processinfo.Process,
-) *registry.ProcessIdentity {
-	var selected *processinfo.Process
-
-	for index, process := range processes {
-		matches := reportProcessMatchesHarness(process, harnessID)
-		if selected != nil && !matches {
-			break
-		}
-
-		if matches && (selected == nil || !observer.IsAgentWrapper(process)) {
-			selected = &processes[index]
-		}
-	}
-
-	if selected == nil {
-		return nil
-	}
-
-	return &registry.ProcessIdentity{
-		PID:            selected.PID,
-		PPID:           selected.PPID,
-		ProcessGroupID: selected.ProcessGroupID,
-		Foreground:     selected.Foreground,
-		StartIdentity:  selected.StartIdentity,
-		Executable:     selected.Executable,
-		CWD:            selected.CWD,
-		TTY:            selected.TTY,
-	}
-}
-
-func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
-	if harnessID, ok := catalog.FromCommand(process.Executable); ok {
-		return harnessID == expected
-	}
-
-	for _, arg := range process.Args[:min(reportProcessArgumentPrefixCount, len(process.Args))] {
-		if harnessID, ok := catalog.FromCommand(arg); ok {
-			return harnessID == expected
-		}
-	}
-
-	return false
-}
-
-func parentProcessArgs(ctx context.Context) []string { return processArgs(ctx, os.Getppid()) }
-
-func processArgs(ctx context.Context, pid int) []string {
-	if pid <= 0 {
-		return nil
-	}
-
-	if a := procProcessArgs(pid); len(a) > 0 {
-		return a
-	}
-
-	return psProcessArgs(ctx, pid)
-}
-
-func procProcessArgs(pid int) []string {
-	// Linux exposes process argument vectors through its fixed procfs interface.
-	const linuxProcfsRoot = "/proc"
-
-	data, err := os.ReadFile(filepath.Join(linuxProcfsRoot, strconv.Itoa(pid), "cmdline"))
-	if err != nil || len(data) == 0 {
-		return nil
-	}
-
-	return strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
-}
-
-func psProcessArgs(ctx context.Context, pid int) []string {
-	out, err := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return nil
-	}
-
-	return strings.Fields(strings.TrimSpace(string(out)))
-}
-
-func applyPayloadDefaults(opts *reportOptions, a map[string]string, d harness.PayloadDefaults) {
-	if opts.sessionID == "" {
-		opts.sessionID = d.SessionID
-	}
-
-	if opts.sessionPath == "" {
-		opts.sessionPath = d.SessionPath
-	}
-
-	if opts.event == "" {
-		opts.event = d.Event
-	}
-
-	applyCWDDefault(opts, d.CWD)
-	maps.Copy(a, d.Attributes)
-}
-
-func applyReportRuntimeDefaults(opts *reportOptions) {
-	if opts.cwd == "" && opts.cwdAuto {
-		if wd, err := os.Getwd(); err == nil {
-			opts.cwd = wd
-		}
-	}
-}
-
-func applyCWDDefault(opts *reportOptions, v string) {
-	if v != "" && opts.cwdAuto && opts.cwd == "" {
-		opts.cwd = v
-	}
-}
-
-func resolveReportProjectRoot(
-	harnessID registry.Harness,
-	projectRoot string,
-	payload harness.PayloadDefaults,
-	cwd string,
-) string {
-	if projectRoot != "" {
-		return projectRoot
-	}
-
-	if root := firstEnv(catalog.EnvNames(harnessID, harness.EnvProjectRoot)...); root != "" {
-		return root
-	}
-
-	if payload.ProjectRoot != "" {
-		return payload.ProjectRoot
-	}
-
-	if root := findProjectRoot(payload.CWD); root != "" {
-		return root
-	}
-
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-
-	return findProjectRoot(cwd)
 }

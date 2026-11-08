@@ -13,6 +13,103 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+func TestHookAuthorityRequiresCurrentLiveReport(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, test := range []struct {
+		name      string
+		age       time.Duration
+		replaced  bool
+		ended     bool
+		retain    bool
+		want      registry.HookEvaluation
+		authority registry.Authority
+	}{
+		{
+			name: "matching live report",
+			want: registry.HookEvaluation{
+				Active: true, Fresh: true, ProcessMatches: true, Reason: "matching_live_process_report",
+			},
+			authority: registry.AuthorityHook,
+		},
+		{
+			name: "replaced process", replaced: true,
+			want: registry.HookEvaluation{Reason: "agent_process_replaced"}, authority: registry.AuthorityScreen,
+		},
+		{
+			name: "ended integration", ended: true,
+			want: registry.HookEvaluation{Reason: "integration_ended"}, authority: registry.AuthorityScreen,
+		},
+		{
+			name: "future report", age: -time.Second,
+			want: registry.HookEvaluation{
+				ProcessMatches: true, Reason: "integration_observation_from_future",
+			},
+			authority: registry.AuthorityScreen,
+		},
+		{
+			name: "expired report", age: registry.IntegrationActivityLease + time.Second,
+			want: registry.HookEvaluation{
+				ProcessMatches: true, Reason: "integration_report_stale",
+			},
+			authority: registry.AuthorityScreen,
+		},
+		{
+			name: "retained expired report", age: registry.IntegrationActivityLease + time.Second, retain: true,
+			want: registry.HookEvaluation{
+				ProcessMatches: true, Reason: "integration_report_stale",
+			},
+			authority: registry.AuthorityHook,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			process := registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
+
+			session := registry.Session{
+				Harness: "agent",
+				Process: &process,
+				Liveness: registry.NewLiveness(
+					registry.PresenceLive,
+					registry.ActivityValue(nil),
+					nil,
+					time.Time{},
+					"",
+				),
+				Observations: registry.Observations{Native: &registry.NativeObservation{
+					Activity: new(registry.ActivityRunning),
+					Process:  process,
+					Reporter: registry.Reporter{
+						Integration: "agent-extension",
+					},
+					ObservedAt: now.Add(-test.age),
+				}},
+			}
+			if test.replaced {
+				session.Observations.Native.Process.StartIdentity = "boot:old"
+			}
+
+			if test.ended {
+				session.Observations.Native.Presence = new(registry.PresenceGone)
+			}
+
+			policy := (behaviorRules{}).Policy(session.Harness)
+
+			policy.RetainNativeActivity = test.retain
+			if got := registry.EvaluateHook(session, policy, now); got != test.want {
+				t.Fatalf("hook evaluation = %+v, want %+v", got, test.want)
+			}
+
+			if got, _ := registry.ActivityAuthority(session, policy, now); got != test.authority {
+				t.Fatalf("activity authority = %q, want %q", got, test.authority)
+			}
+		})
+	}
+}
+
 func TestNativeSessionSwitchOnSameProcessPreservesEndedHistory(t *testing.T) {
 	t.Parallel()
 
@@ -27,7 +124,7 @@ func TestNativeSessionSwitchOnSameProcessPreservesEndedHistory(t *testing.T) {
 	first, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("pi"),
+			Harness: registry.Harness("secondary"),
 			At:      at,
 			Subject: registry.ObservationIdentity{SessionID: "old-session"},
 			Evidence: &registry.Report{
@@ -46,7 +143,7 @@ func TestNativeSessionSwitchOnSameProcessPreservesEndedHistory(t *testing.T) {
 	second, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("pi"),
+			Harness: registry.Harness("secondary"),
 			At:      at.Add(time.Second),
 			Subject: registry.ObservationIdentity{SessionID: "new-session"},
 			Evidence: &registry.Report{
@@ -96,7 +193,7 @@ func TestNativeSessionSwitchOnSameProcessPreservesEndedHistory(t *testing.T) {
 	observed, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       at.Add(2 * time.Second),
 			Subject:  registry.ObservationIdentity{},
 			Evidence: &registry.Sighting{Process: *process, Present: present},
@@ -121,13 +218,13 @@ func TestStaleNativeStartDoesNotReviveGoneSession(t *testing.T) {
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Minute)
-	identity := registry.ObservationIdentity{SessionPath: "/tmp/pi-stale.json"}
+	identity := registry.ObservationIdentity{SessionPath: "/tmp/secondary-stale.json"}
 	process := &registry.ProcessIdentity{PID: 85, StartIdentity: "boot:85"}
 
 	if _, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       at,
 			Subject:  identity,
 			Evidence: &registry.Sighting{Process: *process, Present: true},
@@ -139,7 +236,7 @@ func TestStaleNativeStartDoesNotReviveGoneSession(t *testing.T) {
 	if _, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       at.Add(10 * time.Second),
 			Subject:  identity,
 			Evidence: &registry.Sighting{Process: *process, Present: false},
@@ -155,7 +252,7 @@ func TestStaleNativeStartDoesNotReviveGoneSession(t *testing.T) {
 	observed, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("pi"),
+			Harness: registry.Harness("secondary"),
 			At:      at.Add(5 * time.Second),
 			Subject: identity,
 			Evidence: &registry.Report{
@@ -200,7 +297,7 @@ func TestDelayedGoneEvidenceDoesNotOverwriteNewerLivePresence(t *testing.T) {
 				idle := registry.ActivityIdle
 
 				return registry.Observation{
-					Harness: registry.Harness("pi"),
+					Harness: registry.Harness("secondary"),
 					At:      at,
 					Subject: identity,
 					Evidence: &registry.Report{
@@ -217,7 +314,7 @@ func TestDelayedGoneEvidenceDoesNotOverwriteNewerLivePresence(t *testing.T) {
 				at time.Time,
 			) registry.Observation {
 				return registry.Observation{
-					Harness:  registry.Harness("pi"),
+					Harness:  registry.Harness("secondary"),
 					At:       at,
 					Subject:  identity,
 					Evidence: &registry.Sighting{Process: process, Present: false},
@@ -233,7 +330,7 @@ func TestDelayedGoneEvidenceDoesNotOverwriteNewerLivePresence(t *testing.T) {
 				at time.Time,
 			) registry.Observation {
 				return registry.Observation{
-					Harness:  registry.Harness("pi"),
+					Harness:  registry.Harness("secondary"),
 					At:       at,
 					Subject:  identity,
 					Evidence: &registry.Sighting{Process: process, Present: true},
@@ -248,7 +345,7 @@ func TestDelayedGoneEvidenceDoesNotOverwriteNewerLivePresence(t *testing.T) {
 				gone := registry.PresenceGone
 
 				return registry.Observation{
-					Harness: registry.Harness("pi"),
+					Harness: registry.Harness("secondary"),
 					At:      at,
 					Subject: identity,
 					Evidence: &registry.Report{
@@ -309,7 +406,7 @@ func TestDelayedProcessPresenceDoesNotReviveNewerNativeGoneState(t *testing.T) {
 	session, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       at,
 			Subject:  identity,
 			Evidence: &registry.Report{Event: "session_end", Claim: &gone, Process: &process},
@@ -326,7 +423,7 @@ func TestDelayedProcessPresenceDoesNotReviveNewerNativeGoneState(t *testing.T) {
 	session, err = store.Observe(
 		ctx,
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       at.Add(-time.Second),
 			Subject:  identity,
 			Evidence: &registry.Sighting{Process: process, Present: true},
@@ -360,24 +457,26 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 				behaviorRules{},
 			)
 			at := time.Now().UTC().Add(-time.Minute)
-			identity := registry.ObservationIdentity{SessionID: "recorded-goose-session"}
+			identity := registry.ObservationIdentity{SessionID: "recorded-other-session"}
 			oldProcess := registry.ProcessIdentity{PID: 91, StartIdentity: "boot:91"}
 			newProcess := registry.ProcessIdentity{PID: 91, StartIdentity: "boot:92"}
 
 			ended, err := store.Observe(
 				ctx,
 				registry.Observation{
-					Harness: registry.Harness("goose"),
+					Harness: registry.Harness("other"),
 					At:      at,
 					Subject: identity,
 					Evidence: &registry.Report{
-						Event:     "SessionEnd",
-						Lifecycle: new(registry.NativeLifecycleEnd),
-						Claim:     new(registry.PresenceGone),
-						Process:   &oldProcess,
+						Event: "SessionEnd",
+						Lifecycle: new(
+							registry.NativeLifecycleEnd,
+						),
+						Claim:   new(registry.PresenceGone),
+						Process: &oldProcess,
 						Listing: &registry.Listing{
 							ResumeCommand: []string{
-								"goose",
+								"other",
 								"session",
 								"--resume",
 								"--session-id",
@@ -392,7 +491,7 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 			}
 
 			processObservation := registry.Observation{
-				Harness:  registry.Harness("goose"),
+				Harness:  registry.Harness("other"),
 				At:       at.Add(time.Second),
 				Subject:  registry.ObservationIdentity{},
 				Evidence: &registry.Sighting{Process: newProcess, Present: true},
@@ -406,7 +505,7 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 			resumed, err := store.Observe(
 				ctx,
 				registry.Observation{
-					Harness: registry.Harness("goose"),
+					Harness: registry.Harness("other"),
 					At:      at.Add(2 * time.Second),
 					Subject: identity,
 					Evidence: &registry.Report{
@@ -448,7 +547,7 @@ func TestNativeActivityResumesDurableIdentityAcrossProcessIncarnations(t *testin
 			_, err = store.Observe(
 				ctx,
 				registry.Observation{
-					Harness: registry.Harness("goose"),
+					Harness: registry.Harness("other"),
 					At:      at.Add(time.Second),
 					Subject: identity,
 					Evidence: &registry.Report{
@@ -490,20 +589,22 @@ func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
 				behaviorRules{},
 			)
 			at := time.Now().UTC().Add(-time.Minute)
-			identity := registry.ObservationIdentity{SessionID: "retired-goose-session"}
+			identity := registry.ObservationIdentity{SessionID: "retired-other-session"}
 			oldProcess := registry.ProcessIdentity{PID: 93, StartIdentity: "boot:93"}
 
 			ended, err := store.Observe(
 				ctx,
 				registry.Observation{
-					Harness: registry.Harness("goose"),
+					Harness: registry.Harness("other"),
 					At:      at,
 					Subject: identity,
 					Evidence: &registry.Report{
-						Event:     "SessionEnd",
-						Lifecycle: new(registry.NativeLifecycleEnd),
-						Claim:     new(registry.PresenceGone),
-						Process:   &oldProcess,
+						Event: "SessionEnd",
+						Lifecycle: new(
+							registry.NativeLifecycleEnd,
+						),
+						Claim:   new(registry.PresenceGone),
+						Process: &oldProcess,
 					},
 				},
 			)
@@ -512,13 +613,15 @@ func TestNativeActivityCannotResurrectRetiredIncarnation(t *testing.T) {
 			}
 
 			incoming := registry.Observation{
-				Harness: registry.Harness("goose"),
+				Harness: registry.Harness("other"),
 				At:      at.Add(time.Second),
 				Subject: identity,
 				Evidence: &registry.Report{
-					Event:    "UserPromptSubmit",
-					Activity: new(registry.ActivityRunning),
-					Process:  &registry.ProcessIdentity{PID: 94, StartIdentity: "boot:94"},
+					Event: "UserPromptSubmit",
+					Activity: new(
+						registry.ActivityRunning,
+					),
+					Process: &registry.ProcessIdentity{PID: 94, StartIdentity: "boot:94"},
 				},
 			}
 
@@ -571,7 +674,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err := store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base,
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Report{Event: "test", Lifecycle: &start, Activity: &idle},
@@ -591,7 +694,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err = store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base.Add(time.Second),
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Report{Event: "test", Lifecycle: &end},
@@ -611,7 +714,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err = store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base.Add(1500 * time.Millisecond),
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Sighting{Process: *process, Present: processPresent},
@@ -630,7 +733,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err = store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base.Add(2 * time.Second),
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Report{Event: "test", Activity: &running},
@@ -651,7 +754,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err = store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base.Add(3 * time.Second),
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Report{Event: "test", Lifecycle: &resume},
@@ -668,7 +771,7 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	session, err = store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness:  registry.Harness("pi"),
+			Harness:  registry.Harness("secondary"),
 			At:       base.Add(4 * time.Second),
 			Subject:  registry.ObservationIdentity{SessionID: "s"},
 			Evidence: &registry.Sighting{Process: *process, Present: processPresent},
@@ -691,7 +794,7 @@ func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *te
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	identity := registry.ObservationIdentity{SessionID: "compacting-session"}
 	process := &registry.ProcessIdentity{PID: 86, StartIdentity: "boot:86"}
-	reporter := registry.Reporter{Integration: "codex-extension"}
+	reporter := registry.Reporter{Integration: "primary-extension"}
 	start := registry.NativeLifecycleStart
 	live := registry.PresenceLive
 	running := registry.ActivityRunning
@@ -699,7 +802,7 @@ func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *te
 	if _, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("codex"),
+			Harness: registry.Harness("primary"),
 			At:      at,
 			Subject: identity,
 			Evidence: &registry.Report{
@@ -716,7 +819,7 @@ func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *te
 	if _, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("codex"),
+			Harness: registry.Harness("primary"),
 			At:      at.Add(time.Second),
 			Subject: identity,
 			Evidence: &registry.Report{
@@ -734,7 +837,7 @@ func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *te
 	session, err := store.Observe(
 		ctx,
 		registry.Observation{
-			Harness: registry.Harness("codex"),
+			Harness: registry.Harness("primary"),
 			At:      at.Add(2 * time.Second),
 			Subject: identity,
 			Evidence: &registry.Report{
@@ -802,22 +905,22 @@ func reducerProcess(pid int) registry.ProcessIdentity {
 		PPID:           1,
 		ProcessGroupID: pid,
 		StartIdentity:  "boot:" + strconv.Itoa(pid),
-		Executable:     "/usr/bin/codex",
+		Executable:     "/usr/bin/primary",
 	}
 }
 
-func codexReport(
+func nativeReport(
 	sessionID string,
 	at time.Time,
 	process *registry.ProcessIdentity,
 	activity registry.Activity,
 ) registry.Observation {
 	return registry.Observation{
-		Harness: registry.Harness("codex"),
+		Harness: registry.Harness("primary"),
 		At:      at,
 		Subject: registry.ObservationIdentity{SessionID: sessionID},
 		Evidence: &registry.Report{
-			Reporter: registry.Reporter{Integration: "codex-extension"},
+			Reporter: registry.Reporter{Integration: "primary-extension"},
 			Event:    "turn",
 			Activity: &activity,
 			Process:  process,
@@ -825,13 +928,13 @@ func codexReport(
 	}
 }
 
-func codexSighting(
+func processSighting(
 	at time.Time,
 	process registry.ProcessIdentity,
 	present bool,
 ) registry.Observation {
 	return registry.Observation{
-		Harness:  registry.Harness("codex"),
+		Harness:  registry.Harness("primary"),
 		At:       at,
 		Evidence: &registry.Sighting{Process: process, Present: present},
 	}
@@ -916,18 +1019,18 @@ func TestLateNativeEndNeverLeavesSessionLive(t *testing.T) {
 		t,
 		state,
 		base,
-		codexReport("ended", base, &process, registry.ActivityRunning),
+		nativeReport("ended", base, &process, registry.ActivityRunning),
 	)
 	sightedAt := base.Add(10 * time.Second)
-	state = applyObservations(t, state, sightedAt, codexSighting(sightedAt, process, true))
+	state = applyObservations(t, state, sightedAt, processSighting(sightedAt, process, true))
 
 	end := registry.NativeLifecycleEnd
 	lateEnd := registry.Observation{
-		Harness: registry.Harness("codex"),
+		Harness: registry.Harness("primary"),
 		At:      base.Add(5 * time.Second),
 		Subject: registry.ObservationIdentity{SessionID: "ended"},
 		Evidence: &registry.Report{
-			Reporter:  registry.Reporter{Integration: "codex-extension"},
+			Reporter:  registry.Reporter{Integration: "primary-extension"},
 			Event:     "session_end",
 			Lifecycle: &end,
 			Process:   &process,
@@ -962,7 +1065,7 @@ func TestResumeFromNewProcessBeforeGoneScanRevivesSession(t *testing.T) {
 		t,
 		state,
 		base,
-		codexReport("resumed", base, &oldProcess, registry.ActivityIdle),
+		nativeReport("resumed", base, &oldProcess, registry.ActivityIdle),
 	)
 
 	// The observer notices the old process exit and the new process at the same scan.
@@ -971,11 +1074,11 @@ func TestResumeFromNewProcessBeforeGoneScanRevivesSession(t *testing.T) {
 		t,
 		state,
 		scan,
-		codexSighting(scan, oldProcess, false),
-		codexSighting(scan, newProcess, true),
+		processSighting(scan, oldProcess, false),
+		processSighting(scan, newProcess, true),
 	)
 
-	resume := codexReport("resumed", base.Add(9*time.Second), &newProcess, registry.ActivityIdle)
+	resume := nativeReport("resumed", base.Add(9*time.Second), &newProcess, registry.ActivityIdle)
 	lifecycle := registry.NativeLifecycleResume
 	resume.Report().Lifecycle = &lifecycle
 	state = applyObservations(t, state, scan.Add(time.Second), resume)
@@ -997,7 +1100,7 @@ func TestOutOfOrderObservationDoesNotBlockRestOfBatch(t *testing.T) {
 	known, started := reducerProcess(100), reducerProcess(300)
 	state := registry.State{Sessions: map[string]registry.Session{}}
 
-	state = applyObservations(t, state, base, codexSighting(base, known, true))
+	state = applyObservations(t, state, base, processSighting(base, known, true))
 
 	// The wall clock stepped back an hour before the next observer scan.
 	stepped := base.Add(-time.Hour)
@@ -1005,8 +1108,8 @@ func TestOutOfOrderObservationDoesNotBlockRestOfBatch(t *testing.T) {
 		t,
 		state,
 		stepped,
-		codexSighting(stepped, started, true),
-		codexSighting(stepped, known, false),
+		processSighting(stepped, started, true),
+		processSighting(stepped, known, false),
 	)
 
 	if session := sessionWithProcess(
@@ -1025,19 +1128,19 @@ func TestProcessExitEndsSessionAfterFutureDatedReport(t *testing.T) {
 	process := reducerProcess(100)
 	state := registry.State{Sessions: map[string]registry.Session{}}
 
-	state = applyObservations(t, state, base, codexSighting(base, process, true))
+	state = applyObservations(t, state, base, processSighting(base, process, true))
 	// A hook whose clock runs four minutes ahead.
 	state = applyObservations(
 		t,
 		state,
 		base,
-		codexReport("skewed", base.Add(4*time.Minute), &process, registry.ActivityRunning),
+		nativeReport("skewed", base.Add(4*time.Minute), &process, registry.ActivityRunning),
 	)
 	state = applyObservations(
 		t,
 		state,
 		base.Add(2*time.Second),
-		codexSighting(base.Add(2*time.Second), process, false),
+		processSighting(base.Add(2*time.Second), process, false),
 	)
 
 	if session := sessionWithID(t, state, "skewed"); session.Presence() != registry.PresenceGone {

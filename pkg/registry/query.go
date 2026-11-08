@@ -138,7 +138,12 @@ func sessionIDForObservation(observation Observation) string {
 			observation.ProcessIdentity().StartIdentity,
 		)
 	default:
-		parts = append(parts, "event", observation.Report().Event)
+		var event string
+		if report := observation.Report(); report != nil {
+			event = report.Event
+		}
+
+		parts = append(parts, "event", event)
 	}
 
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))

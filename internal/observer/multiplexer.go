@@ -9,28 +9,12 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
-	"github.com/zigai/aht/v2/pkg/herdr"
 	"github.com/zigai/aht/v2/pkg/mux"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
-	"github.com/zigai/aht/v2/pkg/tmux"
-	"github.com/zigai/aht/v2/pkg/zellij"
 )
 
-const (
-	multiplexerPriorityTmux   = 1
-	multiplexerPriorityZellij = 2
-	multiplexerPriorityHerdr  = 3
-)
-
-var (
-	errUnsupportedMultiplexerPane = errors.New("unsupported multiplexer pane")
-
-	defaultMultiplexerDrivers = []mux.Driver{
-		tmux.NewDriver(),
-		zellij.NewDriver(),
-		herdr.NewDriver(),
-	}
-)
+var errUnsupportedMultiplexerPane = errors.New("unsupported multiplexer pane")
 
 func listMultiplexerPanes(
 	ctx context.Context,
@@ -40,84 +24,50 @@ func listMultiplexerPanes(
 
 	var listErrors []error
 
-	for _, driver := range defaultMultiplexerDrivers {
-		// Reuse the cycle's process scan instead of rescanning /proc for tmux servers.
-		if tmuxDriver, ok := driver.(tmux.Driver); ok {
-			tmuxDriver.ServerProcesses = func(context.Context) ([]tmux.ServerProcess, error) {
-				return tmuxServerProcesses(processes), nil
-			}
-			driver = tmuxDriver
-		}
-
-		listed, listErr := driver.ListPanes(ctx)
-		if listErr != nil {
-			listErrors = append(listErrors, listErr)
-			continue
-		}
+	for _, driver := range drivers.All() {
+		listed, listErr := driver.ListPanes(ctx, processes)
 
 		panes = append(panes, listed...)
+		if listErr != nil {
+			listErrors = append(listErrors, listErr)
+		}
 	}
 
 	return panes, errors.Join(listErrors...)
 }
 
-func tmuxServerProcesses(processes []processinfo.Process) []tmux.ServerProcess {
-	servers := make([]tmux.ServerProcess, 0)
-
-	for _, process := range processes {
-		if server, ok := tmux.ServerProcessFrom(process.PID, process.Name, process.Args); ok {
-			servers = append(servers, server)
-		}
-	}
-
-	return servers
-}
-
 func locationPresence(ctx context.Context, location registry.Location) (registry.Presence, error) {
-	if location.Kind == registry.MultiplexerTmux {
-		presence, err := tmux.PanePresence(ctx, location)
-		if err != nil {
-			return registry.PresenceUnknown, fmt.Errorf("check tmux pane: %w", err)
-		}
-
-		return presence, nil
+	driver, ok := drivers.Find(location.Kind)
+	if !ok {
+		return registry.PresenceUnknown, nil
 	}
 
-	return registry.PresenceUnknown, nil
-}
-
-func multiplexerPanesFromTmux(panes []tmux.Pane) []mux.Pane {
-	result := make([]mux.Pane, 0, len(panes))
-	for _, pane := range panes {
-		result = append(result, pane.ToMuxPane())
+	presence, err := driver.Presence(ctx, location)
+	if err != nil {
+		return registry.PresenceUnknown, fmt.Errorf("check %s pane: %w", location.Kind, err)
 	}
 
-	return result
+	return presence, nil
 }
 
 func captureMultiplexerPane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	for _, driver := range defaultMultiplexerDrivers {
-		if driver.Kind() == pane.Location.Kind {
-			snapshot, err := driver.CapturePane(ctx, pane)
-			if err != nil {
-				return mux.ScreenSnapshot{}, fmt.Errorf(
-					"capture %s pane: %w",
-					pane.Location.Kind,
-					err,
-				)
-			}
-
-			return snapshot, nil
-		}
+	driver, ok := drivers.Find(pane.Location.Kind)
+	if !ok {
+		return mux.ScreenSnapshot{}, errUnsupportedMultiplexerPane
 	}
 
-	return mux.ScreenSnapshot{}, errUnsupportedMultiplexerPane
+	snapshot, err := driver.CapturePane(ctx, pane)
+	if err != nil {
+		return mux.ScreenSnapshot{}, fmt.Errorf("capture %s pane: %w", pane.Location.Kind, err)
+	}
+
+	return snapshot, nil
 }
 
 func multiplexerPaneProcess(
 	pane mux.Pane,
 	processes []processinfo.Process,
-	byPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 	paneCommandCounts map[string]int,
 ) (processinfo.Process, registry.Harness, bool) {
@@ -126,7 +76,7 @@ func multiplexerPaneProcess(
 	}
 
 	for _, reference := range pane.Processes {
-		if process, ok := byPID[reference.PID]; ok {
+		if process, ok := tree.byPID[reference.PID]; ok {
 			if harnessID, ok := harnessByPID[process.PID]; ok {
 				return process, harnessID, true
 			}
@@ -135,7 +85,7 @@ func multiplexerPaneProcess(
 		if process, harnessID, ok := descendantHarnessProcess(
 			reference.PID,
 			processes,
-			byPID,
+			tree,
 			harnessByPID,
 		); ok {
 			return process, harnessID, true
@@ -167,19 +117,19 @@ func multiplexerPaneProcess(
 func processTiedToPane(
 	process processinfo.Process,
 	pane mux.Pane,
-	byPID map[int]processinfo.Process,
+	tree *processTree,
 ) bool {
 	location := paneLocation(pane)
 	if location.PaneTTY != "" && process.TTY == location.PaneTTY {
 		return true
 	}
 
-	if process.PID == location.PanePID || processDescendsFrom(process, location.PanePID, byPID) {
+	if process.PID == location.PanePID || tree.descendsFrom(process.PID, location.PanePID) {
 		return true
 	}
 
 	for _, reference := range pane.Processes {
-		if process.PID == reference.PID || processDescendsFrom(process, reference.PID, byPID) {
+		if process.PID == reference.PID || tree.descendsFrom(process.PID, reference.PID) {
 			return true
 		}
 	}
@@ -187,34 +137,9 @@ func processTiedToPane(
 	return multiplexerIdentityMatches(process, location)
 }
 
-func processDescendsFrom(
-	process processinfo.Process,
-	rootPID int,
-	byPID map[int]processinfo.Process,
-) bool {
-	if rootPID <= 0 {
-		return false
-	}
-
-	for range len(byPID) {
-		if process.PPID == rootPID {
-			return true
-		}
-
-		parent, ok := byPID[process.PPID]
-		if !ok || parent.PID == process.PID {
-			break
-		}
-
-		process = parent
-	}
-
-	return false
-}
-
 func normalizeHarnessForeground(
 	processes []processinfo.Process,
-	byPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) {
 	for index, process := range processes {
@@ -222,34 +147,26 @@ func normalizeHarnessForeground(
 			continue
 		}
 
-		if nestedHarnessProcess(process, byPID, harnessByPID) {
+		if nestedHarnessProcess(process, tree, harnessByPID) {
 			// The kernel foreground flag covers a process group, including nested noninteractive agents.
 			processes[index].Foreground = false
 		}
 	}
 
 	for _, process := range processes {
-		byPID[process.PID] = process
+		tree.byPID[process.PID] = process
 	}
 }
 
 func nestedHarnessProcess(
 	process processinfo.Process,
-	byPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) bool {
-	ancestor := process
-	for range len(byPID) {
-		parent, ok := byPID[ancestor.PPID]
-		if !ok || parent.PID == ancestor.PID || parent.PID == process.PID {
-			break
-		}
-
-		if harnessByPID[parent.PID] != "" {
+	for parent := range tree.parents(process.PID) {
+		if _, ok := tree.byPID[parent]; ok && harnessByPID[parent] != "" {
 			return true
 		}
-
-		ancestor = parent
 	}
 
 	return false
@@ -291,40 +208,9 @@ func processMatchingMultiplexerIdentity(
 }
 
 func multiplexerIdentityMatches(process processinfo.Process, location registry.Location) bool {
-	if process.MultiplexerKind == "" || process.MultiplexerKind != string(location.Kind) {
-		return false
-	}
+	driver, ok := drivers.Find(location.Kind)
 
-	switch location.Kind {
-	case registry.MultiplexerZellij:
-		if process.MultiplexerSession == "" || location.SessionName == "" ||
-			process.MultiplexerSession != location.SessionName {
-			return false
-		}
-	case registry.MultiplexerHerdr:
-		if !herdrIdentityMatches(process, location) {
-			return false
-		}
-	case registry.MultiplexerTmux:
-		return false
-	}
-
-	return mux.NormalizePaneID(
-		location.Kind,
-		process.MultiplexerPane,
-	) == mux.NormalizePaneID(
-		location.Kind,
-		location.PaneID,
-	)
-}
-
-func herdrIdentityMatches(process processinfo.Process, location registry.Location) bool {
-	sameServer := process.MultiplexerServer != "" && location.ServerID != "" &&
-		process.MultiplexerServer == location.ServerID
-	sameSession := process.MultiplexerSession != "" && location.SessionName != "" &&
-		process.MultiplexerSession == location.SessionName
-
-	return sameServer || sameSession
+	return ok && driver.SamePane(drivers.LocationFromEnv(process.Env), location)
 }
 
 func foregroundPaneProcess(
@@ -359,7 +245,7 @@ func foregroundPaneProcess(
 func descendantHarnessProcess(
 	rootPID int,
 	processes []processinfo.Process,
-	byPID map[int]processinfo.Process,
+	tree *processTree,
 	harnessByPID map[int]registry.Harness,
 ) (processinfo.Process, registry.Harness, bool) {
 	if rootPID <= 0 {
@@ -368,20 +254,9 @@ func descendantHarnessProcess(
 	}
 
 	for _, process := range processes {
-		ancestor := process
-		for range processes {
-			if ancestor.PPID == rootPID {
-				if harnessID, ok := harnessByPID[process.PID]; ok {
-					return process, harnessID, true
-				}
-			}
-
-			next, ok := byPID[ancestor.PPID]
-			if !ok || next.PID == ancestor.PID {
-				break
-			}
-
-			ancestor = next
+		if harnessID, ok := harnessByPID[process.PID]; ok &&
+			tree.descendsFrom(process.PID, rootPID) {
+			return process, harnessID, true
 		}
 	}
 
@@ -452,17 +327,4 @@ func commandPaneKey(pane mux.Pane) (string, registry.Harness, bool) {
 	}
 
 	return string(paneHarness) + "\x00" + filepath.Clean(pane.CWD), paneHarness, true
-}
-
-func multiplexerPriority(kind registry.MultiplexerKind) int {
-	switch kind {
-	case registry.MultiplexerHerdr:
-		return multiplexerPriorityHerdr
-	case registry.MultiplexerZellij:
-		return multiplexerPriorityZellij
-	case registry.MultiplexerTmux:
-		return multiplexerPriorityTmux
-	default:
-		return 0
-	}
 }

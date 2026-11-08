@@ -59,7 +59,7 @@ func (claudeHarness) PayloadActivity(
 	payload map[string]any,
 	at time.Time,
 ) registry.Activity {
-	if event != harness.HookEventStop || activity != registry.ActivityIdle {
+	if event != "Stop" || activity != registry.ActivityIdle {
 		return activity
 	}
 

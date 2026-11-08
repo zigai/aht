@@ -1,32 +1,27 @@
 package processinfo
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
-// Process is a point-in-time snapshot of a process. Args, AgentHint, and the
-// multiplexer hints are transient inventory data and must not be persisted by
-// callers.
+// Process is a point-in-time snapshot of a process. Args and Env are transient
+// inventory data and must not be persisted by callers.
 type Process struct {
-	PID                int
-	Name               string
-	PPID               int
-	ProcessGroupID     int
-	Foreground         bool
-	StartIdentity      string
-	Executable         string
-	CWD                string
-	TTY                string
-	AgentHint          string
-	MultiplexerKind    string
-	MultiplexerServer  string
-	MultiplexerSession string
-	MultiplexerPane    string
-	Args               []string `json:"-"`
-}
-
-// UnsupportedError reports that process enumeration is unavailable on the
-// current operating system.
-type UnsupportedError struct {
-	Platform string
+	PID            int
+	Name           string
+	PPID           int
+	ProcessGroupID int
+	Foreground     bool
+	StartIdentity  string
+	Executable     string
+	CWD            string
+	TTY            string
+	// Env holds the trimmed values of the environment keys requested from
+	// ListWithEnv. The first occurrence of a key wins, even when empty.
+	Env  map[string]string `json:"-"`
+	Args []string          `json:"-"`
 }
 
 // PermissionError reports an inability to inspect a process table or entry.
@@ -41,14 +36,6 @@ type TableError struct {
 	Err  error
 }
 
-func (e *UnsupportedError) Error() string {
-	if e.Platform == "" {
-		return "process enumeration is unsupported"
-	}
-
-	return "process enumeration is unsupported on " + e.Platform
-}
-
 func (e *PermissionError) Error() string {
 	return fmt.Sprintf("permission denied reading process information at %s: %v", e.Path, e.Err)
 }
@@ -60,3 +47,26 @@ func (e *TableError) Error() string {
 }
 
 func (e *TableError) Unwrap() error { return e.Err }
+
+func parseEnvironment(data []byte, keys []string) map[string]string {
+	var env map[string]string
+
+	for entry := range strings.SplitSeq(string(data), "\x00") {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !slices.Contains(keys, key) {
+			continue
+		}
+
+		if _, seen := env[key]; seen {
+			continue
+		}
+
+		if env == nil {
+			env = make(map[string]string, len(keys))
+		}
+		// Clone so the map does not retain the whole environment buffer.
+		env[key] = strings.Clone(strings.TrimSpace(value))
+	}
+
+	return env
+}

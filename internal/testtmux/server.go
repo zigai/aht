@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/internal/terminal"
 )
 
 const (
@@ -44,24 +44,16 @@ type Server struct {
 func Executable(t *testing.T) string {
 	t.Helper()
 
-	if override := os.Getenv("AHT_TEST_TMUX_EXECUTABLE"); override != "" {
-		path, err := exec.LookPath(override)
-		if err != nil {
-			t.Fatalf("resolve test tmux executable: %v", err)
-		}
-
-		return path
+	path, err := terminal.FindExecutable()
+	if errors.Is(err, terminal.ErrNotInstalled) {
+		t.Skip(err.Error())
 	}
 
-	for _, candidate := range []string{"/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux", "tmux"} {
-		if path, err := exec.LookPath(candidate); err == nil {
-			return path
-		}
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	t.Skip("tmux is not installed")
-
-	return ""
+	return path
 }
 
 // New starts a detached session without loading personal tmux or shell config.

@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +16,188 @@ import (
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestDoctorTrackerRepairPreservesContext(t *testing.T) {
+	for _, mode := range []string{"file", "environment", "disabled", "stdin"} {
+		t.Run(mode, func(t *testing.T) {
+			store := prepareDoctorEnvironment(t)
+			home := filepath.Dir(store)
+			store = filepath.Join(home, "session archive.json")
+
+			configPath := filepath.Join(home, "tracker settings.toml")
+			if err := os.WriteFile(
+				configPath,
+				[]byte("[tracker]\ninterval = '2s'\n"),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			args := []string{"--store", store, "--json"}
+
+			var stdin io.Reader
+
+			switch mode {
+			case "file":
+				args = append(args, "--config", configPath)
+			case "environment":
+				t.Setenv("AHT_CONFIG", configPath)
+			case "disabled":
+				args = append(args, "--no-config")
+			case "stdin":
+				args = append(args, "--config", "-")
+				stdin = strings.NewReader("[tracker]\ninterval = '2s'\n")
+			}
+
+			var stdout, stderr bytes.Buffer
+			executeCLI(t.Context(), append(args, "doctor"), stdin, &stdout, &stderr)
+			report := decodeDoctorReport(t, stdout.String())
+
+			var fix *doctorFix
+
+			for _, check := range report.Checks {
+				if strings.HasPrefix(check.ID, "tracker.") && check.Fix != nil {
+					fix = check.Fix
+					break
+				}
+			}
+
+			if fix == nil {
+				t.Fatal("doctor omitted the tracker repair")
+			}
+
+			want := []string{"--store", store}
+
+			switch mode {
+			case "file", "environment":
+				want = append(want, "--config", configPath, "manage", "tracker", "enable")
+			case "disabled":
+				want = append(want, "--no-config", "manage", "tracker", "status")
+			case "stdin":
+				want = append(want, "--config", "-", "manage", "tracker", "enable")
+
+				if !strings.Contains(fix.Command, "< saved-config.toml") ||
+					!strings.Contains(fix.Manual, "TOML") {
+					t.Fatalf("tracker repair cannot reproduce stdin config: %+v", fix)
+				}
+
+				if err := os.WriteFile(
+					filepath.Join(home, "saved-config.toml"),
+					[]byte("[tracker]\ninterval = '2s'\n"), 0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got := doctorCommandArgs(t, home, fix.Command)
+			if !slices.Equal(got, want) {
+				t.Fatalf("repair command %q passes arguments %q, want %q", fix.Command, got, want)
+			}
+		})
+	}
+}
+
+func TestDoctorRepairCommandPreservesHomePathWithSpaces(t *testing.T) {
+	store := prepareDoctorEnvironment(t)
+	home := filepath.Dir(store)
+
+	store = filepath.Join(home, "session archive.json")
+	if err := os.WriteFile(store, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	executeCLI(
+		t.Context(),
+		[]string{"--store", store, "--no-config", "--json", "doctor"},
+		nil,
+		&stdout,
+		&stderr,
+	)
+	report := decodeDoctorReport(t, stdout.String())
+	command := ""
+
+	for _, check := range report.Checks {
+		if check.ID == "store.read" && check.Fix != nil {
+			command = check.Fix.Command
+		}
+	}
+
+	if command == "" {
+		t.Fatal("doctor omitted the store repair command")
+	}
+
+	args := doctorCommandArgs(t, home, command)
+
+	index := slices.Index(args, "--store")
+	if index < 0 || index+1 >= len(args) || args[index+1] != store {
+		t.Fatalf("repair command %q passes arguments %q, want store %q", command, args, store)
+	}
+}
+
+func doctorCommandArgs(t *testing.T, home string, command string) []string {
+	t.Helper()
+
+	bin := filepath.Join(home, "bin")
+	if err := os.WriteFile(
+		filepath.Join(bin, "aht"),
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", bin)
+
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", command)
+	cmd.Dir = home
+
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return strings.Split(strings.TrimSpace(string(output)), "\n")
+}
+
+func TestDoctorReadsStdinConfigOnce(t *testing.T) {
+	store := prepareDoctorEnvironment(t)
+
+	var stdout, stderr bytes.Buffer
+
+	input := &doctorConfigInput{reads: 0}
+	executeCLI(
+		t.Context(),
+		[]string{"--store", store, "--config", "-", "--json", "doctor"},
+		input,
+		&stdout,
+		&stderr,
+	)
+
+	if input.reads != 1 {
+		t.Fatalf("doctor reads stdin %d times, want once", input.reads)
+	}
+
+	report := decodeDoctorReport(t, stdout.String())
+	for _, check := range report.Checks {
+		if check.ID == "config.file" && check.Status != manage.DoctorStatusOK {
+			t.Fatalf("stdin config check = %+v", check)
+		}
+	}
+
+	for _, file := range report.Paths.Config {
+		if file.Path == "-" && file.Status != doctorConfigLoaded {
+			t.Fatalf("stdin config header = %+v", file)
+		}
+	}
+}
+
+type doctorConfigInput struct{ reads int }
+
+func (input *doctorConfigInput) Read(data []byte) (int, error) {
+	input.reads++
+	return copy(data, "[ui]\nsort = 'created'\n"), io.EOF
+}
 
 func TestDoctorIsConciseUnlessVerbose(t *testing.T) {
 	path := prepareDoctorEnvironment(t)
@@ -356,33 +540,6 @@ func TestEnvironmentErrorsPointToDoctor(t *testing.T) {
 
 	if strings.Contains(stderr.String(), "aht doctor") {
 		t.Fatalf("missing --config path stderr = %q, want no doctor hint", stderr.String())
-	}
-}
-
-func TestDoctorIsSecondToLastCommand(t *testing.T) {
-	var stdout bytes.Buffer
-	if err := runTestCLI(t.Context(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-
-	var commands []string
-
-	listing := false
-
-	for line := range strings.Lines(stdout.String()) {
-		switch {
-		case strings.HasPrefix(line, "Available Commands:"):
-			listing = true
-		case listing && strings.TrimSpace(line) == "":
-			listing = false
-		case listing:
-			commands = append(commands, strings.Fields(line)[0])
-		}
-	}
-
-	if len(commands) < 2 || commands[len(commands)-2] != "doctor" ||
-		commands[len(commands)-1] != "help" {
-		t.Fatalf("root commands = %v, want doctor before help at the end", commands)
 	}
 }
 

@@ -47,15 +47,11 @@ func Transition(
 		process = core.ProcessKey(value.PID, value.StartIdentity)
 	}
 
-	report := observation.Report()
-	ends := report.Lifecycle != nil && *report.Lifecycle == registry.NativeLifecycleEnd ||
-		report.Claim != nil && *report.Claim == registry.PresenceGone
-	present := observation.Present() != nil && *observation.Present()
-
 	err := core.Transition(projected[0], projected[1], core.Event{
-		Kind: observation.Kind(), Process: process, Harness: string(observation.Harness),
+		Process: process, Harness: string(observation.Harness),
 		SessionID: observation.Subject.SessionID, SessionPath: observation.Subject.SessionPath,
-		At: observation.At, Ends: ends, Present: present,
+		At: observation.At, NativeEnd: observation.Report().Ends(),
+		Absent: observation.Present() != nil && !*observation.Present(),
 	})
 	if err != nil {
 		return fmt.Errorf("checking registry transition: %w", err)

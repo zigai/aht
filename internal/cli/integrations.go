@@ -7,13 +7,33 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
+
+	"github.com/zigai/aht/v2/pkg/manage"
+	"github.com/zigai/aht/v2/pkg/registry"
+
+	"github.com/jedib0t/go-pretty/v6/text"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/install"
-	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+var (
+	errAllWithAgents          = errors.New("all cannot be combined with agent names")
+	errAgentRequired          = errors.New("at least one agent or all is required")
+	errIntegrationStatusFail  = errors.New("one or more integrations could not be inspected")
+	errTargetBinaryNeedsShim  = errors.New("--target-binary requires --shim")
+	errTargetBinaryWithAll    = errors.New("--target-binary cannot be used with all")
+	errInstallHarnessRequired = errors.New("install requires at least one harness or 'all'")
+	errRemoveHarnessRequired  = errors.New("remove requires at least one harness or 'all'")
+)
+
+//exhaustruct:optional
+type integrationCommandOptions struct {
+	binary, targetBinary string
+	dryRun, force, shim  bool
+	showContent          bool
+}
 
 func (app *application) newIntegrationsCommand() *cobra.Command {
 	command := &cobra.Command{
@@ -61,11 +81,17 @@ func (app *application) newIntegrationsInstallCommand() *cobra.Command {
 				return exitCode(errTargetBinaryWithAll, exitCodeUsage)
 			}
 
-			if options.binary == "" {
-				options.binary = defaultInstallBinary()
+			harnesses, err := selectedHarnesses(args, false)
+			if err != nil {
+				return exitCode(err, exitCodeUsage)
 			}
 
-			results, err := installIntegrations(cmd.Context(), args, options)
+			results, err := installIntegrations(
+				cmd.Context(),
+				app.manager(options.binary),
+				harnesses,
+				options,
+			)
 			if app.outputJSON {
 				if writeErr := app.writeJSON(results); writeErr != nil {
 					return writeErr
@@ -123,21 +149,18 @@ func (app *application) newIntegrationsRemoveCommand() *cobra.Command {
 				return exitCode(err, exitCodeUsage)
 			}
 
-			results := make([]install.Result, 0, len(harnesses))
+			manager := app.manager("")
+			results := make([]manage.IntegrationResult, 0, len(harnesses))
 
 			var failures []error
 
 			for _, harnessID := range harnesses {
-				result, removeErr := install.Remove(
+				result, removeErr := manager.RemoveIntegration(
 					cmd.Context(),
-					install.Options{
-						Harness: harnessID,
-						Binary:  options.binary,
-						DryRun:  options.dryRun,
-					},
+					harnessID,
+					manage.IntegrationOptions{DryRun: options.dryRun},
 				)
 				if removeErr != nil {
-					result = failedIntegrationResult(harnessID, "remove failed", removeErr)
 					failures = append(failures, removeErr)
 				}
 
@@ -170,11 +193,7 @@ func (app *application) newIntegrationsStatusCommand() *cobra.Command {
 		SilenceUsage:  true,
 		Args:          cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if binary == "" {
-				binary = defaultInstallBinary()
-			}
-
-			return app.runIntegrationsStatus(cmd.Context(), args, binary)
+			return app.runIntegrationsStatus(cmd.Context(), args, app.manager(binary))
 		},
 	}
 	command.Flags().StringVar(&binary, "binary", "", "expected AHT binary `<path>`")
@@ -185,14 +204,14 @@ func (app *application) newIntegrationsStatusCommand() *cobra.Command {
 func (app *application) runIntegrationsStatus(
 	ctx context.Context,
 	args []string,
-	binary string,
+	manager *manage.Manager,
 ) error {
 	harnesses, err := selectedHarnesses(args, true)
 	if err != nil {
 		return err
 	}
 
-	results, failed := inspectIntegrationStatuses(ctx, harnesses, binary)
+	results, failed := inspectIntegrationStatuses(ctx, harnesses, manager)
 	if err := app.writeIntegrationStatuses(results); err != nil {
 		return err
 	}
@@ -207,13 +226,13 @@ func (app *application) runIntegrationsStatus(
 func inspectIntegrationStatuses(
 	ctx context.Context,
 	harnesses []registry.Harness,
-	binary string,
+	manager *manage.Manager,
 ) ([]install.IntegrationStatus, bool) {
 	results := make([]install.IntegrationStatus, 0, len(harnesses))
 	failed := false
 
 	for _, harnessID := range harnesses {
-		status, err := install.Inspect(ctx, harnessID, binary)
+		status, err := manager.IntegrationStatus(ctx, harnessID)
 		if err != nil {
 			failed = true
 			status = install.IntegrationStatus{
@@ -269,33 +288,23 @@ func (app *application) writeIntegrationStatuses(results []install.IntegrationSt
 
 func installIntegrations(
 	ctx context.Context,
-	args []string,
+	manager *manage.Manager,
+	harnesses []registry.Harness,
 	opts integrationCommandOptions,
-) ([]install.Result, error) {
-	harnesses, err := selectedHarnesses(args, false)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]install.Result, 0, len(harnesses))
+) ([]manage.IntegrationResult, error) {
+	results := make([]manage.IntegrationResult, 0, len(harnesses))
 
 	var failures []error
 
 	for _, harnessID := range harnesses {
-		result, installErr := install.Run(
-			ctx,
-			install.Options{
-				Harness:      harnessID,
-				Binary:       opts.binary,
-				TargetBinary: opts.targetBinary,
-				DryRun:       opts.dryRun,
-				Force:        opts.force,
-				UseShim:      opts.shim,
-			},
-		)
-		if installErr != nil {
-			result = failedIntegrationResult(harnessID, "install failed", installErr)
-			failures = append(failures, installErr)
+		result, err := manager.InstallIntegration(ctx, harnessID, manage.IntegrationOptions{
+			TargetBinary: opts.targetBinary,
+			DryRun:       opts.dryRun,
+			Force:        opts.force,
+			UseShim:      opts.shim,
+		})
+		if err != nil {
+			failures = append(failures, err)
 		}
 
 		results = append(results, result)
@@ -304,26 +313,13 @@ func installIntegrations(
 	return results, errors.Join(failures...)
 }
 
-func failedIntegrationResult(harnessID registry.Harness, message string, err error) install.Result {
-	return install.Result{
-		Harness:  string(harnessID),
-		Path:     "",
-		Changed:  false,
-		Message:  message,
-		NextStep: "",
-		Snippet:  "",
-		Error:    err.Error(),
-	}
-}
-
-func (app *application) writeIntegrationResults(results []install.Result, showContent bool) error {
+func (app *application) writeIntegrationResults(
+	results []manage.IntegrationResult,
+	showContent bool,
+) error {
 	rows := make([][]string, 0, len(results))
 	for _, result := range results {
 		message := result.Message
-		if !result.Changed &&
-			strings.HasSuffix(strings.TrimSpace(result.Message), "already installed") {
-			message = "already installed"
-		}
 
 		if result.Error != "" {
 			message = result.Error
@@ -335,7 +331,12 @@ func (app *application) writeIntegrationResults(results []install.Result, showCo
 
 		rows = append(
 			rows,
-			[]string{result.Harness, strconv.FormatBool(result.Changed), result.Path, message},
+			[]string{
+				string(result.Harness),
+				strconv.FormatBool(result.Changed),
+				result.Path,
+				message,
+			},
 		)
 	}
 
@@ -406,56 +407,25 @@ func allocateIntegrationResultWidths(pathNeeded int, resultNeeded int, available
 		minResultWidth = 30
 	)
 
-	pathMin := min(pathNeeded, minPathWidth)
-	resultMin := min(resultNeeded, minResultWidth)
-
-	switch {
-	case available >= pathNeeded+resultNeeded:
-		return pathNeeded, resultNeeded
-	case available >= pathNeeded+resultMin:
+	pathMin, resultMin := min(pathNeeded, minPathWidth), min(resultNeeded, minResultWidth)
+	if available >= pathNeeded+resultMin && available < pathNeeded+resultNeeded {
 		return pathNeeded, available - pathNeeded
-	case available > pathMin+resultMin:
-		extra := available - pathMin - resultMin
-		pathUnmet := pathNeeded - pathMin
-		resultUnmet := resultNeeded - resultMin
-
-		totalUnmet := pathUnmet + resultUnmet
-		if totalUnmet == 0 {
-			return pathMin, resultMin
-		}
-
-		pathAdd := min(pathUnmet, extra*pathUnmet/totalUnmet)
-		resultAdd := min(resultUnmet, extra-pathAdd)
-
-		remaining := extra - pathAdd - resultAdd
-		if remaining > 0 && pathMin+pathAdd < pathNeeded {
-			canAdd := min(remaining, pathNeeded-(pathMin+pathAdd))
-			pathAdd += canAdd
-			remaining -= canAdd
-		}
-
-		if remaining > 0 && resultMin+resultAdd < resultNeeded {
-			canAdd := min(remaining, resultNeeded-(resultMin+resultAdd))
-			resultAdd += canAdd
-		}
-
-		return pathMin + pathAdd, resultMin + resultAdd
-	default:
-		return pathMin, resultMin
 	}
+
+	return allocateColumnPair(pathMin, resultMin, pathNeeded, resultNeeded, available)
 }
 
 func selectedHarnesses(args []string, emptyMeansAll bool) ([]registry.Harness, error) {
 	if len(args) == 0 {
 		if emptyMeansAll {
-			return install.Harnesses(), nil
+			return manage.InstallableHarnesses(), nil
 		}
 
 		return nil, errAgentRequired
 	}
 
 	if len(args) == 1 && strings.EqualFold(args[0], "all") {
-		return install.Harnesses(), nil
+		return manage.InstallableHarnesses(), nil
 	}
 
 	for _, arg := range args {

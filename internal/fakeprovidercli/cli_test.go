@@ -12,26 +12,12 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 )
 
-func unsupportedHarnessName(t *testing.T) string {
-	t.Helper()
-
-	for _, adapter := range catalog.All() {
-		if _, ok := adapter.(harness.Launchable); !ok {
-			return string(adapter.Definition().ID)
-		}
-	}
-
-	t.Skip("every catalog harness has a launch plan")
-
-	return ""
-}
-
 func launchableHarnessName(t *testing.T) string {
 	t.Helper()
 
 	names := launchableHarnessNames()
 	if len(names) == 0 {
-		t.Skip("no catalog harness has a launch plan")
+		t.Fatal("no catalog harness has a launch plan")
 	}
 
 	return names[0]
@@ -53,11 +39,6 @@ func TestStartRejectsBadInvocationBeforeCreatingRoot(t *testing.T) {
 			wantText: "accepts 1 arg",
 		},
 		{name: "unknown harness", args: []string{"no-such-harness"}, wantText: "unknown harness"},
-		{
-			name:     "unsupported harness",
-			args:     []string{unsupportedHarnessName(t)},
-			wantText: "does not support fake provider launches",
-		},
 		{name: "aht missing from PATH", args: []string{launchable}, wantText: "--no-integration"},
 		{
 			name:     "aht path that does not exist",
@@ -70,6 +51,21 @@ func TestStartRejectsBadInvocationBeforeCreatingRoot(t *testing.T) {
 			wantText: "cannot be combined",
 		},
 	}
+
+	for _, adapter := range catalog.All() {
+		if _, ok := adapter.(harness.Launchable); !ok {
+			cases = append(cases, struct {
+				name     string
+				args     []string
+				wantText string
+			}{
+				name:     "unsupported " + string(adapter.Definition().ID),
+				args:     []string{string(adapter.Definition().ID)},
+				wantText: "does not support fake provider launches",
+			})
+		}
+	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "root")

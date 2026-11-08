@@ -5,7 +5,6 @@ package hostcompat
 import (
 	"os/exec"
 	"testing"
-	"time"
 )
 
 // Pi's RPC agent_settled event is the no-continuation boundary. Closing stdin
@@ -22,19 +21,9 @@ func (host *isolatedHost) runPiCompletion(t *testing.T, command *exec.Cmd) {
 	)
 
 	for expected := range 2 {
-		select {
-		case hold := <-host.provider.Holds():
-			if hold.Request.Index != expected {
-				t.Fatalf("Pi provider checkpoint = %d, want %d", hold.Request.Index, expected)
-			}
-
-			host.waitForActiveSession(t)
-			hold.Release()
-		case <-process.done:
-			t.Fatalf("Pi exited before provider checkpoint %d: %v", expected, process.waitErr())
-		case <-time.After(30 * time.Second):
-			t.Fatalf("Pi did not reach provider checkpoint %d", expected)
-		}
+		hold := host.awaitHold(t, process, expected)
+		host.waitForActiveSession(t)
+		hold.Release()
 	}
 
 	awaitPiCompletion(t, next)

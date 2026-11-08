@@ -98,12 +98,12 @@ func OpenMemoryStoreWithOptions(
 		return nil, fmt.Errorf("creating state directory: %w", err)
 	}
 
-	lock, err := openStoreLock(context.Background(), fileStore.Path()+".lock", nil)
+	lock, err := openStoreLock(context.Background(), storeLockPath(fileStore.Path()), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	owner, err := tryStoreLock(fileStore.Path() + ".owner.lock")
+	owner, err := tryStoreLock(ownerLockPath(fileStore.Path()))
 	if err != nil {
 		return nil, closeStoreLock(lock, err)
 	}
@@ -390,12 +390,7 @@ func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
 // persisted with the next visible change, on a slow background interval, or on
 // shutdown. The caller owns this loop and must cancel ctx before discarding the
 // store.
-func (s *MemoryStore) RunPersistence(
-	ctx context.Context,
-	settle time.Duration, maximumDelay time.Duration,
-) error {
-	settle, maximumDelay = normalizePersistenceOptions(settle, maximumDelay)
-
+func (s *MemoryStore) RunPersistence(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -413,7 +408,7 @@ func (s *MemoryStore) RunPersistence(
 			continue
 		}
 
-		if err := s.coalescePersistence(ctx, settle, maximumDelay); err != nil {
+		if err := s.coalescePersistence(ctx); err != nil {
 			return s.flushOnShutdown(ctx)
 		}
 
@@ -460,7 +455,7 @@ func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 		return nil
 	}
 
-	lock, err := openStoreLock(ctx, s.path+".lock", nil)
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
 	if err != nil {
 		return err
 	}
@@ -536,20 +531,6 @@ func validateNativePayloadChanges(previous snapshot, candidate snapshot) error {
 	return nil
 }
 
-func normalizePersistenceOptions(
-	settle time.Duration, maximumDelay time.Duration,
-) (time.Duration, time.Duration) {
-	if settle <= 0 {
-		settle = defaultPersistenceSettle
-	}
-
-	if maximumDelay < settle {
-		maximumDelay = defaultPersistenceMaxDelay
-	}
-
-	return settle, maximumDelay
-}
-
 func (s *MemoryStore) setNowForTest(now func() time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -572,14 +553,11 @@ func (s *MemoryStore) signalDirty() {
 	}
 }
 
-func (s *MemoryStore) coalescePersistence(
-	ctx context.Context,
-	settle time.Duration, maximumDelay time.Duration,
-) error {
-	settleTimer := time.NewTimer(settle)
+func (s *MemoryStore) coalescePersistence(ctx context.Context) error {
+	settleTimer := time.NewTimer(defaultPersistenceSettle)
 	defer settleTimer.Stop()
 
-	maximumTimer := time.NewTimer(maximumDelay)
+	maximumTimer := time.NewTimer(defaultPersistenceMaxDelay)
 	defer maximumTimer.Stop()
 
 	for {
@@ -587,7 +565,7 @@ func (s *MemoryStore) coalescePersistence(
 		case <-ctx.Done():
 			return fmt.Errorf("waiting to persist: %w", ctx.Err())
 		case <-s.dirty:
-			settleTimer.Reset(settle)
+			settleTimer.Reset(defaultPersistenceSettle)
 		case <-settleTimer.C:
 			return nil
 		case <-maximumTimer.C:

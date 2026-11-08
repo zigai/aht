@@ -190,26 +190,20 @@ func assertRegistryError(t *testing.T, err error, sentinel error, code string, o
 		t.Fatalf("error = %v, want errors.Is(_, %v)", err, sentinel)
 	}
 
-	operationError, isOperation := errors.AsType[*client.OperationError](err)
-	if isOperation != online {
-		t.Fatalf("error = %T, broker operation error = %t, want %t", err, isOperation, online)
+	remoteError, isRemote := errors.AsType[*broker.RemoteError](err)
+	if isRemote != online {
+		t.Fatalf("error = %T, broker remote error = %t, want %t", err, isRemote, online)
 	}
 
 	if !online {
 		return
 	}
 
-	if operationError.Code != code {
-		t.Fatalf("operation code = %q, want %q", operationError.Code, code)
+	if remoteError.Code != code {
+		t.Fatalf("remote code = %q, want %q", remoteError.Code, code)
 	}
 
-	remoteError, ok := errors.AsType[*broker.RemoteError](err)
-	if !ok || !errors.Is(remoteError, sentinel) {
+	if !errors.Is(remoteError, sentinel) {
 		t.Fatalf("broker error chain = %v, want %v", remoteError, sentinel)
-	}
-
-	if operationError.Message != remoteError.Message ||
-		operationError.Error() != remoteError.Error() {
-		t.Fatalf("public error changed broker diagnostics: %v != %v", operationError, remoteError)
 	}
 }

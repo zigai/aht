@@ -22,7 +22,6 @@ var (
 	errUnsupportedHarness = errors.New("unsupported harness")
 	errForeignFile        = errors.New("file exists and is not managed by aht")
 	errBinaryEncoding     = errors.New("aht binary path is not valid UTF-8")
-	errHookConfigShape    = errors.New("hook config has an unexpected shape")
 	errManagedBlockMarker = errors.New("managed block markers are not paired")
 )
 
@@ -108,16 +107,16 @@ func fileNeedsUpdate(path string, content string, force bool) (bool, error) {
 	}
 
 	if !force {
-		currentIntegration := integrationIDFromContent(string(current))
+		currentIdentity, _ := harnesspkg.ParseArtifactIdentity(string(current))
 
-		nextIntegration := integrationIDFromContent(content)
-		if currentIntegration != "" && nextIntegration != "" &&
-			currentIntegration != nextIntegration {
+		nextIdentity, _ := harnesspkg.ParseArtifactIdentity(content)
+		if currentIdentity.ID != "" && nextIdentity.ID != "" &&
+			currentIdentity.ID != nextIdentity.ID {
 			return false, fmt.Errorf(
 				"%w: %s is managed by the %s integration; pass --force to replace it",
 				errForeignFile,
 				path,
-				currentIntegration,
+				currentIdentity.ID,
 			)
 		}
 	}

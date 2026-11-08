@@ -13,15 +13,15 @@
 //
 // # Storage
 //
-// State is a snapshot file (schema 3) plus an append-only journal next to it,
+// State is a snapshot file ([StoreSchemaVersion]) plus an append-only journal next to it,
 // named after the snapshot with a .journal.jsonl suffix. Both belong together
 // when moving or backing up an instance.
 //
 //   - [MemoryStore] is the live state held by the tracker. It applies pending
 //     journal entries before each operation. It journals consumer-visible
 //     changes, native reports, and administrative commands, and writes
-//     coalesced compact snapshots after consumer-visible changes (25 ms settle,
-//     250 ms maximum) and a final one on shutdown. Heartbeats that only
+//     coalesced compact snapshots after consumer-visible changes (500 ms settle,
+//     2 s maximum) and a final one on shutdown. Heartbeats that only
 //     refresh evidence timestamps are neither journaled nor written promptly;
 //     they are persisted with the next visible change or at most once a minute.
 //   - [Journal] records writes while no tracker is reachable. Entries are fsynced

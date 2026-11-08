@@ -7,13 +7,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	IntegrationVersion = 15
-
 	EnvSessionID   EnvField = "session_id"
 	EnvSessionPath EnvField = "session_path"
 	EnvProjectRoot EnvField = "project_root"
@@ -29,7 +28,9 @@ type (
 	EnvField string
 )
 
+//exhaustruct:optional
 type EnvKeys struct {
+	Config      []string
 	SessionID   []string
 	SessionPath []string
 	ProjectRoot []string
@@ -37,6 +38,7 @@ type EnvKeys struct {
 	Event       []string
 }
 
+//exhaustruct:optional
 type PayloadDefaults struct {
 	SessionID   string
 	SessionPath string
@@ -46,28 +48,37 @@ type PayloadDefaults struct {
 	Attributes  map[string]string
 }
 
+//exhaustruct:optional
 type Capabilities struct {
 	SessionStart      bool
 	SessionEnd        bool
 	RunningIdle       bool
 	WaitingPermission bool
 	ProcessIdentity   bool
-	NativeCatalog     bool
-	TTYTmuxContext    bool
 }
 
+// Definition describes an adapter. LifecycleEventAttribute names the report
+// attribute that holds the native event when a report has none, and
+// LifecycleSourceAttributes the attributes searched, in order, for the start
+// source; when empty, "source" and "reason" are searched.
+//
+//exhaustruct:optional
 type Definition struct {
-	ExclusiveProcess   bool
-	CatalogCreates     bool
-	ID                 registry.Harness
-	Aliases            []string
-	ProcessNames       []string
-	Env                EnvKeys
-	Capabilities       Capabilities
-	IntegrationVersion int
-	IntegrationSource  string
-	StateAuthority     registry.Authority
-	ScreenFallback     bool
+	ExclusiveProcess          bool
+	CatalogCreates            bool
+	RetainNativeActivity      bool
+	ID                        registry.Harness
+	Aliases                   []string
+	ProcessNames              []string
+	Env                       EnvKeys
+	Capabilities              Capabilities
+	IntegrationVersion        int
+	IntegrationSource         string
+	StateAuthority            registry.Authority
+	ScreenFallback            bool
+	PayloadOmissions          []string
+	LifecycleEventAttribute   string
+	LifecycleSourceAttributes []string
 }
 
 type Adapter interface {
@@ -137,17 +148,28 @@ type PayloadActivityAdapter interface {
 	) registry.Activity
 }
 
-type ActivityDetailAdapter interface {
+type ActivityDetailer interface {
 	ActivityDetail(
 		event string,
 		activity registry.Activity,
 		attributes map[string]string,
 	) *registry.ActivityDetail
+}
+
+type DetailCapabilityProvider interface {
 	DetailCapabilities() registry.DetailCapabilities
 }
 
 type ProcessFilter interface {
 	ObservableProcess(process processinfo.Process) bool
+}
+
+type DistributionProvider interface {
+	Distribution() Distribution
+}
+
+type TranscriptProvider interface {
+	Transcript() transcript.Reader
 }
 
 type BaseAdapter struct {
@@ -164,22 +186,27 @@ func (adapter BaseAdapter) Definition() Definition {
 
 func cloneDefinition(definition Definition) Definition {
 	return Definition{
-		ID:                 definition.ID,
-		ExclusiveProcess:   definition.ExclusiveProcess,
-		CatalogCreates:     definition.CatalogCreates,
-		Aliases:            slices.Clone(definition.Aliases),
-		ProcessNames:       slices.Clone(definition.ProcessNames),
-		Env:                cloneEnvKeys(definition.Env),
-		Capabilities:       definition.Capabilities,
-		IntegrationVersion: definition.IntegrationVersion,
-		IntegrationSource:  definition.IntegrationSource,
-		StateAuthority:     definition.StateAuthority,
-		ScreenFallback:     definition.ScreenFallback,
+		ID:                        definition.ID,
+		ExclusiveProcess:          definition.ExclusiveProcess,
+		CatalogCreates:            definition.CatalogCreates,
+		RetainNativeActivity:      definition.RetainNativeActivity,
+		Aliases:                   slices.Clone(definition.Aliases),
+		ProcessNames:              slices.Clone(definition.ProcessNames),
+		Env:                       cloneEnvKeys(definition.Env),
+		Capabilities:              definition.Capabilities,
+		IntegrationVersion:        definition.IntegrationVersion,
+		IntegrationSource:         definition.IntegrationSource,
+		StateAuthority:            definition.StateAuthority,
+		ScreenFallback:            definition.ScreenFallback,
+		PayloadOmissions:          slices.Clone(definition.PayloadOmissions),
+		LifecycleEventAttribute:   definition.LifecycleEventAttribute,
+		LifecycleSourceAttributes: slices.Clone(definition.LifecycleSourceAttributes),
 	}
 }
 
 func cloneEnvKeys(keys EnvKeys) EnvKeys {
 	return EnvKeys{
+		Config:      slices.Clone(keys.Config),
 		SessionID:   slices.Clone(keys.SessionID),
 		SessionPath: slices.Clone(keys.SessionPath),
 		ProjectRoot: slices.Clone(keys.ProjectRoot),

@@ -3,7 +3,6 @@ package goose
 import (
 	"encoding/json"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
@@ -13,17 +12,11 @@ import (
 const (
 	gooseCommand           = "goose"
 	goosePluginName        = "aht-state"
-	gooseMarkerFileName    = ".aht-managed"
-	gooseIntegrationID     = "goose"
 	gooseIntegrationSource = "goose-hook"
+	integrationVersion     = 15
 )
 
 type gooseHarness struct{ harness.BaseAdapter }
-
-type gooseHookSpec struct {
-	event      string
-	transition harness.HookTransition
-}
 
 type goosePayload struct {
 	SessionID string `json:"session_id" validate:"notblank"`
@@ -31,39 +24,30 @@ type goosePayload struct {
 
 func New() gooseHarness {
 	return gooseHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
+		Env:              harness.EnvKeys{Config: []string{"GOOSE_PATH_ROOT"}},
 		ExclusiveProcess: true,
-		CatalogCreates:   false,
 		ID:               registry.Harness("goose"),
-		Aliases:          nil,
 		ProcessNames:     []string{"goose"},
-		Env: harness.EnvKeys{
-			SessionID:   nil,
-			SessionPath: nil,
-			ProjectRoot: nil,
-			PID:         nil,
-			Event:       nil,
-		},
 		Capabilities: harness.Capabilities{
-			SessionStart:      true,
-			SessionEnd:        true,
-			RunningIdle:       true,
-			NativeCatalog:     true,
-			WaitingPermission: false,
-			ProcessIdentity:   false,
-			TTYTmuxContext:    false,
+			SessionStart: true,
+			SessionEnd:   true,
+			RunningIdle:  true,
 		},
-		IntegrationVersion: harness.IntegrationVersion,
-		IntegrationSource:  gooseIntegrationSource,
-		StateAuthority:     registry.AuthorityHook,
-		ScreenFallback:     false,
+		LifecycleEventAttribute:   "goose_event",
+		LifecycleSourceAttributes: []string{"goose_start_source", "source", "reason"},
+		IntegrationVersion:        integrationVersion,
+		IntegrationSource:         gooseIntegrationSource,
+		StateAuthority:            registry.AuthorityHook,
 	})}
 }
 
-func (gooseHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+func (adapter gooseHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 	base := goosePluginsDir()
 	if base == "" {
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
+
+	definition := adapter.Definition()
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
@@ -72,40 +56,17 @@ func (gooseHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
 				Label: "goose plugin",
 				Files: []harness.RenderedFileInstallSpec{
 					{
-						Name:    "plugin.json",
-						Content: "",
+						Name: "plugin.json",
 						JSONContent: map[string]any{
 							"name":        goosePluginName,
-							"version":     harness.IntegrationVersion,
+							"version":     integrationVersion,
 							"description": harness.ManagedMarker,
 						},
 					},
-					{
-						Name:        "hooks/hooks.json",
-						Content:     "",
-						JSONContent: gooseHookConfig(),
-					},
-					{
-						Name:        "scripts/report.sh",
-						Content:     gooseReportScript(binary),
-						JSONContent: nil,
-					},
-					{
-						Name:        gooseMarkerFileName,
-						Content:     gooseMarkerContent(),
-						JSONContent: nil,
-					},
+					{Name: "hooks/hooks.json", JSONContent: gooseHookConfig()},
+					{Name: "scripts/report.sh", Content: gooseReportScript(binary, definition)},
 				},
-				SnippetOrder: []string{
-					"plugin.json",
-					"hooks/hooks.json",
-					"scripts/report.sh",
-					gooseMarkerFileName,
-				},
-				MarkerFile:     gooseMarkerFileName,
-				ImportManifest: nil,
-				Retired:        nil,
-				Registration:   nil,
+				Identity: definition.Identity(),
 			}},
 		},
 	}, nil
@@ -124,29 +85,17 @@ func (gooseHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 }
 
 func (gooseHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefaults, error) {
-	attributes := make(map[string]string)
-	harness.AddAttributeString(attributes, "goose_event", harness.PayloadString(payload, "event"))
-	harness.AddAttributeString(
-		attributes,
-		"goose_start_source",
-		harness.PayloadString(payload, "source"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"goose_tool_name",
-		harness.PayloadString(payload, "tool_name"),
-	)
-	harness.AddAttributeString(
-		attributes,
-		"goose_matcher_context",
-		harness.PayloadString(payload, "matcher_context"),
-	)
+	attributes := harness.PayloadAttributes(payload, map[string][]string{
+		"goose_event":           {"event"},
+		"goose_start_source":    {"source"},
+		"goose_tool_name":       {"tool_name"},
+		"goose_matcher_context": {"matcher_context"},
+	})
 
 	cwd := harness.PayloadString(payload, "working_dir")
 
 	return harness.PayloadDefaults{
 		SessionID:   harness.PayloadString(payload, "session_id"),
-		SessionPath: "",
 		CWD:         cwd,
 		ProjectRoot: cwd,
 		Event:       harness.PayloadString(payload, "event"),
@@ -157,96 +106,69 @@ func (gooseHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefa
 func gooseHookConfig() map[string]any {
 	hooks := make(map[string]any)
 	for _, spec := range gooseHookSpecs() {
-		hooks[spec.event] = []any{gooseHookRule(spec)}
+		hooks[spec.Event] = []any{gooseHookRule(spec)}
 	}
 
 	return map[string]any{"hooks": hooks}
 }
 
-func gooseHookSpecs() []gooseHookSpec {
-	return []gooseHookSpec{
-		{event: harness.HookEventSessionStart, transition: harness.HookActivityIdle},
-		{event: harness.HookEventUserPromptSubmit, transition: harness.HookActivityRunning},
-		{event: harness.HookEventPreToolUse, transition: harness.HookActivityRunning},
-		{event: harness.HookEventPostToolUse, transition: harness.HookActivityRunning},
-		{event: harness.HookEventPostToolUseFailure, transition: harness.HookActivityRunning},
-		{event: "BeforeReadFile", transition: harness.HookActivityRunning},
-		{event: "AfterFileEdit", transition: harness.HookActivityRunning},
-		{event: "BeforeShellExecution", transition: harness.HookActivityRunning},
-		{event: "AfterShellExecution", transition: harness.HookActivityRunning},
-		{event: harness.HookEventStop, transition: harness.HookActivityIdle},
-		{event: "SessionEnd", transition: harness.HookPresenceGone},
+func gooseHookSpecs() []harness.CommandHook {
+	return []harness.CommandHook{
+		{Event: "SessionStart", Transition: harness.HookActivityIdle},
+		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
+		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
+		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
+		{Event: "BeforeReadFile", Transition: harness.HookActivityRunning},
+		{Event: "AfterFileEdit", Transition: harness.HookActivityRunning},
+		{Event: "BeforeShellExecution", Transition: harness.HookActivityRunning},
+		{Event: "AfterShellExecution", Transition: harness.HookActivityRunning},
+		{Event: "Stop", Transition: harness.HookActivityIdle},
+		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
 	}
 }
 
-func gooseHookRule(spec gooseHookSpec) map[string]any {
-	return map[string]any{
-		"hooks": []any{
-			gooseCommandHook(spec),
-		},
-	}
+func gooseHookRule(spec harness.CommandHook) map[string]any {
+	return harness.CommandHookGroup(
+		gooseHookCommand(spec),
+		spec.Matcher,
+		"",
+		harness.HookTimeoutSeconds,
+	)
 }
 
-func gooseCommandHook(spec gooseHookSpec) map[string]any {
-	return map[string]any{
-		"type":    harness.HookTypeCommand,
-		"command": gooseHookCommand(spec),
-		"timeout": float64(harness.HookTimeoutSeconds),
-	}
-}
-
-func gooseHookCommand(spec gooseHookSpec) string {
+func gooseHookCommand(spec harness.CommandHook) string {
 	return strings.Join([]string{
 		"sh",
 		"\"${PLUGIN_ROOT}/scripts/report.sh\"",
-		harness.ShellQuote(spec.transition.State()),
-		harness.ShellQuote(spec.event),
+		harness.ShellQuote(spec.Transition.State()),
+		harness.ShellQuote(spec.Event),
 	}, " ")
 }
 
-func gooseReportScript(binary string) string {
-	return strings.Join([]string{
-		"#!/bin/sh",
-		"# " + harness.ManagedMarker,
-		"# AHT_INTEGRATION_ID=" + gooseIntegrationID,
-		"# AHT_INTEGRATION_VERSION=" + strconv.Itoa(harness.IntegrationVersion),
-		"# AHT_SOURCE=" + gooseIntegrationSource,
+func gooseReportScript(binary string, definition harness.Definition) string {
+	report := func(flag string) string {
+		return "  " + harness.ReportScriptCommand(
+			binary,
+			definition,
+			harness.ReportStdinDefaults,
+			flag,
+			`"$transition"`,
+			`"$event"`,
+		) + " >/dev/null 2>&1 || true"
+	}
+
+	return "#!/bin/sh\n" + definition.Identity().Marker("# ") + strings.Join([]string{
 		"transition=${1:-}",
 		"event=${2:-}",
 		`if [ -z "$transition" ] || [ -z "$event" ]; then`,
 		"  exit 0",
 		"fi",
 		"if [ \"$transition\" = gone ]; then",
-		"  " + harness.ShellQuote(
-			binary,
-		) + " report " + harness.ShellQuote(
-			string(registry.Harness("goose")),
-		) + " --presence \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(
-			strconv.Itoa(harness.IntegrationVersion),
-		) + " --reporter " + harness.ShellQuote(
-			gooseIntegrationSource,
-		) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		report("--presence"),
 		"else",
-		"  " + harness.ShellQuote(
-			binary,
-		) + " report " + harness.ShellQuote(
-			string(registry.Harness("goose")),
-		) + " --activity \"$transition\" --event \"$event\" --reporter-version " + harness.ShellQuote(
-			strconv.Itoa(harness.IntegrationVersion),
-		) + " --reporter " + harness.ShellQuote(
-			gooseIntegrationSource,
-		) + " --raw-stdin-defaults-only --quiet >/dev/null 2>&1 || true",
+		report("--activity"),
 		"fi",
-		"",
-	}, "\n")
-}
-
-func gooseMarkerContent() string {
-	return strings.Join([]string{
-		harness.ManagedMarker,
-		"AHT_INTEGRATION_ID=" + gooseIntegrationID,
-		"AHT_INTEGRATION_VERSION=" + strconv.Itoa(harness.IntegrationVersion),
-		"AHT_SOURCE=" + gooseIntegrationSource,
 		"",
 	}, "\n")
 }
@@ -258,18 +180,4 @@ func goosePluginsDir() string {
 	}
 
 	return filepath.Join(home, ".agents", "plugins")
-}
-
-func (gooseHarness) LifecycleDefaults(
-	event string,
-	attributes map[string]string,
-) harness.LifecycleDefaults {
-	if event == "" {
-		event = attributes["goose_event"]
-	}
-
-	return harness.TranslateLifecycle(
-		event,
-		harness.FirstAttribute(attributes, "goose_start_source", "source", "reason"),
-	)
 }

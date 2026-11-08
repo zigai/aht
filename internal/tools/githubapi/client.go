@@ -25,6 +25,7 @@ const (
 	maxAttempts      = 4
 	defaultRetry     = 2 * time.Second
 	maxErrorMessage  = 200
+	maxRedirects     = 10
 )
 
 var (
@@ -55,6 +56,7 @@ type Client struct {
 func New(baseURL string, token string) *Client {
 	httpClient := *http.DefaultClient
 	httpClient.Timeout = requestTimeout
+	httpClient.CheckRedirect = checkRedirect
 
 	return &Client{
 		RetryDelay: defaultRetry,
@@ -82,6 +84,16 @@ func HasStatus(err error, status int) bool {
 // Get decodes the response of a GET request for path into out.
 func (c *Client) Get(ctx context.Context, path string, out any) error {
 	return c.Do(ctx, http.MethodGet, path, nil, out)
+}
+
+// Download returns the raw body of a GET request for path, following
+// redirects without forwarding the token to another origin.
+func (c *Client) Download(ctx context.Context, path string) ([]byte, error) {
+	var body []byte
+
+	_, err := c.send(ctx, http.MethodGet, c.baseURL+path, nil, &body)
+
+	return body, err
 }
 
 // Do sends body as JSON to path and decodes the response into out. A nil body
@@ -224,9 +236,15 @@ func (c *Client) attempt(
 		}
 	}
 
-	if out != nil && len(data) > 0 {
-		if err := json.Unmarshal(data, out); err != nil {
-			return "", fmt.Errorf("decode %s %s: %w", method, target, err)
+	switch out := out.(type) {
+	case nil:
+	case *[]byte:
+		*out = data
+	default:
+		if len(data) > 0 {
+			if err := json.Unmarshal(data, out); err != nil {
+				return "", fmt.Errorf("decode %s %s: %w", method, target, err)
+			}
 		}
 	}
 
@@ -261,6 +279,18 @@ func (c *Client) newRequest(
 	}
 
 	return req, nil
+}
+
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("%w: too many redirects", errGitHubAPI)
+	}
+	// Artifact downloads redirect to object storage.
+	if req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme {
+		req.Header.Del("Authorization")
+	}
+
+	return nil
 }
 
 func retryable(err error) bool {

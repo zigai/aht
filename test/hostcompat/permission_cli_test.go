@@ -32,12 +32,12 @@ func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 			host := newPermissionHost(t, contract, oracle, allow)
 			configured := host.lifecycleCommand(t)
 
-			switch contract.ID {
-			case registry.Harness("claude"):
+			switch contract.PermissionDriver {
+			case driverControlCLI:
 				runClaudePermission(t, host, configured.Env, allow)
-			case registry.Harness("codex"):
+			case driverAppServer:
 				runCodexPermission(t, host, configured.Env, allow)
-			case registry.Harness("copilot"):
+			case driverSDKCLI:
 				env := make([]string, 0, len(configured.Env))
 				for _, value := range configured.Env {
 					if !strings.HasPrefix(value, "COPILOT_ALLOW_ALL=") {
@@ -46,6 +46,18 @@ func runCLIPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 				}
 
 				runCopilotPermission(t, host, env, allow)
+			case driverProcess,
+				driverExecRPC,
+				driverACP,
+				driverCompletionRPC,
+				driverExtensionRPC,
+				driverPythonACP,
+				driverExecutionServer,
+				driverPluginServer,
+				driverTerminalQuit,
+				driverTerminalDialog,
+				driverCLIACP:
+				fallthrough
 			default:
 				t.Fatalf("no CLI permission driver for %s", contract.ID)
 			}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,7 +20,6 @@ var (
 
 type pluginDirectoryInstall struct {
 	dir          string
-	markerFile   string
 	files        map[string]string
 	snippetOrder []string
 	renameFile   func(string, string) error
@@ -78,15 +78,38 @@ func validateInstallRelativePath(name string) error {
 	return nil
 }
 
+// renderPluginFiles renders the plan's files followed by its marker file, in
+// install order.
+func renderPluginFiles(
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (map[string]string, []string, error) {
+	specs := append(slices.Clone(plan.Files), harnesspkg.RenderedFileInstallSpec{
+		Name:    harnesspkg.ArtifactMarkerFile,
+		Content: plan.Identity.Marker(""),
+	})
+
+	files, err := renderInstallFiles(specs, "plugin")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	order := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		order = append(order, spec.Name)
+	}
+
+	return files, order, nil
+}
+
 func newPluginDirectoryInstall(
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	files map[string]string,
+	order []string,
 ) pluginDirectoryInstall {
 	return pluginDirectoryInstall{
 		dir:          plan.Dir,
-		markerFile:   plan.MarkerFile,
 		files:        files,
-		snippetOrder: plan.SnippetOrder,
+		snippetOrder: order,
 		renameFile:   os.Rename,
 		removeTree:   os.RemoveAll,
 	}
@@ -274,11 +297,7 @@ func (plugin pluginDirectoryInstall) managed() (bool, error) {
 		return false, nil
 	}
 
-	if plugin.markerFile == "" {
-		return false, nil
-	}
-
-	marker, err := os.ReadFile(filepath.Join(plugin.dir, plugin.markerFile))
+	marker, err := os.ReadFile(filepath.Join(plugin.dir, harnesspkg.ArtifactMarkerFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
@@ -564,16 +583,8 @@ func (plugin pluginDirectoryInstall) commitReplacement(
 }
 
 func (plugin pluginDirectoryInstall) snippet() string {
-	order := plugin.snippetOrder
-	if len(order) == 0 {
-		order = make([]string, 0, len(plugin.files))
-		for name := range plugin.files {
-			order = append(order, name)
-		}
-	}
-
-	parts := make([]string, 0, len(order))
-	for _, name := range order {
+	parts := make([]string, 0, len(plugin.snippetOrder))
+	for _, name := range plugin.snippetOrder {
 		parts = append(parts, "== "+name+" ==\n"+plugin.files[name])
 	}
 

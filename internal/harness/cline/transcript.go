@@ -118,20 +118,13 @@ func transcriptExtra(path string, _ map[string]string, stamp func(string) string
 
 func (clineHarness) Transcript() transcript.Reader {
 	return transcript.Reader{
-		Patterns:          []string{"*.messages.json"},
-		Sources:           transcriptSources,
-		SkipDirectory:     nil,
-		SkipFile:          nil,
-		SourceMetadata:    nil,
-		Initialize:        nil,
-		Extra:             transcriptExtra,
-		Record:            nil,
-		FastRecord:        nil,
-		Document:          readTranscriptDocument,
-		Query:             nil,
-		LocalTitles:       false,
-		RewritableHeaders: nil,
-		Parent:            nil,
+		DefaultFormat: transcript.FormatDocument,
+		Patterns: []string{
+			"*.messages.json",
+		},
+		Sources:  transcriptSources,
+		Extra:    transcriptExtra,
+		Document: readTranscriptDocument,
 	}
 }
 

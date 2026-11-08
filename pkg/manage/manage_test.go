@@ -5,11 +5,63 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/zigai/aht/v2/internal/install"
 
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+func TestDisableTrackerIgnoresConfig(t *testing.T) {
+	home := isolateDoctorEnvironment(t)
+	manager := manage.New(manage.Config{
+		Binary: "missing-binary", StorePath: filepath.Join(home, "state.json"),
+		ConfigPath: filepath.Join(home, "missing.toml"),
+	})
+
+	result, err := manager.DisableTracker(t.Context(), manage.TrackerOptions{DryRun: true})
+	if err != nil || result.Message != "not installed" {
+		t.Fatalf("disable with missing config = %+v, %v", result, err)
+	}
+}
+
+func TestInstallIntegrationPreservesPartialResult(t *testing.T) {
+	home := isolateDoctorEnvironment(t)
+	t.Setenv("PATH", filepath.Join(home, "missing-bin"))
+
+	manager := manage.New(manage.Config{Binary: "/bin/fixture-aht"})
+
+	result, err := manager.InstallIntegration(
+		t.Context(),
+		registry.Harness("codex"),
+		manage.IntegrationOptions{},
+	)
+	if err == nil {
+		t.Fatal("installation succeeded without the native trust CLI")
+	}
+
+	wantPath := filepath.Join(os.Getenv("CODEX_HOME"), "hooks.json")
+	if _, statErr := os.Stat(wantPath); statErr != nil {
+		t.Fatalf("hook file was not installed before trust failed: %v", statErr)
+	}
+
+	if !result.Changed || result.Path != wantPath || result.Error == "" {
+		t.Fatalf("partial installation lost its effects: %+v, %v", result, err)
+	}
+}
+
+func TestInstallIntegrationPreservesNoSetupOutcome(t *testing.T) {
+	isolateDoctorEnvironment(t)
+
+	result, err := manage.New(manage.Config{}).InstallIntegration(
+		t.Context(), registry.Harness("prime-agent"), manage.IntegrationOptions{},
+	)
+	if err != nil || result.Message != "no setup required" || result.Changed {
+		t.Fatalf("no-setup installation = %+v, %v", result, err)
+	}
+}
 
 func writeExecutableFixture(t *testing.T, path string, content []byte) {
 	t.Helper()
@@ -35,8 +87,8 @@ func assertMissingStatus(t *testing.T, mgr *manage.Manager, hookPath string, shi
 		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.Harness("claude"))
 	}
 
-	if status.Status != manage.ArtifactMissing {
-		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactMissing)
+	if status.Status != install.ArtifactMissing {
+		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactMissing)
 	}
 
 	if !slices.Contains(status.Paths, hookPath) {
@@ -62,8 +114,8 @@ func assertForeignStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatalf("IntegrationStatus(Claude) foreign error = %v", err)
 	}
 
-	if status.Status != manage.ArtifactForeign {
-		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactForeign)
+	if status.Status != install.ArtifactForeign {
+		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactForeign)
 	}
 }
 
@@ -92,8 +144,38 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatalf("IntegrationStatus(Claude) current error = %v", err)
 	}
 
-	if status.Status != manage.ArtifactCurrent {
-		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactCurrent)
+	if status.Status != install.ArtifactCurrent {
+		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactCurrent)
+	}
+}
+
+func TestManagerInstallDryRunKeepsPreviewOnCurrentIntegration(t *testing.T) {
+	home := isolateDoctorEnvironment(t)
+
+	mgr := manage.New(manage.Config{Binary: filepath.Join(home, "bin", "aht")})
+	if _, err := mgr.InstallIntegration(
+		t.Context(),
+		registry.Harness("pi"),
+		manage.IntegrationOptions{},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := mgr.InstallIntegration(
+		t.Context(),
+		registry.Harness("pi"),
+		manage.IntegrationOptions{DryRun: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Changed || !strings.HasPrefix(result.Message, "dry run:") {
+		t.Fatalf(
+			"preview of current integration: changed=%t message=%q",
+			result.Changed,
+			result.Message,
+		)
 	}
 }
 
