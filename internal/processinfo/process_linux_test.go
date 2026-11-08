@@ -70,7 +70,7 @@ func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 
 	var reader linuxProcessReader
 
-	process, err := reader.read(dir, 123, "boot", []string{"ZELLIJ_PANE_ID"})
+	process, err := reader.read(dir, 123, "boot", []string{"ZELLIJ_PANE_ID"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,13 +79,63 @@ func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 		t.Fatalf("environment = %#v, want %#v", process.Env, want)
 	}
 
-	process, err = reader.read(dir, 123, "boot", nil)
+	process, err = reader.read(dir, 123, "boot", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if process.Env != nil {
 		t.Fatalf("environment read without requested keys: %#v", process.Env)
+	}
+}
+
+func TestLinuxEnvironmentSelectionUsesFreshArguments(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stat"),
+		[]byte("123 (runner) S 1 42 42 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 987654"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "environ"), []byte("PANE=7\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	includeEnv := func(process Process) bool {
+		return len(process.Args) > 1 && process.Args[1] == "agent"
+	}
+
+	var reader linuxProcessReader
+
+	for _, test := range []struct {
+		args string
+		env  map[string]string
+	}{
+		{"runner\x00worker\x00", nil},
+		{"runner\x00agent\x00", map[string]string{"PANE": "7"}},
+		{"runner\x00worker\x00", nil},
+	} {
+		if err := os.WriteFile(
+			filepath.Join(dir, "cmdline"),
+			[]byte(test.args),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		process, err := reader.read(dir, 123, "boot", []string{"PANE"}, includeEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !maps.Equal(process.Env, test.env) {
+			t.Fatalf("args %q environment = %#v, want %#v", test.args, process.Env, test.env)
+		}
+
+		if process.PID != 123 || process.StartIdentity != "boot:987654" {
+			t.Fatalf("process identity changed: %#v", process)
+		}
 	}
 }
 

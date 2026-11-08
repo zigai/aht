@@ -178,7 +178,13 @@ func New(opts Options) *Observer {
 	processList := opts.ProcessList
 	if processList == nil {
 		processList = func(ctx context.Context) ([]processinfo.Process, error) {
-			return processinfo.ListWithEnv(ctx, append(drivers.EnvKeys(), processinfo.ChildRoleEnv))
+			return processinfo.ListWithEnv(ctx,
+				append(drivers.EnvKeys(), processinfo.ChildRoleEnv),
+				func(process processinfo.Process) bool {
+					_, ok := catalog.ResolveProcess(process)
+					return ok
+				},
+			)
 		}
 	}
 

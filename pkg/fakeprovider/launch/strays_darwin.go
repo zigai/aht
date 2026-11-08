@@ -10,7 +10,7 @@ import (
 )
 
 func launchProcesses(ctx context.Context, marker []byte) ([]int, error) {
-	processes, err := processinfo.ListWithEnv(ctx, []string{"AHT_STORE"})
+	processes, err := processinfo.ListWithEnv(ctx, []string{"AHT_STORE"}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list launch processes: %w", err)
 	}

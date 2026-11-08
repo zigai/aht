@@ -39,11 +39,15 @@ type linuxProcessReader struct {
 // List returns a complete best-effort snapshot of processes owned by the
 // effective user. Processes which exit while being read are skipped.
 func List(ctx context.Context) ([]Process, error) {
-	return ListWithEnv(ctx, nil)
+	return ListWithEnv(ctx, nil, nil)
 }
 
 // ListWithEnv is List that also records the values of envKeys in Process.Env.
-func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
+func ListWithEnv(
+	ctx context.Context,
+	envKeys []string,
+	includeEnv func(Process) bool,
+) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("process listing context: %w", err)
 	}
@@ -65,7 +69,7 @@ func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
 
 	uid := uint32(euid)
 
-	return listLinuxProcessEntries(ctx, entries, boot, uid, envKeys)
+	return listLinuxProcessEntries(ctx, entries, boot, uid, envKeys, includeEnv)
 }
 
 // Find returns the current-user process identified by pid. A false found
@@ -103,7 +107,7 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 
 	var reader linuxProcessReader
 
-	process, err := reader.read(dir, pid, boot, nil)
+	process, err := reader.read(dir, pid, boot, nil, nil)
 	if err != nil {
 		if isLinuxProcessExited(dir, pid, err) {
 			return zero, false, nil
@@ -168,6 +172,7 @@ func (r *linuxProcessReader) read(
 	pid int,
 	boot string,
 	envKeys []string,
+	includeEnv func(Process) bool,
 ) (Process, error) {
 	statPath := filepath.Join(dir, "stat")
 
@@ -198,7 +203,7 @@ func (r *linuxProcessReader) read(
 		info.Args = splitLinuxArgs(args)
 	}
 
-	if len(envKeys) > 0 {
+	if len(envKeys) > 0 && (includeEnv == nil || includeEnv(info)) {
 		info.Env = r.readEnvironment(filepath.Join(dir, "environ"), envKeys)
 	}
 
@@ -258,6 +263,7 @@ func listLinuxProcessEntries(
 	boot string,
 	uid uint32,
 	envKeys []string,
+	includeEnv func(Process) bool,
 ) ([]Process, error) {
 	processes := make([]Process, 0, len(entries))
 
@@ -284,7 +290,7 @@ func listLinuxProcessEntries(
 			continue
 		}
 
-		process, err := reader.read(dir, pid, boot, envKeys)
+		process, err := reader.read(dir, pid, boot, envKeys, includeEnv)
 		if err != nil {
 			if isLinuxProcessExited(dir, pid, err) {
 				continue

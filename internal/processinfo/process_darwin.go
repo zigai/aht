@@ -39,11 +39,15 @@ type darwinPSRow struct {
 // List returns a current-user process snapshot from the kernel process table,
 // enriched by kern.procargs2, one ps, and one lsof invocation.
 func List(ctx context.Context) ([]Process, error) {
-	return ListWithEnv(ctx, nil)
+	return ListWithEnv(ctx, nil, nil)
 }
 
 // ListWithEnv also reads requested environment keys when kern.procargs2 exposes them.
-func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
+func ListWithEnv(
+	ctx context.Context,
+	envKeys []string,
+	includeEnv func(Process) bool,
+) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
@@ -69,16 +73,16 @@ func ListWithEnv(ctx context.Context, envKeys []string) ([]Process, error) {
 
 	enrichDarwinProcesses(processes, byPID)
 
-	if err := readDarwinArguments(ctx, processes, envKeys); err != nil {
-		return nil, err
-	}
-
 	if cwd, err := darwinLsofCWD(ctx, pids); err == nil {
 		for i := range processes {
 			processes[i].CWD = cwd[processes[i].PID]
 		}
 	} else if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("inspect process working directories: %w", ctxErr)
+	}
+
+	if err := readDarwinArguments(ctx, processes, envKeys, includeEnv); err != nil {
+		return nil, err
 	}
 
 	return processes, nil
@@ -185,7 +189,12 @@ func enrichDarwinProcesses(processes []Process, rows map[int]darwinPSRow) {
 	}
 }
 
-func readDarwinArguments(ctx context.Context, processes []Process, envKeys []string) error {
+func readDarwinArguments(
+	ctx context.Context,
+	processes []Process,
+	envKeys []string,
+	includeEnv func(Process) bool,
+) error {
 	for i := range processes {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("read process arguments: %w", err)
@@ -212,7 +221,9 @@ func readDarwinArguments(ctx context.Context, processes []Process, envKeys []str
 		}
 
 		processes[i].Args = args
-		processes[i].Env = parseEnvironment(environment, envKeys)
+		if len(envKeys) > 0 && (includeEnv == nil || includeEnv(processes[i])) {
+			processes[i].Env = parseEnvironment(environment, envKeys)
+		}
 	}
 
 	return nil
