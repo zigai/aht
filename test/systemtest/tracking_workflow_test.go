@@ -254,6 +254,11 @@ func shortSystemTestRoot(t *testing.T, directories ...string) string {
 
 	root := testdir.Short(t, "aht-systest-")
 
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve isolated directory: %v", err)
+	}
+
 	for _, directory := range directories {
 		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
 			t.Fatalf("create isolated directory %q: %v", directory, err)
