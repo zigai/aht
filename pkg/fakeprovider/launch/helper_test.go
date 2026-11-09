@@ -302,10 +302,6 @@ func testExecutable(t *testing.T) string {
 	return path
 }
 
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
-}
-
 func shortRoot(t *testing.T) string {
 	t.Helper()
 

@@ -201,8 +201,7 @@ func readDarwinArguments(
 		}
 
 		data, err := unix.SysctlRaw("kern.procargs2", processes[i].PID)
-		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) ||
-			errors.Is(err, unix.EACCES) || errors.Is(err, unix.EINVAL) {
+		if darwinArgumentsUnavailable(err) {
 			// The process exited or denies access; keep the kernel command name.
 			continue
 		}
@@ -227,6 +226,11 @@ func readDarwinArguments(
 	}
 
 	return nil
+}
+
+func darwinArgumentsUnavailable(err error) bool {
+	return errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) ||
+		errors.Is(err, unix.EACCES) || errors.Is(err, unix.EINVAL)
 }
 
 func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) {
