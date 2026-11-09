@@ -29,6 +29,14 @@ func (s *search) parser() *parser {
 }
 
 func (s *search) part(t *transcript, part Excerpt) {
+	if s.last != nil {
+		if part.Role == s.last.role {
+			t.keepLast(part)
+		}
+
+		return
+	}
+
 	s.matchText(t, part.Role, part.Text, part.MessageID, part.Line, part.Timestamp)
 }
 func (s *search) conversation(ctx context.Context, t *transcript) { s.add(ctx, t) }

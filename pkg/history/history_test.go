@@ -60,6 +60,9 @@ var (
 
 	//go:embed testdata/recently-updated.jsonl
 	recentlyUpdatedHistory string
+
+	//go:embed testdata/report.jsonl
+	reportHistory string
 )
 
 // toolHistory has a tool message newer than its searchable text, so searching
@@ -1557,6 +1560,97 @@ func TestDefaultSourcesAreAbsoluteWithPaddedHome(t *testing.T) {
 	for _, source := range sources {
 		if !filepath.IsAbs(source.Path) {
 			t.Errorf("%s source path %q is not absolute", source.Harness, source.Path)
+		}
+	}
+}
+
+func lastMessageCatalog(t *testing.T, body string) (history.Catalog, string) {
+	t.Helper()
+	path := writeHistory(t, t.TempDir(), "session.jsonl", body)
+
+	return history.Catalog{
+		IndexPath: filepath.Join(t.TempDir(), "index.sqlite"),
+		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: path}},
+	}, path
+}
+
+func TestLastMessageJoinsTheTextOfTheLatestMessageOfTheRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, reportHistory)
+
+	assistant, found, err := c.LastMessage(t.Context(), "report-session", history.RoleAssistant)
+	if err != nil || !found || assistant.Text != "Fixed the redirect.\n**Evidence**\n- shot.png" {
+		t.Fatalf("assistant message = %q, %v, %v", assistant.Text, found, err)
+	}
+
+	user, found, err := c.LastMessage(t.Context(), "report-session", history.RoleUser)
+	if err != nil || !found || user.Text != "Go on" {
+		t.Fatalf("user message = %q, %v, %v", user.Text, found, err)
+	}
+}
+
+func TestLastMessageReadsTheHistoryAsItIsNow(t *testing.T) {
+	t.Parallel()
+
+	c, path := lastMessageCatalog(t, reportHistory)
+	if _, err := c.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	appended := reportHistory + `{"type":"message","id":"a3","message":{"role":"assistant",` +
+		`"content":"Pushed the branch."}}` + "\n"
+	if err := os.WriteFile(path, []byte(appended), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	message, found, err := c.LastMessage(t.Context(), "report-session", history.RoleAssistant)
+	if err != nil || !found || message.Text != "Pushed the branch." {
+		t.Fatalf("message after append = %q, %v, %v", message.Text, found, err)
+	}
+}
+
+func TestLastMessageIsNotFoundForAnotherSessionOrAMissingRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, `{"type":"session","id":"quiet-session","cwd":"/work"}
+{"type":"message","id":"u1","message":{"role":"user","content":"Hello"}}
+`)
+
+	for _, session := range []string{"quiet-session", "other-session"} {
+		message, found, err := c.LastMessage(t.Context(), session, history.RoleAssistant)
+		if err != nil || found {
+			t.Fatalf(
+				"%s assistant message = %q, %v, %v; want not found",
+				session,
+				message.Text,
+				found,
+				err,
+			)
+		}
+	}
+}
+
+func TestLastMessageRejectsAMissingSessionOrAnUnknownRole(t *testing.T) {
+	t.Parallel()
+	c, _ := lastMessageCatalog(t, reportHistory)
+
+	for _, query := range []struct {
+		session string
+		role    history.Role
+	}{
+		{session: "", role: history.RoleAssistant},
+		{session: "report-session", role: history.RoleTool},
+	} {
+		if _, _, err := c.LastMessage(
+			t.Context(),
+			query.session,
+			query.role,
+		); !errors.Is(err, history.ErrInvalidQuery) {
+			t.Fatalf(
+				"LastMessage(%q, %q) error = %v, want ErrInvalidQuery",
+				query.session,
+				query.role,
+				err,
+			)
 		}
 	}
 }

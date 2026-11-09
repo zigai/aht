@@ -39,6 +39,8 @@ type transcript struct {
 	excluded    bool
 	lastMessage string
 	projection  string
+	last        Excerpt
+	hasLast     bool
 }
 
 func readTranscriptHeaders(
@@ -96,7 +98,26 @@ func newDatabaseTranscript(c Conversation) transcript {
 		excluded:    false,
 		lastMessage: "",
 		projection:  "",
+		last: Excerpt{
+			Role:      "",
+			Text:      "",
+			Spans:     nil,
+			MessageID: "",
+			Line:      0,
+			Timestamp: time.Time{},
+		},
+		hasLast: false,
 	}
+}
+
+func (t *transcript) keepLast(part Excerpt) {
+	if t.hasLast && part.MessageID != "" && part.MessageID == t.last.MessageID {
+		t.last.Text += "\n" + part.Text
+
+		return
+	}
+
+	t.last, t.hasLast = part, true
 }
 
 // absorb folds the text matches of a child history into t. Conversation
