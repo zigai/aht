@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,123 @@ func TestPrepareReportAddsNativeResumeCommand(t *testing.T) {
 					prepared.Observation.Listing(),
 					test.want,
 				)
+			}
+		})
+	}
+}
+
+func TestPrepareReportLocatesOnlyAgentsInThePaneTerminal(t *testing.T) {
+	t.Parallel()
+
+	pane := registry.Location{
+		Kind:        registry.MultiplexerTmux,
+		ServerID:    "/tmp/tmux-1000/default",
+		SessionName: "work",
+		PaneID:      "%3",
+		PanePID:     10,
+		PaneTTY:     "/dev/pts/4",
+	}
+	paneWithoutTTY := pane
+	paneWithoutTTY.PaneTTY = ""
+
+	shell := processinfo.Process{
+		PID:           70,
+		PPID:          60,
+		StartIdentity: "boot:70",
+		Executable:    "/bin/sh",
+		Args:          []string{"sh"},
+	}
+	agent := func(pid int, ppid int, tty string) processinfo.Process {
+		return processinfo.Process{
+			PID:            pid,
+			PPID:           ppid,
+			ProcessGroupID: pid,
+			StartIdentity:  "boot:" + strconv.Itoa(pid),
+			Executable:     "/usr/bin/codex",
+			CWD:            "/work",
+			TTY:            tty,
+			Args:           []string{"codex"},
+		}
+	}
+	recorder := processinfo.Process{
+		PID:            50,
+		PPID:           10,
+		ProcessGroupID: 50,
+		StartIdentity:  "boot:50",
+		Executable:     "/usr/bin/script",
+		CWD:            "/work",
+		TTY:            "/dev/pts/4",
+		Args:           []string{"script", "-q", "session.log"},
+	}
+
+	tests := []struct {
+		name      string
+		location  registry.Location
+		ancestors []processinfo.Process
+		want      *registry.Location
+	}{
+		{
+			name:      "agent in the pane terminal",
+			location:  pane,
+			ancestors: []processinfo.Process{shell, agent(60, 10, "/dev/pts/4")},
+			want:      &pane,
+		},
+		{
+			name:     "agent started by the pane agent in its own terminal",
+			location: pane,
+			ancestors: []processinfo.Process{
+				shell,
+				agent(60, 55, "/dev/pts/9"),
+				recorder,
+				agent(40, 10, "/dev/pts/4"),
+			},
+			want: nil,
+		},
+		{
+			name:      "agent in a terminal recorder started from the pane",
+			location:  pane,
+			ancestors: []processinfo.Process{shell, agent(60, 50, "/dev/pts/9"), recorder},
+			want:      &pane,
+		},
+		{
+			name:     "started agent without a terminal",
+			location: pane,
+			ancestors: []processinfo.Process{
+				shell,
+				agent(60, 40, ""),
+				agent(40, 10, "/dev/pts/4"),
+			},
+			want: &pane,
+		},
+		{
+			name:     "pane without a known terminal",
+			location: paneWithoutTTY,
+			ancestors: []processinfo.Process{
+				shell,
+				agent(60, 55, "/dev/pts/9"),
+				agent(40, 10, "/dev/pts/4"),
+			},
+			want: &paneWithoutTTY,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			prepared, err := Prepare(nil, Options{
+				Harness: "codex", SessionID: "session", Event: "turn_complete",
+			}, Runtime{
+				Location:          test.location,
+				Processes:         test.ancestors,
+				DefaultObservedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := prepared.Observation.Location()
+			if (got == nil) != (test.want == nil) || (got != nil && *got != *test.want) {
+				t.Fatalf("report location = %#v, want %#v", got, test.want)
 			}
 		})
 	}

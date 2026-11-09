@@ -48,8 +48,8 @@ func PrepareHook(
 		result.Report.SetProcess(processIdentity(id, runtime.Processes))
 
 		result.Report = catalog.PrepareObservation(result.Report)
-		if !runtime.Location.Empty() {
-			result.Report.SetLocation(&runtime.Location)
+		if location := runtime.reportLocation(id); !location.Empty() {
+			result.Report.SetLocation(&location)
 		}
 	}
 

@@ -481,8 +481,7 @@ func nativeReportObservation(
 		observation.Report().Lifecycle = &lifecycle
 	}
 
-	if !runtime.Location.Empty() {
-		location := runtime.Location
+	if location := runtime.reportLocation(harnessID); !location.Empty() {
 		observation.SetLocation(&location)
 	}
 
@@ -596,22 +595,12 @@ func processIdentity(
 	harnessID registry.Harness,
 	processes []processinfo.Process,
 ) *registry.ProcessIdentity {
-	var selected *processinfo.Process
-
-	for index, process := range processes {
-		matches := reportProcessMatchesHarness(process, harnessID)
-		if selected != nil && !matches {
-			break
-		}
-
-		if matches && (selected == nil || !catalog.IsWrapper(process)) {
-			selected = &processes[index]
-		}
-	}
-
-	if selected == nil {
+	index, ok := harnessProcessIndex(harnessID, processes)
+	if !ok {
 		return nil
 	}
+
+	selected := processes[index]
 
 	return &registry.ProcessIdentity{
 		PID:            selected.PID,
@@ -623,6 +612,46 @@ func processIdentity(
 		CWD:            selected.CWD,
 		TTY:            selected.TTY,
 	}
+}
+
+func harnessProcessIndex(harnessID registry.Harness, processes []processinfo.Process) (int, bool) {
+	selected := -1
+
+	for index, process := range processes {
+		matches := reportProcessMatchesHarness(process, harnessID)
+		if selected >= 0 && !matches {
+			break
+		}
+
+		if matches && (selected < 0 || !catalog.IsWrapper(process)) {
+			selected = index
+		}
+	}
+
+	return selected, selected >= 0
+}
+
+func (r Runtime) reportLocation(harnessID registry.Harness) registry.Location {
+	paneTTY := r.Location.PaneTTY
+
+	index, ok := harnessProcessIndex(harnessID, r.Processes)
+	if !ok || paneTTY == "" || r.Processes[index].TTY == "" ||
+		r.Processes[index].TTY == paneTTY {
+		return r.Location
+	}
+
+	for _, ancestor := range r.Processes[index+1:] {
+		if _, isAgent := catalog.ResolveProcess(ancestor); isAgent && ancestor.TTY == paneTTY {
+			// An agent in the pane started this one in a terminal of its own, for
+			// example to test it. The multiplexer variables are inherited, and the
+			// pane shows only the parent agent.
+			var empty registry.Location
+
+			return empty
+		}
+	}
+
+	return r.Location
 }
 
 func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
