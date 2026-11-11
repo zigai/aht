@@ -289,20 +289,30 @@ func (m lifecycleMachine) apply(observation Observation, policy Policy, at time.
 }
 
 func (r *Report) apply(m lifecycleMachine, policy Policy, at time.Time) {
-	if m.session.Observations.Native.Activity != nil && policy.Authority != AuthorityScreen &&
-		m.acceptsActivity(at) {
-		m.session.setActivity(clonePtr(m.session.Observations.Native.Activity))
-		m.session.setDecision(&ActivityDecision{
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			FallbackReason:  "",
-			Authority:       AuthorityHook,
-			Reason:          r.Event,
-			Process:         m.session.Observations.Native.Process,
-			ObservedAt:      at,
-		})
+	if m.session.Observations.Native.Activity == nil || policy.Authority == AuthorityScreen ||
+		!m.acceptsActivity(at) {
+		return
 	}
+
+	if authority, _ := ActivityAuthority(*m.session, policy, at); authority == AuthorityTerminal {
+		return
+	}
+
+	m.hookActivity(r.Event, at)
+}
+
+func (m lifecycleMachine) hookActivity(event string, at time.Time) {
+	m.session.setActivity(clonePtr(m.session.Observations.Native.Activity))
+	m.session.setDecision(&ActivityDecision{
+		RuleID:          "",
+		ManifestSource:  "",
+		ManifestVersion: 0,
+		FallbackReason:  "",
+		Authority:       AuthorityHook,
+		Reason:          event,
+		Process:         m.session.Observations.Native.Process,
+		ObservedAt:      at,
+	})
 }
 func (*Reading) apply(m lifecycleMachine, policy Policy, at time.Time) { m.reading(policy, at) }
 func (verification *Verification) apply(m lifecycleMachine, _ Policy, at time.Time) {
@@ -388,7 +398,18 @@ func (m lifecycleMachine) reading(policy Policy, at time.Time) {
 		return
 	}
 
-	if authority, _ := ActivityAuthority(*m.session, policy, at); authority != AuthorityScreen {
+	authority, _ := ActivityAuthority(*m.session, policy, at)
+	if screen.Authority == AuthorityTerminal && authority == AuthorityHook {
+		// The record was cleared or a held turn outranks it, so the hook's
+		// last report is the state again.
+		if native, _, ok := matchingHookObservation(*m.session, policy); ok {
+			m.hookActivity(native.Event, at)
+		}
+
+		return
+	}
+
+	if authority != screen.authority() {
 		return
 	}
 

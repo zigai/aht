@@ -67,6 +67,8 @@ type simulationWorld struct {
 	panes       [3]bool
 	catalog     [3]bool
 	screens     [3]registry.Activity
+	programs    [3]*mux.ProgramStatus
+	app         string
 	processErr  bool
 	paneErr     bool
 	catalogErr  bool
@@ -134,6 +136,8 @@ func TestObserverSeededWorld(t *testing.T) {
 		"screen-reading",
 		"stale-rejected",
 		"replay-handled",
+		"terminal-outranks-hook",
+		"program-cleared",
 	); len(
 		missing,
 	) > 0 {
@@ -145,11 +149,15 @@ func runSimulationSeed(t *testing.T, seed uint64, steps int, coverage *registryc
 	t.Helper()
 	world := newSimulationWorld(t, coverage)
 	rng := rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)
+	// Program status changes draw from their own stream, so the event trace of
+	// a seed stays the one it was recorded with.
+	programs := rand.NewPCG(seed^0x7501, seed)
 
 	trace := make([]string, 0, steps)
 	for step := range steps {
 		event, slot := simulationChoice(rng, step)
-		trace = append(trace, fmt.Sprintf("%d:%s/%d", step, event, slot))
+		record := world.changeProgram(programs, slot)
+		trace = append(trace, fmt.Sprintf("%d:%s/%d%s", step, event, slot, record))
 		world.step(t, seed, trace, event, slot)
 		world.coverage.Hit(event)
 		time.Sleep(time.Second)
@@ -287,6 +295,7 @@ func newSimulationWorld(t *testing.T, coverage *registrycheck.Coverage) *simulat
 
 	world := &simulationWorld{
 		store:       store,
+		app:         harness.ProgramStatusApp(id),
 		harness:     id,
 		command:     command,
 		reporter:    reporter,
@@ -323,7 +332,7 @@ func simulationHarness(t *testing.T) (registry.Harness, string, string) {
 
 		policy := (harness.Rules{}).Policy(definition.ID)
 		if !policy.ExclusiveProcess || policy.Authority != registry.AuthorityHook ||
-			!policy.ScreenFallback ||
+			!policy.ScreenFallback || definition.ProgramStatusApp == "" ||
 			!harness.SupportsScreen(definition.ID) ||
 			len(definition.ProcessNames) == 0 {
 			continue
@@ -416,6 +425,7 @@ func (w *simulationWorld) apply(ctx context.Context, event simulationEvent, slot
 		w.exit(slot)
 	case simPaneClose:
 		w.panes[slot] = false
+		w.programs[slot] = nil
 	case simPaneReuse:
 		w.spawn(slot, false)
 	case simPIDReuse:
@@ -690,6 +700,7 @@ func (w *simulationWorld) listPanes(context.Context) ([]mux.Pane, error) {
 				ProcessTTY: process.TTY,
 				Command:    w.command,
 				CWD:        process.CWD,
+				Program:    w.programs[slot],
 			},
 		)
 	}
@@ -770,7 +781,8 @@ func (w *simulationWorld) check(
 	}
 
 	for _, session := range after {
-		if session.Observations.Screen != nil {
+		if screen := session.Observations.Screen; screen != nil &&
+			screen.Authority != registry.AuthorityTerminal {
 			w.coverage.Hit("screen-reading")
 			break
 		}
@@ -918,7 +930,82 @@ func (w *simulationWorld) checkSession(
 		return simulationError("ghost live session %s for process %s", session.ID, identity)
 	}
 
+	if err := w.checkTerminalAuthority(session, now); err != nil {
+		return err
+	}
+
 	return w.checkHookAuthority(session, now)
+}
+
+func (w *simulationWorld) changeProgram(rng *rand.PCG, slot int) string {
+	const cleared = 4
+
+	states := []mux.ProgramState{
+		mux.ProgramStateWorking,
+		mux.ProgramStateBlocked,
+		mux.ProgramStateDone,
+		mux.ProgramStateIdle,
+	}
+
+	choice := rng.Uint64() % 8
+
+	switch {
+	case choice < uint64(len(states)):
+		if !w.panes[slot] {
+			return ""
+		}
+
+		w.programs[slot] = &mux.ProgramStatus{App: w.app, State: states[choice], Kind: "permission"}
+
+		return "+" + string(states[choice])
+	case choice == cleared:
+		w.programs[slot] = nil
+
+		return "+clear"
+	}
+
+	return ""
+}
+
+func (w *simulationWorld) checkTerminalAuthority(session registry.Session, now time.Time) error {
+	reading := session.Observations.Screen
+	if reading == nil || reading.Authority != registry.AuthorityTerminal ||
+		session.Process == nil || !reading.Process.Equal(*session.Process) {
+		return nil
+	}
+
+	if reading.Activity == registry.ActivityUnknown {
+		w.coverage.Hit("program-cleared")
+
+		return nil
+	}
+
+	policy := (harness.Rules{}).Policy(session.Harness)
+	native := session.Observations.Native
+
+	if authority, _ := registry.ActivityAuthority(
+		session,
+		policy,
+		now,
+	); authority != registry.AuthorityTerminal {
+		return nil
+	}
+
+	if native != nil && native.Activity != nil && *native.Activity != reading.Activity &&
+		registry.EvaluateHook(session, policy, now).Active {
+		w.coverage.Hit("terminal-outranks-hook")
+	}
+
+	activity, decision := session.Activity(), session.Decision()
+	if activity == nil || *activity != reading.Activity || decision == nil ||
+		decision.Authority != registry.AuthorityTerminal {
+		return simulationError(
+			"program status %s lost for %s: got %v by %v",
+			reading.Activity, session.ID, activity, decision,
+		)
+	}
+
+	return nil
 }
 
 func (w *simulationWorld) checkHookAuthority(session registry.Session, now time.Time) error {

@@ -254,7 +254,7 @@ func (o *Observer) foregroundCandidate(
 	process processinfo.Process,
 	processes []processinfo.Process,
 ) bool {
-	if o.disableScreenInspection && pane.Activity == nil {
+	if o.disableScreenInspection && pane.Activity == nil && pane.Program == nil {
 		return false
 	}
 

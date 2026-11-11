@@ -6,9 +6,12 @@ import (
 )
 
 const (
-	AuthorityHook    Authority = "hook"
-	AuthorityScreen  Authority = "screen"
-	AuthorityProcess Authority = "process"
+	AuthorityHook   Authority = "hook"
+	AuthorityScreen Authority = "screen"
+	// AuthorityTerminal is the state the harness itself reported to its
+	// terminal with the OSC 7501 program status protocol.
+	AuthorityTerminal Authority = "terminal"
+	AuthorityProcess  Authority = "process"
 )
 
 type Authority string
@@ -27,6 +30,10 @@ type Policy struct {
 	RetainNativeActivity bool
 	Reporter             string
 	CatalogCreates       bool
+	// HeldTurnEvents names the native events that end a turn but still report
+	// running while background work keeps the turn open. Such a report
+	// outranks a resting terminal record.
+	HeldTurnEvents []string
 }
 
 type Reducer struct {
@@ -72,7 +79,7 @@ func (r Reducer) Apply(
 
 func (a Authority) Valid() bool {
 	switch a {
-	case AuthorityHook, AuthorityScreen, AuthorityProcess:
+	case AuthorityHook, AuthorityScreen, AuthorityTerminal, AuthorityProcess:
 		return true
 	}
 

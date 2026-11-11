@@ -58,6 +58,7 @@ func New() piHarness {
 		IntegrationVersion:        integrationVersion,
 		IntegrationSource:         piIntegrationSourceID,
 		StateAuthority:            registry.AuthorityHook,
+		ProgramStatusApp:          "pi",
 		ScreenFallback:            true,
 	})}
 }

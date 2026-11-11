@@ -53,6 +53,8 @@ func New() claudeHarness {
 		IntegrationVersion:        integrationVersion,
 		IntegrationSource:         claudeIntegrationSource,
 		StateAuthority:            registry.AuthorityHook,
+		ProgramStatusApp:          "claude-code",
+		HeldTurnEvents:            []string{"Stop"},
 		ScreenFallback:            true,
 	})}
 }

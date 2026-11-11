@@ -92,9 +92,14 @@ type Options struct {
 	// at once. Zero uses a 3 second default; a negative value confirms at once.
 	// Single-cycle runs confirm at once because they have no history.
 	ProcessConfirmation time.Duration
-	Now                 func() time.Time
-	ErrorWriter         io.Writer
-	Quiet               bool
+	// ProgramStatusWatch delivers a multiplexer server's panes when a program
+	// status changes, so a continuously running observer records it without
+	// waiting for a cycle. Nil uses the multiplexer drivers, or nothing when
+	// PaneList is set.
+	ProgramStatusWatch mux.ProgramStatusWatch
+	Now                func() time.Time
+	ErrorWriter        io.Writer
+	Quiet              bool
 }
 
 type Result struct {
@@ -167,6 +172,9 @@ type cycleInventory struct {
 	tree          *processTree
 	harnessByPID  map[int]registry.Harness
 	knownSessions []registry.Session
+	// panesAt is when the panes were listed. Listing processes can take long,
+	// so a program status reading carries this time instead of the cycle start.
+	panesAt time.Time
 }
 
 type trackedUpdate struct {
@@ -191,14 +199,20 @@ type Observer struct {
 	errorWriter             io.Writer
 	quiet                   bool
 	confirmAfter            time.Duration
+	statusWatch             mux.ProgramStatusWatch
 
 	//exhaustruct:optional
-	mu              sync.Mutex
-	startedAt       time.Time
-	initialized     bool
-	tracked         map[processKey]trackedProcess
-	candidates      map[processKey]time.Time
-	screenPending   map[processKey]pendingScreenDecision
+	mu            sync.Mutex
+	startedAt     time.Time
+	initialized   bool
+	tracked       map[processKey]trackedProcess
+	candidates    map[processKey]time.Time
+	screenPending map[processKey]pendingScreenDecision
+	statusServers map[statusServer]struct{}
+	// statusMu orders program status readings: a cycle holds it from listing
+	// panes to recording, and a watch holds it while recording a change.
+	//exhaustruct:optional
+	statusMu        sync.Mutex
 	health          Health
 	lastHealthWrite time.Time
 	lockPath        string
@@ -284,11 +298,13 @@ func New(opts Options) *Observer {
 		errorWriter:             errorWriter,
 		quiet:                   opts.Quiet,
 		confirmAfter:            confirmAfter,
+		statusWatch:             programStatusWatch(opts),
 		tracked: make(
 			map[processKey]trackedProcess,
 		),
 		candidates:    make(map[processKey]time.Time),
 		screenPending: make(map[processKey]pendingScreenDecision),
+		statusServers: make(map[statusServer]struct{}),
 		startedAt:     time.Time{},
 		initialized:   false,
 		health: Health{
@@ -377,8 +393,18 @@ func (o *Observer) run(ctx context.Context, handle func(Result) error) (err erro
 
 	schedule.source, _ = o.store.(revisionReader)
 
+	watchCtx, stopWatchers := context.WithCancel(ctx)
+	watchers := newStatusWatchers(o.statusWatch, o.readProgramStatus)
+
+	defer func() {
+		stopWatchers()
+		watchers.group.Wait()
+	}()
+
 	for {
 		result, err := o.runCycle(ctx)
+		watchers.sync(watchCtx, o.statusServers)
+
 		if handle != nil {
 			if handleErr := handle(result); handleErr != nil {
 				return fmt.Errorf("handling observer result: %w", handleErr)
@@ -433,10 +459,15 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	processes = slices.Clone(processes)
 	result.Processes = len(processes)
 
+	o.statusMu.Lock()
+	defer o.statusMu.Unlock()
+
 	panes, paneErr := o.paneList(ctx, processes)
 	if paneErr != nil {
 		result = result.withDegradation(paneErr)
 	}
+
+	panesAt := o.now().UTC()
 
 	result.Panes = len(panes)
 	sortPanesByPriority(panes)
@@ -480,6 +511,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 		processByPID: processByPID, tree: tree,
 		harnessByPID:  harnessByPID,
 		knownSessions: knownSessions,
+		panesAt:       panesAt,
 	}
 
 	sightings, current := processSightings(inventory, catalogByPID, at)
@@ -586,6 +618,8 @@ func (o *Observer) paneScreens(
 	screens := make([]paneScreen, len(panes))
 	paneCommandCounts := commandPaneCounts(panes)
 
+	clear(o.statusServers)
+
 	for i, pane := range panes {
 		process, harnessID, ok := multiplexerPaneProcess(
 			pane,
@@ -605,6 +639,10 @@ func (o *Observer) paneScreens(
 			at,
 		)
 
+		if ok {
+			o.statusServers[statusServer{kind: pane.Location.Kind, id: pane.Location.ServerID}] = struct{}{}
+		}
+
 		if !ok || claimed ||
 			nestedHarnessProcess(process, inventory.tree, inventory.harnessByPID) {
 			continue
@@ -617,7 +655,7 @@ func (o *Observer) paneScreens(
 
 		screens[i].process, screens[i].harnessID = process, harnessID
 		screens[i].screenDetection = o.detectScreenState(
-			inventory.knownSessions,
+			inventory,
 			harnessID,
 			process,
 			pane,
@@ -1308,7 +1346,7 @@ func unavailableScreenState(
 }
 
 func (o *Observer) detectScreenState(
-	sessions []registry.Session,
+	inventory cycleInventory,
 	harnessID registry.Harness,
 	process processinfo.Process,
 	pane mux.Pane,
@@ -1316,14 +1354,22 @@ func (o *Observer) detectScreenState(
 ) screenDetection {
 	var detection screenDetection
 
-	if !o.manifestLoader.Supports(harnessID) {
+	identity := processIdentity(process)
+	session := sessionForProcess(inventory.knownSessions, harnessID, identity)
+
+	observation, changed, tracked := programStatusReading(
+		session,
+		identity,
+		pane,
+		inventory.panesAt,
+	)
+	if tracked {
+		detection.observation, detection.detected = observation, changed
+
 		return detection
 	}
 
-	identity := processIdentity(process)
-
-	session := sessionForProcess(sessions, harnessID, identity)
-	if !shouldDetectScreen(session, at) {
+	if !o.manifestLoader.Supports(harnessID) || !shouldDetectScreen(session, at) {
 		return detection
 	}
 

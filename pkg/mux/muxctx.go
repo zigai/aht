@@ -75,6 +75,9 @@ type Pane struct {
 	Activity *registry.Activity
 	//exhaustruct:optional
 	StateReason string
+	// Program is the pane's own program status record, when the multiplexer keeps one.
+	//exhaustruct:optional
+	Program *ProgramStatus
 }
 
 type ScreenSnapshot struct {

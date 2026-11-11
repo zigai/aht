@@ -82,6 +82,12 @@ type Definition struct {
 	PayloadOmissions          []string
 	LifecycleEventAttribute   string
 	LifecycleSourceAttributes []string
+	// ProgramStatusApp is the app name the harness reports in its OSC 7501
+	// program status records. Empty means its records are not used.
+	ProgramStatusApp string
+	// HeldTurnEvents names the native events that end a turn but still report
+	// running while background work keeps the turn open.
+	HeldTurnEvents []string
 }
 
 type Adapter interface {
@@ -181,6 +187,8 @@ func cloneDefinition(definition Definition) Definition {
 		PayloadOmissions:          slices.Clone(definition.PayloadOmissions),
 		LifecycleEventAttribute:   definition.LifecycleEventAttribute,
 		LifecycleSourceAttributes: slices.Clone(definition.LifecycleSourceAttributes),
+		ProgramStatusApp:          definition.ProgramStatusApp,
+		HeldTurnEvents:            slices.Clone(definition.HeldTurnEvents),
 	}
 }
 

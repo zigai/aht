@@ -4,6 +4,7 @@ package observer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -388,5 +389,41 @@ func TestMultiplexerPanesFindCustomSocketServerInScannedProcesses(t *testing.T) 
 
 	if !found(processes) {
 		t.Fatal("custom -S server not found from the cycle's process scan")
+	}
+}
+
+func TestProgramStatusWatchReachesTmuxServer(t *testing.T) {
+	server := testtmux.New(
+		t,
+		gotmux.NewSessionOptions{Name: "watch", Program: gotmux.Exec("sleep", "30")},
+	)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	delivered := make(chan []mux.Pane, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- programStatusWatch(Options{})(
+			ctx, registry.MultiplexerTmux, server.Socket,
+			func(panes []mux.Pane) {
+				select {
+				case delivered <- panes:
+				default:
+				}
+			},
+		)
+	}()
+
+	select {
+	case panes := <-delivered:
+		if len(panes) != 1 || panes[0].Location.ServerID != server.Socket {
+			t.Fatalf("panes of the watched server = %#v", panes)
+		}
+	case err := <-done:
+		if !errors.Is(err, mux.ErrProgramStatusUnsignaled) {
+			t.Fatalf("watch on a tmux without program status = %v", err)
+		}
 	}
 }

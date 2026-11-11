@@ -1,6 +1,11 @@
 package registry
 
-import "time"
+import (
+	"slices"
+	"time"
+)
+
+const hookReportStale = "integration_report_stale"
 
 type HookEvaluation struct {
 	Active         bool
@@ -28,13 +33,18 @@ func EvaluateHook(session Session, policy Policy, now time.Time) HookEvaluation 
 }
 
 func ActivityAuthority(session Session, policy Policy, now time.Time) (Authority, string) {
+	if reading := terminalReading(session); reading != nil &&
+		!hookHoldsTurn(session, policy, *reading, now) {
+		return AuthorityTerminal, reading.Reason
+	}
+
 	if policy.Authority == AuthorityScreen {
 		return AuthorityScreen, "screen_primary"
 	}
 
 	evaluation := EvaluateHook(session, policy, now)
 	if policy.ScreenFallback && !evaluation.Active {
-		if policy.RetainNativeActivity && evaluation.Reason == "integration_report_stale" {
+		if policy.RetainNativeActivity && evaluation.Reason == hookReportStale {
 			return AuthorityHook, evaluation.Reason
 		}
 
@@ -42,6 +52,46 @@ func ActivityAuthority(session Session, policy Policy, now time.Time) (Authority
 	}
 
 	return AuthorityHook, evaluation.Reason
+}
+
+func (o ScreenObservation) authority() Authority {
+	if o.Authority == AuthorityTerminal {
+		return AuthorityTerminal
+	}
+
+	return AuthorityScreen
+}
+
+func terminalReading(session Session) *ScreenObservation {
+	reading := session.Observations.Screen
+	if reading == nil || reading.Authority != AuthorityTerminal ||
+		reading.Activity == ActivityUnknown || session.Presence() == PresenceGone ||
+		session.Process == nil || !reading.Process.Equal(*session.Process) {
+		return nil
+	}
+
+	return reading
+}
+
+func hookHoldsTurn(
+	session Session,
+	policy Policy,
+	reading ScreenObservation,
+	now time.Time,
+) bool {
+	if reading.Activity != ActivityIdle {
+		return false
+	}
+
+	native, _, ok := matchingHookObservation(session, policy)
+	if !ok || *native.Activity != ActivityRunning ||
+		!slices.Contains(policy.HeldTurnEvents, native.Event) {
+		return false
+	}
+
+	reason := invalidHookTimeReason(native.ObservedAt, now)
+
+	return reason == "" || policy.RetainNativeActivity && reason == hookReportStale
 }
 
 func matchingHookObservation(
@@ -121,7 +171,7 @@ func invalidHookTimeReason(observedAt time.Time, now time.Time) string {
 	}
 
 	if now.Sub(observedAt) > IntegrationActivityLease {
-		return "integration_report_stale"
+		return hookReportStale
 	}
 
 	return ""

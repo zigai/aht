@@ -320,3 +320,157 @@ func TestProcessReplacementClearsScreenActivity(t *testing.T) {
 		t.Fatalf("stale screen restored replaced process: %#v", session)
 	}
 }
+
+func TestTerminalRecordAndHookReportOrder(t *testing.T) {
+	t.Parallel()
+
+	type step struct {
+		event    string
+		terminal bool
+		activity Activity
+		detail   ActivityDetail
+		after    time.Duration
+	}
+
+	hook := func(event string, activity Activity) step {
+		return step{
+			event:    event,
+			terminal: false,
+			activity: activity,
+			detail:   "",
+			after:    time.Second,
+		}
+	}
+	terminal := func(activity Activity) step {
+		return step{event: "", terminal: true, activity: activity, detail: "", after: time.Second}
+	}
+
+	for _, test := range []struct {
+		name      string
+		steps     []step
+		activity  Activity
+		authority Authority
+		detail    ActivityDetail
+	}{
+		{
+			name:      "a resting record ends a turn the hooks still call running",
+			steps:     []step{hook("tool_start", ActivityRunning), terminal(ActivityIdle)},
+			activity:  ActivityIdle,
+			authority: AuthorityTerminal,
+		},
+		{
+			name:      "a hook report does not replace the record",
+			steps:     []step{terminal(ActivityRunning), hook("tool_end", ActivityIdle)},
+			activity:  ActivityRunning,
+			authority: AuthorityTerminal,
+		},
+		{
+			name: "a held turn end outranks the resting record that follows it",
+			steps: []step{
+				terminal(ActivityRunning), hook(heldTurnEvent, ActivityRunning), terminal(ActivityIdle),
+			},
+			activity:  ActivityRunning,
+			authority: AuthorityHook,
+		},
+		{
+			name: "a held turn end outranks the resting record that came first",
+			steps: []step{
+				terminal(ActivityRunning), terminal(ActivityIdle), hook(heldTurnEvent, ActivityRunning),
+			},
+			activity:  ActivityRunning,
+			authority: AuthorityHook,
+		},
+		{
+			name: "a held turn end does not hide a blocked record",
+			steps: []step{
+				hook(heldTurnEvent, ActivityRunning),
+				terminal(ActivityIdle),
+				{
+					event: "", terminal: true, activity: ActivityWaiting,
+					detail: ActivityDetailPermission, after: time.Second,
+				},
+			},
+			activity:  ActivityWaiting,
+			authority: AuthorityTerminal,
+			detail:    ActivityDetailPermission,
+		},
+		{
+			name: "a held turn end that lost its lease stops holding",
+			steps: []step{
+				hook(heldTurnEvent, ActivityRunning),
+				{
+					event: "", terminal: true, activity: ActivityIdle, detail: "",
+					after: IntegrationActivityLease + time.Second,
+				},
+			},
+			activity:  ActivityIdle,
+			authority: AuthorityTerminal,
+		},
+		{
+			name: "a cleared record returns the state to the last hook report",
+			steps: []step{
+				terminal(ActivityRunning), hook("tool_end", ActivityIdle), terminal(ActivityUnknown),
+			},
+			activity:  ActivityIdle,
+			authority: AuthorityHook,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := NewJournal(t.TempDir()+"/state.json", fixtureRules{})
+			at := time.Date(2026, 8, 12, 6, 0, 0, 0, time.UTC)
+			process := ProcessIdentity{PID: 171, StartIdentity: "boot:171", Executable: "secondary"}
+			presence := PresenceLive
+
+			steps := append([]step{hook("session_start", ActivityIdle)}, test.steps...)
+
+			var session Session
+
+			for _, current := range steps {
+				at = at.Add(current.after)
+
+				var evidence Evidence = &Report{
+					Reporter: Reporter{Integration: "secondary-extension"},
+					Event:    current.event,
+					Claim:    &presence,
+					Activity: &current.activity,
+					Process:  &process,
+				}
+				if current.terminal {
+					evidence = (*Reading)(&ScreenObservation{
+						Activity:   current.activity,
+						Detail:     current.detail,
+						Authority:  AuthorityTerminal,
+						Reason:     "program_status",
+						Process:    process,
+						ObservedAt: at,
+					})
+				}
+
+				var err error
+
+				session, err = store.Observe(context.Background(), Observation{
+					Harness:  harnessSecondary,
+					At:       at,
+					Subject:  ObservationIdentity{SessionID: "terminal-order"},
+					Evidence: evidence,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if session.Activity() == nil || *session.Activity() != test.activity ||
+				session.Decision() == nil || session.Decision().Authority != test.authority {
+				t.Fatalf("activity = %v by %#v, want %s by %s",
+					session.Activity(), session.Decision(), test.activity, test.authority)
+			}
+
+			if test.detail != "" && (session.Detail == nil || session.Detail.Value != test.detail ||
+				session.Detail.Quality != DetailQualityCurrent) {
+				t.Fatalf("detail = %#v, want current %s", session.Detail, test.detail)
+			}
+		})
+	}
+}

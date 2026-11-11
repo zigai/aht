@@ -107,7 +107,9 @@ func (s *Session) resolveDetail(policy Policy, now time.Time) {
 
 	if evidence != nil && evidence.Value.ValidFor(*activity) {
 		detail.Value, detail.ObservedAt, detail.Quality = evidence.Value, evidence.ObservedAt, DetailQualityCurrent
-		if invalidHookTimeReason(evidence.ObservedAt, now) != "" {
+		// A terminal record is the program's standing state, so it does not age.
+		if decision.Authority != AuthorityTerminal &&
+			invalidHookTimeReason(evidence.ObservedAt, now) != "" {
 			detail.Quality = DetailQualityStale
 		}
 	}
@@ -123,17 +125,22 @@ func (s Session) selectedDetail(
 	switch authority {
 	case AuthorityHook:
 		return s.matchingNativeDetail(policy), policy.Details.Native
-	case AuthorityScreen:
+	case AuthorityScreen, AuthorityTerminal:
+		support := policy.Details.Screen
+		if authority == AuthorityTerminal {
+			support = DetailSupport{Permission: true, Question: true, UsageLimit: false}
+		}
+
 		screen := s.Observations.Screen
 		if screen != nil && screen.Process.Equal(*s.Process) && screen.Activity == activity &&
 			screen.Detail != "" {
 			return &DetailEvidence{
 				Value:      screen.Detail,
 				ObservedAt: screen.ObservedAt,
-			}, policy.Details.Screen
+			}, support
 		}
 
-		return nil, policy.Details.Screen
+		return nil, support
 	case AuthorityProcess:
 		return nil, DetailSupport{}
 	}

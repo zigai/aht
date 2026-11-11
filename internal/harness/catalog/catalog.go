@@ -403,6 +403,16 @@ func PrepareObservation(observation registry.Observation) registry.Observation {
 	return WithResumeCommand(observation)
 }
 
+// ProgramStatusApp returns the app name the harness reports in its OSC 7501
+// records, or "" when its records are not used.
+func ProgramStatusApp(id registry.Harness) string {
+	if adapter, ok := Find(id); ok {
+		return adapter.Definition().ProgramStatusApp
+	}
+
+	return ""
+}
+
 func DetailCapabilitiesFor(id registry.Harness) registry.DetailCapabilities {
 	if adapter, ok := Find(id); ok {
 		return adapter.Definition().DetailCapabilities

@@ -5,7 +5,10 @@ package tmux
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,7 +16,9 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -211,5 +216,151 @@ func TestCapturePanesMatchesEachPaneAcrossServers(t *testing.T) {
 		}
 
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestListPanesReadsProgramStatus(t *testing.T) {
+	server := testtmux.New(t, gotmux.NewSessionOptions{
+		Name: "program-status",
+		Program: gotmux.Exec(
+			"sh", "-c",
+			`printf '\033]7501;state=blocked:kind=permission:id=child:app=other\033\\'; `+
+				`printf '\033]7501;state=working:app=demo\033\\'; sleep 60`,
+		),
+	})
+
+	if !programStatusSupported(t, server) {
+		t.Skip("this tmux keeps no OSC 7501 program status records")
+	}
+
+	want := mux.ProgramStatus{App: "demo", State: mux.ProgramStateWorking, Kind: ""}
+	deadline := time.Now().Add(3 * time.Second)
+
+	for {
+		panes, err := ListPanesWithOptions(t.Context(), ListOptions{
+			Processes:   []processinfo.Process{},
+			SocketPaths: []string{server.Socket},
+		})
+		if err != nil || len(panes) != 1 {
+			t.Fatalf("list panes = %#v, %v", panes, err)
+		}
+
+		if got := panes[0].ToMuxPane().Program; got != nil && *got == want {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("program status = %#v, want %#v", panes[0].Program, want)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func programStatusSupported(t *testing.T, server *testtmux.Server) bool {
+	t.Helper()
+
+	return exec.CommandContext(
+		t.Context(), testtmux.Executable(t),
+		"-S", server.Socket, "show-hooks", "-g", programStatusHook,
+	).Run() == nil
+}
+
+func TestWatchProgramStatusDeliversStateAndKindChanges(t *testing.T) {
+	server := testtmux.New(t, gotmux.NewSessionOptions{
+		Name:    "program-status-watch",
+		Program: gotmux.Exec("sleep", "60"),
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	changes := make(chan []mux.Pane, 16)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- WatchProgramStatus(ctx, server.Socket, func(panes []mux.Pane) { changes <- panes })
+	}()
+
+	if !programStatusSupported(t, server) {
+		if err := <-done; !errors.Is(err, mux.ErrProgramStatusUnsignaled) {
+			t.Fatalf("watch on a tmux without program status = %v", err)
+		}
+
+		return
+	}
+
+	var panes []mux.Pane
+
+	select {
+	case panes = <-changes:
+	case err := <-done:
+		t.Fatalf("watch ended with %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watch delivered no panes after it was set")
+	}
+
+	if len(panes) != 1 || panes[0].Program != nil {
+		t.Fatalf("panes of the watched server = %#v", panes)
+	}
+
+	tty, err := os.OpenFile(panes[0].Location.PaneTTY, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if err := tty.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	report := func(record string) []mux.ProgramStatus {
+		t.Helper()
+
+		if _, err := tty.WriteString("\x1b]7501;" + record + "\x1b\\"); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+
+		delivered := make([]mux.ProgramStatus, 0, len(changes))
+
+		for range len(changes) {
+			status := mux.ProgramStatus{}
+			if program := (<-changes)[0].Program; program != nil {
+				status = *program
+			}
+
+			delivered = append(delivered, status)
+		}
+
+		return delivered
+	}
+
+	working := mux.ProgramStatus{App: "demo", State: mux.ProgramStateWorking, Kind: ""}
+	permission := mux.ProgramStatus{App: "demo", State: mux.ProgramStateBlocked, Kind: "permission"}
+	question := mux.ProgramStatus{App: "demo", State: mux.ProgramStateBlocked, Kind: "question"}
+
+	for _, step := range []struct {
+		record string
+		want   []mux.ProgramStatus
+	}{
+		{record: "state=working:app=demo", want: []mux.ProgramStatus{working}},
+		{record: "state=working:app=demo:msg=aGVsbG8=", want: nil},
+		{record: "state=blocked:kind=permission:id=child:app=demo", want: nil},
+		{record: "state=blocked:kind=permission:app=demo", want: []mux.ProgramStatus{permission}},
+		{record: "state=blocked:kind=question:app=demo", want: []mux.ProgramStatus{question}},
+		{record: "state=clear", want: []mux.ProgramStatus{{}}},
+	} {
+		if got := report(step.record); !slices.Equal(got, step.want) {
+			t.Fatalf("records delivered after %q = %v, want %v", step.record, got, step.want)
+		}
+	}
+
+	cancel()
+
+	if err := <-done; err != nil {
+		t.Fatalf("watch ended with %v", err)
 	}
 }

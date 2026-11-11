@@ -15,6 +15,12 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+const (
+	programStateField = "program_state"
+	programAppField   = "program_name"
+	programKindField  = "program_kind"
+)
+
 var (
 	// ErrNotInTmux is returned when no tmux environment is available.
 	ErrNotInTmux         = errors.New("not inside tmux")
@@ -25,6 +31,10 @@ type Pane struct {
 	Location registry.Location
 	PanePID  int
 	PaneTTY  string
+	// Program is the pane's own OSC 7501 record. Servers that do not keep
+	// program status records leave it nil.
+	//exhaustruct:optional
+	Program *mux.ProgramStatus
 }
 
 type Env struct {
@@ -70,6 +80,7 @@ func (p Pane) ToMuxPane() mux.Pane {
 		Title:       "",
 		Activity:    nil,
 		StateReason: "",
+		Program:     p.Program,
 	}
 }
 
@@ -342,6 +353,29 @@ func paneFromGotmux(p gotmux.PaneInfo, fallbackIdentity string) Pane {
 		},
 		PanePID: p.PID,
 		PaneTTY: p.TTY,
+		Program: programStatus(p),
+	}
+}
+
+func programStatusFields() []string {
+	return []string{programStateField, programAppField, programKindField}
+}
+
+func programStatus(p gotmux.PaneInfo) *mux.ProgramStatus {
+	// tmux expands a variable it does not know to an empty string, so a server
+	// without program status support reports no record.
+	state, _ := p.Raw(programStateField)
+	if len(state) == 0 {
+		return nil
+	}
+
+	app, _ := p.Raw(programAppField)
+	kind, _ := p.Raw(programKindField)
+
+	return &mux.ProgramStatus{
+		App:   string(app),
+		State: mux.ProgramState(state),
+		Kind:  string(kind),
 	}
 }
 
@@ -356,7 +390,7 @@ func queryServerPanesGotmux(ctx context.Context, server serverSpec) ([]Pane, err
 		return nil, fmt.Errorf("init tmux server: %w", err)
 	}
 
-	paneInfos, err := s.Panes(ctx)
+	paneInfos, err := s.PanesWith(ctx, gotmux.QueryOptions{ExtraFields: programStatusFields()})
 	if err != nil {
 		return nil, fmt.Errorf("list panes: %w", err)
 	}

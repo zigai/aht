@@ -309,6 +309,7 @@ linters:
         - "^github\\.com/zigai/gotmux/tmux\\.Config$"
         - "^github\\.com/zigai/gotmux/tmux\\.CaptureOptions$"
         - "^github\\.com/zigai/gotmux/tmux\\.NewSessionOptions$"
+        - "^github\\.com/zigai/gotmux/tmux\\.QueryOptions$"
         - "^github\\.com/zigai/gotmux/tmux\\.RespawnOptions$"
         - "^github\\.com/jedib0t/go-pretty/v6/table\\.ColumnConfig$"
         - "^golang\\.org/x/sys/unix\\.PollFd$"

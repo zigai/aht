@@ -10,6 +10,8 @@ const (
 	harnessShared    Harness = "shared"
 )
 
+const heldTurnEvent = "turn_end"
+
 type fixtureRules struct{ authority Authority }
 
 func (fixtureRules) SamePane(a Location, b Location) bool { return !a.Empty() && a == b }
@@ -33,5 +35,6 @@ func (r fixtureRules) Policy(id Harness) Policy {
 		Authority:        authority,
 		ScreenFallback:   true,
 		CatalogCreates:   id == harnessCatalog,
+		HeldTurnEvents:   []string{heldTurnEvent},
 	}
 }

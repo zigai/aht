@@ -27,6 +27,7 @@ func (Rules) Policy(id registry.Harness) registry.Policy {
 			RetainNativeActivity: false,
 			Reporter:             "",
 			CatalogCreates:       false,
+			HeldTurnEvents:       nil,
 			Details: registry.DetailCapabilities{
 				Native: registry.DetailSupport{
 					Permission: false,
@@ -50,6 +51,7 @@ func (Rules) Policy(id registry.Harness) registry.Policy {
 		RetainNativeActivity: definition.RetainNativeActivity,
 		Reporter:             definition.IntegrationSource,
 		CatalogCreates:       definition.CatalogCreates,
+		HeldTurnEvents:       definition.HeldTurnEvents,
 	}
 }
 

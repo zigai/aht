@@ -59,6 +59,7 @@ func New() ompHarness {
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ompIntegrationSourceID,
 		StateAuthority:     registry.AuthorityHook,
+		ProgramStatusApp:   "omp",
 		ScreenFallback:     true,
 	})}
 }

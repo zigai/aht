@@ -12,12 +12,14 @@ import (
 )
 
 var (
-	_ mux.Driver        = (*Driver)(nil)
-	_ mux.Interrupter   = (*Driver)(nil)
-	_ mux.BatchCapturer = (*Driver)(nil)
+	_ mux.Driver               = (*Driver)(nil)
+	_ mux.Interrupter          = (*Driver)(nil)
+	_ mux.BatchCapturer        = (*Driver)(nil)
+	_ mux.ProgramStatusWatcher = (*Driver)(nil)
 )
 
-// Driver implements [mux.Driver], [mux.Interrupter] and [mux.BatchCapturer] for tmux.
+// Driver implements [mux.Driver], [mux.Interrupter], [mux.BatchCapturer], and
+// [mux.ProgramStatusWatcher] for tmux.
 type Driver struct {
 	LookPath func(string) (string, error)
 }
@@ -124,4 +126,12 @@ func (d Driver) SamePane(a registry.Location, b registry.Location) bool {
 
 func (d Driver) SendInterrupt(ctx context.Context, serverIdentity string, paneID string) error {
 	return SendInterruptTo(ctx, serverIdentity, paneID)
+}
+
+func (d Driver) WatchProgramStatus(
+	ctx context.Context,
+	serverIdentity string,
+	changed func([]mux.Pane),
+) error {
+	return WatchProgramStatus(ctx, serverIdentity, changed)
 }

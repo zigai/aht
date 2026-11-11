@@ -253,9 +253,11 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 	if native := session.Observations.Native; native != nil && native.Activity != nil {
 		reportedActivity = string(*native.Activity)
 
-		authoritative = "yes"
-		if (catalog.Rules{}).Policy(session.Harness).Authority == registry.AuthorityScreen {
-			authoritative = "no"
+		authoritative = "no"
+
+		policy := (catalog.Rules{}).Policy(session.Harness)
+		if policy.Authority == registry.AuthorityHook && !terminalDecides(session) {
+			authoritative = "yes"
 		}
 	}
 
@@ -279,4 +281,10 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 			},
 		},
 	)
+}
+
+func terminalDecides(session registry.Session) bool {
+	decision := session.Decision()
+
+	return decision != nil && decision.Authority == registry.AuthorityTerminal
 }
