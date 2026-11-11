@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -4332,4 +4333,44 @@ func (c Catalog) runDirect(ctx context.Context, s *search) (Result, error) {
 	err = s.runDirect(ctx, sources)
 
 	return s.finalize(ctx), err
+}
+
+type statFileInfo struct {
+	os.FileInfo
+
+	stat *syscall.Stat_t
+}
+
+func (info statFileInfo) Sys() any { return info.stat }
+
+func TestFileStampSurvivesDeviceRenumbering(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("platform has no stat_t")
+	}
+
+	renumbered := *stat
+	renumbered.Dev++
+
+	before := stampFile(info)
+	if after := stampFile(statFileInfo{FileInfo: info, stat: &renumbered}); before != after {
+		t.Fatalf("stamp changed with device number: %q != %q", before, after)
+	}
+
+	replaced := *stat
+	replaced.Ino++
+
+	if before == stampFile(statFileInfo{FileInfo: info, stat: &replaced}) {
+		t.Fatal("stamp ignored a replaced file")
+	}
 }
