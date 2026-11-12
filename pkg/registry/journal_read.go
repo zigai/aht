@@ -129,7 +129,7 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 }
 
 // acceptSnapshotLocked installs candidate. Only consumer-visible changes
-// advance the public revision and schedule a prompt snapshot write.
+// advance the public revision and schedule a snapshot write.
 func (s *MemoryStore) acceptSnapshotLocked(candidate snapshot, changes []Change) {
 	s.snapshot = candidate
 	s.storageRevision++
@@ -143,6 +143,15 @@ func (s *MemoryStore) acceptSnapshotLocked(candidate snapshot, changes []Change)
 	close(s.stateChanged)
 	s.stateChanged = make(chan struct{})
 	s.signalDirty()
+}
+
+func (s *MemoryStore) acceptUnjournaledLocked(candidate snapshot, changes []Change) {
+	s.acceptSnapshotLocked(candidate, changes)
+
+	if len(changes) > 0 {
+		// Replaying the journal does not reproduce these changes.
+		s.unjournaledRevision = s.storageRevision
+	}
 }
 
 func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalResult, error) {
@@ -230,6 +239,9 @@ func (s *MemoryStore) commandLocked(
 			State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
 			State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
 		)
+		s.acceptUnjournaledLocked(candidate, result.changes)
+
+		return result, nil
 	}
 
 	s.acceptSnapshotLocked(candidate, result.changes)

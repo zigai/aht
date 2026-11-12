@@ -515,7 +515,7 @@ func TestHeartbeatObservationsDoNotJournalOrRewriteSnapshot(t *testing.T) {
 			time.Sleep(300 * time.Millisecond)
 		}
 
-		time.Sleep(2 * defaultPersistenceMaxDelay)
+		time.Sleep(defaultVisiblePersistInterval)
 		synctest.Wait()
 
 		assertNoPersistence(t, store, path, snapshotBefore, journalBefore, stateBefore.Revision)
@@ -543,6 +543,37 @@ func TestHeartbeatObservationsDoNotJournalOrRewriteSnapshot(t *testing.T) {
 		}
 
 		assertPersistedRunning(t, path, "native-visible")
+
+		// The next visible change stays in the journal until the interval ends.
+		checkpoint := markFile(t, path)
+		idle := ActivityIdle
+
+		if _, err := store.Observe(
+			t.Context(),
+			Observation{
+				Harness:  harnessPrimary,
+				At:       at.Add(2 * time.Second),
+				Subject:  ObservationIdentity{SessionID: "native-visible"},
+				Evidence: &Report{Event: "agent_end", Activity: &idle, Process: &process},
+			},
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		synctest.Wait()
+		time.Sleep(defaultPersistenceMaxDelay)
+		synctest.Wait()
+
+		if markFile(t, path) != checkpoint {
+			t.Fatal("visible change rewrote the snapshot inside the interval")
+		}
+
+		time.Sleep(defaultVisiblePersistInterval)
+		synctest.Wait()
+
+		if markFile(t, path) == checkpoint {
+			t.Fatal("visible change was not checkpointed after the interval")
+		}
 	})
 }
 

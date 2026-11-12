@@ -419,6 +419,10 @@ func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 		time.Sleep(3 * time.Second)
 		synctest.Wait()
 
+		if err := store.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+
 		snapshot := statIdentity(t, path)
 		journal := statIdentity(t, path+".journal.jsonl")
 		health := statIdentity(t, path+".observer-health.json")

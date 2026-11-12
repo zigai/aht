@@ -253,7 +253,7 @@ func (s *MemoryStore) refreshDetailsLocked() {
 	}
 
 	if len(changes) > 0 {
-		s.acceptSnapshotLocked(candidate, changes)
+		s.acceptUnjournaledLocked(candidate, changes)
 	}
 }
 

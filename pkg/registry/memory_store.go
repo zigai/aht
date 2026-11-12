@@ -15,6 +15,9 @@ const (
 	// checkpoint; a wide window bounds full rewrites under constant hook traffic.
 	defaultPersistenceSettle   = 500 * time.Millisecond
 	defaultPersistenceMaxDelay = 2 * time.Second
+	// defaultVisiblePersistInterval spaces snapshot rewrites while visible
+	// changes keep arriving; the journal already holds each of them.
+	defaultVisiblePersistInterval = 10 * time.Second
 	// defaultBackgroundPersistInterval bounds how long state that consumers
 	// cannot see, such as refreshed evidence timestamps, stays memory-only.
 	defaultBackgroundPersistInterval = time.Minute
@@ -61,12 +64,14 @@ type MemoryStore struct {
 	snapshot     snapshot
 	revision     uint64
 	// storageRevision counts every in-memory change. visibleRevision is the
-	// storageRevision of the latest consumer-visible change; only those
-	// schedule a prompt snapshot write.
+	// storageRevision of the latest consumer-visible change, and
+	// unjournaledRevision of the latest one that only a snapshot can persist.
 	storageRevision           uint64
 	visibleRevision           uint64
+	unjournaledRevision       uint64
 	persistedRevision         uint64
 	persistedAt               time.Time
+	visiblePersistInterval    time.Duration
 	backgroundPersistInterval time.Duration
 	stateChanged              chan struct{}
 	owner                     *storeLock
@@ -132,8 +137,10 @@ func OpenMemoryStoreWithOptions(
 		revision:                  1,
 		storageRevision:           1,
 		visibleRevision:           1,
+		unjournaledRevision:       0,
 		persistedRevision:         0,
 		persistedAt:               time.Time{},
+		visiblePersistInterval:    defaultVisiblePersistInterval,
 		backgroundPersistInterval: defaultBackgroundPersistInterval,
 		stateChanged: make(
 			chan struct{},
@@ -399,12 +406,12 @@ func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
 	return result.reset, s.Flush(ctx)
 }
 
-// RunPersistence coalesces bursts of consumer-visible changes into durable
-// atomic snapshots and expires tombstones. Evidence-only refreshes, such as
-// observer heartbeats, are neither journaled nor written promptly; they are
-// persisted with the next visible change, on a slow background interval, or on
-// shutdown. The caller owns this loop and must cancel ctx before discarding the
-// store.
+// RunPersistence writes consumer-visible changes as durable atomic snapshots
+// at most once per visible interval and expires tombstones. Evidence-only
+// refreshes, such as observer heartbeats, are neither journaled nor written
+// promptly; they are persisted with the next snapshot, on a slow background
+// interval, or on shutdown. The caller owns this loop and must cancel ctx
+// before discarding the store.
 func (s *MemoryStore) RunPersistence(ctx context.Context) error {
 	for {
 		select {
@@ -453,8 +460,8 @@ func (s *MemoryStore) stateLocked(filter Filter) StateSnapshot {
 }
 
 // persist checkpoints the snapshot and truncates the journal. Unless force is
-// set, it writes only after a consumer-visible change or, for evidence-only
-// refreshes, once the background interval has elapsed since the last write.
+// set or the journal lacks a visible change, it writes only once the visible
+// interval, or for evidence-only refreshes the background interval, has elapsed.
 func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 	select {
 	case s.flush <- struct{}{}:
@@ -504,11 +511,16 @@ func (s *MemoryStore) persistDueLocked(force bool) bool {
 		return false
 	}
 
-	if force || s.visibleRevision > s.persistedRevision {
+	if force || s.unjournaledRevision > s.persistedRevision {
 		return true
 	}
 
-	return time.Since(s.persistedAt) >= s.backgroundPersistInterval
+	interval := s.backgroundPersistInterval
+	if s.visibleRevision > s.persistedRevision {
+		interval = s.visiblePersistInterval
+	}
+
+	return time.Since(s.persistedAt) >= interval
 }
 
 func (s *MemoryStore) expireTombstonesLocked() {
@@ -523,7 +535,7 @@ func (s *MemoryStore) expireTombstonesLocked() {
 		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
 		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
 	)
-	s.acceptSnapshotLocked(candidate, changes)
+	s.acceptUnjournaledLocked(candidate, changes)
 }
 
 func validateNativePayloadChanges(previous snapshot, candidate snapshot) error {
