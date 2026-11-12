@@ -1438,7 +1438,6 @@ func (writer *indexWriter) finish(c Conversation) {
 // writer must retain the same identity.
 func (checkpoint indexCheckpoint) resumable(writer *indexWriter, info os.FileInfo) bool {
 	return checkpoint.Complete && checkpoint.Size > 0 && checkpoint.Size <= info.Size() &&
-		(checkpoint.Size < info.Size() || len(checkpoint.HeaderSizes) > 0) &&
 		slices.Equal(checkpoint.HeaderSizes, writer.checkpoint.HeaderSizes) &&
 		checkpoint.Identity == writer.checkpoint.Identity && checkpoint.Extra == writer.checkpoint.Extra
 }

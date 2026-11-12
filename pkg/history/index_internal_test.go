@@ -1391,6 +1391,7 @@ func TestIndexMatchesGeneratedMutationHistories(t *testing.T) {
 			"restore",
 			"tail",
 			"same-size",
+			"touch",
 			"move-tree",
 			"remove-tree",
 		}),
@@ -1822,6 +1823,7 @@ func mutateGeneratedHistoryPath(
 		if err := root.RemoveAll(parent); err != nil {
 			property.Fatal(err)
 		}
+	case "touch":
 	default:
 		if err := root.MkdirAll(parent, 0o700); err != nil {
 			property.Fatal(err)
