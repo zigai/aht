@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,7 +17,10 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-const realtimeComponentCount = 4
+const (
+	realtimeComponentCount = 4
+	trackerGCPercent       = 400
+)
 
 var errObserverRunDegraded = errors.New("observer reconciliation degraded")
 
@@ -184,6 +188,10 @@ func (app *application) runRealtimeObserver(
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// The tracker's heap is small, so collecting less often trades a few
+	// megabytes for a quarter of its CPU.
+	defer debug.SetGCPercent(debug.SetGCPercent(trackerGCPercent))
 
 	results := make(chan trackerComponentResult, realtimeComponentCount)
 	run := func(name string, operation func() error) {
