@@ -258,15 +258,12 @@ func journalWorthy(entry journalEntry, result journalResult) bool {
 func (s *MemoryStore) journalBaseline() (snapshot, error) {
 	baseline := s.snapshot
 
-	data, err := readSnapshotFile(s.path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	sequence, err := s.checkpointSequence()
+	if err != nil {
 		return snapshot{}, err
 	}
 
-	var header struct {
-		Sequence uint64 `json:"journal_sequence"`
-	}
-	if json.Unmarshal(data, &header) == nil && header.Sequence > baseline.JournalSequence {
+	if sequence > baseline.JournalSequence {
 		// Only reset can publish a checkpoint ahead of the live owner's memory.
 		baseline, err = NewFileStore(s.path, s.reducer.rules).loadSnapshot()
 		if err != nil {
@@ -275,4 +272,37 @@ func (s *MemoryStore) journalBaseline() (snapshot, error) {
 	}
 
 	return baseline, nil
+}
+
+func (s *MemoryStore) checkpointSequence() (uint64, error) {
+	info, statErr := registryFSFor(s.path).Lstat(s.path)
+	if statErr == nil && s.checkpoint.describes(info) {
+		return s.checkpoint.sequence, nil
+	}
+
+	data, err := readSnapshotFile(s.path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+
+	var header struct {
+		Sequence uint64 `json:"journal_sequence"`
+	}
+	if json.Unmarshal(data, &header) != nil {
+		header.Sequence = 0
+	}
+
+	s.checkpoint = checkpointFile{info: nil, sequence: 0}
+	if statErr == nil && err == nil {
+		s.checkpoint = checkpointFile{info: info, sequence: header.Sequence}
+	}
+
+	return header.Sequence, nil
+}
+
+func (c checkpointFile) describes(info os.FileInfo) bool {
+	// Every checkpoint is a new file renamed into place, so an unchanged
+	// regular file still holds the sequence read from it.
+	return c.info != nil && info.Mode().IsRegular() && os.SameFile(c.info, info) &&
+		c.info.Size() == info.Size() && c.info.ModTime().Equal(info.ModTime())
 }

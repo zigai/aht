@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -71,6 +72,13 @@ type MemoryStore struct {
 	owner                     *storeLock
 	dirty                     chan struct{}
 	flush                     chan struct{}
+	//exhaustruct:optional
+	checkpoint checkpointFile
+}
+
+type checkpointFile struct {
+	info     os.FileInfo
+	sequence uint64
 }
 
 // OpenMemoryStore loads path once and returns an in-memory authoritative store
