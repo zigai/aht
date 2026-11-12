@@ -3,7 +3,6 @@
 package processinfo
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,11 +11,15 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
 	procRoot  = "/proc"
 	maxUint32 = int(^uint32(0))
+
+	processFileBufferSize = 4096
 )
 
 var (
@@ -33,7 +36,8 @@ var (
 )
 
 type linuxProcessReader struct {
-	environment bytes.Buffer
+	file []byte
+	link []byte
 }
 
 // List returns a complete best-effort snapshot of processes owned by the
@@ -174,14 +178,31 @@ func (r *linuxProcessReader) read(
 	envKeys []string,
 	includeEnv func(Process) bool,
 ) (Process, error) {
-	before, err := os.Stat(dir)
-	if err != nil {
+	var before unix.Stat_t
+	if err := statLinuxProcess(dir, &before); err != nil {
 		return Process{}, classifyProcessError(dir, err)
 	}
 
-	statPath := filepath.Join(dir, "stat")
+	euid := os.Geteuid()
+	if euid < 0 || euid > maxUint32 {
+		return Process{}, fmt.Errorf("%d: %w", euid, errInvalidEffectiveUserID)
+	}
 
-	data, err := os.ReadFile(statPath)
+	return r.readEntry(dir, pid, boot, &before, uint32(euid), envKeys, includeEnv)
+}
+
+func (r *linuxProcessReader) readEntry(
+	dir string,
+	pid int,
+	boot string,
+	before *unix.Stat_t,
+	uid uint32,
+	envKeys []string,
+	includeEnv func(Process) bool,
+) (Process, error) {
+	statPath := dir + "/stat"
+
+	data, err := r.readFile(statPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Process{}, fmt.Errorf("read process stat: %w", err)
@@ -197,62 +218,135 @@ func (r *linuxProcessReader) read(
 
 	info.PID = pid
 	info.StartIdentity = boot + ":" + info.StartIdentity
-	info.Executable = readLinuxLink(filepath.Join(dir, "exe"))
+	info.Executable = r.readLink(dir + "/exe")
 
-	info.CWD = readLinuxLink(filepath.Join(dir, "cwd"))
-	if tty := readLinuxLink(filepath.Join(dir, "fd", "0")); isLinuxTTY(tty) {
+	info.CWD = r.readLink(dir + "/cwd")
+	if tty := r.readLink(dir + "/fd/0"); isLinuxTTY(tty) {
 		info.TTY = tty
 	}
 
-	if args, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+	if args, err := r.readFile(dir + "/cmdline"); err == nil {
 		info.Args = splitLinuxArgs(args)
 	}
 
 	if len(envKeys) > 0 && (includeEnv == nil || includeEnv(info)) {
-		info.Env = r.readEnvironment(filepath.Join(dir, "environ"), envKeys)
+		info.Env = r.readEnvironment(dir+"/environ", envKeys)
 	}
 
-	after, err := os.Stat(dir)
-	if err != nil {
+	var after unix.Stat_t
+	if err := statLinuxProcess(dir, &after); err != nil {
 		return Process{}, classifyProcessError(dir, err)
 	}
 
-	if !sameOwnedLinuxProcess(before, after) {
+	if !sameOwnedLinuxProcess(before, &after, uid) {
 		return Process{}, fmt.Errorf("process identity changed at %s: %w", dir, os.ErrNotExist)
 	}
 
 	return info, nil
 }
 
-func sameOwnedLinuxProcess(before os.FileInfo, after os.FileInfo) bool {
-	owner, ok := after.Sys().(*syscall.Stat_t)
+func sameOwnedLinuxProcess(before *unix.Stat_t, after *unix.Stat_t, uid uint32) bool {
+	return before.Dev == after.Dev && before.Ino == after.Ino && after.Uid == uid
+}
 
-	return os.SameFile(before, after) && ok && int(owner.Uid) == os.Geteuid()
+func statLinuxProcess(dir string, stat *unix.Stat_t) error {
+	for {
+		err := unix.Stat(dir, stat)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, unix.EINTR) {
+			return &os.PathError{Op: "stat", Path: dir, Err: err}
+		}
+	}
 }
 
 func (r *linuxProcessReader) readEnvironment(path string, keys []string) map[string]string {
-	r.environment.Reset()
-
-	file, err := os.Open(path)
+	data, err := r.readFile(path)
 	if err != nil {
 		return nil
 	}
-	defer func() { _ = file.Close() }()
 
-	if _, err := r.environment.ReadFrom(file); err != nil {
-		return nil
-	}
-
-	return parseEnvironment(r.environment.Bytes(), keys)
+	return parseEnvironment(data, keys)
 }
 
-func readLinuxLink(path string) string {
-	link, err := os.Readlink(path)
+func (r *linuxProcessReader) readFile(path string) ([]byte, error) {
+	fd, err := openLinuxProcessFile(path)
 	if err != nil {
-		return ""
+		return nil, err
 	}
 
-	return link
+	// Closing a read-only process file has no pending writes to finalize.
+	defer func() { _ = unix.Close(fd) }()
+
+	if r.file == nil {
+		r.file = make([]byte, 0, processFileBufferSize)
+	}
+
+	data := r.file[:0]
+
+	for {
+		if len(data) == cap(data) {
+			data = append(data, 0)[:len(data)]
+		}
+
+		n, readErr := unix.Read(fd, data[len(data):cap(data)])
+		if errors.Is(readErr, unix.EINTR) {
+			continue
+		}
+
+		if readErr != nil {
+			return nil, &os.PathError{Op: "read", Path: path, Err: readErr}
+		}
+
+		if n <= 0 {
+			break
+		}
+
+		data = data[:len(data)+n]
+	}
+
+	// The next read reuses this buffer, so callers copy what they keep.
+	r.file = data[:0]
+
+	return data, nil
+}
+
+func openLinuxProcessFile(path string) (int, error) {
+	for {
+		fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err == nil {
+			return fd, nil
+		}
+
+		if !errors.Is(err, unix.EINTR) {
+			return -1, &os.PathError{Op: "open", Path: path, Err: err}
+		}
+	}
+}
+
+func (r *linuxProcessReader) readLink(path string) string {
+	if r.link == nil {
+		r.link = make([]byte, processFileBufferSize)
+	}
+
+	for {
+		n, err := unix.Readlink(path, r.link)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+
+		if err != nil || n < 0 {
+			return ""
+		}
+
+		if n < len(r.link) {
+			return string(r.link[:n])
+		}
+
+		r.link = make([]byte, len(r.link)+processFileBufferSize)
+	}
 }
 
 func isLinuxTTY(path string) bool {
@@ -299,18 +393,22 @@ func listLinuxProcessEntries(
 			continue
 		}
 
-		dir := filepath.Join(procRoot, entry.Name())
+		dir := procRoot + "/" + entry.Name()
 
-		owned, err := linuxProcessOwned(dir, uid)
-		if err != nil {
-			return nil, err
+		var before unix.Stat_t
+		if err := statLinuxProcess(dir, &before); err != nil {
+			if isLinuxNotExist(err) {
+				continue
+			}
+
+			return nil, classifyProcessError(dir, err)
 		}
 
-		if !owned {
+		if before.Uid != uid {
 			continue
 		}
 
-		process, err := reader.read(dir, pid, boot, envKeys, includeEnv)
+		process, err := reader.readEntry(dir, pid, boot, &before, uid, envKeys, includeEnv)
 		if err != nil {
 			if isLinuxProcessExited(dir, pid, err) {
 				continue
@@ -323,21 +421,6 @@ func listLinuxProcessEntries(
 	}
 
 	return processes, nil
-}
-
-func linuxProcessOwned(dir string, uid uint32) (bool, error) {
-	info, err := os.Stat(dir)
-	if err != nil {
-		if isLinuxNotExist(err) {
-			return false, nil
-		}
-
-		return false, classifyProcessError(dir, err)
-	}
-
-	stat, ok := info.Sys().(*syscall.Stat_t)
-
-	return ok && stat.Uid == uid, nil
 }
 
 func parseLinuxStat(stat string) (Process, error) {
