@@ -3,6 +3,7 @@ package agentstate
 import (
 	"errors"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,28 @@ import (
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
+
+//nolint:gocritic // reason: intentional ANSI byte ranges in the regression oracle.
+var historicalEscapePattern = regexp.MustCompile(
+	`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\a\x1b]*(?:\a|\x1b\\)|)`,
+)
+
+func FuzzStripEscapesFollowsHistoricalPattern(f *testing.F) {
+	f.Add("\x1b[31mworking\x1b[0m\nline")
+	f.Add("\x1b]0;codex\a\x1b]0;codex\x1b\\")
+	f.Add("\x1b[\x1b[31m31m")
+	f.Add("\x1b]open\x1b[ 1\xff")
+	f.Fuzz(func(t *testing.T, text string) {
+		if got, want := stripEscapes(
+			text,
+		), historicalEscapePattern.ReplaceAllString(
+			text,
+			"",
+		); got != want {
+			t.Fatalf("stripEscapes(%q) = %q, historical pattern gives %q", text, got, want)
+		}
+	})
+}
 
 func FuzzNormalizeSnapshotBounded(f *testing.F) {
 	f.Add("\x1b[31mworking\x1b[0m\nline", "\x1b]0;codex\a")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -20,10 +19,7 @@ const (
 	ReasonNoRuleMatched = "no_rule_matched"
 )
 
-// CSI parameter, intermediate, and final bytes use their standard ASCII ranges.
-var ansiEscapePattern = regexp.MustCompile(
-	`\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][^\a\x1b]*(?:\a|\x1b\\)|)`,
-)
+const escapeByte = 0x1b
 
 // ErrManifestOptions reports conflicting explicit and ambient manifest sources.
 var ErrManifestOptions = errors.New("manifest path and config directory cannot be used together")
@@ -145,10 +141,87 @@ func InspectScreen(
 }
 
 func NormalizeSnapshot(text string, title string) Snapshot {
-	text = ansiEscapePattern.ReplaceAllString(text, "")
-	lines := mux.BoundBottomLines(text, maxSnapshotLines)
+	lines := mux.BoundBottomLines(stripEscapes(text), maxSnapshotLines)
 
-	return Snapshot{Lines: lines, Title: ansiEscapePattern.ReplaceAllString(title, "")}
+	return Snapshot{Lines: lines, Title: stripEscapes(title)}
+}
+
+func stripEscapes(text string) string {
+	start := strings.IndexByte(text, escapeByte)
+	if start < 0 {
+		return text
+	}
+
+	var stripped strings.Builder
+
+	stripped.Grow(len(text))
+
+	for start >= 0 {
+		stripped.WriteString(text[:start])
+		text = text[start+escapeLength(text[start:]):]
+		start = strings.IndexByte(text, escapeByte)
+	}
+
+	stripped.WriteString(text)
+
+	return stripped.String()
+}
+
+func escapeLength(text string) int {
+	const introducerLength = 2
+	if len(text) < introducerLength {
+		return 1
+	}
+
+	length := 0
+
+	switch text[1] {
+	case '[':
+		length = controlSequenceEnd(text, introducerLength)
+	case ']':
+		length = operatingSystemCommandEnd(text, introducerLength)
+	}
+
+	// A sequence that lacks its final byte or terminator is left in place and
+	// only its escape byte is removed.
+	return max(length, 1)
+}
+
+func controlSequenceEnd(text string, start int) int {
+	// CSI parameter, intermediate, and final bytes use their standard ASCII ranges.
+	end := start
+	for end < len(text) && text[end] >= 0x30 && text[end] <= 0x3f {
+		end++
+	}
+
+	for end < len(text) && text[end] >= 0x20 && text[end] <= 0x2f {
+		end++
+	}
+
+	if end < len(text) && text[end] >= 0x40 && text[end] <= 0x7e {
+		return end + 1
+	}
+
+	return 0
+}
+
+func operatingSystemCommandEnd(text string, start int) int {
+	const terminatorLength = 2
+
+	end := start
+	for end < len(text) && text[end] != '\a' && text[end] != escapeByte {
+		end++
+	}
+
+	if end < len(text) && text[end] == '\a' {
+		return end + 1
+	}
+
+	if end+1 < len(text) && text[end+1] == '\\' {
+		return end + terminatorLength
+	}
+
+	return 0
 }
 
 func (manifest *Manifest) Evaluate(snapshot Snapshot) Decision {

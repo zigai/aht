@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -1160,14 +1159,12 @@ func TestDefaultConfigDir(t *testing.T) {
 	})
 }
 
-func TestANSIEscapePatternPreservesIntermediateBytesAndMatches(t *testing.T) {
+func TestStripEscapesFollowsHistoricalPattern(t *testing.T) {
 	t.Parallel()
 	// Preserve the historical ANSI grammar as an independent equivalence oracle.
-	// The cases below compare accepted/rejected text and all capture indices,
-	// including every intermediate byte, empty input, Unicode, and newlines.
-	//nolint:gocritic // reason: intentional ANSI byte ranges in the regression oracle.
-	original := regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\a\x1b]*(?:\a|\x1b\\)|)`)
-	inputs := make([]string, 0, 266)
+	// The cases below cover every intermediate byte, empty input, Unicode,
+	// newlines, and sequences cut short by another escape or the end of input.
+	inputs := make([]string, 0, 280)
 	inputs = append(
 		inputs,
 		"",
@@ -1180,6 +1177,19 @@ func TestANSIEscapePatternPreservesIntermediateBytesAndMatches(t *testing.T) {
 		"\x1b]0;title\x1b\\",
 		"\x1b[é",
 		"\x1b[\n",
+		"\x1b[",
+		"\x1b]",
+		"\x1b[31",
+		"\x1b[31 ",
+		"\x1b[31\x1b[0m",
+		"\x1b[ 1m",
+		"\x1b]0;open",
+		"\x1b]0;open\x1b",
+		"\x1b]0;open\x1bx",
+		"\x1b]0;é\n\xff\a",
+		"\x1b\x1b\x1b[m",
+		"\x1b\\",
+		"tail\x1b",
 	)
 
 	for value := range 256 {
@@ -1187,16 +1197,14 @@ func TestANSIEscapePatternPreservesIntermediateBytesAndMatches(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		if diff := cmp.Diff(original.FindAllStringSubmatchIndex(input,
-			-1),
-			ansiEscapePattern.FindAllStringSubmatchIndex(input,
-				-1)); diff != "" {
-			t.Fatalf("escape match boundaries and captures changed for %q: %s", input, diff)
+		if got, want := stripEscapes(
+			input,
+		), historicalEscapePattern.ReplaceAllString(
+			input,
+			"",
+		); got != want {
+			t.Fatalf("stripEscapes(%q) = %q, historical pattern gives %q", input, got, want)
 		}
-	}
-
-	if ansiEscapePattern.NumSubexp() != 0 {
-		t.Fatal("unexpected capture groups")
 	}
 }
 
