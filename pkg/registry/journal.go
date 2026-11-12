@@ -280,6 +280,13 @@ func readJournal(path string) ([]decodedJournalEntry, error) {
 		return nil, fmt.Errorf("reading journal: %w", err)
 	}
 
+	entries, _, err := decodeJournal(data)
+
+	return entries, err
+}
+
+// decodeJournal decodes the complete lines of data and returns their length.
+func decodeJournal(data []byte) ([]decodedJournalEntry, int, error) {
 	var entries []decodedJournalEntry
 
 	data = data[:bytes.LastIndexByte(data, '\n')+1]
@@ -290,13 +297,13 @@ func readJournal(path string) ([]decodedJournalEntry, error) {
 
 		entry, err := decodeJournalEntry(line)
 		if err != nil {
-			return nil, fmt.Errorf("%w: decoding journal: %w", ErrCorruptStore, err)
+			return nil, 0, fmt.Errorf("%w: decoding journal: %w", ErrCorruptStore, err)
 		}
 
 		entries = append(entries, entry)
 	}
 
-	return entries, nil
+	return entries, len(data), nil
 }
 
 func appendJournal(path string, entry journalEntry) error {

@@ -17,7 +17,7 @@ const (
 	defaultPersistenceMaxDelay = 2 * time.Second
 	// defaultVisiblePersistInterval spaces snapshot rewrites while visible
 	// changes keep arriving; the journal already holds each of them.
-	defaultVisiblePersistInterval = 10 * time.Second
+	defaultVisiblePersistInterval = 30 * time.Second
 	// defaultBackgroundPersistInterval bounds how long state that consumers
 	// cannot see, such as refreshed evidence timestamps, stays memory-only.
 	defaultBackgroundPersistInterval = time.Minute
@@ -79,11 +79,19 @@ type MemoryStore struct {
 	flush                     chan struct{}
 	//exhaustruct:optional
 	checkpoint checkpointFile
+	// journal is the end of the journal bytes already applied to snapshot.
+	//exhaustruct:optional
+	journal journalPosition
 }
 
 type checkpointFile struct {
 	info     os.FileInfo
 	sequence uint64
+}
+
+type journalPosition struct {
+	info   os.FileInfo
+	offset int64
 }
 
 // OpenMemoryStore loads path once and returns an in-memory authoritative store
@@ -496,7 +504,7 @@ func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
 	}
 
-	if err := persistJournalSnapshot(s.path, s.snapshot); err != nil {
+	if err := s.checkpointLocked(s.snapshot); err != nil {
 		return closeStoreLock(lock, err)
 	}
 

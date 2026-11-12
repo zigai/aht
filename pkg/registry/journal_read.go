@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -88,13 +89,17 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 		return err
 	}
 
-	entries, err := readJournal(s.path)
+	// A checkpoint ahead of memory replaces what this owner applied so far.
+	entries, position, err := s.unreadJournal(
+		baseline.JournalSequence != s.snapshot.JournalSequence,
+	)
 	if err != nil {
 		return err
 	}
 
 	if baseline.JournalSequence == s.snapshot.JournalSequence &&
 		(len(entries) == 0 || entries[len(entries)-1].Sequence <= baseline.JournalSequence) {
+		s.journal = position
 		return nil
 	}
 
@@ -110,9 +115,11 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 	if len(rejected) > 0 {
 		// Checkpoint the rejection's memory-only evidence before discarding its
 		// journal entry; a restart must not accept what this owner rejected.
-		if err := persistJournalSnapshot(s.path, candidate); err != nil {
+		if err := s.checkpointLocked(candidate); err != nil {
 			return err
 		}
+	} else {
+		s.journal = position
 	}
 
 	changes := stateChanges(
@@ -154,6 +161,98 @@ func (s *MemoryStore) acceptUnjournaledLocked(candidate snapshot, changes []Chan
 	}
 }
 
+func (s *MemoryStore) unreadJournal(whole bool) ([]decodedJournalEntry, journalPosition, error) {
+	path := journalPath(s.path)
+
+	info, err := registryFSFor(path).Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, journalPosition{info: nil, offset: 0}, nil
+	}
+
+	if err != nil {
+		return nil, journalPosition{}, fmt.Errorf("stating journal: %w", err)
+	}
+
+	position := journalPosition{info: info, offset: s.journal.offset}
+	// Appends keep the bytes before them; any other change starts a new journal.
+	if whole || s.journal.info == nil || !os.SameFile(s.journal.info, info) ||
+		info.Size() < position.offset {
+		position.offset = 0
+	}
+
+	if info.Size() == position.offset {
+		return nil, position, nil
+	}
+
+	data, err := readJournalFrom(path, position.offset)
+	if err != nil {
+		return nil, journalPosition{}, err
+	}
+
+	entries, length, err := decodeJournal(data)
+	position.offset += int64(length)
+
+	return entries, position, err
+}
+
+func readJournalFrom(path string, offset int64) ([]byte, error) {
+	file, err := registryFSFor(path).Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading journal: %w", err)
+	}
+	// Closing a read-only journal has no pending writes to finalize.
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("reading journal: %w", err)
+	}
+
+	if info.Size()-offset > maxSnapshotBytes {
+		return nil, fmt.Errorf("reading journal: %w", ErrStoreTooLarge)
+	}
+
+	data := make([]byte, max(info.Size()-offset, 0))
+
+	n, err := file.ReadAt(data, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("reading journal: %w", err)
+	}
+
+	return data[:n], nil
+}
+
+// journalWrittenLocked records that the whole journal is applied, which holds
+// after this owner appends to it or replaces it under the store lock.
+func (s *MemoryStore) journalWrittenLocked() error {
+	path := journalPath(s.path)
+
+	info, err := registryFSFor(path).Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		s.journal = journalPosition{info: nil, offset: 0}
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("stating journal: %w", err)
+	}
+
+	s.journal = journalPosition{info: info, offset: info.Size()}
+
+	return nil
+}
+
+func (s *MemoryStore) checkpointLocked(snap snapshot) error {
+	// A checkpoint that fails midway leaves a journal of unknown content.
+	s.journal = journalPosition{info: nil, offset: 0}
+
+	if err := persistJournalSnapshot(s.path, snap); err != nil {
+		return err
+	}
+
+	return s.journalWrittenLocked()
+}
+
 func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,24 +276,7 @@ func (s *MemoryStore) commandLocked(
 	entry journalEntry,
 ) (journalResult, error) {
 	if entry.Reset {
-		candidate, result, err := resetJournalSnapshot(
-			ctx,
-			s.path,
-			s.now().UTC(),
-			s.snapshot.JournalSequence,
-			len(s.snapshot.Sessions),
-		)
-		if err != nil {
-			return journalResult{}, err
-		}
-
-		result.changes = stateChanges(
-			State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
-			State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
-		)
-		s.acceptSnapshotLocked(candidate, result.changes)
-
-		return result, nil
+		return s.resetLocked(ctx)
 	}
 
 	if err := s.consumeJournalLocked(ctx); err != nil {
@@ -224,7 +306,7 @@ func (s *MemoryStore) commandLocked(
 
 	if journalWorthy(entry, result) ||
 		!maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
-		if err := appendJournal(s.path, entry); err != nil {
+		if err := s.appendJournalLocked(entry); err != nil {
 			return journalResult{}, err
 		}
 	} else {
@@ -247,6 +329,36 @@ func (s *MemoryStore) commandLocked(
 	s.acceptSnapshotLocked(candidate, result.changes)
 
 	return result, nil
+}
+
+func (s *MemoryStore) resetLocked(ctx context.Context) (journalResult, error) {
+	candidate, result, err := resetJournalSnapshot(
+		ctx,
+		s.path,
+		s.now().UTC(),
+		s.snapshot.JournalSequence,
+		len(s.snapshot.Sessions),
+	)
+	if err != nil {
+		return journalResult{}, err
+	}
+
+	result.changes = stateChanges(
+		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
+		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
+	)
+	s.acceptSnapshotLocked(candidate, result.changes)
+	s.journal = journalPosition{info: nil, offset: 0}
+
+	return result, nil
+}
+
+func (s *MemoryStore) appendJournalLocked(entry journalEntry) error {
+	if err := appendJournal(s.path, entry); err != nil {
+		return err
+	}
+
+	return s.journalWrittenLocked()
 }
 
 // journalWorthy reports whether losing entry in an owner crash would matter:

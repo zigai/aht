@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -360,6 +361,71 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 			len(live),
 			restoredErr == nil,
 		)
+	}
+}
+
+func TestMemoryStoreFollowsJournalReplacedByReset(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	s, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = s.Close() })
+
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	report := func(sessionID string) Observation {
+		return Observation{
+			Harness: harnessSecondary,
+			At:      now,
+			Subject: ObservationIdentity{SessionID: sessionID},
+			Evidence: &Report{
+				Event:    "agent_start",
+				Claim:    new(PresenceLive),
+				Activity: new(ActivityRunning),
+			},
+		}
+	}
+
+	s.setNowForTest(func() time.Time { return now })
+
+	if _, err = s.Observe(ctx, report("before-reset")); err != nil {
+		t.Fatal(err)
+	}
+
+	disk := NewJournal(path, fixtureRules{})
+	disk.setNowForTest(func() time.Time { return now })
+
+	if _, err = disk.Reset(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sessionID := range []string{"after-reset-1", "after-reset-2", "after-reset-3"} {
+		if _, err = disk.Observe(ctx, report(sessionID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	live, err := s.List(ctx, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	persisted, err := disk.List(ctx, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := sessionIDs(
+		live,
+	), sessionIDs(
+		persisted,
+	); len(want) != 3 ||
+		!maps.Equal(got, want) {
+		t.Fatalf("owner sessions after reset = %v, journal holds %v", got, want)
 	}
 }
 
