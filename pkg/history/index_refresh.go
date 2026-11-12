@@ -1003,26 +1003,30 @@ func (index *historyIndex) storeParsed(
 	file, err := index.store(ctx, job, *result)
 
 	elapsed := time.Since(started)
-	if !errors.Is(err, errStaleResume) {
-		return file, elapsed, err
-	}
-
 	retry := *job
-	retry.previous, retry.resumeID = file, 0
 
-	*result = parseRefresh(ctx, &retry)
-	if err := errors.Join(result.err, result.failure, result.openErr); err != nil {
-		return file, elapsed, err
+	for attempt := 0; errors.Is(err, errStaleResume); attempt++ {
+		retry.previous, retry.resumeID = file, file.resumeID
+		if attempt > 0 {
+			// Only a resume can go stale, so a whole reparse ends the retries.
+			retry.resumeID = 0
+		}
+
+		*result = parseRefresh(ctx, &retry)
+		if err := errors.Join(result.err, result.failure, result.openErr); err != nil {
+			return file, elapsed, err
+		}
+
+		if result.skipped || result.unchanged {
+			return file, elapsed, nil
+		}
+
+		started = time.Now()
+		file, err = index.store(ctx, &retry, *result)
+		elapsed += time.Since(started)
 	}
 
-	if result.skipped || result.unchanged {
-		return file, elapsed, nil
-	}
-
-	started = time.Now()
-	file, err = index.store(ctx, &retry, *result)
-
-	return file, elapsed + time.Since(started), err
+	return file, elapsed, err
 }
 
 func (index *historyIndex) writeRefresh(

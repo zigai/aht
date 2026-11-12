@@ -4044,7 +4044,7 @@ func writeIndexFixture(t *testing.T, c Catalog, name string, body string) {
 	}
 }
 
-func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
+func TestStaleAppendResumeContinuesFromStoredCheckpoint(t *testing.T) {
 	t.Parallel()
 
 	c := filterFixture(t)
@@ -4116,12 +4116,30 @@ func TestStaleAppendResumeReparsesWholeHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	appendRecord(
+		t,
+		path,
+		claudeRecord(
+			"user",
+			"new",
+			"/work/b",
+			"feature",
+			"2026-09-01T10:05:00Z",
+			"third appended walrus",
+			"",
+		),
+	)
+
 	if _, _, err := index.storeParsed(t.Context(), job, &parsed); err != nil {
 		t.Fatalf("stale resume: %v", err)
 	}
 
+	if parsed.writer.resume == nil {
+		t.Fatal("stale resume reparsed the whole history")
+	}
+
 	got, err := c.Search(t.Context(), Query{Terms: []string{"walrus"}})
-	if err != nil || len(got.Matches) != 1 || got.Matches[0].MatchingParts != 2 {
+	if err != nil || len(got.Matches) != 1 || got.Matches[0].MatchingParts != 3 {
 		t.Fatalf("search after stale resume = %#v, %v", got, err)
 	}
 
