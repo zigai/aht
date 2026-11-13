@@ -440,7 +440,12 @@ func TestTrackedIssues(t *testing.T) {
 	}
 	want := issueReport{
 		Open: []issueStatus{
-			{Harness: "kimi-code", Version: "2.1.1", RunURL: "kimi-run"},
+			{
+				Harness:    "kimi-code",
+				Version:    "2.1.1",
+				MaxVersion: kimi.MaxVersion,
+				RunURL:     "kimi-run",
+			},
 			{Harness: "grok", Version: "1.0.41", Successful: "1.0.39", RunURL: "grok-run"},
 		},
 		Resolved: []issueStatus{

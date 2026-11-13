@@ -35,9 +35,11 @@ type hookPayload struct {
 func New() kimiCodeHarness {
 	return kimiCodeHarness{BaseAdapter: harness.NewBaseAdapter(harness.Definition{
 		Distribution: harness.Distribution{
-			Source:    harness.DistributionNPM,
-			Package:   "@moonshot-ai/kimi-code",
-			Directory: "kimi",
+			Source:  harness.DistributionNPM,
+			Package: "@moonshot-ai/kimi-code",
+			// 2.6.0 stopped running Stop hooks: https://github.com/MoonshotAI/kimi-code/issues/4884
+			MaxVersion: "2.5.3",
+			Directory:  "kimi",
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},
