@@ -136,6 +136,8 @@ jobs:
       # Each attempt builds fresh isolated hosts, so a retry cannot inherit state.
       - name: Exercise installed integration and host
         id: lifecycle
+        # A release check records the failure, and its record job decides whether the run fails.
+        continue-on-error: ${{ inputs.release-tag != '' }}
         shell: bash
         working-directory: ${{ inputs.release-tag != '' && 'host-source' || '.' }}
         env:
