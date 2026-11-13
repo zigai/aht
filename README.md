@@ -1,8 +1,8 @@
 # AHT
 
-AHT (Agent Harness Tracker) gives you one local view of your coding-agent
-sessions. See what agents are doing, find their terminal panes, and search
-retained conversations across harnesses.
+AHT (Agent Harness Tracker) gives you one local view of your sessions across
+coding-agent harnesses such as Claude Code and Codex. See what agents are doing,
+find their terminal panes, and search past conversations.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/zigai/aht/ci.yml?branch=master&label=tests&labelColor=30363d)](https://github.com/zigai/aht/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/zigai/aht?label=release&color=blue&logo=github&labelColor=30363d)](https://github.com/zigai/aht/releases/latest)
@@ -11,7 +11,7 @@ retained conversations across harnesses.
 [![license](https://img.shields.io/github/license/zigai/aht?label=license&labelColor=30363d)](LICENSE)
 
 - **Live tracking:** Follow session activity and locations across tmux, Zellij, and herdr.
-- **Conversation search:** Find retained discussions, including sessions created before AHT was installed.
+- **Conversation search:** Find past conversations, including sessions created before AHT was installed.
 - **Go API and JSON output:** Build tools that query session state and subscribe to changes.
 
 Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
@@ -36,7 +36,7 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 go install github.com/zigai/aht/v2@latest
 ```
 
-AHT runs on Linux and macOS. Building from source requires Go 1.27.4 or newer.
+Requires Linux or macOS, and Go 1.27.4 or newer.
 
 ## Quick start
 
@@ -53,17 +53,18 @@ aht list
 aht watch
 ```
 
-Search retained conversations, including sessions created before AHT was installed:
+Search past conversations:
 
 ```sh
-aht search "refresh token" --dir /work/app --dir /work/worktrees/app
+aht search "refresh token"
 ```
 
 ## Configuration
 
-AHT works without configuration. `aht manage config init` writes a commented
-`~/.config/aht/config.toml` with every setting and its default; `aht manage config --help`
-lists commands to inspect and change them.
+AHT works without configuration.
+
+`aht manage config init` writes a commented `~/.config/aht/config.toml` with every setting and
+its default. `aht manage config --help` lists commands to inspect and change them.
 
 | Environment variable | Overrides                            | Default                                       |
 | -------------------- | ------------------------------------ | --------------------------------------------- |
@@ -71,6 +72,18 @@ lists commands to inspect and change them.
 | `AHT_STATE_DIR`      | State directory                      | `$XDG_STATE_HOME/aht` or `~/.local/state/aht` |
 | `AHT_STORE`          | Registry file (`--store` wins)       | `state.json` in the state directory           |
 | `AHT_SOCKET`         | Tracker socket                       | Registry file path + `.sock`                  |
+
+## Hook installation
+
+Install hooks without starting the tracker, or print what an install would write:
+
+```sh
+aht manage integrations install all
+aht manage integrations install codex --dry-run --show-content
+```
+
+Installing for Codex also marks the AHT hooks, and only those, as trusted. It
+fails if the Codex CLI is missing.
 
 ## Go library
 
@@ -83,8 +96,9 @@ API guide and examples.
 
 ## Fake model provider
 
-`fakeprovider` serves a scripted Anthropic and OpenAI compatible model API for tests, and starts
-an installed harness against it in a private root. Release archives include it.
+`fakeprovider` serves a scripted Anthropic- and OpenAI-compatible model API for tests. It also
+starts an installed harness against that API in a separate home directory. Release archives
+include it.
 
 ```sh
 go install github.com/zigai/aht/v2/cmd/fakeprovider@latest
@@ -94,18 +108,6 @@ fakeprovider start pi
 
 Go tests can use [`pkg/fakeprovider`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider)
 and [`pkg/fakeprovider/launch`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider/launch).
-
-## Hook installation
-
-```sh
-aht manage integrations install <harness>
-aht manage integrations install all
-aht manage integrations install codex --dry-run --show-content
-```
-
-`<harness>` is a supported harness name from the list above. Codex installs and
-updates automatically trust only AHT hooks through the installed Codex CLI;
-missing Codex or failed trust updates fail the installation.
 
 ## License
 
