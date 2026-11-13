@@ -59,6 +59,7 @@ type Request struct {
 	Tools       []string       `json:"tools"`
 	UserText    string         `json:"user_text"`
 	ToolResults []ToolResult   `json:"tool_results"`
+	ToolCallIDs []string       `json:"tool_call_ids"` // calls echoed from earlier replies, oldest first
 	Body        jsontext.Value `json:"body"`
 	ReceivedAt  time.Time      `json:"received_at"`
 	Outcome     Outcome        `json:"outcome"`

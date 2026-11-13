@@ -153,6 +153,62 @@ func TestToolCallIDMatchingIsTolerant(t *testing.T) {
 	}
 }
 
+func TestToolResultFollowsReplacedCallID(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol fakeprovider.Protocol
+		body     string
+		wantOK   bool
+	}{
+		{
+			name:     "chat",
+			protocol: fakeprovider.ProtocolOpenAIChat,
+			body: `{"messages":[{"role":"assistant","tool_calls":[{"id":"call_9f3a_0"}]},` +
+				`{"role":"tool","tool_call_id":"call_9f3a_0","content":"` + marker + `"}]}`,
+			wantOK: true,
+		},
+		{
+			name:     "responses",
+			protocol: fakeprovider.ProtocolOpenAIResponses,
+			body: `{"input":[{"type":"function_call","call_id":"fc_9f3a"},` +
+				`{"type":"function_call_output","call_id":"fc_9f3a","output":"` + marker + `"}]}`,
+			wantOK: true,
+		},
+		{
+			name:     "anthropic",
+			protocol: fakeprovider.ProtocolAnthropicMessages,
+			body: `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9f3a"}]},` +
+				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9f3a",` +
+				`"content":"` + marker + `"}]}]}`,
+			wantOK: true,
+		},
+		{
+			name:     "kept id answered under another id",
+			protocol: fakeprovider.ProtocolOpenAIChat,
+			body: `{"messages":[{"role":"assistant","tool_calls":[{"id":"call_fake"},{"id":"call_9f3a_0"}]},` +
+				`{"role":"tool","tool_call_id":"call_9f3a_0","content":"` + marker + `"}]}`,
+			wantOK: false,
+		},
+		{
+			name:     "only an older call answered",
+			protocol: fakeprovider.ProtocolOpenAIChat,
+			body: `{"messages":[{"role":"assistant","tool_calls":[{"id":"call_9f3a_0"}]},` +
+				`{"role":"tool","tool_call_id":"call_9f3a_0","content":"` + marker + `"},` +
+				`{"role":"assistant","tool_calls":[{"id":"call_77b1_0"}]},` +
+				`{"role":"tool","tool_call_id":"call_77b1_0","content":"other output"}]}`,
+			wantOK: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := recordedRequest(t, test.protocol, test.body)
+			if got := request.HasToolResult("call_fake", marker); got != test.wantOK {
+				t.Fatalf("HasToolResult = %t, want %t", got, test.wantOK)
+			}
+		})
+	}
+}
+
 func TestPromptTextIsNotAToolResult(t *testing.T) {
 	body := fmt.Sprintf(
 		`{"messages":[{"role":"user","content":"please print %s"}],`+

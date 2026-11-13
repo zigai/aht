@@ -59,6 +59,7 @@ func newRequest(
 		Tools:       toolNames(value),
 		UserText:    userText(protocol, value),
 		ToolResults: toolResults(protocol, value),
+		ToolCallIDs: toolCallIDs(protocol, value),
 		Body:        jsontext.Value(body),
 		ReceivedAt:  time.Now(),
 		Outcome:     OutcomePending,
@@ -165,6 +166,28 @@ func toolResultsIn(protocol Protocol, message map[string]any) []ToolResult {
 	}
 
 	return nil
+}
+
+func toolCallIDs(protocol Protocol, value map[string]any) []string {
+	var ids []string
+
+	for _, message := range messagesOf(protocol, value) {
+		if message[typeKey] == "function_call" {
+			ids = append(ids, stringOf(message["call_id"]))
+		}
+
+		for _, call := range objects(message["tool_calls"]) {
+			ids = append(ids, stringOf(call["id"]))
+		}
+
+		for _, part := range objects(message["content"]) {
+			if part[typeKey] == "tool_use" {
+				ids = append(ids, stringOf(part["id"]))
+			}
+		}
+	}
+
+	return ids
 }
 
 func chatToolResults(message map[string]any) []ToolResult {
