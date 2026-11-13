@@ -25,7 +25,7 @@ func copilotPlan(
 			"COPILOT_PROVIDER_BASE_URL=" + model.Endpoint + "/v1",
 			"COPILOT_PROVIDER_TYPE=openai",
 			"COPILOT_PROVIDER_API_KEY=" + model.APIKey,
-			"COPILOT_MODEL=gpt-4",
+			"COPILOT_MODEL=gpt-4.1",
 			"COPILOT_PROVIDER_WIRE_MODEL=" + model.Model,
 		},
 		Files: []File{{
