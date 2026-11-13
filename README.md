@@ -35,7 +35,7 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 go install github.com/zigai/aht/v2@latest
 ```
 
-AHT runs on Linux and macOS. Building from source requires Go 1.27.1 or newer.
+AHT runs on Linux and macOS. Building from source requires Go 1.27.4 or newer.
 
 ## Quick start
 
