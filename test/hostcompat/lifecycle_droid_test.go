@@ -208,6 +208,7 @@ func (session *droidRPCSession) observeNotification(t *testing.T, frame map[stri
 		"thinking_text_delta",
 		"thinking_text_complete",
 		"session_token_usage_changed",
+		"queued_messages_changed",
 		"hook_execution_started",
 		"hook_execution_completed":
 		// Documented SDK metadata and output; AHT hooks remain the lifecycle oracle.
