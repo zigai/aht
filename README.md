@@ -4,11 +4,10 @@ AHT (Agent Harness Tracker) gives you one local view of your coding-agent
 sessions. See what agents are doing, find their terminal panes, and search
 retained conversations across harnesses.
 
-[![CI](https://github.com/zigai/aht/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/zigai/aht/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/zigai/aht?color=blue)](https://github.com/zigai/aht/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/zigai/aht/v2/pkg/aht.svg)](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht)
-[![Go version](https://img.shields.io/github/go-mod/go-version/zigai/aht)](https://github.com/zigai/aht/blob/master/go.mod)
-[![License: MIT](https://img.shields.io/github/license/zigai/aht)](https://github.com/zigai/aht/blob/master/LICENSE)
+[![tests](https://img.shields.io/github/actions/workflow/status/zigai/aht/ci.yml?branch=master&label=tests&logo=githubactions&logoColor=white)](https://github.com/zigai/aht/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/zigai/aht?label=release&color=blue&logo=github)](https://github.com/zigai/aht/releases/latest)
+[![reference](https://img.shields.io/badge/reference-pkg.go.dev-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht)
+[![license](https://img.shields.io/github/license/zigai/aht?label=license&logo=opensourceinitiative&logoColor=white)](LICENSE)
 
 - **Live tracking:** Follow session activity and locations across tmux, Zellij, and herdr.
 - **Conversation search:** Find retained discussions, including sessions created before AHT was installed.
@@ -36,7 +35,7 @@ Supported harnesses: [`claude`](https://code.claude.com/docs/en/overview),
 go install github.com/zigai/aht/v2@latest
 ```
 
-Supports Linux and macOS. Building from source requires Go 1.27.1 or newer.
+AHT runs on Linux and macOS. Building from source requires Go 1.27.1 or newer.
 
 ## Quick start
 
@@ -95,7 +94,7 @@ fakeprovider start pi
 Go tests can use [`pkg/fakeprovider`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider)
 and [`pkg/fakeprovider/launch`](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/fakeprovider/launch).
 
-## Hook Installation
+## Hook installation
 
 ```sh
 aht manage integrations install <harness>
