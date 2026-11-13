@@ -6,8 +6,8 @@ find their terminal panes, and search past conversations.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/zigai/aht/ci.yml?branch=master&label=tests&labelColor=30363d)](https://github.com/zigai/aht/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/zigai/aht?label=release&color=blue&logo=github&labelColor=30363d)](https://github.com/zigai/aht/releases/latest)
-[![reference](https://img.shields.io/badge/reference-007d9c?logo=go&logoColor=white&labelColor=30363d)](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht)
 [![go](https://img.shields.io/github/go-mod/go-version/zigai/aht?label=&logo=go&logoColor=white&labelColor=30363d)](go.mod)
+[![reference](https://img.shields.io/badge/reference-007d9c?logo=go&logoColor=white&labelColor=30363d)](https://pkg.go.dev/github.com/zigai/aht/v2/pkg/aht)
 [![license](https://img.shields.io/github/license/zigai/aht?label=license&labelColor=30363d)](LICENSE)
 
 - **Live tracking:** Follow session activity and locations across tmux, Zellij, and herdr.
