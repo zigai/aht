@@ -131,6 +131,30 @@ type trackedProcess struct {
 	missingSince time.Time
 	missingCount int
 }
+
+type paneScreen struct {
+	screenDetection
+
+	placements []registry.Observation
+	process    processinfo.Process
+	harnessID  registry.Harness
+}
+
+type screenDetection struct {
+	observation registry.Observation
+	detected    bool
+	probe       *screenProbe
+	err         error
+}
+
+type screenProbe struct {
+	session   registry.Session
+	harnessID registry.Harness
+	identity  *registry.ProcessIdentity
+	manifest  agentstate.Manifest
+	pane      mux.Pane
+}
+
 type pendingScreenDecision struct {
 	activity      registry.Activity
 	ruleID        string
@@ -160,7 +184,7 @@ type Observer struct {
 	paneList                func(context.Context, []processinfo.Process) ([]mux.Pane, error)
 	locationPresence        func(context.Context, registry.Location) (registry.Presence, error)
 	catalogList             CatalogLister
-	screenCapture           mux.ScreenCapturer
+	screenCapture           func(context.Context, []mux.Pane) []mux.ScreenCapture
 	disableScreenInspection bool
 	manifestLoader          agentstate.Loader
 	now                     func() time.Time
@@ -234,9 +258,9 @@ func New(opts Options) *Observer {
 		catalogList = DefaultCatalogList
 	}
 
-	screenCapture := opts.ScreenCapture
-	if screenCapture == nil {
-		screenCapture = captureMultiplexerPane
+	screenCapture := captureMultiplexerPanes
+	if opts.ScreenCapture != nil {
+		screenCapture = captureEachPane(opts.ScreenCapture)
 	}
 
 	confirmAfter := opts.ProcessConfirmation
@@ -512,13 +536,57 @@ func (o *Observer) paneObservations(
 	panes []mux.Pane,
 	at time.Time,
 ) ([]registry.Observation, map[int]bool, error) {
-	observations := make([]registry.Observation, 0, len(panes))
 	locationPIDs := make(map[int]bool)
-	paneCommandCounts := commandPaneCounts(panes)
+	screens := o.paneScreens(inventory, panes, locationPIDs, at)
+
+	var probed []mux.Pane
+
+	for _, screen := range screens {
+		if screen.probe != nil {
+			probed = append(probed, screen.probe.pane)
+		}
+	}
+
+	captures := o.screenCapture(ctx, probed)
+	observations := make([]registry.Observation, 0, len(panes))
 
 	var detectErr error
 
-	for _, pane := range panes {
+	for _, screen := range screens {
+		observations = append(observations, screen.placements...)
+
+		if screen.probe != nil {
+			screen.screenDetection = o.screenState(*screen.probe, captures[0], at)
+			captures = captures[1:]
+		}
+
+		if screen.detected && o.screenDecisionReady(
+			inventory.knownSessions,
+			screen.harnessID,
+			screen.process,
+			screen.observation,
+		) {
+			observations = append(observations, screen.observation)
+		}
+
+		if screen.err != nil {
+			detectErr = screen.err
+		}
+	}
+
+	return observations, locationPIDs, detectErr
+}
+
+func (o *Observer) paneScreens(
+	inventory cycleInventory,
+	panes []mux.Pane,
+	locationPIDs map[int]bool,
+	at time.Time,
+) []paneScreen {
+	screens := make([]paneScreen, len(panes))
+	paneCommandCounts := commandPaneCounts(panes)
+
+	for i, pane := range panes {
 		process, harnessID, ok := multiplexerPaneProcess(
 			pane,
 			inventory.processes,
@@ -528,9 +596,13 @@ func (o *Observer) paneObservations(
 		)
 
 		claimed := locationPIDs[process.PID]
-		observations = append(
-			observations,
-			panePlacementObservations(inventory, pane, process, ok, locationPIDs, at)...,
+		screens[i].placements = panePlacementObservations(
+			inventory,
+			pane,
+			process,
+			ok,
+			locationPIDs,
+			at,
 		)
 
 		if !ok || claimed ||
@@ -543,25 +615,17 @@ func (o *Observer) paneObservations(
 			continue
 		}
 
-		screenObservation, detected, err := o.detectScreenState(
-			ctx,
+		screens[i].process, screens[i].harnessID = process, harnessID
+		screens[i].screenDetection = o.detectScreenState(
 			inventory.knownSessions,
 			harnessID,
 			process,
 			pane,
 			at,
 		)
-		if detected &&
-			o.screenDecisionReady(inventory.knownSessions, harnessID, process, screenObservation) {
-			observations = append(observations, screenObservation)
-		}
-
-		if err != nil {
-			detectErr = err
-		}
 	}
 
-	return observations, locationPIDs, detectErr
+	return screens
 }
 
 func (o *Observer) retireMissingProcesses(
@@ -1244,24 +1308,23 @@ func unavailableScreenState(
 }
 
 func (o *Observer) detectScreenState(
-	ctx context.Context,
 	sessions []registry.Session,
 	harnessID registry.Harness,
 	process processinfo.Process,
 	pane mux.Pane,
 	at time.Time,
-) (registry.Observation, bool, error) {
+) screenDetection {
+	var detection screenDetection
+
 	if !o.manifestLoader.Supports(harnessID) {
-		var empty registry.Observation
-		return empty, false, nil
+		return detection
 	}
 
 	identity := processIdentity(process)
 
 	session := sessionForProcess(sessions, harnessID, identity)
 	if !shouldDetectScreen(session, at) {
-		var empty registry.Observation
-		return empty, false, nil
+		return detection
 	}
 
 	if pane.Activity != nil {
@@ -1270,26 +1333,48 @@ func (o *Observer) detectScreenState(
 			reason = "multiplexer_agent_status"
 		}
 
-		observation := screenObservation(session, harnessID, identity, at, at, agentstate.Decision{
-			Activity:        *pane.Activity,
-			Detail:          "",
-			Reason:          reason,
-			RuleID:          "",
-			ManifestSource:  "",
-			ManifestVersion: 0,
-			Warning:         "",
-			Evidence:        nil,
-		})
+		detection.detected = true
+		detection.observation = screenObservation(
+			session,
+			harnessID,
+			identity,
+			at,
+			at,
+			agentstate.Decision{
+				Activity:        *pane.Activity,
+				Detail:          "",
+				Reason:          reason,
+				RuleID:          "",
+				ManifestSource:  "",
+				ManifestVersion: 0,
+				Warning:         "",
+				Evidence:        nil,
+			},
+		)
 
-		return observation, true, nil
+		return detection
 	}
 
 	if o.disableScreenInspection {
-		var empty registry.Observation
-		return empty, false, nil
+		return detection
 	}
 
-	return o.captureScreenState(ctx, session, harnessID, identity, pane, at)
+	manifest, err := o.manifestLoader.Load(harnessID)
+	if err != nil {
+		detection.err = fmt.Errorf("loading %s detection manifest: %w", harnessID, err)
+
+		return detection
+	}
+
+	detection.probe = &screenProbe{
+		session:   session,
+		harnessID: harnessID,
+		identity:  identity,
+		manifest:  manifest,
+		pane:      pane,
+	}
+
+	return detection
 }
 
 func (o *Observer) screenDecisionReady(
@@ -1740,54 +1825,49 @@ func (o *Observer) reconcileUnobservedSessions(
 	return observations, errors.Join(checkErrors...)
 }
 
-func (o *Observer) captureScreenState(
-	ctx context.Context,
-	session registry.Session,
-	harnessID registry.Harness,
-	identity *registry.ProcessIdentity,
-	pane mux.Pane,
+func (o *Observer) screenState(
+	probe screenProbe,
+	capture mux.ScreenCapture,
 	at time.Time,
-) (registry.Observation, bool, error) {
-	manifest, err := o.manifestLoader.Load(harnessID)
-	if err != nil {
-		return registry.Observation{}, false, fmt.Errorf(
-			"loading %s detection manifest: %w",
-			harnessID,
-			err,
-		)
-	}
+) screenDetection {
+	var detection screenDetection
 
-	snapshot, captureErr := o.screenCapture(ctx, pane)
-	if captureErr != nil {
-		return registry.Observation{}, false, fmt.Errorf(
+	if capture.Err != nil {
+		detection.err = fmt.Errorf(
 			"capturing %s pane %s for detection: %w",
-			harnessID,
-			pane.Location.PaneID,
-			captureErr,
+			probe.harnessID,
+			probe.pane.Location.PaneID,
+			capture.Err,
 		)
+
+		return detection
 	}
 
-	decision := manifest.Evaluate(agentstate.NormalizeSnapshot(snapshot.Text, snapshot.Title))
+	decision := probe.manifest.Evaluate(
+		agentstate.NormalizeSnapshot(capture.Snapshot.Text, capture.Snapshot.Title),
+	)
 	if decision.Activity == registry.ActivityUnknown &&
 		decision.Reason == agentstate.ReasonNoRuleMatched &&
-		session.Activity() != nil &&
-		*session.Activity() != registry.ActivityUnknown {
-		var empty registry.Observation
-		return empty, false, nil
+		probe.session.Activity() != nil &&
+		*probe.session.Activity() != registry.ActivityUnknown {
+		return detection
 	}
 
-	observedAt := screenObservationTime(at, o.now().UTC())
-	observation := screenObservation(session, harnessID, identity, at, observedAt, decision)
+	detection.detected = true
+	detection.observation = screenObservation(
+		probe.session,
+		probe.harnessID,
+		probe.identity,
+		at,
+		screenObservationTime(at, o.now().UTC()),
+		decision,
+	)
 
-	if manifest.Warning != "" {
-		return observation, true, fmt.Errorf(
-			"%w: %s",
-			errDetectionOverrideInvalid,
-			manifest.Warning,
-		)
+	if probe.manifest.Warning != "" {
+		detection.err = fmt.Errorf("%w: %s", errDetectionOverrideInvalid, probe.manifest.Warning)
 	}
 
-	return observation, true, nil
+	return detection
 }
 
 func (o *Observer) observeBatch(

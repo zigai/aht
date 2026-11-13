@@ -45,6 +45,13 @@ type Interrupter interface {
 	SendInterrupt(ctx context.Context, serverIdentity, paneID string) error
 }
 
+// BatchCapturer is an optional capability interface for multiplexers that
+// capture several panes in one round trip.
+type BatchCapturer interface {
+	// CapturePanes returns one capture per pane, in the given order.
+	CapturePanes(ctx context.Context, panes []Pane) []ScreenCapture
+}
+
 // ProcessRef identifies a process reported by a multiplexer for one pane.
 // Start identity is resolved from the observer's own process snapshot.
 type ProcessRef struct {
@@ -73,6 +80,12 @@ type Pane struct {
 type ScreenSnapshot struct {
 	Text  string
 	Title string
+}
+
+// ScreenCapture is one pane's result from a [BatchCapturer].
+type ScreenCapture struct {
+	Snapshot ScreenSnapshot
+	Err      error
 }
 
 type (

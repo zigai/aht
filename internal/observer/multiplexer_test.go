@@ -2,6 +2,8 @@ package observer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -194,6 +196,92 @@ func TestObserverPrefersRicherNestedMultiplexerLocation(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].Location.Kind != registry.MultiplexerHerdr ||
 		sessions[0].Location.PaneID != "w1:p1" {
 		t.Fatalf("nested location = %#v", sessions)
+	}
+}
+
+var errStubCapture = errors.New("stub capture failed")
+
+type stubDriver struct {
+	mux.Driver
+
+	kind registry.MultiplexerKind
+}
+
+func (d stubDriver) CapturePane(_ context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
+	if pane.Title == "closed" {
+		return mux.ScreenSnapshot{}, errStubCapture
+	}
+
+	return mux.ScreenSnapshot{Text: string(d.kind) + " " + pane.Location.PaneID, Title: ""}, nil
+}
+
+type batchStubDriver struct {
+	stubDriver
+}
+
+func (d batchStubDriver) CapturePanes(ctx context.Context, panes []mux.Pane) []mux.ScreenCapture {
+	captures := captureEachPane(d.CapturePane)(ctx, panes)
+	for i := range captures {
+		captures[i].Snapshot.Title = fmt.Sprintf("batch of %d", len(panes))
+	}
+
+	return captures
+}
+
+func TestCaptureDriverPanesKeepsEachPaneWithItsDriver(t *testing.T) {
+	t.Parallel()
+
+	pane := func(kind registry.MultiplexerKind, id string, title string) mux.Pane {
+		return mux.Pane{
+			Location: registry.Location{Kind: kind, PaneID: id},
+			Command:  "",
+			CWD:      "",
+			Title:    title,
+		}
+	}
+	panes := []mux.Pane{
+		pane("batching", "a1", ""),
+		pane("single", "b1", ""),
+		pane("unknown", "x1", ""),
+		pane("batching", "a2", "closed"),
+		pane("single", "b2", "closed"),
+		pane("batching", "a3", ""),
+		pane("single", "b3", ""),
+	}
+
+	drivers := map[registry.MultiplexerKind]mux.Driver{
+		"batching": batchStubDriver{stubDriver{Driver: nil, kind: "batching"}},
+		"single":   stubDriver{Driver: nil, kind: "single"},
+	}
+	find := func(kind registry.MultiplexerKind) (mux.Driver, bool) {
+		driver, ok := drivers[kind]
+
+		return driver, ok
+	}
+
+	captures := captureDriverPanes(context.Background(), panes, find)
+
+	want := []struct {
+		text, title string
+		err         error
+	}{
+		{text: "batching a1", title: "batch of 3", err: nil},
+		{text: "single b1", title: "", err: nil},
+		{text: "", title: "", err: errUnsupportedMultiplexerPane},
+		{text: "", title: "", err: errStubCapture},
+		{text: "", title: "", err: errStubCapture},
+		{text: "batching a3", title: "batch of 3", err: nil},
+		{text: "single b3", title: "", err: nil},
+	}
+	if len(captures) != len(want) {
+		t.Fatalf("captures = %d, want %d", len(captures), len(want))
+	}
+
+	for i, capture := range captures {
+		if capture.Snapshot.Text != want[i].text || capture.Snapshot.Title != want[i].title ||
+			!errors.Is(capture.Err, want[i].err) {
+			t.Errorf("pane %s capture = %#v, want %#v", panes[i].Location.PaneID, capture, want[i])
+		}
 	}
 }
 

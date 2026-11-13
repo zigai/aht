@@ -136,3 +136,80 @@ func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 		t.Fatalf("SendInterruptTo failed: %v", err)
 	}
 }
+
+func TestCapturePanesMatchesEachPaneAcrossServers(t *testing.T) {
+	first := testtmux.New(t, gotmux.NewSessionOptions{
+		Name:    "first",
+		Program: gotmux.Exec("sh", "-c", "echo 'first server, first pane'; sleep 60"),
+	})
+	if _, err := first.Session.NewWindow(t.Context(), gotmux.NewWindowOptions{
+		Program: gotmux.Exec("sh", "-c", "echo 'first server, second pane'; sleep 60"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := testtmux.New(t, gotmux.NewSessionOptions{
+		Name:    "second",
+		Program: gotmux.Exec("sh", "-c", "echo 'second server'; sleep 60"),
+	})
+
+	pane := func(serverID string, paneID string) Pane {
+		return Pane{
+			Location: registry.Location{
+				Kind:     registry.MultiplexerTmux,
+				ServerID: serverID,
+				PaneID:   paneID,
+			},
+			PanePID: 0,
+			PaneTTY: "",
+		}
+	}
+	panes := []Pane{
+		pane(second.Socket, "%0"),
+		pane(first.Socket, ""),
+		pane(first.Socket, "%1"),
+		pane(first.Socket, "%999"),
+		pane("-L:", "%0"),
+		pane(first.Socket, "%0"),
+	}
+	want := []struct {
+		text string
+		err  error
+	}{
+		{text: "second server", err: nil},
+		{text: "", err: errMissingCapturePane},
+		{text: "first server, second pane", err: nil},
+		{text: "", err: gotmux.ErrNotFound},
+		{text: "", err: errInvalidServerIdentity},
+		{text: "first server, first pane", err: nil},
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+
+	for {
+		captures := CapturePanes(t.Context(), panes)
+		if len(captures) != len(panes) {
+			t.Fatalf("captures = %d, want %d", len(captures), len(panes))
+		}
+
+		matched := true
+
+		for i, capture := range captures {
+			if !errors.Is(capture.Err, want[i].err) ||
+				!strings.Contains(capture.Snapshot.Text, want[i].text) ||
+				(capture.Err != nil && capture.Snapshot.Text != "") {
+				matched = false
+			}
+		}
+
+		if matched {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("captures = %#v, want %#v", captures, want)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+}

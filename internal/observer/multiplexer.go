@@ -50,18 +50,80 @@ func locationPresence(ctx context.Context, location registry.Location) (registry
 	return presence, nil
 }
 
-func captureMultiplexerPane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	driver, ok := drivers.Find(pane.Location.Kind)
-	if !ok {
-		return mux.ScreenSnapshot{}, errUnsupportedMultiplexerPane
+func captureMultiplexerPanes(ctx context.Context, panes []mux.Pane) []mux.ScreenCapture {
+	return captureDriverPanes(ctx, panes, drivers.Find)
+}
+
+func captureDriverPanes(
+	ctx context.Context,
+	panes []mux.Pane,
+	find func(registry.MultiplexerKind) (mux.Driver, bool),
+) []mux.ScreenCapture {
+	captures := make([]mux.ScreenCapture, len(panes))
+	byKind := make(map[registry.MultiplexerKind][]int)
+
+	var kinds []registry.MultiplexerKind
+
+	for i, pane := range panes {
+		kind := pane.Location.Kind
+		if _, ok := byKind[kind]; !ok {
+			kinds = append(kinds, kind)
+		}
+
+		byKind[kind] = append(byKind[kind], i)
 	}
 
-	snapshot, err := driver.CapturePane(ctx, pane)
-	if err != nil {
-		return mux.ScreenSnapshot{}, fmt.Errorf("capture %s pane: %w", pane.Location.Kind, err)
+	for _, kind := range kinds {
+		indexes := byKind[kind]
+
+		driver, ok := find(kind)
+		if !ok {
+			for _, index := range indexes {
+				captures[index].Err = errUnsupportedMultiplexerPane
+			}
+
+			continue
+		}
+
+		batch := make([]mux.Pane, len(indexes))
+		for i, index := range indexes {
+			batch[i] = panes[index]
+		}
+
+		results := driverCaptures(ctx, driver, batch)
+		for i, index := range indexes {
+			captures[index] = results[i]
+			if results[i].Err != nil {
+				captures[index] = mux.ScreenCapture{
+					Snapshot: mux.ScreenSnapshot{Text: "", Title: ""},
+					Err:      fmt.Errorf("capture %s pane: %w", kind, results[i].Err),
+				}
+			}
+		}
 	}
 
-	return snapshot, nil
+	return captures
+}
+
+func driverCaptures(ctx context.Context, driver mux.Driver, panes []mux.Pane) []mux.ScreenCapture {
+	if batch, ok := driver.(mux.BatchCapturer); ok {
+		return batch.CapturePanes(ctx, panes)
+	}
+
+	return captureEachPane(driver.CapturePane)(ctx, panes)
+}
+
+func captureEachPane(
+	capture mux.ScreenCapturer,
+) func(context.Context, []mux.Pane) []mux.ScreenCapture {
+	return func(ctx context.Context, panes []mux.Pane) []mux.ScreenCapture {
+		captures := make([]mux.ScreenCapture, len(panes))
+		for i, pane := range panes {
+			captures[i].Snapshot, captures[i].Err = capture(ctx, pane)
+		}
+
+		return captures
+	}
 }
 
 func multiplexerPaneProcess(

@@ -3,6 +3,7 @@ package observer
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -331,6 +332,89 @@ func TestObserverPreservesKnownActivityWhenScreenCaptureFails(t *testing.T) {
 	}
 
 	assertIdleSince(t, store, at.Add(-2*time.Minute))
+}
+
+func TestObserverMatchesEachScreenToItsPane(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	screens := map[string]string{
+		"%1": "› next task\nContext 63% used",
+		"%4": "Working · esc to interrupt",
+	}
+
+	commands := []string{"codex", "pi", "claude", "opencode"}
+	processes := make([]processinfo.Process, len(commands))
+	panes := make([]mux.Pane, len(commands))
+
+	var captured []string
+
+	for index, command := range commands {
+		processes[index], panes[index] = detectionProcessPane(301+index, command)
+		processes[index].TTY = fmt.Sprintf("/dev/pts/%d", index+1)
+		panes[index].Location.PaneTTY = processes[index].TTY
+		panes[index].Location.PaneID = fmt.Sprintf("%%%d", index+1)
+	}
+
+	reported := registry.ActivityRunning
+	panes[1].Activity = &reported
+
+	options := detectionObserverOptions(store, processes[0], panes[0], t.TempDir())
+	options.ProcessList = func(context.Context) ([]processinfo.Process, error) {
+		return processes, nil
+	}
+	options.PaneList = func(context.Context) ([]mux.Pane, error) { return panes, nil }
+	options.ScreenCapture = func(_ context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
+		captured = append(captured, pane.Location.PaneID)
+
+		screen, ok := screens[pane.Location.PaneID]
+		if !ok {
+			return mux.ScreenSnapshot{}, context.Canceled
+		}
+
+		return mux.ScreenSnapshot{Text: screen, Title: ""}, nil
+	}
+
+	result, err := New(options).RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !result.Degraded || !strings.Contains(result.Error, "capturing claude pane %3") {
+		t.Fatalf("result = %#v, want the failed claude capture reported", result)
+	}
+
+	if got := strings.Join(captured, " "); got != "%1 %3 %4" {
+		t.Fatalf("captured panes = %q, want %%1 %%3 %%4", got)
+	}
+
+	sessions, err := store.List(context.Background(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[registry.Harness]registry.Activity, len(sessions))
+
+	for _, session := range sessions {
+		if activity := session.Activity(); activity != nil {
+			got[session.Harness] = *activity
+		}
+	}
+
+	want := map[registry.Harness]registry.Activity{
+		"codex":    registry.ActivityIdle,
+		"pi":       registry.ActivityRunning,
+		"claude":   registry.ActivityUnknown,
+		"opencode": registry.ActivityRunning,
+	}
+	if len(sessions) != 4 || !maps.Equal(got, want) {
+		t.Fatalf(
+			"activities by harness = %v in %d sessions, want %v in 4",
+			got,
+			len(sessions),
+			want,
+		)
+	}
 }
 
 func TestObserverPreservesIdleSinceAcrossUnrecognizedScreenRedraw(t *testing.T) {

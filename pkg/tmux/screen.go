@@ -17,42 +17,108 @@ var (
 )
 
 func CapturePane(ctx context.Context, pane Pane) (mux.ScreenSnapshot, error) {
-	if strings.TrimSpace(pane.Location.PaneID) == "" {
-		return mux.ScreenSnapshot{}, errMissingCapturePane
+	capture := CapturePanes(ctx, []Pane{pane})[0]
+
+	return capture.Snapshot, capture.Err
+}
+
+// CapturePanes captures the given panes with one tmux call per server. The
+// result holds one capture per pane, in the given order.
+func CapturePanes(ctx context.Context, panes []Pane) []mux.ScreenCapture {
+	captures := make([]mux.ScreenCapture, len(panes))
+	byServer := make(map[string][]int)
+
+	var servers []string
+
+	for i, pane := range panes {
+		if strings.TrimSpace(pane.Location.PaneID) == "" {
+			captures[i].Err = errMissingCapturePane
+
+			continue
+		}
+
+		identity := strings.TrimSpace(pane.Location.ServerID)
+		if _, ok := byServer[identity]; !ok {
+			servers = append(servers, identity)
+		}
+
+		byServer[identity] = append(byServer[identity], i)
 	}
 
-	cfg, err := gotmuxConfigForIdentity(pane.Location.ServerID)
+	for _, identity := range servers {
+		captureServerPanes(ctx, identity, panes, byServer[identity], captures)
+	}
+
+	return captures
+}
+
+func captureServerPanes(
+	ctx context.Context,
+	identity string,
+	panes []Pane,
+	indexes []int,
+	captures []mux.ScreenCapture,
+) {
+	server, err := captureServer(identity)
 	if err != nil {
-		return mux.ScreenSnapshot{}, err
+		for _, index := range indexes {
+			captures[index].Err = err
+		}
+
+		return
+	}
+
+	handles := make([]gotmux.Pane, 0, len(indexes))
+	captured := make([]int, 0, len(indexes))
+
+	for _, index := range indexes {
+		paneID := panes[index].Location.PaneID
+
+		handle, err := server.PaneHandle(gotmux.PaneID(paneID))
+		if err != nil {
+			captures[index].Err = fmt.Errorf("resolve tmux pane %s: %w", paneID, err)
+
+			continue
+		}
+
+		handles = append(handles, handle)
+		captured = append(captured, index)
+	}
+
+	results, err := server.CapturePanes(ctx, handles, gotmux.CaptureOptions{
+		JoinWrapped:    true,
+		IncludeEscapes: true,
+	})
+
+	for i, index := range captured {
+		paneID := panes[index].Location.PaneID
+
+		switch {
+		case err != nil:
+			captures[index].Err = fmt.Errorf("capturing pane %s: %w", paneID, err)
+		case results[i].Err != nil:
+			captures[index].Err = fmt.Errorf("capturing pane %s: %w", paneID, results[i].Err)
+		default:
+			captures[index].Snapshot = mux.ScreenSnapshot{
+				Text:  string(results[i].Output),
+				Title: strings.TrimRight(results[i].Title, "\r\n"),
+			}
+		}
+	}
+}
+
+func captureServer(identity string) (*gotmux.Server, error) {
+	cfg, err := gotmuxConfigForIdentity(identity)
+	if err != nil {
+		return nil, err
 	}
 
 	server, err := gotmux.New(cfg)
 	if err != nil {
-		return mux.ScreenSnapshot{}, fmt.Errorf("init tmux client: %w", err)
+		return nil, fmt.Errorf("init tmux client: %w", err)
 	}
 
-	paneHandle, err := server.PaneHandle(gotmux.PaneID(pane.Location.PaneID))
-	if err != nil {
-		return mux.ScreenSnapshot{}, fmt.Errorf(
-			"resolve tmux pane %s: %w",
-			pane.Location.PaneID,
-			err,
-		)
-	}
-
-	captureOpts := gotmux.CaptureOptions{
-		JoinWrapped:    true,
-		IncludeEscapes: true,
-	}
-
-	res, err := paneHandle.CaptureWithTitle(ctx, captureOpts)
-	if err != nil {
-		return mux.ScreenSnapshot{}, fmt.Errorf("capturing pane %s: %w", pane.Location.PaneID, err)
-	}
-
-	text := string(res.Output)
-
-	return mux.ScreenSnapshot{Text: text, Title: strings.TrimRight(res.Title, "\r\n")}, nil
+	return server, nil
 }
 
 func gotmuxConfigForIdentity(identity string) (gotmux.Config, error) {

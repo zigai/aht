@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	_ mux.Driver      = (*Driver)(nil)
-	_ mux.Interrupter = (*Driver)(nil)
+	_ mux.Driver        = (*Driver)(nil)
+	_ mux.Interrupter   = (*Driver)(nil)
+	_ mux.BatchCapturer = (*Driver)(nil)
 )
 
-// Driver implements [mux.Driver] and [mux.Interrupter] for tmux.
+// Driver implements [mux.Driver], [mux.Interrupter] and [mux.BatchCapturer] for tmux.
 type Driver struct {
 	LookPath func(string) (string, error)
 }
@@ -86,13 +87,24 @@ func (d Driver) ListPanes(
 }
 
 func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	tmuxPane := Pane{
+	return CapturePane(ctx, capturedPane(pane))
+}
+
+func (d Driver) CapturePanes(ctx context.Context, panes []mux.Pane) []mux.ScreenCapture {
+	tmuxPanes := make([]Pane, len(panes))
+	for i, pane := range panes {
+		tmuxPanes[i] = capturedPane(pane)
+	}
+
+	return CapturePanes(ctx, tmuxPanes)
+}
+
+func capturedPane(pane mux.Pane) Pane {
+	return Pane{
 		Location: pane.Location,
 		PanePID:  pane.Location.PanePID,
 		PaneTTY:  pane.Location.PaneTTY,
 	}
-
-	return CapturePane(ctx, tmuxPane)
 }
 
 func (d Driver) Presence(

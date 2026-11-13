@@ -272,10 +272,12 @@ func integrationRaceCapture(
 	processes []processinfo.Process,
 ) func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
 	return func(captureCtx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-		snapshot, captureErr := captureMultiplexerPane(captureCtx, pane)
-		if captureErr != nil {
-			return mux.ScreenSnapshot{}, fmt.Errorf("capture race fixture: %w", captureErr)
+		capture := captureMultiplexerPanes(captureCtx, []mux.Pane{pane})[0]
+		if capture.Err != nil {
+			return mux.ScreenSnapshot{}, fmt.Errorf("capture race fixture: %w", capture.Err)
 		}
+
+		snapshot := capture.Snapshot
 
 		harnessID := registry.Harness(pane.Location.SessionName)
 		if harnessID != registry.Harness("pi") && harnessID != registry.Harness("opencode") {
