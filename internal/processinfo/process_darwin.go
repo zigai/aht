@@ -358,7 +358,7 @@ func darwinLsofCWD(ctx context.Context, pids []string) (map[int]string, error) {
 			pid = value
 		case 'n':
 			if pid > 0 {
-				cwds[pid] = line[1:]
+				cwds[pid] = darwinLsofPath(line[1:])
 			}
 		}
 	}
