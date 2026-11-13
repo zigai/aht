@@ -83,7 +83,8 @@ jobs:
 
   verify-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # A new Go version empties the build cache, and a cold run needs more than ten minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
