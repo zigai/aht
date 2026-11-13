@@ -51,7 +51,7 @@ jobs:
         if: inputs.release-tag != ''
         shell: bash
         run: |
-          if ! grep -Fq 'AHT_COMPAT_BINARY' host-source/test/hostcompat/command_test.go; then
+          if ! grep -Fq 'AHT_COMPAT_BINARY' host-source/internal/testharness/fixture.go; then
             echo "The published release's compatibility tests do not accept a prebuilt binary; publish a release containing that support before scheduling release checks." >&2
             exit 1
           fi
@@ -161,7 +161,7 @@ jobs:
         env:
           AHT_INSTALL_OUTCOME: ${{ steps.install.outcome }}
           AHT_TEST_OUTCOME: ${{ steps.lifecycle.outcome }}
-          GITHUB_SHA: ${{ steps.source.outputs.commit }}
+          AHT_COMPAT_REVISION: ${{ steps.source.outputs.commit }}
         run: go run ./internal/tools/compatibility result
 
       - name: Upload sanitized diagnostics and result

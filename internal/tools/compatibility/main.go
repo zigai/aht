@@ -269,7 +269,7 @@ func (a application) recordResult() error {
 		Harness:  spec.ID,
 		Version:  version,
 		Outcome:  resultOutcome(a.getenv("AHT_INSTALL_OUTCOME"), a.getenv("AHT_TEST_OUTCOME")),
-		Revision: a.getenv("GITHUB_SHA"),
+		Revision: a.getenv("AHT_COMPAT_REVISION"),
 	}
 
 	var mismatch error
