@@ -26,10 +26,10 @@ func TestStopActivityHoldsForDelegatedBackgroundWork(t *testing.T) {
 		"MCP task": {`{"background_tasks":[{"id":"a","type":"MCP task",` +
 			`"status":"running"}]}`, registry.ActivityRunning},
 		"shell": {`{"background_tasks":[{"id":"a","type":"shell",` +
-			`"status":"running","command":"go test ./..."}]}`, registry.ActivityRunning},
-		"shell beside monitor": {
-			`{"background_tasks":[{"id":"a","type":"monitor",` +
-				`"status":"running"},{"id":"b","type":"shell",` +
+			`"status":"running","command":"go test ./..."}]}`, registry.ActivityIdle},
+		"shell beside subagent": {
+			`{"background_tasks":[{"id":"a","type":"shell",` +
+				`"status":"running"},{"id":"b","type":"subagent",` +
 				`"status":"running"}]}`,
 			registry.ActivityRunning,
 		},

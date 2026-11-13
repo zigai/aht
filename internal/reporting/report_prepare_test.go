@@ -713,7 +713,7 @@ func TestPrepareReportKeepsClaudeStopRunningWhileBackgroundWorkIsInFlight(t *tes
 				`"background_tasks":[{"id":"b1","type":"shell",` +
 				`"status":"running","command":"go test ./..."}],` +
 				`"session_crons":[]}`,
-			want: registry.ActivityRunning,
+			want: registry.ActivityIdle,
 		},
 		"monitor only": {
 			payload: `{"session_id":"s","cwd":"/work","hook_event_name":"Stop",` +

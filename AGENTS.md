@@ -114,7 +114,7 @@ must leave a building tree. `internal/harness/amp` is a compact reference adapte
 ## Harness behavior
 
 - aht supports OpenCode 2 only, from `@opencode/cli`. Kilo uses a different API and events, so keep its paths separate.
-- A Claude `Stop` with background shell tasks counts as running, even for never-ending watchers.
+- A Claude `Stop` with only background shell tasks counts as idle, matching Claude's own program status.
 - Pi reports idle only on `agent_settled`, not `agent_end`.
 
 ## Invariants and Simulation
