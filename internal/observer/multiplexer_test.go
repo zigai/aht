@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -363,6 +364,14 @@ func (w *programStatusWatches) watch(
 	return nil
 }
 
+func (w *programStatusWatches) change(panes []mux.Pane) {
+	w.mu.Lock()
+	changed := w.changed
+	w.mu.Unlock()
+
+	changed(panes)
+}
+
 func (w *programStatusWatches) started() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -522,7 +531,7 @@ func TestObserverRecordsProgramStatusChangeBetweenCycles(t *testing.T) {
 			{state: "", want: "running by hook"},
 		} {
 			time.Sleep(time.Second)
-			watches.changed([]mux.Pane{
+			watches.change([]mux.Pane{
 				programStatusPane("/tmp/agents.sock", "/dev/pts/7", 42, step.state),
 			})
 
@@ -562,9 +571,13 @@ func TestObserverRestartsProgramStatusWatch(t *testing.T) {
 		watches := &programStatusWatches{
 			results: []error{io.ErrUnexpectedEOF, mux.ErrProgramStatusUnsignaled},
 		}
-		listed := true
+
+		var listed atomic.Bool
+
+		listed.Store(true)
+
 		run := runProgramStatusObserver(t, time.Second, watches, func() []mux.Pane {
-			if !listed {
+			if !listed.Load() {
 				return nil
 			}
 
@@ -590,11 +603,11 @@ func TestObserverRestartsProgramStatusWatch(t *testing.T) {
 			t.Fatalf("watches of a server that cannot signal = %d, want 2", got)
 		}
 
-		listed = false
+		listed.Store(false)
 
 		cycle()
 
-		listed = true
+		listed.Store(true)
 
 		if got := cycle(); got != 3 {
 			t.Fatalf("watches after the server came back = %d, want 3", got)
