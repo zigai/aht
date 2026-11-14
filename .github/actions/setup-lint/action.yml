@@ -41,7 +41,7 @@ runs:
       shell: bash
       run: go install "mvdan.cc/sh/v3/cmd/shfmt@$(just --evaluate SHFMT_VERSION)"
     - name: Install Markdown formatter
-      uses: extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d
+      uses: extractions/setup-crate@7577c1bdf2d95e6d65d532788f35ed79d4b1dda2
       with:
         repo: rvben/rumdl@${{ steps.tool.outputs.rumdl-version }}
     - name: Install data formatter
