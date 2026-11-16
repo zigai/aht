@@ -2,12 +2,33 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/zigai/aht/v2/internal/command"
 )
+
+// ErrCommandMissing matches errors caused by a harness executable that is not
+// on PATH, such as after the harness was uninstalled.
+var ErrCommandMissing = errors.New("harness executable is missing")
+
+type commandMissingError struct{ executable string }
+
+func (err commandMissingError) Error() string {
+	return fmt.Sprintf("executable %q was not found", err.executable)
+}
+
+func (commandMissingError) Is(target error) bool {
+	return target == ErrCommandMissing
+}
+
+// CommandMissing returns an error matching [ErrCommandMissing] that names the
+// missing executable.
+func CommandMissing(executable string) error {
+	return commandMissingError{executable: executable}
+}
 
 // RunCommand executes a command with bounded output and a caller-specified timeout.
 // It never returns a partial successful response when the output budget is exceeded.

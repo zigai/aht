@@ -82,9 +82,9 @@ func (registration registration) Inspect(
 		}
 
 		return harness.PluginRegistrationMissing, fmt.Errorf(
-			"%w: executable %q was not found",
+			"%w: %w",
 			errCLIRequired,
-			registration.command,
+			harness.CommandMissing(registration.command),
 		)
 	}
 
@@ -124,7 +124,7 @@ func (registration registration) EnsureMutable(pluginDir string) error {
 	}
 
 	if _, err := exec.LookPath(registration.command); err != nil {
-		return fmt.Errorf("%w: executable %q was not found", errCLIRequired, registration.command)
+		return fmt.Errorf("%w: %w", errCLIRequired, harness.CommandMissing(registration.command))
 	}
 
 	return nil

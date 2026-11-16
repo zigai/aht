@@ -284,6 +284,25 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 	}
 }
 
+func TestUpgradeSkipsPluginWhoseHarnessWasUninstalled(t *testing.T) {
+	isolateUpgradeHome(t)
+	installFakeHermesCLI(t)
+
+	id := registry.Harness("hermes")
+	if _, err := Run(t.Context(), Options{Harness: id, Binary: "/bin/old-aht"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+
+	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+	if err != nil || len(results) != 1 || results[0].Harness != string(id) ||
+		results[0].Changed || results[0].Error != "" ||
+		!strings.HasPrefix(results[0].Message, "skipped: ") {
+		t.Fatalf("upgrade = %+v, %v", results, err)
+	}
+}
+
 func assertUpgradeNextStep(t *testing.T, id registry.Harness, first Result, repeated Result) {
 	t.Helper()
 

@@ -66,17 +66,8 @@ func UpgradeHarness(
 		return appendUpgradeResult(nil, id, result, err), err
 	}
 
-	native, err := installedNative(ctx, id, binary)
-	if err != nil {
-		var result Result
-
-		results = appendUpgradeResult(results, id, result, err)
-		failures = append(failures, err)
-	} else if native || recovered {
-		result, installErr := upgradeNative(ctx, options)
-		results = appendUpgradeResult(results, id, result, installErr)
-		failures = append(failures, installErr)
-	}
+	results, err = upgradeInstalledNative(ctx, options, recovered)
+	failures = append(failures, err)
 
 	if err := ctx.Err(); err != nil {
 		return results, errors.Join(append(failures, err)...)
@@ -98,6 +89,36 @@ func UpgradeHarness(
 	}
 
 	return results, errors.Join(failures...)
+}
+
+func upgradeInstalledNative(ctx context.Context, opts Options, recovered bool) ([]Result, error) {
+	var result Result
+
+	native, err := installedNative(ctx, opts.Harness, opts.Binary)
+	upgraded := err == nil && (native || recovered)
+
+	if upgraded {
+		result, err = upgradeNative(ctx, opts)
+	}
+
+	switch {
+	case errors.Is(err, harnesspkg.ErrCommandMissing):
+		// A harness uninstalled without removing its integration cannot be
+		// upgraded, and nothing runs the stale integration either.
+		return []Result{{
+			Harness:  string(opts.Harness),
+			Path:     "",
+			Changed:  false,
+			Message:  "skipped: " + err.Error(),
+			NextStep: "",
+			Snippet:  "",
+			Error:    "",
+		}}, nil
+	case err != nil || upgraded:
+		return appendUpgradeResult(nil, opts.Harness, result, err), err
+	default:
+		return nil, nil
+	}
 }
 
 func upgradeNative(ctx context.Context, opts Options) (Result, error) {
