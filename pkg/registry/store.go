@@ -256,17 +256,26 @@ func newSnapshot() snapshot {
 }
 
 func writeSnapshotAtomic(path string, snap snapshot) error {
+	data, err := encodeSnapshot(snap)
+	if err != nil {
+		return err
+	}
+
+	return writeRegistryAtomic(path, data)
+}
+
+func encodeSnapshot(snap snapshot) ([]byte, error) {
 	data, err := json.Marshal(snap)
 	if err != nil {
-		return fmt.Errorf("encoding store: %w", err)
+		return nil, fmt.Errorf("encoding store: %w", err)
 	}
 
 	data = append(data, '\n')
 	if len(data) > maxSnapshotBytes {
-		return ErrStoreTooLarge
+		return nil, ErrStoreTooLarge
 	}
 
-	return writeRegistryAtomic(path, data)
+	return data, nil
 }
 
 func writeRegistryAtomic(path string, data []byte) error {

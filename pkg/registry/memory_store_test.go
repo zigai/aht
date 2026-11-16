@@ -3,12 +3,35 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+var errInjectedSync = errors.New("injected sync failure")
+
+type syncGateFS struct {
+	osRegistryFS
+
+	armed   atomic.Bool
+	entered chan string
+	release chan error
+
+	statArmed   atomic.Bool
+	statEntered chan string
+	statRelease chan struct{}
+}
+
+type syncGateFile struct {
+	registryFile
+
+	gate *syncGateFS
+}
 
 func TestMemoryStoreNativePresenceIsolation(t *testing.T) {
 	t.Parallel()
@@ -487,5 +510,439 @@ func TestMemoryStoreFlushPreservesExternalFallbackWrites(t *testing.T) {
 		t.Fatal("successful fallback observation overwritten by broker loaded snapshot")
 	} else if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func (g *syncGateFS) Open(path string) (registryFile, error) {
+	file, err := g.osRegistryFS.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return syncGateFile{registryFile: file, gate: g}, nil
+}
+
+func (g *syncGateFS) OpenFile(path string, flag int, mode os.FileMode) (registryFile, error) {
+	file, err := g.osRegistryFS.OpenFile(path, flag, mode)
+	if err != nil {
+		return nil, err
+	}
+
+	return syncGateFile{registryFile: file, gate: g}, nil
+}
+
+func (g *syncGateFS) CreateTemp(dir string, pattern string) (registryFile, error) {
+	file, err := g.osRegistryFS.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	return syncGateFile{registryFile: file, gate: g}, nil
+}
+
+func (f syncGateFile) Sync() error {
+	if f.gate.armed.Load() {
+		f.gate.entered <- filepath.Base(f.Name())
+
+		if err := <-f.gate.release; err != nil {
+			return err
+		}
+	}
+
+	if err := f.registryFile.Sync(); err != nil {
+		return fmt.Errorf("syncing gated file: %w", err)
+	}
+
+	return nil
+}
+
+func (g *syncGateFS) Lstat(path string) (os.FileInfo, error) {
+	if g.statArmed.CompareAndSwap(true, false) {
+		g.statEntered <- filepath.Base(path)
+
+		<-g.statRelease
+	}
+
+	return g.osRegistryFS.Lstat(path)
+}
+
+func openSyncGatedStore(t *testing.T) (*MemoryStore, *syncGateFS) {
+	t.Helper()
+
+	dir := t.TempDir()
+	gate := &syncGateFS{
+		entered:     make(chan string),
+		release:     make(chan error),
+		statEntered: make(chan string),
+		statRelease: make(chan struct{}),
+	}
+
+	registryFSByDir.Store(dir, gate)
+	t.Cleanup(func() { registryFSByDir.Delete(dir) })
+
+	store, err := OpenMemoryStore(filepath.Join(dir, "state.json"), fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		gate.armed.Store(false)
+
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	return store, gate
+}
+
+func liveReport(sessionID string) Observation {
+	return Observation{
+		Harness: harnessSecondary,
+		At:      time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC),
+		Subject: ObservationIdentity{SessionID: sessionID},
+		Evidence: &Report{
+			Event:    "agent_start",
+			Claim:    new(PresenceLive),
+			Activity: new(ActivityRunning),
+		},
+	}
+}
+
+func nativeSessionIDs(sessions []Session) map[string]bool {
+	ids := make(map[string]bool, len(sessions))
+	for _, session := range sessions {
+		ids[session.SessionID] = true
+	}
+
+	return ids
+}
+
+func requireStateDuringEachSync(
+	t *testing.T,
+	store *MemoryStore,
+	gate *syncGateFS,
+	want map[string]bool,
+	operation func() error,
+) {
+	t.Helper()
+
+	gate.armed.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() { done <- operation() }()
+
+	held := 0
+
+	for {
+		select {
+		case err := <-done:
+			gate.armed.Store(false)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if held == 0 {
+				t.Fatal("operation finished without a sync")
+			}
+
+			return
+		case name := <-gate.entered:
+			held++
+
+			read := make(chan error, 1)
+
+			var state StateSnapshot
+
+			go func() {
+				var err error
+
+				state, err = store.State(context.Background(), Filter{})
+				read <- err
+			}()
+
+			select {
+			case err := <-read:
+				gate.release <- nil
+
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if got := nativeSessionIDs(state.Sessions); !maps.Equal(got, want) {
+					t.Fatalf("State during sync of %s = %v, want %v", name, got, want)
+				}
+			case <-time.After(time.Second):
+				gate.armed.Store(false)
+
+				gate.release <- nil
+
+				t.Fatalf(
+					"State blocked while sync of %s was held; then returned %v, operation %v",
+					name, <-read, <-done,
+				)
+			}
+		}
+	}
+}
+
+func TestMemoryStoreStateDoesNotWaitForCommandSync(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+
+	for _, sessionID := range []string{"first", "second"} {
+		want := map[string]bool{"first": true}
+		want[sessionID] = true
+
+		requireStateDuringEachSync(t, store, gate, want, func() error {
+			_, err := store.Observe(t.Context(), liveReport(sessionID))
+			return err
+		})
+	}
+}
+
+func requireStateAfterExternalWrite(
+	t *testing.T,
+	store *MemoryStore,
+	gate *syncGateFS,
+	operation func(attempt int) (string, error),
+) {
+	t.Helper()
+
+	external := NewJournal(store.Path(), fixtureRules{})
+	want := map[string]bool{}
+
+	for attempt := range 10 {
+		externalID := fmt.Sprintf("external-%d", attempt)
+		if _, err := external.Observe(t.Context(), liveReport(externalID)); err != nil {
+			t.Fatal(err)
+		}
+
+		want[externalID] = true
+
+		type stateResult struct {
+			state StateSnapshot
+			err   error
+		}
+
+		read := make(chan stateResult, 1)
+
+		gate.statArmed.Store(true)
+
+		go func() {
+			state, err := store.State(context.Background(), Filter{})
+			read <- stateResult{state: state, err: err}
+		}()
+
+		<-gate.statEntered
+		gate.armed.Store(true)
+
+		var operationID string
+
+		done := make(chan error, 1)
+
+		go func() {
+			var err error
+
+			operationID, err = operation(attempt)
+			done <- err
+		}()
+
+		// Let operation take the file locks and wait for the reader's s.mu.
+		time.Sleep(20 * time.Millisecond)
+
+		gate.statRelease <- struct{}{}
+
+		var result stateResult
+
+		select {
+		case result = <-read:
+		case name := <-gate.entered:
+			select {
+			case result = <-read:
+				gate.armed.Store(false)
+
+				gate.release <- nil
+			case <-time.After(time.Second):
+				gate.armed.Store(false)
+
+				gate.release <- nil
+
+				late := <-read
+				t.Fatalf(
+					"State blocked while sync of %s was held; then returned %v, %v",
+					name, nativeSessionIDs(late.state.Sessions), late.err,
+				)
+			}
+		}
+
+		gate.armed.Store(false)
+		finishGatedOperation(t, gate, done)
+
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+
+		got := nativeSessionIDs(result.state.Sessions)
+		if operationID != "" {
+			if !got[operationID] {
+				continue
+			}
+
+			want[operationID] = true
+		}
+
+		if !maps.Equal(got, want) {
+			t.Fatalf("State after external write = %v, want %v", got, want)
+		}
+
+		return
+	}
+
+	t.Fatal("operation never took the file locks before the reader")
+}
+
+func finishGatedOperation(t *testing.T, gate *syncGateFS, done chan error) {
+	t.Helper()
+
+	for {
+		select {
+		case <-gate.entered:
+			gate.release <- nil
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			return
+		}
+	}
+}
+
+func TestMemoryStoreStateAfterExternalWriteDoesNotWaitForCommandSync(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+
+	requireStateAfterExternalWrite(t, store, gate, func(attempt int) (string, error) {
+		sessionID := fmt.Sprintf("owner-%d", attempt)
+		_, err := store.Observe(t.Context(), liveReport(sessionID))
+
+		return sessionID, err
+	})
+}
+
+func TestMemoryStoreStateAfterExternalWriteDoesNotWaitForCheckpointSync(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+
+	requireStateAfterExternalWrite(t, store, gate, func(int) (string, error) {
+		return "", store.Flush(t.Context())
+	})
+}
+
+func TestMemoryStoreStateDoesNotWaitForCheckpointSync(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+
+	if _, err := store.Observe(t.Context(), liveReport("checkpointed")); err != nil {
+		t.Fatal(err)
+	}
+
+	requireStateDuringEachSync(t, store, gate, map[string]bool{"checkpointed": true}, func() error {
+		return store.Flush(t.Context())
+	})
+}
+
+func TestMemoryStoreStateSeesExternalJournalWrites(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openSyncGatedStore(t)
+	external := NewJournal(store.Path(), fixtureRules{})
+	want := map[string]bool{}
+
+	for _, step := range []struct {
+		sessionID string
+		before    func() error
+	}{
+		{"after-read", func() error { return nil }},
+		{"after-command", func() error {
+			_, err := store.Observe(t.Context(), liveReport("owner"))
+			want["owner"] = true
+
+			return err
+		}},
+		{"after-checkpoint", func() error { return store.Flush(t.Context()) }},
+	} {
+		if err := step.before(); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := store.State(t.Context(), Filter{}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := external.Observe(t.Context(), liveReport(step.sessionID)); err != nil {
+			t.Fatal(err)
+		}
+
+		want[step.sessionID] = true
+
+		state, err := store.State(t.Context(), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := nativeSessionIDs(state.Sessions); !maps.Equal(got, want) {
+			t.Fatalf("State %s = %v, want %v", step.sessionID, got, want)
+		}
+	}
+}
+
+func TestMemoryStoreCommandSyncFailureKeepsEntry(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+	gate.armed.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := store.Observe(t.Context(), liveReport("unsynced"))
+		done <- err
+	}()
+
+	<-gate.entered
+	gate.armed.Store(false)
+
+	gate.release <- errInjectedSync
+
+	if err := <-done; !errors.Is(err, errInjectedSync) {
+		t.Fatalf("Observe error = %v, want injected sync failure", err)
+	}
+
+	want := map[string]bool{"unsynced": true}
+
+	state, err := store.State(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := nativeSessionIDs(state.Sessions); !maps.Equal(got, want) {
+		t.Fatalf("owner State = %v, want %v", got, want)
+	}
+
+	sessions, err := NewFileStore(store.Path(), fixtureRules{}).List(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := nativeSessionIDs(sessions); !maps.Equal(got, want) {
+		t.Fatalf("file List = %v, want %v", got, want)
 	}
 }

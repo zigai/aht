@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// Visible changes are fsynced to the journal at once, so the snapshot is a
-	// checkpoint; a wide window bounds full rewrites under constant hook traffic.
+	// A command returns after its journal entry is fsynced, so the snapshot is
+	// a checkpoint; a wide window bounds full rewrites under constant hook traffic.
 	defaultPersistenceSettle   = 500 * time.Millisecond
 	defaultPersistenceMaxDelay = 2 * time.Second
 	// defaultVisiblePersistInterval spaces snapshot rewrites while visible
@@ -56,6 +56,11 @@ type MemoryStoreOptions struct {
 type MemoryStore struct {
 	//exhaustruct:optional
 	mu sync.RWMutex
+	//exhaustruct:optional
+	files sync.Mutex
+	//exhaustruct:optional
+	filesDrained bool
+	filesChanged chan struct{}
 
 	reducer      Reducer
 	path         string
@@ -153,9 +158,10 @@ func OpenMemoryStoreWithOptions(
 		stateChanged: make(
 			chan struct{},
 		),
-		owner: owner,
-		dirty: make(chan struct{}, 1),
-		flush: make(chan struct{}, 1),
+		filesChanged: make(chan struct{}),
+		owner:        owner,
+		dirty:        make(chan struct{}, 1),
+		flush:        make(chan struct{}, 1),
 	}
 	expireTombstones(&store.snapshot, store.now(), ttl)
 
@@ -168,6 +174,10 @@ func OpenMemoryStoreWithOptions(
 
 func (s *MemoryStore) Close() error {
 	err := s.Flush(context.Background())
+
+	s.files.Lock()
+	defer s.files.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -175,6 +185,8 @@ func (s *MemoryStore) Close() error {
 		err = closeStoreLock(s.owner, err)
 		s.owner = nil
 	}
+
+	s.signalFilesLocked()
 
 	return err
 }
@@ -267,9 +279,7 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	s.mu.Lock()
-	if err := s.drainLocked(ctx); err != nil {
-		s.mu.Unlock()
+	if err := s.lockCurrent(ctx); err != nil {
 		return Session{}, err
 	}
 
@@ -342,9 +352,7 @@ func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, 
 		return StateSnapshot{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	s.mu.Lock()
-	if err := s.drainLocked(ctx); err != nil {
-		s.mu.Unlock()
+	if err := s.lockCurrent(ctx); err != nil {
 		return StateSnapshot{}, err
 	}
 
@@ -365,9 +373,7 @@ func (s *MemoryStore) WaitForRevision(
 			return StateSnapshot{}, fmt.Errorf("waiting for registry revision: %w", err)
 		}
 
-		s.mu.Lock()
-		if err := s.drainLocked(ctx); err != nil {
-			s.mu.Unlock()
+		if err := s.lockCurrent(ctx); err != nil {
 			return StateSnapshot{}, err
 		}
 
@@ -478,40 +484,64 @@ func (s *MemoryStore) persist(ctx context.Context, force bool) error {
 		return fmt.Errorf("waiting to flush registry: %w", ctx.Err())
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.owner == nil {
-		return nil
-	}
-
-	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
+	lock, err := s.lockFiles(ctx)
 	if err != nil {
 		return err
 	}
 
+	s.mu.Lock()
+
+	data, err := s.checkpointDueLocked(ctx, force)
+	if err != nil || data == nil {
+		err = s.unlockFilesLocked(lock, err)
+		s.mu.Unlock()
+
+		return err
+	}
+
+	revision := s.storageRevision
+	sequence := s.snapshot.JournalSequence
+	// A checkpoint that fails midway leaves a journal of unknown content.
+	s.journal = journalPosition{info: nil, offset: 0}
+	s.mu.Unlock()
+
+	err = persistJournalSnapshot(s.path, data)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err == nil {
+		err = s.checkpointWrittenLocked(sequence)
+	}
+
+	if err == nil {
+		s.persistedRevision = revision
+		s.persistedAt = time.Now()
+	}
+
+	return s.unlockFilesLocked(lock, err)
+}
+
+func (s *MemoryStore) checkpointDueLocked(ctx context.Context, force bool) ([]byte, error) {
+	if s.owner == nil {
+		return nil, nil
+	}
+
 	if err := s.consumeJournalLocked(ctx); err != nil {
-		return closeStoreLock(lock, err)
+		return nil, err
 	}
 
 	s.expireTombstonesLocked()
 
 	if !s.persistDueLocked(force) {
-		return closeStoreLock(lock, nil)
+		return nil, nil
 	}
 
 	if err := ctx.Err(); err != nil {
-		return closeStoreLock(lock, fmt.Errorf("flushing registry: %w", err))
+		return nil, fmt.Errorf("flushing registry: %w", err)
 	}
 
-	if err := s.checkpointLocked(s.snapshot); err != nil {
-		return closeStoreLock(lock, err)
-	}
-
-	s.persistedRevision = s.storageRevision
-	s.persistedAt = time.Now()
-
-	return closeStoreLock(lock, nil)
+	return encodeSnapshot(s.snapshot)
 }
 
 func (s *MemoryStore) persistDueLocked(force bool) bool {

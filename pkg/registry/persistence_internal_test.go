@@ -157,6 +157,10 @@ func TestMemoryStoreConcurrentFlushPersistsLatestState(t *testing.T) {
 			if err := store.Flush(t.Context()); err != nil {
 				t.Error(err)
 			}
+
+			if _, err := store.State(t.Context(), Filter{}); err != nil {
+				t.Error(err)
+			}
 		})
 	}
 

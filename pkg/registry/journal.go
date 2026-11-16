@@ -32,6 +32,11 @@ type journalEntry struct {
 	Reset        bool           `json:"reset,omitempty"`
 }
 
+type journalWrite struct {
+	file registryFile
+	dir  string
+}
+
 type journalResult struct {
 	changes  []Change
 	sessions []Session
@@ -186,7 +191,7 @@ func (s *Journal) transactLocked(ctx context.Context, entry journalEntry) (journ
 	}
 
 	if owner != nil {
-		return result, closeStoreLock(owner, persistJournalSnapshot(s.path, snap))
+		return result, closeStoreLock(owner, persistSnapshot(s.path, snap))
 	}
 
 	if err := appendJournal(s.path, entry); err != nil {
@@ -307,34 +312,62 @@ func decodeJournal(data []byte) ([]decodedJournalEntry, int, error) {
 }
 
 func appendJournal(path string, entry journalEntry) error {
+	written, err := writeJournalEntry(path, entry)
+	if err != nil {
+		return err
+	}
+
+	return written.sync()
+}
+
+func writeJournalEntry(path string, entry journalEntry) (journalWrite, error) {
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("encoding journal: %w", err)
+		return journalWrite{}, fmt.Errorf("encoding journal: %w", err)
 	}
 
 	data = append(data, '\n')
 
 	created, err := journalMissing(path)
 	if err != nil {
-		return err
+		return journalWrite{}, err
 	}
 
 	file, err := registryFSFor(
 		path,
 	).OpenFile(journalPath(path), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("opening journal: %w", err)
+		return journalWrite{}, fmt.Errorf("opening journal: %w", err)
 	}
 
-	if err := errors.Join(writeJournal(file, data), file.Close()); err != nil {
+	if err := writeJournal(file, data); err != nil {
+		return journalWrite{}, errors.Join(err, file.Close())
+	}
+
+	written := journalWrite{file: file, dir: ""}
+	// The directory entry needs syncing only when the journal file is new.
+	if created {
+		written.dir = filepath.Dir(path)
+	}
+
+	return written, nil
+}
+
+func (w journalWrite) sync() error {
+	if w.file == nil {
+		return nil
+	}
+
+	syncErr := w.file.Sync()
+	if syncErr != nil {
+		syncErr = fmt.Errorf("syncing journal: %w", syncErr)
+	}
+
+	if err := errors.Join(syncErr, w.file.Close()); err != nil || w.dir == "" {
 		return err
 	}
 
-	if !created {
-		return nil
-	}
-	// The directory entry needs syncing only when the journal file is new.
-	return syncDir(filepath.Dir(path))
+	return syncDir(w.dir)
 }
 
 func journalMissing(path string) (bool, error) {
@@ -368,15 +401,20 @@ func writeJournal(file registryFile, data []byte) error {
 		)
 	}
 
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("syncing journal: %w", err)
-	}
-
 	return nil
 }
 
-func persistJournalSnapshot(path string, snap snapshot) error {
-	if err := writeSnapshotAtomic(path, snap); err != nil {
+func persistSnapshot(path string, snap snapshot) error {
+	data, err := encodeSnapshot(snap)
+	if err != nil {
+		return err
+	}
+
+	return persistJournalSnapshot(path, data)
+}
+
+func persistJournalSnapshot(path string, data []byte) error {
+	if err := writeRegistryAtomic(path, data); err != nil {
 		return err
 	}
 
@@ -520,7 +558,7 @@ func resetJournalSnapshot(
 		return snapshot{}, journalResult{}, err
 	}
 
-	if err := persistJournalSnapshot(path, snap); err != nil {
+	if err := persistSnapshot(path, snap); err != nil {
 		return snapshot{}, journalResult{}, err
 	}
 

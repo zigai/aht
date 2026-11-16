@@ -65,22 +65,130 @@ func (s *FileStore) loadLocked(ctx context.Context, lock *storeLock) (snapshot, 
 	return snap, closeStoreLock(lock, validateSnapshot(snap))
 }
 
+func (s *MemoryStore) lockCurrent(ctx context.Context) error {
+	for {
+		s.mu.Lock()
+		if s.owner == nil {
+			s.mu.Unlock()
+			return ErrStoreClosed
+		}
+
+		if s.filesUnchangedLocked() {
+			s.refreshDetailsLocked()
+			return nil
+		}
+
+		// TryLock never waits, so trying it under s.mu keeps the lock order.
+		if s.files.TryLock() {
+			break
+		}
+
+		changed := s.filesChanged
+		s.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for registry files: %w", ctx.Err())
+		case <-changed:
+		}
+	}
+
+	s.mu.Unlock()
+
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
+	if err != nil {
+		s.releaseFiles()
+		return err
+	}
+
+	s.mu.Lock()
+
+	err = s.unlockFilesLocked(lock, s.drainLocked(ctx))
+	if err != nil {
+		s.mu.Unlock()
+	}
+
+	return err
+}
+
 func (s *MemoryStore) drainLocked(ctx context.Context) error {
 	if s.owner == nil {
 		return ErrStoreClosed
 	}
 
-	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
-	if err != nil {
-		return err
-	}
-
-	err = closeStoreLock(lock, s.consumeJournalLocked(ctx))
+	err := s.consumeJournalLocked(ctx)
 	if err == nil {
 		s.refreshDetailsLocked()
 	}
 
 	return err
+}
+
+func (s *MemoryStore) lockFiles(ctx context.Context) (*storeLock, error) {
+	// The mutex lets this process's goroutines hand off without polling the
+	// flock. Both come before s.mu, which is never held across file syncs.
+	s.files.Lock()
+
+	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
+	if err != nil {
+		s.releaseFiles()
+		return nil, err
+	}
+
+	return lock, nil
+}
+
+func (s *MemoryStore) releaseFiles() {
+	s.files.Unlock()
+
+	s.mu.Lock()
+	s.signalFilesLocked()
+	s.mu.Unlock()
+}
+
+func (s *MemoryStore) unlockFilesLocked(lock *storeLock, err error) error {
+	s.filesDrained = false
+	err = closeStoreLock(lock, err)
+	s.files.Unlock()
+	s.signalFilesLocked()
+
+	return err
+}
+
+func (s *MemoryStore) signalFilesLocked() {
+	close(s.filesChanged)
+	s.filesChanged = make(chan struct{})
+}
+
+func (s *MemoryStore) filesUnchangedLocked() bool {
+	// A goroutine of this process holds the flock and drained the files, so no
+	// other process can have written since.
+	if s.filesDrained {
+		return true
+	}
+
+	journal := journalPath(s.path)
+
+	info, err := registryFSFor(journal).Lstat(journal)
+	if !unchangedFile(s.journal.info, info, err) {
+		return false
+	}
+
+	info, err = registryFSFor(s.path).Lstat(s.path)
+
+	return unchangedFile(s.checkpoint.info, info, err)
+}
+
+func unchangedFile(before os.FileInfo, after os.FileInfo, err error) bool {
+	if errors.Is(err, os.ErrNotExist) {
+		return before == nil
+	}
+
+	// Writers append to the journal or rename a new file into place, so an
+	// unchanged regular file holds the bytes already read from it.
+	return err == nil && before != nil && after.Mode().IsRegular() &&
+		os.SameFile(before, after) && before.Size() == after.Size() &&
+		before.ModTime().Equal(after.ModTime())
 }
 
 func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
@@ -100,6 +208,9 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 	if baseline.JournalSequence == s.snapshot.JournalSequence &&
 		(len(entries) == 0 || entries[len(entries)-1].Sequence <= baseline.JournalSequence) {
 		s.journal = position
+		s.filesDrained = true
+		s.signalFilesLocked()
+
 		return nil
 	}
 
@@ -131,6 +242,9 @@ func (s *MemoryStore) consumeJournalLocked(ctx context.Context) error {
 	for _, err := range rejected {
 		slog.Warn("dropping rejected registry observation", "path", s.path, "error", err)
 	}
+
+	s.filesDrained = true
+	s.signalFilesLocked()
 
 	return nil
 }
@@ -243,44 +357,71 @@ func (s *MemoryStore) journalWrittenLocked() error {
 }
 
 func (s *MemoryStore) checkpointLocked(snap snapshot) error {
+	data, err := encodeSnapshot(snap)
+	if err != nil {
+		return err
+	}
+
 	// A checkpoint that fails midway leaves a journal of unknown content.
 	s.journal = journalPosition{info: nil, offset: 0}
 
-	if err := persistJournalSnapshot(s.path, snap); err != nil {
+	if err := persistJournalSnapshot(s.path, data); err != nil {
 		return err
 	}
+
+	return s.checkpointWrittenLocked(snap.JournalSequence)
+}
+
+func (s *MemoryStore) checkpointWrittenLocked(sequence uint64) error {
+	info, err := registryFSFor(s.path).Lstat(s.path)
+	if err != nil {
+		return fmt.Errorf("stating store: %w", err)
+	}
+
+	s.checkpoint = checkpointFile{info: info, sequence: sequence}
 
 	return s.journalWrittenLocked()
 }
 
 func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.owner == nil {
-		return journalResult{}, ErrStoreClosed
-	}
-
-	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
+	lock, err := s.lockFiles(ctx)
 	if err != nil {
 		return journalResult{}, err
 	}
 
-	result, err := s.commandLocked(ctx, entry)
+	s.mu.Lock()
 
-	return result, closeStoreLock(lock, err)
+	var (
+		result  journalResult
+		written journalWrite
+	)
+
+	if s.owner == nil {
+		err = ErrStoreClosed
+	} else {
+		result, written, err = s.commandLocked(ctx, entry)
+	}
+	s.mu.Unlock()
+
+	err = errors.Join(err, written.sync())
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return result, s.unlockFilesLocked(lock, err)
 }
 
 func (s *MemoryStore) commandLocked(
 	ctx context.Context,
 	entry journalEntry,
-) (journalResult, error) {
+) (journalResult, journalWrite, error) {
 	if entry.Reset {
-		return s.resetLocked(ctx)
+		result, err := s.resetLocked(ctx)
+		return result, journalWrite{}, err
 	}
 
 	if err := s.consumeJournalLocked(ctx); err != nil {
-		return journalResult{}, err
+		return journalResult{}, journalWrite{}, err
 	}
 
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
@@ -289,25 +430,28 @@ func (s *MemoryStore) commandLocked(
 
 	result, err := s.reducer.applyJournalEntry(ctx, &candidate, entry)
 	if err != nil {
-		return journalResult{}, err
+		return journalResult{}, journalWrite{}, err
 	}
 
 	if err := validateSnapshot(candidate); err != nil {
-		return journalResult{}, err
+		return journalResult{}, journalWrite{}, err
 	}
 
 	if err := validateNativePayloadChanges(s.snapshot, candidate); err != nil {
-		return journalResult{}, err
+		return journalResult{}, journalWrite{}, err
 	}
 
 	if err := ctx.Err(); err != nil {
-		return journalResult{}, fmt.Errorf("committing registry command: %w", err)
+		return journalResult{}, journalWrite{}, fmt.Errorf("committing registry command: %w", err)
 	}
+
+	var written journalWrite
 
 	if journalWorthy(entry, result) ||
 		!maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
-		if err := s.appendJournalLocked(entry); err != nil {
-			return journalResult{}, err
+		written, err = s.appendJournalLocked(entry)
+		if err != nil {
+			return journalResult{}, written, err
 		}
 	} else {
 		// Evidence-only refreshes are re-derived after a restart. Keeping the
@@ -323,12 +467,12 @@ func (s *MemoryStore) commandLocked(
 		)
 		s.acceptUnjournaledLocked(candidate, result.changes)
 
-		return result, nil
+		return result, written, nil
 	}
 
 	s.acceptSnapshotLocked(candidate, result.changes)
 
-	return result, nil
+	return result, written, nil
 }
 
 func (s *MemoryStore) resetLocked(ctx context.Context) (journalResult, error) {
@@ -353,12 +497,13 @@ func (s *MemoryStore) resetLocked(ctx context.Context) (journalResult, error) {
 	return result, nil
 }
 
-func (s *MemoryStore) appendJournalLocked(entry journalEntry) error {
-	if err := appendJournal(s.path, entry); err != nil {
-		return err
+func (s *MemoryStore) appendJournalLocked(entry journalEntry) (journalWrite, error) {
+	written, err := writeJournalEntry(s.path, entry)
+	if err != nil {
+		return journalWrite{}, err
 	}
 
-	return s.journalWrittenLocked()
+	return written, s.journalWrittenLocked()
 }
 
 // journalWorthy reports whether losing entry in an owner crash would matter:
