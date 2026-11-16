@@ -722,6 +722,7 @@ func requireReleaseIntegrationsBeforeUpgrade(
 
 		want, upgrades := releaseStatusBeforeUpgrade(
 			preview[id],
+			status.Status,
 			installed,
 			oldInstall[id].Path,
 			old,
@@ -753,6 +754,7 @@ func requireReleaseIntegrationsBeforeUpgrade(
 
 func releaseStatusBeforeUpgrade(
 	preview releaseIntegrationResult,
+	status string,
 	installed bool,
 	oldPath string,
 	oldVersion int,
@@ -763,6 +765,10 @@ func releaseStatusBeforeUpgrade(
 		return "missing", false
 	case !installed, preview.Message == "no setup required":
 		return "current", false
+	case oldPath != preview.Path && status == "partial":
+		// The new binary recognizes the artifacts at the old path, and upgrade
+		// moves them to the new one.
+		return "partial", true
 	case oldPath != preview.Path:
 		return "missing", false
 	case preview.Changed || oldVersion != newVersion:
