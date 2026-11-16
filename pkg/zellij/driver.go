@@ -54,7 +54,11 @@ func (d Driver) CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnaps
 	return CapturePaneWithOptions(
 		ctx,
 		pane,
-		CaptureOptions{Run: d.ListOptions.Run, SocketDir: d.ListOptions.SocketDir},
+		CaptureOptions{
+			Run:            d.ListOptions.Run,
+			SocketDir:      d.ListOptions.SocketDir,
+			SessionInfoDir: d.ListOptions.SessionInfoDir,
+		},
 	)
 }
 

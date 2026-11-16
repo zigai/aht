@@ -259,18 +259,22 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 			PaneID:      "terminal_7",
 		},
 		Title: "Codex",
-	}, zellij.CaptureOptions{SocketDir: socketDir, Run: func(ctx context.Context, args ...string) (string, error) {
-		got = append([]string(nil), args...)
+	}, zellij.CaptureOptions{
+		SocketDir:      socketDir,
+		SessionInfoDir: t.TempDir(),
+		Run: func(ctx context.Context, args ...string) (string, error) {
+			got = append([]string(nil), args...)
 
-		var err error
+			var err error
 
-		visible, err = visibleSessions(zellij.SocketDir(ctx))
-		if err != nil {
-			return "", err
-		}
+			visible, err = visibleSessions(zellij.SocketDir(ctx))
+			if err != nil {
+				return "", err
+			}
 
-		return strings.Join(lines, "\n") + "\n", nil
-	}})
+			return strings.Join(lines, "\n") + "\n", nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +336,72 @@ func TestListPanesUsesNativeJSONInventory(t *testing.T) {
 		{
 			args:     []string{"--session", "work", "action", "list-panes", "--all", "--json"},
 			sessions: []string{"work"},
+		},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %#v, want %#v", calls, want)
+	}
+}
+
+// Since Zellij 0.46, sockets and metadata folders are named after a session
+// id, and the metadata records the session name.
+func TestSessionsNamedByIDReportAndCaptureTheirName(t *testing.T) {
+	t.Parallel()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
+	startSessionServer(t, socketDir, "fedbfbd10e6f", testNow.Add(-time.Hour))
+
+	metadataDir := filepath.Join(infoDir, "fedbfbd10e6f")
+	if err := os.MkdirAll(metadataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata := filepath.Join(metadataDir, "session-metadata.kdl")
+	if err := os.WriteFile(metadata, []byte("name \"work\"\ntabs {\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls []scopedCall
+
+	run := scopedRunner(&calls, map[string]string{"fedbfbd10e6f": paneListJSON}, nil)
+
+	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{
+		Run:       run,
+		SocketDir: socketDir, SessionInfoDir: infoDir, Now: func() time.Time { return testNow },
+	})
+	if err != nil || len(panes) != 1 || panes[0].Location.SessionName != "work" {
+		t.Fatalf("panes = %#v, %v", panes, err)
+	}
+
+	if _, err := zellij.CapturePaneWithOptions(
+		context.Background(),
+		panes[0],
+		zellij.CaptureOptions{Run: run, SocketDir: socketDir, SessionInfoDir: infoDir},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []scopedCall{
+		{
+			args: []string{
+				"--session",
+				"fedbfbd10e6f",
+				"action",
+				"list-panes",
+				"--all",
+				"--json",
+			},
+			sessions: []string{"fedbfbd10e6f"},
+		},
+		{
+			args: []string{
+				"--session",
+				"fedbfbd10e6f",
+				"action",
+				"dump-screen",
+				"--pane-id",
+				"terminal_7",
+			},
+			sessions: []string{"fedbfbd10e6f"},
 		},
 	}
 	if !reflect.DeepEqual(calls, want) {

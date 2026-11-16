@@ -1,15 +1,18 @@
 package zellij
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -85,7 +88,9 @@ func listSessionSockets(socketDir string) ([]sessionSocket, error) {
 	var sockets []sessionSocket
 
 	for _, entry := range entries {
-		if entry.Type()&fs.ModeSocket == 0 || entry.Name() == webServerSocket {
+		// Names starting with a dot belong to Zellij's own app sessions.
+		if entry.Type()&fs.ModeSocket == 0 || entry.Name() == webServerSocket ||
+			strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
@@ -109,6 +114,52 @@ func listSessionSockets(socketDir string) ([]sessionSocket, error) {
 	}
 
 	return sockets, nil
+}
+
+// sessionName returns the name of the session whose socket is named id. Since
+// Zellij 0.46, sockets and session metadata folders are named after a session
+// id, and only the metadata records the session name. Earlier versions name
+// both after the session. Like Zellij, it falls back to the id when the
+// metadata does not name the session.
+func sessionName(sessionInfoDir string, id string) string {
+	file, err := os.Open(filepath.Join(sessionInfoDir, id, sessionMetadata))
+	if err != nil {
+		return id
+	}
+	defer file.Close() //nolint:errcheck // read-only file
+
+	line, err := bufio.NewReader(file).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return id
+	}
+
+	quoted, found := strings.CutPrefix(strings.TrimSpace(line), "name ")
+	if !found {
+		return id
+	}
+
+	name, err := strconv.Unquote(quoted)
+	if err != nil || name == "" {
+		return id
+	}
+
+	return name
+}
+
+// sessionSocketID returns the socket name of the session called name.
+func sessionSocketID(socketDir string, sessionInfoDir string, name string) (string, error) {
+	sockets, err := listSessionSockets(socketDir)
+	if err != nil {
+		return "", err
+	}
+
+	for _, socket := range sockets {
+		if socket.name == name || sessionName(sessionInfoDir, socket.name) == name {
+			return socket.name, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: %q", errSessionGone, name)
 }
 
 // ready reports whether the session server has finished initializing.

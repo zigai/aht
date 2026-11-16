@@ -42,8 +42,9 @@ type ListOptions struct {
 
 // CaptureOptions configures [CapturePaneWithOptions].
 type CaptureOptions struct {
-	Run       CommandRunner
-	SocketDir string
+	Run            CommandRunner
+	SocketDir      string
+	SessionInfoDir string
 }
 
 type paneRecord struct {
@@ -182,7 +183,7 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 			continue
 		}
 
-		parsed, parseErr := parsePanes(socket.name, output)
+		parsed, parseErr := parsePanes(sessionName(opts.SessionInfoDir, socket.name), output)
 		if parseErr != nil {
 			listErrors = append(
 				listErrors,
@@ -199,7 +200,11 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 }
 
 func CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error) {
-	return CapturePaneWithOptions(ctx, pane, CaptureOptions{Run: nil, SocketDir: ""})
+	return CapturePaneWithOptions(
+		ctx,
+		pane,
+		CaptureOptions{Run: nil, SocketDir: "", SessionInfoDir: ""},
+	)
 }
 
 func CapturePaneWithOptions(
@@ -222,13 +227,28 @@ func CapturePaneWithOptions(
 		socketDir = defaultSocketDir()
 	}
 
+	sessionInfoDir := opts.SessionInfoDir
+	if sessionInfoDir == "" {
+		dir, err := defaultSessionInfoDir()
+		if err != nil {
+			return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
+		}
+
+		sessionInfoDir = dir
+	}
+
+	id, err := sessionSocketID(socketDir, sessionInfoDir, pane.Location.SessionName)
+	if err != nil {
+		return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
+	}
+
 	text, err := runInSession(
 		ctx,
 		run,
 		socketDir,
-		pane.Location.SessionName,
+		id,
 		"--session",
-		pane.Location.SessionName,
+		id,
 		"action",
 		"dump-screen",
 		"--pane-id",
