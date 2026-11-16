@@ -742,11 +742,7 @@ func managedSource(source string, harness registry.Harness) string {
 }
 
 func isManagedSourceHookCommand(source string, configs []map[string]any) func(string) bool {
-	pattern := regexp.MustCompile(
-		`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` + regexp.QuoteMeta(
-			source,
-		) + `(?:['"\s]|$)`,
-	)
+	pattern := harnesspkg.ManagedSourcePattern(source)
 	nativeID := nativeHookIDForSource(source)
 
 	binaries := make(map[string]bool)

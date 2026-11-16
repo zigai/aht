@@ -75,7 +75,7 @@ func writeExecutableFixture(t *testing.T, path string, content []byte) {
 	}
 }
 
-func assertMissingStatus(t *testing.T, mgr *manage.Manager, hookPath string, shimPath string) {
+func assertMissingStatus(t *testing.T, mgr *manage.Manager, pluginPath string, shimPath string) {
 	t.Helper()
 
 	status, err := mgr.IntegrationStatus(context.Background(), registry.Harness("claude"))
@@ -91,8 +91,8 @@ func assertMissingStatus(t *testing.T, mgr *manage.Manager, hookPath string, shi
 		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactMissing)
 	}
 
-	if !slices.Contains(status.Paths, hookPath) {
-		t.Errorf("status.Paths %v missing hookPath %s", status.Paths, hookPath)
+	if !slices.Contains(status.Paths, pluginPath) {
+		t.Errorf("status.Paths %v missing pluginPath %s", status.Paths, pluginPath)
 	}
 
 	if !slices.Contains(status.Paths, shimPath) {
@@ -197,10 +197,10 @@ func TestManagerIntegrationStatus(t *testing.T) {
 		StorePath: filepath.Join(t.TempDir(), "sessions.json"),
 	})
 
-	hookPath := filepath.Join(integrationDir, "settings.json")
+	pluginPath := filepath.Join(integrationDir, "aht")
 	shimPath := filepath.Join(stateDir, "shims", "claude")
 
-	assertMissingStatus(t, mgr, hookPath, shimPath)
+	assertMissingStatus(t, mgr, pluginPath, shimPath)
 	assertForeignStatus(t, mgr, shimPath)
 	assertCurrentStatus(t, mgr, shimPath)
 }

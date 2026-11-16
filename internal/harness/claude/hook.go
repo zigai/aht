@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
@@ -26,25 +27,13 @@ func (claudeHarness) HandleHook(
 		event = harness.PayloadString(invocation.Payload, "hook_event_name")
 	}
 
-	if event != "SessionStart" && event != "FileChanged" {
+	if !slices.Contains(titleHookEvents, event) {
 		return result, nil
 	}
 
 	sessionID, path, err := validateTitleHookIdentity(invocation.Payload, event)
 	if err != nil {
 		return result, err
-	}
-
-	if event == "FileChanged" {
-		matches, err := validateTitleFileChange(invocation.Payload, path)
-		if err != nil || !matches {
-			return result, err
-		}
-	} else {
-		result.Response["hookSpecificOutput"] = map[string]any{
-			"hookEventName": "SessionStart",
-			"watchPaths":    []string{path},
-		}
 	}
 
 	_, err = readSessionTitle(ctx, sessionID, path)
@@ -74,25 +63,4 @@ func validateTitleHookIdentity(payload map[string]any, event string) (string, st
 	}
 
 	return sessionID, filepath.Clean(path), nil
-}
-
-func validateTitleFileChange(payload map[string]any, path string) (bool, error) {
-	changedPath := harness.PayloadString(payload, "file_path")
-	if !filepath.IsAbs(changedPath) || strings.ContainsRune(changedPath, 0) {
-		return false, fmt.Errorf("%w: absolute file_path is required", errInvalidTitleHook)
-	}
-
-	if filepath.Clean(changedPath) != path {
-		return false, nil
-	}
-
-	switch harness.PayloadString(payload, "event") {
-	case "change", "add", "unlink":
-		return true, nil
-	default:
-		return false, fmt.Errorf(
-			"%w: FileChanged requires change, add, or unlink event",
-			errInvalidTitleHook,
-		)
-	}
 }

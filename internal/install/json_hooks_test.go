@@ -1,7 +1,6 @@
 package install
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -14,89 +13,6 @@ import (
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 )
-
-func TestInstallClaudeWritesHooks(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-
-	result, err := Run(t.Context(), Options{
-		Harness: registry.Harness("claude"),
-		Binary:  defaultBinary,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-
-	if !result.Changed {
-		t.Fatal("expected claude install to report changed")
-	}
-
-	data, err := os.ReadFile(result.Path)
-	if err != nil {
-		t.Fatalf("reading installed hooks: %v", err)
-	}
-
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("installed hooks are not valid JSON: %v", err)
-	}
-
-	requireClaudeHookEvents(t, config)
-
-	requireTextContainsAll(t, string(data), []string{
-		"--raw-stdin",
-		"--quiet",
-		"--reporter claude-hook",
-		managedMarker,
-	}, "installed hook")
-}
-
-func requireClaudeHookEvents(t *testing.T, config map[string]any) {
-	t.Helper()
-
-	hooks, hooksOK := config["hooks"].(map[string]any)
-	if !hooksOK {
-		t.Fatal("expected hooks object")
-	}
-
-	for _, event := range []string{
-		hookEventSessionStart,
-		"UserPromptSubmit",
-		"PreToolUse",
-		"PostToolUse",
-		"PostToolUseFailure",
-		"PermissionRequest",
-		"PermissionDenied",
-		"Elicitation",
-		"ElicitationResult",
-		"Notification",
-		"PreCompact",
-		"PostCompact",
-		hookEventStop,
-		"StopFailure",
-		"SessionEnd",
-		"FileChanged",
-	} {
-		if _, ok := hooks[event]; !ok {
-			t.Fatalf("expected %s hook", event)
-		}
-	}
-
-	requireNoSubagentHooks(t, hooks, "SubagentStart", "SubagentStop")
-	requireCompactionKeepsTurnRunning(t, hooks, "startup|resume|clear")
-	requireManualPostCompactIdle(t, hooks, "manual")
-	requireOnlyManualPreCompactRunning(t, hooks)
-
-	for _, event := range []string{"SessionStart", "FileChanged"} {
-		commands := requireTestHookMatcherCommands(t, hooks, event)
-		if !strings.Contains(commands[""], " --json hook claude --event "+event) {
-			t.Fatalf(
-				"%s dynamic watcher = %q, want request/response hook without matcher",
-				event,
-				commands[""],
-			)
-		}
-	}
-}
 
 // requireNoSubagentHooks asserts that child-agent events, which fire while the
 // parent turn keeps running, never report the main session's activity.
@@ -207,27 +123,27 @@ func requireTestHookMatcherCommands(
 	return commands
 }
 
-func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
+func TestInstallRemovesManagedHooksForDroppedEvents(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("QWEN_HOME", dir)
 	path := filepath.Join(dir, "settings.json")
 	userCommand := "notify-send subagent-finished"
 
 	oldConfig := `{"hooks":{` +
 		`"SubagentStart":[{"hooks":[{"type":"command","command":"aht ` +
-		`report claude --activity running --event SubagentStart ` +
-		`--reporter-version 9 --reporter claude-hook --raw-stdin ` +
+		`report qwen --activity running --event SubagentStart ` +
+		`--reporter-version 9 --reporter qwen-hook --raw-stdin-defaults-only ` +
 		`--quiet"}]}],` +
 		`"SubagentStop":[{"hooks":[` +
-		`{"type":"command","command":"aht report claude --activity ` +
+		`{"type":"command","command":"aht report qwen --activity ` +
 		`idle --event SubagentStop --reporter-version 9 --reporter ` +
-		`claude-hook --raw-stdin --quiet"},` +
+		`qwen-hook --raw-stdin-defaults-only --quiet"},` +
 		`{"type":"command","command":"` + userCommand + `"}]}]}}`
 	if err := os.WriteFile(path, []byte(oldConfig), 0o600); err != nil {
 		t.Fatalf("writing old hooks: %v", err)
 	}
 
-	options := Options{Harness: registry.Harness("claude"), Binary: testInstallBinary}
+	options := Options{Harness: registry.Harness("qwen"), Binary: testInstallBinary}
 	options.DryRun = true
 
 	dryRun, err := Run(t.Context(), options)
@@ -244,8 +160,8 @@ func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	data := readTestFile(t, path, "reading claude hooks")
-	config := decodeTestJSONObject(t, data, "claude hooks")
+	data := readTestFile(t, path, "reading qwen hooks")
+	config := decodeTestJSONObject(t, data, "qwen hooks")
 
 	hooks, ok := config["hooks"].(map[string]any)
 	if !ok {
@@ -271,45 +187,16 @@ func TestInstallClaudeRemovesManagedHooksForDroppedEvents(t *testing.T) {
 	}
 
 	if second.Changed {
-		t.Fatal("expected second claude install to be idempotent")
+		t.Fatal("expected second qwen install to be idempotent")
 	}
 }
 
-func TestInstallClaudeReplacesManagedHooks(t *testing.T) {
+func TestInstallRepairsManagedHookMatcher(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-
-	path := filepath.Join(dir, "settings.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("creating claude dir: %v", err)
-	}
-
-	oldConfig := `{"hooks":{"SessionStart":[{"matcher":"startup|resume",` +
-		`"hooks":[{"type":"command","command":"old-aht report ` +
-		`--harness claude --state idle --source claude-hook ` +
-		`--attribute aht_integration_version=5 --attribute ` +
-		`aht_integration=claude-hook","statusMessage":"aht managed ` +
-		`integration"}]}]}}`
-	if err := os.WriteFile(path, []byte(oldConfig), 0o600); err != nil {
-		t.Fatalf("writing old hooks: %v", err)
-	}
-
-	requireManagedReplacement(t, managedReplacementCase{
-		Harness:              registry.Harness("claude"),
-		Path:                 path,
-		RemovedText:          "old-aht",
-		RequiredText:         []string{"--raw-stdin"},
-		FirstChangeMessage:   "expected claude install to replace old managed hook",
-		SecondChangedMessage: "expected second claude install to be idempotent",
-	})
-}
-
-func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("QWEN_HOME", dir)
 
 	first, err := Run(t.Context(), Options{
-		Harness: registry.Harness("claude"),
+		Harness: registry.Harness("qwen"),
 		Binary:  testInstallBinary,
 	})
 	if err != nil {
@@ -318,8 +205,8 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 
 	config := decodeTestJSONObject(
 		t,
-		readTestFile(t, first.Path, "reading claude hooks"),
-		"claude hooks",
+		readTestFile(t, first.Path, "reading qwen hooks"),
+		"qwen hooks",
 	)
 	hooks := requireTestHooks(t, config)
 
@@ -345,7 +232,7 @@ func TestInstallClaudeRepairsManagedHookMatcher(t *testing.T) {
 	}
 
 	second, err := Run(t.Context(), Options{
-		Harness: registry.Harness("claude"),
+		Harness: registry.Harness("qwen"),
 		Binary:  testInstallBinary,
 	})
 	if err != nil {
@@ -736,8 +623,8 @@ func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
 		harness string
 		config  string
 	}{
-		{name: "claude event object", harness: "claude", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
-		{name: "claude hooks string", harness: "claude", config: `{"hooks": "my-notifier"}`},
+		{name: "qwen event object", harness: "qwen", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
+		{name: "qwen hooks string", harness: "qwen", config: `{"hooks": "my-notifier"}`},
 		{
 			name:    "cursor event object",
 			harness: "cursor",
@@ -748,11 +635,11 @@ func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+			t.Setenv("QWEN_HOME", filepath.Join(home, ".qwen"))
 
 			path := filepath.Join(home, ".cursor", "hooks.json")
-			if test.harness == "claude" {
-				path = filepath.Join(home, ".claude", "settings.json")
+			if test.harness == "qwen" {
+				path = filepath.Join(home, ".qwen", "settings.json")
 			}
 
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -1373,219 +1260,6 @@ func TestInstallCodexReportsInterruptWithinNativeTimeout(t *testing.T) {
 	if timeoutSeconds := requireTestHookTimeoutSeconds(t, hooks, "Interrupt"); timeoutSeconds != 3 {
 		t.Fatalf("Interrupt timeout = %v, want 3", timeoutSeconds)
 	}
-}
-
-func TestClaudeWatcherUpgradePreservesUserHooksAndIsIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	path := filepath.Join(dir, "settings.json")
-	userCommands := []string{
-		"notify-send transcript-changed",
-		"echo '/usr/local/bin/aht --json hook claude --event FileChanged'",
-		"sh -c '/usr/local/bin/aht --json hook claude --event FileChanged'",
-	}
-	writeOldClaudeWatcherFixture(t, path, userCommands)
-
-	id := registry.Harness("claude")
-	if status, err := Inspect(
-		t.Context(),
-		id,
-		testInstallBinary,
-	); err != nil ||
-		status.Status != ArtifactStale {
-		t.Fatalf("old watcher status = %+v, %v", status, err)
-	}
-
-	if result, err := upgradeNative(
-		t.Context(),
-		Options{Harness: id, Binary: testInstallBinary},
-	); err != nil ||
-		!result.Changed {
-		t.Fatalf("watcher upgrade = %+v, %v", result, err)
-	}
-
-	data := readTestFile(t, path, "reading upgraded watcher")
-
-	config := decodeTestJSONObject(t, data, "upgraded watcher")
-	if config["theme"] != "dark" {
-		t.Fatalf("user settings lost: %s", data)
-	}
-
-	requirePreservedUserHookCommands(t, data, userCommands)
-
-	if strings.Contains(string(data), "/old/bin/renamed tracker") {
-		t.Fatalf("old managed endpoint preserved: %s", data)
-	}
-
-	requireClaudeNativeWatchers(t, config)
-
-	if status, err := Inspect(
-		t.Context(),
-		id,
-		testInstallBinary,
-	); err != nil ||
-		status.Status != ArtifactCurrent {
-		t.Fatalf("upgraded watcher status = %+v, %v", status, err)
-	}
-
-	if result, err := Run(
-		t.Context(),
-		Options{Harness: id, Binary: testInstallBinary},
-	); err != nil ||
-		result.Changed {
-		t.Fatalf("watcher reinstall = %+v, %v", result, err)
-	}
-
-	requireClaudeWatcherRemoval(t, id, path, userCommands)
-}
-
-func writeOldClaudeWatcherFixture(t *testing.T, path string, userCommands []string) {
-	t.Helper()
-
-	handlers := make([]any, 0, 1+len(userCommands))
-
-	handlers = append(
-		handlers,
-		map[string]any{
-			"type":    "command",
-			"command": "'/old/bin/renamed tracker' --json hook claude --event FileChanged",
-		},
-	)
-	for _, command := range userCommands {
-		handlers = append(handlers, map[string]any{"type": "command", "command": command})
-	}
-
-	config := map[string]any{"theme": "dark", "hooks": map[string]any{
-		"SessionStart": []any{
-			map[string]any{
-				"matcher": "startup|resume|clear",
-				"hooks": []any{
-					map[string]any{
-						"type": "command",
-						"command": "'/old/bin/renamed tracker' report claude --activity idle " +
-							"--event SessionStart --reporter-version 13 --reporter " +
-							"claude-hook --raw-stdin --quiet",
-					},
-				},
-			},
-		},
-		"FileChanged": []any{map[string]any{"matcher": "user.txt", "hooks": handlers}},
-	}}
-
-	data, err := json.Marshal(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func requireClaudeWatcherRemoval(
-	t *testing.T,
-	id registry.Harness,
-	path string,
-	commands []string,
-) {
-	t.Helper()
-
-	if result, err := Remove(
-		t.Context(),
-		Options{Harness: id, Binary: testInstallBinary},
-	); err != nil ||
-		!result.Changed {
-		t.Fatalf("watcher removal = %+v, %v", result, err)
-	}
-
-	data := readTestFile(t, path, "reading removed watcher")
-	if strings.Contains(string(data), `"command": "/usr/local/bin/aht --json hook`) {
-		t.Fatalf("managed watcher remained after removal: %s", data)
-	}
-
-	requirePreservedUserHookCommands(t, data, commands)
-}
-
-func requirePreservedUserHookCommands(t *testing.T, data []byte, commands []string) {
-	t.Helper()
-
-	for _, command := range commands {
-		encoded, err := json.Marshal(command)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !bytes.Contains(data, encoded) {
-			t.Fatalf("user hook %q lost: %s", command, data)
-		}
-	}
-}
-
-func requireClaudeNativeWatchers(t *testing.T, config map[string]any) {
-	t.Helper()
-
-	hooks, ok := config["hooks"].(map[string]any)
-	if !ok {
-		t.Fatal("expected installed hook object")
-	}
-
-	for _, event := range []string{"SessionStart", "FileChanged"} {
-		groups, ok := hooks[event].([]any)
-		if !ok {
-			t.Fatalf("expected %s hook groups", event)
-		}
-
-		requireClaudeNativeWatcher(t, groups, event)
-	}
-}
-
-func requireClaudeNativeWatcher(t *testing.T, groups []any, event string) {
-	t.Helper()
-
-	watchers := 0
-
-	for _, value := range groups {
-		group, ok := value.(map[string]any)
-		if !ok {
-			t.Fatalf("expected %s hook group object", event)
-		}
-
-		watchers += countClaudeNativeWatcherHooks(t, group, event)
-	}
-
-	if watchers != 1 {
-		t.Fatalf("%s watcher count = %d, want one", event, watchers)
-	}
-}
-
-func countClaudeNativeWatcherHooks(t *testing.T, group map[string]any, event string) int {
-	t.Helper()
-
-	hooks, ok := group["hooks"].([]any)
-	if !ok {
-		t.Fatalf("expected %s hook handlers", event)
-	}
-
-	watchers := 0
-
-	for _, value := range hooks {
-		handler, ok := value.(map[string]any)
-		if !ok {
-			t.Fatalf("expected %s hook handler object", event)
-		}
-
-		if handler["command"] != testInstallBinary+" --json hook claude --event "+event {
-			continue
-		}
-
-		watchers++
-
-		if _, exists := group["matcher"]; exists {
-			t.Fatalf("dynamic %s watcher has matcher: %#v", event, group)
-		}
-	}
-
-	return watchers
 }
 
 type managedReplacementCase struct {

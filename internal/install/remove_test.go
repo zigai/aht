@@ -143,7 +143,7 @@ func TestRemoveDeletesStaleManagedRenderedArtifact(t *testing.T) {
 
 func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("QWEN_HOME", dir)
 	path := filepath.Join(dir, "settings.json")
 	userCommand := "custom-tool"
 
@@ -154,14 +154,14 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 
 	if _, err := Run(
 		t.Context(),
-		Options{Harness: registry.Harness("claude"), Binary: testInstallBinary},
+		Options{Harness: registry.Harness("qwen"), Binary: testInstallBinary},
 	); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := Remove(
 		t.Context(),
-		Options{Harness: registry.Harness("claude"), Binary: testInstallBinary},
+		Options{Harness: registry.Harness("qwen"), Binary: testInstallBinary},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 	}
 
 	if !strings.Contains(string(data), userCommand) ||
-		strings.Contains(string(data), "--reporter claude-hook") {
+		strings.Contains(string(data), "--reporter qwen-hook") {
 		t.Fatalf("user hook was not preserved cleanly: %s", data)
 	}
 }

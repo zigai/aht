@@ -72,7 +72,7 @@ func prepareUpgradeFailure(t *testing.T) string {
 
 	installed, err := install.Run(
 		t.Context(),
-		install.Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"},
+		install.Options{Harness: registry.Harness("qwen"), Binary: "/bin/old-aht"},
 	)
 	if err != nil {
 		t.Fatal(err)

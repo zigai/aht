@@ -12,7 +12,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func TestSessionStartWatchesAndPrimesNativeTranscript(t *testing.T) {
+func TestSessionStartPrimesNativeTitle(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	path := writeTitleTranscript(
@@ -29,26 +29,9 @@ func TestSessionStartWatchesAndPrimesNativeTranscript(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			want := map[string]any{
-				"hookSpecificOutput": map[string]any{
-					"hookEventName": "SessionStart",
-					"watchPaths":    []string{path},
-				},
-			}
-			if !reflect.DeepEqual(result.Response, want) || result.ReportOK ||
-				!reflect.DeepEqual(result.Report, registry.Observation{}) {
-				t.Fatalf(
-					"SessionStart result = %#v, want response %#v without observation",
-					result,
-					want,
-				)
-			}
+			requireNoObservation(t, result)
 
-			if title, err := readSessionTitle(
-				t.Context(),
-				"native",
-				path,
-			); err != nil ||
+			if title, err := readSessionTitle(t.Context(), "native", path); err != nil ||
 				title != "Generated" {
 				t.Fatalf("cached title = %q, %v", title, err)
 			}
@@ -56,12 +39,12 @@ func TestSessionStartWatchesAndPrimesNativeTranscript(t *testing.T) {
 	}
 }
 
-func TestFileChangedMaintainsTitleWithoutRegistryObservation(t *testing.T) {
+func TestStopRefreshesTitleWithoutRegistryObservation(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	path := writeTitleTranscript(t, "")
 	for _, step := range []struct {
-		event  string
+		change string
 		append string
 		want   string
 	}{
@@ -74,71 +57,54 @@ func TestFileChangedMaintainsTitleWithoutRegistryObservation(t *testing.T) {
 		{"unlink", "", ""},
 		{"add", "{\"type\":\"ai-title\",\"sessionId\":\"native\",\"aiTitle\":\"Recreated\"}\n", "Recreated"},
 	} {
-		changeTitleTranscript(t, path, step.event, step.append)
-		invocation := nativeTitleHook("FileChanged", path)
-		invocation.Payload["file_path"] = filepath.Dir(path) + "/./" + filepath.Base(path)
-		invocation.Payload["event"] = step.event
+		changeTitleTranscript(t, path, step.change, step.append)
 
-		result, err := New().HandleHook(t.Context(), invocation)
+		result, err := New().HandleHook(t.Context(), nativeTitleHook("Stop", path))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if result.ReportOK || !reflect.DeepEqual(result.Report, registry.Observation{}) ||
-			!reflect.DeepEqual(result.Response, map[string]any{}) {
-			t.Fatalf(
-				"FileChanged produced registry observation or native side effects: %#v",
-				result,
-			)
-		}
+		requireNoObservation(t, result)
 
-		if title, err := readSessionTitle(
-			t.Context(),
-			"native",
-			path,
-		); err != nil ||
+		if title, err := readSessionTitle(t.Context(), "native", path); err != nil ||
 			title != step.want {
-			t.Fatalf("%s cached title = %q, %v; want %q", step.event, title, err, step.want)
+			t.Fatalf("%s cached title = %q, %v; want %q", step.change, title, err, step.want)
 		}
 	}
 }
 
-func TestNativeTitleHookIgnoresOtherWatchedFiles(t *testing.T) {
+func TestNativeTitleHookIgnoresOtherEvents(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	invocation := nativeTitleHook("FileChanged", t.TempDir())
-	invocation.Payload["file_path"] = filepath.Join(t.TempDir(), "other")
-	invocation.Payload["event"] = "change"
 
-	result, err := New().HandleHook(t.Context(), invocation)
-	if err != nil || result.ReportOK || !reflect.DeepEqual(result.Response, map[string]any{}) {
-		t.Fatalf("unrelated watched file result = %#v, %v", result, err)
+	for _, event := range []string{"FileChanged", "PreToolUse", "SessionEnd"} {
+		invocation := nativeTitleHook(event, "relative.jsonl")
+
+		result, err := New().HandleHook(t.Context(), invocation)
+		if err != nil {
+			t.Fatalf("%s: %v", event, err)
+		}
+
+		requireNoObservation(t, result)
 	}
 }
 
-func TestNativeTitleHookRegistersMissingTranscript(t *testing.T) {
+func TestNativeTitleHookAcceptsMissingTranscript(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "absent.jsonl")
-	result, err := New().HandleHook(t.Context(), nativeTitleHook("SessionStart", path))
 
-	want := map[string]any{
-		"hookSpecificOutput": map[string]any{
-			"hookEventName": "SessionStart",
-			"watchPaths":    []string{path},
-		},
+	result, err := New().HandleHook(t.Context(), nativeTitleHook("SessionStart", path))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err != nil || !reflect.DeepEqual(result.Response, want) || result.ReportOK {
-		t.Fatalf("missing transcript result = %#v, %v", result, err)
-	}
+
+	requireNoObservation(t, result)
 }
 
 func TestNativeTitleHookPropagatesCacheErrors(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	for _, event := range []string{"SessionStart", "FileChanged"} {
+	for _, event := range titleHookEvents {
 		invocation := nativeTitleHook(event, t.TempDir())
-		invocation.Payload["file_path"] = invocation.Payload["transcript_path"]
-
-		invocation.Payload["event"] = "change"
 		if result, err := New().HandleHook(t.Context(), invocation); err == nil || result.ReportOK {
 			t.Fatalf(
 				"%s directory transcript result = %#v, %v; want error without report",
@@ -152,7 +118,7 @@ func TestNativeTitleHookPropagatesCacheErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := New().HandleHook(ctx, nativeTitleHook("SessionStart", writeTitleTranscript(t, "")))
+	_, err := New().HandleHook(ctx, nativeTitleHook("Stop", writeTitleTranscript(t, "")))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled hook error = %v", err)
 	}
@@ -166,45 +132,32 @@ func TestNativeTitleHookRejectsInvalidNativeIdentityAndPath(t *testing.T) {
 		{"session_id", " "},
 		{"transcript_path", "relative.jsonl"},
 		{"transcript_path", ""},
-		{"hook_event_name", "Stop"},
+		{"hook_event_name", "PreToolUse"},
 	} {
-		invocation := nativeTitleHook("SessionStart", filepath.Join(t.TempDir(), "session.jsonl"))
+		invocation := nativeTitleHook("Stop", filepath.Join(t.TempDir(), "session.jsonl"))
 
-		invocation.Payload[change.key] = change.value
-		if result, err := New().HandleHook(t.Context(), invocation); err == nil || result.ReportOK {
-			t.Fatalf("invalid %s result = %#v, %v", change.key, result, err)
-		}
-	}
-}
-
-func TestFileChangedRejectsInvalidChangedPathAndEvent(t *testing.T) {
-	for _, change := range []struct {
-		key   string
-		value string
-	}{
-		{"file_path", "relative.jsonl"},
-		{"file_path", ""},
-		{"event", "rename"},
-		{"event", ""},
-	} {
-		path := filepath.Join(t.TempDir(), "session.jsonl")
-		invocation := nativeTitleHook("FileChanged", path)
-		invocation.Payload["file_path"] = path
-		invocation.Payload["event"] = "change"
 		invocation.Payload[change.key] = change.value
 
 		result, err := New().HandleHook(t.Context(), invocation)
-		if !errors.Is(err, errInvalidTitleHook) || result.ReportOK ||
-			!reflect.DeepEqual(result.Response, map[string]any{}) {
+		if !errors.Is(err, errInvalidTitleHook) || result.ReportOK {
 			t.Fatalf("invalid %s result = %#v, %v", change.key, result, err)
 		}
 	}
 }
 
-func changeTitleTranscript(t *testing.T, path string, event string, content string) {
+func requireNoObservation(t *testing.T, result harness.HookResult) {
 	t.Helper()
 
-	if event == "unlink" {
+	if result.ReportOK || !reflect.DeepEqual(result.Report, registry.Observation{}) ||
+		!reflect.DeepEqual(result.Response, map[string]any{}) {
+		t.Fatalf("title hook produced an observation or a native response: %#v", result)
+	}
+}
+
+func changeTitleTranscript(t *testing.T, path string, change string, content string) {
+	t.Helper()
+
+	if change == "unlink" {
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}

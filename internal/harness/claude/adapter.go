@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/zigai/aht/v2/internal/harness"
@@ -13,7 +14,7 @@ import (
 const (
 	claudeCommand           = "claude"
 	claudeIntegrationSource = "claude-hook"
-	integrationVersion      = 15
+	integrationVersion      = 16
 )
 
 type claudeHarness struct{ harness.BaseAdapter }
@@ -65,64 +66,48 @@ func (adapter claudeHarness) InstallPlan(binary string) (harness.InstallPlan, er
 		return harness.InstallPlan{}, harness.ErrHomeUnknown
 	}
 
-	hooks := harness.CommandHookSpecs(binary, adapter.Definition(), []harness.CommandHook{
-		{
-			Event:      "SessionStart",
-			Matcher:    "startup|resume|clear",
-			Transition: harness.HookActivityIdle,
-		},
-		// Automatic compaction also fires SessionStart inside a turn that
-		// keeps running, so compaction reports presence without activity.
-		{
-			Event:      "SessionStart",
-			Matcher:    "compact",
-			Transition: harness.HookPresenceLive,
-		},
-		{Event: "UserPromptSubmit", Transition: harness.HookActivityRunning},
-		{Event: "PreToolUse", Transition: harness.HookActivityRunning},
-		{Event: "PostToolUse", Transition: harness.HookActivityRunning},
-		{Event: "PostToolUseFailure", Transition: harness.HookActivityRunning},
-		{Event: "PermissionRequest", Transition: harness.HookActivityWaiting},
-		{Event: "Elicitation", Transition: harness.HookActivityWaiting},
-		{Event: "ElicitationResult", Transition: harness.HookActivityRunning},
-		{Event: "PermissionDenied", Transition: harness.HookActivityIdle},
-		{
-			Event:      "Notification",
-			Matcher:    "permission_prompt",
-			Transition: harness.HookActivityWaiting,
-		},
-		// SubagentStart and SubagentStop describe child agents, including
-		// Claude Code's internal prompt-suggestion agents, not the main
-		// turn. Stop reports whether delegated work keeps the turn running.
-		// Automatic compaction either happens inside a turn that already
-		// runs or between turns, where no Stop would return the session to
-		// idle, so only manual compaction reports running.
-		{Event: "PreCompact", Matcher: "manual", Transition: harness.HookActivityRunning},
-		// Automatic compaction continues the running turn; only manual
-		// compaction returns the session to idle.
-		{Event: "PostCompact", Matcher: "manual", Transition: harness.HookActivityIdle},
-		{Event: "Stop", Transition: harness.HookActivityIdle},
-		{Event: "StopFailure", Transition: harness.HookActivityFailed},
-		{Event: "SessionEnd", Transition: harness.HookPresenceGone},
-	})
+	definition := adapter.Definition()
+	marketplaceDir := filepath.Join(base, marketplaceName)
+	version := "0.0." + strconv.Itoa(integrationVersion)
+	description := "Reports Claude Code session state to aht"
 
-	for _, event := range []string{"SessionStart", "FileChanged"} {
-		hooks = append(hooks, harness.CommandHookInstallSpec{
-			Event:   event,
-			Command: harness.NativeHookCommand(binary, adapter.Definition().ID, event),
-		})
+	module, err := renderModule(binary, definition)
+	if err != nil {
+		return harness.InstallPlan{}, err
 	}
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
-			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
-				StatusMessage: harness.ManagedMarker,
-				HooksKey:      "hooks",
-				Path:          filepath.Join(base, "settings.json"),
-				Source:        claudeIntegrationSource,
-				Label:         "claude hooks",
-				ConfigLabel:   "claude config",
-				Hooks:         hooks,
+			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
+				Dir:   marketplaceDir,
+				Label: "claude plugin",
+				Files: []harness.RenderedFileInstallSpec{
+					{Name: ".claude-plugin/marketplace.json", JSONContent: map[string]any{
+						"name":  marketplaceName,
+						"owner": map[string]any{"name": "aht"},
+						"plugins": []any{map[string]any{
+							"name":        pluginName,
+							"source":      "./" + pluginName,
+							"description": description,
+							"version":     version,
+						}},
+					}},
+					{Name: pluginName + "/.claude-plugin/plugin.json", JSONContent: map[string]any{
+						"name":        pluginName,
+						"version":     version,
+						"description": description,
+					}},
+					{
+						Name:        pluginName + "/hooks/hooks.json",
+						JSONContent: map[string]any{"modules": []string{"./register.ts"}},
+					},
+					{Name: pluginName + "/hooks/register.ts", Content: module},
+				},
+				Identity: definition.Identity(),
+				Registration: registration{
+					settingsPath: filepath.Join(base, "settings.json"),
+				},
+				UpgradeRegisters: true,
 			}},
 		},
 	}, nil

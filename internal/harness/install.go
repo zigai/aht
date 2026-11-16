@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -126,6 +127,12 @@ type JSONMergeInstallPlan struct {
 	ConfigLabel string
 	Merge       func(map[string]any, func(string) bool) (bool, error)
 	Remove      func(map[string]any, func(string) bool) bool
+	// Installed reports whether Merge's entries are present. When set, status
+	// reads it instead of a version marker in the file.
+	Installed func(map[string]any) bool
+	// RetiresCommandHooks strips the command hooks an earlier version of the
+	// integration installed under the file's "hooks" key.
+	RetiresCommandHooks bool
 }
 
 type ManagedTextBlockInstallPlan struct {
@@ -167,6 +174,9 @@ type PluginDirectoryInstallPlan struct {
 	// Retired lists former locations of this plugin. Installing or removing
 	// the plugin also removes aht-managed artifacts found there.
 	Retired []PluginDirectoryInstallPlan
+	// UpgradeRegisters lets upgrade register a stale registration again. Set
+	// it when registering only restores what an earlier install set up.
+	UpgradeRegisters bool
 }
 type PluginRegistrationState uint8
 
@@ -232,14 +242,34 @@ func ReportHookCommand[T Transition](
 	transition T,
 	event string,
 ) string {
+	return shellCommand(binary, ReportHookArgs(definition, stdin, transition, event))
+}
+
+// ReportHookArgs returns the arguments after the binary of the report command
+// ReportHookCommand renders.
+func ReportHookArgs[T Transition](
+	definition Definition,
+	stdin ReportStdin,
+	transition T,
+	event string,
+) []string {
 	flag, value := hookTransitionArgument(transition)
 
-	quotedEvent := ""
+	args := []string{"report", string(definition.ID), flag, value}
 	if event != "" {
-		quotedEvent = ShellQuote(event)
+		args = append(args, "--event", event)
 	}
 
-	return ReportScriptCommand(binary, definition, stdin, flag, ShellQuote(value), quotedEvent)
+	args = append(
+		args,
+		"--reporter-version", strconv.Itoa(definition.IntegrationVersion),
+		"--reporter", definition.IntegrationSource,
+	)
+	if !definition.ExclusiveProcess {
+		args = append(args, "--multi-session")
+	}
+
+	return append(args, string(stdin), "--quiet")
 }
 
 // ReportScriptCommand renders a report command whose transition value and
@@ -270,12 +300,25 @@ func ReportScriptCommand(
 	return strings.Join(append(parts, string(stdin), "--quiet"), " ")
 }
 
+// ManagedSourcePattern matches a hook command that an aht integration with
+// this reporter source generated, in any version's spelling.
+func ManagedSourcePattern(source string) *regexp.Regexp {
+	return regexp.MustCompile(
+		`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` +
+			regexp.QuoteMeta(source) + `(?:['"\s]|$)`,
+	)
+}
+
 // NativeHookCommand renders the command a generated hook runs to pass a native
 // hook event to the adapter's HookAdapter.
 func NativeHookCommand(binary string, id registry.Harness, event string) string {
-	return strings.Join([]string{
-		ShellQuote(binary), "--json", "hook", ShellQuote(string(id)), "--event", ShellQuote(event),
-	}, " ")
+	return shellCommand(binary, NativeHookArgs(id, event))
+}
+
+// NativeHookArgs returns the arguments after the binary of the command
+// NativeHookCommand renders.
+func NativeHookArgs(id registry.Harness, event string) []string {
+	return []string{"--json", "hook", string(id), "--event", event}
 }
 
 // ParseNativeHookCommand returns the binary of a command NativeHookCommand
@@ -341,6 +384,17 @@ func RenderScriptTemplate(template string, binary string, definition Definition)
 	// The replacer does not rescan the event parser it splices in, so the
 	// alias table it references is filled in a second pass.
 	return strings.ReplaceAll(rendered, "{{ACTIVITY_ALIASES}}", typeScriptActivityAliases())
+}
+
+func shellCommand(binary string, args []string) string {
+	words := make([]string, 0, len(args)+1)
+	words = append(words, ShellQuote(binary))
+
+	for _, arg := range args {
+		words = append(words, ShellQuote(arg))
+	}
+
+	return strings.Join(words, " ")
 }
 
 func typeScriptActivityAliases() string {

@@ -1,0 +1,79 @@
+// {{MANAGED_MARKER}}
+// AHT_INTEGRATION_ID={{INTEGRATION_ID}}
+// AHT_INTEGRATION_VERSION={{INTEGRATION_VERSION}}
+// Hooks modules run inside Claude Code without the spinner status that
+// settings command hooks show while they run.
+import type { ClassicHookEvent, EngineInterface, Register } from "claude-code";
+
+type Command = { event: ClassicHookEvent; matcher: string; args: string[] };
+
+const binary = {{BINARY}};
+const commands: Command[] = {{COMMANDS}};
+const timeoutMs = {{TIMEOUT_MS}};
+
+// Claude Code matches each of these events' matchers against one input field.
+const matcherFields: Partial<Record<ClassicHookEvent, string>> = {
+  SessionStart: "source",
+  Notification: "notification_type",
+  PreCompact: "trigger",
+  PostCompact: "trigger",
+};
+
+// PreToolUse hands hooks modules the tool call alone, so its report reuses the
+// session fields of the latest full hook input.
+let session: Record<string, unknown> = {};
+
+async function payload(
+  $: EngineInterface,
+  event: ClassicHookEvent,
+  input: Readonly<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  if (event !== "PreToolUse") {
+    session = {
+      transcript_path: input.transcript_path,
+      permission_mode: input.permission_mode,
+    };
+    return { ...input };
+  }
+
+  return {
+    ...session,
+    session_id: await $.session.id(),
+    cwd: await $.session.cwd(),
+    hook_event_name: event,
+    tool_name: input.tool,
+    tool_use_id: input.tool_use_id,
+  };
+}
+
+function matches(command: Command, input: Record<string, unknown>): boolean {
+  const field = matcherFields[command.event];
+  if (command.matcher === "" || field === undefined) return true;
+  return command.matcher.split("|").includes(String(input[field]));
+}
+
+async function run($: EngineInterface, command: Command, input: Record<string, unknown>) {
+  const result = await $.process.run([binary, ...command.args], {
+    stdin: JSON.stringify(input),
+    timeoutMs,
+  });
+  if (result.exitCode !== 0) {
+    $.ui.log(`aht ${command.args.join(" ")} exited ${result.exitCode}: ${result.stderr}`, { to: "debug" });
+  }
+}
+
+async function report($: EngineInterface, event: ClassicHookEvent, e: unknown): Promise<void> {
+  // A failed report must not block Claude Code; the debug log records it.
+  try {
+    const input = await payload($, event, e as Readonly<Record<string, unknown>>);
+    for (const command of commands) {
+      if (command.event === event && matches(command, input)) await run($, command, input);
+    }
+  } catch (error) {
+    $.ui.log(`aht ${event} report failed: ${String(error)}`, { to: "debug" });
+  }
+}
+
+export const register: Register = (on) => {
+{{HOOKS}}
+};

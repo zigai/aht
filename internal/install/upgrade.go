@@ -108,58 +108,62 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 
 	for _, action := range plan.Actions {
 		plugin, ok := action.(harnesspkg.PluginDirectoryAction)
-		if !ok || plugin.Plan.Registration == nil {
-			continue
+		if ok && plugin.Plan.Registration != nil {
+			return upgradeRegisteredPlugin(ctx, opts, plugin.Plan)
 		}
-
-		registration := plugin.Plan.Registration
-
-		state, err := registration.Inspect(ctx, plugin.Plan.Dir)
-		if err != nil {
-			return Result{}, fmt.Errorf("inspect %s for upgrade: %w", registration.Label(), err)
-		}
-
-		if state == harnesspkg.PluginRegistrationForeign {
-			return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
-		}
-
-		if state == harnesspkg.PluginRegistrationDisabled {
-			return Result{
-				Harness: string(
-					opts.Harness,
-				),
-				Path:    plugin.Plan.Dir,
-				Changed: false,
-				Snippet: "",
-				Error:   "",
-				Message: "registration disabled; preserved",
-				NextStep: "enable " + registration.Label() + " through the harness plugin settings; " +
-					"upgrade preserves disablement",
-			}, nil
-		}
-
-		if state == harnesspkg.PluginRegistrationMissing {
-			return Run(ctx, opts)
-		}
-
-		if !opts.DryRun {
-			if err := registration.EnsureMutable(plugin.Plan.Dir); err != nil {
-				return Result{}, fmt.Errorf("check %s for upgrade: %w", registration.Label(), err)
-			}
-		}
-		// Re-registering through Install can enable disabled plugins or grant new
-		// permissions. Refresh their local source while preserving native policy.
-		opts.preserveRegistration = true
-
-		result, err := installPluginDirectory(ctx, opts, opts.Harness, plugin.Plan)
-		if result.Changed {
-			result.NextStep = "restart the harness to load updated plugin code; registration and permissions preserved"
-		}
-
-		return result, err
 	}
 
 	return Run(ctx, opts)
+}
+
+func upgradeRegisteredPlugin(
+	ctx context.Context,
+	opts Options,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+) (Result, error) {
+	registration := plan.Registration
+
+	state, err := registration.Inspect(ctx, plan.Dir)
+	if err != nil {
+		return Result{}, fmt.Errorf("inspect %s for upgrade: %w", registration.Label(), err)
+	}
+
+	switch {
+	case state == harnesspkg.PluginRegistrationForeign:
+		return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
+	case state == harnesspkg.PluginRegistrationDisabled:
+		return Result{
+			Harness: string(
+				opts.Harness,
+			),
+			Path:    plan.Dir,
+			Changed: false,
+			Snippet: "",
+			Error:   "",
+			Message: "registration disabled; preserved",
+			NextStep: "enable " + registration.Label() + " through the harness plugin settings; " +
+				"upgrade preserves disablement",
+		}, nil
+	case state == harnesspkg.PluginRegistrationMissing,
+		state == harnesspkg.PluginRegistrationStale && plan.UpgradeRegisters:
+		return Run(ctx, opts)
+	}
+
+	if !opts.DryRun {
+		if err := registration.EnsureMutable(plan.Dir); err != nil {
+			return Result{}, fmt.Errorf("check %s for upgrade: %w", registration.Label(), err)
+		}
+	}
+	// Re-registering through Install can enable disabled plugins or grant new
+	// permissions. Refresh their local source while preserving native policy.
+	opts.preserveRegistration = true
+
+	result, err := installPluginDirectory(ctx, opts, opts.Harness, plan)
+	if result.Changed {
+		result.NextStep = "restart the harness to load updated plugin code; registration and permissions preserved"
+	}
+
+	return result, err
 }
 
 func appendUpgradeResult(results []Result, id registry.Harness, result Result, err error) []Result {

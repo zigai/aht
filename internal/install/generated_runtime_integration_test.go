@@ -130,7 +130,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 	t.Run("command-hook", func(t *testing.T) {
 		capture := captureBinary(t)
 		t.Setenv("AHT_CAPTURE", capture.path)
-		command := generatedCommandHook(t, registry.Harness("claude"))
+		command := generatedCommandHook(t, registry.Harness("qwen"))
 		runGeneratedCommand(
 			t,
 			`{"session_id":"command-session","prompt":"`+generatedRuntimeSensitiveSentinel+`"}`,
@@ -138,7 +138,7 @@ func TestGeneratedRuntimeFamilies(t *testing.T) {
 			"-c",
 			command,
 		)
-		requireCapturedArguments(t, capture.path, "report", "claude", "--activity", "idle")
+		requireCapturedArguments(t, capture.path, "report", "qwen", "--activity", "idle")
 	})
 
 	t.Run("goose-shell-wrapper", func(t *testing.T) {
@@ -342,77 +342,6 @@ func TestGeneratedRuntimesRunBinaryOutsideBasicMultilingualPlane(t *testing.T) {
 	pi := generatedArtifactContentFor(t, capture, registry.Harness("pi"), "aht-state.ts")
 	runNodeRuntime(t, "extension.ts", pi, runtimeScript(t, "node/pi-failed.mjs"), nil)
 	requireCapturedArguments(t, capture.path, "report", "pi", "--activity", "failed")
-}
-
-func TestGeneratedNativeTitleWatcherCommands(t *testing.T) {
-	t.Setenv("AHT_TEST_SENSITIVE_SENTINEL", generatedRuntimeSensitiveSentinel)
-	requireRuntimeTool(t, "sh")
-
-	for _, event := range []string{"SessionStart", "FileChanged"} {
-		t.Run(event, func(t *testing.T) {
-			capture := captureBinary(t)
-			t.Setenv("AHT_CAPTURE", capture.path)
-			runGeneratedNativeTitleWatchers(t, capture.command, capture.path, event)
-		})
-	}
-}
-
-func runGeneratedNativeTitleWatchers(
-	t *testing.T,
-	binary string,
-	capturePath string,
-	event string,
-) {
-	t.Helper()
-
-	adapter, ok := catalog.Find(registry.Harness("claude"))
-	if !ok {
-		t.Fatal("missing Claude adapter")
-	}
-
-	plan, err := adapter.InstallPlan(binary)
-	if err != nil {
-		t.Fatalf("plan Claude integration: %v", err)
-	}
-
-	found := false
-
-	for _, action := range plan.Actions {
-		hooks, ok := action.(harnesspkg.JSONCommandHooksAction)
-		if !ok {
-			continue
-		}
-
-		for _, hook := range hooks.Plan.Hooks {
-			if hook.Event == event && strings.Contains(hook.Command, " --json hook ") {
-				found = true
-
-				runGeneratedCommand(
-					t,
-					`{"session_id":"native","transcript_path":"/tmp/`+
-						`native.jsonl","cwd":"/tmp","hook_event_name":"`+
-						event+
-						`","file_path":"/tmp/native.jsonl","event":"change"}`,
-					"sh",
-					"-c",
-					hook.Command,
-				)
-				requireCapturedArguments(
-					t,
-					capturePath,
-					"--json",
-					"hook",
-					"claude",
-					"--event",
-					event,
-				)
-			}
-		}
-	}
-
-	if !found {
-		t.Fatalf("no generated %s watcher", event)
-	}
 }
 
 func renderedRuntimeModule(t *testing.T, h registry.Harness) string {

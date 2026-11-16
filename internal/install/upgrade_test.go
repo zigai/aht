@@ -52,7 +52,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("QWEN_HOME", dir)
 	path := filepath.Join(dir, "settings.json")
 
 	user := `{"theme":"custom","hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-hook"}]}]}}`
@@ -62,7 +62,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 
 	old, err := Run(
 		t.Context(),
-		Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"},
+		Options{Harness: registry.Harness("qwen"), Binary: "/bin/old-aht"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 
 	for _, dry := range []bool{true, false, false} {
 		results, err = Upgrade(t.Context(), "/bin/new-aht", dry)
-		if err != nil || len(results) != 1 || results[0].Harness != "claude" {
+		if err != nil || len(results) != 1 || results[0].Harness != "qwen" {
 			t.Fatalf("upgrade = %+v, %v", results, err)
 		}
 
@@ -155,15 +155,15 @@ func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	isolateUpgradeHome(t)
 	installFakeCodexCLI(t)
 
-	claude, err := Run(
+	qwen, err := Run(
 		t.Context(),
-		Options{Harness: registry.Harness("claude"), Binary: "/bin/old-aht"},
+		Options{Harness: registry.Harness("qwen"), Binary: "/bin/old-aht"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(claude.Path, []byte(`{"aht managed integration":`), 0o600); err != nil {
+	if err := os.WriteFile(qwen.Path, []byte(`{"aht managed integration":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
