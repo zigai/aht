@@ -284,10 +284,6 @@ func publishTitleCache(ctx context.Context, path string, record titleCacheRecord
 		writeErr = json.NewEncoder(temp).Encode(record)
 	}
 
-	if writeErr == nil {
-		writeErr = temp.Sync()
-	}
-
 	if err := errors.Join(writeErr, temp.Close()); err != nil {
 		return fmt.Errorf("write Claude title cache snapshot: %w", err)
 	}
@@ -298,15 +294,6 @@ func publishTitleCache(ctx context.Context, path string, record titleCacheRecord
 
 	if err := os.Rename(temp.Name(), path); err != nil {
 		return fmt.Errorf("publish Claude title cache snapshot: %w", err)
-	}
-
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("open Claude title cache directory: %w", err)
-	}
-
-	if err := errors.Join(directory.Sync(), directory.Close()); err != nil {
-		return fmt.Errorf("sync Claude title cache directory: %w", err)
 	}
 
 	return nil

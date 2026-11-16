@@ -507,20 +507,33 @@ func TestTitleCacheRejectsCorruptOrForeignSnapshots(t *testing.T) {
 		})
 	}
 
-	t.Run("corrupt", func(t *testing.T) {
-		cacheRoot := isolateTitleCache(t)
-		path := writeTitleTranscript(
-			t,
-			`{"type":"ai-title","sessionId":"native","aiTitle":"Generated"}`+"\n",
-		)
-		requireCachedTitle(t, path, "Generated")
+	for name, torn := range map[string]func([]byte) []byte{
+		"corrupt":   func([]byte) []byte { return []byte("{") },
+		"empty":     func([]byte) []byte { return nil },
+		"truncated": func(body []byte) []byte { return body[:len(body)/2] },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cacheRoot := isolateTitleCache(t)
+			path := writeTitleTranscript(
+				t,
+				`{"type":"ai-title","sessionId":"native","aiTitle":"Generated"}`+"\n",
+			)
+			requireCachedTitle(t, path, "Generated")
 
-		if err := os.WriteFile(titleCacheSnapshot(t, cacheRoot), []byte("{"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+			snapshot := titleCacheSnapshot(t, cacheRoot)
 
-		requireCachedTitle(t, path, "Generated")
-	})
+			body, err := os.ReadFile(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(snapshot, torn(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			requireCachedTitle(t, path, "Generated")
+		})
+	}
 }
 
 func obstructTitleCacheSnapshot(t *testing.T, cacheRoot string, path string) {
