@@ -11,7 +11,10 @@ import (
 
 type (
 	Record   map[string]json.RawMessage
-	TextPart struct{ Role, Text string }
+	TextPart struct {
+		Role string
+		Text string
+	}
 )
 
 type messageBlock struct {

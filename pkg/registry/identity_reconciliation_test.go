@@ -223,9 +223,10 @@ func TestMultiplexerObservationRetiresDifferentHarnessWithoutProcessIdentity(t *
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		prior, next registry.Location
-		replace     bool
+		name    string
+		prior   registry.Location
+		next    registry.Location
+		replace bool
 	}{
 		{
 			name: "tmux server same",

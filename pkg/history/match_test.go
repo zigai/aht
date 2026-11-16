@@ -17,7 +17,8 @@ func TestBytePrefilterJSONSpellings(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		term, raw string
+		term      string
+		raw       string
 		candidate bool
 	}{
 		{`"`, `{"text":"say \"hello\""}`, true},

@@ -591,7 +591,11 @@ func TestNewRegressions(t *testing.T) {
 }
 
 func TestResultOutcomes(t *testing.T) {
-	for _, tc := range []struct{ install, test, want string }{
+	for _, tc := range []struct {
+		install string
+		test    string
+		want    string
+	}{
 		{"success", "success", "success"},
 		{"success", "failure", "failure"},
 		{"failure", "skipped", "infrastructure"},

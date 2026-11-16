@@ -59,8 +59,9 @@ func TestDistributionInstallUsesPinnedOfficialInstaller(t *testing.T) {
 func TestResumeCommandPrefersPath(t *testing.T) {
 	adapter := New()
 	for _, test := range []struct {
-		id, path string
-		want     []string
+		id   string
+		path string
+		want []string
 	}{
 		{
 			id:   "durable",

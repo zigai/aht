@@ -381,7 +381,11 @@ func codexFixtureHooks(state map[string]any) ([]map[string]any, error) {
 		return nil, fmt.Errorf("decode fixture hooks: %w", err)
 	}
 
-	events := []struct{ JSON, Native, Key string }{
+	events := []struct {
+		JSON   string
+		Native string
+		Key    string
+	}{
 		{"SessionStart", "sessionStart", "session_start"},
 		{"UserPromptSubmit", "userPromptSubmit", "user_prompt_submit"},
 		{"PostToolUse", "postToolUse", "post_tool_use"},

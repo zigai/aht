@@ -115,9 +115,10 @@ func TestNativeJSONLReaders(t *testing.T) {
 	qwenTranscript := qwenHistory
 
 	tests := []struct {
-		name       string
-		harness    registry.Harness
-		file, body string
+		name    string
+		harness registry.Harness
+		file    string
+		body    string
 	}{
 		{"pi", registry.Harness("pi"), "session.jsonl", treeHistory},
 		{"prime-agent", registry.Harness("prime-agent"), "session.jsonl", treeHistory},
@@ -610,7 +611,10 @@ func TestKimiNativeDirectoryMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, test := range []struct{ name, path string }{
+	for _, test := range []struct {
+		name string
+		path string
+	}{
 		{"directory", filepath.Join(root, "sessions")}, {"file", path}, {"symlink", link},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -798,7 +802,10 @@ func TestQwenHistorySourcesAtDifferentDepths(t *testing.T) {
 		strings.ReplaceAll(parent, "main", "workflow"),
 	)
 
-	for _, test := range []struct{ name, path string }{
+	for _, test := range []struct {
+		name string
+		path string
+	}{
 		{"runtime", root},
 		{"projects", filepath.Join(root, "projects")},
 		{"project", filepath.Join(root, "projects", "-work-project")},

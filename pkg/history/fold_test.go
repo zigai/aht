@@ -37,7 +37,11 @@ func foldSearch(t *testing.T, body string, query Query) (Result, error) {
 func TestFoldNormalizerContract(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range []struct{ name, text, want string }{
+	for _, tt := range []struct {
+		name string
+		text string
+		want string
+	}{
 		{"ascii", "Refresh TOKEN", "refresh token"},
 		{"sharp s", "Straße", "strasse"},
 		{"capital sharp s", "ẞ", "ss"},
@@ -88,7 +92,11 @@ func TestFoldNormalizerContract(t *testing.T) {
 
 	// The equivalences must hold for real searches too: each query is written in
 	// a different spelling than the transcript it has to match.
-	for _, tt := range []struct{ name, query, spelling string }{
+	for _, tt := range []struct {
+		name     string
+		query    string
+		spelling string
+	}{
 		{"sharp s", "STRASSE", "Straße"},
 		{"final sigma", "Σ", "ς"},
 		{"ffi ligature", "ffi", "ﬃ"},
@@ -142,8 +150,12 @@ func TestFoldExcerptWindows(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
-		name, body, query, token, want string
-		caseSensitive                  bool
+		name          string
+		body          string
+		query         string
+		token         string
+		want          string
+		caseSensitive bool
 	}{
 		{
 			name:  "sharp s run before the match",

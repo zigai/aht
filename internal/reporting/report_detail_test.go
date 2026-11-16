@@ -13,10 +13,13 @@ func TestReportDetailValidationAndNativePayload(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name, activity, detail, payload string
-		event                           string
-		want                            registry.ActivityDetail
-		invalid                         bool
+		name     string
+		activity string
+		detail   string
+		payload  string
+		event    string
+		want     registry.ActivityDetail
+		invalid  bool
 	}{
 		{"permission", "waiting", "permission", "", "", registry.ActivityDetailPermission, false},
 		{"question", "waiting", "question", "", "", registry.ActivityDetailQuestion, false},

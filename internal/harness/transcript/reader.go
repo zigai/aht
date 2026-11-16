@@ -61,9 +61,15 @@ type Decoder struct {
 	UserParts    func(string) []TextPart
 }
 type Row struct {
-	SessionID, Title, CWD, Created, Updated, MessageID, Role string
-	Body                                                     sql.NullString
-	Timestamp                                                string
+	SessionID string
+	Title     string
+	CWD       string
+	Created   string
+	Updated   string
+	MessageID string
+	Role      string
+	Body      sql.NullString
+	Timestamp string
 }
 type (
 	RowReader func(context.Context, *Decoder, Row) error

@@ -116,7 +116,8 @@ func assertUpgradedHooks(t *testing.T, path string, before []byte, dry bool) {
 
 func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 	for _, test := range []struct {
-		name, target string
+		name   string
+		target string
 	}{
 		{name: "quotes", target: "/custom/harness with 'quotes'"},
 		{name: "newline", target: "/custom/harness\nbin"},

@@ -24,10 +24,16 @@ type DistributionFamily string
 
 //exhaustruct:optional
 type Distribution struct {
-	Source                                                          DistributionSource
-	Family                                                          DistributionFamily
-	Package, Repo, Asset, URL, MaxVersion, Directory, PackageExtras string
-	Install                                                         func(
+	Source        DistributionSource
+	Family        DistributionFamily
+	Package       string
+	Repo          string
+	Asset         string
+	URL           string
+	MaxVersion    string
+	Directory     string
+	PackageExtras string
+	Install       func(
 		string,
 		string,
 		string,

@@ -502,7 +502,10 @@ func TestDoctorIntegrationInstalledByAnotherExecutable(t *testing.T) {
 }
 
 func TestDoctorReportsIncompleteAndDisabledIntegrations(t *testing.T) {
-	for _, test := range []struct{ name, id string }{
+	for _, test := range []struct {
+		name string
+		id   string
+	}{
 		{"missing plugin file", "goose"},
 		{"disabled native registration", "hermes"},
 	} {

@@ -732,7 +732,9 @@ func TestCodexDryRunDoesNotRequireCLIOrMutateFiles(t *testing.T) {
 
 func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
 	for _, test := range []struct {
-		name, harness, config string
+		name    string
+		harness string
+		config  string
 	}{
 		{name: "claude event object", harness: "claude", config: `{"hooks": {"Stop": {"command": "my-notifier"}}}`},
 		{name: "claude hooks string", harness: "claude", config: `{"hooks": "my-notifier"}`},

@@ -84,7 +84,8 @@ type (
 )
 
 type stopTarget struct {
-	Method, Target string
+	Method string
+	Target string
 	//exhaustruct:optional
 	Kind registry.MultiplexerKind
 	//exhaustruct:optional

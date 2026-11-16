@@ -12,7 +12,10 @@ func TestTranscriptManifestBranchAndModel(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name, manifest, branch, model string
+		name     string
+		manifest string
+		branch   string
+		model    string
 	}{
 		{
 			"complete",

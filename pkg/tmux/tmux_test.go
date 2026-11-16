@@ -187,8 +187,9 @@ func TestListPanesWithOptionsPreservesEndpointErrors(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name             string
-		partial, current bool
+		name    string
+		partial bool
+		current bool
 	}{
 		{name: "outside all failed"},
 		{name: "outside partial", partial: true},

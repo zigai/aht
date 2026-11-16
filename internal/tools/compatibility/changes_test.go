@@ -219,7 +219,8 @@ func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 	}
 
 	tests := []struct {
-		name, path string
+		name       string
+		path       string
 		successful map[string]checkedRelease
 		repository string
 		want       candidate
@@ -572,8 +573,12 @@ func TestCompatibilityUtilityProcess(t *testing.T) {
 
 	head := commitChange(t, dir, "internal/harness/cursor/adapter.go", "cursor")
 	for _, tc := range []struct {
-		name, event, base, head string
-		selected, failure       bool
+		name     string
+		event    string
+		base     string
+		head     string
+		selected bool
+		failure  bool
 	}{
 		{name: "empty succeeds", event: "push", base: base, head: docs},
 		{name: "cursor remains unpinned", event: "pull_request", base: docs, head: head, selected: true},

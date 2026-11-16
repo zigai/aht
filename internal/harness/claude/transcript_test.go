@@ -12,9 +12,11 @@ import (
 )
 
 type transcriptCapture struct {
-	Role, Body, ID string
-	Line           int
-	At             time.Time
+	Role string
+	Body string
+	ID   string
+	Line int
+	At   time.Time
 }
 
 type transcriptReadState struct {

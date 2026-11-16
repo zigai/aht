@@ -18,7 +18,8 @@ func TestSystemdAnalyzeAcceptsManagedUnit(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name, store string
+		name  string
+		store string
 	}{
 		{name: "plain", store: "sessions.json"},
 		{name: "apostrophe", store: "o'neil/sessions.json"},

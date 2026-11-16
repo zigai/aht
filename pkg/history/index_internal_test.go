@@ -385,8 +385,9 @@ func TestChildHistoryIssuesFollowParentMetadata(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		dir               string
-		reported, omitted int
+		dir      string
+		reported int
+		omitted  int
 	}{{"/work/a", 1, 0}, {"/work/b", 0, 0}} {
 		query := Query{Terms: []string{"gremlin"}, Dirs: []string{test.dir}}
 
@@ -404,9 +405,12 @@ func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name, filename, body, updated string
-		harness                       registry.Harness
-		tools                         int
+		name     string
+		filename string
+		body     string
+		updated  string
+		harness  registry.Harness
+		tools    int
 	}{
 		{
 			"pi",
@@ -632,7 +636,8 @@ func TestNativeContextSearchRoles(t *testing.T) {
 
 	for _, test := range []struct {
 		harness      registry.Harness
-		name, body   string
+		name         string
+		body         string
 		contextParts int
 	}{
 		{
@@ -701,8 +706,9 @@ func TestNativeUserProjectionDoesNotDuplicateTypedText(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name, response string
-		contextParts   int
+		name         string
+		response     string
+		contextParts int
 	}{
 		{"plain", `"typed needle"`, 0},
 		{"mixed", `"<skill>prefix-marker</skill>\ntyped needle"`, 1},
@@ -1121,7 +1127,10 @@ func TestIndexHeaderResumeRejectsChangesOutsideDeclaredSlots(t *testing.T) {
 
 	body := `{"type":"session","id":"headers","cwd":"/work"}` + "\n" + message
 	for _, test := range []struct {
-		name, harness, initial, changed string
+		name    string
+		harness string
+		initial string
+		changed string
 	}{
 		{
 			"header length",

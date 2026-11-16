@@ -23,8 +23,12 @@ type releaseCodexFixture struct {
 }
 
 type releaseCodexHook struct {
-	key, event, command, kind, hash string
-	matcher                         any
+	key     string
+	event   string
+	command string
+	kind    string
+	hash    string
+	matcher any
 }
 
 func installReleaseCodexCLI(t *testing.T, environment []string) ([]string, releaseCodexFixture) {
@@ -331,7 +335,11 @@ func releaseCodexHooks(t *testing.T, home string) []releaseCodexHook {
 	}
 	decodeJSONFile(t, path, &config)
 
-	events := []struct{ JSON, Native, Key string }{
+	events := []struct {
+		JSON   string
+		Native string
+		Key    string
+	}{
 		{"SessionStart", "sessionStart", "session_start"},
 		{"UserPromptSubmit", "userPromptSubmit", "user_prompt_submit"},
 		{"PermissionRequest", "permissionRequest", "permission_request"},

@@ -6,7 +6,12 @@ import (
 	"time"
 )
 
-type sessionMatch struct{ id, identityID, processID, droppedID string }
+type sessionMatch struct {
+	id         string
+	identityID string
+	processID  string
+	droppedID  string
+}
 
 func reconcileResumedProcessSession(
 	sessions map[string]Session,

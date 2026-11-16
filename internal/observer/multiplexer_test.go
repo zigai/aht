@@ -745,8 +745,9 @@ func TestCaptureDriverPanesKeepsEachPaneWithItsDriver(t *testing.T) {
 	captures := captureDriverPanes(context.Background(), panes, find)
 
 	want := []struct {
-		text, title string
-		err         error
+		text  string
+		title string
+		err   error
 	}{
 		{text: "batching a1", title: "batch of 3", err: nil},
 		{text: "single b1", title: "", err: nil},

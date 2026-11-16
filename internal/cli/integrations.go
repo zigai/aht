@@ -30,9 +30,12 @@ var (
 
 //exhaustruct:optional
 type integrationCommandOptions struct {
-	binary, targetBinary string
-	dryRun, force, shim  bool
-	showContent          bool
+	binary       string
+	targetBinary string
+	dryRun       bool
+	force        bool
+	shim         bool
+	showContent  bool
 }
 
 func (app *application) newIntegrationsCommand() *cobra.Command {

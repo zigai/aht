@@ -39,8 +39,10 @@ func (e *upgradeExecutor) Run(ctx context.Context, name string, args ...string) 
 
 func TestUpgradePreservesTrackerSettingsAndState(t *testing.T) {
 	for _, test := range []struct {
-		name                   string
-		stopped, stale, dryRun bool
+		name    string
+		stopped bool
+		stale   bool
+		dryRun  bool
 	}{
 		{name: "running current"},
 		{name: "running stale", stale: true},
@@ -179,7 +181,8 @@ func assertServiceContent(t *testing.T, path string, expected string) {
 
 func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
 	for _, test := range []struct {
-		name, store string
+		name  string
+		store string
 	}{
 		{name: "apostrophe", store: "/home/o'neil/state.json"},
 		{name: "dollar", store: "/srv/a$b/${HOME}/state.json"},

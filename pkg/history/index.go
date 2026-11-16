@@ -81,9 +81,14 @@ var (
 // indexedFile is one history's committed index entry. resumeID is its first
 // conversation row, which an append resume extends; zero means none.
 type indexedFile struct {
-	id, resumeID                             int64
-	harness, path, stamp, checkpoint, issues string
-	omitted                                  int
+	id         int64
+	resumeID   int64
+	harness    string
+	path       string
+	stamp      string
+	checkpoint string
+	issues     string
+	omitted    int
 }
 type historyIndex struct {
 	db                 *sql.DB

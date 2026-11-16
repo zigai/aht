@@ -1135,8 +1135,9 @@ func TestToolsSearchUsesBothModificationAndActivityTimes(t *testing.T) {
 
 	recent := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
 	for _, fixture := range []struct {
-		id, day string
-		mtime   time.Time
+		id    string
+		day   string
+		mtime time.Time
 	}{
 		{"selected", "2026-09-03", recent},
 		{"old-file", "2026-09-03", older},

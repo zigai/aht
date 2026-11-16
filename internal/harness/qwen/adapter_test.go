@@ -70,9 +70,10 @@ func TestLifecycleDefaults(t *testing.T) {
 	h := New()
 
 	tests := []struct {
-		event, source string
-		lifecycle     registry.NativeLifecycle
-		presence      registry.Presence
+		event     string
+		source    string
+		lifecycle registry.NativeLifecycle
+		presence  registry.Presence
 	}{
 		{
 			event:     "SessionStart",

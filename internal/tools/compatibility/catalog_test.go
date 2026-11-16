@@ -12,8 +12,9 @@ func TestNewerReleaseSelection(t *testing.T) {
 	spec := testHarness(t, "claude")
 
 	tests := []struct {
-		before, after string
-		want          bool
+		before string
+		after  string
+		want   bool
 	}{
 		{"1.2.3", "1.2.3", false},
 		{"1.2.3", "1.2.4", true},

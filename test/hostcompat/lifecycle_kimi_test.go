@@ -487,7 +487,10 @@ func TestKimiPermissionUsesNativeOptionsAndForegroundIdentity(t *testing.T) {
 			t.Fatalf("native permission result = %v, want %s", result, want)
 		}
 
-		for _, mutation := range []struct{ old, new string }{
+		for _, mutation := range []struct {
+			old string
+			new string
+		}{
 			{
 				`foreground`,
 				`sibling`,

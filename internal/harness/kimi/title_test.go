@@ -68,8 +68,9 @@ func TestKimiSessionTitleFailures(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name, body string
-		want       error
+		name string
+		body string
+		want error
 	}{
 		{"invalid", `{"id":`, transcript.ErrInvalidRecord},
 		{"wrong identity", `{"id":"another","title":"Wrong title"}`, transcript.ErrUnknownFormat},

@@ -13,8 +13,9 @@ import (
 
 //exhaustruct:optional
 type trackerFlags struct {
-	binary          string
-	interval, grace time.Duration
+	binary   string
+	interval time.Duration
+	grace    time.Duration
 }
 
 func defaultInstallBinary() string {

@@ -448,9 +448,12 @@ func TestHermesNullableAndOversizedMessageBodies(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
-		name, extraRows, status string
-		matchingParts, issues   int
-		err                     error
+		name          string
+		extraRows     string
+		status        string
+		matchingParts int
+		issues        int
+		err           error
 	}{
 		{name: "nullable", status: "searched", matchingParts: 1},
 		{
@@ -497,7 +500,10 @@ INSERT INTO messages VALUES(2,'native','user','refresh token',2);`+tt.extraRows)
 func TestGooseMalformedMessageReportsPartialResults(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range []struct{ name, body string }{
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
 		{"invalid JSON", `{broken private-content`},
 		{"invalid shape", `{"unexpected":"private-content"}`},
 	} {

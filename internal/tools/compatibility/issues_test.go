@@ -25,8 +25,9 @@ var grokRegression = issueStatus{
 }
 
 type issueCall struct {
-	method, path string
-	body         map[string]string
+	method string
+	path   string
+	body   map[string]string
 }
 
 // fakeIssues serves the open-issue listing and records every mutation.

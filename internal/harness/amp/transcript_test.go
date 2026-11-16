@@ -9,7 +9,11 @@ import (
 func TestTranscriptBranchFromRepositoryRef(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct{ name, ref, want string }{
+	tests := []struct {
+		name string
+		ref  string
+		want string
+	}{
 		{"branch", `"refs/heads/feature/x"`, "feature/x"},
 		{"tag", `"refs/tags/v1"`, ""},
 		{"missing", `null`, ""},

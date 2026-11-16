@@ -27,8 +27,10 @@ func TestInstallRecipeUsesInstalledBinary(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name, recipe             string
-		failInstall, failUpgrade bool
+		name        string
+		recipe      string
+		failInstall bool
+		failUpgrade bool
 	}{
 		{name: "install", recipe: "install"},
 		{name: "binary only", recipe: "install-binary"},

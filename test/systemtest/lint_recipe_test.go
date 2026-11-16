@@ -22,7 +22,11 @@ func TestLintRecipesPreserveBuildFlagsAndIsolateCache(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name, flags, cache, xdg, wantCache string
+		name      string
+		flags     string
+		cache     string
+		xdg       string
+		wantCache string
 	}{
 		{name: "home default", wantCache: "home with space/.cache/golangci-lint/source-positions"},
 		{

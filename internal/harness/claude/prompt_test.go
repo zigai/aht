@@ -5,7 +5,10 @@ import "testing"
 func TestSplitInjectedKeepsTypedText(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range []struct{ body, want string }{
+	for _, tt := range []struct {
+		body string
+		want string
+	}{
 		{"  Fix the   parser\n", "Fix the   parser"},
 		{"<environment_context>\n<cwd>/work</cwd>\n</environment_context>", ""},
 		{"<environment_context>x</environment_context>\n\nFix it", "Fix it"},

@@ -30,9 +30,11 @@ func TestReadReportPayloadInputDropsLargeToolContent(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name                                  string
-		harness                               registry.Harness
-		sessionField, inputField, outputField string
+		name         string
+		harness      registry.Harness
+		sessionField string
+		inputField   string
+		outputField  string
 	}{
 		{"command hooks", "claude", "session_id", "tool_input", "tool_response"},
 		{"native tool hooks", "copilot", "sessionId", "toolArgs", "toolResult"},

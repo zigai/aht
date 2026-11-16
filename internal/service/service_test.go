@@ -80,7 +80,9 @@ func TestRenderSystemdUnitEscapesLiteralPercentSigns(t *testing.T) {
 
 func TestRenderSystemdUnitEscapesQuotesAndDollarSigns(t *testing.T) {
 	for _, test := range []struct {
-		name, store, want string
+		name  string
+		store string
+		want  string
 	}{
 		{
 			name:  "apostrophe",

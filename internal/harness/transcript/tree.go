@@ -8,8 +8,12 @@ import (
 )
 
 type TreeEntry struct {
-	Type, ID, CWD, Title, Name string
-	Timestamp                  time.Time
+	Type      string
+	ID        string
+	CWD       string
+	Title     string
+	Name      string
+	Timestamp time.Time
 }
 
 func TreeRecord(ctx context.Context, t *Decoder, r Record, line int) {

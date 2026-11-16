@@ -91,8 +91,11 @@ func TestTranscriptQueryCapturesBranchAndModel(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name, sessionColumns, sessionValues string
-		branch, model                       string
+		name           string
+		sessionColumns string
+		sessionValues  string
+		branch         string
+		model          string
 	}{
 		{"both", ", git_branch TEXT, model TEXT", ", 'main', 'model-a'", "main", "model-a"},
 		{"model only", ", model TEXT", ", 'model-a'", "", "model-a"},

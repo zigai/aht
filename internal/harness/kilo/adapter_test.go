@@ -33,7 +33,9 @@ func TestHistoryOmitsInMemoryDatabase(t *testing.T) {
 
 func TestHistorySourcesFollowDatabaseOverride(t *testing.T) {
 	for _, test := range []struct {
-		name, database, want string
+		name     string
+		database string
+		want     string
 	}{
 		{name: "default directory", want: "kilo"},
 		{name: "relative export", database: "selected.db", want: "kilo/selected.db"},

@@ -8,7 +8,10 @@ import (
 )
 
 func TestUserPromptParts(t *testing.T) {
-	for _, test := range []struct{ body, typed string }{
+	for _, test := range []struct {
+		body  string
+		typed string
+	}{
 		{"# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>rules</INSTRUCTIONS>", ""},
 		{"# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>rules</INSTRUCTIONS>\nShip it", "Ship it"},
 		{"<environment_context>env</environment_context>\nFix it", "Fix it"},

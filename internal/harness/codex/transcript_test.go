@@ -15,9 +15,11 @@ import (
 )
 
 type transcriptCapture struct {
-	Role, Body, ID string
-	Line           int
-	At             time.Time
+	Role string
+	Body string
+	ID   string
+	Line int
+	At   time.Time
 }
 
 type transcriptState struct {
@@ -119,8 +121,9 @@ func TestTranscriptProjectionAcrossLongRecords(t *testing.T) {
 
 	oversized := strings.Repeat("x", transcript.MaxRecordBytes)
 	for _, test := range []struct {
-		name, body string
-		want       string
+		name string
+		body string
+		want string
 	}{
 		{"empty transcript", "", ""},
 		{"native event without newline", strings.TrimSuffix(nativeMessage("typed"), "\n"), typedUserProjection},
@@ -275,8 +278,9 @@ func TestTranscriptUserProjectionCaptures(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name, projection string
-		want             []transcriptCapture
+		name       string
+		projection string
+		want       []transcriptCapture
 	}{
 		{"legacy", "", []transcriptCapture{
 			{

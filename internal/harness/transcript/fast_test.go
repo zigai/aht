@@ -9,9 +9,11 @@ import (
 )
 
 type treeCapture struct {
-	role, body, id string
-	line           int
-	at             time.Time
+	role string
+	body string
+	id   string
+	line int
+	at   time.Time
 }
 
 type treeReadState struct {
@@ -24,8 +26,9 @@ func TestFastTreeRecordMatchesOrdinaryReader(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name, line string
-		fast       bool
+		name string
+		line string
+		fast bool
 	}{
 		{
 			"text",

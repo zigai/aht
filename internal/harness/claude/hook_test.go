@@ -60,7 +60,11 @@ func TestFileChangedMaintainsTitleWithoutRegistryObservation(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	path := writeTitleTranscript(t, "")
-	for _, step := range []struct{ event, append, want string }{
+	for _, step := range []struct {
+		event  string
+		append string
+		want   string
+	}{
 		{"add", "{\"type\":\"ai-title\",\"sessionId\":\"native\",\"aiTitle\":\"Generated\"}\n", "Generated"},
 		{"change", "{\"type\":\"custom-title\",\"sessionId\":\"native\",\"customTitle\":\"Manual\"}\n", "Manual"},
 		{"change", "{\"type\":\"ai-title\",\"sessionId\":\"native\",\"aiTitle\":\"New generated\"}\n", "Manual"},

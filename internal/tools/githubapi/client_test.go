@@ -71,9 +71,10 @@ func TestStatusErrorsCarryStatusAndMessage(t *testing.T) {
 
 func TestOnlyReadsRetryTransientFailures(t *testing.T) {
 	tests := []struct {
-		name, method string
-		status       int
-		wantCalls    int32
+		name      string
+		method    string
+		status    int
+		wantCalls int32
 	}{
 		{"read retries server errors", http.MethodGet, http.StatusBadGateway, maxAttempts},
 		{"read retries rate limits", http.MethodGet, http.StatusTooManyRequests, maxAttempts},
@@ -134,8 +135,9 @@ func TestPaginateFollowsNextLinks(t *testing.T) {
 	}
 
 	tests := []struct {
-		name, key string
-		pages     []string
+		name  string
+		key   string
+		pages []string
 	}{
 		{"bare arrays", "", []string{`[{"id":1},{"id":2}]`, `[{"id":3}]`}},
 		{

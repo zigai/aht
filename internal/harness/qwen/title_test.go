@@ -122,7 +122,11 @@ func TestSessionTitleFromProjectDirectory(t *testing.T) {
 	t.Setenv("QWEN_HOME", home)
 	t.Setenv("QWEN_RUNTIME_DIR", "")
 
-	for _, test := range []struct{ name, cwd, project string }{
+	for _, test := range []struct {
+		name    string
+		cwd     string
+		project string
+	}{
 		{"ASCII punctuation", "/work/my.project", "-work-my-project"},
 		{"BMP characters", "/work/caf\u00e9", "-work-caf-"},
 		{"non-BMP character", "/work/\U0001f680", "-work---"},

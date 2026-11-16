@@ -33,7 +33,11 @@ func writeTitleTranscript(t *testing.T, body string) string {
 func TestSessionTitlesUsesNewestNativeTitleWithManualPrecedence(t *testing.T) {
 	isolateTitleCache(t)
 
-	for _, tt := range []struct{ name, body, want string }{
+	for _, tt := range []struct {
+		name string
+		body string
+		want string
+	}{
 		{"generated", `{"type":"ai-title","sessionId":"native","aiTitle":"Old"}
 {"type":"ai-title","sessionId":"native","aiTitle":"Generated"}
 `, "Generated"},
@@ -313,7 +317,13 @@ func TestTitleCachePersistsAcrossAdaptersAndAppends(t *testing.T) {
 func TestTitleCacheReplaysUnterminatedTails(t *testing.T) {
 	isolateTitleCache(t)
 
-	for _, tt := range []struct{ name, tail, continuation, first, want string }{
+	for _, tt := range []struct {
+		name         string
+		tail         string
+		continuation string
+		first        string
+		want         string
+	}{
 		{
 			"valid becomes malformed",
 			`{"type":"custom-title","sessionId":"native","customTitle":"Temporary"}`,
@@ -529,8 +539,9 @@ func obstructTitleCacheSnapshot(t *testing.T, cacheRoot string, path string) {
 
 func TestTitleCacheErrorsPreserveScannedTitle(t *testing.T) {
 	for _, tt := range []struct {
-		name, want string
-		obstruct   func(*testing.T, string, string)
+		name     string
+		want     string
+		obstruct func(*testing.T, string, string)
 	}{
 		{"directory", "Manual", func(t *testing.T, cacheRoot, _ string) {
 			t.Helper()
@@ -747,7 +758,11 @@ func TestTitleScannerRecordSizeLimit(t *testing.T) {
 }
 
 func TestTitleScannerValidatesTopLevelJSONFields(t *testing.T) {
-	for _, tt := range []struct{ name, record, want string }{
+	for _, tt := range []struct {
+		name   string
+		record string
+		want   string
+	}{
 		{"fields reordered", `{"aiTitle":"Title","sessionId":"native","type":"ai-title"}`, "Title"},
 		{
 			"escaped fields and values",

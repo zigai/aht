@@ -32,10 +32,27 @@ var (
 
 //exhaustruct:optional
 type listOptions struct {
-	harness, presence, activity, tmuxSession, multiplexerSession, sortBy, groupBy string
-	project, cwd, multiplexerKind, multiplexerServer, multiplexerPane             string
-	projectSubtree                                                                bool
-	summary, absoluteTime, absoluteSet, sortSet, desc, descSet, full, groupBySet  bool
+	harness            string
+	presence           string
+	activity           string
+	tmuxSession        string
+	multiplexerSession string
+	sortBy             string
+	groupBy            string
+	project            string
+	cwd                string
+	multiplexerKind    string
+	multiplexerServer  string
+	multiplexerPane    string
+	projectSubtree     bool
+	summary            bool
+	absoluteTime       bool
+	absoluteSet        bool
+	sortSet            bool
+	desc               bool
+	descSet            bool
+	full               bool
+	groupBySet         bool
 }
 
 func (app *application) newListCommand() *cobra.Command {

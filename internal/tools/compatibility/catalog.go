@@ -31,16 +31,17 @@ var (
 )
 
 type harnessSpec struct {
-	Directory, PackageExtras string
-	Family                   harness.DistributionFamily
-	Install                  func(string, string, string) []harness.DistributionCommand
-	ID                       string
-	Source                   harness.DistributionSource
-	Package                  string
-	Repo                     string
-	Asset                    string
-	URL                      string
-	MaxVersion               string
+	Directory     string
+	PackageExtras string
+	Family        harness.DistributionFamily
+	Install       func(string, string, string) []harness.DistributionCommand
+	ID            string
+	Source        harness.DistributionSource
+	Package       string
+	Repo          string
+	Asset         string
+	URL           string
+	MaxVersion    string
 }
 
 type candidate struct {

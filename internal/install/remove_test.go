@@ -179,7 +179,9 @@ func TestRemovePreservesUserHooksInSharedConfig(t *testing.T) {
 
 func TestRemoveDeletesNativeWatchersWithoutReportingHooks(t *testing.T) {
 	for _, test := range []struct {
-		name, event, binary string
+		name   string
+		event  string
+		binary string
 	}{
 		{"session-start", "SessionStart", "aht"},
 		{"file-changed", "FileChanged", "aht"},

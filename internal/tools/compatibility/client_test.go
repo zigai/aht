@@ -14,8 +14,11 @@ import (
 
 func TestReleaseSources(t *testing.T) {
 	tests := []struct {
-		id, path, body, want string
-		bad                  bool
+		id   string
+		path string
+		body string
+		want string
+		bad  bool
 	}{
 		{
 			"claude",
@@ -108,7 +111,10 @@ func TestReleaseSources(t *testing.T) {
 }
 
 func TestSupportedCapDoesNotHideLatestRelease(t *testing.T) {
-	for _, tc := range []struct{ latest, supported string }{
+	for _, tc := range []struct {
+		latest    string
+		supported string
+	}{
 		{"2.0.0", "2.0.0"}, {"2.1.0", "2.1.0"}, {"2.1.1", "2.1.0"},
 	} {
 		t.Run(tc.latest, func(t *testing.T) {
