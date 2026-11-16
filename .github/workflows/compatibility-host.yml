@@ -148,7 +148,7 @@ jobs:
           : > "$log"
           for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
             echo "=== lifecycle attempt $attempt of $ATTEMPTS" | tee -a "$log"
-            if go test -count=1 -v -tags=compatibility ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m 2>&1 |
+            if go test -count=1 -v -tags=compatibility,harness ./test/hostcompat -run '^TestCurrentHarnessLifecycle$' -timeout 10m 2>&1 |
               tee -a "$log"; then
               if ((attempt > 1)); then
                 echo "::warning title=Flaky lifecycle test::$AHT_COMPAT_HARNESS ${AHT_COMPAT_VERSION:-current} passed on attempt $attempt of $ATTEMPTS"

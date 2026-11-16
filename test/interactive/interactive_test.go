@@ -1,4 +1,4 @@
-//go:build compatibility
+//go:build compatibility && harness
 
 package interactive
 

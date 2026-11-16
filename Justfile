@@ -1,6 +1,5 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-INTEGRATION_TESTS := "^(TestChangesMetadataFailurePublishesNoSelection|TestChangesPinLastSuccessfulRelease|TestCleanupReconcilesCreationWhoseResponseWasLost|TestCurrentHarnessLifecycle|TestDetachedHistoryCommandReturnsWhileChildRunsWithoutTerminal|TestDetectionRechecksChangedBinaryRevision|TestDraftRetriesReuseOwnershipPreserveNotesAndCleanUp|TestForeignAndPublishedReleasesCannotBeDeleted|TestHTTPFailuresAndLimits|TestIssueSyncCommentsAndClosesResolvedIssue|TestIssueSyncIgnoresIssuesAndPullRequestsItDoesNotOwn|TestIssueSyncLeavesUnchangedIssueAndUpdatesStaleOne|TestIssueSyncOpensOneIssueForUntrackedRegression|TestIssuesCommandReadsFinishReport|TestListPanesIgnoresSocketsThatAreNotLiveSessions|TestLostPublicationResponseAndRerunsPreserveThePublishedRelease|TestMalformedArtifactListingCannotResetBaseline|TestMissingStateAndAPIFailureAreDifferent|TestMissingStateStartsEmpty|TestOnlyReadsRetryTransientFailures|TestPaginateFollowsNextLinks|TestPaginateRejectsForeignNextLink|TestPaginateRequiresWrappedField|TestPrereleaseTagsCreatePrereleases|TestPublicationFailureRemainsFailureAndDraftIsRemovable|TestPublishRefusesReleaseOwnedByAnotherRun|TestReadRecoversAfterTransientFailure|TestRedirectDoesNotForwardToken|TestRegressionsListTrackedFailuresForReleaseChecks|TestRegressionsRequireReadableState|TestReleaseCancelsWhileWaitingForCI|TestReleaseGateFailsOnLaterPageErrors|TestReleaseGateFollowsPagination|TestReleasePropagatesGateAPIErrors|TestReleaseRequiresNewestExactCommitCIAndEveryGate|TestReleaseRequiresTagAndCommitIdentity|TestReleaseSources|TestReleaseWaitsForNewestCIToComplete|TestReleaseWithoutAdapterIsNotChecked|TestRequestsAuthenticateAndEncodeJSON|TestRestoreOnlyTrustedDefaultBranchState|TestStatusErrorsCarryStatusAndMessage|TestSuccessfulStateServerEscapesJSON|TestSupportedCapDoesNotHideLatestRelease|TestUnauthorizedLookupIsNotAnAbsentDraft|TestUnknownCommandShowsUsage|TestWeeklyChangesSkipReleaseState|TestWorkflowOutputsAndStateRoundTrip)$"
 GOLANGCI_LINT_VERSION := "v2.15.0"
 GOLANGCI_LINT := 'GOFLAGS="${GOFLAGS:-} -trimpath=false" GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/golangci-lint}/source-positions" ' + env("AHT_GOLANGCI_LINT", "golangci-lint")
 ACTIONLINT_VERSION := "v1.7.12"
@@ -17,7 +16,7 @@ EDITORCONFIG_CHECKER_VERSION := "v3.11.3"
 test *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    if (( $# )); then go test -skip '{{ INTEGRATION_TESTS }}' "$@"; else go test -skip '{{ INTEGRATION_TESTS }}' ./...; fi
+    if (( $# )); then go test "$@"; else go test ./...; fi
 
 # Run extended simulations and bounded fuzz exploration
 explore fuzztime="30s":
@@ -41,16 +40,15 @@ integration:
         exit 1
     fi
     go test -count=1 -tags=integration ./internal/install ./internal/observer ./internal/service ./test/systemtest ./internal/testtmux ./pkg/tmux
-    go test -run '{{ INTEGRATION_TESTS }}' ./...
 
 # Test CI tooling, release detection, state transitions, and workflow wiring
 compatibility-tests:
     go test ./internal/tools/...
-    go test -count=1 -race -tags=compatibility ./test/hostcompat -skip '^TestCurrentHarnessLifecycle$'
+    go test -count=1 -race -tags=compatibility ./test/hostcompat
 
 # Exercise one installed current harness against an isolated local provider
 compatibility harness:
-    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility ./test/hostcompat ./test/interactive -run '^TestCurrentHarness(Lifecycle|Interactive)$' -timeout 15m
+    AHT_COMPAT_HARNESS="{{ harness }}" go test -count=1 -v -tags=compatibility,harness ./test/hostcompat ./test/interactive -run '^TestCurrentHarness(Lifecycle|Interactive)$' -timeout 15m
 
 # Validate built release artifacts and optional published copies
 artifacts artifact_dir="dist" published_dir="":

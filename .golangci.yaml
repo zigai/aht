@@ -5,6 +5,7 @@ run:
   build-tags:
     - integration
     - compatibility
+    - harness
 
 formatters:
   enable:
