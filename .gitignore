@@ -1,5 +1,6 @@
 /aht
 /aht.exe
+/compatibility
 dist/
 coverage.out
 .cache/
