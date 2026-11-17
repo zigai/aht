@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/reporting"
 
 	"github.com/google/go-cmp/cmp"
@@ -579,7 +580,36 @@ func startNamedProcess(t *testing.T, name string) int {
 		_ = cmd.Wait()
 	})
 
+	waitForNamedProcess(t, cmd.Process.Pid, name)
+
 	return cmd.Process.Pid
+}
+
+func waitForNamedProcess(t *testing.T, pid int, name string) {
+	t.Helper()
+
+	// A just started process can still expose its parent's command line.
+	deadline := time.Now().Add(5 * time.Second)
+
+	for {
+		process, found, err := processinfo.Find(context.Background(), pid)
+		if err == nil && found && len(process.Args) > 0 && process.Args[0] == name {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf(
+				"process %d did not report name %q: found=%v err=%v args=%q",
+				pid,
+				name,
+				found,
+				err,
+				process.Args,
+			)
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func TestReportKeepsExplicitProjectRootWhenPayloadCarriesCWD(t *testing.T) {
