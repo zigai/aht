@@ -315,9 +315,12 @@ func stalledReportingBinary(t *testing.T) (string, string) {
 	capture := filepath.Join(dir, "reports.jsonl")
 	t.Setenv("AHT_PROCESS_CAPTURE", capture)
 
+	stalled := filepath.Join(dir, "stalled-reporter")
+	writeTestFile(t, stalled, "#!"+node+"\n"+runtimeScript(t, "node/stalled-reporter.cjs"), 0o700)
+	t.Setenv("AHT_STALLED_REPORTER", stalled)
+
 	binary := filepath.Join(dir, "reporter")
-	script := "#!" + node + "\n" + runtimeScript(t, "node/stalled-reporter.cjs")
-	writeTestFile(t, binary, script, 0o700)
+	writeTestFile(t, binary, runtimeScript(t, "sh/stalled-reporter.sh"), 0o700)
 
 	return binary, capture
 }

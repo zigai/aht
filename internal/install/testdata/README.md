@@ -5,7 +5,7 @@ These scripts exercise generated harness integrations through their native regis
 - `node/*.mjs`: host event scenarios and the OpenClaw SDK fixture.
 - `node/*.cjs`: reporter executables used to exercise slow writes, failures, and child-process cleanup.
 - `python/*.py`: Hermes host event scenarios.
-- `sh/*.sh`: argument capture for generated reporters.
+- `sh/*.sh`: argument capture for generated reporters and the stalled reporter that stands in for `aht`.
 
 Keep executable scripts here instead of inside Go string literals. Pass scenario inputs explicitly through test-owned environment variables or arguments; avoid rewriting script source to select a scenario.
 

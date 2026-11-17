@@ -1,5 +1,7 @@
-const commandTimeoutMs = 1000;
-const commandKillGraceMs = 100;
+// aht allows a five-second tmux inspection plus a one-second pipe drain, so a
+// shorter deadline kills reports that were still inside their own budget.
+const commandTimeoutMs = 7000;
+const commandKillGraceMs = 1000;
 const maxPendingReports = 64;
 const pendingCommands: string[][] = [];
 let commandDrain: Promise<void> | undefined;
