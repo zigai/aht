@@ -16,6 +16,7 @@ let reportTimeouts = defaultReportTimeouts;
 const maxPendingReports = 64;
 const pendingCommands: string[][] = [];
 let commandDrain: Promise<void> | undefined;
+let pendingEnd = false;
 let shutdownDeadline: number | undefined;
 let reportingContext: ExtensionContext | undefined;
 let reportingAPI: ExtensionAPI | undefined;
@@ -68,10 +69,12 @@ function reportExitReason(stderr: string, code: number | null, signal: string | 
   return signal ? `report terminated by ${signal}` : `report exited with code ${code}`;
 }
 
-function runCommand(args: string[]): Promise<void> {
+function runCommand(args: string[], detached: boolean): Promise<void> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(ahtBin, args, { stdio: ["ignore", "ignore", "pipe"] });
+      // Detaching keeps the reporter alive past Pi's exit. aht writes stderr only
+      // when a report fails, so a dead reader can only cut off a failed report.
+      const child = spawn(ahtBin, args, { stdio: ["ignore", "ignore", "pipe"], detached });
       let stderr = "";
       let failed = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -121,7 +124,9 @@ function enqueueCommand(args: string[]): Promise<void> {
       try {
         let next: string[] | undefined;
         while ((next = pendingCommands.shift()) !== undefined) {
-          await runCommand(next);
+          const isEnd = pendingEnd && pendingCommands.length === 0;
+          await runCommand(next, isEnd);
+          if (isEnd) pendingEnd = false;
           // Once shutdown has spent one reporter budget draining, supersede
           // remaining intermediate states with the final presence observation.
           // Avoid spending a full reporter timeout on every queued update.
@@ -277,14 +282,19 @@ function resolveActivity(event: NativeEvent): string {
   return "idle";
 }
 
-function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent): void {
+function reportArgs(transition: string, ctx?: ExtensionContext, event?: NativeEvent): string[] {
   const observedAt = new Date().toISOString();
   if (ctx) {
     reportingContext = ctx;
     updateSessionRef(ctx);
   }
 
-  const args = ["report", "pi", "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+  const args = ["report", "pi", "--sequence", String(++reportSequence), "--quiet"];
+  // The end report is ordered by the recorder's receive time: a process scan
+  // taken while Pi exits must not make the harness end look stale.
+  if (transition !== "gone") {
+    args.push("--observed-at", observedAt);
+  }
   args.push(transition === "gone" ? "--presence" : "--activity", transition);
   args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
   args.push("--reporter", currentSessionSource);
@@ -305,7 +315,19 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
   addAttribute(args, "pi_reason", event?.reason);
   addAttribute(args, "pi_prompt_kind", event?.kind);
 
-  enqueueCommand(args);
+  return args;
+}
+
+function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent): void {
+  enqueueCommand(reportArgs(transition, ctx, event));
+}
+
+function reportEnd(ctx?: ExtensionContext, event?: NativeEvent): Promise<void> {
+  // Pi can exit before an attached reporter finishes, so the end report owns its
+  // own process group and still lands.
+  pendingEnd = true;
+
+  return enqueueCommand(reportArgs("gone", ctx, event));
 }
 // Pi passes only the API. Tests pass shorter timeouts.
 export default function (pi: ExtensionAPI, timeouts = defaultReportTimeouts) {
@@ -365,7 +387,6 @@ export default function (pi: ExtensionAPI, timeouts = defaultReportTimeouts) {
   on("session_shutdown", async (event: NativeEvent, ctx: ExtensionContext) => {
     stopHeartbeat();
     shutdownDeadline = Date.now() + reportTimeouts.commandMs + reportTimeouts.killGraceMs;
-    report("gone", ctx, event);
-    await commandDrain;
+    await reportEnd(ctx, event);
   });
 }
