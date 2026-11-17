@@ -13,7 +13,7 @@ import (
 const (
 	ampPluginName        = "aht-state.ts"
 	ampIntegrationSource = "amp-plugin"
-	integrationVersion   = 6
+	integrationVersion   = 7
 )
 
 //go:embed assets/aht-state.ts.tmpl
