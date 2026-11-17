@@ -27,6 +27,7 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 
 	artifacts := collectGeneratedArtifacts(t, captureBinary(t))
 	seenHarnesses := make(map[registry.Harness]bool)
+	typescript := make([]generatedArtifact, 0, len(artifacts))
 
 	for _, artifact := range artifacts {
 		t.Run(
@@ -35,8 +36,17 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 				validateGeneratedArtifact(t, artifact)
 			},
 		)
+
+		if strings.EqualFold(filepath.Ext(artifact.path), ".ts") {
+			typescript = append(typescript, artifact)
+		}
+
 		seenHarnesses[artifact.harness] = true
 	}
+
+	t.Run("typescript modules", func(t *testing.T) {
+		checkTypescriptModules(t, typescript)
+	})
 
 	for _, harness := range catalog.Harnesses() {
 		if noInstallRequiredHarness(t, harness) {
@@ -77,7 +87,9 @@ func validateGeneratedArtifact(t *testing.T, artifact generatedArtifact) {
 		if err := yaml.Unmarshal([]byte(artifact.content), &value); err != nil {
 			t.Fatalf("invalid generated YAML: %v\n%s", err, artifact.content)
 		}
-	case ".ts", ".js", ".py", ".sh":
+	case ".ts":
+		// Checked together in one node process by TestGeneratedArtifactsParse.
+	case ".js", ".py", ".sh":
 		checkGeneratedScriptSyntax(
 			t,
 			extension,
@@ -90,20 +102,33 @@ func validateGeneratedArtifact(t *testing.T, artifact generatedArtifact) {
 	}
 }
 
+func checkTypescriptModules(t *testing.T, artifacts []generatedArtifact) {
+	t.Helper()
+
+	if len(artifacts) == 0 {
+		return
+	}
+
+	modules := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		name := string(artifact.harness) + "-" + filepath.Base(artifact.path)
+		file := writeRuntimeArtifact(t, name, artifact.content)
+		modules = append(modules, strconv.Quote((&url.URL{Scheme: "file", Path: file}).String()))
+	}
+
+	failure := "  try { await import(file) } catch (error) {\n" +
+		"    console.error(`FAIL ${file}: ${error}`)\n" +
+		"    process.exitCode = 1\n" +
+		"  }\n"
+	script := "for (const file of [" + strings.Join(modules, ", ") + "]) {\n" + failure + "}\n"
+
+	runGeneratedCommand(t, script, "node", "--experimental-strip-types", "--input-type=module")
+}
+
 func checkGeneratedScriptSyntax(t *testing.T, extension string, file string) {
 	t.Helper()
 
 	switch extension {
-	case ".ts":
-		moduleURL := (&url.URL{Scheme: "file", Path: file}).String()
-		runGeneratedCommand(
-			t,
-			"",
-			"node",
-			"--experimental-strip-types",
-			"--eval",
-			"import("+strconv.Quote(moduleURL)+")",
-		)
 	case ".js":
 		runGeneratedCommand(t, "", "node", "--check", file)
 	case ".py":
