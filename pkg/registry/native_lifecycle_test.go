@@ -786,6 +786,119 @@ func TestNativeTerminalAndResumeReduction(t *testing.T) {
 	}
 }
 
+func TestTurnEndAfterSessionEndKeepsSessionEnded(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-time.Minute)
+	process := registry.ProcessIdentity{PID: 95, StartIdentity: "boot:95"}
+	identity := registry.ObservationIdentity{SessionID: "shutdown-turn-end"}
+	report := func(at time.Time, evidence *registry.Report) registry.Observation {
+		evidence.Reporter = registry.Reporter{Integration: "secondary-hook"}
+		evidence.Process = &process
+
+		return registry.Observation{
+			Harness: registry.Harness("secondary"), At: at, Subject: identity, Evidence: evidence,
+		}
+	}
+	running, idle := registry.ActivityRunning, registry.ActivityIdle
+	turn := report(base, &registry.Report{Event: "UserPromptSubmit", Activity: &running})
+	end := report(base.Add(time.Second), &registry.Report{
+		Event:     "SessionEnd",
+		Lifecycle: new(registry.NativeLifecycleEnd),
+		Claim:     new(registry.PresenceGone),
+	})
+	// The shutdown turn-end hook runs after the session end hook.
+	turnEnd := report(base.Add(time.Second+5*time.Millisecond), &registry.Report{
+		Event: "Stop", Activity: &idle,
+	})
+
+	for name, arrivals := range map[string][]registry.Observation{
+		"end arrives first":      {end, turnEnd},
+		"turn end arrives first": {turnEnd, end},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			store := registry.NewJournal(
+				filepath.Join(t.TempDir(), "sessions.json"),
+				behaviorRules{},
+			)
+
+			session, err := store.Observe(ctx, turn)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for _, observation := range arrivals {
+				if _, err := store.Observe(ctx, observation); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			session, err = store.Get(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if session.Presence() != registry.PresenceGone || session.Activity() != nil ||
+				session.Observations.Native == nil ||
+				session.Observations.Native.Event != "SessionEnd" {
+				t.Fatalf(
+					"turn end after the session end replaced it: presence %s, activity %v, native %#v",
+					session.Presence(),
+					registry.ActivityValue(session.Activity()),
+					session.Observations.Native,
+				)
+			}
+		})
+	}
+}
+
+func TestSessionEndOlderThanResumeStaysStale(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), behaviorRules{})
+	base := time.Now().UTC().Add(-time.Minute)
+	process := registry.ProcessIdentity{PID: 96, StartIdentity: "boot:96"}
+	identity := registry.ObservationIdentity{SessionID: "resumed-before-end"}
+	idle := registry.ActivityIdle
+
+	for _, observation := range []registry.Observation{
+		{
+			Harness: registry.Harness("secondary"), At: base, Subject: identity,
+			Evidence: &registry.Report{Event: "SessionStart", Activity: &idle, Process: &process},
+		},
+		{
+			Harness: registry.Harness("secondary"), At: base.Add(2 * time.Second), Subject: identity,
+			Evidence: &registry.Report{
+				Event:     "SessionStart",
+				Lifecycle: new(registry.NativeLifecycleResume),
+				Activity:  &idle,
+				Process:   &process,
+			},
+		},
+	} {
+		if _, err := store.Observe(ctx, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	session, err := store.Observe(ctx, registry.Observation{
+		Harness: registry.Harness("secondary"), At: base.Add(time.Second), Subject: identity,
+		Evidence: &registry.Report{
+			Event:     "SessionEnd",
+			Lifecycle: new(registry.NativeLifecycleEnd),
+			Claim:     new(registry.PresenceGone),
+			Process:   &process,
+		},
+	})
+	if err == nil && session.Presence() == registry.PresenceGone {
+		t.Fatalf("session end older than the resume ended the session: %#v", session)
+	}
+}
+
 func TestPresenceOnlySessionStartKeepsRunningTurnAuthorityAndActivityClock(t *testing.T) {
 	t.Parallel()
 
