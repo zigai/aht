@@ -33,6 +33,7 @@ var (
 type harnessSpec struct {
 	Directory     string
 	PackageExtras string
+	Python        string
 	Family        harness.DistributionFamily
 	Install       func(string, string, string) []harness.DistributionCommand
 	ID            string
@@ -346,6 +347,7 @@ func distributionCatalog() []harnessSpec {
 				Directory:     d.Directory,
 				Family:        d.Family,
 				PackageExtras: d.PackageExtras,
+				Python:        d.Python,
 				Install:       d.Install,
 			},
 		)

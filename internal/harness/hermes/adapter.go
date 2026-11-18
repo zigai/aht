@@ -31,6 +31,7 @@ func New() hermesHarness {
 			Package:       "hermes-agent",
 			Directory:     "hermes",
 			PackageExtras: "[acp]",
+			Python:        ">=3.11,<3.14",
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},

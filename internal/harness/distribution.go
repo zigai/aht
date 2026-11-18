@@ -32,7 +32,10 @@ type Distribution struct {
 	MaxVersion    string
 	Directory     string
 	PackageExtras string
-	Install       func(
+	// Python is the uv interpreter request for PyPI packages. uv ignores the
+	// upper bound of a package's requires-python when it picks an interpreter.
+	Python  string
+	Install func(
 		string,
 		string,
 		string,

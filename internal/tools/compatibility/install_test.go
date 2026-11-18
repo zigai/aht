@@ -100,12 +100,13 @@ func assertPyPIPin(t *testing.T, spec harnessSpec, version string, commands []in
 		t.Errorf("%s executable = %q, want uv", spec.ID, cmd.Name)
 	}
 
-	expectedPkg := spec.Package + "==" + version
+	wantArgs := []string{"tool", "install", spec.Package + "==" + version}
 	if spec.ID == "hermes" {
-		expectedPkg = spec.Package + "[acp]==" + version
+		wantArgs = []string{
+			"tool", "install", "--python", ">=3.11,<3.14", spec.Package + "[acp]==" + version,
+		}
 	}
 
-	wantArgs := []string{"tool", "install", expectedPkg}
 	if !slices.Equal(cmd.Args, wantArgs) {
 		t.Errorf("%s args = %#v, want %#v", spec.ID, cmd.Args, wantArgs)
 	}
