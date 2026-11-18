@@ -152,7 +152,12 @@ func (input incarnationInput) previousProcess() bool {
 func (input incarnationInput) replaces() bool { return input.different }
 
 func (input incarnationInput) terminalStale() bool {
-	return (input.end || input.absent) && input.at.Before(input.current.EvidenceAt)
+	if input.end {
+		// Harnesses can run turn-end hooks during shutdown, after the session end hook.
+		return input.at.Before(input.current.TransitionAt)
+	}
+
+	return input.absent && input.at.Before(input.current.EvidenceAt)
 }
 
 func (input incarnationInput) bindsTerminalProcess() bool {
@@ -253,6 +258,10 @@ func (input incarnationInput) applyEvidence(result incarnationTransition) incarn
 		result.next.TransitionAt = input.at
 	case input.replacementReport(result):
 		result.next.State = IncarnationLive
+	}
+
+	if input.start {
+		result.next.TransitionAt = maxTime(result.next.TransitionAt, input.at)
 	}
 	// Exit scans are not evidence that the old process was still running.
 	if input.ownProcessEvidence(result.next) {

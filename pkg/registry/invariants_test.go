@@ -729,6 +729,7 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 		"equivalent sequence replay",
 		"sequence content conflict",
 		"stale terminal sequence conflict",
+		"late end after newer turn end",
 	} {
 		t.Run(situation, func(t *testing.T) {
 			state := State{Sessions: map[string]Session{}}
@@ -1038,6 +1039,22 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 				if current.Presence() != PresenceGone {
 					t.Fatal("start before own exit revived session")
 				}
+			case "late end after newer turn end":
+				turnEnd := report(base.Add(2*time.Second), &first, nil, 0)
+				turnEnd.Report().Reporter = Reporter{}
+				turnEnd.Report().Claim = nil
+				turnEnd.Report().Activity = new(ActivityIdle)
+				apply(scan, turnEnd)
+
+				end := report(base.Add(time.Second), &first, new(NativeLifecycleEnd), 0)
+				end.Report().Reporter = Reporter{}
+
+				current = apply(scan, end)
+				if current.Presence() != PresenceGone || current.Activity() != nil ||
+					current.Observations.Native.Lifecycle == nil ||
+					*current.Observations.Native.Lifecycle != NativeLifecycleEnd {
+					t.Fatal("newer turn end made the session end stale")
+				}
 			case "ordering drop atomic matching":
 				stale := report(base.Add(-time.Second), &first, nil, 1)
 				stale.Subject.SessionID = "conflicting"
@@ -1073,6 +1090,7 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 		"equivalent sequence replay",
 		"sequence content conflict",
 		"stale terminal sequence conflict",
+		"late end after newer turn end",
 	); len(
 		missing,
 	) > 0 {

@@ -93,16 +93,17 @@ func TestIncarnationCrossStepInvariants(t *testing.T) {
 	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 
 	before := Session{
-		ID:          "current",
-		Harness:     "fixture",
-		SessionID:   "native",
-		SessionPath: "/native/current",
-		Process:     "1:a",
-		Incarnation: "live",
-		Presence:    "live",
-		Activity:    "running",
-		EvidenceAt:  at,
-		DecisionAt:  at,
+		ID:           "current",
+		Harness:      "fixture",
+		SessionID:    "native",
+		SessionPath:  "/native/current",
+		Process:      "1:a",
+		Incarnation:  "live",
+		Presence:     "live",
+		Activity:     "running",
+		EvidenceAt:   at,
+		TransitionAt: at,
+		DecisionAt:   at,
 	}
 	for _, situation := range []string{
 		"delayed end",
@@ -202,9 +203,30 @@ func TestIncarnationCrossStepInvariants(t *testing.T) {
 		}
 	}
 
+	turnEnded := before
+	turnEnded.TransitionAt = at.Add(-time.Second)
+	lateEnd := Event{
+		Process: before.Process, Harness: before.Harness, SessionID: before.SessionID,
+		At: at.Add(-time.Millisecond), NativeEnd: true,
+	}
+
+	ended := turnEnded
+	ended.Presence, ended.Activity, ended.Incarnation, ended.NativeEnded = "gone", "", "ended", true
+
+	if err := Transition(turnEnded, ended, lateEnd); err != nil {
+		t.Fatalf("valid end after the last transition: %v", err)
+	}
+
+	if err := Transition(turnEnded, turnEnded, lateEnd); err == nil {
+		t.Fatal("missing end after newer turn evidence invariant")
+	}
+
+	coverage.Hit("end after newer turn evidence")
+
 	if missing := coverage.Missing(
 		"stale report", "equal report", "fresh report",
 		"stale sighting", "equal sighting", "fresh sighting",
+		"end after newer turn evidence",
 	); len(missing) > 0 {
 		t.Fatalf("missing terminal ordering coverage: %v", missing)
 	}

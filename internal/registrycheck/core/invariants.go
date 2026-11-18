@@ -93,7 +93,14 @@ func ownProcessTerminalInvariant(before Session, after Session, event Event) err
 		return nil
 	}
 
-	if event.At.Before(before.EvidenceAt) {
+	// A session end is stale only behind a transition, because turn-end hooks can
+	// run after it during shutdown.
+	staleAfter := before.EvidenceAt
+	if event.NativeEnd {
+		staleAfter = before.TransitionAt
+	}
+
+	if event.At.Before(staleAfter) {
 		if after != before {
 			return fmt.Errorf(
 				"%w: stale own-process terminal evidence changed %q",
