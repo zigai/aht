@@ -108,11 +108,14 @@ func installationCommands(
 			},
 		}, nil
 	case harness.DistributionPyPI:
-		packageName := spec.Package + spec.PackageExtras
+		args := []string{"tool", "install"}
+		if spec.Python != "" {
+			args = append(args, "--python", spec.Python)
+		}
 
-		return []installCommand{
-			{Name: "uv", Args: []string{"tool", "install", packageName + "==" + version}, Env: nil},
-		}, nil
+		args = append(args, spec.Package+spec.PackageExtras+"=="+version)
+
+		return []installCommand{{Name: "uv", Args: args, Env: nil}}, nil
 	case harness.DistributionGitHub, harness.DistributionChannel, harness.DistributionWeekly:
 		// These sources install only through Distribution.Install.
 	}
