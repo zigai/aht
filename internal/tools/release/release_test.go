@@ -266,12 +266,12 @@ func (f *fixture) setEnv(key string, value string) {
 }
 
 func TestReleaseRequiresNewestExactCommitCIAndEveryGate(t *testing.T) {
-	withoutGate := successfulJobs()[:3]
+	withoutGate := successfulJobs()[:len(requiredChecks)-1]
 	skippedGate := successfulJobs()
-	skippedGate[3].Conclusion = "skipped"
+	skippedGate[len(requiredChecks)-1].Conclusion = "skipped"
 	duplicateGate := append(
 		successfulJobs(),
-		workflowJob{Name: "verify-linux", Conclusion: "success"},
+		workflowJob{Name: "checks", Conclusion: "success"},
 	)
 	with := func(change func(*workflowRun)) workflowRun {
 		run := successfulRun
