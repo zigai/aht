@@ -169,7 +169,6 @@ jobs:
       harness: ${{ matrix.harness }}
       version: ${{ matrix.version }}
       artifact: release-${{ github.sha }}
-      attempts: 2
 
   publish-release:
     needs:
