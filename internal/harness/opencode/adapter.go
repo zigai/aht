@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 17
+	integrationVersion        = 18
 	opencodePluginName        = "aht-state.ts"
 	opencodeIntegrationSource = "opencode-plugin"
 	opencodeSessionFlag       = "--session"
