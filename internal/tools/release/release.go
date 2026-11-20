@@ -23,10 +23,11 @@ const (
 
 // requiredChecks are the CI jobs that must succeed on the tagged commit.
 var requiredChecks = []string{
-	"verify-linux",
+	"checks",
+	"test-linux",
+	"integration-linux",
 	"verify-darwin",
-	"artifact-validation",
-	"change-compatibility",
+	"result",
 }
 
 type workflowRun struct {

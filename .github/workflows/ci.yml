@@ -58,29 +58,7 @@ jobs:
       version: ${{ matrix.version }}
       artifact: snapshot-${{ github.sha }}
 
-  change-compatibility:
-    name: change-compatibility
-    if: ${{ always() }}
-    needs: [affected-hosts, changed-hosts]
-    runs-on: ubuntu-slim
-    timeout-minutes: 2
-    steps:
-      - name: Require complete change compatibility
-        env:
-          SELECTOR_RESULT: ${{ needs.affected-hosts.result }}
-          SELECTED: ${{ needs.affected-hosts.outputs.selected }}
-          HOSTS_RESULT: ${{ needs.changed-hosts.result }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$SELECTOR_RESULT" = success
-          case "$SELECTED:$HOSTS_RESULT" in
-            false:skipped) echo "No affected harnesses." ;;
-            true:success) echo "All affected harnesses passed." ;;
-            *) echo "Compatibility selection or host jobs failed or are incomplete." >&2; exit 1 ;;
-          esac
-
-  verify-linux:
+  checks:
     runs-on: ubuntu-24.04
     # A new Go version empties the build cache, and a cold run needs more than ten minutes.
     timeout-minutes: 20
@@ -110,18 +88,66 @@ jobs:
       - name: Lint
         run: just lint
 
-      # Race tests run the full unit suite, so a separate plain run adds no coverage.
-      - name: Race tests
-        run: just race
-
-      - name: Integration tests
-        run: just integration
-
       - name: Compatibility helper tests
         run: just compatibility-tests
 
       - name: Source consistency
         run: just source-checks
+
+  test-linux:
+    runs-on: ubuntu-24.04
+    # A new Go version empties the build cache, and a cold run needs more than ten minutes.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          profile: verify
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Set up Just
+        uses: extractions/setup-just@v4
+
+      - name: Install tmux
+        uses: ./.github/actions/setup-tmux
+
+      # Race tests run the full unit suite, so a separate plain run adds no coverage.
+      - name: Race tests
+        run: just race
+
+  integration-linux:
+    runs-on: ubuntu-24.04
+    # A new Go version empties the build cache, and a cold run needs more than ten minutes.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          profile: verify
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Set up Just
+        uses: extractions/setup-just@v4
+
+      - name: Install tmux
+        uses: ./.github/actions/setup-tmux
+
+      - name: Integration tests
+        run: just integration
 
   verify-darwin:
     runs-on: macos-15
@@ -252,19 +278,43 @@ jobs:
             artifact-validation.log
           retention-days: 14
 
-  artifact-validation:
+  result:
     if: ${{ always() }}
     needs:
-      - verify-linux
+      - affected-hosts
+      - changed-hosts
+      - checks
+      - test-linux
+      - integration-linux
       - verify-darwin
       - build-snapshot
       - native-artifact-validation
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require every artifact gate
+      - name: Require every job and the selected harnesses
+        env:
+          SELECTOR: ${{ needs.affected-hosts.result }}
+          SELECTED: ${{ needs.affected-hosts.outputs.selected }}
+          HOSTS: ${{ needs.changed-hosts.result }}
+          CHECKS: ${{ needs.checks.result }}
+          TEST_LINUX: ${{ needs.test-linux.result }}
+          INTEGRATION_LINUX: ${{ needs.integration-linux.result }}
+          VERIFY_DARWIN: ${{ needs.verify-darwin.result }}
+          SNAPSHOT: ${{ needs.build-snapshot.result }}
+          NATIVE: ${{ needs.native-artifact-validation.result }}
+        shell: bash
         run: |
-          test "${{ needs.verify-linux.result }}" = "success"
-          test "${{ needs.verify-darwin.result }}" = "success"
-          test "${{ needs.build-snapshot.result }}" = "success"
-          test "${{ needs.native-artifact-validation.result }}" = "success"
+          set -euo pipefail
+          test "$SELECTOR" = success
+          case "$SELECTED:$HOSTS" in
+            false:skipped) echo "No affected harnesses." ;;
+            true:success) echo "All affected harnesses passed." ;;
+            *) echo "Compatibility selection or host jobs failed or are incomplete." >&2; exit 1 ;;
+          esac
+          test "$CHECKS" = success
+          test "$TEST_LINUX" = success
+          test "$INTEGRATION_LINUX" = success
+          test "$VERIFY_DARWIN" = success
+          test "$SNAPSHOT" = success
+          test "$NATIVE" = success
