@@ -117,7 +117,10 @@ function createCore(initialRefs?: SessionRefs, client?: OpenCodeClient) {
     const observedAt = new Date().toISOString();
     refreshSessionRef(event);
 
-    const args = ["report", "opencode", state === "gone" ? "--presence" : "--activity", state, "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+    const args = ["report", "opencode", state === "gone" ? "--presence" : "--activity", state, "--sequence", String(++reportSequence), "--quiet"];
+    // The end report is stamped when aht receives it: a process scan taken while the
+    // host exits must not make an end stamped before the scan look stale.
+    if (state !== "gone") args.push("--observed-at", observedAt);
     addEvent(args, valueAt(event, ["type"]));
     if (detail) args.push("--detail", detail);
     if (detailObservedAt) args.push("--detail-observed-at", detailObservedAt);

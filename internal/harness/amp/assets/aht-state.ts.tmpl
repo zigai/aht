@@ -39,7 +39,10 @@ export default function (amp: PluginAPI) {
     extraAttrs?: Record<string, string>,
   ): Promise<void> {
     const observedAt = new Date().toISOString();
-    const args = ["report", "amp", "--observed-at", observedAt, "--sequence", String(++reportSequence), "--quiet"];
+    const args = ["report", "amp", "--sequence", String(++reportSequence), "--quiet"];
+    // The end report is stamped when aht receives it: a process scan taken while the
+    // host exits must not make an end stamped before the scan look stale.
+    if (state !== "gone") args.push("--observed-at", observedAt);
     if (eventName !== "thread.title") args.push(state === "gone" ? "--presence" : "--activity", state);
 
     if (eventName) {

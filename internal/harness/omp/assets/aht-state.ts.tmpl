@@ -177,15 +177,10 @@ function captureReport(state: ReportState, ctx: ExtensionContext | undefined, ev
 function report(snapshot: ReportSnapshot | undefined): Promise<void> {
   if (!snapshot) return Promise.resolve();
   const { activity, presence, lifecycle, message, session: ref, sequence, mode } = snapshot;
-  const args = [
-    "report",
-    "omp",
-    "--observed-at",
-    new Date().toISOString(),
-    "--sequence",
-    String(sequence),
-    "--quiet",
-  ];
+  const args = ["report", "omp", "--sequence", String(sequence), "--quiet"];
+  // The end report is stamped when aht receives it: a process scan taken while omp
+  // exits must not make an end stamped before the scan look stale.
+  if (presence !== "gone" && lifecycle !== "end") args.push("--observed-at", new Date().toISOString());
   if (presence) args.push("--presence", presence);
   if (activity) args.push("--activity", activity);
   if (snapshot.detail) args.push("--detail", snapshot.detail);
