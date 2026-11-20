@@ -57,7 +57,6 @@ jobs:
       harness: ${{ matrix.harness }}
       version: ${{ matrix.version }}
       artifact: snapshot-${{ github.sha }}
-      attempts: ${{ github.event_name == 'push' && 2 || 1 }}
 
   change-compatibility:
     name: change-compatibility
