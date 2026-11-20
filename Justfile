@@ -69,7 +69,7 @@ coverage:
 
 # Run tests with the race detector
 race:
-    go test -race ./...
+    go test -race -shuffle=on ./...
 
 # Apply safe lint autofixes, then format every supported file type
 fix: && format
