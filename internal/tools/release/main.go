@@ -31,7 +31,6 @@ var (
 	runIDRE    = regexp.MustCompile(`^[0-9]+$`)
 )
 
-// target identifies the tagged commit and the workflow run acting on it.
 type target struct {
 	repo   string
 	tag    string
@@ -135,14 +134,16 @@ func (a application) logf(format string, args ...any) {
 	_, _ = fmt.Fprintf(a.stdout, format+"\n", args...)
 }
 
-// output records a step output for later workflow steps.
 func (a application) output(name string, value string) error {
 	text := name + "=" + value + "\n"
 
 	path := a.getenv("GITHUB_OUTPUT")
 	if path == "" {
-		_, err := io.WriteString(a.stdout, text)
-		return err //nolint:wrapcheck // Local runs print outputs; the writer error needs no context.
+		if _, err := io.WriteString(a.stdout, text); err != nil {
+			return fmt.Errorf("write output %s: %w", name, err)
+		}
+
+		return nil
 	}
 
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)

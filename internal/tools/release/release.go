@@ -169,12 +169,12 @@ func (a application) waitForCI(
 // prepareDraft creates this run's draft, or reuses it on a retry, and reports
 // its id and whether it was already published.
 func (a application) prepareDraft(ctx context.Context, t target, notes string) error {
-	existing, err := a.findRelease(ctx, t)
+	existing, found, err := a.findRelease(ctx, t)
 	if err != nil {
 		return err
 	}
 
-	if existing == nil {
+	if !found {
 		// The marker is part of creation, so cleanup can reconcile a lost response.
 		create := newRelease{
 			TagName:         t.tag,
@@ -185,21 +185,18 @@ func (a application) prepareDraft(ctx context.Context, t target, notes string) e
 			Prerelease:      strings.Contains(t.tag, "-"),
 		}
 
-		var created release
 		if err := a.api.Do(
 			ctx,
 			http.MethodPost,
 			t.repoPath("/releases"),
 			create,
-			&created,
+			&existing,
 		); err != nil {
 			return fmt.Errorf("create draft release %s: %w", t.tag, err)
 		}
-
-		existing = &created
 	}
 
-	if !t.owns(*existing) {
+	if !t.owns(existing) {
 		return fmt.Errorf(
 			"%w: tag %s belongs to another run; refusing to replace it",
 			errRelease,
@@ -260,12 +257,12 @@ func (a application) publishDraft(ctx context.Context, t target, id int64) error
 
 // cleanupDraft deletes this run's unpublished draft, if one exists.
 func (a application) cleanupDraft(ctx context.Context, t target) error {
-	existing, err := a.findRelease(ctx, t)
+	existing, found, err := a.findRelease(ctx, t)
 	if err != nil {
 		return err
 	}
 
-	if existing == nil || !existing.Draft || !t.owns(*existing) {
+	if !found || !existing.Draft || !t.owns(existing) {
 		a.logf("No draft owned by this run needs cleanup")
 		return nil
 	}
@@ -285,21 +282,21 @@ func (a application) cleanupDraft(ctx context.Context, t target) error {
 	return nil
 }
 
-// findRelease returns the release for the tag, or nil when none exists. Other
+// findRelease returns the release for the tag and whether it exists. Other
 // failures, such as a forbidden lookup, are not treated as an absent release.
-func (a application) findRelease(ctx context.Context, t target) (*release, error) {
+func (a application) findRelease(ctx context.Context, t target) (release, bool, error) {
 	var found release
 
 	err := a.api.Get(ctx, t.repoPath("/releases/tags/%s", url.PathEscape(t.tag)), &found)
 	if githubapi.HasStatus(err, http.StatusNotFound) {
-		return nil, nil //nolint:nilnil // An absent release is an expected, non-error result.
+		return release{}, false, nil
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("find release %s: %w", t.tag, err)
+		return release{}, false, fmt.Errorf("find release %s: %w", t.tag, err)
 	}
 
-	return &found, nil
+	return found, true, nil
 }
 
 func (t target) owns(r release) bool {

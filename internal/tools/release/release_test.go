@@ -51,7 +51,6 @@ func successfulJobs() []workflowJob {
 	return jobs
 }
 
-// fakeGitHub serves the release and workflow endpoints for fixture/aht.
 type fakeGitHub struct {
 	mu           sync.Mutex
 	release      *release
