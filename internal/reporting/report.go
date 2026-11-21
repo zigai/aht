@@ -21,6 +21,11 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+const (
+	IgnorePayloadMismatch IgnoreReason = "payload_mismatch"
+	IgnoreSessionTeardown IgnoreReason = "session_teardown"
+)
+
 //exhaustruct:optional
 type Options struct {
 	DetailObservedAt string
@@ -56,11 +61,6 @@ type Options struct {
 
 // IgnoreReason says why a hook report is dropped before it reaches the registry.
 type IgnoreReason string
-
-const (
-	IgnorePayloadMismatch IgnoreReason = "payload_mismatch"
-	IgnoreSessionTeardown IgnoreReason = "session_teardown"
-)
 
 type Result struct {
 	Harness registry.Harness
@@ -151,6 +151,7 @@ func Prepare(
 	if teardown {
 		return Result{Harness: harnessID, Ignored: IgnoreSessionTeardown}, nil
 	}
+
 	applyReportRuntimeDefaults(&opts)
 	translateReportLifecycle(&opts, harnessID, attrs)
 
