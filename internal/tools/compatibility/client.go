@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,6 +26,10 @@ const (
 	workflowPath     = ".github/workflows/compatibility-releases.yml"
 	artifactPageSize = 100
 	maxArtifactPages = 20
+)
+
+var exactNPMVersionPattern = regexp.MustCompile(
+	`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`,
 )
 
 type releaseClient struct {
@@ -356,4 +362,155 @@ func (c *releaseClient) trustedArtifact(
 
 	return details.Path == workflowPath &&
 		(details.Event == "schedule" || details.Event == "workflow_dispatch"), nil
+}
+
+func (c *releaseClient) npmDependencyDate(
+	ctx context.Context,
+	spec harnessSpec,
+	version string,
+) (time.Time, error) {
+	var manifest struct {
+		Name                 string            `json:"name"`
+		Dependencies         map[string]string `json:"dependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"` //nolint:tagliatelle // npm registry field.
+	}
+	if err := c.getJSON(
+		ctx,
+		c.npmBase+"/"+url.PathEscape(spec.Package)+"/"+url.PathEscape(version),
+		&manifest,
+	); err != nil {
+		return time.Time{}, err
+	}
+
+	if manifest.Name != spec.Package {
+		return time.Time{}, fmt.Errorf("%w: npm package identity mismatch", errCompatibility)
+	}
+
+	date, err := c.npmPublished(ctx, spec.Package, version)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// Platform binaries are pinned exactly and are often published minutes after
+	// the release, so the date has to include them.
+	for name, requested := range mergedDependencies(manifest.Dependencies, manifest.OptionalDependencies) {
+		target, pinned, ok := exactNPMDependency(name, requested)
+		if !ok {
+			continue
+		}
+
+		published, err := c.npmPublished(ctx, target, pinned)
+		if err != nil {
+			return time.Time{}, err
+		}
+
+		if published.After(date) {
+			date = published
+		}
+	}
+
+	return date, nil
+}
+
+func mergedDependencies(groups ...map[string]string) map[string]string {
+	merged := map[string]string{}
+	for _, group := range groups {
+		maps.Copy(merged, group)
+	}
+
+	return merged
+}
+
+func exactNPMDependency(name string, requested string) (string, string, bool) {
+	if alias, ok := strings.CutPrefix(requested, "npm:"); ok {
+		separator := strings.LastIndex(alias, "@")
+		if separator <= 0 {
+			return "", "", false
+		}
+
+		name, requested = alias[:separator], alias[separator+1:]
+	}
+
+	return name, requested, exactNPMVersionPattern.MatchString(requested)
+}
+
+func (c *releaseClient) npmPublished(
+	ctx context.Context,
+	name string,
+	version string,
+) (time.Time, error) {
+	target := c.npmBase + "/" + url.PathEscape(name)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "aht-compatibility")
+
+	response, err := c.http.Do(req)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("fetch %s: %w", target, err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		return time.Time{}, fmt.Errorf(
+			"%w: GET %s: HTTP %d",
+			errCompatibility,
+			target,
+			response.StatusCode,
+		)
+	}
+
+	times, err := decodePackumentTimes(response.Body)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode %s: %w", target, err)
+	}
+
+	var published time.Time
+	if err := json.Unmarshal(times[version], &published); err != nil || published.IsZero() {
+		return time.Time{}, fmt.Errorf(
+			"%w: %s@%s has no publish time",
+			errCompatibility,
+			name,
+			version,
+		)
+	}
+
+	return published, nil
+}
+
+func decodePackumentTimes(body io.Reader) (map[string]json.RawMessage, error) {
+	// A full packument can hold tens of megabytes of manifests, so only the time map is kept.
+	decoder := json.NewDecoder(body)
+	if _, err := decoder.Token(); err != nil {
+		return nil, fmt.Errorf("read packument start: %w", err)
+	}
+
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, fmt.Errorf("read packument field: %w", err)
+		}
+
+		if key != "time" {
+			var skipped json.RawMessage
+			if err := decoder.Decode(&skipped); err != nil {
+				return nil, fmt.Errorf("skip packument field %v: %w", key, err)
+			}
+
+			continue
+		}
+
+		var times map[string]json.RawMessage
+		if err := decoder.Decode(&times); err != nil {
+			return nil, fmt.Errorf("read packument times: %w", err)
+		}
+
+		return times, nil
+	}
+
+	return nil, fmt.Errorf("%w: packument has no publish times", errCompatibility)
 }
