@@ -19,9 +19,7 @@ const (
 )
 
 var (
-	// ErrHistoryIncomplete identifies searches that returned partial results.
-	ErrHistoryIncomplete = history.ErrIncomplete
-	// ErrInvalidHistoryQuery identifies invalid search options.
+	ErrHistoryIncomplete   = history.ErrIncomplete
 	ErrInvalidHistoryQuery = history.ErrInvalidQuery
 	// ErrHistoryIndexUnavailable identifies a history index refresh that could
 	// not use the disposable index.
@@ -33,21 +31,17 @@ type (
 	HistoryQuery = history.Query
 	// HistoryListQuery lists conversations by metadata without searching text.
 	HistoryListQuery = history.ListQuery
-	// HistoryFilter selects conversations by native metadata.
-	HistoryFilter = history.Filter
-	// HistorySort orders history results.
-	HistorySort = history.Sort
+	HistoryFilter    = history.Filter
+	HistorySort      = history.Sort
 	// HistoryRole is the author of a message part in queries and excerpts.
 	HistoryRole = history.Role
 	// HistoryStatus is a history source's coverage in a result.
 	HistoryStatus = history.Status
-	// HistoryResult includes matches and source coverage.
 	HistoryResult = history.Result
 	// HistoryCatalog supports explicit sources instead of default discovery.
 	HistoryCatalog = history.Catalog
 	// HistorySource identifies a native history directory or SQLite database.
-	HistorySource = history.Source
-	// HistoryProgress reports scanning of one history source.
+	HistorySource       = history.Source
 	HistoryProgress     = history.Progress
 	HistoryRefreshStats = history.RefreshStats
 	// HistoryRefreshStatus describes the last completed or partial index refresh.
@@ -72,9 +66,6 @@ func SearchHistory(ctx context.Context, query HistoryQuery) (HistoryResult, erro
 
 	result, err := historyCatalog.Search(ctx, query)
 	if err != nil {
-		// history already prefixes errors with "search history:", so wrapcheck
-		// would add a second, redundant layer.
-		//nolint:wrapcheck // the returned error already carries operation context
 		return result, err
 	}
 
@@ -88,7 +79,6 @@ func ListHistory(ctx context.Context, query HistoryListQuery) (HistoryResult, er
 
 	result, err := historyCatalog.List(ctx, query)
 	if err != nil {
-		//nolint:wrapcheck // the returned error already carries operation context
 		return result, err
 	}
 

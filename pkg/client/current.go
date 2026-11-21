@@ -22,7 +22,6 @@ type currentInspectors struct {
 	Locations   func(context.Context) []registry.Location
 }
 
-// Current resolves the session for the calling agent context.
 func (c *Client) Current(ctx context.Context) (registry.Session, error) {
 	return c.CurrentWithOptions(ctx, CurrentOptions{PID: 0})
 }
@@ -48,7 +47,7 @@ func (c *Client) CurrentWithOptions(
 	return session, nil
 }
 
-//nolint:wrapcheck // CurrentWithOptions adds operation context at the public boundary.
+//nolint:wrapcheck // CurrentWithOptions wraps every error once, including context errors.
 func (c *Client) currentWithInspectors(
 	ctx context.Context,
 	opts currentInspectors,
@@ -74,14 +73,12 @@ func (c *Client) currentWithInspectors(
 		return registry.Session{}, ErrNoCurrentSession
 	}
 
-	// 1. Check process tree ancestors.
 	if session, found, err := resolveCurrentFromAncestors(ctx, sessions, opts); err != nil {
 		return registry.Session{}, err
 	} else if found {
 		return session, nil
 	}
 
-	// 2. Check verified terminal context.
 	if session, found, err := resolveCurrentFromTerminal(ctx, sessions, opts); err != nil {
 		return registry.Session{}, err
 	} else if found {

@@ -22,7 +22,6 @@ func TestRequestsCancelBlockedResponse(t *testing.T) {
 		},
 		"subscribe": func(ctx context.Context, client *broker.Client) error {
 			_, err := client.Subscribe(ctx, registry.Filter{})
-			//nolint:wrapcheck // The test operation preserves the client's exact cancellation contract.
 			return err
 		},
 	}

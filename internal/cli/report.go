@@ -202,7 +202,7 @@ func (app *application) runReport(
 	}
 
 	if err != nil {
-		return err //nolint:wrapcheck // Client.Observe supplies the operation context.
+		return err
 	}
 
 	return app.writeReportResult(session, quiet)

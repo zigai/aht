@@ -16,7 +16,7 @@ func (app *application) newCurrentCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			session, err := app.registryStore().Current(cmd.Context())
 			if err != nil {
-				return err //nolint:wrapcheck // Client.Current supplies the operation context.
+				return err
 			}
 
 			if app.outputJSON {

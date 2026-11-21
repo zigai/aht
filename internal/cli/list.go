@@ -215,7 +215,6 @@ func validateListSummaryOptions(opts listOptions) error {
 	if opts.groupBySet || opts.groupBy != "" {
 		switch opts.groupBy {
 		case "multiplexer-session", "project", "harness":
-			// valid
 		default:
 			return fmt.Errorf(
 				"%w: %q (expected multiplexer-session, project, or harness)",
@@ -288,7 +287,7 @@ func (app *application) runListSessions(
 ) error {
 	ss, e := app.registryStore().List(ctx, f)
 	if e != nil {
-		return e //nolint:wrapcheck // Client.List supplies the operation context.
+		return e
 	}
 
 	ss = applyConfigFilter(ss, app.cfg.Filter, f.Harness)

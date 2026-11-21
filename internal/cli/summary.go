@@ -20,7 +20,7 @@ func (app *application) runListSummary(
 	s, e := app.registryStore().
 		SummaryWithOptions(ctx, f, registry.SummaryOptions{GroupBy: groupBy})
 	if e != nil {
-		return e //nolint:wrapcheck // Client.SummaryWithOptions supplies the operation context.
+		return e
 	}
 
 	if app.outputJSON {

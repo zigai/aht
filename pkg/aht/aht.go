@@ -23,31 +23,23 @@ const (
 	// ModeDurableOnly reads directly from the on-disk registry file.
 	ModeDurableOnly Mode = client.ModeDurableOnly
 
-	// PresenceLive indicates the agent session process or container is active.
 	PresenceLive Presence = registry.PresenceLive
 
-	// PresenceGone indicates the agent session has terminated.
 	PresenceGone Presence = registry.PresenceGone
 
-	// PresenceUnknown indicates presence cannot be determined.
 	PresenceUnknown Presence = registry.PresenceUnknown
 
-	// ActivityRunning indicates the agent is actively processing or executing.
 	ActivityRunning Activity = registry.ActivityRunning
 
 	// ActivityWaiting indicates the agent is waiting for user or tool input.
 	ActivityWaiting Activity = registry.ActivityWaiting
 
-	// ActivityIdle indicates the agent is idle and ready for interaction.
 	ActivityIdle Activity = registry.ActivityIdle
 
-	// ActivityFailed indicates the agent encountered an unrecoverable failure.
 	ActivityFailed Activity = registry.ActivityFailed
 
-	// ActivityInterrupted indicates the agent run was canceled or interrupted.
 	ActivityInterrupted Activity = registry.ActivityInterrupted
 
-	// ActivityUnknown indicates activity cannot be determined.
 	ActivityUnknown Activity = registry.ActivityUnknown
 
 	MultiplexerTmux                  MultiplexerKind = registry.MultiplexerTmux
@@ -96,103 +88,76 @@ const (
 )
 
 var (
-	// ErrInvalidMode means the client was configured with an unsupported operating mode.
 	ErrInvalidMode = client.ErrInvalidMode
 
-	// ErrUnavailable means no realtime AHT broker accepted the local connection.
 	ErrUnavailable = broker.ErrUnavailable
 
 	// ErrBusy means the realtime broker refused a connection because all slots are occupied.
 	ErrBusy = broker.ErrBusy
 
-	// ErrStreamClosed means an established realtime subscription lost its transport.
 	ErrStreamClosed = broker.ErrStreamClosed
 
-	// ErrProtocol means the broker returned an invalid or incompatible response.
 	ErrProtocol = broker.ErrProtocol
 
-	// ErrRealtimeRequired means the operation requires a realtime broker connection.
 	ErrRealtimeRequired = client.ErrRealtimeRequired
 
-	// ErrAmbiguousSession indicates that a selector or reference matched multiple sessions.
 	ErrAmbiguousSession = client.ErrAmbiguousSession
 
-	// ErrSessionNotFound is returned when no session matches the selector.
 	ErrSessionNotFound = registry.ErrSessionNotFound
 
-	// ErrNoCurrentSession indicates that no agent session was found for the current context.
-	ErrNoCurrentSession = client.ErrNoCurrentSession
-	// ErrUnsupportedGroupBy means an unsupported summary grouping was requested.
+	ErrNoCurrentSession   = client.ErrNoCurrentSession
 	ErrUnsupportedGroupBy = registry.ErrUnsupportedGroupBy
-	// ErrWaitTimeout means the wait operation timed out before the condition was satisfied.
-	ErrWaitTimeout = client.ErrWaitTimeout
+	ErrWaitTimeout        = client.ErrWaitTimeout
 
-	// ErrSessionDisappeared means the session departed or became gone before the requested condition was met.
 	ErrSessionDisappeared = client.ErrSessionDisappeared
 
-	// ErrUnknownState means the session entered an indeterminate or unknown state.
 	ErrUnknownState = client.ErrUnknownState
 
 	// ErrConditionRequired means neither activity nor presence condition was specified.
 	ErrConditionRequired = client.ErrConditionRequired
 
-	// ErrContradictoryCondition means contradictory wait conditions were specified.
 	ErrContradictoryCondition = client.ErrContradictoryCondition
 
-	// ErrInvalidDuration means a duration was negative or stable-for exceeded timeout.
+	// ErrInvalidDuration means a duration was negative or stable-for reached timeout.
 	ErrInvalidDuration = client.ErrInvalidDuration
 
-	// ErrSessionRequired means a canonical session ID was not provided.
+	// ErrSessionRequired means no session reference was given: a registry ID,
+	// registry ID prefix, native session ID, or session path.
 	ErrSessionRequired = client.ErrSessionRequired
 	// ErrObservationConflict means an incoming observation contradicts or precedes accepted evidence.
 	ErrObservationConflict = registry.ErrObservationConflict
 
-	// ErrInvalidObservation means an observation failed structural validation.
 	ErrInvalidObservation = registry.ErrInvalidObservation
 
-	// ErrCorruptStore means registry persistence contained unreadable or malformed state.
 	ErrCorruptStore = registry.ErrCorruptStore
 
-	// ErrStoreTooLarge means registry state exceeds the configured maximum size.
 	ErrStoreTooLarge = registry.ErrStoreTooLarge
 
-	// ErrHarnessRequired means an observation omitted the required harness identifier.
 	ErrHarnessRequired = registry.ErrHarnessRequired
 
-	// ErrObservationIdentity means an observation omitted the required identity fields.
 	ErrObservationIdentity = registry.ErrObservationIdentity
 
-	// ErrUnknownHarness means an invalid harness name was encountered.
 	ErrUnknownHarness = registry.ErrUnknownHarness
 
-	// ErrUnknownPresence means an invalid presence value was encountered.
 	ErrUnknownPresence = registry.ErrUnknownPresence
 
-	// ErrUnknownActivity means an invalid activity value was encountered.
 	ErrUnknownActivity = registry.ErrUnknownActivity
 
-	// ErrHealthMissing means the background tracker health sidecar file is missing.
 	ErrHealthMissing = manage.ErrHealthMissing
 
-	// ErrHealthStale means the background tracker has not reconciled within the expected window.
 	ErrHealthStale = manage.ErrHealthStale
 
-	// ErrHealthDegraded means the background tracker reported a degraded state.
 	ErrHealthDegraded = manage.ErrHealthDegraded
 
-	// ErrHealthCorrupt means the background tracker health sidecar file contains invalid JSON.
 	ErrHealthCorrupt = manage.ErrHealthCorrupt
 
-	// ErrReconciliationIncomplete means the observer has not completed any successful reconciliation.
 	ErrReconciliationIncomplete = manage.ErrReconciliationIncomplete
 
-	// ErrPaneNotLive means the target terminal multiplexer pane is not running or available.
 	ErrPaneNotLive = manage.ErrPaneNotLive
 
 	// ErrForeignTracker means the tracker service definition is not owned by AHT.
 	ErrForeignTracker = manage.ErrForeignTracker
 
-	// ErrConfig means the AHT configuration could not be loaded.
 	ErrConfig = manage.ErrConfig
 
 	// ErrNoRepair means a doctor check has no automatic repair.
@@ -200,32 +165,24 @@ var (
 )
 
 type (
-	// Client reads and updates agent-harness state through the local AHT broker.
 	Client = client.Client
 
-	// Config identifies the local AHT instance and operating mode used by a Client.
 	Config = client.Config
 
 	// Mode controls how a Client routes operations between the realtime broker
 	// and the durable registry file on disk.
 	Mode = client.Mode
 
-	// Session represents an agent-harness session tracked by AHT.
 	Session = registry.Session
 
-	// Filter specifies matching criteria when querying or watching sessions.
 	Filter = registry.Filter
 
-	// StateSnapshot is a revisioned collection of tracked sessions.
 	StateSnapshot = registry.StateSnapshot
 
-	// Presence indicates whether an agent session is live, gone, or unknown.
 	Presence = registry.Presence
 
-	// Activity indicates what an agent is currently doing.
 	Activity = registry.Activity
 
-	// Harness identifies a supported AI coding agent.
 	Harness = registry.Harness
 
 	Liveness = registry.Liveness
@@ -233,130 +190,95 @@ type (
 	Gone     = registry.Gone
 	Unknown  = registry.Unknown
 
-	// Location represents the unified multiplexer location of a session.
 	Location = registry.Location
 
-	// MultiplexerKind identifies a supported terminal multiplexer.
 	MultiplexerKind = registry.MultiplexerKind
 
-	// Selector specifies criteria for selecting and resolving a single session.
 	Selector = client.Selector
 
-	// SessionLister captures the session query capability required to resolve selectors.
 	SessionLister = client.SessionLister
 
-	// CurrentOptions identifies the process whose enclosing session is requested.
 	CurrentOptions = client.CurrentOptions
 
-	// AmbiguousSessionError provides detailed information about ambiguous session matches.
 	AmbiguousSessionError = client.AmbiguousSessionError
 
-	// Observation represents an observation recorded for a session.
 	Observation = registry.Observation
 
-	// ObservationIdentity identifies the session an observation belongs to.
 	ObservationIdentity = registry.ObservationIdentity
 
 	// Summary represents aggregate session counts for a terminal session.
 	Summary = registry.Summary
 
-	// SummaryGroupBy represents the grouping dimension for aggregate session summaries.
 	SummaryGroupBy = registry.SummaryGroupBy
 
-	// SummaryOptions configures grouping for aggregate session summaries.
 	SummaryOptions = registry.SummaryOptions
 
-	// GroupedSummarizer extends a Store with configurable grouping options.
 	GroupedSummarizer = registry.GroupedSummarizer
 
 	// Subscription streams immutable state snapshots from the realtime broker.
 	Subscription = broker.Subscription
 
-	// Store represents an engine that persists or serves agent-harness state.
 	Store = registry.Store
 
-	// WaitOptions configures the session condition, timeout, and stability duration to wait for.
 	WaitOptions = client.WaitOptions
 
-	// WaitResult describes the session state that satisfied the wait condition.
-	WaitResult = client.WaitResult
-	// Explanation represents the activity diagnosis and decision provenance for an agent session.
+	WaitResult  = client.WaitResult
 	Explanation = manage.Explanation
 
-	// HookExplanation describes the evaluation of native integration hook evidence.
 	HookExplanation = manage.HookExplanation
 
-	// ScreenExplanation describes the evaluation of screen detection heuristics.
 	ScreenExplanation = manage.ScreenExplanation
 
-	// ScreenDecision represents the outcome of evaluating a screen state detection rule.
 	ScreenDecision = manage.ScreenDecision
 
-	// RuleEvidence records whether an individual detection rule matched during screen evaluation.
 	RuleEvidence = manage.RuleEvidence
 
-	// ExplainOptions controls how session explanation is evaluated.
 	ExplainOptions = manage.ExplainOptions
 
-	// TrackerHealth represents background tracker reconciliation health and freshness.
 	TrackerHealth = manage.TrackerHealth
 
-	// HealthStatus indicates the operational state of tracker reconciliation.
 	HealthStatus = manage.HealthStatus
 
-	// DoctorStatus is the outcome of one doctor check.
 	DoctorStatus = manage.DoctorStatus
 
-	// DoctorCheck is one diagnostic row evaluated by Doctor.
 	DoctorCheck = manage.DoctorCheck
 
 	// DoctorFix says how to resolve a warn or fail doctor check.
 	DoctorFix    = manage.DoctorFix
 	DoctorAction = manage.DoctorAction
 
-	// DoctorSummary counts doctor checks by status.
 	DoctorSummary = manage.DoctorSummary
 
 	// DoctorResult is the complete diagnostic report, in check order.
 	DoctorResult = manage.DoctorResult
 
-	// DoctorOptions controls what checks and details Doctor evaluates.
 	DoctorOptions = manage.DoctorOptions
 
-	// HarnessCapabilities describes the static capabilities and supported features of an agent harness.
 	HarnessCapabilities = harness.Capabilities
 
 	// HarnessLocation is a path where a harness documents reading user-facing configuration.
 	HarnessLocation = harness.Location
 
-	// HarnessLocationKind says what a [HarnessLocation] holds.
 	HarnessLocationKind = harness.LocationKind
 
-	// HarnessLocationScope says whom a [HarnessLocation] applies to.
 	HarnessLocationScope = harness.LocationScope
 
 	// Manager installs harness integrations and controls the platform-native AHT tracker.
 	Manager = manage.Manager
 
-	// ManagerConfig identifies the binary, registry, configuration, and tracker settings used by a Manager.
 	ManagerConfig = manage.Config
 
-	// IntegrationOptions controls one managed harness integration operation.
 	IntegrationOptions = manage.IntegrationOptions
 
-	// IntegrationResult describes the effect of installing or removing one integration.
 	IntegrationResult = manage.IntegrationResult
 
-	// IntegrationStatus describes the installed state of one harness integration.
 	IntegrationStatus = install.IntegrationStatus
 
 	// ArtifactStatus describes the ownership and freshness of a managed integration artifact.
 	ArtifactStatus = install.ArtifactStatus
 
-	// TrackerOptions controls a tracker operation.
 	TrackerOptions = manage.TrackerOptions
 
-	// TrackerResult describes the tracker state after a management operation.
 	TrackerResult = manage.TrackerResult
 )
 
@@ -376,22 +298,18 @@ type (
 	ProcessIdentity = registry.ProcessIdentity
 )
 
-// New returns a client for the configured local AHT instance.
 func New(config Config) *Client {
 	return client.New(config)
 }
 
-// NewManager returns a manager for harness integrations and the background tracker.
 func NewManager(config ManagerConfig) *Manager {
 	return manage.New(config)
 }
 
-// DefaultSocketPath returns the default endpoint for the current user's AHT broker.
 func DefaultSocketPath() string {
 	return broker.DefaultSocketPath()
 }
 
-// DefaultStorePath returns the default filesystem location for the durable registry.
 func DefaultStorePath() string {
 	return registry.DefaultStorePath()
 }
@@ -405,66 +323,43 @@ func NewSubscription(
 	return broker.NewSubscription(snapshots, errCh, cancel)
 }
 
-// IsUnavailable reports whether err means that no realtime broker accepted the connection.
 func IsUnavailable(err error) bool {
 	return broker.IsUnavailable(err)
 }
 
-// StreamClosed reports whether an established realtime subscription lost its transport.
 func StreamClosed(err error) bool {
 	return broker.StreamClosed(err)
 }
 
-// Resolve finds a single session matching selector using the provided session lister.
 func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Session, error) {
-	return client.Resolve( //nolint:wrapcheck // facade forwards client error unchanged
-		ctx,
-		lister,
-		selector,
-	)
+	return client.Resolve(ctx, lister, selector)
 }
 
-// ResolveSessions resolves a selector against an existing session snapshot.
 func ResolveSessions(sessions []Session, selector Selector) (Session, error) {
-	return client.ResolveSessions( //nolint:wrapcheck // facade forwards client error unchanged
-		sessions,
-		selector,
-	)
+	return client.ResolveSessions(sessions, selector)
 }
 
-// Current returns the session for the calling agent context using the provided client.
 func Current(ctx context.Context, c *Client) (Session, error) {
-	return c.Current(ctx) //nolint:wrapcheck // facade forwards client error unchanged
+	return c.Current(ctx)
 }
 
-// ExplainSession returns an Explanation for the given session.
 func ExplainSession(
 	ctx context.Context,
 	session Session,
 	opts ExplainOptions,
 ) (Explanation, error) {
-	return manage.ExplainSession( //nolint:wrapcheck // facade forwards manage error unchanged
-		ctx,
-		session,
-		opts,
-	)
+	return manage.ExplainSession(ctx, session, opts)
 }
 
 // ReadTrackerHealth reads and evaluates the tracker health sidecar at path.
 func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (TrackerHealth, error) {
-	return manage.ReadTrackerHealth( //nolint:wrapcheck // facade forwards manage error unchanged
-		path,
-		now,
-		maxAge,
-	)
+	return manage.ReadTrackerHealth(path, now, maxAge)
 }
 
-// Capabilities returns the static capabilities of harnessID.
 func Capabilities(harnessID Harness) (HarnessCapabilities, bool) {
 	return harness.CapabilitiesFor(harnessID)
 }
 
-// AllCapabilities returns the static capabilities of all supported harnesses.
 func AllCapabilities() []HarnessCapabilities {
 	return harness.AllCapabilities()
 }
@@ -477,7 +372,6 @@ func HarnessLocations(harnessID Harness, projectDir string) ([]HarnessLocation, 
 	return harness.LocationsFor(harnessID, projectDir)
 }
 
-// AllHarnessLocations returns the locations of all supported harnesses.
 func AllHarnessLocations(projectDir string) []HarnessLocation {
 	return harness.AllLocations(projectDir)
 }

@@ -194,7 +194,7 @@ func (app *application) newStateResetCommand() *cobra.Command {
 
 			r, e := s.Reset(cmd.Context())
 			if e != nil {
-				return e //nolint:wrapcheck // Client.Reset supplies the operation context.
+				return e
 			}
 
 			o := manageResetResult{ResetResult: r, Path: s.StorePath()}

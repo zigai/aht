@@ -128,6 +128,9 @@ linters:
     - zerologlint
 
   settings:
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/zigai/aht/v2/*
     thelper:
       benchmark:
         begin: false
@@ -330,10 +333,6 @@ linters:
 
       - path: "_test\\.go"
         linters: [gosec, cyclop, gocognit, exhaustruct_v5, goconst]
-
-      # Test-helper packages (named like httptest) only build fixtures.
-      - path: "(^|/)[a-z0-9]+test/"
-        linters: [exhaustruct_v5]
 
       - path: "_test\\.go"
         linters: [goconst]
