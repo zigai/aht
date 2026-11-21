@@ -105,11 +105,6 @@ func serverSpecFromArgs(args []string) (serverSpec, bool) {
 	if !isBinaryName(base) {
 		return serverSpec{}, false
 	}
-	// Some tmux builds expose a bare -d daemon process marker rather than a
-	// native root flag. It carries no endpoint, so retain the default fallback.
-	if len(args) == 2 && args[1] == "-d" {
-		return serverSpec{Identity: "default"}, true
-	}
 
 	parsed, err := gotmux.ParseCommandLine(args[1:])
 	if err != nil {

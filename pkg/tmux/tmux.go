@@ -22,7 +22,6 @@ const (
 )
 
 var (
-	// ErrNotInTmux is returned when no tmux environment is available.
 	ErrNotInTmux         = errors.New("not inside tmux")
 	errMissingTmuxPaneID = errors.New("missing tmux pane id")
 )
@@ -42,9 +41,6 @@ type Env struct {
 	TMUXPane string
 }
 
-// ListOptions controls pane discovery and is primarily useful for observer
-// injection and deterministic tests.
-//
 //exhaustruct:optional
 type ListOptions struct {
 	Env Env
@@ -57,7 +53,6 @@ type ListOptions struct {
 	SocketPaths []string
 }
 
-// ToMuxPane converts a native tmux Pane to a unified mux.Pane.
 func (p Pane) ToMuxPane() mux.Pane {
 	location := p.Location
 	location.PanePID = p.PanePID
@@ -155,7 +150,6 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error)
 	return listPanesWithOptions(ctx, opts, queryServerPanesGotmux)
 }
 
-// SendInterruptTo sends an interrupt to a pane on the identified tmux server.
 func SendInterruptTo(ctx context.Context, serverIdentity string, paneID string) error {
 	if strings.TrimSpace(paneID) == "" {
 		return errMissingTmuxPaneID
@@ -430,32 +424,12 @@ func appendCanonicalPanes(
 }
 
 func tmuxServerSocket(tmuxEnv string) string {
-	tmuxEnv = strings.TrimSpace(tmuxEnv)
-	if tmuxEnv == "" {
+	vars, err := gotmux.ParseTmuxVars(gotmux.TmuxVars{TMUX: tmuxEnv, TMUXPane: ""})
+	if err != nil {
 		return ""
 	}
 
-	if hints, err := gotmux.ParseTmuxVars(
-		gotmux.TmuxVars{TMUX: tmuxEnv, TMUXPane: ""},
-	); err == nil {
-		return hints.SocketPath
-	}
-
-	// Preserve the public environment-only fallback for incomplete or invalid
-	// $TMUX values that gotmux cannot verify. Strip suffixes from the right to
-	// retain commas in socket paths.
-	end := strings.LastIndexByte(tmuxEnv, ',')
-	if end < 0 {
-		return tmuxEnv
-	}
-
-	start := strings.LastIndexByte(tmuxEnv[:end], ',')
-
-	if start < 0 {
-		return tmuxEnv[:end]
-	}
-
-	return tmuxEnv[:start]
+	return vars.SocketPath
 }
 
 func locationFromEnv(env Env) registry.Location {

@@ -56,7 +56,7 @@ func TestServerSpecFromArgsSupportsBinarySuffixAndFlags(t *testing.T) {
 			wantOK:       true,
 			wantIdentity: "/tmp/custom.sock",
 		},
-		{name: "tmux.real binary", args: []string{"/usr/bin/tmux.real", "-d"}, wantOK: true, wantIdentity: "default"},
+		{name: "tmux.real binary", args: []string{"/usr/bin/tmux.real", "-D"}, wantOK: true, wantIdentity: "default"},
 		{name: "attached named socket", args: []string{"tmux", "-Lpopup"}, wantOK: true, wantIdentity: "-L:popup"},
 		{
 			name: "bundled socket flags",
