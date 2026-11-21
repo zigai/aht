@@ -38,7 +38,6 @@ type StateSnapshot struct {
 	Sessions  []Session `json:"sessions"`
 }
 
-// MemoryStoreOptions configures an in-memory authoritative store.
 type MemoryStoreOptions struct {
 	// TombstoneTTL is how long an identified gone session stays in the registry
 	// to reject late native reports from its ended incarnation. Values <= 0 use
@@ -87,6 +86,8 @@ type MemoryStore struct {
 	// journal is the end of the journal bytes already applied to snapshot.
 	//exhaustruct:optional
 	journal journalPosition
+	//exhaustruct:optional
+	filesLocked func()
 }
 
 type checkpointFile struct {
@@ -601,6 +602,13 @@ func (s *MemoryStore) setNowForTest(now func() time.Time) {
 	defer s.mu.Unlock()
 
 	s.now = now
+}
+
+func (s *MemoryStore) setFilesLockedForTest(hook func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.filesLocked = hook
 }
 
 func (s *MemoryStore) flushOnShutdown(ctx context.Context) error {

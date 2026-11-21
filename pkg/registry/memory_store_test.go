@@ -715,6 +715,16 @@ func requireStateAfterExternalWrite(
 	external := NewJournal(store.Path(), fixtureRules{})
 	want := map[string]bool{}
 
+	var lockArmed atomic.Bool
+
+	locked := make(chan struct{})
+
+	store.setFilesLockedForTest(func() {
+		if lockArmed.CompareAndSwap(true, false) {
+			locked <- struct{}{}
+		}
+	})
+
 	for attempt := range 10 {
 		externalID := fmt.Sprintf("external-%d", attempt)
 		if _, err := external.Observe(t.Context(), liveReport(externalID)); err != nil {
@@ -744,6 +754,8 @@ func requireStateAfterExternalWrite(
 
 		done := make(chan error, 1)
 
+		lockArmed.Store(true)
+
 		go func() {
 			var err error
 
@@ -751,8 +763,7 @@ func requireStateAfterExternalWrite(
 			done <- err
 		}()
 
-		// Let operation take the file locks and wait for the reader's s.mu.
-		time.Sleep(20 * time.Millisecond)
+		<-locked
 
 		gate.statRelease <- struct{}{}
 

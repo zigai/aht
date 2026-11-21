@@ -135,6 +135,10 @@ func (s *MemoryStore) lockFiles(ctx context.Context) (*storeLock, error) {
 		return nil, err
 	}
 
+	if s.filesLocked != nil {
+		s.filesLocked()
+	}
+
 	return lock, nil
 }
 
