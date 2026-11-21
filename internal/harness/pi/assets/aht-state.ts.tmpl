@@ -11,8 +11,8 @@ const heartbeatIntervalMs = 10000;
 // tmux inspection alone has a five-second deadline plus a one-second pipe
 // drain in aht. Allow that budget and the atomic state write to finish before
 // terminating the reporter. Never block Pi's event handlers on disk I/O.
-const commandTimeoutMs = 7000;
-const commandKillGraceMs = 1000;
+const defaultReportTimeouts = { commandMs: 7000, killGraceMs: 1000 };
+let reportTimeouts = defaultReportTimeouts;
 const maxPendingReports = 64;
 const pendingCommands: string[][] = [];
 let commandDrain: Promise<void> | undefined;
@@ -83,10 +83,10 @@ function runCommand(args: string[]): Promise<void> {
       const timeout = setTimeout(() => {
         failed = true;
         // A busy machine causes this and the next report repairs it, so it stays out of the UI.
-        recordReportingFailure(`report timed out after ${commandTimeoutMs / 1000}s (disk or state lock may be busy)`);
+        recordReportingFailure(`report timed out after ${reportTimeouts.commandMs / 1000}s (disk or state lock may be busy)`);
         child.kill("SIGTERM");
-        killTimer = setTimeout(() => child.kill("SIGKILL"), commandKillGraceMs);
-      }, commandTimeoutMs);
+        killTimer = setTimeout(() => child.kill("SIGKILL"), reportTimeouts.killGraceMs);
+      }, reportTimeouts.commandMs);
       child.once("error", (error: NodeJS.ErrnoException) => {
         failed = true;
         warnReporting(error.code === "ENOENT" ? "reporter executable is missing; reinstall the Pi integration" :
@@ -307,8 +307,10 @@ function report(transition: string, ctx?: ExtensionContext, event?: NativeEvent)
 
   enqueueCommand(args);
 }
-export default function (pi: ExtensionAPI) {
+// Pi passes only the API. Tests pass shorter timeouts.
+export default function (pi: ExtensionAPI, timeouts = defaultReportTimeouts) {
   reportingAPI = pi;
+  reportTimeouts = timeouts;
   const on = (name: string, handler: (event: NativeEvent, ctx: ExtensionContext) => void | Promise<void>): void => {
     pi.on(name, (event, ctx) => handler(parseEvent(event), ctx));
   };
@@ -362,7 +364,7 @@ export default function (pi: ExtensionAPI) {
 
   on("session_shutdown", async (event: NativeEvent, ctx: ExtensionContext) => {
     stopHeartbeat();
-    shutdownDeadline = Date.now() + commandTimeoutMs + commandKillGraceMs;
+    shutdownDeadline = Date.now() + reportTimeouts.commandMs + reportTimeouts.killGraceMs;
     report("gone", ctx, event);
     await commandDrain;
   });

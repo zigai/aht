@@ -14,7 +14,7 @@ const (
 	piExtensionName       = "aht-state.ts"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
-	integrationVersion    = 19
+	integrationVersion    = 20
 )
 
 //go:embed assets/aht-state.ts.tmpl
