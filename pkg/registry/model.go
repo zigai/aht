@@ -232,10 +232,8 @@ type Filter struct {
 	MultiplexerPane    string          `json:"multiplexer_pane,omitempty"`
 }
 
-// SummaryGroupBy identifies the grouping dimension for aggregate session summaries.
 type SummaryGroupBy string
 
-// SummaryOptions configures grouping for aggregate session summaries.
 type SummaryOptions struct {
 	GroupBy SummaryGroupBy `json:"group_by,omitempty"`
 }

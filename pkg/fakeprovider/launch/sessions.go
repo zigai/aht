@@ -49,7 +49,6 @@ func (h *Harness) Sessions(ctx context.Context) ([]registry.Session, error) {
 	return matching, nil
 }
 
-// WaitForSession waits until match accepts a session.
 func (h *Harness) WaitForSession(
 	ctx context.Context,
 	match func(registry.Session) bool,

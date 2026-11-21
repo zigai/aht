@@ -16,7 +16,6 @@ import (
 
 const pollInterval = 20 * time.Millisecond
 
-// StartTracker starts the AHT tracker for this launch.
 func (h *Harness) StartTracker(ctx context.Context) error {
 	if h.aht == "" {
 		return errNoAHT

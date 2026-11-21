@@ -16,6 +16,6 @@ fs.appendFileSync(
 );
 if (first) {
   setInterval(() => {}, 1000);
-  // Self-clean even when exercising the old detached-child bug.
+  // Exit on its own if the test never kills this first reporter.
   setTimeout(() => process.exit(0), 10000);
 }

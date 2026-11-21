@@ -958,7 +958,6 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 		t.Fatalf("precondition failed: sessions=%#v, error=%v", preSessions, err)
 	}
 
-	// Run observer with no live processes
 	at = at.Add(10 * time.Second)
 	options := Options{
 		StorePath: path,
@@ -999,7 +998,7 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 	process := processinfo.Process{PID: 2527379, StartIdentity: "boot:dead"}
 
 	start := registry.NativeLifecycleStart
-	// 1. Initial hook observation
+
 	_, err := store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -1027,7 +1026,6 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 		t.Fatal(err)
 	}
 
-	// 2. Prior process observation showing process is absent
 	_, err = store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -1044,7 +1042,6 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 		t.Fatal(err)
 	}
 
-	// 3. A subsequent start hook revived presence to live
 	_, err = store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -1063,7 +1060,7 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 		t.Fatal(err)
 	}
 
-	// 4. Process evidence belongs to the restarted incarnation.
+	// Process evidence belongs to the restarted incarnation.
 	_, err = store.Observe(context.Background(), registry.Observation{
 		Harness: registry.Harness("omp"),
 		At:      at.Add(2500 * time.Millisecond),
@@ -1080,7 +1077,6 @@ func seedStaleSessionHistory(t *testing.T, store registry.Store, at time.Time) {
 		t.Fatal(err)
 	}
 
-	// 5. Agent end hook with interrupted activity
 	_, err = store.Observe(
 		context.Background(),
 		registry.Observation{

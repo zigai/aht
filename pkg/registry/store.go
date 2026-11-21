@@ -142,7 +142,6 @@ func (s *FileStore) Summary(ctx context.Context, filter Filter) ([]Summary, erro
 	)
 }
 
-// SummaryWithOptions returns filtered summaries grouped according to opts.
 func (s *FileStore) SummaryWithOptions(
 	ctx context.Context,
 	filter Filter,

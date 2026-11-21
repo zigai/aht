@@ -28,10 +28,8 @@ const (
 )
 
 var (
-	// ErrRealtimeRequired means the operation requires a realtime broker connection.
 	ErrRealtimeRequired = errors.New("operation requires a realtime broker connection")
-	// ErrInvalidMode means a client was configured with an unsupported Mode.
-	ErrInvalidMode = errors.New("invalid aht client mode")
+	ErrInvalidMode      = errors.New("invalid aht client mode")
 
 	_ registry.Store             = (*Client)(nil)
 	_ registry.GroupedSummarizer = (*Client)(nil)
@@ -130,17 +128,14 @@ func New(config Config) *Client {
 	}
 }
 
-// StorePath returns the durable registry path used for broker fallback.
 func (c *Client) StorePath() string {
 	return c.storePath
 }
 
-// SocketPath returns the broker endpoint used by the client.
 func (c *Client) SocketPath() string {
 	return c.realtime.SocketPath()
 }
 
-// Mode returns the configured operating mode.
 func (c *Client) Mode() Mode {
 	return c.mode
 }
@@ -167,7 +162,6 @@ func (c *Client) Subscribe(
 	return subscription, nil
 }
 
-// Ping verifies that the realtime broker is accepting requests.
 func (c *Client) Ping(ctx context.Context) error {
 	if c.configErr != nil {
 		return c.configErr
@@ -215,7 +209,6 @@ func (c *Client) ObserveBatch(
 	return sessions, nil
 }
 
-// List returns all sessions matching filter.
 func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.Session, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
@@ -229,7 +222,6 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 	return sessions, nil
 }
 
-// Get returns the session identified by id.
 func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	if c.configErr != nil {
 		return registry.Session{}, c.configErr
@@ -243,7 +235,6 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	return session, nil
 }
 
-// SummaryWithOptions returns aggregate session counts with the given options.
 func (c *Client) SummaryWithOptions(
 	ctx context.Context,
 	filter registry.Filter,
@@ -280,7 +271,6 @@ func (c *Client) GC(ctx context.Context, deleteAfter time.Duration) (registry.GC
 	return result, nil
 }
 
-// Reset deletes every stored session.
 func (c *Client) Reset(ctx context.Context) (registry.ResetResult, error) {
 	if c.configErr != nil {
 		return registry.ResetResult{}, c.configErr

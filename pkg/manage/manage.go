@@ -20,10 +20,8 @@ import (
 )
 
 var (
-	// ErrForeignTracker means the service definition is not owned by AHT.
 	ErrForeignTracker = errors.New("tracker service definition is not owned by aht")
-	// ErrConfig means the AHT configuration could not be loaded.
-	ErrConfig = errors.New("invalid aht configuration")
+	ErrConfig         = errors.New("invalid aht configuration")
 )
 
 // Config identifies the AHT binary, registry, configuration, and tracker
@@ -53,8 +51,6 @@ type Manager struct {
 	stdinConfig func() loadedConfig
 }
 
-// IntegrationOptions controls one managed harness integration operation.
-//
 //exhaustruct:optional
 type IntegrationOptions struct {
 	TargetBinary string
@@ -75,12 +71,10 @@ type IntegrationResult struct {
 	Error    string           `json:"error,omitempty"`
 }
 
-// TrackerOptions controls a tracker operation.
 type TrackerOptions struct {
 	DryRun bool
 }
 
-// TrackerResult describes the platform-native tracker state after an operation.
 type TrackerResult struct {
 	Platform       string `json:"platform"`
 	Manager        string `json:"manager"`
@@ -119,7 +113,6 @@ func New(cfg Config) *Manager {
 	return m
 }
 
-// InstallableHarnesses returns the harnesses with managed integrations.
 func InstallableHarnesses() []registry.Harness {
 	return catalog.Harnesses()
 }
@@ -184,7 +177,6 @@ func (m *Manager) UpgradeIntegrations(
 	return converted, nil
 }
 
-// IntegrationStatus reports whether one harness integration is installed and current.
 func (m *Manager) IntegrationStatus(
 	ctx context.Context,
 	harness registry.Harness,
@@ -220,7 +212,6 @@ func (m *Manager) DisableTracker(ctx context.Context, opts TrackerOptions) (Trac
 	return trackerResult(result), trackerError("disabling tracker", err)
 }
 
-// TrackerStatus reports the state of background agent-session tracking.
 func (m *Manager) TrackerStatus(ctx context.Context) (TrackerResult, error) {
 	options, err := m.serviceOptions(TrackerOptions{DryRun: false})
 	if err != nil {

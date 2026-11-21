@@ -184,7 +184,6 @@ screen_inspection = false
 		t.Fatalf("resolved path %q != %q", resolved, configPath)
 	}
 
-	// UI
 	if cfg.UI.DefaultPresence != "live" {
 		t.Errorf("UI.DefaultPresence = %q, want 'live'", cfg.UI.DefaultPresence)
 	}
@@ -205,12 +204,10 @@ screen_inspection = false
 		t.Errorf("UI.TimeFormat = %q, want 'absolute'", cfg.UI.TimeFormat)
 	}
 
-	// Retention
 	if cfg.Retention.TombstoneTTL != "30m" {
 		t.Errorf("Retention.TombstoneTTL = %q, want '30m'", cfg.Retention.TombstoneTTL)
 	}
 
-	// Filter
 	if len(cfg.Filter.IgnoreHarnesses) != 2 || cfg.Filter.IgnoreHarnesses[0] != "copilot" ||
 		cfg.Filter.IgnoreHarnesses[1] != "gemini" {
 		t.Errorf(
@@ -223,7 +220,6 @@ screen_inspection = false
 		t.Errorf("Filter.IgnorePaths = %v", cfg.Filter.IgnorePaths)
 	}
 
-	// Tracker
 	if cfg.Tracker.Interval != "5s" {
 		t.Errorf("Tracker.Interval = %q, want '5s'", cfg.Tracker.Interval)
 	}
@@ -236,7 +232,6 @@ screen_inspection = false
 		t.Errorf("Tracker.Quiet = %v, want true", cfg.Tracker.Quiet)
 	}
 
-	// Detection
 	if cfg.Detection.ManifestsDir != "/custom/manifests" {
 		t.Errorf(
 			"Detection.ManifestsDir = %q, want '/custom/manifests'",
@@ -481,7 +476,6 @@ func TestMaxFileSizeLimit(t *testing.T) {
 	tempDir := t.TempDir()
 	largeConfig := filepath.Join(tempDir, "large.toml")
 
-	// Create a file > 1 MiB
 	f, err := os.Create(largeConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -529,7 +523,6 @@ func TestEnsureConfigFile(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "subdir", "config.toml")
 
-	// 1. EnsureConfigFile creates new file and parent dirs
 	created, err := EnsureConfigFile(configPath)
 	if err != nil {
 		t.Fatalf("EnsureConfigFile failed: %v", err)
@@ -548,7 +541,6 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatalf("file content does not match template")
 	}
 
-	// 2. EnsureConfigFile on existing file returns created=false, nil without modifying
 	customContent := "# custom content"
 	if err := os.WriteFile(configPath, []byte(customContent), 0o600); err != nil {
 		t.Fatal(err)
@@ -572,7 +564,6 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatalf("existing file was overwritten: got %q, want %q", string(reRead), customContent)
 	}
 
-	// 3. WriteConfigFile overwrites existing file
 	if err := WriteConfigFile(configPath); err != nil {
 		t.Fatalf("WriteConfigFile failed: %v", err)
 	}
@@ -586,7 +577,6 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatalf("expected DefaultConfigTemplate after WriteConfigFile")
 	}
 
-	// 4. EnsureConfigFile on directory path returns error
 	dirPath := filepath.Join(tempDir, "directory")
 	if err := os.MkdirAll(dirPath, 0o700); err != nil {
 		t.Fatal(err)
@@ -597,7 +587,6 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatal("expected error when path is directory")
 	}
 
-	// 5. EnsureConfigFile("") uses DefaultPath (respecting AHT_CONFIG)
 	envPath := filepath.Join(tempDir, "env_config", "config.toml")
 	t.Setenv(ConfigEnv, envPath)
 
@@ -779,7 +768,7 @@ default_presence = "unknown"
 	if cfg.UI.DefaultPresence != "unknown" {
 		t.Errorf("expected default_presence='unknown', got %q", cfg.UI.DefaultPresence)
 	}
-	// Untouched defaults preserved
+
 	if cfg.Tracker.Interval != "300ms" {
 		t.Errorf("expected tracker.interval='300ms', got %q", cfg.Tracker.Interval)
 	}

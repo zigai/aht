@@ -6,12 +6,10 @@ import (
 	"strings"
 )
 
-// HasTool reports whether the request advertises a tool with this name.
 func (r Request) HasTool(name string) bool {
 	return slices.Contains(r.Tools, name)
 }
 
-// HasToolResult reports whether the request has a result for callID containing contains.
 func (r Request) HasToolResult(callID string, contains string) bool {
 	callID = r.echoedCallID(callID)
 

@@ -196,7 +196,6 @@ func lookPathExcludingShimDir(file string, shimDir string) (string, error) {
 }
 
 func isExecutable(path string) bool {
-	// PATH lookup like exec.LookPath.
 	//nolint:gosec // G703: entries of the user's own PATH.
 	info, err := os.Stat(filepath.Clean(path))
 	if err != nil || info.IsDir() {

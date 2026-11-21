@@ -21,7 +21,6 @@ const (
 //go:embed assets/register.ts.tmpl
 var moduleTemplate string
 
-// reportHooks is what the plugin reports for each Claude Code hook event.
 var reportHooks = []harness.CommandHook{
 	{
 		Event:      "SessionStart",

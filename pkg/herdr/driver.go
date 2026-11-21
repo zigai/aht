@@ -12,17 +12,14 @@ import (
 
 var _ mux.Driver = (*Driver)(nil)
 
-// Driver implements [mux.Driver] for Herdr.
 type Driver struct {
 	ListOptions ListOptions
 }
 
-// NewDriver returns a Herdr driver.
 func NewDriver() Driver {
 	return Driver{}
 }
 
-// Kind returns [registry.MultiplexerHerdr].
 func (d Driver) Kind() registry.MultiplexerKind {
 	return registry.MultiplexerHerdr
 }

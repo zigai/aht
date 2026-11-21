@@ -1110,7 +1110,6 @@ regex_any=["[unclosed"]
 			t.Fatal(err)
 		}
 
-		// Ambient loader should succeed with warning and bundled fallback:
 		ambientManifest, err := (Loader{ConfigDir: configDir}).Load(registry.Harness("codex"))
 		if err != nil {
 			t.Fatalf("ambient load unexpectedly failed: %v", err)
@@ -1125,7 +1124,6 @@ regex_any=["[unclosed"]
 			t.Fatalf("expected bundled source, got: %q", ambientManifest.Source)
 		}
 
-		// Explicit loader MUST fail with error:
 		_, explicitErr := LoadExplicitManifest(overridePath, registry.Harness("codex"))
 		if explicitErr == nil {
 			t.Fatal("explicit loader must fail on broken override file")

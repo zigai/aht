@@ -12,42 +12,31 @@ import (
 )
 
 const (
-	// HealthStatusHealthy indicates that the tracker is reconciling normally.
 	HealthStatusHealthy HealthStatus = "healthy"
 
-	// HealthStatusDegraded indicates that the tracker reported reconciliation failures.
 	HealthStatusDegraded HealthStatus = "degraded"
 
-	// HealthStatusStale indicates that the tracker health sidecar is older than the expected interval.
 	HealthStatusStale HealthStatus = "stale"
 
-	// HealthStatusMissing indicates that no tracker health sidecar exists on disk.
 	HealthStatusMissing HealthStatus = "missing"
 
-	// HealthStatusCorrupt indicates that the tracker health sidecar contains invalid data.
 	HealthStatusCorrupt HealthStatus = "corrupt"
 )
 
 var (
-	// ErrHealthMissing indicates that the tracker health sidecar does not exist.
 	ErrHealthMissing = errors.New("tracker health is missing")
 
-	// ErrHealthStale indicates that the tracker has not completed reconciliation within the expected window.
 	ErrHealthStale = errors.New("tracker health is stale")
 
-	// ErrHealthDegraded indicates that the tracker reported degraded reconciliation or enumeration errors.
 	ErrHealthDegraded = errors.New("tracker health reports degraded reconciliation")
 
-	// ErrHealthCorrupt indicates that the tracker health sidecar is malformed or unreadable.
 	ErrHealthCorrupt = errors.New("invalid tracker health sidecar")
 
-	// ErrReconciliationIncomplete indicates that the tracker has not yet completed a successful cycle.
 	ErrReconciliationIncomplete = errors.New(
 		"tracker has not completed a successful reconciliation",
 	)
 )
 
-// HealthStatus indicates the operational state of tracker reconciliation.
 type HealthStatus string
 
 // TrackerHealth is the tracker's health file plus its evaluated freshness.
@@ -70,7 +59,6 @@ func (m *Manager) HealthPath() string {
 	return observer.HealthPath(storePath)
 }
 
-// TrackerHealth returns the reconciliation health of the managed background tracker.
 func (m *Manager) TrackerHealth(ctx context.Context) (TrackerHealth, error) {
 	if err := ctx.Err(); err != nil {
 		var empty TrackerHealth

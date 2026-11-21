@@ -158,7 +158,6 @@ func needsCheck(
 	return slices.Compare(current[:], before[:]) > 0, nil
 }
 
-// aboveMaximum reports whether version exceeds the adapter's declared cap.
 func aboveMaximum(spec harnessSpec, version string) (bool, error) {
 	if spec.MaxVersion == "" {
 		return false, nil

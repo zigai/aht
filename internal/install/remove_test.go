@@ -533,10 +533,8 @@ func testRemovalBackupFailure(t *testing.T) {
 func TestPluginRemovalFinalizationFailureDoesNotRegainDanglingManifest(t *testing.T) {
 	t.Parallel()
 
-	// 1. Post-deletion sync failure does not restore old manifest
 	t.Run("sync failure after backup deletion", testRemovalSyncFailure)
 
-	// 2. Pre-deletion backup failure reports error and does not restore old manifest
 	t.Run("backup deletion failure", testRemovalBackupFailure)
 }
 

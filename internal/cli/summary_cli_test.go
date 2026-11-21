@@ -19,7 +19,7 @@ func TestListSummaryFlagValidation(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 	ctx := t.Context()
 
-	// 1. --group-by without --summary must fail at parse boundary with exit code 2
+	// --group-by without --summary must fail at parse boundary with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
 
@@ -39,7 +39,6 @@ func TestListSummaryFlagValidation(t *testing.T) {
 		}
 	}
 
-	// 2. --summary with unsupported --group-by value must fail with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
 
@@ -59,7 +58,6 @@ func TestListSummaryFlagValidation(t *testing.T) {
 		}
 	}
 
-	// 3. --summary with invalid sort flags must fail with exit code 2
 	{
 		var stdout, stderr bytes.Buffer
 
@@ -344,7 +342,6 @@ func TestListSummaryEmptyState(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 	ctx := t.Context()
 
-	// Empty store table output prints "No results."
 	for _, groupBy := range []string{"project", "harness", "multiplexer-session"} {
 		var stdout, stderr bytes.Buffer
 

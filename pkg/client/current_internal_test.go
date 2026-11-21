@@ -176,7 +176,7 @@ func TestCurrentPIDReuseDefense(t *testing.T) {
 			PPID:           1,
 			ProcessGroupID: 500,
 			Foreground:     true,
-			StartIdentity:  "boot-1:500:reused-start", // mismatch!
+			StartIdentity:  "boot-1:500:reused-start",
 			Executable:     "/usr/bin/other-app",
 			CWD:            "/tmp/work",
 			TTY:            "/dev/pts/2",
@@ -268,11 +268,10 @@ func TestCurrentTerminalContext(t *testing.T) {
 		Mode:      ModeDurableOnly,
 	})
 
-	// 1. Success matching verified Tmux terminal pane
 	resolved, err := c.currentWithInspectors(t.Context(), currentInspectors{
 		PID: 999, // Unrelated caller PID
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
-			return nil, nil // No ancestor match
+			return nil, nil
 		},
 		ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
 			if pid == 700 || pid == 999 {
@@ -318,7 +317,7 @@ func TestCurrentTerminalContext(t *testing.T) {
 		t.Fatalf("resolved session ID = %q, want %q", resolved.ID, createdSession.ID)
 	}
 
-	// 2. Stale terminal environment: TMUX_PANE points to a pane with no session
+	// Stale terminal environment: TMUX_PANE points to a pane with no session
 	_, err = c.currentWithInspectors(t.Context(), currentInspectors{
 		PID: 999,
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
@@ -334,7 +333,7 @@ func TestCurrentTerminalContext(t *testing.T) {
 				WindowID:        "@1",
 				WindowIndex:     "1",
 				WindowName:      "win",
-				PaneID:          "%999", // non-existent pane
+				PaneID:          "%999",
 				PaneIndex:       "0",
 				PaneCurrentPath: "/tmp/work",
 				PanePID:         0,
@@ -347,14 +346,14 @@ func TestCurrentTerminalContext(t *testing.T) {
 		t.Fatalf("expected ErrNoCurrentSession for stale pane, got: %v", err)
 	}
 
-	// 3. Stale session: process died in pane
+	// Stale session: process died in pane
 	_, err = c.currentWithInspectors(t.Context(), currentInspectors{
 		PID: 999,
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			return nil, nil
 		},
 		ProcessFind: func(_ context.Context, pid int) (processinfo.Process, bool, error) {
-			return processinfo.Process{}, false, nil // process not found (died)
+			return processinfo.Process{}, false, nil
 		},
 		Locations: func(context.Context) []registry.Location {
 			return []registry.Location{{

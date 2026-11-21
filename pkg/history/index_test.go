@@ -1711,8 +1711,6 @@ func TestIndexDeletesVanishedHistoriesForEveryToolMode(t *testing.T) {
 	}
 }
 
-// holdIndexWriteLock takes the index write lock on a separate connection and
-// returns a function that releases it.
 func holdIndexWriteLock(t *testing.T, path string) func() {
 	t.Helper()
 

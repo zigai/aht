@@ -1,3 +1,3 @@
 const fs = require("node:fs");
-// Model a successful disk sync that exceeds the old one-second deadline.
+// A successful report whose disk sync takes longer than one second.
 setTimeout(() => fs.writeFileSync(process.env.AHT_REPORT_COMPLETED, "written"), 1300);

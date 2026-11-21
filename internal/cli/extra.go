@@ -38,7 +38,6 @@ type trackerComponentResult struct {
 	err  error
 }
 
-//exhaustruct:optional
 func (app *application) newTrackerRunCommand() *cobra.Command {
 	o := observeOptions{interval: config.DefaultTrackerInterval}
 	screenInspection := true

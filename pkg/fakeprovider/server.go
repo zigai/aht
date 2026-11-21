@@ -20,7 +20,6 @@ var (
 	errServerClosed  = errors.New("fake provider is closed")
 )
 
-// Options configures a [Server].
 type Options struct {
 	Address     string                    // listen address; default "127.0.0.1:0"
 	Model       string                    // model id served by /models; default "fake"

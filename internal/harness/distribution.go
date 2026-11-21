@@ -15,7 +15,6 @@ const (
 	FamilyPartPlugin    DistributionFamily = "part-plugin"
 )
 
-// DistributionSource names where release versions of a harness are published.
 type DistributionSource string
 
 // DistributionFamily groups harnesses that share integration code, so a change

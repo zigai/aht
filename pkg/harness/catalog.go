@@ -19,7 +19,6 @@ func Parse(value string) (registry.Harness, error) {
 	return harnessID, nil
 }
 
-// Supported returns every harness recognized by this AHT version.
 func Supported() []registry.Harness {
 	adapters := catalog.All()
 
@@ -36,7 +35,6 @@ func FromCommand(command string) (registry.Harness, bool) {
 	return catalog.FromCommand(command)
 }
 
-// ProcessNames returns executable names associated with harnessID.
 func ProcessNames(harnessID registry.Harness) []string {
 	return slices.Clone(catalog.ProcessNames(harnessID))
 }

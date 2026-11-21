@@ -29,13 +29,11 @@ const (
 	StageMidStream   Stage = "mid-stream"
 )
 
-// Protocol names a model API wire format.
 type Protocol string
 
 // Kind separates scripted conversation requests from side requests.
 type Kind string
 
-// Outcome is how a recorded request ended.
 type Outcome string
 
 // Stage is the point at which a held reply waits for release.
@@ -47,7 +45,6 @@ type ToolResult struct {
 	Output string `json:"output"`
 }
 
-// Request is one model request received by the server.
 type Request struct {
 	Index       int            `json:"index"`
 	Kind        Kind           `json:"kind"`
@@ -78,7 +75,6 @@ type ErrorReply struct {
 	Message string `json:"message"`
 }
 
-// Reply is the model output for one conversation request.
 type Reply struct {
 	Text      string      `json:"text"`
 	ToolCalls []ToolCall  `json:"tool_calls"`
@@ -89,15 +85,12 @@ type Reply struct {
 	Disconnect bool `json:"disconnect"`
 }
 
-// Script decides the reply to each conversation request.
 type Script interface {
 	Reply(request Request) (Reply, error)
 }
 
-// ScriptFunc adapts a function to Script.
 type ScriptFunc func(request Request) (Reply, error)
 
-// Reply calls f.
 func (f ScriptFunc) Reply(request Request) (Reply, error) {
 	return f(request)
 }

@@ -30,7 +30,6 @@ type Health struct {
 	Degraded                     bool          `json:"degraded"`
 }
 
-// HealthPath returns the health file path for the registry store at storePath.
 func HealthPath(storePath string) string {
 	return storePath + ".observer-health.json"
 }

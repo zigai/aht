@@ -13,15 +13,12 @@ import (
 const maxSnapshotLines = 100
 
 const (
-	// ReasonManifestRule marks a decision taken by a manifest rule.
-	ReasonManifestRule = "manifest_rule"
-	// ReasonNoRuleMatched marks a decision where no manifest rule matched.
+	ReasonManifestRule  = "manifest_rule"
 	ReasonNoRuleMatched = "no_rule_matched"
 )
 
 const escapeByte = 0x1b
 
-// ErrManifestOptions reports conflicting explicit and ambient manifest sources.
 var ErrManifestOptions = errors.New("manifest path and config directory cannot be used together")
 
 type Snapshot struct {
@@ -75,8 +72,6 @@ type Inspection struct {
 	Screen          string           `json:"screen,omitempty"`
 }
 
-// InspectOptions selects the screen title, rule source, and optional screen output.
-//
 //exhaustruct:optional
 type InspectOptions struct {
 	Title         string

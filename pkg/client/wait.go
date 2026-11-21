@@ -18,39 +18,31 @@ const (
 )
 
 var (
-	// ErrWaitTimeout means the wait operation timed out before the condition was satisfied.
 	ErrWaitTimeout = errors.New("wait condition timed out")
 
-	// ErrSessionDisappeared means the session departed or became gone before the requested condition was met.
 	ErrSessionDisappeared = errors.New("session disappeared before wait condition was met")
 
-	// ErrUnknownState means the session entered an indeterminate or unknown state.
 	ErrUnknownState = errors.New("session state is unknown")
 
 	// ErrConditionRequired means neither activity nor presence condition was specified.
 	ErrConditionRequired = errors.New("wait condition is required: specify activity or presence")
 
-	// ErrContradictoryCondition means contradictory wait conditions were specified.
 	ErrContradictoryCondition = errors.New("contradictory wait conditions specified")
 
 	// ErrInvalidDuration means a duration was negative or stable-for reached timeout.
 	ErrInvalidDuration = errors.New("invalid wait duration")
 
-	// ErrSessionRequired means no session reference was provided.
 	ErrSessionRequired = errors.New("session reference is required")
 )
 
-// WaitOptions configures the session condition, timeout, and stability duration to wait for.
 type WaitOptions struct {
 	// Reference selects the session like [Selector.Reference]: a registry ID,
 	// registry ID prefix, native session ID, or session path. It is resolved
 	// against the first snapshot.
 	Reference string
 
-	// Activity optionally specifies the target activity state.
 	Activity registry.Activity
 
-	// Presence optionally specifies the target presence state.
 	Presence registry.Presence
 
 	// Timeout is the maximum duration to wait for the condition to be satisfied.
@@ -62,9 +54,7 @@ type WaitOptions struct {
 	StableFor time.Duration
 }
 
-// WaitResult describes the session state that satisfied the wait condition.
 type WaitResult struct {
-	// Session is the session that satisfied the wait condition.
 	Session registry.Session `json:"session"`
 
 	// Initial reports whether the condition was already satisfied by the initial snapshot.

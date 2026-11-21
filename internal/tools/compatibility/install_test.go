@@ -207,7 +207,6 @@ func assertPrimeChannelPin(
 func TestNativeReleaseInstallations(t *testing.T) {
 	work, bin := t.TempDir(), t.TempDir()
 
-	// Goose
 	gooseCommands, err := installationCommands(testHarness(t, "goose"), "v1.2.3", work, bin)
 	if err != nil {
 		t.Fatalf("goose commands error: %v", err)
@@ -228,7 +227,6 @@ func TestNativeReleaseInstallations(t *testing.T) {
 		t.Errorf("goose env = %#v, want %#v", gooseRun.Env, wantEnv)
 	}
 
-	// Antigravity (agy)
 	agyCommands, err := installationCommands(testHarness(t, "agy"), "1.2.3", work, bin)
 	if err != nil {
 		t.Fatalf("agy commands error: %v", err)

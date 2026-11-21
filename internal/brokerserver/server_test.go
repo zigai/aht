@@ -520,7 +520,6 @@ func testSecondClientAdmissionPing(t *testing.T, listener *testPipeListener) {
 
 	listener.push(serverPipe)
 
-	// Bound I/O on second client with SetDeadline
 	if err := clientPipe.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("second client set deadline: %v", err)
 	}
@@ -809,7 +808,6 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 		t.Fatalf("default summary len %d != mux summary len %d", len(defaultSum), len(muxSum))
 	}
 
-	// Test invalid group by returns error
 	_, err = client.SummaryWithOptions(
 		ctx,
 		registry.Filter{},

@@ -88,7 +88,6 @@ type searchProgress struct {
 	shown bool
 }
 
-// excerptCell is one displayed rune of an excerpt and whether a match covers it.
 type excerptCell struct {
 	character rune
 	width     int

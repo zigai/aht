@@ -12,17 +12,14 @@ import (
 
 var _ mux.Driver = (*Driver)(nil)
 
-// Driver implements [mux.Driver] for Zellij.
 type Driver struct {
 	ListOptions ListOptions
 }
 
-// NewDriver returns a Zellij driver.
 func NewDriver() Driver {
 	return Driver{}
 }
 
-// Kind returns [registry.MultiplexerZellij].
 func (d Driver) Kind() registry.MultiplexerKind {
 	return registry.MultiplexerZellij
 }

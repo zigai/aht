@@ -40,7 +40,6 @@ type ListOptions struct {
 	Now            func() time.Time
 }
 
-// CaptureOptions configures [CapturePaneWithOptions].
 type CaptureOptions struct {
 	Run            CommandRunner
 	SocketDir      string

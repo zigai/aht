@@ -81,7 +81,6 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 		Mode:      aht.ModeDurableOnly,
 	})
 
-	// Test aht.Resolve
 	resolved, err := aht.Resolve(t.Context(), c, aht.Selector{
 		Reference: "sess-facade-1",
 	})
@@ -93,7 +92,6 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 		t.Fatalf("resolved ID = %q, want %q", resolved.ID, created.ID)
 	}
 
-	// Test aht.Current when no agent is active
 	_, err = aht.Current(t.Context(), c)
 	if !errors.Is(err, aht.ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession, got: %v", err)
@@ -103,7 +101,6 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 func TestAhtFacadeDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	// Capabilities
 	caps, ok := aht.Capabilities(aht.HarnessPi)
 	if !ok || caps.Harness != aht.HarnessPi {
 		t.Fatalf("aht.Capabilities(HarnessPi) = %+v, %v", caps, ok)
@@ -114,13 +111,11 @@ func TestAhtFacadeDiagnostics(t *testing.T) {
 		t.Fatal("aht.AllCapabilities() is empty")
 	}
 
-	// ReadTrackerHealth on nonexistent path returns ErrHealthMissing
 	_, err := aht.ReadTrackerHealth(filepath.Join(t.TempDir(), "nonexistent.json"), time.Time{}, 0)
 	if !errors.Is(err, aht.ErrHealthMissing) {
 		t.Fatalf("ReadTrackerHealth err = %v, want ErrHealthMissing", err)
 	}
 
-	// ExplainSession
 	running := aht.ActivityRunning
 	session := aht.Session{
 		ID:      "s-facade",

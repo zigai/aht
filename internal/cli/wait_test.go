@@ -323,7 +323,7 @@ func TestWaitCLICancellation(t *testing.T) {
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	cancel()
 
 	var stdout, stderr bytes.Buffer
 
@@ -357,7 +357,7 @@ func TestWaitCLIReferenceResolution(t *testing.T) {
 	)
 
 	var stdout, stderr bytes.Buffer
-	// Pass prefix of session ID (e.g. first 6 characters)
+
 	prefix := session.ID[:6]
 
 	code := executeCLI(

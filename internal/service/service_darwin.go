@@ -34,7 +34,6 @@ type darwinBackend struct {
 	domain   string
 }
 
-// RenderLaunchAgent returns the exact managed LaunchAgent plist for options.
 func RenderLaunchAgent(opts Options) (string, error) {
 	normalized, err := normalizeOptions(opts)
 	if err != nil {

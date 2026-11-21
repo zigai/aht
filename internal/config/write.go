@@ -35,7 +35,6 @@ func EditPath(path string) (string, error) {
 	return resolved, nil
 }
 
-// FileExists reports whether a config file exists at path.
 func FileExists(path string) (bool, error) {
 	info, err := os.Stat(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

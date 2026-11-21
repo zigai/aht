@@ -35,7 +35,6 @@ func TestCurrentFailsWhenNoAmbientAgent(t *testing.T) {
 		t.Fatalf("stdout should be empty on error, got: %q", stdout.String())
 	}
 
-	// Also test with --json
 	stdout.Reset()
 	stderr.Reset()
 
@@ -68,7 +67,6 @@ func TestListProjectAndCWDAndLocationFilterFlags(t *testing.T) {
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
 
-	// Session 1: proj1, subdir, tmux /tmp/s1.sock %1
 	s1, err := store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -97,7 +95,6 @@ func TestListProjectAndCWDAndLocationFilterFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session 2: root proj2, working dir proj2, zellij %1
 	s2, err := store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -178,7 +175,6 @@ func TestInfoQualifiedPaneResolution(t *testing.T) {
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
 
-	// Two sessions in pane %0 on two different servers
 	s1, err := store.Observe(
 		context.Background(),
 		registry.Observation{
@@ -221,7 +217,6 @@ func TestInfoQualifiedPaneResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bare info --pane %0 is ambiguous
 	var stdout, stderr bytes.Buffer
 
 	err = runTestCLI(
@@ -234,7 +229,6 @@ func TestInfoQualifiedPaneResolution(t *testing.T) {
 		t.Fatal("expected error for ambiguous bare --pane %0")
 	}
 
-	// Qualified info --pane %0 --server /tmp/server1.sock resolves s1
 	stdout.Reset()
 	stderr.Reset()
 
@@ -302,7 +296,6 @@ func TestCurrentWithVerifiedProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test human-readable output
 	var human, stderr bytes.Buffer
 	if err := runTestCLI(
 		context.Background(),
@@ -317,7 +310,6 @@ func TestCurrentWithVerifiedProcess(t *testing.T) {
 		t.Fatalf("human-readable current output missing session details: %q", human.String())
 	}
 
-	// Test JSON output
 	var machine bytes.Buffer
 	if err := runTestCLI(
 		context.Background(),

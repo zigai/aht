@@ -20,7 +20,6 @@ func All() []mux.Driver {
 	return []mux.Driver{herdr.NewDriver(), zellij.NewDriver(), tmux.NewDriver()}
 }
 
-// Find returns the driver for kind.
 func Find(kind registry.MultiplexerKind) (mux.Driver, bool) {
 	for _, driver := range All() {
 		if driver.Kind() == kind {

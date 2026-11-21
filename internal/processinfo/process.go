@@ -24,13 +24,11 @@ type Process struct {
 	Args []string          `json:"-"`
 }
 
-// PermissionError reports an inability to inspect a process table or entry.
 type PermissionError struct {
 	Path string
 	Err  error
 }
 
-// TableError reports malformed or otherwise unusable process table data.
 type TableError struct {
 	Path string
 	Err  error

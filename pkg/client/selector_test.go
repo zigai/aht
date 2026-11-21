@@ -35,7 +35,6 @@ func TestSelectorExactIDVsPrefixPrecedence(t *testing.T) {
 		t.Fatalf("resolved ID = %q, want claude-1000", resolved.ID)
 	}
 
-	// Ambiguous prefix matching both sessions must return ErrAmbiguousSession
 	_, err = client.ResolveSessions(sessions, client.Selector{
 		Reference: "claude-10",
 	})
@@ -54,7 +53,6 @@ func TestSelectorNativeIDsAndPaths(t *testing.T) {
 		testSessionWithNative("cursor-0002", "cursor", "native-token-456", sessPath),
 	}
 
-	// Match by native session ID
 	resolved, err := client.ResolveSessions(sessions, client.Selector{
 		Reference: "native-token-123",
 	})
@@ -98,7 +96,6 @@ func TestSelectorNoMatchAndAmbiguity(t *testing.T) {
 		testSessionWithID("session-b", "claude", "id-b"),
 	}
 
-	// No match returns ErrSessionNotFound
 	_, err := client.ResolveSessions(sessions, client.Selector{
 		Reference: "nonexistent",
 	})
@@ -106,7 +103,6 @@ func TestSelectorNoMatchAndAmbiguity(t *testing.T) {
 		t.Fatalf("expected ErrSessionNotFound, got: %v", err)
 	}
 
-	// Ambiguity with multiple prefix matches
 	_, err = client.ResolveSessions(sessions, client.Selector{
 		Reference: "session",
 	})
@@ -229,7 +225,6 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 		t.Fatalf("resolved ID = %q, want path-sess", resolved.ID)
 	}
 
-	// Non-matching exact project
 	_, err = client.ResolveSessions(sessions, client.Selector{
 		Filter: registry.Filter{
 			Project: tempDir,
@@ -536,7 +531,6 @@ func TestResolveWithSessionLister(t *testing.T) {
 		t.Fatalf("Resolve ID = %q, want %q", resolved.ID, session.ID)
 	}
 
-	// Test nil lister
 	_, err = client.Resolve(t.Context(), nil, client.Selector{Reference: session.ID})
 	if err == nil {
 		t.Fatal("expected error with nil SessionLister")

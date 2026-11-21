@@ -45,7 +45,6 @@ func (f *fakeIssues) client(t *testing.T) *githubapi.Client {
 	return api
 }
 
-// serve starts the fake and returns its API root.
 func (f *fakeIssues) serve(t *testing.T) string {
 	t.Helper()
 

@@ -54,7 +54,7 @@ compatibility harness:
 artifacts artifact_dir="dist" published_dir="":
     AHT_ARTIFACT_DIR="{{ artifact_dir }}" AHT_PUBLISHED_ARTIFACT_DIR="{{ published_dir }}" go test -count=1 -tags=integration ./test/systemtest -run '^TestReleaseArtifacts$'
 
-# Measure all local test suites and print coverage
+# Measure unit and integration test coverage
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail

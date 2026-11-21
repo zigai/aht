@@ -237,7 +237,6 @@ func TestReadTrackerHealthHealthy(t *testing.T) {
 		)
 	}
 
-	// Test JSON marshaling preserves stable fields
 	marshaled, err := json.Marshal(health)
 	if err != nil {
 		t.Fatal(err)

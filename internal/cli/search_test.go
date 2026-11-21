@@ -283,7 +283,6 @@ func searchCLIFixture(t *testing.T) string {
 	return path
 }
 
-// searchSourceStatus returns the coverage status reported for one source.
 func searchSourceStatus(
 	t *testing.T,
 	result history.Result,

@@ -383,7 +383,6 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatal("expected codex install to report changed")
 	}
 
-	// Verify symlink was preserved
 	fi, err := os.Lstat(symlinkPath)
 	if err != nil {
 		t.Fatalf("lstat symlink: %v", err)
@@ -393,7 +392,6 @@ func TestInstallCodexReplacesStaleHooksAndPreservesSymlinks(t *testing.T) {
 		t.Fatal("expected hooks.json to remain a symlink")
 	}
 
-	// Verify content in target file
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
 		t.Fatalf("reading target file: %v", err)
@@ -1159,7 +1157,6 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Install Droid hooks
 	result, err := Run(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
@@ -1172,7 +1169,6 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 		t.Fatal("expected install to report changed")
 	}
 
-	// Verify large numbers are preserved verbatim
 	data := readTestFile(t, hooksPath, "reading installed hooks")
 	assertLargeNumbersPreserved(t, data, "during install")
 
@@ -1197,7 +1193,6 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 		t.Fatal("expected second install to be idempotent with 5.0 timeout spelling")
 	}
 
-	// Remove hooks
 	removeResult, err := Remove(t.Context(), Options{
 		Harness: registry.Harness("droid"),
 		Binary:  testInstallBinary,
@@ -1210,7 +1205,6 @@ func TestJSONHooksPreserveLargeNumbersAndTimeoutSpellings(t *testing.T) {
 		t.Fatal("expected remove to report changed")
 	}
 
-	// Verify foreign large numbers are still preserved after removal
 	cleanedData := readTestFile(t, hooksPath, "reading cleaned hooks")
 	assertLargeNumbersPreserved(t, cleanedData, "during removal")
 }

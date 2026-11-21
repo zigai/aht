@@ -20,8 +20,6 @@ const (
 	ArtifactForeign  ArtifactStatus = "foreign"
 )
 
-// ArtifactStatus describes whether a managed integration artifact is absent,
-// incomplete, disabled, up to date, stale, or owned by somebody else.
 type ArtifactStatus string
 
 // classifyArtifact inspects an artifact generated for harnessID without

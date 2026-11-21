@@ -26,7 +26,6 @@ func Match(path string, pattern string) bool {
 	return matchPrefixOrWildcard(cleanPath, pattern)
 }
 
-// MatchAny reports whether any of paths matches any of patterns.
 func MatchAny(patterns []string, paths ...string) bool {
 	for _, pattern := range patterns {
 		for _, path := range paths {

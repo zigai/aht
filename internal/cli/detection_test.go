@@ -56,7 +56,7 @@ func TestManageDetectionTestHumanOutput(t *testing.T) {
 				t.Fatalf("stdout missing %q:\n%s", required, out)
 			}
 		}
-		// Confirm raw screen is not echoed by default
+
 		if strings.Contains(out, "Screen:") || strings.Contains(out, "[y/N]") {
 			t.Fatalf("screen text unexpectedly leaked in default output:\n%s", out)
 		}
@@ -151,7 +151,6 @@ func TestManageDetectionTestJSONOutput(t *testing.T) {
 			t.Fatalf("screen unexpectedly populated without --show-screen: %q", inspection.Screen)
 		}
 
-		// Ensure matchers are populated
 		foundWinner := false
 
 		for _, c := range inspection.Candidates {

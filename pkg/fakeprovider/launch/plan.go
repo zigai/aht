@@ -35,8 +35,7 @@ type Service struct {
 
 // Tool is the native shell tool a scripted model can call.
 type Tool struct {
-	Name string
-	// Arguments builds the native tool input that runs command.
+	Name      string
 	Arguments func(command string) map[string]any
 }
 

@@ -201,7 +201,7 @@ func TestExplainExpiredAndFutureEvidence(t *testing.T) {
 					Event:      "agent_start",
 					Activity:   &running,
 					Process:    process,
-					ObservedAt: now.Add(10 * time.Second), // In future!
+					ObservedAt: now.Add(10 * time.Second),
 					Reporter:   registry.Reporter{Integration: "pi-extension"},
 				},
 			},
@@ -498,7 +498,6 @@ func TestExplainDefensiveCopies(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Mutate original pointers
 	process.PID = 9999
 	running = registry.ActivityIdle
 	decision.Reason = "mutated"
@@ -586,14 +585,12 @@ func TestExplainReadOnlyDoesNotSpawnScreenCapture(t *testing.T) {
 			registry.PresenceLive,
 			registry.ActivityValue(&idle),
 			nil,
-			time.Time{
-
-				// LiveScreen: false (the default) must succeed without attempting tmux pane capture!
-			},
+			time.Time{},
 			"",
 		),
 	}
 
+	// LiveScreen is false, so ExplainSession must succeed without capturing the pane.
 	exp, err := manage.ExplainSession(
 		context.Background(),
 		session,

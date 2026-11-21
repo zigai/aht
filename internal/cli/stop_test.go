@@ -196,7 +196,6 @@ func TestStopMultipleSessions(t *testing.T) {
 func TestStopAllConfirmationHandling(t *testing.T) {
 	path, _ := createSkippedStopSession(t)
 
-	// Refused / non-interactive confirmation without --yes fails with error
 	var stdout, stderr bytes.Buffer
 
 	err := runTestCLI(
@@ -209,7 +208,6 @@ func TestStopAllConfirmationHandling(t *testing.T) {
 		t.Fatalf("expected unconfirmed stop error in non-TTY")
 	}
 
-	// Accepted via -y flag
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -221,7 +219,6 @@ func TestStopAllConfirmationHandling(t *testing.T) {
 		t.Fatalf("expected successful stop with -y, got %v", err)
 	}
 
-	// Accepted via --yes flag
 	stdout.Reset()
 
 	if err := runTestCLI(

@@ -85,7 +85,6 @@ type ScreenSnapshot struct {
 	Title string
 }
 
-// ScreenCapture is one pane's result from a [BatchCapturer].
 type ScreenCapture struct {
 	Snapshot ScreenSnapshot
 	Err      error

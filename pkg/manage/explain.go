@@ -42,7 +42,6 @@ type (
 		RegistryDecision  *registry.ActivityDecision `json:"registry_decision,omitempty"`
 	}
 
-	// HookExplanation describes the evaluation of native integration hook evidence for a session.
 	HookExplanation struct {
 		Event           string    `json:"event,omitempty"`
 		Integration     string    `json:"integration,omitempty"`
@@ -54,7 +53,6 @@ type (
 		Active          bool      `json:"active"`
 	}
 
-	// ScreenExplanation describes the evaluation of screen detection heuristics for a session.
 	ScreenExplanation struct {
 		Evaluated         bool           `json:"evaluated"`
 		UnavailableReason string         `json:"unavailable_reason,omitempty"`
@@ -62,7 +60,6 @@ type (
 		Error             string         `json:"error,omitempty"`
 	}
 
-	// ScreenDecision represents the outcome of evaluating a screen state detection rule.
 	ScreenDecision struct {
 		Activity        registry.Activity       `json:"activity"`
 		Detail          registry.ActivityDetail `json:"detail,omitempty"`
@@ -74,14 +71,11 @@ type (
 		Evidence        []RuleEvidence          `json:"evidence,omitempty"`
 	}
 
-	// RuleEvidence records whether an individual detection rule matched during screen evaluation.
 	RuleEvidence struct {
 		RuleID  string `json:"rule_id"`
 		Matched bool   `json:"matched"`
 	}
 
-	// ExplainOptions controls how session explanation is evaluated.
-	//
 	//exhaustruct:optional
 	ExplainOptions struct {
 		// Now is the reference time used for freshness and lease calculations.
@@ -100,10 +94,10 @@ type (
 )
 
 // ExplainSession returns an Explanation for the given session.
-// When options.LiveScreen is false, ExplainSession is strictly read-only: it inspects
+// When opts.LiveScreen is false, ExplainSession is strictly read-only: it inspects
 // the persisted session state, evidence, and stored decision provenance without
 // capturing screens or modifying registry state.
-// When options.LiveScreen is true and authority is "screen", it additionally performs
+// When opts.LiveScreen is true and authority is "screen", it additionally performs
 // live terminal multiplexer screen capture and manifest re-evaluation.
 func ExplainSession(
 	ctx context.Context,
@@ -165,7 +159,6 @@ func ExplainSession(
 	return result, nil
 }
 
-// Explain returns an Explanation for the session identified by sessionID.
 func (m *Manager) Explain(
 	ctx context.Context,
 	sessionID string,
@@ -425,6 +418,7 @@ func evaluateLiveScreen(
 		Title:       "",
 		Activity:    nil,
 		StateReason: "",
+		Program:     nil,
 	}
 
 	snapshot, err := driver.CapturePane(ctx, pane)

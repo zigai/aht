@@ -26,7 +26,6 @@ type linuxBackend struct {
 	rendered string
 }
 
-// RenderSystemdUnit returns the exact managed user unit for options.
 func RenderSystemdUnit(opts Options) (string, error) {
 	normalized, err := normalizeOptions(opts)
 	if err != nil {

@@ -194,7 +194,6 @@ func TestTOMLQuoteStringRoundTrip(t *testing.T) {
 		`simple`,
 		`with "quotes" and 'single quotes'`,
 		`with \backslashes\ and /slashes/`,
-		// test fixture validates UTF-8 multi-byte rune handling in TOML strings
 		"with unicode: 🚀 and 世界 and ñ",
 		"with bell: \a",
 		"with vertical tab: \v",

@@ -35,7 +35,6 @@ type Location struct {
 	Path  string
 }
 
-// LocationBuilder collects the locations an adapter reports.
 type LocationBuilder struct {
 	projectDir string
 	locations  []Location

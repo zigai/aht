@@ -1238,10 +1238,8 @@ func generatedObservation(
 		Executable:     "/bin/agent",
 	}
 
-	// Semantic variation across observation sources and evidence types
 	switch generator.IntN(6) {
 	case 0:
-		// Process presence evidence
 		present := generator.IntN(2) == 0
 
 		return Observation{
@@ -1251,7 +1249,6 @@ func generatedObservation(
 			Evidence: &Sighting{Process: *process, Present: present},
 		}
 	case 1:
-		// Screen state evidence
 		return Observation{
 			Harness: harness,
 			At:      observedAt,
@@ -1265,17 +1262,14 @@ func generatedObservation(
 			}),
 		}
 	default:
-		// Native evidence with varied sequence and lifecycle
 		var seq *uint64
 
 		switch generator.IntN(4) {
 		case 0:
-			// Replay current sequence
 			if s, ok := sequences[sessionID]; ok && s > 0 {
 				seq = &s
 			}
 		case 1:
-			// Stale sequence
 			if s, ok := sequences[sessionID]; ok && s > 1 {
 				stale := s - 1
 				seq = &stale

@@ -28,7 +28,6 @@ var (
 	_             registry.Store = (*Client)(nil)
 )
 
-// Client sends registry operations to one local broker.
 type Client struct {
 	socketPath  string
 	dialTimeout time.Duration
@@ -44,28 +43,23 @@ type Subscription struct {
 	done      <-chan struct{}
 }
 
-// RemoteError is an operation error returned by the broker.
 type RemoteError struct {
 	Code    string
 	Message string
 }
 
-// NewClient returns a client for the broker listening on socketPath.
 func NewClient(socketPath string) *Client {
 	return &Client{socketPath: socketPath, dialTimeout: defaultDialTimeout}
 }
 
-// SocketPath returns the exact endpoint used by the client.
 func (c *Client) SocketPath() string { return c.socketPath }
 
-// Ping verifies that the broker is accepting requests.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.roundTrip(ctx, newRequest(MethodPing))
 
 	return err
 }
 
-// Observe records one observation in the broker.
 func (c *Client) Observe(
 	ctx context.Context,
 	observation registry.Observation,
@@ -105,7 +99,6 @@ func (c *Client) ObserveBatch(
 	return response.Sessions, nil
 }
 
-// List returns the broker's current filtered sessions.
 func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.Session, error) {
 	request := newRequest(MethodList)
 	request.Filter = filter.NormalizePaths()
@@ -122,7 +115,6 @@ func (c *Client) List(ctx context.Context, filter registry.Filter) ([]registry.S
 	return response.Sessions, nil
 }
 
-// Get returns one broker-owned session.
 func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	request := newRequest(MethodGet)
 	request.SessionID = id
@@ -139,7 +131,6 @@ func (c *Client) Get(ctx context.Context, id string) (registry.Session, error) {
 	return *response.Session, nil
 }
 
-// SummaryWithOptions returns filtered summaries with options.
 func (c *Client) SummaryWithOptions(
 	ctx context.Context,
 	filter registry.Filter,
@@ -301,12 +292,10 @@ func (c *Client) Subscribe(ctx context.Context, filter registry.Filter) (*Subscr
 	}, nil
 }
 
-// IsUnavailable reports whether err means no broker accepted the connection.
 func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrUnavailable)
 }
 
-// StreamClosed reports whether an established subscription lost its transport.
 func StreamClosed(err error) bool {
 	return errors.Is(err, ErrStreamClosed)
 }

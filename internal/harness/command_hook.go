@@ -24,8 +24,6 @@ type CommandHookPayload struct {
 	HookEventName  string  `json:"hook_event_name" validate:"required,notblank"`
 }
 
-// CommandHookSpecs renders a hook table into install specs that report for
-// the harness the definition describes.
 func CommandHookSpecs(
 	binary string,
 	definition Definition,

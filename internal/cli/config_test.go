@@ -27,12 +27,10 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	store := registry.NewJournal(storePath, catalog.Rules{})
 	ctx := context.Background()
 
-	// Seed 3 sessions with different harnesses, presence, and created timestamps
 	now := time.Now().UTC()
 	presentTrue := true
 	presentFalse := false
 
-	// Session 1: created earlier, live, claude
 	_, err := store.Observe(
 		ctx,
 		registry.Observation{
@@ -49,7 +47,6 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session 2: created later, live, codex
 	_, err = store.Observe(
 		ctx,
 		registry.Observation{
@@ -66,7 +63,6 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session 3: gone, pi
 	_, err = store.Observe(
 		ctx,
 		registry.Observation{
@@ -83,7 +79,6 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Config: UI default presence = live, sort = created, sort_desc = true
 	cfgContent := `
 [ui]
 default_presence = "live"
@@ -94,7 +89,6 @@ sort_desc = true
 		t.Fatal(err)
 	}
 
-	// 1. Run aht list without presence/sort flags -> should show only live, sorted by created desc (s2 then s1)
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -128,7 +122,6 @@ sort_desc = true
 		}
 	}
 
-	// 2. Explicit flags override config defaults: --presence all --sort created --desc=false
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -181,7 +174,6 @@ func TestCLIConfigFiltering(t *testing.T) {
 	ctx := context.Background()
 	presentTrue := true
 
-	// Session 1: copilot harness (to be ignored)
 	_, err := store.Observe(
 		ctx,
 		registry.Observation{
@@ -202,7 +194,6 @@ func TestCLIConfigFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session 2: ignored path (/tmp/scratch)
 	_, err = store.Observe(
 		ctx,
 		registry.Observation{
@@ -223,7 +214,6 @@ func TestCLIConfigFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session 3: normal session
 	_, err = store.Observe(
 		ctx,
 		registry.Observation{
@@ -244,7 +234,6 @@ func TestCLIConfigFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Config: ignore copilot and /tmp/scratch
 	cfgContent := `
 [filter]
 ignore_harnesses = ["copilot"]
@@ -254,7 +243,6 @@ ignore_paths = ["/tmp/scratch"]
 		t.Fatal(err)
 	}
 
-	// 1. Without --agent: copilot is filtered out; /tmp/scratch is filtered out. Only claude remains.
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -274,7 +262,6 @@ ignore_paths = ["/tmp/scratch"]
 		t.Fatalf("expected only claude-proj, got %+v", sessions)
 	}
 
-	// 2. With explicit --agent copilot: copilot is unhidden despite config ignore
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -315,7 +302,7 @@ func TestCLIStateCleanDefaultsToConfiguredTombstoneTTL(t *testing.T) {
 	presentGone := false
 
 	now := time.Now().UTC()
-	// Record 1: Gone 48h ago
+
 	_, err := store.Observe(
 		ctx,
 		registry.Observation{
@@ -332,7 +319,6 @@ func TestCLIStateCleanDefaultsToConfiguredTombstoneTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Record 2: Gone 2h ago
 	_, err = store.Observe(
 		ctx,
 		registry.Observation{
@@ -349,7 +335,6 @@ func TestCLIStateCleanDefaultsToConfiguredTombstoneTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Configure a 24-hour tombstone retention period.
 	cfgContent := `
 [retention]
 tombstone_ttl = "24h"
@@ -358,7 +343,6 @@ tombstone_ttl = "24h"
 		t.Fatal(err)
 	}
 
-	// Run clean without --all or --older-than -> should use 24h from config
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -416,7 +400,6 @@ interval = "5s"
 
 	ctx := context.Background()
 
-	// 1. aht manage config path
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -431,7 +414,6 @@ interval = "5s"
 		t.Fatalf("config path = %q, want %q", strings.TrimSpace(stdout.String()), configPath)
 	}
 
-	// 2. aht manage config path --json
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -452,7 +434,6 @@ interval = "5s"
 		t.Fatalf("config path JSON = %v, want %q", pathMap, configPath)
 	}
 
-	// 3. aht manage config show --json
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -474,7 +455,6 @@ interval = "5s"
 		t.Fatalf("loaded config mismatch: %+v", loadedCfg)
 	}
 
-	// 4. aht manage config show (TOML)
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -491,7 +471,6 @@ interval = "5s"
 		t.Fatalf("expected toml output to contain sort = created: %q", stdout.String())
 	}
 
-	// 5. aht doctor with valid config
 	stdout.Reset()
 	_ = runTestCLI(
 		ctx,
@@ -590,7 +569,6 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	brokenConfigPath := filepath.Join(tempDir, "broken-config.toml")
 
-	// Create intentionally malformed TOML
 	if err := os.WriteFile(
 		brokenConfigPath,
 		[]byte("invalid [[ toml syntax @@"),
@@ -599,12 +577,10 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set AHT_CONFIG environment variable pointing to broken config
 	t.Setenv(config.ConfigEnv, brokenConfigPath)
 
 	ctx := context.Background()
 
-	// 1. Verify that 'aht report' executes successfully and records the observation
 	var stderr bytes.Buffer
 	if err := runTestCLI(ctx, []string{
 		"--store", storePath,
@@ -616,7 +592,6 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 		t.Fatalf("aht report failed with broken config: %v; stderr=%s", err, stderr.String())
 	}
 
-	// Verify the session was written to store
 	store := registry.NewJournal(storePath, catalog.Rules{})
 
 	sessions, err := store.List(ctx, registry.Filter{})
@@ -637,7 +612,6 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 		t.Fatal("session reported by isolated command was not found in store")
 	}
 
-	// 2. Verify that 'aht hook codex' succeeds even with broken config
 	var hookStdout bytes.Buffer
 
 	err = runTestCLI(ctx, []string{
@@ -693,7 +667,6 @@ func TestCLIExplicitConfigNonCreation(t *testing.T) {
 		t.Fatalf("expected 'config file not found' error, got: %v", err)
 	}
 
-	// Verify the file was NOT created
 	if _, err := os.Stat(nonExistentPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected explicit missing config to NOT be created, but stat returned: %v", err)
 	}
@@ -704,7 +677,6 @@ func TestCLIManageConfigInit(t *testing.T) {
 	targetPath := filepath.Join(tempDir, "init_test", "config.toml")
 	ctx := context.Background()
 
-	// 1. aht manage config init --json in clean directory
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -733,7 +705,6 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatal("created config content does not match template")
 	}
 
-	// 2. Run again without --force (human mode): should inform user on stderr that file exists
 	var stderr bytes.Buffer
 
 	stdout.Reset()
@@ -755,7 +726,6 @@ func TestCLIManageConfigInit(t *testing.T) {
 		)
 	}
 
-	// 3. Run again without --force (--json mode)
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -776,7 +746,6 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatalf("expected created=false for existing file, got %+v", initRes)
 	}
 
-	// 4. Overwrite file with custom content, then run with --force
 	if err := os.WriteFile(targetPath, []byte("# custom"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -828,7 +797,7 @@ func TestCLIManageConfigSet(t *testing.T) {
 	targetPath := filepath.Join(tempDir, "config.toml")
 	ctx := context.Background()
 
-	// 1. Set key in new config file -> creates template, sets key in-place, preserves comments
+	// Set key in new config file -> creates template, sets key in-place, preserves comments
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -848,7 +817,6 @@ func TestCLIManageConfigSet(t *testing.T) {
 		t.Fatal("manage config set dropped template comments")
 	}
 
-	// 2. Verify setting was applied
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -869,7 +837,6 @@ func TestCLIManageConfigSet(t *testing.T) {
 		t.Fatalf("expected ui.sort=created, got %q", loaded.UI.Sort)
 	}
 
-	// 3. Set another key via --json
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -899,7 +866,6 @@ func TestCLIManageConfigSet(t *testing.T) {
 		t.Fatalf("unexpected set result: %+v", res)
 	}
 
-	// 4. Setting invalid value fails validation and leaves file uncorrupted
 	if err := runTestCLI(
 		ctx,
 		[]string{"--config", targetPath, "manage", "config", "set", "ui.sort", "invalid_sort_key"},
@@ -908,7 +874,7 @@ func TestCLIManageConfigSet(t *testing.T) {
 	); err == nil {
 		t.Fatal("expected invalid sort key to fail, got nil")
 	}
-	// File should still have ui.sort = "created"
+
 	reRead, err := os.ReadFile(targetPath)
 	if err != nil {
 		t.Fatal(err)
@@ -918,7 +884,6 @@ func TestCLIManageConfigSet(t *testing.T) {
 		t.Fatal("file was corrupted by invalid setting")
 	}
 
-	// 5. --no-config disallows set
 	if err := runTestCLI(
 		ctx,
 		[]string{"--no-config", "manage", "config", "set", "ui.sort", "created"},
@@ -1004,7 +969,6 @@ func TestCLIManageConfigShowProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Text mode with --provenance
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -1021,7 +985,6 @@ func TestCLIManageConfigShowProvenance(t *testing.T) {
 		t.Fatalf("expected provenance output to mention active files and ui.sort, got:\n%s", outStr)
 	}
 
-	// 2. JSON mode with --provenance
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -1056,7 +1019,6 @@ func TestCLIManageConfigGet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Plain text get
 	var stdout bytes.Buffer
 	if err := runTestCLI(
 		ctx,
@@ -1071,7 +1033,6 @@ func TestCLIManageConfigGet(t *testing.T) {
 		t.Fatalf("expected 'created', got %q", stdout.String())
 	}
 
-	// 2. Get with --provenance
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -1088,7 +1049,6 @@ func TestCLIManageConfigGet(t *testing.T) {
 		t.Fatalf("expected value and config path in provenance get, got: %q", stdout.String())
 	}
 
-	// 3. Get with --json
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -1109,7 +1069,6 @@ func TestCLIManageConfigGet(t *testing.T) {
 		t.Fatalf("unexpected json get result: %+v", res)
 	}
 
-	// 4. Get with --json and --provenance
 	stdout.Reset()
 
 	if err := runTestCLI(
@@ -1139,7 +1098,6 @@ func TestCLIManageConfigGet(t *testing.T) {
 		t.Fatalf("expected origin in result: %+v", res)
 	}
 
-	// 5. Unknown key fails
 	if err := runTestCLI(
 		ctx,
 		[]string{"--config", configPath, "manage", "config", "get", "nonexistent.key"},

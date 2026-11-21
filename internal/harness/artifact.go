@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// ArtifactMarkerFile is the file that marks a managed plugin directory.
 const ArtifactMarkerFile = ".aht-managed"
 
 const artifactCaptureGroups = 2
@@ -34,7 +33,6 @@ type ArtifactIdentity struct {
 	Source  string
 }
 
-// Identity is the identity of artifacts generated for this definition.
 func (definition Definition) Identity() ArtifactIdentity {
 	return ArtifactIdentity{
 		ID:      string(definition.ID),

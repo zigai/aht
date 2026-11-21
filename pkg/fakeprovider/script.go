@@ -24,7 +24,6 @@ type ToolRoundTrip struct {
 	FinalText string   // default "done"
 }
 
-// Reply implements [Script].
 func (r ToolRoundTrip) Reply(request Request) (Reply, error) {
 	callID := r.callID(request.Protocol)
 	switch request.Index {

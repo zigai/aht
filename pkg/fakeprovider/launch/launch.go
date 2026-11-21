@@ -27,7 +27,6 @@ const (
 	logTailBytes     = 4 << 10
 )
 
-// ErrUnsupported reports a harness that cannot be launched as requested.
 var ErrUnsupported = errors.New("harness does not support fake provider launches")
 
 var (
@@ -44,9 +43,7 @@ var (
 
 var rootDirectories = []string{"home", "work", "tmp", "config", "data", "state", "cache", "logs"}
 
-// Options configures a Harness.
 type Options struct {
-	// Harness selects the launch plan.
 	Harness registry.Harness
 	// Root must be absolute and missing or empty.
 	Root string
@@ -57,8 +54,7 @@ type Options struct {
 	// APIKey is the provider credential given to the harness. Empty means "fake".
 	APIKey string
 	// AHT is the aht executable; empty skips the integration and tracker.
-	AHT string
-	// Executable overrides the plan's executable.
+	AHT        string
 	Executable string
 	// Env holds extra KEY=VALUE entries applied last.
 	Env []string
@@ -210,7 +206,6 @@ func (h *Harness) AHTCommand(ctx context.Context, args ...string) *exec.Cmd {
 	)
 }
 
-// HeadlessArgs returns the non-interactive launch arguments for prompt.
 func (h *Harness) HeadlessArgs(prompt string) ([]string, error) {
 	if h.plan.Headless == nil {
 		return nil, fmt.Errorf("%w: %q has no headless launch", ErrUnsupported, h.ID)
@@ -224,7 +219,6 @@ func (h *Harness) HeadlessArgs(prompt string) ([]string, error) {
 	return args, nil
 }
 
-// InteractiveArgs returns the terminal UI arguments for prompt.
 func (h *Harness) InteractiveArgs(prompt string) ([]string, error) {
 	if h.plan.Interactive == nil {
 		return nil, fmt.Errorf("%w: %q has no interactive launch", ErrUnsupported, h.ID)

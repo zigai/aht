@@ -20,7 +20,6 @@ var (
 	errInvalidBody      = errors.New("invalid request body")
 )
 
-// ServeHTTP serves the fake model API.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.enter() {
 		http.Error(w, errServerClosed.Error(), http.StatusServiceUnavailable)

@@ -22,7 +22,6 @@ func Summaries(sessions []Session) []Summary {
 	return SummariesWithOptions(sessions, SummaryOptions{GroupBy: SummaryGroupByMultiplexerSession})
 }
 
-// SummariesWithOptions aggregates sessions into summaries according to opts.
 func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 	groupBy := opts.GroupBy
 	if groupBy == "" {

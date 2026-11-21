@@ -45,15 +45,12 @@ const (
 )
 
 var (
-	// ErrInvalidQuery indicates invalid search options.
 	ErrInvalidQuery = errors.New("invalid history query")
 	// ErrIncomplete means some history could not be searched. The result still
 	// contains matches and structured diagnostics; callers must inspect both.
-	ErrIncomplete = errors.New("history search incomplete")
-	// ErrUnsupportedHarness indicates there is no verified local history reader.
+	ErrIncomplete         = errors.New("history search incomplete")
 	ErrUnsupportedHarness = errors.New("local history reader unavailable for this harness")
-	// ErrInvalidSource indicates an empty source location.
-	ErrInvalidSource = errors.New("history source path must not be empty")
+	ErrInvalidSource      = errors.New("history source path must not be empty")
 	// ErrIndexUnavailable reports that the disposable index could not be used.
 	// Search, List, and Stream fall back to scanning native history; Refresh fails.
 	ErrIndexUnavailable = errors.New("history index unavailable")
@@ -1402,7 +1399,7 @@ func (s *search) reportIndexError(source Source, path string, err error) {
 	s.fileIssue(source, path, err)
 }
 
-// Validate checks the public query contract without reading any history.
+// validate checks the public query contract without reading any history.
 func (q Query) validate() error {
 	q = q.combined()
 	if err := q.Filter.Validate(); err != nil {

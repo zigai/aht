@@ -61,7 +61,6 @@ type CatalogEntry struct {
 }
 type CatalogLister func(context.Context) ([]CatalogEntry, error)
 
-// Store is the observation and inventory capability required by an Observer.
 type Store interface {
 	Observe(ctx context.Context, observation registry.Observation) (registry.Session, error)
 	ObserveBatch(

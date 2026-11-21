@@ -27,10 +27,8 @@ const (
 )
 
 type (
-	// LocationKind says what a [Location] holds.
 	LocationKind string
 
-	// LocationScope says whom a [Location] applies to.
 	LocationScope string
 
 	// Location is a path where a harness documents reading user-facing

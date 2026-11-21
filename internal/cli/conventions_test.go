@@ -117,7 +117,6 @@ func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Without --yes in non-TTY environment (e.g. piped or automated test): should fail and preserve records
 	var stdout, stderr bytes.Buffer
 
 	err := runTestCLI(
@@ -140,7 +139,6 @@ func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 		)
 	}
 
-	// 2. With --all --yes: should succeed and remove records
 	stdout.Reset()
 	stderr.Reset()
 

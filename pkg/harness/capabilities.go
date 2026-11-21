@@ -6,7 +6,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// Capabilities describes the static capabilities and supported features of an agent harness.
 type Capabilities struct {
 	Details            registry.DetailCapabilities `json:"details"`
 	Harness            registry.Harness            `json:"harness"`

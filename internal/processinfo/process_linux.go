@@ -133,7 +133,6 @@ func StartIdentity(ctx context.Context, pid int) string {
 	return process.StartIdentity
 }
 
-// CommandName returns the executable command name for pid on Linux.
 func CommandName(ctx context.Context, pid int) (string, error) {
 	if pid <= 0 {
 		return "", nil

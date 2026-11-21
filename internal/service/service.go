@@ -32,7 +32,6 @@ var (
 	defaultService       = New(nil)
 )
 
-// Options controls the managed observer service.
 type Options struct {
 	Binary      string
 	StorePath   string
@@ -41,7 +40,6 @@ type Options struct {
 	DryRun      bool
 }
 
-// Result describes the service state after an operation.
 type Result struct {
 	Platform       string `json:"platform"`
 	Manager        string `json:"manager"`
@@ -59,7 +57,6 @@ type CommandExecutor interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// Service manages the platform-native observer service.
 type Service struct {
 	executor CommandExecutor
 }
@@ -82,7 +79,6 @@ func (osCommandExecutor) Run(ctx context.Context, name string, args ...string) (
 	return output, nil
 }
 
-// New constructs a service using an injected command executor.
 func New(executor CommandExecutor) *Service {
 	if executor == nil {
 		return &Service{executor: osCommandExecutor{}}

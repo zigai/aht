@@ -34,8 +34,7 @@ const (
 	DoctorActionRemoveHealth       DoctorAction = "remove_health"
 	DoctorActionReplaceIntegration DoctorAction = "replace_integration"
 	DoctorActionUpgrade            DoctorAction = "upgrade"
-	// DoctorStatusOK means the check passed.
-	DoctorStatusOK DoctorStatus = "ok"
+	DoctorStatusOK                 DoctorStatus = "ok"
 
 	// DoctorStatusInfo reports a neutral fact, such as an optional component that is absent.
 	DoctorStatusInfo DoctorStatus = "info"
@@ -68,12 +67,10 @@ const (
 	issuesURL            = "https://github.com/zigai/aht/issues"
 )
 
-// ErrNoRepair means a doctor check has no automatic repair.
 var ErrNoRepair = errors.New("doctor check has no automatic repair")
 
 type (
 	DoctorAction string
-	// DoctorStatus is the outcome of one doctor check.
 	DoctorStatus string
 
 	// DoctorCheck is one diagnostic row. ID is "<group>.<name>" with the group
@@ -102,7 +99,6 @@ type (
 		Automatic bool `json:"automatic"`
 	}
 
-	// DoctorSummary counts checks by status.
 	DoctorSummary struct {
 		OK   int `json:"ok"`
 		Info int `json:"info"`
@@ -119,7 +115,6 @@ type (
 		ConfigError error         `json:"-"`
 	}
 
-	// DoctorOptions controls what Doctor evaluates.
 	DoctorOptions struct {
 		// IncludeAll also reports harnesses whose integration is not installed
 		// or needs no setup.
@@ -172,7 +167,6 @@ func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	}
 }
 
-// Failed reports whether any check failed.
 func (r DoctorResult) Failed() bool {
 	return r.Summary.Fail > 0
 }
@@ -605,7 +599,6 @@ func describeConfigError(check *DoctorCheck, explicit string, resolved string, e
 }
 
 func configErrors(err error) []*strata.ConfigError {
-	// Walks the tree itself so joined errors yield every problem.
 	if problem, ok := err.(*strata.ConfigError); ok { //nolint:errorlint // Matches only this tree node.
 		return []*strata.ConfigError{problem}
 	}

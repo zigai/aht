@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// Store is the interface shared by public store implementations.
 type Store interface {
 	Observe(ctx context.Context, observation Observation) (Session, error)
 	ObserveBatch(ctx context.Context, observations []Observation) ([]Session, error)
@@ -14,7 +13,6 @@ type Store interface {
 	GC(ctx context.Context, deleteAfter time.Duration) (GCResult, error)
 }
 
-// GroupedSummarizer extends a Store with configurable grouping options.
 type GroupedSummarizer interface {
 	SummaryWithOptions(ctx context.Context, filter Filter, opts SummaryOptions) ([]Summary, error)
 }

@@ -73,7 +73,6 @@ func newServer(t *testing.T, name string, opts gotmux.NewSessionOptions) *Server
 	executable := Executable(t)
 	// Unix socket paths must stay short. Cleanup owns this directory so a
 	// failed server shutdown retains its socket for inspection and recovery.
-	// reason: Unix domain socket paths in /tmp must stay short to prevent sockaddr_un overflow
 	directory, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
 		"/tmp",
 		"aht-test-tmux-",

@@ -162,14 +162,14 @@ func sessionStateViolations(session Session) []error {
 			fmt.Errorf("%w: session %q has invalid liveness", ErrLiveness, id),
 		)
 	}
-	// Gone.Activity() is nil, and the session codec rejects a gone activity value.
+	// Session.Activity returns nil for gone liveness, and the session codec rejects a gone activity value.
 	if session.Presence == "gone" && session.Activity != "" {
 		violations = append(
 			violations,
 			fmt.Errorf("%w: session %q has activity %s", errGoneActivity, id, session.Activity),
 		)
 	}
-	// lifecycleMachine.end clears activity and retains a gone tombstone.
+	// A native end leaves the session as a gone tombstone with no activity.
 	if session.NativeEnded && (session.Presence != "gone" || session.Activity != "") {
 		violations = append(
 			violations,

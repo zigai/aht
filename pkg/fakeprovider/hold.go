@@ -23,12 +23,10 @@ func newHold(request Request, stage Stage) *Hold {
 	}
 }
 
-// Release lets the paused reply continue.
 func (h *Hold) Release() {
 	h.finish()
 }
 
-// Done is closed when the hold ends.
 func (h *Hold) Done() <-chan struct{} {
 	return h.done
 }

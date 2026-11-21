@@ -14,7 +14,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// IntegrationStatus describes the managed artifacts for one harness integration.
 type IntegrationStatus struct {
 	Harness  registry.Harness `json:"harness"`
 	Status   ArtifactStatus   `json:"status"`

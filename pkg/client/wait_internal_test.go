@@ -277,7 +277,6 @@ func TestWaitEventualTransition(t *testing.T) {
 		// Allow initial snapshot to be processed
 		synctest.Wait()
 
-		// Send transition to idle
 		idle := makeTestSession("sess-trans", registry.PresenceLive, registry.ActivityIdle)
 		tw.SendSessions(idle)
 
@@ -329,7 +328,6 @@ func TestWaitRapidFlickerAndStableForReset(t *testing.T) {
 
 		synctest.Wait()
 
-		// Transition to idle
 		tw.SendSessions(idle)
 		synctest.Wait()
 

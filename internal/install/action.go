@@ -7,8 +7,6 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-// actionHandler implements every integration operation for one kind of
-// install action.
 type actionHandler interface {
 	install(ctx context.Context, opts Options, harness registry.Harness) (Result, error)
 	remove(ctx context.Context, opts Options, harness registry.Harness) (Result, error)

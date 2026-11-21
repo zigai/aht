@@ -14,7 +14,6 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the public GitHub REST API root.
 const DefaultBaseURL = "https://api.github.com"
 
 const (
@@ -34,7 +33,6 @@ var (
 	nextLinkRE   = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
 )
 
-// StatusError is a GitHub API response with an unsuccessful HTTP status.
 type StatusError struct {
 	Method  string
 	URL     string
@@ -42,7 +40,6 @@ type StatusError struct {
 	Message string
 }
 
-// Client sends authenticated requests to one GitHub REST API root.
 type Client struct {
 	// RetryDelay is the delay before the first retry of a failed read; later
 	// retries double it.
@@ -75,13 +72,11 @@ func (e *StatusError) Error() string {
 	return text
 }
 
-// HasStatus reports whether err is a GitHub API response with status.
 func HasStatus(err error, status int) bool {
 	var statusErr *StatusError
 	return errors.As(err, &statusErr) && statusErr.Status == status
 }
 
-// Get decodes the response of a GET request for path into out.
 func (c *Client) Get(ctx context.Context, path string, out any) error {
 	return c.Do(ctx, http.MethodGet, path, nil, out)
 }

@@ -16,20 +16,16 @@ import (
 )
 
 const (
-	// ConfigEnv is the environment variable for overriding the config file path.
 	ConfigEnv = "AHT_CONFIG"
 
-	// maxConfigFileSize caps configuration files to 1 MiB.
 	maxConfigFileSize = 1024 * 1024
 
 	defaultDirMode  = 0o700
 	defaultFileMode = 0o600
 )
 
-// DefaultTrackerInterval is the default tracker.interval.
 const DefaultTrackerInterval = 300 * time.Millisecond
 
-// Sentinel configuration errors.
 var (
 	ErrMissingUnitSuffix   = errors.New("missing unit suffix")
 	ErrInvalidSort         = errors.New("invalid ui.sort")
@@ -49,8 +45,7 @@ var (
 	ErrInvalidDuration = errors.New("invalid duration")
 	// ErrStdinNotEditable means the configuration was read from stdin.
 	ErrStdinNotEditable = errors.New("cannot set key on stdin configuration")
-	// ErrInvalidSetting means a config edit was rejected.
-	ErrInvalidSetting = errors.New("invalid configuration setting")
+	ErrInvalidSetting   = errors.New("invalid configuration setting")
 
 	validSortKeys = map[string]string{
 		"updated":             "updated",
@@ -148,8 +143,6 @@ type DetectionConfig struct {
 	ScreenInspection *bool  `json:"screen_inspection,omitempty" toml:"screen_inspection"`
 }
 
-// Options controls layered configuration resolution.
-//
 //exhaustruct:optional
 type Options struct {
 	Path     string
@@ -204,7 +197,6 @@ func (c *Config) ValidateWith(meta *strata.Metadata) error {
 	return c.validateTracker(meta)
 }
 
-// Defaults returns a complete typed configuration with all base defaults populated.
 func Defaults() Config {
 	return Config{
 		UI: UIConfig{
@@ -252,7 +244,6 @@ func UserConfigDir() string {
 	return ""
 }
 
-// DefaultPath returns the default path to the user's config file.
 func DefaultPath() string {
 	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
 		return val
@@ -405,7 +396,6 @@ func SortKey(s string) (string, bool) {
 	return key, ok
 }
 
-// NormalizeSort validates and normalizes sort key names.
 func NormalizeSort(s string) (string, error) {
 	if key, ok := SortKey(s); ok {
 		return key, nil
@@ -633,7 +623,7 @@ func Keys() []string {
 	return keys
 }
 
-// TombstoneTTL returns the configured tombstone TTL, or zero when unset.
+// TombstoneTTL returns the configured tombstone TTL, or registry.DefaultTombstoneTTL when unset.
 func TombstoneTTL(cfg Config) (time.Duration, error) {
 	if cfg.Retention.TombstoneTTL == "" {
 		return registry.DefaultTombstoneTTL, nil
@@ -642,7 +632,6 @@ func TombstoneTTL(cfg Config) (time.Duration, error) {
 	return ParseDuration(cfg.Retention.TombstoneTTL)
 }
 
-// LoadWithMetadata resolves configuration across all tiers per the given options and returns strata.Metadata.
 func LoadWithMetadata(opts Options) (Config, *strata.Metadata, string, error) {
 	strataOpts, targetPath := strataLoadOptions(opts)
 	cfg, meta, err := strata.LoadWithMetadata[Config](strataOpts...)

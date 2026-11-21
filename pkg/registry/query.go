@@ -5,12 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
-	"slices" // SessionCWD returns the best available working directory for session.
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// SessionCWD returns the best available working directory for session.
 func SessionCWD(session Session) string {
 	if session.CWD != "" {
 		return session.CWD
@@ -50,7 +51,6 @@ func PathsEqual(p1 string, p2 string) bool {
 	return CanonicalPath(p1) == CanonicalPath(p2)
 }
 
-// PathWithinOrEqual reports whether target is equal to base or located within base.
 func PathWithinOrEqual(target string, base string) bool {
 	targetCanon := CanonicalPath(target)
 
@@ -71,7 +71,6 @@ func PathWithinOrEqual(target string, base string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// MatchesProject reports whether session matches the specified project path.
 func MatchesProject(session Session, project string, subtree bool) bool {
 	if project == "" {
 		return true

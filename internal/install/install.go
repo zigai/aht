@@ -44,7 +44,6 @@ type Result struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// Run installs one integration while honoring caller cancellation.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("install integration context: %w", err)

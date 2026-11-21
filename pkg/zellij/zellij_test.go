@@ -52,7 +52,6 @@ func shortSocketDir(t *testing.T) string {
 	return dir
 }
 
-// startSessionServer binds a session socket whose modification time is created.
 func startSessionServer(
 	t *testing.T,
 	socketDir string,
@@ -165,9 +164,6 @@ type scopedCall struct {
 	sessions []string
 }
 
-// scopedRunner records each command with the sessions visible in the socket
-// directory it was given, and answers with the output registered for the
-// --session argument.
 func visibleSessions(socketDir string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(socketDir, contractDir))
 	if err != nil {
@@ -182,6 +178,9 @@ func visibleSessions(socketDir string) ([]string, error) {
 	return sessions, nil
 }
 
+// scopedRunner records each command with the sessions visible in the socket
+// directory it was given, and answers with the output registered for the
+// --session argument.
 func scopedRunner(
 	calls *[]scopedCall,
 	outputs map[string]string,

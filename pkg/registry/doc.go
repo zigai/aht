@@ -19,11 +19,12 @@
 //
 //   - [MemoryStore] is the live state held by the tracker. It applies pending
 //     journal entries before each operation. It journals consumer-visible
-//     changes, native reports, and administrative commands, and writes
-//     coalesced compact snapshots after consumer-visible changes (500 ms settle,
-//     2 s maximum) and a final one on shutdown. Heartbeats that only
-//     refresh evidence timestamps are neither journaled nor written promptly;
-//     they are persisted with the next visible change or at most once a minute.
+//     changes, native reports, and administrative commands. It writes a compact
+//     snapshot after consumer-visible changes settle (500 ms, 2 s maximum), at
+//     most once every 30 s while they keep arriving, and a final one on shutdown.
+//     Heartbeats that only refresh evidence timestamps are neither journaled nor
+//     written promptly; they are persisted with the next snapshot or at most
+//     once a minute.
 //   - [Journal] records writes while no tracker is reachable. Entries are fsynced
 //     and the journal is limited to 64 MiB. Without a tracker, a writer folds the
 //     snapshot and journal under the store lock and checkpoints the result.

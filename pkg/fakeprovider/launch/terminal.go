@@ -31,7 +31,6 @@ type Terminal struct {
 	closed    bool
 }
 
-// StartTerminal starts the terminal UI in a private tmux server.
 func (h *Harness) StartTerminal(
 	ctx context.Context,
 	prompt string,
@@ -54,22 +53,18 @@ func (h *Harness) StartTerminal(
 	return startTerminal(ctx, argv, h.Work, size)
 }
 
-// Pane returns the pane that runs the harness.
 func (t *Terminal) Pane() gotmux.Pane {
 	return t.pane
 }
 
-// Socket returns the path of the private tmux socket.
 func (t *Terminal) Socket() string {
 	return t.socket
 }
 
-// AttachCommand returns the argv that attaches to the terminal.
 func (t *Terminal) AttachCommand() []string {
 	return []string{t.tmux, "-S", t.socket, "attach"}
 }
 
-// Capture returns the visible text of the pane.
 func (t *Terminal) Capture(ctx context.Context) (string, error) {
 	screen, err := t.pane.Capture(ctx, gotmux.CaptureOptions{})
 	if err != nil {
@@ -88,7 +83,6 @@ func (t *Terminal) SendText(ctx context.Context, text string) error {
 	return nil
 }
 
-// SendKeys sends named keys to the pane.
 func (t *Terminal) SendKeys(ctx context.Context, keys ...gotmux.Key) error {
 	if err := t.pane.SendKeys(ctx, keys...); err != nil {
 		return fmt.Errorf("send keys to terminal: %w", err)
@@ -97,7 +91,6 @@ func (t *Terminal) SendKeys(ctx context.Context, keys ...gotmux.Key) error {
 	return nil
 }
 
-// WaitForText waits until the pane shows text.
 func (t *Terminal) WaitForText(ctx context.Context, text string) (string, error) {
 	if text == "" {
 		return "", errEmptyText
@@ -129,7 +122,6 @@ func (t *Terminal) WaitForText(ctx context.Context, text string) (string, error)
 	}
 }
 
-// Exited reports whether the harness process in the pane has exited.
 func (t *Terminal) Exited(ctx context.Context) (bool, error) {
 	info, err := t.pane.Info(ctx)
 	if err != nil {
@@ -139,7 +131,6 @@ func (t *Terminal) Exited(ctx context.Context) (bool, error) {
 	return info.Dead, nil
 }
 
-// Close stops the tmux server.
 func (t *Terminal) Close(ctx context.Context) error {
 	if t.closed {
 		return nil

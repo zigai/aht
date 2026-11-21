@@ -1020,8 +1020,6 @@ func searchModes(t *testing.T, sources []history.Source) []searchMode {
 	}
 }
 
-// requireMatches asserts that a search returned want matching conversations and
-// the expected error.
 func requireMatches(t *testing.T, result history.Result, err error, want int) {
 	t.Helper()
 
