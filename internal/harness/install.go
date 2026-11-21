@@ -127,12 +127,6 @@ type JSONMergeInstallPlan struct {
 	ConfigLabel string
 	Merge       func(map[string]any, func(string) bool) (bool, error)
 	Remove      func(map[string]any, func(string) bool) bool
-	// Installed reports whether Merge's entries are present. When set, status
-	// reads it instead of a version marker in the file.
-	Installed func(map[string]any) bool
-	// RetiresCommandHooks strips the command hooks an earlier version of the
-	// integration installed under the file's "hooks" key.
-	RetiresCommandHooks bool
 }
 
 type ManagedTextBlockInstallPlan struct {
@@ -368,8 +362,6 @@ func ScriptString(value string) string {
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
-// RenderScriptTemplate fills a plugin or extension template with the binary
-// and the identity of the definition.
 func RenderScriptTemplate(template string, binary string, definition Definition) string {
 	rendered := strings.NewReplacer(
 		"{{MANAGED_MARKER}}", ManagedMarker,
