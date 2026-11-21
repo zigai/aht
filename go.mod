@@ -8,12 +8,12 @@ require (
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/google/go-cmp v0.7.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
-	github.com/jedib0t/go-pretty/v6 v6.8.3
-	github.com/openai/openai-go/v3 v3.98.0
+	github.com/jedib0t/go-pretty/v6 v6.9.2
+	github.com/openai/openai-go/v3 v3.102.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
-	github.com/zigai/gotmux v0.8.0
+	github.com/zigai/gotmux v0.9.0
 	github.com/zigai/strata v0.6.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/sys v0.50.0
