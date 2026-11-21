@@ -65,6 +65,54 @@ func assertBoundedFIFOReports(t *testing.T, records []reportingRecord, terminal 
 	}
 }
 
+func TestHermesShutdownKeepsSessionEnds(t *testing.T) {
+	binary, capture := stalledReportingBinary(t)
+	dir := writeReportingPlugin(t, registry.Harness("hermes"), binary)
+	path := filepath.Join(dir, "driver.py")
+	writeTestFile(t, path, runtimeScript(t, "python/hermes-shutdown-ends.py"), 0o600)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	watcher := watchCaptureDirectory(t, capture)
+	command := exec.CommandContext(ctx, requireRuntimeTool(t, "python3"), path)
+	command.Dir = dir
+
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("hermes driver: %v\n%s", err, output)
+	}
+
+	ended := func(record reportingRecord) string {
+		if !slices.Contains(record.Args, "on_session_finalize") {
+			return ""
+		}
+
+		return record.Args[slices.Index(record.Args, "--session-id")+1]
+	}
+
+	for {
+		var sessions []string
+
+		for _, record := range readReportingRecords(t, capture) {
+			if session := ended(record); session != "" {
+				sessions = append(sessions, session)
+			}
+		}
+
+		if slices.Equal(sessions, []string{"first", "second"}) {
+			return
+		}
+
+		select {
+		case <-watcher.Events:
+		case err := <-watcher.Errors:
+			t.Fatalf("watch reports: %v", err)
+		case <-ctx.Done():
+			t.Fatalf("session ends reported: %v, want first and second", sessions)
+		}
+	}
+}
+
 func TestReportingPluginsMissingBinaryIsNonfatal(t *testing.T) {
 	for _, name := range []registry.Harness{
 		registry.Harness("cline"),
@@ -97,7 +145,7 @@ func TestReportingPluginsMissingBinaryIsNonfatal(t *testing.T) {
 	}
 }
 
-func TestOpenClawGatewayStopJoinsReporter(t *testing.T) {
+func TestOpenClawGatewayStopKeepsSessionEnds(t *testing.T) {
 	binary, capture := stalledReportingBinary(t)
 	dir := writeReportingPlugin(t, registry.Harness("openclaw"), binary)
 	fixture := reportingDriver(t, registry.Harness("openclaw"))
@@ -105,9 +153,15 @@ func TestOpenClawGatewayStopJoinsReporter(t *testing.T) {
 	runReportingDriver(t, fixture, dir, capture)
 
 	records := readReportingRecords(t, capture)
-	if len(records) != 2 || records[1].Overlap ||
-		!slices.Contains(records[1].Args, fixture.terminal) {
-		t.Fatalf("shutdown did not join the active child and preserve newest state: %+v", records)
+	overlap := slices.ContainsFunc(
+		records,
+		func(record reportingRecord) bool { return record.Overlap },
+	)
+
+	if len(records) != 3 || overlap ||
+		!slices.Contains(records[1].Args, "openclaw_run_id=199") ||
+		!slices.Contains(records[2].Args, fixture.terminal) {
+		t.Fatalf("shutdown did not keep the newest state and then the session end: %+v", records)
 	}
 }
 

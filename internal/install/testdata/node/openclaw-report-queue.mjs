@@ -9,8 +9,9 @@ if (process.env.AHT_TEST_SKIP_HANDSHAKE !== "1") await lines.next();
 for (let index = 0; index < 200; index++)
   hooks.get("before_agent_run")({}, { ...ctx, runId: String(index) });
 if (process.env.AHT_TEST_GATEWAY_STOP === "1") {
-  hooks.get("session_end")({}, ctx);
+  // OpenClaw runs gateway_stop before it ends the sessions still active at shutdown.
   await hooks.get("gateway_stop")();
+  await hooks.get("session_end")({}, ctx);
 } else {
   await hooks.get("session_end")({}, ctx);
 }

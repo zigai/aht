@@ -164,10 +164,9 @@ export default function (amp: PluginAPI) {
 
   try {
     if (typeof amp?.onDispose === "function") {
-      amp.onDispose(() => {
-        for (const id of subscribedThreads) {
-          void report("gone", id, "session.end");
-        }
+      // Amp terminates the plugin process once the returned promise settles.
+      amp.onDispose(async () => {
+        await Promise.all(Array.from(subscribedThreads, (id) => report("gone", id, "session.end")));
       });
     }
   } catch {}
