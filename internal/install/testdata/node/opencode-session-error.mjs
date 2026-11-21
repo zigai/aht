@@ -1,23 +1,43 @@
 import plugin from "./plugin.ts";
-if (plugin.id !== "aht-state" || typeof plugin.server !== "function") {
+if (plugin.id !== "aht-state" || typeof plugin.setup !== "function") {
   throw new Error("unexpected plugin export shape: " + JSON.stringify(plugin));
 }
-const runtime = await plugin.server({ directory: "/tmp/project", worktree: "/tmp/project" });
-if (typeof runtime.event !== "function") {
-  throw new Error("unexpected plugin runtime hooks: " + JSON.stringify(runtime));
-}
-await runtime.event({
-  event: {
+
+let finish;
+const finished = new Promise((resolve) => {
+  finish = resolve;
+});
+
+async function* generateEvents() {
+  yield {
     type: "session.error",
-    sessionID: "opencode-session",
+    data: {
+      sessionID: "opencode-session",
+    },
     prompt: process.env.AHT_TEST_SENSITIVE_SENTINEL,
-  },
-});
-await runtime.event({
-  event: {
+  };
+  yield {
     type: "session.status",
-    sessionID: "opencode-session",
-    properties: { status: { type: "idle" } },
+    data: {
+      sessionID: "opencode-session",
+      status: { type: "idle" },
+    },
+  };
+  yield {
+    type: "session.idle",
+    data: {
+      sessionID: "opencode-session",
+    },
+  };
+  finish();
+}
+
+const cleanup = await plugin.setup({
+  location: { directory: "/tmp/project", project: { canonical: "/tmp/project" } },
+  event: {
+    subscribe: () => generateEvents(),
   },
 });
-await runtime.event({ event: { type: "session.idle", sessionID: "opencode-session" } });
+
+await finished;
+await cleanup();

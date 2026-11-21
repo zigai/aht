@@ -28,6 +28,12 @@ func runtimeScript(t *testing.T, name string) string {
 	return string(data)
 }
 
+func pluginHooksFile(t *testing.T) map[string]string {
+	t.Helper()
+
+	return map[string]string{"plugin-hooks.mjs": runtimeScript(t, "node/plugin-hooks.mjs")}
+}
+
 func runNodeRuntime(
 	t *testing.T,
 	moduleName string,

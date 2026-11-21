@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline";
 const lines = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
 import plugin from "./extension.ts";
-const hooks = await plugin.server({ directory: "/project", worktree: "/project" });
+import { pluginHooks } from "./plugin-hooks.mjs";
+const hooks = await pluginHooks(plugin, "/project");
 const sends = [hooks.event({ event: { type: "session.created", sessionID: "owned-session" } })];
 await lines.next();
 for (let index = 0; index < 100; index++) {

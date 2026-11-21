@@ -135,13 +135,27 @@ func TestTypeScriptReportingOwnsProcesses(t *testing.T) {
 				terminal: "session_shutdown",
 				driver:   runtimeScript(t, "node/extension-process-ownership.mjs"),
 			}
+			maxReports := 1 + 64
+
 			if harness == registry.Harness("opencode") || harness == registry.Harness("kilo") {
 				fixture.driver = runtimeScript(t, "node/plugin-process-ownership.mjs")
 				fixture.terminal = "session.deleted"
+
+				writeTestFile(
+					t,
+					filepath.Join(dir, "plugin-hooks.mjs"),
+					runtimeScript(t, "node/plugin-hooks.mjs"),
+					0o600,
+				)
+			}
+			// OpenCode handles each subscribed event after the previous report
+			// finishes, so its pending queue never fills and every report runs.
+			if harness == registry.Harness("opencode") {
+				maxReports = 102
 			}
 
 			runReportingDriver(t, fixture, dir, capture)
-			assertOwnedReports(t, readReportingRecords(t, capture), fixture.terminal)
+			assertOwnedReports(t, readReportingRecords(t, capture), fixture.terminal, maxReports)
 		})
 	}
 }
@@ -164,10 +178,15 @@ func generatedTypeScriptModule(
 	return ""
 }
 
-func assertOwnedReports(t *testing.T, records []reportingRecord, terminalEvent string) {
+func assertOwnedReports(
+	t *testing.T,
+	records []reportingRecord,
+	terminalEvent string,
+	maxReports int,
+) {
 	t.Helper()
 
-	if len(records) < 2 || len(records) > 65 {
+	if len(records) < 2 || len(records) > maxReports {
 		t.Fatalf("executed %d reports, want initial plus bounded pending FIFO", len(records))
 	}
 
@@ -241,7 +260,7 @@ func TestTypeScriptReportingMissingExecutableIsNonfatal(t *testing.T) {
 					driver = runtimeScript(t, "node/plugin-missing-reporter.mjs")
 				}
 
-				runNodeRuntime(t, "extension.ts", artifact.content, driver, nil)
+				runNodeRuntime(t, "extension.ts", artifact.content, driver, pluginHooksFile(t))
 
 				return
 			}

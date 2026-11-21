@@ -1,5 +1,6 @@
 import plugin from "./plugin.ts";
-const hooks = await plugin.server({ directory: "/work" });
+import { pluginHooks } from "./plugin-hooks.mjs";
+const hooks = await pluginHooks(plugin, "/work");
 async function emit(type, sessionID, fields = {}) { await hooks.event({ event: { type, properties: { sessionID, ...fields } } }); }
 await emit("session.created", "a");
 await emit("question.unrecognized", "a");

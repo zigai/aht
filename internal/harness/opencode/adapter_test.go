@@ -89,25 +89,6 @@ func runOpencodeDriverOutput(t *testing.T, driverSource string) string {
 	return string(data)
 }
 
-func TestPluginDisposalDrainsNativeEvents(t *testing.T) {
-	driver := `import plugin from "./plugin.ts";
-const hooks = await plugin.server({ directory: "/work" });
-for (const [sessionID, type] of [["first", "busy"], ["first", "idle"], ["resumed", "busy"], ["resumed", "idle"]]) {
-  void hooks.event({ event: { type: "session.status", properties: { sessionID, status: { type } } } });
-}
-await hooks.dispose();
-process.exit(0);
-`
-
-	observations := runOpencodeDriver(t, driver)
-	if got := strings.Join(
-		observations,
-		",",
-	); got != "first:running,first:idle,resumed:running,resumed:idle" {
-		t.Fatalf("native observations must finish in order before disposal returns: %s", got)
-	}
-}
-
 func TestSetupDisposalDrainsNativeEvents(t *testing.T) {
 	driver := `import plugin from "./plugin.ts";
 let finish;
@@ -160,7 +141,6 @@ func TestPluginDefaultExportShape(t *testing.T) {
 if (!plugin || typeof plugin !== "object") throw new Error("expected object export");
 if (plugin.id !== "aht-state") throw new Error("expected id 'aht-state', got " + plugin.id);
 if (typeof plugin.setup !== "function") throw new Error("expected setup function, got " + typeof plugin.setup);
-if (typeof plugin.server !== "function") throw new Error("expected server function, got " + typeof plugin.server);
 process.exit(0);
 `
 
@@ -177,10 +157,20 @@ process.exit(0);
 
 func TestOpencodePluginReportsServerSessionTitle(t *testing.T) {
 	driver := `import plugin from "./plugin.ts";
-	const client = { session: { get: async ({ path }) => ({ id: path.id, title: "Server title" }) } };
-const hooks = await plugin.server({ directory: "/work", client });
-await hooks.event({ event: { type: "session.status", properties: { sessionID: "s1", status: { type: "idle" } } } });
-await hooks.dispose();
+const client = { session: { get: async ({ path }) => ({ id: path.id, title: "Server title" }) } };
+let finish;
+const finished = new Promise((resolve) => { finish = resolve; });
+async function* generateEvents() {
+  yield { type: "session.status", data: { sessionID: "s1", status: { type: "idle" } } };
+  finish();
+}
+const cleanup = await plugin.setup({
+  location: { directory: "/work", project: { canonical: "/work" } },
+  client,
+  event: { subscribe: () => generateEvents() },
+});
+await finished;
+await cleanup();
 process.exit(0);
 `
 
@@ -190,7 +180,7 @@ process.exit(0);
 	}
 }
 
-func TestOpencodeV2EventStateTransitions(t *testing.T) {
+func TestOpencodeEventStateTransitions(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to exercise the generated plugin")

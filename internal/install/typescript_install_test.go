@@ -223,8 +223,8 @@ func TestInstallWritesPlugin(t *testing.T) {
 			path:    []string{"opencode", "plugins", opencodePluginName},
 			want: []string{
 				"AHT_INTEGRATION_ID=opencode",
-				`export default { id: "aht-state", setup, server };`,
-				`event: async ({ event }`,
+				`export default { id: "aht-state", setup };`,
+				`ctx.event.subscribe(`,
 				`"permission.asked"`,
 				`"session.deleted"`,
 			},

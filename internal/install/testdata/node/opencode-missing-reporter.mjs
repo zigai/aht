@@ -1,10 +1,27 @@
 import plugin from "./opencode_absent.ts";
-const runtime = await plugin.server({ directory: "/tmp/project", worktree: "/tmp/project" });
-await runtime.event({
-  event: {
+
+let finish;
+const finished = new Promise((resolve) => {
+  finish = resolve;
+});
+
+async function* generateEvents() {
+  yield {
     type: "session.status",
-    sessionID: "missing-session",
-    properties: { status: { type: "idle" } },
+    data: {
+      sessionID: "missing-session",
+      status: { type: "idle" },
+    },
+  };
+  finish();
+}
+
+const cleanup = await plugin.setup({
+  location: { directory: "/tmp/project", project: { canonical: "/tmp/project" } },
+  event: {
+    subscribe: () => generateEvents(),
   },
 });
-await new Promise((resolve) => setTimeout(resolve, 50));
+
+await finished;
+await cleanup();

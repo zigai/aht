@@ -16,33 +16,19 @@ let reportSequence = Date.now() * 1000;
 
 {{TYPESCRIPT_EVENT_PARSER}}
 // Consumer-only native plugin contract; event bus payloads are parsed as unknown.
-// V2: https://opencode.ai/v2/docs/build/plugins/
-// V1 (1.18.29+): server() is the bounded V1 compatibility entrypoint.
-// Dual entrypoint: V2 loaders invoke setup(), while V1 loaders invoke server().
-// Exporting both from a single hermetic object allows one generated file to support
-// both runtimes without external dependencies or install-time version branching.
+// https://opencode.ai/v2/docs/build/plugins/
 type SessionRefs = {
   readonly directory?: string | undefined;
   readonly projectRoot?: string | undefined;
 };
 
-type V1PluginContext = {
-  readonly directory?: string | undefined;
-  readonly worktree?: string | undefined;
-  readonly project?: { readonly path?: string | undefined; readonly root?: string };
-  readonly client?: OpenCodeClient;
-};
 type OpenCodeClient = {
   readonly session?: {
     get(input: { readonly path: { readonly id: string } }): Promise<unknown>;
   };
 };
-type V1PluginHooks = {
-  event(input: { readonly event: unknown }): Promise<void>;
-  dispose(): Promise<void>;
-};
 
-type V2PluginContext = {
+type PluginContext = {
   readonly location?: {
     readonly directory?: string | undefined;
     readonly project?: {
@@ -190,22 +176,7 @@ function createCore(initialRefs?: SessionRefs, client?: OpenCodeClient) {
   };
 }
 
-async function server(ctx: V1PluginContext): Promise<V1PluginHooks> {
-  const directory = firstString(ctx?.directory, ctx?.worktree);
-  const projectRoot = firstString(ctx?.worktree, ctx?.project?.path, ctx?.project?.root);
-  const core = createCore({ directory, projectRoot }, ctx?.client);
-
-  return {
-    dispose: async () => {
-      await core.drain();
-    },
-    event: async ({ event }) => {
-      await core.handle(event);
-    },
-  };
-}
-
-async function setup(ctx: V2PluginContext): Promise<() => Promise<void>> {
+async function setup(ctx: PluginContext): Promise<() => Promise<void>> {
   const directory = ctx?.location?.directory;
   const projectRoot = ctx?.location?.project?.canonical ?? ctx?.location?.project?.directory ?? directory;
   const core = createCore({ directory, projectRoot }, ctx?.client);
@@ -218,8 +189,9 @@ async function setup(ctx: V2PluginContext): Promise<() => Promise<void>> {
         for await (const event of stream) {
           await core.handle(event);
         }
-      } catch {
-        // Unloaded or aborted subscription
+      } catch (error) {
+        // Dispose aborts the subscription. Any other error surfaces.
+        if (!controller.signal.aborted) throw error;
       }
     })();
   }
@@ -230,4 +202,4 @@ async function setup(ctx: V2PluginContext): Promise<() => Promise<void>> {
   };
 }
 
-export default { id: "aht-state", setup, server };
+export default { id: "aht-state", setup };

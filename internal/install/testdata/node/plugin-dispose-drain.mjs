@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import plugin from "./plugin.ts";
-const runtime = await plugin.server({ directory: "/tmp/project", worktree: "/tmp/project" });
+import { pluginHooks } from "./plugin-hooks.mjs";
+const runtime = await pluginHooks(plugin, "/tmp/project");
 assert.equal(typeof runtime.dispose, "function");
 const sessionID = "drain-session";
 // The host publishes events without awaiting hooks and exits after dispose.

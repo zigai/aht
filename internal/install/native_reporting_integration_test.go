@@ -69,7 +69,7 @@ func TestPluginDisposeWaitsForQueuedReports(t *testing.T) {
 				"plugin.ts",
 				module,
 				runtimeScript(t, "node/plugin-dispose-drain.mjs"),
-				nil,
+				pluginHooksFile(t),
 			)
 		})
 	}
