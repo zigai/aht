@@ -6,9 +6,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -72,22 +75,22 @@ func runTestCLIWithStdin(
 	return nil
 }
 
+// clearHarnessConfigEnv keeps an inherited harness profile from moving harness
+// paths out of the test's HOME.
+func clearHarnessConfigEnv(t *testing.T) {
+	t.Helper()
+
+	for _, adapter := range catalog.All() {
+		for _, key := range adapter.Definition().Env.Config {
+			t.Setenv(key, "")
+		}
+	}
+}
+
 func listenFakeBroker(t *testing.T) net.Listener {
 	t.Helper()
 
-	//nolint:usetesting // reason: t.TempDir paths can exceed the Unix socket path limit.
-	socketFile, err := os.CreateTemp("", "aht-broker-")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	socketPath := socketFile.Name()
-	_ = socketFile.Close()
-
-	if err := os.Remove(socketPath); err != nil {
-		t.Fatal(err)
-	}
-
+	socketPath := filepath.Join(testdir.Short(t, "aht-broker-"), "broker.sock")
 	t.Setenv(broker.SocketPathEnv, socketPath)
 
 	var listenConfig net.ListenConfig

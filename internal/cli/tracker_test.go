@@ -145,13 +145,17 @@ func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
 		}
 	}
 
-	if err := runTestCLI(
-		t.Context(),
-		[]string{"--store", storePath, "manage", "tracker", "run", "--once", "--quiet"},
-		&bytes.Buffer{},
-		&bytes.Buffer{},
-	); err != nil &&
-		!errors.Is(err, errObserverRunDegraded) {
+	app := &application{storePath: storePath, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	watcher := observer.New(observer.Options{
+		Store:       store,
+		StorePath:   storePath,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
+	})
+
+	opts := observeOptions{once: true, quiet: true, tombstoneTTL: registry.DefaultTombstoneTTL}
+	if err := app.runObserverOnce(t.Context(), opts, watcher); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,18 +163,14 @@ func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The cycle also records any real agents on the host; only the seeded
-	// tombstones matter here.
-	var tombstones []string
 
+	remaining := make([]string, 0, len(sessions))
 	for _, session := range sessions {
-		if strings.HasPrefix(session.SessionID, "tombstone-") {
-			tombstones = append(tombstones, session.SessionID+"/"+string(session.Presence()))
-		}
+		remaining = append(remaining, session.SessionID+"/"+string(session.Presence()))
 	}
 
-	if len(tombstones) != 1 || tombstones[0] != "tombstone-1/gone" {
-		t.Fatalf("tombstones after --once = %v, want only tombstone-1/gone", tombstones)
+	if len(remaining) != 1 || remaining[0] != "tombstone-1/gone" {
+		t.Fatalf("sessions after one cycle = %v, want only tombstone-1/gone", remaining)
 	}
 }
 

@@ -547,34 +547,14 @@ func prepareDoctorEnvironment(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	// Like the upgrade fixture, redirect every harness override rather than
-	// letting an inherited profile escape the temporary home directory.
-	for _, key := range []string{
-		"XDG_CONFIG_HOME",
-		"XDG_STATE_HOME",
-		"AHT_CONFIG",
-		"CLAUDE_CONFIG_DIR",
-		"CODEX_HOME",
-		"COPILOT_HOME",
-		"CLINE_DIR",
-		"CLINE_HOOKS_DIR",
-		"KIMI_CODE_HOME",
-		"GROK_HOME",
-		"PI_CODING_AGENT_DIR",
-		"PI_CONFIG_DIR",
-		"HERMES_HOME",
-		"OPENCODE_CONFIG_DIR",
-		"OPENCODE_CONFIG",
-		"KILO_CONFIG_DIR",
-		registry.StateDirEnv,
-	} {
+	clearHarnessConfigEnv(t)
+
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", registry.StateDirEnv} {
 		t.Setenv(key, filepath.Join(home, key))
 	}
 
 	t.Setenv("AHT_CONFIG", filepath.Join(home, "config.toml"))
 	t.Setenv(registry.StorePathEnv, "")
-	t.Setenv("OMP_PROFILE", "default")
-	t.Setenv("PI_PROFILE", "default")
 
 	fakeBin := filepath.Join(home, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
