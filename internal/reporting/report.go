@@ -54,12 +54,20 @@ type Options struct {
 	Evidence         string
 }
 
+// IgnoreReason says why a hook report is dropped before it reaches the registry.
+type IgnoreReason string
+
+const (
+	IgnorePayloadMismatch IgnoreReason = "payload_mismatch"
+	IgnoreSessionTeardown IgnoreReason = "session_teardown"
+)
+
 type Result struct {
 	Harness registry.Harness
 	//exhaustruct:optional
 	Observation registry.Observation
 	//exhaustruct:optional
-	Ignored bool
+	Ignored IgnoreReason
 }
 
 type reportState struct {
@@ -124,7 +132,7 @@ func Prepare(
 	}
 
 	if !catalog.PayloadCompatible(harnessID, defaultsPayload) {
-		return Result{Harness: harnessID, Ignored: true}, nil
+		return Result{Harness: harnessID, Ignored: IgnorePayloadMismatch}, nil
 	}
 
 	defaults, err := catalog.PayloadDefaults(harnessID, defaultsPayload)
@@ -134,6 +142,15 @@ func Prepare(
 
 	opts.ProjectRoot = resolveReportProjectRoot(harnessID, opts.ProjectRoot, defaults, opts.CWD)
 	applyPayloadDefaults(&opts, attrs, defaults)
+
+	teardown, err := catalog.TeardownPayload(harnessID, opts.Event, defaultsPayload)
+	if err != nil {
+		return Result{}, fmt.Errorf("classify teardown payload: %w", err)
+	}
+
+	if teardown {
+		return Result{Harness: harnessID, Ignored: IgnoreSessionTeardown}, nil
+	}
 	applyReportRuntimeDefaults(&opts)
 	translateReportLifecycle(&opts, harnessID, attrs)
 

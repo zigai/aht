@@ -79,6 +79,21 @@ func (grokHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 	return grokPayloadValidator(rawPayload)
 }
 
+// Grok fires a second Stop at session end, at the same time as SessionEnd.
+// Only a Stop with reason end_turn ends a turn.
+func (grokHarness) TeardownPayload(event string, payload map[string]any) bool {
+	if !strings.EqualFold(event, "Stop") {
+		return false
+	}
+
+	switch harness.PayloadString(payload, "reason") {
+	case "channel_closed", "shutdown":
+		return true
+	default:
+		return false
+	}
+}
+
 func grokPayloadValidator(rawPayload json.RawMessage) bool {
 	payload, ok := harness.PayloadObject(rawPayload)
 	if !ok {

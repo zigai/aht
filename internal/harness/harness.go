@@ -143,6 +143,13 @@ type PayloadActivityAdapter interface {
 	) registry.Activity
 }
 
+// TeardownPayloadAdapter reports hook payloads that a host sends while it
+// tears a session down, beside its own session end event. They carry no state,
+// and a report for one could land after the session end and hide it.
+type TeardownPayloadAdapter interface {
+	TeardownPayload(event string, payload map[string]any) bool
+}
+
 type ActivityDetailer interface {
 	ActivityDetail(
 		event string,

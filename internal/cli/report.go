@@ -181,11 +181,19 @@ func (app *application) runReport(
 		return fmt.Errorf("preparing report: %w", err)
 	}
 
-	if prepared.Ignored {
+	switch prepared.Ignored {
+	case reporting.IgnorePayloadMismatch:
 		return app.writeReportIgnored(
 			prepared.Harness,
-			"payload_mismatch",
+			string(prepared.Ignored),
 			"hook payload does not match harness",
+			quiet,
+		)
+	case reporting.IgnoreSessionTeardown:
+		return app.writeReportIgnored(
+			prepared.Harness,
+			string(prepared.Ignored),
+			"hook fired during session teardown carries no session state",
 			quiet,
 		)
 	}

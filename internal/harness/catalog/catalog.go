@@ -261,6 +261,35 @@ func ActivityFromPayload(
 	return activityAdapter.PayloadActivity(event, activity, payload, at), nil
 }
 
+// TeardownPayload reports whether rawPayload is a hook payload the harness
+// sends only while tearing a session down.
+func TeardownPayload(
+	harnessID registry.Harness,
+	event string,
+	rawPayload json.RawMessage,
+) (bool, error) {
+	if len(rawPayload) == 0 {
+		return false, nil
+	}
+
+	adapter, ok := Find(harnessID)
+	if !ok {
+		return false, nil
+	}
+
+	teardownAdapter, ok := adapter.(harness.TeardownPayloadAdapter)
+	if !ok {
+		return false, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return false, fmt.Errorf("decoding hook payload: %w", err)
+	}
+
+	return teardownAdapter.TeardownPayload(event, payload), nil
+}
+
 func PayloadCompatible(harnessID registry.Harness, rawPayload json.RawMessage) bool {
 	if len(rawPayload) == 0 {
 		return true

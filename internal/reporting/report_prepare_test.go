@@ -744,6 +744,44 @@ func TestPrepareReportKeepsClaudeStopRunningWhileBackgroundWorkIsInFlight(t *tes
 	}
 }
 
+func TestPrepareReportDropsGrokSessionEndStop(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		reason string
+		want   IgnoreReason
+	}{
+		"turn end":       {reason: "end_turn", want: ""},
+		"channel closed": {reason: "channel_closed", want: IgnoreSessionTeardown},
+		"shutdown":       {reason: "shutdown", want: IgnoreSessionTeardown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := `{"sessionId":"s","cwd":"/work","workspaceRoot":"/work",` +
+				`"hookEventName":"stop","reason":"` + test.reason + `"}`
+
+			prepared, err := Prepare(strings.NewReader(payload), Options{
+				Harness: "grok", Activity: "idle", Event: "Stop", RawStdin: true,
+			}, Runtime{DefaultObservedAt: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if prepared.Ignored != test.want {
+				t.Fatalf("ignored = %q, want %q", prepared.Ignored, test.want)
+			}
+
+			if test.want == "" {
+				if claim := prepared.Observation.ActivityClaim(); claim == nil ||
+					*claim != registry.ActivityIdle {
+					t.Fatalf("activity = %v, want idle", claim)
+				}
+			}
+		})
+	}
+}
+
 func TestPrepareReportStoresClaudePostToolUseWithoutToolContent(t *testing.T) {
 	t.Parallel()
 
