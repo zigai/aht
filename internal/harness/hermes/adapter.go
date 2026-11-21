@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	integrationVersion      = 10
+	integrationVersion      = 11
 	hermesCommand           = "hermes"
 	hermesPluginName        = "aht-state"
 	hermesIntegrationSource = "hermes-plugin"

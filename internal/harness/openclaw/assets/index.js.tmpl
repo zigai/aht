@@ -10,7 +10,6 @@ const pendingReports = [];
 const maxPendingReports = 64;
 let activeReport = false;
 let reportingWarningShown = false;
-let reportingStopped = false;
 let lastReport = Promise.resolve();
 
 function warnReporting() {
@@ -21,26 +20,28 @@ function warnReporting() {
 
 // Own one referenced child at a time. Keep the newest state under overload,
 // retaining FIFO order for the accepted reports and their enqueue-time metadata.
-function enqueueReport(args) {
-  if (reportingStopped) return Promise.resolve();
+function enqueueReport(args, end) {
   lastReport = new Promise((complete) => {
     if (pendingReports.length >= maxPendingReports) {
       pendingReports.shift().complete();
       warnReporting();
     }
-    pendingReports.push({ args, complete });
+    pendingReports.push({ args, end, complete });
     drainReports();
   });
   return lastReport;
 }
 
+// OpenClaw runs gateway_stop before the session_end hooks of the sessions still
+// active, so shutdown drops superseded states but keeps accepting session ends.
 function stopReporting() {
-  reportingStopped = true;
-  // Bound shutdown to the active child and newest/final queued state.
-  while (pendingReports.length > 1) {
-    pendingReports.shift().complete();
+  const kept = pendingReports.filter((report, index) => report.end || index === pendingReports.length - 1);
+  for (const report of pendingReports) {
+    if (kept.includes(report)) continue;
+    report.complete();
     warnReporting();
   }
+  pendingReports.splice(0, pendingReports.length, ...kept);
   return lastReport;
 }
 
@@ -51,7 +52,8 @@ function drainReports() {
   activeReport = true;
   let child;
   try {
-    child = spawn(binary, report.args, { stdio: "ignore" });
+    // The session end gets its own process group so it outlives the gateway exit.
+    child = spawn(binary, report.args, { stdio: "ignore", detached: report.end });
   } catch {
     warnReporting();
     activeReport = false;
@@ -110,14 +112,17 @@ function report(eventName, event, ctx, transition) {
     runId: event.runId || ctx.runId,
     sessionFile: event.sessionFile,
   });
+  const end = transition.lifecycle === "end";
   const args = [
     "report", "openclaw", "--session-id", sessionId,
-    "--event", eventName, "--observed-at", new Date().toISOString(),
+    "--event", eventName,
     "--sequence", String(++reportSequence),
     "--quiet", "--no-tmux",
     "--reporter", {{SOURCE}},
     "--reporter-version", String(integrationVersion),
   ];
+  // aht stamps the end on receipt, so a process scan taken during shutdown cannot make it stale.
+  if (!end) args.push("--observed-at", new Date().toISOString());
   if (transition.lifecycle) args.push("--lifecycle", transition.lifecycle);
   if (transition.presence) args.push("--presence", transition.presence);
   if (transition.activity) args.push("--activity", transition.activity);
@@ -134,8 +139,8 @@ function report(eventName, event, ctx, transition) {
   attribute(args, "openclaw_end_reason", event.reason);
   if (typeof event.success === "boolean") attribute(args, "openclaw_success", String(event.success));
 
-  if (transition.lifecycle === "end") sessions.delete(sessionId);
-  return enqueueReport(args);
+  if (end) sessions.delete(sessionId);
+  return enqueueReport(args, end);
 }
 
 export default definePluginEntry({

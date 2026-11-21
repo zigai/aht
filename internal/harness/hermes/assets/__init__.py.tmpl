@@ -31,25 +31,29 @@ class Reporter:
     """Own one worker and child, with bounded FIFO pending work.
 
     Overflow drops the oldest pending report so the newest/final state wins.
-    Interpreter shutdown keeps only the newest pending report, then joins the
-    worker after its bounded child termination/reap. Hook callbacks never wait.
+    Interpreter shutdown keeps session ends and the newest pending report, then
+    joins the worker after its bounded child termination/reap. A session end
+    submitted after shutdown starts at once. Hook callbacks never wait.
     """
 
     def __init__(self) -> None:
         self._condition = Condition()
-        self._pending: deque[list[str]] = deque()
+        self._pending: deque[tuple[list[str], bool]] = deque()
         self._worker: Thread | None = None
         self._is_closed = False
         self._has_warned = False
 
-    def submit(self, args: list[str]) -> None:
+    def submit(self, args: list[str], *, end: bool = False) -> None:
         with self._condition:
             if self._is_closed:
+                # Hermes CLI cleanup can finalize sessions after this atexit handler ran.
+                if end:
+                    self._spawn(args, end=True)
                 return
             if len(self._pending) >= 64:
                 self._pending.popleft()
                 self._warn()
-            self._pending.append(args)
+            self._pending.append((args, end))
             if self._worker is None:
                 # atexit owns joining this single daemon; a non-daemon idle
                 # worker would prevent Python from reaching atexit.
@@ -60,11 +64,15 @@ class Reporter:
     def close(self) -> None:
         with self._condition:
             self._is_closed = True
-            if len(self._pending) > 1:
+            # A gateway hosts many sessions, so every session end stays.
+            kept = [
+                item
+                for index, item in enumerate(self._pending)
+                if item[1] or index == len(self._pending) - 1
+            ]
+            if len(kept) < len(self._pending):
                 self._warn()
-                newest = self._pending.pop()
-                self._pending.clear()
-                self._pending.append(newest)
+            self._pending = deque(kept)
             self._condition.notify()
             worker = self._worker
         if worker is not None:
@@ -79,23 +87,30 @@ class Reporter:
                     "aht: reporting failed or overloaded; some state updates were dropped."
                 )
 
+    def _spawn(self, args: list[str], *, end: bool) -> subprocess.Popen[bytes] | None:
+        try:
+            # The session end gets its own session so it outlives Hermes' exit.
+            return subprocess.Popen(
+                [_BINARY, *args],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=end,
+            )
+        except (OSError, ValueError):
+            self._warn()
+            return None
+
     def _run(self) -> None:
         while True:
             with self._condition:
                 self._condition.wait_for(lambda: self._pending or self._is_closed)
                 if not self._pending:
                     return
-                args = self._pending.popleft()
-            try:
-                child = subprocess.Popen(
-                    [_BINARY, *args],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    close_fds=True,
-                )
-            except (OSError, ValueError):
-                self._warn()
+                args, end = self._pending.popleft()
+            child = self._spawn(args, end=end)
+            if child is None:
                 continue
             try:
                 child.wait(timeout=1)
@@ -151,15 +166,18 @@ def _report(event: str, transition: dict[str, str], values: dict[str, Any]) -> N
         return
 
     cwd = os.getcwd()
+    end = transition.get("lifecycle") == "end"
     args = [
         "report", "hermes", "--session-id", session_id,
         "--event", event,
-        "--observed-at", datetime.now(timezone.utc).isoformat(),
         "--cwd", cwd, "--project-root", cwd,
         "--quiet", "--no-tmux",
         "--reporter", {{SOURCE}},
         "--reporter-version", str(_INTEGRATION_VERSION),
     ]
+    # aht stamps the end on receipt, so a process scan taken during shutdown cannot make it stale.
+    if not end:
+        args.extend(("--observed-at", datetime.now(timezone.utc).isoformat()))
     for flag in ("lifecycle", "presence", "activity"):
         if transition.get(flag):
             args.extend((f"--{flag}", transition[flag]))
@@ -182,7 +200,7 @@ def _report(event: str, transition: dict[str, str], values: dict[str, Any]) -> N
     if isinstance(values.get("interrupted"), bool):
         _attribute(args, "hermes_interrupted", str(values["interrupted"]).lower())
 
-    reporter.submit(args)
+    reporter.submit(args, end=end)
 
 
 def _on_session_start(**values: Any) -> None:

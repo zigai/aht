@@ -34,7 +34,11 @@ func TestPiReportingAllowsSlowSuccessfulWrite(t *testing.T) {
 }
 
 func TestPluginDisposeWaitsForQueuedReports(t *testing.T) {
-	for _, id := range []registry.Harness{registry.Harness("opencode"), registry.Harness("kilo")} {
+	for id, driver := range map[registry.Harness]string{
+		registry.Harness("opencode"): "node/plugin-dispose-drain.mjs",
+		registry.Harness("kilo"):     "node/plugin-dispose-drain.mjs",
+		registry.Harness("amp"):      "node/amp-dispose-drain.mjs",
+	} {
 		t.Run(string(id), func(t *testing.T) {
 			dir := t.TempDir()
 			binary := filepath.Join(dir, "reporter")
@@ -68,7 +72,7 @@ func TestPluginDisposeWaitsForQueuedReports(t *testing.T) {
 				t,
 				"plugin.ts",
 				module,
-				runtimeScript(t, "node/plugin-dispose-drain.mjs"),
+				runtimeScript(t, driver),
 				pluginHooksFile(t),
 			)
 		})

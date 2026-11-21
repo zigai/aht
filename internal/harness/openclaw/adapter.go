@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 11
+	integrationVersion        = 12
 	openclawCommand           = "openclaw"
 	openclawPluginName        = "aht-state"
 	openclawIntegrationSource = "openclaw-plugin"
