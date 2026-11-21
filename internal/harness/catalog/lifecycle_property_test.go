@@ -686,15 +686,24 @@ func (runner *nativeSequenceRunner) incarnations(rt *rapid.T) {
 		},
 	)
 
-	stale := apply(scan, report(base.Add(time.Second), first, new(registry.NativeLifecycleEnd), 9))
+	// An end is stale only before the live claim; a later sighting of the same live process does not count.
+	stale := apply(scan, report(base.Add(-time.Second), first, new(registry.NativeLifecycleEnd), 9))
 	if !reflect.DeepEqual(beforeEnd, stale) {
 		rt.Fatal("stale own-process end changed session")
 	}
 
 	runner.coverage.Hit("stale own-process end no-op")
 
-	for index, at := range []time.Time{scan, scan.Add(time.Second)} {
-		ended := apply(at, report(at, first, new(registry.NativeLifecycleEnd), uint64(9+index)))
+	for index, at := range []time.Time{base.Add(time.Second), scan, scan.Add(time.Second)} {
+		received := scan
+		if at.After(scan) {
+			received = at
+		}
+
+		ended := apply(
+			received,
+			report(at, first, new(registry.NativeLifecycleEnd), uint64(10+index)),
+		)
 		if ended.Presence() != registry.PresenceGone || ended.Activity() != nil {
 			rt.Fatal("current own-process end left nonterminal session")
 		}

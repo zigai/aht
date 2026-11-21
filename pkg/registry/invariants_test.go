@@ -850,7 +850,16 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 					return report(at, &first, new(NativeLifecycleEnd), sequence)
 				}
 
-				stale := terminal(base.Add(time.Second), 91)
+				// An end is stale only before the live claim; a later sighting of the same live process does not count.
+				staleAt := base.Add(time.Second)
+				terminalTimes := []time.Time{scan, scan.Add(time.Second)}
+
+				if situation == "delayed end" {
+					staleAt = base.Add(-time.Second)
+					terminalTimes = []time.Time{base.Add(time.Second), scan, scan.Add(time.Second)}
+				}
+
+				stale := terminal(staleAt, 91)
 				stale.Subject.CWD = "/stale"
 
 				current = apply(scan, stale)
@@ -860,8 +869,8 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 
 				coverage.Hit("stale own-process terminal no-op")
 
-				for index, at := range []time.Time{scan, scan.Add(time.Second)} {
-					current = apply(at, terminal(at, uint64(91+index)))
+				for index, at := range terminalTimes {
+					current = apply(maxTime(at, scan), terminal(at, uint64(92+index)))
 					if current.Presence() != PresenceGone || current.Activity() != nil {
 						t.Fatal("current terminal evidence did not terminate")
 					}

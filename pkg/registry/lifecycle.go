@@ -247,8 +247,7 @@ func (input incarnationInput) applyEvidence(result incarnationTransition) incarn
 		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
 		result.terminal = true
 	case input.kind == EvidenceSighting:
-		result.next.State = IncarnationLive
-		result.next.TransitionAt = maxTime(result.next.TransitionAt, input.at)
+		result.next = input.sighted(result.next)
 	case input.claimApplies(result.next):
 		result.next.State = IncarnationStarting
 		if *input.report.Claim == PresenceLive {
@@ -269,6 +268,17 @@ func (input incarnationInput) applyEvidence(result incarnationTransition) incarn
 	}
 
 	return result
+}
+
+func (input incarnationInput) sighted(next Incarnation) Incarnation {
+	// Seeing a live process again changes nothing, so it cannot make an earlier end stale.
+	if next.State != IncarnationLive {
+		next.TransitionAt = maxTime(next.TransitionAt, input.at)
+	}
+
+	next.State = IncarnationLive
+
+	return next
 }
 
 func (input incarnationInput) claimApplies(next Incarnation) bool {
