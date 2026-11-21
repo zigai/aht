@@ -5,9 +5,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 )
+
+var testDependencyDate = time.Date(2026, 3, 4, 5, 6, 7, 500_000_000, time.UTC)
 
 func TestInstallationsPinTheSelectedRelease(t *testing.T) {
 	for _, spec := range defaultCatalog {
@@ -27,7 +30,7 @@ func assertVersionPin(t *testing.T, spec harnessSpec) {
 
 	work, bin := t.TempDir(), t.TempDir()
 
-	commands, err := installationCommands(spec, version, work, bin)
+	commands, err := installationCommands(spec, version, testDependencyDate, work, bin)
 	if err != nil {
 		t.Fatalf("unexpected error generating commands for %s: %v", spec.ID, err)
 	}
@@ -82,7 +85,9 @@ func assertNPMPin(t *testing.T, spec harnessSpec, version string, commands []ins
 		t.Errorf("%s executable = %q, want npm", spec.ID, cmd.Name)
 	}
 
-	wantArgs := []string{"install", "--global", spec.Package + "@" + version}
+	wantArgs := []string{
+		"install", "--global", "--before=2026-03-04T05:06:07.5Z", spec.Package + "@" + version,
+	}
 	if !slices.Equal(cmd.Args, wantArgs) {
 		t.Errorf("%s args = %#v, want %#v", spec.ID, cmd.Args, wantArgs)
 	}
@@ -208,7 +213,13 @@ func assertPrimeChannelPin(
 func TestNativeReleaseInstallations(t *testing.T) {
 	work, bin := t.TempDir(), t.TempDir()
 
-	gooseCommands, err := installationCommands(testHarness(t, "goose"), "v1.2.3", work, bin)
+	gooseCommands, err := installationCommands(
+		testHarness(t, "goose"),
+		"v1.2.3",
+		time.Time{},
+		work,
+		bin,
+	)
 	if err != nil {
 		t.Fatalf("goose commands error: %v", err)
 	}
@@ -228,7 +239,13 @@ func TestNativeReleaseInstallations(t *testing.T) {
 		t.Errorf("goose env = %#v, want %#v", gooseRun.Env, wantEnv)
 	}
 
-	agyCommands, err := installationCommands(testHarness(t, "agy"), "1.2.3", work, bin)
+	agyCommands, err := installationCommands(
+		testHarness(t, "agy"),
+		"1.2.3",
+		time.Time{},
+		work,
+		bin,
+	)
 	if err != nil {
 		t.Fatalf("agy commands error: %v", err)
 	}
@@ -269,6 +286,7 @@ func TestInvalidInstallVersionRunsNothing(t *testing.T) {
 			if commands, err := installationCommands(
 				spec,
 				version,
+				testDependencyDate,
 				t.TempDir(),
 				t.TempDir(),
 			); err == nil ||

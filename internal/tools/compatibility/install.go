@@ -30,13 +30,14 @@ func (a application) install(ctx context.Context) error {
 	}
 
 	bin := filepath.Join(home, ".local", "bin")
+	version := a.getenv("AHT_COMPAT_VERSION")
 
-	commands, err := installationCommands(
-		spec,
-		a.getenv("AHT_COMPAT_VERSION"),
-		a.workDirectory(),
-		bin,
-	)
+	dependencyDate, err := a.dependencyDate(ctx, spec, version)
+	if err != nil {
+		return err
+	}
+
+	commands, err := installationCommands(spec, version, dependencyDate, a.workDirectory(), bin)
 	if err != nil {
 		return err
 	}
@@ -60,6 +61,22 @@ func (a application) install(ctx context.Context) error {
 	return nil
 }
 
+func (a application) dependencyDate(
+	ctx context.Context,
+	spec harnessSpec,
+	version string,
+) (time.Time, error) {
+	if spec.Source != harness.DistributionNPM || spec.Install != nil {
+		return time.Time{}, nil
+	}
+
+	if _, err := parseVersion(version); err != nil {
+		return time.Time{}, err
+	}
+
+	return a.releaseClient().npmDependencyDate(ctx, spec, version)
+}
+
 func (a application) execute(ctx context.Context, command installCommand) error {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -80,6 +97,7 @@ func (a application) execute(ctx context.Context, command installCommand) error 
 func installationCommands(
 	spec harnessSpec,
 	version string,
+	dependencyDate time.Time,
 	work string,
 	bin string,
 ) ([]installCommand, error) {
@@ -100,11 +118,24 @@ func installationCommands(
 
 	switch spec.Source {
 	case harness.DistributionNPM:
+		if dependencyDate.IsZero() {
+			return nil, fmt.Errorf(
+				"%w: npm install of %s needs a dependency date",
+				errCompatibility,
+				spec.ID,
+			)
+		}
+
 		return []installCommand{
 			{
 				Name: "npm",
-				Args: []string{"install", "--global", spec.Package + "@" + version},
-				Env:  nil,
+				Args: []string{
+					"install",
+					"--global",
+					"--before=" + dependencyDate.UTC().Format(time.RFC3339Nano),
+					spec.Package + "@" + version,
+				},
+				Env: nil,
 			},
 		}, nil
 	case harness.DistributionPyPI:

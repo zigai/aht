@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
 )
@@ -193,4 +194,94 @@ func testClient(server *httptest.Server) *releaseClient {
 	client.pypiBase = server.URL + "/pypi"
 
 	return client
+}
+
+func TestNPMDependencyDateCoversExactlyPinnedDependencies(t *testing.T) {
+	const release = `{"name":"@openai/codex","dependencies":{"ranged":"^1.0.0"},` +
+		`"optionalDependencies":{"@openai/codex-linux-x64":"npm:@openai/codex@1.2.3-linux-x64",` +
+		`"@openai/codex-darwin-x64":"npm:@openai/codex@1.2.3-darwin-x64","platform-helper":"4.5.6"}}`
+
+	tests := []struct {
+		name     string
+		manifest string
+		packages map[string]string
+		want     string
+		bad      bool
+	}{
+		{
+			name:     "latest exact pin wins",
+			manifest: release,
+			packages: map[string]string{
+				"@openai%2Fcodex": `{"versions":{"1.2.3":{"name":"@openai/codex"}},"time":{` +
+					`"1.2.3":"2026-01-02T03:00:00.000Z",` +
+					`"1.2.3-linux-x64":"2026-01-02T03:05:00.000Z",` +
+					`"1.2.3-darwin-x64":"2026-01-02T03:02:00.000Z"}}`,
+				"platform-helper": `{"time":{"4.5.6":"2026-01-02T03:04:00.000Z"}}`,
+			},
+			want: "2026-01-02T03:05:00Z",
+		},
+		{
+			name:     "release without publish time",
+			manifest: `{"name":"@openai/codex"}`,
+			packages: map[string]string{
+				"@openai%2Fcodex": `{"time":{"1.2.2":"2026-01-02T03:00:00.000Z"}}`,
+			},
+			bad: true,
+		},
+		{
+			name:     "exact pin without publish time",
+			manifest: `{"name":"@openai/codex","optionalDependencies":{"platform-helper":"4.5.6"}}`,
+			packages: map[string]string{
+				"@openai%2Fcodex": `{"time":{"1.2.3":"2026-01-02T03:00:00.000Z"}}`,
+				"platform-helper": `{"time":{}}`,
+			},
+			bad: true,
+		},
+		{
+			name:     "different package",
+			manifest: `{"name":"other"}`,
+			packages: map[string]string{
+				"@openai%2Fcodex": `{"time":{"1.2.3":"2026-01-02T03:00:00.000Z"}}`,
+			},
+			bad: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					path := strings.TrimPrefix(r.URL.EscapedPath(), "/npm/")
+					if path == "@openai%2Fcodex/1.2.3" {
+						_, _ = fmt.Fprint(w, tt.manifest)
+						return
+					}
+
+					body, ok := tt.packages[path]
+					if !ok {
+						http.NotFound(w, r)
+						return
+					}
+
+					_, _ = fmt.Fprint(w, body)
+				}),
+			)
+			t.Cleanup(server.Close)
+
+			date, err := testClient(
+				server,
+			).npmDependencyDate(t.Context(), testHarness(t, "codex"), "1.2.3")
+			if tt.bad {
+				if err == nil {
+					t.Fatalf("date = %s, want an error", date)
+				}
+
+				return
+			}
+
+			if err != nil || date.UTC().Format(time.RFC3339) != tt.want {
+				t.Fatalf("date = %s, %v; want %s", date, err, tt.want)
+			}
+		})
+	}
 }
