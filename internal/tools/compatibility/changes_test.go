@@ -222,38 +222,26 @@ func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 		name       string
 		path       string
 		successful map[string]checkedRelease
-		repository string
 		want       candidate
 		lookups    int32
-		warning    bool
 	}{
 		{
 			name:       "pins proven release",
 			path:       "internal/harness/codex/adapter.go",
 			successful: successful(codex, "1.2.0"),
-			repository: "owner/repo",
 			want:       candidate{Harness: "codex", Version: "1.2.0"},
 		},
 		{
 			name:       "pins replacement release",
 			path:       "internal/harness/kimi/adapter.go",
 			successful: successful(kimi, "2.1.1"),
-			repository: "owner/repo",
 			want:       candidate{Harness: "kimi-code", Version: "2.1.1"},
 		},
 		{
-			name:       "resolves without history",
-			path:       "internal/harness/codex/adapter.go",
-			repository: "owner/repo",
-			want:       candidate{Harness: "codex", Version: "1.2.3"},
-			lookups:    1,
-		},
-		{
-			name:    "resolves when state is unavailable",
+			name:    "resolves without history",
 			path:    "internal/harness/codex/adapter.go",
 			want:    candidate{Harness: "codex", Version: "1.2.3"},
 			lookups: 1,
-			warning: true,
 		},
 	}
 	for _, tc := range tests {
@@ -273,17 +261,17 @@ func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 				"AHT_COMPAT_HEAD":    head,
 				"AHT_COMPAT_WORK":    work,
 				"GITHUB_OUTPUT":      filepath.Join(work, "output"),
-				"GITHUB_REPOSITORY":  tc.repository,
+				"GITHUB_REPOSITORY":  "owner/repo",
 				"AHT_DEFAULT_BRANCH": "master",
 			}
 
-			var stdout, stderr bytes.Buffer
+			var stdout bytes.Buffer
 
 			app := application{
 				client: testClient(server),
 				getenv: func(key string) string { return env[key] },
 				stdout: &stdout,
-				stderr: &stderr,
+				stderr: io.Discard,
 			}
 			runTestCommand(t, app, "changes")
 
@@ -300,12 +288,6 @@ func TestChangesPinLastSuccessfulRelease(t *testing.T) {
 				t.Fatalf("release lookups = %d, want %d", lookups.Load(), tc.lookups)
 			}
 
-			if got := strings.Contains(
-				stderr.String(),
-				"warning: release state unavailable",
-			); got != tc.warning {
-				t.Fatalf("warning = %v, stderr = %q", got, stderr.String())
-			}
 			// Change checks only read release history; they never publish it.
 			if _, err := os.Stat(
 				filepath.Join(work, "state.json"),
@@ -454,7 +436,7 @@ func TestWeeklyChangesSkipReleaseState(t *testing.T) {
 	}
 }
 
-func TestChangesMetadataFailurePublishesNoSelection(t *testing.T) {
+func TestChangesFailWithoutReleaseState(t *testing.T) {
 	dir := changeRepository(t)
 	base := commitChange(t, dir, "README.md", "base")
 	head := commitChange(t, dir, "internal/harness/codex/adapter.go", "changed")
@@ -466,10 +448,58 @@ func TestChangesMetadataFailurePublishesNoSelection(t *testing.T) {
 	t.Cleanup(server.Close)
 	output := filepath.Join(t.TempDir(), "output")
 	env := map[string]string{
-		"GITHUB_EVENT_NAME": "push",
-		"AHT_COMPAT_BASE":   base,
-		"AHT_COMPAT_HEAD":   head,
-		"GITHUB_OUTPUT":     output,
+		"GITHUB_EVENT_NAME":  "push",
+		"AHT_COMPAT_BASE":    base,
+		"AHT_COMPAT_HEAD":    head,
+		"GITHUB_OUTPUT":      output,
+		"GITHUB_REPOSITORY":  "owner/repo",
+		"AHT_DEFAULT_BRANCH": "master",
+	}
+
+	var stdout bytes.Buffer
+
+	app := application{
+		client: testClient(server),
+		getenv: func(key string) string { return env[key] },
+		stdout: &stdout,
+		stderr: io.Discard,
+	}
+	if err := app.run(t.Context(), []string{"changes"}); err == nil {
+		t.Fatal("changes succeeded without release state")
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("published a change plan without release state: %s", stdout.String())
+	}
+
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published a selection without release state: %v", err)
+	}
+}
+
+func TestChangesMetadataFailurePublishesNoSelection(t *testing.T) {
+	dir := changeRepository(t)
+	base := commitChange(t, dir, "README.md", "base")
+	head := commitChange(t, dir, "internal/harness/codex/adapter.go", "changed")
+	t.Chdir(dir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/github/repos/owner/repo/actions/artifacts" {
+			_, _ = fmt.Fprint(w, `{"artifacts":[]}`)
+			return
+		}
+
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	output := filepath.Join(t.TempDir(), "output")
+	env := map[string]string{
+		"GITHUB_EVENT_NAME":  "push",
+		"AHT_COMPAT_BASE":    base,
+		"AHT_COMPAT_HEAD":    head,
+		"GITHUB_OUTPUT":      output,
+		"GITHUB_REPOSITORY":  "owner/repo",
+		"AHT_DEFAULT_BRANCH": "master",
 	}
 
 	var stdout bytes.Buffer

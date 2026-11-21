@@ -187,37 +187,21 @@ func (a application) changes(ctx context.Context) error {
 		}
 
 		if state == nil {
-			restored := a.knownGoodState(ctx)
+			restored, err := a.restore(ctx)
+			if err != nil {
+				return err
+			}
+
 			state = &restored
 		}
-		// Test changes against the newest release the scheduled workflow proved,
-		// so upstream releases cannot turn a change check red on their own.
-		version, ok, err := knownGood(spec, *state)
+
+		selected, err := changeRelease(ctx, spec, *state, client.supported)
 		if err != nil {
 			return err
 		}
 
-		if ok {
-			plan.Matrix.Include = append(
-				plan.Matrix.Include,
-				candidate{Harness: id, Version: version},
-			)
-			plan.Observations = append(
-				plan.Observations,
-				observation{Harness: id, Version: version, Error: "", Selected: true},
-			)
-
-			continue
-		}
-		// Without proven history, resolve each selected distribution once and
-		// pin the host job to the current supported release.
-		resolved, err := detect(ctx, emptyState(), id, false, everyHarness, client.supported)
-		if err != nil {
-			return err
-		}
-
-		plan.Matrix.Include = append(plan.Matrix.Include, resolved.Matrix.Include...)
-		plan.Observations = append(plan.Observations, resolved.Observations...)
+		plan.Matrix.Include = append(plan.Matrix.Include, selected.Matrix.Include...)
+		plan.Observations = append(plan.Observations, selected.Observations...)
 	}
 
 	if err := json.NewEncoder(a.stdout).Encode(plan); err != nil {
@@ -238,22 +222,32 @@ func (a application) changes(ctx context.Context) error {
 	return a.output("selected", len(plan.Matrix.Include) > 0)
 }
 
-// knownGoodState reads the scheduled workflow's history without writing it. An
-// unavailable history only loses pinning, so change checks fall back to the
-// current supported releases instead of failing.
-func (a application) knownGoodState(ctx context.Context) releaseState {
-	state, err := a.restore(ctx)
+// changeRelease picks the release a change check tests for spec. Changes run
+// against the newest release the scheduled workflow proved, so upstream
+// releases cannot turn a change check red on their own.
+func changeRelease(
+	ctx context.Context,
+	spec harnessSpec,
+	state releaseState,
+	supported func(context.Context, harnessSpec) (string, error),
+) (releasePlan, error) {
+	version, ok, err := knownGood(spec, state)
 	if err != nil {
-		_, _ = fmt.Fprintf(
-			a.stderr,
-			"warning: release state unavailable; using current supported releases: %v\n",
-			err,
-		)
-
-		return emptyState()
+		return releasePlan{}, err
 	}
 
-	return state
+	if ok {
+		return releasePlan{
+			Matrix: matrix{Include: []candidate{{Harness: spec.ID, Version: version}}},
+			Observations: []observation{
+				{Harness: spec.ID, Version: version, Error: "", Selected: true},
+			},
+			Unreleased: nil,
+		}, nil
+	}
+	// A harness the scheduled workflow has not proven yet runs against its
+	// current supported release.
+	return detect(ctx, emptyState(), spec.ID, false, everyHarness, supported)
 }
 
 // knownGood returns the newest successful release for spec, capped at its
