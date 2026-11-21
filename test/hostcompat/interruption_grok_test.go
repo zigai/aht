@@ -174,16 +174,13 @@ func waitForGrokExit(t *testing.T, pane gotmux.Pane) {
 			t.Fatal(err)
 		}
 
+		// Older tmux reports a pane dead once its pty closes, before it reaps
+		// the process and sets pane_dead_status. A process killed by a signal
+		// never gets a status, so it fails at the deadline.
 		status, known := state.DeadStatus.Get()
-		if state.Dead {
-			if known && status != 0 {
+		if state.Dead && known {
+			if status != 0 {
 				t.Fatalf("native Grok quit with status %d", status)
-			}
-			// The CI pane displayed status 0 while pane_dead_status was
-			// unavailable. The caller still requires SessionEnd and gone
-			// presence, so a terminated process alone cannot pass.
-			if !known {
-				t.Log("native Grok pane has no reported exit status; checking SessionEnd")
 			}
 
 			return
@@ -191,7 +188,7 @@ func waitForGrokExit(t *testing.T, pane gotmux.Pane) {
 
 		if time.Now().After(deadline) {
 			t.Fatalf(
-				"native Grok did not quit within 15s: dead=%t status=%v",
+				"native Grok did not exit with a status within 15s: dead=%t status=%v",
 				state.Dead,
 				state.DeadStatus,
 			)
