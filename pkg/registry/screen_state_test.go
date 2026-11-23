@@ -474,3 +474,93 @@ func TestTerminalRecordAndHookReportOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestClearedTerminalRecordDropsStaleActivity(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		authority Authority
+		reporter  string
+		activity  Activity
+		decision  Authority
+	}{
+		{
+			name:      "screen primary",
+			authority: AuthorityScreen,
+			reporter:  "secondary-extension",
+			activity:  ActivityUnknown,
+			decision:  AuthorityTerminal,
+		},
+		{
+			name:      "hook primary with a matching report",
+			authority: AuthorityHook,
+			reporter:  "secondary-extension",
+			activity:  ActivityIdle,
+			decision:  AuthorityHook,
+		},
+		{
+			name:      "hook primary without a matching report",
+			authority: AuthorityHook,
+			reporter:  "foreign-extension",
+			activity:  ActivityUnknown,
+			decision:  AuthorityTerminal,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := NewJournal(t.TempDir()+"/state.json", fixtureRules{authority: test.authority})
+			at := time.Date(2026, 8, 12, 6, 0, 0, 0, time.UTC)
+			process := ProcessIdentity{PID: 172, StartIdentity: "boot:172", Executable: "secondary"}
+			presence := PresenceLive
+			idle := ActivityIdle
+			observe := func(evidence Evidence) Session {
+				t.Helper()
+
+				at = at.Add(time.Second)
+
+				session, err := store.Observe(context.Background(), Observation{
+					Harness:  harnessSecondary,
+					At:       at,
+					Subject:  ObservationIdentity{SessionID: "cleared-record"},
+					Evidence: evidence,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return session
+			}
+			terminal := func(activity Activity, reason string) Evidence {
+				return (*Reading)(&ScreenObservation{
+					Activity:   activity,
+					Authority:  AuthorityTerminal,
+					Reason:     reason,
+					Process:    process,
+					ObservedAt: at.Add(time.Second),
+				})
+			}
+
+			observe(&Report{
+				Reporter: Reporter{Integration: test.reporter},
+				Event:    "session_start",
+				Claim:    &presence,
+				Activity: &idle,
+				Process:  &process,
+			})
+
+			session := observe(terminal(ActivityRunning, "program_status"))
+			if session.Activity() == nil || *session.Activity() != ActivityRunning {
+				t.Fatalf("activity = %v, want running from the record", session.Activity())
+			}
+
+			session = observe(terminal(ActivityUnknown, "program_status_cleared"))
+			if session.Activity() == nil || *session.Activity() != test.activity ||
+				session.Decision() == nil || session.Decision().Authority != test.decision {
+				t.Fatalf("activity = %v by %#v, want %s by %s",
+					session.Activity(), session.Decision(), test.activity, test.decision)
+			}
+		})
+	}
+}

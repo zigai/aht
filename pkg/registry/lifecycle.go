@@ -418,9 +418,14 @@ func (m lifecycleMachine) reading(policy Policy, at time.Time) {
 	}
 
 	authority, _ := ActivityAuthority(*m.session, policy, at)
+	if screen.Authority == AuthorityTerminal && screen.Activity == ActivityUnknown {
+		m.clearedTerminal(*screen, policy, authority, at)
+		return
+	}
+
 	if screen.Authority == AuthorityTerminal && authority == AuthorityHook {
-		// The record was cleared or a held turn outranks it, so the hook's
-		// last report is the state again.
+		// A held turn outranks the record, so the hook's last report is the
+		// state again.
 		if native, _, ok := matchingHookObservation(*m.session, policy); ok {
 			m.hookActivity(native.Event, at)
 		}
@@ -433,6 +438,27 @@ func (m lifecycleMachine) reading(policy Policy, at time.Time) {
 	}
 
 	m.session.setActivity(new(screen.Activity))
+	m.session.setDecision(&ActivityDecision{
+		Authority: screen.Authority, Reason: screen.Reason, RuleID: screen.RuleID,
+		ManifestSource: screen.ManifestSource, ManifestVersion: screen.ManifestVersion,
+		FallbackReason: screen.FallbackReason, Process: screen.Process, ObservedAt: at,
+	})
+}
+
+func (m lifecycleMachine) clearedTerminal(
+	screen ScreenObservation,
+	policy Policy,
+	authority Authority,
+	at time.Time,
+) {
+	if authority == AuthorityHook {
+		if native, _, ok := matchingHookObservation(*m.session, policy); ok {
+			m.hookActivity(native.Event, at)
+			return
+		}
+	}
+
+	m.session.setActivity(new(ActivityUnknown))
 	m.session.setDecision(&ActivityDecision{
 		Authority: screen.Authority, Reason: screen.Reason, RuleID: screen.RuleID,
 		ManifestSource: screen.ManifestSource, ManifestVersion: screen.ManifestVersion,
