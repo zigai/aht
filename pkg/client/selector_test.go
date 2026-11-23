@@ -253,10 +253,7 @@ func TestSelectorPathNormalizationAndSubtree(t *testing.T) {
 func TestClientResolveDurableMode(t *testing.T) {
 	t.Parallel()
 
-	storePath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	storePath := shortStatePath(t)
 
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)
@@ -286,10 +283,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 	t.Parallel()
 
-	storePath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	storePath := shortStatePath(t)
 
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)

@@ -89,10 +89,7 @@ func errorContractBroker(
 	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 
-	socketPath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	socketPath := shortStatePath(t)
 
 	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {

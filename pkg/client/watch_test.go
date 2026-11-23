@@ -13,15 +13,9 @@ import (
 func TestAutoWatchReturnsToBrokerAfterOutage(t *testing.T) {
 	t.Parallel()
 
-	storePath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	storePath := shortStatePath(t)
 
-	socketPath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	socketPath := shortStatePath(t)
 
 	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
 	if err != nil {

@@ -3,7 +3,6 @@ package client_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,10 +102,7 @@ func TestClientDurableOnlyBypassesBroker(t *testing.T) {
 func TestClientWatchYieldsRealtimeRevisions(t *testing.T) {
 	t.Parallel()
 
-	storePath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	storePath := shortStatePath(t)
 
 	t.Cleanup(func() {
 		_ = os.Remove(storePath)
@@ -201,22 +197,20 @@ func runningObservation(sessionID string) registry.Observation {
 }
 
 // shortStatePath keeps the derived broker socket below Darwin's Unix socket path limit.
-func shortStatePath() (string, error) {
-	stateFile, err := os.CreateTemp("", "aht-client-*.json")
+func shortStatePath(t *testing.T) string {
+	t.Helper()
+
+	directory, err := os.MkdirTemp( //nolint:usetesting // Unix socket paths require a short temporary root.
+		"",
+		"aht-client-",
+	)
 	if err != nil {
-		return "", fmt.Errorf("creating temporary state path: %w", err)
+		t.Fatal(err)
 	}
 
-	path := stateFile.Name()
-	if err := stateFile.Close(); err != nil {
-		return "", fmt.Errorf("closing temporary state file: %w", err)
-	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
 
-	if err := os.Remove(path); err != nil {
-		return "", fmt.Errorf("removing temporary state file: %w", err)
-	}
-
-	return path, nil
+	return filepath.Join(directory, "state.json")
 }
 
 func TestClientSummaryModesParity(t *testing.T) {
@@ -225,10 +219,7 @@ func TestClientSummaryModesParity(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	storePath, err := shortStatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	storePath := shortStatePath(t)
 
 	t.Cleanup(func() { _ = os.Remove(storePath) })
 
