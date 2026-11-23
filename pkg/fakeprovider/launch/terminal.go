@@ -174,7 +174,7 @@ func (t *Terminal) start(ctx context.Context, argv []string, dir string, size go
 	}
 
 	t.pane = panes[0].Handle()
-	if err := t.pane.Options().SetRemainOnExit(ctx, gotmux.RemainOn); err != nil {
+	if err := t.pane.Options().SetRemainOnExit(ctx, gotmux.RemainOnExitOn); err != nil {
 		return fmt.Errorf("keep terminal pane after exit: %w", err)
 	}
 
