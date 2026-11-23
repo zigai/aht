@@ -151,19 +151,46 @@ func removeRegisteredPlugin(
 		)
 	}
 
+	var unregister func() error
 	if registered {
-		if err := registration.Remove(ctx, plan.Dir); err != nil {
-			return Result{}, fmt.Errorf("removing %s registration: %w", registration.ID(), err)
+		unregister = func() error {
+			if err := registration.Remove(ctx, plan.Dir); err != nil {
+				return fmt.Errorf("removing %s registration: %w", registration.ID(), err)
+			}
+
+			return nil
+		}
+	}
+
+	if err := removeRegisteredPluginFiles(plan, exists, unregister); err != nil {
+		return Result{}, err
+	}
+
+	return removeResult(harnessID, plan.Dir, true, false), nil
+}
+
+func removeRegisteredPluginFiles(
+	plan harnesspkg.PluginDirectoryInstallPlan,
+	exists bool,
+	unregister func() error,
+) error {
+	if plan.StageRemoval {
+		return applyPluginRemoval(plan, exists, unregister, nil)
+	}
+
+	if unregister != nil {
+		if err := unregister(); err != nil {
+			return err
 		}
 	}
 
 	if exists {
 		if err := os.RemoveAll(plan.Dir); err != nil {
-			return Result{}, fmt.Errorf("removing managed plugin %s: %w", plan.Dir, err)
+			return fmt.Errorf("removing managed plugin %s: %w", plan.Dir, err)
 		}
 	}
 
-	return removeResult(harnessID, plan.Dir, true, false), nil
+	return nil
 }
 
 func inspectRegistration(
@@ -203,7 +230,7 @@ func registeredPluginMissingMarker(
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	dir string,
 ) (bool, error) {
-	if plan.Registration == nil {
+	if plan.Registration == nil || plan.RequireMarker {
 		return false, nil
 	}
 

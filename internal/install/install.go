@@ -18,6 +18,7 @@ const (
 
 var (
 	errUnsupportedHarness = errors.New("unsupported harness")
+	errShimUnsupported    = errors.New("shim is not supported")
 	errForeignFile        = errors.New("file exists and is not managed by aht")
 	errBinaryEncoding     = errors.New("aht binary path is not valid UTF-8")
 	errManagedBlockMarker = errors.New("managed block markers are not paired")

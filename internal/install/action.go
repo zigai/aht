@@ -2,6 +2,9 @@ package install
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -35,8 +38,75 @@ type (
 	}
 )
 
-// handlerFor reports false for actions that install nothing themselves, such
-// as the shim fallback.
+func runNativeActions(
+	ctx context.Context,
+	opts Options,
+	plan harnesspkg.InstallPlan,
+	run func(actionHandler) (Result, error),
+) (Result, error) {
+	var (
+		result   Result
+		failures []error
+	)
+
+	found := false
+
+	for _, action := range plan.Actions {
+		handler, ok := handlerFor(action)
+		if !ok {
+			continue
+		}
+
+		found = true
+
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+
+		item, err := run(handler)
+		mergeActionResult(&result, item)
+
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+
+	if !found {
+		return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
+	}
+
+	return result, errors.Join(failures...)
+}
+
+func mergeActionResult(result *Result, item Result) {
+	if result.Harness == "" {
+		result.Harness = item.Harness
+	}
+
+	if result.Path == "" {
+		result.Path = item.Path
+	}
+
+	result.Changed = result.Changed || item.Changed
+	result.Message = joinActionText(result.Message, item.Message)
+	result.NextStep = joinActionText(result.NextStep, item.NextStep)
+	result.Snippet = joinActionText(result.Snippet, item.Snippet)
+	result.Error = joinActionText(result.Error, item.Error)
+}
+
+func joinActionText(first string, next string) string {
+	if first == "" {
+		return next
+	}
+
+	if next == "" || first == next {
+		return first
+	}
+
+	return first + "\n" + next
+}
+
 func handlerFor(action harnesspkg.InstallAction) (actionHandler, bool) {
 	switch typed := action.(type) {
 	case harnesspkg.JSONCommandHooksAction:
@@ -188,11 +258,13 @@ func (handler pluginDirectoryHandler) inspect(
 }
 
 func (handler pluginDirectoryHandler) paths() []string {
-	if handler.plan.ImportManifest != nil {
-		return []string{handler.plan.Dir, handler.plan.ImportManifest.Path}
+	paths := []string{handler.plan.Dir}
+	if registration := handler.plan.Registration; registration != nil &&
+		filepath.IsAbs(registration.Label()) {
+		paths = append(paths, registration.Label())
 	}
 
-	return []string{handler.plan.Dir}
+	return paths
 }
 
 func (handler nativeCatalogHandler) install(

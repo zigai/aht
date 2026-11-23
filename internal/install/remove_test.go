@@ -390,17 +390,13 @@ func TestPluginRemovalRollsBackDirectoryWhenManifestWriteFails(t *testing.T) {
 
 	plan := harnesspkg.PluginDirectoryInstallPlan{
 		Dir: pluginDir,
-		ImportManifest: &harnesspkg.ImportManifestInstallPlan{
-			Path: manifestPath,
-		},
 	}
 
-	err := applyPluginRemovalWithWriter(
+	err := applyPluginRemoval(
 		plan,
 		true,
-		true,
-		importManifest{Imports: nil},
-		func(string, importManifest) error { return errTestManifestWrite },
+		func() error { return errTestManifestWrite },
+		nil,
 	)
 	if !errors.Is(err, errTestManifestWrite) {
 		t.Fatalf("plugin removal error = %v, want injected manifest failure", err)
@@ -451,9 +447,6 @@ func setupPluginRemovalTestDir(
 
 	plan := harnesspkg.PluginDirectoryInstallPlan{
 		Dir: pluginDir,
-		ImportManifest: &harnesspkg.ImportManifestInstallPlan{
-			Path: manifestPath,
-		},
 	}
 
 	return manifestPath, originalManifest, plan
@@ -461,15 +454,12 @@ func setupPluginRemovalTestDir(
 
 func testRemovalSyncFailure(t *testing.T) {
 	manifestPath, originalManifest, plan := setupPluginRemovalTestDir(t)
-	updatedManifest := importManifest{Imports: []importEntry{}}
 
-	err := applyPluginRemovalWithFinalizer(
+	err := applyPluginRemoval(
 		plan,
 		true,
-		true,
-		updatedManifest,
-		func(path string, m importManifest) error {
-			return os.WriteFile(path, []byte("{\"imports\":[]}\n"), 0o600)
+		func() error {
+			return os.WriteFile(manifestPath, []byte("{\"imports\":[]}\n"), 0o600)
 		},
 		func(parent, backup string, backupExists bool) error {
 			if backupExists {
@@ -495,17 +485,14 @@ func testRemovalSyncFailure(t *testing.T) {
 
 func testRemovalBackupFailure(t *testing.T) {
 	manifestPath, originalManifest, plan := setupPluginRemovalTestDir(t)
-	updatedManifest := importManifest{Imports: []importEntry{}}
 
 	var retainedBackup string
 
-	err := applyPluginRemovalWithFinalizer(
+	err := applyPluginRemoval(
 		plan,
 		true,
-		true,
-		updatedManifest,
-		func(path string, m importManifest) error {
-			return os.WriteFile(path, []byte("{\"imports\":[]}\n"), 0o600)
+		func() error {
+			return os.WriteFile(manifestPath, []byte("{\"imports\":[]}\n"), 0o600)
 		},
 		func(parent, backup string, backupExists bool) error {
 			retainedBackup = backup

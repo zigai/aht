@@ -34,7 +34,7 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 
 	shimPath := filepath.Join(registry.DefaultStateDir(), "shims", string(opts.Harness))
 
-	shimStatus, err := classifyShimArtifact(shimPath, opts.Harness)
+	shimStatus, err := classifyShimArtifact(shimPath, opts.Harness, "")
 	if err != nil {
 		return Result{}, err
 	}
@@ -70,13 +70,9 @@ func removeNativeIntegration(
 	opts Options,
 	plan harnesspkg.InstallPlan,
 ) (Result, error) {
-	for _, action := range plan.Actions {
-		if handler, ok := handlerFor(action); ok {
-			return handler.remove(ctx, opts, opts.Harness)
-		}
-	}
-
-	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
+	return runNativeActions(ctx, opts, plan, func(handler actionHandler) (Result, error) {
+		return handler.remove(ctx, opts, opts.Harness)
+	})
 }
 
 func removeOwnedShim(path string, dryRun bool, status ArtifactStatus) (bool, error) {
@@ -364,72 +360,13 @@ func removePluginDirectory(
 		return removeRegisteredPlugin(ctx, opts, harnessID, plan, exists)
 	}
 
-	manifest, manifestChanged, err := pluginRemovalManifest(plan)
-	if err != nil {
-		return Result{}, err
-	}
-
-	changed := exists || manifestChanged
-	if changed && !opts.DryRun {
-		if err := applyPluginRemoval(plan, exists, manifestChanged, manifest); err != nil {
+	if exists && !opts.DryRun {
+		if err := applyPluginRemoval(plan, true, nil, nil); err != nil {
 			return Result{}, err
 		}
 	}
 
-	return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
-}
-
-func pluginRemovalManifest(
-	plan harnesspkg.PluginDirectoryInstallPlan,
-) (importManifest, bool, error) {
-	if plan.ImportManifest == nil {
-		return importManifest{}, false, nil
-	}
-
-	manifest, err := readImportManifest(plan.ImportManifest.Path)
-	if err != nil {
-		return importManifest{}, false, err
-	}
-
-	manifest, changed := removeImport(manifest, plan.ImportManifest.Name)
-
-	return manifest, changed, nil
-}
-
-func applyPluginRemoval(
-	plan harnesspkg.PluginDirectoryInstallPlan,
-	exists bool,
-	manifestChanged bool,
-	manifest importManifest,
-) error {
-	return applyPluginRemovalWithWriter(
-		plan,
-		exists,
-		manifestChanged,
-		manifest,
-		writeImportManifest,
-	)
-}
-
-func applyPluginRemovalWithWriter(
-	plan harnesspkg.PluginDirectoryInstallPlan,
-	exists bool,
-	manifestChanged bool,
-	manifest importManifest,
-	writeManifest func(string, importManifest) error,
-) error {
-	return applyPluginRemovalWithFinalizer(
-		plan,
-		exists,
-		manifestChanged,
-		manifest,
-		writeManifest,
-		nil,
-	)
-}
-
-func shouldUpdateManifest(plan harnesspkg.PluginDirectoryInstallPlan, manifestChanged bool) bool {
-	return plan.ImportManifest != nil && manifestChanged
+	return removeResult(harnessID, plan.Dir, exists, opts.DryRun), nil
 }
 
 func preparePluginRemoval(
@@ -458,73 +395,38 @@ func preparePluginRemoval(
 	return rollbackPlugin, finalizePlugin, nil
 }
 
-func applyPluginRemovalWithFinalizer(
+func applyPluginRemoval(
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	exists bool,
-	manifestChanged bool,
-	manifest importManifest,
-	writeManifest func(string, importManifest) error,
+	unregister func() error,
 	finalizer func(parent string, backup string, backupExists bool) error,
 ) error {
-	var rollbackManifest func() error
-
-	if shouldUpdateManifest(plan, manifestChanged) {
-		var err error
-
-		rollbackManifest, err = prepareImportManifestRollback(plan.ImportManifest.Path)
-		if err != nil {
-			return err
-		}
-	}
-
-	var (
-		rollbackPlugin func() error
-		finalizePlugin func() error
-	)
+	var rollback, finalize func() error
 
 	if exists {
 		var err error
 
-		rollbackPlugin, finalizePlugin, err = preparePluginRemoval(plan, finalizer)
+		rollback, finalize, err = preparePluginRemoval(plan, finalizer)
 		if err != nil {
 			return err
 		}
 	}
 
-	if shouldUpdateManifest(plan, manifestChanged) {
-		if err := writeManifest(plan.ImportManifest.Path, manifest); err != nil {
-			return rollbackPluginDirectoryAndManifest(rollbackPlugin, rollbackManifest, err)
+	if unregister != nil {
+		if err := unregister(); err != nil {
+			return rollbackPluginDirectory(rollback, err)
 		}
 	}
 
-	if finalizePlugin == nil {
+	if finalize == nil {
 		return nil
 	}
-	// Irreversible commit boundary: pre-commit operations succeeded.
-	// Finalization failures do not restore prior manifest to avoid dangling imports.
-	if err := finalizePlugin(); err != nil {
+
+	if err := finalize(); err != nil {
 		return fmt.Errorf("finalizing plugin removal: %w", err)
 	}
 
 	return nil
-}
-
-func removeImport(manifest importManifest, name string) (importManifest, bool) {
-	next := make([]importEntry, 0, len(manifest.Imports))
-	removed := false
-
-	for _, item := range manifest.Imports {
-		if item.name() == name {
-			removed = true
-			continue
-		}
-
-		next = append(next, item)
-	}
-
-	manifest.Imports = next
-
-	return manifest, removed
 }
 
 func removeResult(harnessID registry.Harness, path string, changed bool, dryRun bool) Result {

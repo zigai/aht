@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"unicode/utf8"
 
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
@@ -73,7 +72,11 @@ func Inspect(
 
 	nativeStatus := result.Status
 
-	result, err = mergeShimStatus(result, shimPath)
+	if binary == "" {
+		binary = defaultBinary
+	}
+
+	result, err = mergeShimStatus(result, shimPath, binary)
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
@@ -179,8 +182,12 @@ func markDesiredIntegrationState(
 	return nil
 }
 
-func mergeShimStatus(result IntegrationStatus, path string) (IntegrationStatus, error) {
-	status, err := classifyShimArtifact(path, result.Harness)
+func mergeShimStatus(
+	result IntegrationStatus,
+	path string,
+	binary string,
+) (IntegrationStatus, error) {
+	status, err := classifyShimArtifact(path, result.Harness, binary)
 	if err != nil {
 		return IntegrationStatus{}, err
 	}
@@ -193,6 +200,8 @@ func mergeShimStatus(result IntegrationStatus, path string) (IntegrationStatus, 
 	if result.Status == ArtifactMissing && (status == ArtifactCurrent || status == ArtifactStale) {
 		result.Status = status
 		result.Message = "shim fallback is " + string(status)
+	} else if result.Status == ArtifactCurrent && status == ArtifactStale {
+		result.Status, result.Message = status, "stale shim fallback at "+path
 	}
 
 	return result, nil
@@ -263,7 +272,7 @@ func inspectPluginAction(
 			return nil, inspectErr
 		}
 
-		return append(result, registration), nil
+		result = append(result, registration)
 	}
 
 	retired, err := inspectRetiredPlugins(plan, harnessID)
@@ -271,17 +280,7 @@ func inspectPluginAction(
 		return nil, err
 	}
 
-	result = append(result, retired...)
-	if plan.ImportManifest == nil {
-		return result, nil
-	}
-
-	artifact, err := inspectPluginImportManifest(plan.ImportManifest)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(result, artifact), nil
+	return append(result, retired...), nil
 }
 
 // inspectRetiredPlugins reports managed plugins at former locations as stale
@@ -375,36 +374,4 @@ func inspectPluginFiles(
 	}
 
 	return result, nil
-}
-
-func inspectPluginImportManifest(
-	plan *harnesspkg.ImportManifestInstallPlan,
-) (inspectedArtifact, error) {
-	manifest, err := readImportManifest(plan.Path)
-	if err != nil {
-		return inspectedArtifact{}, err
-	}
-
-	status := ArtifactMissing
-
-	for _, entry := range manifest.Imports {
-		if entry.name() != plan.Name {
-			continue
-		}
-
-		status = ArtifactCurrent
-		if entry.source() != plan.Source {
-			status = ArtifactStale
-		}
-
-		for _, component := range plan.Components {
-			if !slices.Contains(entry.components(), component) {
-				status = ArtifactStale
-			}
-		}
-
-		break
-	}
-
-	return inspectedArtifact{path: plan.Path, status: status}, nil
 }

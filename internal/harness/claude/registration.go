@@ -48,17 +48,15 @@ func (registration registration) Inspect(
 	plugins, _ := config["enabledPlugins"].(map[string]any)
 
 	entry, declared := marketplaces[marketplaceName]
-	hasCommandHooks := stripCommandHooks(config)
-
 	switch {
 	case declared && !isOwnMarketplace(entry, pluginDir):
 		return harness.PluginRegistrationForeign, nil
-	case hasCommandHooks:
+	case plugins[pluginID] == false:
+		return harness.PluginRegistrationDisabled, nil
+	case stripCommandHooks(config):
 		return harness.PluginRegistrationStale, nil
 	case !declared:
 		return harness.PluginRegistrationMissing, nil
-	case plugins[pluginID] == false:
-		return harness.PluginRegistrationDisabled, nil
 	case plugins[pluginID] != true:
 		return harness.PluginRegistrationStale, nil
 	default:
@@ -317,18 +315,30 @@ func writeSettings(path string, config map[string]any) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-
 	if info, err := os.Stat(path); err == nil {
-		if err := os.Chmod(temp.Name(), info.Mode().Perm()); err != nil {
+		if err := temp.Chmod(info.Mode().Perm()); err != nil {
+			_ = temp.Close()
+
 			return fmt.Errorf("writing %s: %w", path, err)
 		}
 	}
 
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+
+		return fmt.Errorf("syncing %s: %w", path, err)
+	}
+
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+
 	if err := os.Rename(temp.Name(), path); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
+	}
+
+	if err := harness.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("syncing settings directory for %s: %w", path, err)
 	}
 
 	return nil

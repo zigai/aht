@@ -78,17 +78,20 @@ func (adapter agyHarness) InstallPlan(binary string) (harness.InstallPlan, error
 					{Name: "plugin.json", JSONContent: map[string]any{"name": agyPluginName}},
 					{Name: "hooks.json", JSONContent: agyHookConfig(binary, definition.ID)},
 				},
-				Identity:       definition.Identity(),
-				ImportManifest: agyImportManifest(configDir),
-				Retired:        []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
+				Identity:         definition.Identity(),
+				Registration:     agyImportRegistration(configDir),
+				RequireMarker:    true,
+				StageRemoval:     true,
+				UpgradeRegisters: true,
+				Retired:          []harness.PluginDirectoryInstallPlan{agyRetiredPlugin()},
 			}},
 			harness.ShimAction{},
 		},
 	}, nil
 }
 
-func agyImportManifest(dir string) *harness.ImportManifestInstallPlan {
-	return &harness.ImportManifestInstallPlan{
+func agyImportRegistration(dir string) importRegistration {
+	return importRegistration{
 		Path:       filepath.Join(dir, agyImportManifestName),
 		Name:       agyPluginName,
 		Source:     agyImportSource,
@@ -96,15 +99,15 @@ func agyImportManifest(dir string) *harness.ImportManifestInstallPlan {
 	}
 }
 
-// agyRetiredPlugin describes where earlier integration versions installed the
-// plugin, before agy moved plugin discovery to the shared config directory.
 func agyRetiredPlugin() harness.PluginDirectoryInstallPlan {
 	dir := agyApplicationDir()
 
 	return harness.PluginDirectoryInstallPlan{
-		Dir:            filepath.Join(dir, "plugins", agyPluginName),
-		Label:          "agy plugin",
-		ImportManifest: agyImportManifest(dir),
+		Dir:           filepath.Join(dir, "plugins", agyPluginName),
+		Label:         "agy plugin",
+		Registration:  agyImportRegistration(dir),
+		RequireMarker: true,
+		StageRemoval:  true,
 	}
 }
 

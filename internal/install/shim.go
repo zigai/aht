@@ -20,7 +20,12 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 	dir := filepath.Join(registry.DefaultStateDir(), "shims")
 	path := filepath.Join(dir, string(harness))
 
-	target, err := resolveShimTarget(opts.TargetBinary, string(harness), dir, path)
+	executable := string(harness)
+	if names := catalog.ProcessNames(harness); len(names) > 0 && names[0] != "" {
+		executable = names[0]
+	}
+
+	target, err := resolveShimTarget(opts.TargetBinary, executable, dir, path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -80,7 +85,7 @@ func shimContentNeedsUpdate(
 	id registry.Harness,
 	force bool,
 ) (bool, error) {
-	status, err := classifyShimArtifact(path, id)
+	status, err := classifyShimArtifact(path, id, "")
 	if err != nil {
 		return false, err
 	}
@@ -94,7 +99,7 @@ func shimContentNeedsUpdate(
 
 func writeShimChanges(path string, script string, contentChanged bool) error {
 	if contentChanged {
-		return writeFileAtomicMode(
+		return harnesspkg.WriteFileAtomicMode(
 			path,
 			[]byte(script),
 			shimFileMode,
@@ -123,12 +128,22 @@ func shimModeNeedsUpdate(path string) (bool, error) {
 	return info.Mode().Perm() != shimFileMode, nil
 }
 
-func classifyShimArtifact(path string, harness registry.Harness) (ArtifactStatus, error) {
+func classifyShimArtifact(
+	path string,
+	harness registry.Harness,
+	binary string,
+) (ArtifactStatus, error) {
 	status, err := classifyArtifactWith(path, func(content string) ArtifactStatus {
-		return classifyExpectedIdentity(
+		status := classifyExpectedIdentity(
 			content,
 			shimIdentity(harness, catalog.IntegrationVersionFor(harness)),
 		)
+		if status == ArtifactCurrent && binary != "" &&
+			!strings.Contains(content, "\naht_bin="+harnesspkg.ShellQuote(binary)+"\n") {
+			return ArtifactStale
+		}
+
+		return status
 	})
 	if err != nil || status != ArtifactCurrent {
 		return status, err

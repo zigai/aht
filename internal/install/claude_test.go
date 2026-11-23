@@ -396,10 +396,24 @@ func TestClaudeRepairsDisabledPlugin(t *testing.T) {
 
 	settings := readClaudeSettings(t, dir)
 	claudeObject(t, settings["enabledPlugins"], "enabledPlugins")[claudePluginID] = false
+	settings["hooks"] = map[string]any{
+		"SessionStart": []any{
+			commandHookGroup("", claudeLegacyBinary+" --json hook claude --event SessionStart"),
+		},
+	}
 	writeClaudeSettings(t, dir, settings)
 
 	if status := claudeStatus(t); status != ArtifactDisabled {
 		t.Fatalf("status of disabled plugin = %s, want disabled", status)
+	}
+
+	if result := upgradeClaude(t, false); result.Changed {
+		t.Fatalf("upgrade changed disabled registration: %+v", result)
+	}
+
+	plugins := claudeObject(t, readClaudeSettings(t, dir)["enabledPlugins"], "enabledPlugins")
+	if got := plugins[claudePluginID]; got != false {
+		t.Fatalf("plugin enabled after upgrade = %#v, want false", got)
 	}
 
 	if !installClaude(t, Options{}).Changed {

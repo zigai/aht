@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/shlex"
 	"github.com/pelletier/go-toml/v2"
@@ -27,31 +25,22 @@ func installHarnessAdapter(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	if action, native := plan.NativeCatalog(); native {
-		return noInstallRequiredResult(opts.Harness, action.Label), nil
-	}
+	if opts.UseShim {
+		if !installPlanHasShim(plan) {
+			return Result{}, fmt.Errorf("%w: %q", errShimUnsupported, opts.Harness)
+		}
 
-	if opts.UseShim && installPlanHasShim(plan) {
 		return installShim(opts, opts.Harness)
 	}
 
-	for _, action := range plan.Actions {
-		handler, ok := handlerFor(action)
-		if !ok {
-			continue
-		}
-
-		result, err := handler.install(ctx, opts, opts.Harness)
-		if err == nil {
-			if advisor != nil {
-				result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
-			}
-		}
-
-		return result, err
+	result, err := runNativeActions(ctx, opts, plan, func(handler actionHandler) (Result, error) {
+		return handler.install(ctx, opts, opts.Harness)
+	})
+	if err == nil && advisor != nil {
+		result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
 	}
 
-	return Result{}, fmt.Errorf("%w: %q", errUnsupportedHarness, opts.Harness)
+	return result, err
 }
 
 func installPlanHasShim(plan harnesspkg.InstallPlan) bool {
@@ -425,134 +414,59 @@ func installPluginDirectory(
 		return Result{}, err
 	}
 
+	result, err := installActivePlugin(ctx, opts, harness, plan, plugin, pluginChanged, recovered)
+	if err != nil {
+		return result, err
+	}
+
+	retiredChanged, err := removeRetiredPlugins(ctx, opts, harness, plan)
+	if retiredChanged && !result.Changed {
+		result.Changed = true
+		result.Message = installMessage(
+			installLabel(plan.Label, harness, "plugin"),
+			true,
+			opts.DryRun,
+		)
+	}
+
+	return result, err
+}
+
+func installActivePlugin(
+	ctx context.Context,
+	opts Options,
+	harness registry.Harness,
+	plan harnesspkg.PluginDirectoryInstallPlan,
+	plugin pluginDirectoryInstall,
+	pluginChanged bool,
+	recovered bool,
+) (Result, error) {
 	if plan.Registration != nil && !opts.preserveRegistration {
 		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged, recovered)
 	}
 
-	manifest, manifestChanged, err := plannedImportManifest(plan.ImportManifest, time.Now().UTC())
-	if err != nil {
-		return Result{}, err
-	}
+	if pluginChanged && !opts.DryRun {
+		_, commit, err := plugin.installStaged()
+		if err != nil {
+			return Result{}, err
+		}
 
-	changed := pluginChanged || manifestChanged
-
-	if changed && !opts.DryRun {
-		if err := writePluginDirectoryChanges(
-			plugin,
-			plan.ImportManifest,
-			manifest,
-			pluginChanged,
-			manifestChanged,
-		); err != nil {
+		if err := commit(); err != nil {
 			return Result{}, err
 		}
 	}
 
-	retiredChanged, err := removeRetiredPlugins(ctx, opts, harness, plan)
-	if err != nil {
-		return Result{}, err
-	}
-
-	changed = changed || retiredChanged || recovered
-
-	label := installLabel(plan.Label, harness, "plugin")
+	changed := pluginChanged || recovered
 
 	return Result{
 		Harness:  string(harness),
 		Path:     plugin.dir,
 		Changed:  changed,
-		Message:  installMessage(label, changed, opts.DryRun),
+		Message:  installMessage(installLabel(plan.Label, harness, "plugin"), changed, opts.DryRun),
 		NextStep: "",
 		Snippet:  plugin.snippet(),
 		Error:    "",
 	}, nil
-}
-
-func writePluginDirectoryChanges(
-	plugin pluginDirectoryInstall,
-	importPlan *harnesspkg.ImportManifestInstallPlan,
-	manifest importManifest,
-	pluginChanged bool,
-	manifestChanged bool,
-) error {
-	var (
-		rollback         func() error
-		commit           func() error
-		rollbackManifest func() error
-	)
-
-	if pluginChanged {
-		var err error
-
-		rollback, commit, err = plugin.installStaged()
-		if err != nil {
-			return err
-		}
-	}
-
-	if importPlan != nil && manifestChanged {
-		var err error
-
-		rollbackManifest, err = prepareImportManifestRollback(importPlan.Path)
-		if err != nil {
-			return rollbackPluginDirectory(rollback, err)
-		}
-
-		if err := writeImportManifest(importPlan.Path, manifest); err != nil {
-			return rollbackPluginDirectoryAndManifest(rollback, rollbackManifest, err)
-		}
-	}
-
-	if commit == nil {
-		return nil
-	}
-
-	return commit()
-}
-
-func prepareImportManifestRollback(path string) (func() error, error) {
-	previous, err := os.ReadFile(path)
-
-	existed := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("reading import manifest rollback state: %w", err)
-	}
-
-	return func() error {
-		if existed {
-			return writeFileAtomic(
-				path,
-				previous,
-				"creating import manifest rollback directory",
-				"restoring import manifest",
-			)
-		}
-
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("removing newly created import manifest: %w", err)
-		}
-
-		return syncDir(filepath.Dir(path))
-	}, nil
-}
-
-func rollbackPluginDirectoryAndManifest(
-	rollbackPlugin func() error, rollbackManifest func() error,
-	cause error,
-) error {
-	if rollbackPlugin != nil {
-		if err := rollbackPlugin(); err != nil {
-			cause = errors.Join(cause, fmt.Errorf("rolling back plugin directory: %w", err))
-		}
-	}
-
-	if rollbackManifest != nil {
-		if err := rollbackManifest(); err != nil {
-			cause = errors.Join(cause, fmt.Errorf("rolling back import manifest: %w", err))
-		}
-	}
-
-	return cause
 }
 
 func rollbackPluginDirectory(rollback func() error, cause error) error {
@@ -567,168 +481,8 @@ func rollbackPluginDirectory(rollback func() error, cause error) error {
 	return cause
 }
 
-func plannedImportManifest(
-	plan *harnesspkg.ImportManifestInstallPlan,
-	now time.Time,
-) (importManifest, bool, error) {
-	if plan == nil {
-		var manifest importManifest
-
-		return manifest, false, nil
-	}
-
-	return importManifestWithPlan(*plan, now)
-}
-
-func importManifestWithPlan(
-	plan harnesspkg.ImportManifestInstallPlan,
-	now time.Time,
-) (importManifest, bool, error) {
-	manifest, err := readImportManifest(plan.Path)
-	if err != nil {
-		return importManifest{}, false, err
-	}
-
-	next, changed := upsertImport(manifest, plan, now)
-
-	return next, changed, nil
-}
-
-func readImportManifest(path string) (importManifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return importManifest{
-				Imports: nil,
-				extra:   nil,
-			}, nil
-		}
-
-		return importManifest{}, fmt.Errorf("reading import manifest: %w", err)
-	}
-
-	var manifest importManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return importManifest{}, fmt.Errorf("parsing import manifest: %w", err)
-	}
-
-	return manifest, nil
-}
-
-func upsertImport(
-	manifest importManifest,
-	plan harnesspkg.ImportManifestInstallPlan,
-	now time.Time,
-) (importManifest, bool) {
-	for index, item := range manifest.Imports {
-		if item.name() != plan.Name {
-			continue
-		}
-
-		next, changed := item.withPlan(plan, now)
-		if !changed {
-			return manifest, false
-		}
-
-		manifest.Imports = slices.Clone(manifest.Imports)
-		manifest.Imports[index] = next
-
-		return manifest, true
-	}
-
-	manifest.Imports = append(slices.Clone(manifest.Imports), newImportEntry(plan, now))
-
-	return manifest, true
-}
-
-func writeImportManifest(path string, manifest importManifest) error {
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encoding import manifest: %w", err)
-	}
-
-	data = append(data, '\n')
-
-	return writeFileAtomic(path, data, "creating config directory", "writing import manifest")
-}
-
 func writeFileAtomic(path string, data []byte, createDirError string, writeError string) error {
-	return writeFileAtomicMode(path, data, 0o600, createDirError, writeError)
-}
-
-func writeFileAtomicMode(
-	path string,
-	data []byte,
-	mode os.FileMode,
-	createDirError string,
-	writeError string,
-) error {
-	targetPath := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		targetPath = resolved
-	}
-
-	dir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("%s: %w", createDirError, err)
-	}
-
-	temp, err := os.CreateTemp(dir, filepath.Base(targetPath)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("creating temp file for %s: %w", targetPath, err)
-	}
-
-	tempPath := temp.Name()
-
-	keep := false
-	defer func() {
-		if keep {
-			return
-		}
-
-		_ = temp.Close()
-		_ = os.Remove(tempPath)
-	}()
-
-	if err := temp.Chmod(mode); err != nil {
-		return fmt.Errorf("setting temp file permissions: %w", err)
-	}
-
-	if _, err := temp.Write(data); err != nil {
-		return fmt.Errorf("%s: %w", writeError, err)
-	}
-
-	if err := temp.Sync(); err != nil {
-		return fmt.Errorf("syncing temp file: %w", err)
-	}
-
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	if err := os.Rename(tempPath, targetPath); err != nil {
-		return fmt.Errorf("%s: %w", writeError, err)
-	}
-
-	keep = true
-
-	return syncDir(dir)
-}
-
-func syncDir(dir string) error {
-	handle, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("opening directory: %w", err)
-	}
-	defer func() {
-		_ = handle.Close()
-	}()
-
-	if err := handle.Sync(); err != nil {
-		return fmt.Errorf("syncing directory: %w", err)
-	}
-
-	return nil
+	return harnesspkg.WriteFileAtomicMode(path, data, 0o600, createDirError, writeError)
 }
 
 func managedSource(source string, harness registry.Harness) string {

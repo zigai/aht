@@ -80,6 +80,43 @@ func TestPersistedShimOwnershipAcrossManagement(t *testing.T) {
 	}
 }
 
+func TestInspectShimBecomesStaleWhenBinaryMoves(t *testing.T) {
+	isolateUpgradeHome(t)
+
+	opts := Options{
+		Harness:      registry.Harness("opencode"),
+		Binary:       "/path with spaces/first",
+		TargetBinary: "/path/target",
+		UseShim:      true,
+	}
+	if _, err := Run(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	for binary, want := range map[string]ArtifactStatus{
+		opts.Binary:                ArtifactCurrent,
+		"/path with spaces/second": ArtifactStale,
+	} {
+		status, err := Inspect(t.Context(), opts.Harness, binary)
+		if err != nil || status.Status != want {
+			t.Errorf("inspect for %q = %s, %v; want %s", binary, status.Status, err, want)
+		}
+	}
+}
+
+func TestInstallRejectsUnsupportedShim(t *testing.T) {
+	cfg := claudeConfigDir(t)
+
+	opts := Options{Harness: registry.Harness("claude"), UseShim: true}
+	if _, err := Run(t.Context(), opts); !errors.Is(err, errShimUnsupported) {
+		t.Fatalf("install shim error = %v, want %v", err, errShimUnsupported)
+	}
+
+	if _, err := os.Stat(filepath.Join(cfg, claudeMarketplace)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsupported shim wrote native integration: %v", err)
+	}
+}
+
 func TestInstallShimRequiresForceForForeignFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(registry.StateDirEnv, dir)

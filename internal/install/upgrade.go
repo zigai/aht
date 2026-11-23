@@ -53,6 +53,10 @@ func UpgradeHarness(
 		failures []error
 	)
 
+	if binary == "" {
+		binary = defaultBinary
+	}
+
 	options := Options{Harness: id, Binary: binary, DryRun: dryRun}
 
 	plan, _, err := installPlanForHarness(id, binary)
@@ -126,19 +130,23 @@ func upgradeInstalledNative(
 }
 
 func upgradeNative(ctx context.Context, opts Options) (Result, error) {
-	plan, _, err := installPlanForHarness(opts.Harness, opts.Binary)
+	plan, advisor, err := installPlanForHarness(opts.Harness, opts.Binary)
 	if err != nil {
 		return Result{}, err
 	}
 
-	for _, action := range plan.Actions {
-		plugin, ok := action.(harnesspkg.PluginDirectoryAction)
-		if ok && plugin.Plan.Registration != nil {
-			return upgradeRegisteredPlugin(ctx, opts, plugin.Plan)
+	result, err := runNativeActions(ctx, opts, plan, func(handler actionHandler) (Result, error) {
+		if plugin, ok := handler.(pluginDirectoryHandler); ok && plugin.plan.Registration != nil {
+			return upgradeRegisteredPlugin(ctx, opts, plugin.plan)
 		}
+
+		return handler.install(ctx, opts, opts.Harness)
+	})
+	if err == nil && advisor != nil && result.NextStep == "" {
+		result.NextStep = advisor.InstallNextStep(result.Changed, opts.DryRun)
 	}
 
-	return Run(ctx, opts)
+	return result, err
 }
 
 func upgradeRegisteredPlugin(
@@ -171,7 +179,7 @@ func upgradeRegisteredPlugin(
 		}, nil
 	case state == harnesspkg.PluginRegistrationMissing,
 		state == harnesspkg.PluginRegistrationStale && plan.UpgradeRegisters:
-		return Run(ctx, opts)
+		return installPluginDirectory(ctx, opts, opts.Harness, plan)
 	}
 
 	if !opts.DryRun {
@@ -233,7 +241,7 @@ func installedNative(ctx context.Context, id registry.Harness, binary string) (b
 func installedShim(id registry.Harness) (string, bool, error) {
 	path := filepath.Join(registry.DefaultStateDir(), "shims", string(id))
 
-	status, err := classifyShimArtifact(path, id)
+	status, err := classifyShimArtifact(path, id, "")
 	if err != nil {
 		return "", false, err
 	}

@@ -160,11 +160,11 @@ func (plugin pluginDirectoryInstall) applyRecovery(recovery pluginRecovery) erro
 			return err
 		}
 
-		if err := syncDir(filepath.Dir(recovery.restore)); err != nil {
+		if err := harnesspkg.SyncDir(filepath.Dir(recovery.restore)); err != nil {
 			return err
 		}
 
-		if err := syncDir(parent); err != nil {
+		if err := harnesspkg.SyncDir(parent); err != nil {
 			return err
 		}
 	}
@@ -175,7 +175,7 @@ func (plugin pluginDirectoryInstall) applyRecovery(recovery pluginRecovery) erro
 		}
 	}
 
-	return syncDir(parent)
+	return harnesspkg.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
@@ -465,7 +465,7 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 		}
 	}
 
-	if err := syncDir(stagedDir); err != nil {
+	if err := harnesspkg.SyncDir(stagedDir); err != nil {
 		return "", err
 	}
 
@@ -603,7 +603,7 @@ func (plugin pluginDirectoryInstall) replace(stagedDir string) (func() error, fu
 		return plugin.commitReplacement(parent, backup, backupExists)
 	}
 
-	if err := syncDir(parent); err != nil {
+	if err := harnesspkg.SyncDir(parent); err != nil {
 		return nil, nil, errors.Join(err, rollback())
 	}
 
@@ -635,7 +635,7 @@ func (plugin pluginDirectoryInstall) backupCurrent(parent string) (string, bool,
 		)
 	}
 
-	if err := errors.Join(syncDir(backup), syncDir(parent)); err != nil {
+	if err := errors.Join(harnesspkg.SyncDir(backup), harnesspkg.SyncDir(parent)); err != nil {
 		return "", false, errors.Join(err, plugin.restoreBackup(backup, true))
 	}
 
@@ -650,11 +650,11 @@ func (plugin pluginDirectoryInstall) prepareBackup(parent string, backup string)
 		return fmt.Errorf("writing plugin backup provenance: %w", err)
 	}
 
-	if err := syncDir(backup); err != nil {
+	if err := harnesspkg.SyncDir(backup); err != nil {
 		return err
 	}
 
-	return syncDir(parent)
+	return harnesspkg.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists bool) error {
@@ -668,7 +668,7 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 	}
 
 	parent := filepath.Dir(plugin.dir)
-	if err := errors.Join(syncDir(backup), syncDir(parent)); err != nil {
+	if err := errors.Join(harnesspkg.SyncDir(backup), harnesspkg.SyncDir(parent)); err != nil {
 		return err
 	}
 
@@ -676,7 +676,7 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 		return err
 	}
 
-	return syncDir(parent)
+	return harnesspkg.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) rollbackReplacement(
@@ -693,7 +693,7 @@ func (plugin pluginDirectoryInstall) rollbackReplacement(
 	if backupExists {
 		restoreErr = plugin.restoreBackup(backup, backupExists)
 	} else {
-		restoreErr = syncDir(parent)
+		restoreErr = harnesspkg.SyncDir(parent)
 	}
 
 	return errors.Join(removeErr, restoreErr)
@@ -710,7 +710,7 @@ func (plugin pluginDirectoryInstall) commitReplacement(
 		}
 	}
 
-	return syncDir(parent)
+	return harnesspkg.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) snippet() string {

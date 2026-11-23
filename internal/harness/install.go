@@ -159,12 +159,15 @@ type RenderedFileInstallSpec struct {
 //
 //exhaustruct:optional
 type PluginDirectoryInstallPlan struct {
-	Dir            string
-	Label          string
-	Files          []RenderedFileInstallSpec
-	Identity       ArtifactIdentity
-	ImportManifest *ImportManifestInstallPlan
-	Registration   PluginRegistration
+	Dir           string
+	Label         string
+	Files         []RenderedFileInstallSpec
+	Identity      ArtifactIdentity
+	Registration  PluginRegistration
+	RequireMarker bool
+	// StageRemoval moves managed files aside before removing registration.
+	// Use it when unregistering does not need to open the plugin directory.
+	StageRemoval bool
 	// Retired lists former locations of this plugin. Installing or removing
 	// the plugin also removes aht-managed artifacts found there.
 	Retired []PluginDirectoryInstallPlan
@@ -186,13 +189,6 @@ type PluginRegistration interface {
 		pluginDir string,
 	) error
 	Remove(ctx context.Context, pluginDir string) error
-}
-
-type ImportManifestInstallPlan struct {
-	Path       string
-	Name       string
-	Source     string
-	Components []string
 }
 
 // NativeCatalog returns the first catalog when every action is a native catalog.

@@ -1,26 +1,25 @@
-package install
+package agy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const importsKey = "imports"
 
-// importManifest is agy's shared import manifest. Fields aht does not own are
-// kept as raw JSON so rewriting the file never drops them.
 type importManifest struct {
 	Imports []importEntry
 	extra   map[string]json.RawMessage
 }
 
-// importEntry is one entry of the manifest. Only the fields aht owns are
-// interpreted; every other field of the entry is carried through untouched.
 type importEntry struct {
 	fields map[string]json.RawMessage
 }
@@ -84,7 +83,7 @@ func (entry importEntry) MarshalJSON() ([]byte, error) {
 	return data, nil
 }
 
-func newImportEntry(plan harnesspkg.ImportManifestInstallPlan, now time.Time) importEntry {
+func newImportEntry(plan importRegistration, now time.Time) importEntry {
 	entry := importEntry{fields: map[string]json.RawMessage{}}
 	entry.set("name", plan.Name)
 	entry.set("source", plan.Source)
@@ -94,10 +93,8 @@ func newImportEntry(plan harnesspkg.ImportManifestInstallPlan, now time.Time) im
 	return entry
 }
 
-// withPlan returns the entry with the fields aht owns brought in line with the
-// plan, and whether that changed anything. Fields it does not own are kept.
 func (entry importEntry) withPlan(
-	plan harnesspkg.ImportManifestInstallPlan,
+	plan importRegistration,
 	now time.Time,
 ) (importEntry, bool) {
 	next := importEntry{fields: make(map[string]json.RawMessage, len(entry.fields)+1)}
@@ -145,7 +142,6 @@ func (entry importEntry) components() []string {
 	return components
 }
 
-// stringField treats a missing or non-string value as empty.
 func (entry importEntry) stringField(key string) string {
 	var value string
 	if err := json.Unmarshal(entry.fields[key], &value); err != nil {
@@ -162,4 +158,124 @@ func (entry importEntry) set(key string, value any) {
 	}
 
 	entry.fields[key] = data
+}
+
+func readImportManifest(path string) (importManifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return importManifest{
+				Imports: nil,
+				extra:   nil,
+			}, nil
+		}
+
+		return importManifest{}, fmt.Errorf("reading import manifest: %w", err)
+	}
+
+	var manifest importManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return importManifest{}, fmt.Errorf("parsing import manifest: %w", err)
+	}
+
+	return manifest, nil
+}
+
+func upsertImport(
+	manifest importManifest,
+	plan importRegistration,
+	now time.Time,
+) (importManifest, bool) {
+	for index, item := range manifest.Imports {
+		if item.name() != plan.Name {
+			continue
+		}
+
+		next, changed := item.withPlan(plan, now)
+		if !changed {
+			return manifest, false
+		}
+
+		manifest.Imports = slices.Clone(manifest.Imports)
+		manifest.Imports[index] = next
+
+		return manifest, true
+	}
+
+	manifest.Imports = append(slices.Clone(manifest.Imports), newImportEntry(plan, now))
+
+	return manifest, true
+}
+
+func writeImportManifest(path string, manifest importManifest) error {
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding import manifest: %w", err)
+	}
+
+	data = append(data, '\n')
+
+	return replaceImportManifest(path, data)
+}
+
+func removeImport(manifest importManifest, name string) (importManifest, bool) {
+	next := make([]importEntry, 0, len(manifest.Imports))
+	removed := false
+
+	for _, item := range manifest.Imports {
+		if item.name() == name {
+			removed = true
+			continue
+		}
+
+		next = append(next, item)
+	}
+
+	manifest.Imports = next
+
+	return manifest, removed
+}
+
+func replaceImportManifest(path string, data []byte) error {
+	previous, err := os.ReadFile(path)
+	existed := err == nil
+
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading import manifest rollback state: %w", err)
+	}
+
+	const createError = "creating config directory"
+	if err := harness.WriteFileAtomicMode(
+		path,
+		data,
+		0o600,
+		createError,
+		"writing import manifest",
+	); err != nil {
+		return errors.Join(err, restoreImportManifest(path, previous, existed))
+	}
+
+	return nil
+}
+
+func restoreImportManifest(path string, previous []byte, existed bool) error {
+	if existed {
+		return harness.WriteFileAtomicMode(
+			path,
+			previous,
+			0o600,
+			"creating config directory",
+			"restoring import manifest",
+		)
+	}
+
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+
+		return fmt.Errorf("removing newly created import manifest: %w", err)
+	}
+
+	return harness.SyncDir(filepath.Dir(path))
 }
