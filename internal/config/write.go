@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -56,19 +55,33 @@ func Set(path string, key string, value string) error {
 		return fmt.Errorf("ensure config file %s: %w", path, err)
 	}
 
-	data, err := os.ReadFile(path)
+	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("read config %s: %w", path, err)
+		return fmt.Errorf("resolve config %s: %w", path, err)
 	}
 
-	updated, err := strata.SetBytes(".toml", data, key, value)
+	data, err := os.ReadFile(target)
 	if err != nil {
+		return fmt.Errorf("read config %s: %w", target, err)
+	}
+
+	stagingDir, err := os.MkdirTemp(filepath.Dir(target), ".aht-config-stage-*")
+	if err != nil {
+		return fmt.Errorf("create config staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stagingDir) }()
+
+	if err := writeStagedConfigFile(stagingDir, "config.toml", data); err != nil {
+		return fmt.Errorf("stage config %s: %w", path, err)
+	}
+
+	stagedPath := filepath.Join(stagingDir, "config.toml")
+	if err := strata.Set[Config](stagedPath, key, value); err != nil {
 		return fmt.Errorf("%w: set key %q: %w", ErrInvalidSetting, key, err)
 	}
 
 	_, err = strata.Load[Config](
-		strata.WithPath("-"),
-		strata.WithStdin(bytes.NewReader(updated)),
+		strata.WithPath(stagedPath),
 		strata.WithFormats(".toml"),
 		strata.WithStrict(),
 	)
@@ -76,8 +89,24 @@ func Set(path string, key string, value string) error {
 		return fmt.Errorf("%w: updated configuration is invalid: %w", ErrInvalidSetting, err)
 	}
 
-	if err := strata.Set[Config](path, key, value); err != nil {
+	if err := strata.Set[Config](target, key, value); err != nil {
 		return fmt.Errorf("%w: set key %q: %w", ErrInvalidSetting, key, err)
+	}
+
+	return nil
+}
+
+func writeStagedConfigFile(dir string, name string, data []byte) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open staging directory: %w", err)
+	}
+
+	writeErr := root.WriteFile(name, data, defaultFileMode)
+
+	closeErr := root.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fmt.Errorf("write staged config: %w", err)
 	}
 
 	return nil

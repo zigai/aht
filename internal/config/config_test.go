@@ -1140,3 +1140,86 @@ func loadWithOptions(opts Options) (Config, string, error) {
 	cfg, _, resolved, err := LoadWithMetadata(opts)
 	return cfg, resolved, err
 }
+
+func TestSetFollowsSymlinkInReadOnlyDirectory(t *testing.T) {
+	isolateConfigEnv(t)
+
+	target := filepath.Join(t.TempDir(), "config.toml")
+	if _, err := EnsureConfigFile(target); err != nil {
+		t.Fatal(err)
+	}
+
+	linkDir := t.TempDir()
+	link := filepath.Join(linkDir, "config.toml")
+
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(linkDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if err := os.Chmod(linkDir, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+
+	if err := Set(link, "ui.sort", "cwd"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.UI.Sort != "cwd" {
+		t.Fatalf("target sort = %q, want cwd", cfg.UI.Sort)
+	}
+}
+
+func TestSetAcceptsScalarStringsMatchingFieldTypes(t *testing.T) {
+	isolateConfigEnv(t)
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Set(path, "detection.manifests_dir", "123"); err != nil {
+		t.Fatalf("Set numeric-looking string field: %v", err)
+	}
+
+	if err := Set(path, "ui.sort_desc", "1"); err != nil {
+		t.Fatalf("Set numeric bool spelling: %v", err)
+	}
+
+	cfg, _, err := load(path)
+	if err != nil {
+		t.Fatalf("Load after Set: %v", err)
+	}
+
+	if cfg.Detection.ManifestsDir != "123" {
+		t.Fatalf("Detection.ManifestsDir = %q, want 123", cfg.Detection.ManifestsDir)
+	}
+
+	if cfg.UI.SortDesc == nil || !*cfg.UI.SortDesc {
+		t.Fatalf("UI.SortDesc = %v, want true", cfg.UI.SortDesc)
+	}
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Set(path, "ui.sort", "invalid-sort"); err == nil {
+		t.Fatal("expected invalid ui.sort to fail")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(before, after) {
+		t.Fatalf("failed Set modified config file:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
