@@ -103,3 +103,103 @@ func TestPrepareReportDetailTimestampBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareRejectsFlagsTheEvidenceIgnores(t *testing.T) {
+	t.Parallel()
+
+	native := Options{Harness: "codex", SessionID: "s", Presence: "live"}
+	process := Options{
+		Harness: "codex", SessionID: "s", Presence: "live", Evidence: "process",
+		PID: 42, StartIdentity: "boot:42",
+	}
+	withNative := func(change func(*Options)) Options {
+		opts := native
+		change(&opts)
+
+		return opts
+	}
+	withProcess := func(change func(*Options)) Options {
+		opts := process
+		change(&opts)
+
+		return opts
+	}
+
+	tests := []struct {
+		name    string
+		options Options
+		want    error
+	}{
+		{
+			"native start identity",
+			withNative(func(o *Options) { o.StartIdentity = "boot:1" }),
+			errNativeProcessFlags,
+		},
+		{"native ppid", withNative(func(o *Options) { o.PPID = 1 }), errNativeProcessFlags},
+		{
+			"native process group",
+			withNative(func(o *Options) { o.ProcessGroupID = 1 }),
+			errNativeProcessFlags,
+		},
+		{
+			"native executable",
+			withNative(func(o *Options) { o.Executable = "/usr/bin/codex" }),
+			errNativeProcessFlags,
+		},
+		{
+			"native tty",
+			withNative(func(o *Options) { o.TTY = "/dev/pts/1" }),
+			errNativeProcessFlags,
+		},
+		{
+			"process project root",
+			withProcess(func(o *Options) { o.ProjectRoot = "/work" }),
+			errProcessEvidenceListing,
+		},
+		{
+			"process resume command",
+			withProcess(func(o *Options) { o.ResumeCommand = []string{"codex", "resume"} }),
+			errProcessEvidenceListing,
+		},
+		{
+			"process cwd without start identity",
+			withProcess(func(o *Options) { o.StartIdentity, o.CWD = "", "/work" }),
+			errProcessEvidenceListing,
+		},
+		{
+			"native listing metadata",
+			withNative(func(o *Options) {
+				o.CWD, o.ProjectRoot, o.ResumeCommand = "/work", "/work", []string{
+					"codex",
+					"resume",
+				}
+			}),
+			nil,
+		},
+		{"process cwd with start identity", withProcess(func(o *Options) { o.CWD = "/work" }), nil},
+		{
+			"process automatic cwd",
+			withProcess(func(o *Options) { o.CWD, o.CWDAuto = "/work", true }),
+			nil,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Prepare(nil, test.options, Runtime{})
+			if test.want == nil {
+				if err != nil {
+					t.Fatalf("error = %v, want none", err)
+				}
+
+				return
+			}
+
+			var inputErr *InputError
+			if !errors.Is(err, test.want) || !errors.As(err, &inputErr) {
+				t.Fatalf("error = %v, want input error %v", err, test.want)
+			}
+		})
+	}
+}

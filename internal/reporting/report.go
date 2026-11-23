@@ -121,6 +121,10 @@ func Prepare(
 		return Result{}, err
 	}
 
+	if err := validateEvidenceFlags(opts); err != nil {
+		return Result{}, err
+	}
+
 	rawPayload, defaultsPayload, err := readStdinPayloadData(
 		stdin, harnessID,
 		opts.RawStdin,
@@ -187,6 +191,26 @@ func Prepare(
 	}
 
 	return Result{Harness: harnessID, Observation: observation}, nil
+}
+
+func validateEvidenceFlags(opts Options) error {
+	if !strings.EqualFold(opts.Evidence, "process") {
+		if opts.StartIdentity != "" || opts.PPID != 0 || opts.ProcessGroupID != 0 ||
+			opts.Executable != "" || opts.TTY != "" {
+			return invalidInput(errNativeProcessFlags)
+		}
+
+		return nil
+	}
+
+	// A sighting carries no listing, but --cwd describes the process itself
+	// when --start-identity supplies the rest of its identity.
+	explicitCWD := opts.CWD != "" && !opts.CWDAuto && opts.StartIdentity == ""
+	if explicitCWD || opts.ProjectRoot != "" || len(opts.ResumeCommand) > 0 {
+		return invalidInput(errProcessEvidenceListing)
+	}
+
+	return nil
 }
 
 func parseReportSequence(value string) (uint64, bool, error) {

@@ -15,6 +15,12 @@ var (
 	errProcessEvidenceSequence = errors.New("process evidence cannot include sequence")
 	errProcessEvidenceIdentity = errors.New("process evidence requires pid and start identity")
 	errProcessEvidenceActivity = errors.New("process evidence cannot include activity")
+	errNativeProcessFlags      = errors.New(
+		"--start-identity, --ppid, --process-group-id, --executable, and --tty require --evidence process",
+	)
+	errProcessEvidenceListing = errors.New(
+		"process evidence cannot include --project-root, --resume-command, or --cwd without --start-identity",
+	)
 )
 
 type InputError struct{ err error }
