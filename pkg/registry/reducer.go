@@ -307,7 +307,7 @@ func applyListing(session *Session, catalog *Listing) {
 		session.ProjectRoot = catalog.ProjectRoot
 	}
 
-	if len(session.ResumeCommand) == 0 {
+	if len(catalog.ResumeCommand) > 0 {
 		session.ResumeCommand = append([]string(nil), catalog.ResumeCommand...)
 	}
 }

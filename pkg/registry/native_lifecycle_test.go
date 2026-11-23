@@ -1324,3 +1324,27 @@ func TestSurvivingProcessReclaimsSessionAfterDuplicateResumeExits(t *testing.T) 
 		t.Fatalf("sessions after the duplicate exited = %s", describeSessions(state))
 	}
 }
+
+func TestLaterResumeCommandReplacesEarlierOne(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	process := reducerProcess(100)
+	first := nativeReport("changing", base, &process, registry.ActivityIdle)
+	first.Report().Listing = &registry.Listing{
+		ResumeCommand: []string{"primary", "--resume", "changing"},
+	}
+	second := nativeReport("changing", base.Add(time.Second), &process, registry.ActivityRunning)
+	second.Report().Listing = &registry.Listing{
+		ResumeCommand: []string{"env", "MODE=1", "primary", "--resume", "changing"},
+	}
+	third := nativeReport("changing", base.Add(2*time.Second), &process, registry.ActivityIdle)
+
+	state := registry.State{Sessions: map[string]registry.Session{}}
+	state = applyObservations(t, state, base.Add(3*time.Second), first, second, third)
+
+	want := []string{"env", "MODE=1", "primary", "--resume", "changing"}
+	if got := sessionWithID(t, state, "changing").ResumeCommand; !slices.Equal(got, want) {
+		t.Fatalf("ResumeCommand = %q, want %q", got, want)
+	}
+}
