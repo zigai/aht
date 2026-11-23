@@ -86,7 +86,7 @@ func TestReplacePluginDirectoryReportsInstallAndRestoreFailures(t *testing.T) {
 				return errInstallStageTest
 			}
 
-			if newPath == dir && strings.Contains(filepath.Base(oldPath), ".plugin.backup-") {
+			if newPath == dir && strings.Contains(oldPath, ".plugin.backup-") {
 				return errRestoreBackupTest
 			}
 
@@ -310,5 +310,205 @@ func TestReinstallAfterInterruptedPluginReplaceLeavesOnlyPluginDirectory(t *test
 
 	if len(names) != 1 || names[0] != "plugin" {
 		t.Fatalf("plugin parent after reinstall = %q, want only plugin", names)
+	}
+}
+
+func TestInstallIgnoresUnprovenPluginBackups(t *testing.T) {
+	t.Parallel()
+
+	for _, targetExists := range []bool{false, true} {
+		name := "target missing"
+		if targetExists {
+			name = "target installed"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			plan := harnesspkg.PluginDirectoryInstallPlan{
+				Dir: filepath.Join(root, "plugin"),
+				Files: []harnesspkg.RenderedFileInstallSpec{
+					{Name: "plugin.json", Content: "{}\n"},
+				},
+				Identity: harnesspkg.ArtifactIdentity{
+					ID:      "test",
+					Version: 1,
+					Source:  "test-plugin",
+				},
+			}
+
+			harness := registry.Harness("test")
+			if targetExists {
+				if _, err := installPluginDirectory(
+					t.Context(),
+					Options{},
+					harness,
+					plan,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, path := range []string{".plugin.backup-123", ".plugin.backup-456/original", ".plugin.stage-789"} {
+				path := filepath.Join(root, path)
+				if err := os.MkdirAll(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.WriteFile(
+					filepath.Join(path, "notes.txt"),
+					[]byte("keep"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, dryRun := range []bool{true, false} {
+				result, err := installPluginDirectory(
+					t.Context(),
+					Options{DryRun: dryRun},
+					harness,
+					plan,
+				)
+				if err != nil || result.Changed == targetExists {
+					t.Fatalf(
+						"install (dry run %t) = %+v, %v; want Changed = %t",
+						dryRun,
+						result,
+						err,
+						!targetExists,
+					)
+				}
+			}
+
+			for _, path := range []string{".plugin.backup-123", ".plugin.backup-456/original", ".plugin.stage-789"} {
+				data, err := os.ReadFile(filepath.Join(root, path, "notes.txt"))
+				if err != nil || string(data) != "keep" {
+					t.Errorf(
+						"unproven recovery path %s: notes = %q, %v; want keep",
+						path,
+						data,
+						err,
+					)
+				}
+			}
+		})
+	}
+}
+
+func TestReinstallRestoresProvenMarkerlessBackupWithoutForce(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	plan := harnesspkg.PluginDirectoryInstallPlan{
+		Dir:      filepath.Join(root, "plugin"),
+		Files:    []harnesspkg.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
+		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
+	}
+	if err := os.Mkdir(plan.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(plan.Dir, "original.txt"),
+		[]byte("keep"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate interruption of a forced replacement after moving the old
+	// directory, but before the staged replacement becomes visible.
+	plugin := newPluginDirectoryInstall(plan, nil, nil)
+
+	backup, exists, err := plugin.backupCurrent(root)
+	if err != nil || !exists {
+		t.Fatalf("backing up markerless plugin = %q, %t, %v", backup, exists, err)
+	}
+
+	harness := registry.Harness("test")
+	if _, err := installPluginDirectory(
+		t.Context(),
+		Options{DryRun: true},
+		harness,
+		plan,
+	); !errors.Is(
+		err,
+		errForeignFile,
+	) {
+		t.Fatalf("dry run error = %v, want foreign-file refusal after projected recovery", err)
+	}
+
+	if _, err := os.Lstat(plan.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run changed the target: %v", err)
+	}
+
+	if _, err := installPluginDirectory(
+		t.Context(),
+		Options{},
+		harness,
+		plan,
+	); !errors.Is(
+		err,
+		errForeignFile,
+	) {
+		t.Fatalf("real install error = %v, want foreign-file refusal after recovery", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(plan.Dir, "original.txt"))
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("recovered original file = %q, %v; want keep", data, err)
+	}
+
+	if _, err := os.Lstat(backup); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovery left its own backup: %v", err)
+	}
+}
+
+func TestReinstallRestoresManagedLegacyBackupWithoutRewriting(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	plan := harnesspkg.PluginDirectoryInstallPlan{
+		Dir:      filepath.Join(root, "plugin"),
+		Files:    []harnesspkg.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
+		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
+	}
+
+	harness := registry.Harness("test")
+	if _, err := installPluginDirectory(t.Context(), Options{}, harness, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	backup := filepath.Join(root, ".plugin.backup-123")
+	if err := os.Rename(plan.Dir, backup); err != nil {
+		t.Fatal(err)
+	}
+
+	original, err := os.Stat(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := installPluginDirectory(t.Context(), Options{DryRun: true}, harness, plan)
+	if err != nil || !result.Changed {
+		t.Fatalf("preview of legacy backup recovery = %+v, %v; want Changed", result, err)
+	}
+
+	if _, err := os.Lstat(plan.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run changed the target: %v", err)
+	}
+
+	result, err = installPluginDirectory(t.Context(), Options{}, harness, plan)
+	if err != nil || !result.Changed {
+		t.Fatalf("legacy backup recovery = %+v, %v; want Changed", result, err)
+	}
+
+	current, err := os.Stat(plan.Dir)
+	if err != nil || !os.SameFile(original, current) {
+		t.Fatalf("legacy backup was not restored in place: %v", err)
 	}
 }

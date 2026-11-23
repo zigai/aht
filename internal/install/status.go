@@ -350,7 +350,7 @@ func inspectPluginFiles(
 	result []inspectedArtifact,
 ) ([]inspectedArtifact, error) {
 	if result[0].status == ArtifactForeign {
-		missingMarker, err := registeredPluginMissingMarker(ctx, plan)
+		missingMarker, err := registeredPluginMissingMarker(ctx, plan, plan.Dir)
 		if err != nil {
 			return nil, err
 		}

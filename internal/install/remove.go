@@ -445,11 +445,7 @@ func preparePluginRemoval(
 	}
 
 	rollbackPlugin := func() error {
-		if err := plugin.restoreBackup(backup, backupExists); err != nil {
-			return err
-		}
-
-		return syncDir(parent)
+		return plugin.restoreBackup(backup, backupExists)
 	}
 	finalizePlugin := func() error {
 		if finalizer != nil {

@@ -552,3 +552,46 @@ func TestClaudeInstallPreservesUserHookMentioningReporterFlags(t *testing.T) {
 		)
 	}
 }
+
+func TestUpgradeRecoversRegisteredMarkerlessClaudePlugin(t *testing.T) {
+	claudeConfigDir(t)
+	installed := installClaude(t, Options{})
+
+	marker := filepath.Join(installed.Path, ".aht-managed")
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+
+	// Registration is still present; interrupt an already authorized repair
+	// after backing up its markerless plugin directory.
+	plugin := pluginDirectoryInstall{dir: installed.Path}
+
+	backup, exists, err := plugin.backupCurrent(filepath.Dir(installed.Path))
+	if err != nil || !exists {
+		t.Fatalf("backing up registered plugin = %q, %t, %v", backup, exists, err)
+	}
+
+	id := registry.Harness("claude")
+
+	preview, err := UpgradeHarness(t.Context(), id, testInstallBinary, true)
+	if err != nil || len(preview) != 1 || !preview[0].Changed {
+		t.Fatalf("registered plugin recovery preview = %+v, %v; want Changed", preview, err)
+	}
+
+	if _, err := os.Lstat(installed.Path); !os.IsNotExist(err) {
+		t.Fatalf("dry run changed the target: %v", err)
+	}
+
+	result, err := UpgradeHarness(t.Context(), id, testInstallBinary, false)
+	if err != nil || len(result) != 1 || !result[0].Changed {
+		t.Fatalf("registered plugin recovery = %+v, %v; want Changed", result, err)
+	}
+
+	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
+		t.Fatalf("recovery left its own backup: %v", err)
+	}
+
+	if status := claudeStatus(t); status != ArtifactCurrent {
+		t.Fatalf("Claude status after recovery = %v, want current", status)
+	}
+}

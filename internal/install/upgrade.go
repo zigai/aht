@@ -60,13 +60,13 @@ func UpgradeHarness(
 		return nil, err
 	}
 
-	recovered, err := recoverPluginDirectories(plan, dryRun)
+	pendingRecovery, err := pluginRecoveryPending(plan)
 	if err != nil {
 		var result Result
 		return appendUpgradeResult(nil, id, result, err), err
 	}
 
-	results, err = upgradeInstalledNative(ctx, options, recovered)
+	results, err = upgradeInstalledNative(ctx, options, pendingRecovery)
 	failures = append(failures, err)
 
 	if err := ctx.Err(); err != nil {
@@ -91,11 +91,15 @@ func UpgradeHarness(
 	return results, errors.Join(failures...)
 }
 
-func upgradeInstalledNative(ctx context.Context, opts Options, recovered bool) ([]Result, error) {
+func upgradeInstalledNative(
+	ctx context.Context,
+	opts Options,
+	pendingRecovery bool,
+) ([]Result, error) {
 	var result Result
 
 	native, err := installedNative(ctx, opts.Harness, opts.Binary)
-	upgraded := err == nil && (native || recovered)
+	upgraded := err == nil && (native || pendingRecovery)
 
 	if upgraded {
 		result, err = upgradeNative(ctx, opts)
@@ -265,21 +269,24 @@ func installedShim(id registry.Harness) (string, bool, error) {
 	return "", true, fmt.Errorf("%w: cannot recover target from %s", errRecursiveShimTarget, path)
 }
 
-func recoverPluginDirectories(plan harnesspkg.InstallPlan, dryRun bool) (bool, error) {
-	recovered := false
+// Check for recoverable installs even when the plugin target is missing.
+// The install path applies recovery (or previews it) along with the upgrade,
+// so cleanup is not performed before the upgrade decides whether to write.
+func pluginRecoveryPending(plan harnesspkg.InstallPlan) (bool, error) {
+	pending := false
 
 	for _, action := range plan.Actions {
 		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
 			directory := newPluginDirectoryInstall(plugin.Plan, nil, nil)
 
-			changed, err := directory.recover(dryRun)
+			recovery, err := directory.inspectRecovery()
 			if err != nil {
 				return false, err
 			}
 
-			recovered = recovered || changed
+			pending = pending || len(recovery.cleanup) != 0
 		}
 	}
 
-	return recovered, nil
+	return pending, nil
 }

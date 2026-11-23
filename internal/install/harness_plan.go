@@ -420,13 +420,13 @@ func installPluginDirectory(
 	harness registry.Harness,
 	plan harnesspkg.PluginDirectoryInstallPlan,
 ) (Result, error) {
-	plugin, pluginChanged, err := preparePluginDirectory(ctx, opts, plan)
+	plugin, pluginChanged, recovered, err := preparePluginDirectory(ctx, opts, plan)
 	if err != nil {
 		return Result{}, err
 	}
 
 	if plan.Registration != nil && !opts.preserveRegistration {
-		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged)
+		return installRegisteredPlugin(ctx, opts, harness, plan, plugin, pluginChanged, recovered)
 	}
 
 	manifest, manifestChanged, err := plannedImportManifest(plan.ImportManifest, time.Now().UTC())
@@ -453,7 +453,7 @@ func installPluginDirectory(
 		return Result{}, err
 	}
 
-	changed = changed || retiredChanged
+	changed = changed || retiredChanged || recovered
 
 	label := installLabel(plan.Label, harness, "plugin")
 
@@ -870,31 +870,45 @@ func preparePluginDirectory(
 	ctx context.Context,
 	opts Options,
 	plan harnesspkg.PluginDirectoryInstallPlan,
-) (pluginDirectoryInstall, bool, error) {
+) (pluginDirectoryInstall, bool, bool, error) {
 	files, order, err := renderPluginFiles(plan)
 	if err != nil {
-		return pluginDirectoryInstall{}, false, err
+		return pluginDirectoryInstall{}, false, false, err
 	}
 
 	plugin := newPluginDirectoryInstall(plan, files, order)
 
-	if _, err := plugin.recover(opts.DryRun); err != nil {
-		return pluginDirectoryInstall{}, false, err
-	}
-
-	missingMarker, err := registeredPluginMissingMarker(ctx, plan)
+	recovery, err := plugin.inspectRecovery()
 	if err != nil {
-		return pluginDirectoryInstall{}, false, err
+		return pluginDirectoryInstall{}, false, false, err
 	}
 
-	if err := plugin.ensureManaged(opts.Force || missingMarker); err != nil {
-		return pluginDirectoryInstall{}, false, err
+	view := plugin
+
+	pending := len(recovery.cleanup) != 0
+	if pending && !opts.DryRun {
+		if err := plugin.applyRecovery(recovery); err != nil {
+			return pluginDirectoryInstall{}, false, false, err
+		}
+	} else if recovery.restore != "" {
+		// In a dry run, validate what recovery would put at the target,
+		// without reading absent target files as if this were a fresh install.
+		view.dir = recovery.restore
 	}
 
-	pluginChanged, err := plugin.needsUpdate()
+	missingMarker, err := registeredPluginMissingMarker(ctx, plan, view.dir)
 	if err != nil {
-		return pluginDirectoryInstall{}, false, err
+		return pluginDirectoryInstall{}, false, false, err
 	}
 
-	return plugin, pluginChanged, nil
+	if err := view.ensureManaged(opts.Force || missingMarker); err != nil {
+		return pluginDirectoryInstall{}, false, false, err
+	}
+
+	pluginChanged, err := view.needsUpdate()
+	if err != nil {
+		return pluginDirectoryInstall{}, false, false, err
+	}
+
+	return plugin, pluginChanged, pending, nil
 }

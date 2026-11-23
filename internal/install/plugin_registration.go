@@ -18,6 +18,7 @@ func installRegisteredPlugin(
 	plan harnesspkg.PluginDirectoryInstallPlan,
 	plugin pluginDirectoryInstall,
 	pluginChanged bool,
+	recovered bool,
 ) (Result, error) {
 	registration := plan.Registration
 
@@ -34,7 +35,8 @@ func installRegisteredPlugin(
 		)
 	}
 
-	changed := pluginChanged || state != harnesspkg.PluginRegistrationCurrent
+	needsWrite := pluginChanged || state != harnesspkg.PluginRegistrationCurrent
+	changed := needsWrite || recovered
 	label := installLabel(plan.Label, harnessID, "plugin")
 
 	result := Result{
@@ -46,7 +48,7 @@ func installRegisteredPlugin(
 		Snippet:  plugin.snippet(),
 		Error:    "",
 	}
-	if !changed || opts.DryRun {
+	if !needsWrite || opts.DryRun {
 		return result, nil
 	}
 
@@ -199,12 +201,13 @@ func inspectRegistration(
 func registeredPluginMissingMarker(
 	ctx context.Context,
 	plan harnesspkg.PluginDirectoryInstallPlan,
+	dir string,
 ) (bool, error) {
 	if plan.Registration == nil {
 		return false, nil
 	}
 
-	info, err := os.Lstat(plan.Dir)
+	info, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -217,7 +220,7 @@ func registeredPluginMissingMarker(
 		return false, nil
 	}
 
-	if _, err := os.Lstat(filepath.Join(plan.Dir, harnesspkg.ArtifactMarkerFile)); err == nil {
+	if _, err := os.Lstat(filepath.Join(dir, harnesspkg.ArtifactMarkerFile)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("checking registered plugin marker: %w", err)

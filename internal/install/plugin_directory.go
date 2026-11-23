@@ -12,14 +12,22 @@ import (
 	harnesspkg "github.com/zigai/aht/v2/internal/harness"
 )
 
+const (
+	pluginBackupMarker   = ".aht-backup"
+	pluginBackupOriginal = "original"
+	maxPluginMarkerBytes = 4096
+)
+
 var (
 	errDuplicatePluginFileName = errors.New("duplicate plugin file name")
 	errInvalidPluginFileName   = errors.New("invalid plugin file name")
 	errStalePluginFile         = errors.New("stale plugin file")
 )
 
+//exhaustruct:optional
 type pluginDirectoryInstall struct {
 	dir          string
+	identity     harnesspkg.ArtifactIdentity
 	files        map[string]string
 	snippetOrder []string
 	renameFile   func(string, string) error
@@ -27,10 +35,9 @@ type pluginDirectoryInstall struct {
 }
 
 type pluginRecovery struct {
-	backups    []string
-	stages     []string
-	newest     string
-	newestInfo os.FileInfo
+	cleanup []string
+	restore string
+	newest  os.FileInfo
 }
 
 func renderInstallFiles(
@@ -108,6 +115,7 @@ func newPluginDirectoryInstall(
 ) pluginDirectoryInstall {
 	return pluginDirectoryInstall{
 		dir:          plan.Dir,
+		identity:     plan.Identity,
 		files:        files,
 		snippetOrder: order,
 		renameFile:   os.Rename,
@@ -145,45 +153,29 @@ func (plugin pluginDirectoryInstall) removeAll(path string) error {
 	return nil
 }
 
-func (plugin pluginDirectoryInstall) recover(dryRun bool) (bool, error) {
-	recovery, err := plugin.inspectRecovery()
-	if err != nil {
-		return false, err
-	}
-
-	pending := len(recovery.backups)+len(recovery.stages) > 0
-	if dryRun {
-		return pending, nil
-	}
-
+func (plugin pluginDirectoryInstall) applyRecovery(recovery pluginRecovery) error {
 	parent := filepath.Dir(plugin.dir)
+	if recovery.restore != "" {
+		if err := plugin.rename(recovery.restore, plugin.dir); err != nil {
+			return err
+		}
 
-	_, err = os.Lstat(plugin.dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("checking plugin recovery target: %w", err)
-	}
-
-	if errors.Is(err, os.ErrNotExist) && recovery.newest != "" {
-		if err := plugin.rename(recovery.newest, plugin.dir); err != nil {
-			return false, err
+		if err := syncDir(filepath.Dir(recovery.restore)); err != nil {
+			return err
 		}
 
 		if err := syncDir(parent); err != nil {
-			return false, err
+			return err
 		}
 	}
 
-	for _, path := range append(recovery.backups, recovery.stages...) {
+	for _, path := range recovery.cleanup {
 		if err := plugin.removeAll(path); err != nil {
-			return false, err
+			return err
 		}
 	}
 
-	if pending {
-		return true, syncDir(parent)
-	}
-
-	return false, nil
+	return syncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
@@ -200,23 +192,15 @@ func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
 		return recovery, fmt.Errorf("reading plugin recovery directory: %w", err)
 	}
 
+	_, err = os.Lstat(plugin.dir)
+
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return recovery, fmt.Errorf("checking plugin recovery target: %w", err)
+	}
+
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		backup := plugin.temporaryName(entry.Name(), "backup")
-		if !backup && !plugin.temporaryName(entry.Name(), "stage") {
-			continue
-		}
-
-		path := filepath.Join(parent, entry.Name())
-		if !backup {
-			recovery.stages = append(recovery.stages, path)
-			continue
-		}
-
-		if err := recovery.collectBackup(plugin, entry, path); err != nil {
+		if err := plugin.collectRecovery(&recovery, entry, missing); err != nil {
 			return recovery, err
 		}
 	}
@@ -224,26 +208,31 @@ func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
 	return recovery, nil
 }
 
-func (recovery *pluginRecovery) collectBackup(
-	plugin pluginDirectoryInstall,
+func (plugin pluginDirectoryInstall) collectRecovery(
+	recovery *pluginRecovery,
 	entry os.DirEntry,
-	path string,
+	missing bool,
 ) error {
-	contents, err := os.ReadDir(path)
-	if err != nil {
-		return fmt.Errorf("reading plugin backup: %w", err)
-	}
-
-	if len(contents) == 0 {
-		recovery.stages = append(recovery.stages, path)
+	if !entry.IsDir() {
 		return nil
 	}
 
-	candidate := plugin
+	backup := plugin.temporaryName(entry.Name(), "backup")
+	if !backup && !plugin.temporaryName(entry.Name(), "stage") {
+		return nil
+	}
 
-	candidate.dir = path
-	if err := candidate.ensureManaged(false); err != nil {
+	path := filepath.Join(filepath.Dir(plugin.dir), entry.Name())
+
+	original, owned, err := plugin.recoveryCandidate(path, backup)
+	if err != nil || !owned {
 		return err
+	}
+
+	recovery.cleanup = append(recovery.cleanup, path)
+
+	if !missing || original == "" {
+		return nil
 	}
 
 	info, err := entry.Info()
@@ -251,12 +240,105 @@ func (recovery *pluginRecovery) collectBackup(
 		return fmt.Errorf("checking plugin backup: %w", err)
 	}
 
-	recovery.backups = append(recovery.backups, path)
-	if recovery.newestInfo == nil || info.ModTime().After(recovery.newestInfo.ModTime()) {
-		recovery.newest, recovery.newestInfo = path, info
+	if recovery.newest == nil || info.ModTime().After(recovery.newest.ModTime()) {
+		recovery.restore, recovery.newest = original, info
 	}
 
 	return nil
+}
+
+func (plugin pluginDirectoryInstall) recoveryCandidate(
+	path string,
+	backup bool,
+) (string, bool, error) {
+	if backup {
+		marker, err := readPluginRecoveryMarker(filepath.Join(path, pluginBackupMarker))
+		if err != nil {
+			return "", false, err
+		}
+
+		if marker == plugin.backupProvenance() {
+			return inspectBackupContainer(path)
+		}
+	}
+
+	// Legacy backups were the original directory itself. A temp-looking
+	// name alone cannot distinguish a forced markerless backup from user data.
+	marker, err := readPluginRecoveryMarker(filepath.Join(path, harnesspkg.ArtifactMarkerFile))
+	if err != nil {
+		return "", false, err
+	}
+
+	owned := plugin.ownsRecoveryMarker(marker)
+	if owned && backup {
+		return path, true, nil
+	}
+
+	return "", owned, nil
+}
+
+func (plugin pluginDirectoryInstall) ownsRecoveryMarker(marker string) bool {
+	identity, _ := harnesspkg.ParseArtifactIdentity(marker)
+	if identity.Version <= 0 || identity.ID == "" || identity.ID != plugin.identity.ID {
+		return false
+	}
+
+	if identity.Source == "" {
+		// Older plugin markers identify the harness and version but omit
+		// the source. Match that exact generated marker shape as well.
+		legacy := strings.TrimSuffix(identity.Marker(""), "AHT_SOURCE=\n")
+
+		return strings.TrimSuffix(marker, "\n") == strings.TrimSuffix(legacy, "\n")
+	}
+
+	return identity.Source == plugin.identity.Source && marker == identity.Marker("")
+}
+
+func readPluginRecoveryMarker(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("checking plugin recovery marker: %w", err)
+	}
+
+	if !info.Mode().IsRegular() || info.Size() > maxPluginMarkerBytes {
+		return "", nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading plugin recovery marker: %w", err)
+	}
+
+	return string(data), nil
+}
+
+func (plugin pluginDirectoryInstall) backupProvenance() string {
+	return managedMarker + ": backup v1 for " + filepath.Base(plugin.dir) + "\n"
+}
+
+func inspectBackupContainer(path string) (string, bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "", false, fmt.Errorf("reading plugin backup container: %w", err)
+	}
+
+	var original string
+
+	for _, entry := range entries {
+		switch entry.Name() {
+		case pluginBackupMarker:
+		case pluginBackupOriginal:
+			original = filepath.Join(path, pluginBackupOriginal)
+		default:
+			return "", false, nil
+		}
+	}
+
+	return original, true, nil
 }
 
 func (plugin pluginDirectoryInstall) temporaryName(name string, kind string) bool {
@@ -361,7 +443,22 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 		}
 	}()
 
+	// Put the managed identity on disk before writing other files so an
+	// interrupted stage can be identified without trusting its directory name.
+	if marker, ok := plugin.files[harnesspkg.ArtifactMarkerFile]; ok {
+		if err := writeStagedPluginFile(
+			filepath.Join(stagedDir, harnesspkg.ArtifactMarkerFile),
+			[]byte(marker),
+		); err != nil {
+			return "", fmt.Errorf("writing staged plugin marker: %w", err)
+		}
+	}
+
 	for name, content := range plugin.files {
+		if name == harnesspkg.ArtifactMarkerFile {
+			continue
+		}
+
 		path := filepath.Join(stagedDir, name)
 		if err := writeStagedPluginFile(path, []byte(content)); err != nil {
 			return "", fmt.Errorf("writing plugin file %s: %w", path, err)
@@ -514,28 +611,50 @@ func (plugin pluginDirectoryInstall) replace(stagedDir string) (func() error, fu
 }
 
 func (plugin pluginDirectoryInstall) backupCurrent(parent string) (string, bool, error) {
+	if _, err := os.Lstat(plugin.dir); errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, fmt.Errorf("checking plugin directory before backup: %w", err)
+	}
+
+	// Keep the MkdirTemp container. Recording ownership before the rename
+	// lets recovery distinguish markerless originals from unrelated data.
 	backup, err := os.MkdirTemp(parent, "."+filepath.Base(plugin.dir)+".backup-*")
 	if err != nil {
-		return "", false, fmt.Errorf("creating plugin backup path: %w", err)
+		return "", false, fmt.Errorf("creating plugin backup container: %w", err)
 	}
 
-	if err := os.Remove(backup); err != nil {
-		return "", false, fmt.Errorf("preparing plugin backup path: %w", err)
+	if err := plugin.prepareBackup(parent, backup); err != nil {
+		return "", false, errors.Join(err, plugin.removeAll(backup))
 	}
 
-	if err := plugin.rename(plugin.dir, backup); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", false, fmt.Errorf("backing up plugin directory: %w", err)
-		}
-
-		return backup, false, nil
+	if err := plugin.rename(plugin.dir, filepath.Join(backup, pluginBackupOriginal)); err != nil {
+		return "", false, errors.Join(
+			fmt.Errorf("backing up plugin directory: %w", err),
+			plugin.removeAll(backup),
+		)
 	}
 
-	if err := syncDir(parent); err != nil {
+	if err := errors.Join(syncDir(backup), syncDir(parent)); err != nil {
 		return "", false, errors.Join(err, plugin.restoreBackup(backup, true))
 	}
 
 	return backup, true, nil
+}
+
+func (plugin pluginDirectoryInstall) prepareBackup(parent string, backup string) error {
+	if err := writeStagedPluginFile(
+		filepath.Join(backup, pluginBackupMarker),
+		[]byte(plugin.backupProvenance()),
+	); err != nil {
+		return fmt.Errorf("writing plugin backup provenance: %w", err)
+	}
+
+	if err := syncDir(backup); err != nil {
+		return err
+	}
+
+	return syncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists bool) error {
@@ -543,11 +662,21 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 		return nil
 	}
 
-	if err := plugin.rename(backup, plugin.dir); err != nil {
+	original := filepath.Join(backup, pluginBackupOriginal)
+	if err := plugin.rename(original, plugin.dir); err != nil {
 		return fmt.Errorf("restoring plugin directory backup %s: %w", backup, err)
 	}
 
-	return nil
+	parent := filepath.Dir(plugin.dir)
+	if err := errors.Join(syncDir(backup), syncDir(parent)); err != nil {
+		return err
+	}
+
+	if err := plugin.removeAll(backup); err != nil {
+		return err
+	}
+
+	return syncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) rollbackReplacement(
@@ -560,8 +689,10 @@ func (plugin pluginDirectoryInstall) rollbackReplacement(
 		removeErr = fmt.Errorf("removing staged plugin directory: %w", err)
 	}
 
-	restoreErr := plugin.restoreBackup(backup, backupExists)
-	if restoreErr == nil {
+	var restoreErr error
+	if backupExists {
+		restoreErr = plugin.restoreBackup(backup, backupExists)
+	} else {
 		restoreErr = syncDir(parent)
 	}
 
