@@ -512,6 +512,59 @@ func TestDoctorFixRequiresConsent(t *testing.T) {
 	}
 }
 
+func TestDoctorRepairCommandAbsolutizesRelativeStorePath(t *testing.T) {
+	store := prepareDoctorEnvironment(t)
+	home := filepath.Dir(store)
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	if err := os.WriteFile(
+		filepath.Join(workDir, "sessions.json"),
+		[]byte("{}"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	relStore := "sessions.json/"
+	absStore := workDir + "/" + relStore
+
+	var stdout, stderr bytes.Buffer
+	executeCLI(
+		t.Context(),
+		[]string{"--store", relStore, "--no-config", "--json", "doctor"},
+		nil,
+		&stdout,
+		&stderr,
+	)
+
+	report := decodeDoctorReport(t, stdout.String())
+	command := ""
+
+	for _, check := range report.Checks {
+		if check.ID == "store.read" && check.Fix != nil {
+			command = check.Fix.Command
+			break
+		}
+	}
+
+	if command == "" {
+		t.Fatal("doctor omitted store.read repair command")
+	}
+
+	args := doctorCommandArgs(t, home, command)
+
+	index := slices.Index(args, "--store")
+	if index < 0 || index+1 >= len(args) || args[index+1] != absStore {
+		t.Fatalf(
+			"repair command %q passes args %q, want absolute store %q",
+			command,
+			args,
+			absStore,
+		)
+	}
+}
+
 func TestEnvironmentErrorsPointToDoctor(t *testing.T) {
 	path := prepareDoctorEnvironment(t)
 	if err := os.WriteFile(

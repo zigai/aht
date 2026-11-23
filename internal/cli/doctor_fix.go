@@ -2,12 +2,12 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/zigai/aht/v2/internal/config"
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/manage"
-	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func (app *application) doctorFixCommand(fix *manage.DoctorFix) string {
@@ -15,18 +15,23 @@ func (app *application) doctorFixCommand(fix *manage.DoctorFix) string {
 	case manage.DoctorActionRefreshHistory:
 		return "aht manage history refresh"
 	case manage.DoctorActionResetStore:
-		prefix := "aht"
-		if fix.Target != registry.DefaultStorePath() {
-			prefix += " --store " + doctorFixPath(fix.Target)
+		target := doctorFixPath(fix.Target)
+		if target == "" {
+			return ""
 		}
 
-		return prefix + " manage state reset --force"
+		return "aht --store " + target + " manage state reset --force"
 	case manage.DoctorActionEnableTracker:
 		return app.doctorTrackerCommand("enable")
 	case manage.DoctorActionInspectTracker:
 		return app.doctorTrackerCommand("status")
 	case manage.DoctorActionRemoveHealth:
-		return "rm " + doctorFixPath(fix.Target)
+		target := doctorFixPath(fix.Target)
+		if target == "" {
+			return ""
+		}
+
+		return "rm " + target
 	case manage.DoctorActionReplaceIntegration:
 		return "aht manage integrations install " + harness.ShellQuote(fix.Target) + " --force"
 	case manage.DoctorActionUpgrade:
@@ -39,13 +44,26 @@ func (app *application) doctorFixCommand(fix *manage.DoctorFix) string {
 }
 
 func (app *application) doctorTrackerCommand(action string) string {
-	command := "aht --store " + doctorFixPath(app.resolvedStorePath())
+	store := doctorFixPath(app.resolvedStorePath())
+	if store == "" {
+		return ""
+	}
 
+	command := "aht --store " + store
 	path := app.doctorConfigPath()
-	if app.noConfig {
+
+	switch {
+	case app.noConfig:
 		command += " --no-config"
-	} else if path != "" {
-		command += " --config " + doctorFixPath(path)
+	case path == "-":
+		command += " --config -"
+	case path != "":
+		argument := doctorFixPath(path)
+		if argument == "" {
+			return ""
+		}
+
+		command += " --config " + argument
 	}
 
 	command += " manage tracker " + action
@@ -65,13 +83,29 @@ func (app *application) doctorConfigPath() string {
 }
 
 func doctorFixPath(path string) string {
-	path = formatHumanPath(path)
-	if path == "~" {
-		return path
+	if path == "" {
+		return ""
 	}
 
-	if suffix, found := strings.CutPrefix(path, "~/"); found {
-		return "~/" + harness.ShellQuote(suffix)
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+
+		sep := string(filepath.Separator)
+		path = strings.TrimSuffix(cwd, sep) + sep + path
+	}
+
+	if path == filepath.Clean(path) {
+		path = formatHumanPath(path)
+		if path == "~" {
+			return path
+		}
+
+		if suffix, found := strings.CutPrefix(path, "~/"); found {
+			return "~/" + harness.ShellQuote(suffix)
+		}
 	}
 
 	return harness.ShellQuote(path)
