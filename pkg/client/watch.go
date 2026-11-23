@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	watcherBufferSize = 16
-	fileWatchDebounce = 10 * time.Millisecond
+	watcherBufferSize   = 16
+	fileWatchDebounce   = 10 * time.Millisecond
+	brokerRetryInterval = time.Second
 )
 
 var errHandlerRequired = errors.New("watch handler is required")
@@ -42,20 +43,24 @@ type durableSessionWatcher struct {
 	done   chan struct{}
 }
 
-// sessionStream follows registry snapshots through the configured Mode and
-// switches to the durable registry when the broker goes away in ModeAuto.
+// sessionStream follows registry snapshots through the configured Mode. In
+// ModeAuto it watches the durable registry while the broker is away and
+// returns to the broker once a subscription succeeds again.
 type sessionStream struct {
 	client  *Client
 	filter  registry.Filter
 	watcher sessionWatcher
 	durable bool
+	//exhaustruct:optional
+	retry *time.Ticker
 }
 
 // Watch calls yield with the initial filtered snapshot and each newer one until
 // ctx is canceled. Watch returns nil after cancellation. ModeAuto follows the
 // realtime broker and switches to watching the durable registry when the broker
-// is unavailable or its stream closes; ModeDurableOnly watches the durable
-// registry only. Durable snapshots have no revision.
+// is unavailable or its stream closes, then back to the broker once it
+// accepts a subscription again; ModeDurableOnly watches the durable registry
+// only. Durable snapshots have no revision.
 func (c *Client) Watch(
 	ctx context.Context,
 	filter registry.Filter,
@@ -79,6 +84,8 @@ func (c *Client) Watch(
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-stream.retries():
+			stream.reconnect(ctx)
 		case ev, ok := <-stream.events():
 			if !ok || ev.err != nil {
 				if err := stream.recover(ctx, ok, ev.err); err != nil {
@@ -119,8 +126,7 @@ func (c *Client) openSessionStream(
 
 		stream.watcher = watcher
 	case ModeDurableOnly:
-		stream.watcher = startDurableWatcher(ctx, c.storePath, filter)
-		stream.durable = true
+		stream.useDurable(ctx)
 	case ModeAuto:
 		watcher, err := openBrokerWatcher(ctx, c.realtime, filter)
 		if err != nil && !brokerOffline(err) {
@@ -128,8 +134,7 @@ func (c *Client) openSessionStream(
 		}
 
 		if err != nil {
-			stream.watcher = startDurableWatcher(ctx, c.storePath, filter)
-			stream.durable = true
+			stream.useDurable(ctx)
 		} else {
 			stream.watcher = watcher
 		}
@@ -160,14 +165,50 @@ func (s *sessionStream) recover(ctx context.Context, ok bool, err error) error {
 	}
 
 	s.watcher.Close()
-	s.watcher = startDurableWatcher(ctx, s.client.storePath, s.filter)
-	s.durable = true
+	s.useDurable(ctx)
 
 	return nil
 }
 
+func (s *sessionStream) useDurable(ctx context.Context) {
+	s.watcher = startDurableWatcher(ctx, s.client.storePath, s.filter)
+	s.durable = true
+
+	if s.client.mode == ModeAuto && s.retry == nil {
+		s.retry = time.NewTicker(brokerRetryInterval)
+	}
+}
+
+func (s *sessionStream) retries() <-chan time.Time {
+	if s.retry == nil {
+		return nil
+	}
+
+	return s.retry.C
+}
+
+func (s *sessionStream) reconnect(ctx context.Context) {
+	watcher, err := openBrokerWatcher(ctx, s.client.realtime, s.filter)
+	if err != nil {
+		// The durable watcher keeps the stream current until a later try.
+		return
+	}
+
+	// The subscription starts with the full current state, so dropping the
+	// durable watcher's queued snapshots loses nothing.
+	s.watcher.Close()
+	s.watcher = watcher
+	s.durable = false
+	s.retry.Stop()
+	s.retry = nil
+}
+
 func (s *sessionStream) close() {
 	s.watcher.Close()
+
+	if s.retry != nil {
+		s.retry.Stop()
+	}
 }
 
 func brokerOffline(err error) bool {
