@@ -166,11 +166,10 @@ func stripCommandHooks(config map[string]any) bool {
 		return false
 	}
 
-	owned := harness.ManagedSourcePattern(claudeIntegrationSource)
 	isOwned := func(command string) bool {
 		_, native := harness.ParseNativeHookCommand(command, registry.Harness("claude"))
 
-		return native || owned.MatchString(command)
+		return native || harness.IsManagedSourceCommand(command, claudeIntegrationSource)
 	}
 
 	stripped := false

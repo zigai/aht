@@ -527,3 +527,28 @@ func TestClaudeRemoveRestoresUserSettings(t *testing.T) {
 		t.Fatalf("second removal = %+v, %v", again, err)
 	}
 }
+
+func TestClaudeInstallPreservesUserHookMentioningReporterFlags(t *testing.T) {
+	dir := claudeConfigDir(t)
+	userHook := commandHookGroup("", "sh -c 'echo --reporter claude-hook --source claude-hook'")
+	writeClaudeSettings(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"Stop": []any{userHook},
+		},
+	})
+
+	installClaude(t, Options{})
+
+	settings := readClaudeSettings(t, dir)
+
+	wantHooks := map[string]any{
+		"Stop": []any{userHook},
+	}
+	if !reflect.DeepEqual(settings["hooks"], wantHooks) {
+		t.Fatalf(
+			"hooks after install = %#v, want user hook preserved %#v",
+			settings["hooks"],
+			wantHooks,
+		)
+	}
+}

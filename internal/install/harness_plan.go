@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -742,16 +741,15 @@ func managedSource(source string, harness registry.Harness) string {
 }
 
 func isManagedSourceHookCommand(source string, configs []map[string]any) func(string) bool {
-	pattern := harnesspkg.ManagedSourcePattern(source)
 	nativeID := nativeHookIDForSource(source)
 
 	binaries := make(map[string]bool)
 	for _, config := range configs {
-		collectOwnedHookBinaries(config, pattern, nativeID, binaries)
+		collectOwnedHookBinaries(config, source, nativeID, binaries)
 	}
 
 	return func(command string) bool {
-		if pattern.MatchString(command) {
+		if harnesspkg.IsManagedSourceCommand(command, source) {
 			return true
 		}
 
@@ -791,29 +789,29 @@ func canonicalNativeHookCommand(
 
 func collectOwnedHookBinaries(
 	value any,
-	sourcePattern *regexp.Regexp,
+	source string,
 	nativeID registry.Harness,
 	binaries map[string]bool,
 ) {
 	switch value := value.(type) {
 	case map[string]any:
-		if binary := ownedHookBinary(value, sourcePattern, nativeID); binary != "" {
+		if binary := ownedHookBinary(value, source, nativeID); binary != "" {
 			binaries[binary] = true
 		}
 
 		for _, child := range value {
-			collectOwnedHookBinaries(child, sourcePattern, nativeID, binaries)
+			collectOwnedHookBinaries(child, source, nativeID, binaries)
 		}
 	case []any:
 		for _, child := range value {
-			collectOwnedHookBinaries(child, sourcePattern, nativeID, binaries)
+			collectOwnedHookBinaries(child, source, nativeID, binaries)
 		}
 	}
 }
 
 func ownedHookBinary(
 	hook map[string]any,
-	sourcePattern *regexp.Regexp,
+	source string,
 	nativeID registry.Harness,
 ) string {
 	command, ok := hook["command"].(string)
@@ -821,7 +819,7 @@ func ownedHookBinary(
 		return ""
 	}
 
-	tagged := sourcePattern.MatchString(command)
+	tagged := harnesspkg.IsManagedSourceCommand(command, source)
 
 	marked := hook["statusMessage"] == managedMarker
 	if !tagged && !marked {

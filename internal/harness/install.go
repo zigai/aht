@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -294,13 +294,26 @@ func ReportScriptCommand(
 	return strings.Join(append(parts, string(stdin), "--quiet"), " ")
 }
 
-// ManagedSourcePattern matches a hook command that an aht integration with
-// this reporter source generated, in any version's spelling.
-func ManagedSourcePattern(source string) *regexp.Regexp {
-	return regexp.MustCompile(
-		`(?:--reporter\s+['"]?|--source\s+['"]?|aht[_-]?integration=['"]?)` +
-			regexp.QuoteMeta(source) + `(?:['"\s]|$)`,
-	)
+// IsManagedSourceCommand reports whether a direct report invocation carries
+// both the requested source and evidence that aht generated it.
+func IsManagedSourceCommand(command string, source string) bool {
+	words, err := shlex.Split(command)
+	if err != nil || len(words) < 4 || words[0] == "" || words[1] != "report" || source == "" {
+		return false
+	}
+
+	target := strings.TrimSuffix(source, "-hook")
+	if words[2] == target {
+		return managedReportArgs(words[3:], source, ahtExecutable(words[0]))
+	}
+
+	// Older versions specified the target as --harness instead of a
+	// positional argument, and identified the reporter with --source.
+	if words[2] == "--harness" && words[3] == target {
+		return managedReportArgs(words[4:], source, ahtExecutable(words[0]))
+	}
+
+	return false
 }
 
 // NativeHookCommand renders the command a generated hook runs to pass a native
@@ -376,6 +389,86 @@ func RenderScriptTemplate(template string, binary string, definition Definition)
 	// The replacer does not rescan the event parser it splices in, so the
 	// alias table it references is filled in a second pass.
 	return strings.ReplaceAll(rendered, "{{ACTIVITY_ALIASES}}", typeScriptActivityAliases())
+}
+
+func ahtExecutable(binary string) bool {
+	switch filepath.Base(binary) {
+	case "aht", "aht.exe", "old-aht", "agent-sessions", "agent-sessions.exe":
+		return true
+	default:
+		return false
+	}
+}
+
+func managedReportArgs(args []string, source string, knownBinary bool) bool {
+	var sourceMatches, versioned, readsHookInput, hasTransition bool
+
+	for leadingReportFlag(args) {
+		var flag, value string
+
+		flag, value, args = takeReportArg(args)
+
+		switch flag {
+		case "--reporter", "--source":
+			sourceMatches = value == source
+		case "--reporter-version":
+			versioned = positiveReportVersion(value)
+		case string(ReportStdinRaw), string(ReportStdinDefaults):
+			readsHookInput = true
+		case "--activity", "--presence", "--state":
+			hasTransition = value != ""
+		case "--attribute":
+			if isManagedIntegrationAttribute(value, source) {
+				return true
+			}
+		}
+	}
+
+	// An explicitly configured (possibly renamed) aht binary need not have
+	// a recognizable filename. Match the generated transition, input mode,
+	// and reporter version in addition to the harness and source.
+	generated := versioned && readsHookInput && hasTransition
+
+	return sourceMatches && (knownBinary || generated)
+}
+
+func leadingReportFlag(args []string) bool {
+	return len(args) > 0 && strings.HasPrefix(args[0], "--") && args[0] != "--"
+}
+
+func takeReportArg(args []string) (string, string, []string) {
+	flag, value, inline := strings.Cut(args[0], "=")
+	args = args[1:]
+
+	if !inline && len(args) > 0 && reportArgumentValue(args[0]) {
+		return flag, args[0], args[1:]
+	}
+
+	return flag, value, args
+}
+
+func reportArgumentValue(word string) bool {
+	// Generated commands may append redirections or a shell suffix, but
+	// their report metadata always belongs to the leading invocation.
+	return !strings.HasPrefix(word, "--") &&
+		(word == "" || !strings.ContainsRune(";&|<>", rune(word[0])))
+}
+
+func positiveReportVersion(value string) bool {
+	version, err := strconv.Atoi(value)
+
+	return err == nil && version > 0
+}
+
+func isManagedIntegrationAttribute(value string, source string) bool {
+	key, got, ok := strings.Cut(value, "=")
+	if !ok || got != source {
+		return false
+	}
+
+	suffix, ok := strings.CutPrefix(key, "aht")
+
+	return ok && (suffix == "_integration" || suffix == "-integration" || suffix == "integration")
 }
 
 func shellCommand(binary string, args []string) string {

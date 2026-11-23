@@ -1353,3 +1353,58 @@ func requireTestHookHandler(t *testing.T, hooks map[string]any, event string) ma
 
 	return handler
 }
+
+func TestJSONHookInstallAndRemovePreserveUserHookMentioningManagedFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path := filepath.Join(home, ".factory", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	group := commandHookGroup(
+		"",
+		"echo report --reporter=droid-hook",
+		"echo report droid --reporter=droid-hook --quiet",
+	)
+	want := map[string]any{"Stop": []any{group}}
+
+	initial, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, initial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := Options{Harness: registry.Harness("droid"), Binary: testInstallBinary}
+	if _, err := Run(t.Context(), opts); err != nil {
+		t.Fatalf("install droid hooks: %v", err)
+	}
+
+	installed := decodeTestJSONObject(
+		t,
+		readTestFile(t, path, "reading droid hooks after install"),
+		"droid hooks",
+	)
+
+	groups, ok := installed["Stop"].([]any)
+	if !ok || len(groups) != 2 || !reflect.DeepEqual(groups[0], group) {
+		t.Fatalf("install lost or modified the user Stop hooks: %#v", installed["Stop"])
+	}
+
+	if _, err := Remove(t.Context(), opts); err != nil {
+		t.Fatalf("remove droid hooks: %v", err)
+	}
+
+	cleaned := decodeTestJSONObject(
+		t,
+		readTestFile(t, path, "reading droid hooks after remove"),
+		"droid hooks",
+	)
+	if !reflect.DeepEqual(cleaned, want) {
+		t.Fatalf("remaining droid hooks = %#v, want only original user hooks %#v", cleaned, want)
+	}
+}
