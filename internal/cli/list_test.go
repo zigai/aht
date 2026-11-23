@@ -331,3 +331,51 @@ func TestListTableColumnsExpandsSessionAndCWDWhenWidthAllows(t *testing.T) {
 
 	assertHumanLinesBounded(t, output.String())
 }
+
+func TestListJSONEscapesBidiControls(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	store := registry.NewJournal(path, catalog.Rules{})
+	rawID := "session-\u202ereversed"
+
+	if _, err := store.Observe(
+		t.Context(),
+		registry.Observation{
+			Harness:  registry.Harness("codex"),
+			At:       time.Now().UTC(),
+			Subject:  registry.ObservationIdentity{SessionID: rawID},
+			Evidence: &registry.Report{Event: "start"},
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runTestCLI(
+		t.Context(),
+		[]string{"--store", path, "--json", "list"},
+		&stdout,
+		&bytes.Buffer{},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	output := stdout.String()
+	if strings.ContainsRune(output, '\u202e') {
+		t.Fatalf("list JSON contains unescaped bidi control rune:\n%s", output)
+	}
+
+	if !strings.Contains(output, `\u202e`) {
+		t.Fatalf("list JSON did not escape bidi control rune:\n%s", output)
+	}
+
+	var sessions []registry.Session
+	if err := json.Unmarshal(stdout.Bytes(), &sessions); err != nil {
+		t.Fatalf("list JSON is not valid JSON: %v", err)
+	}
+
+	if len(sessions) != 1 || sessions[0].SessionID != rawID {
+		t.Fatalf("decoded session ID = %#v, want %q", sessions, rawID)
+	}
+}

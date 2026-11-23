@@ -100,7 +100,7 @@ func (app *application) runHistoryRefresh(
 	progress.clear()
 
 	if app.outputJSON {
-		if err := app.writeJSONSafe(result); err != nil {
+		if err := app.writeJSON(result); err != nil {
 			return err
 		}
 	} else {

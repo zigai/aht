@@ -3,7 +3,6 @@ package cli
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -575,7 +574,7 @@ func (app *application) writeSearchOutput(
 			}
 		}
 	case app.outputJSON:
-		return app.writeSearchJSON(result)
+		return app.writeJSON(result)
 	case opts.listing:
 		if err := app.writeSearchList(result.Matches); err != nil {
 			return err
@@ -653,7 +652,7 @@ func (app *application) writeStreamMatch(match history.Match, opts searchOptions
 	case opts.format != "":
 		return app.writeSearchField(match, opts.format)
 	case app.outputJSON:
-		return app.writeSearchJSONLine(match)
+		return app.writeJSONLine(match)
 	case tty:
 		return app.writeSearchMatchTTY(match, opts.verbose)
 	default:
@@ -1359,7 +1358,7 @@ func (app *application) writeSearchGroups(matches []history.Match, groupBy strin
 	})
 
 	if app.outputJSON {
-		return app.writeJSONSafe(groups)
+		return app.writeJSON(groups)
 	}
 
 	rows := make([][]string, 0, len(groups))
@@ -1394,46 +1393,6 @@ func (app *application) writeSearchGroups(matches []history.Match, groupBy strin
 	)
 
 	return app.writeWrappedHumanTable(columns, rows)
-}
-
-func (app *application) writeSearchJSON(result history.Result) error {
-	return app.writeJSONSafe(result)
-}
-
-func (app *application) writeSearchJSONLine(match history.Match) error {
-	data, err := json.Marshal(match)
-	if err != nil {
-		return fmt.Errorf("encode history match: %w", err)
-	}
-
-	return app.writeln(escapeBidi(string(data)))
-}
-
-// writeJSONSafe writes indented JSON with bidirectional controls escaped so a
-// terminal cannot reorder transcript text.
-func (app *application) writeJSONSafe(value any) error {
-	data, err := json.MarshalIndent(value, "", jsonIndent)
-	if err != nil {
-		return fmt.Errorf("encode history results: %w", err)
-	}
-
-	return app.writeln(escapeBidi(string(data)))
-}
-
-func escapeBidi(data string) string {
-	var safe strings.Builder
-	safe.Grow(len(data))
-
-	for _, character := range data {
-		if isBidiControl(character) {
-			quoted := strconv.QuoteRuneToASCII(character)
-			safe.WriteString(quoted[1 : len(quoted)-1])
-		} else {
-			safe.WriteRune(character)
-		}
-	}
-
-	return safe.String()
 }
 
 func searchPresence(evidence []history.RegistryState) string {
