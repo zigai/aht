@@ -96,9 +96,14 @@ type Options struct {
 	// waiting for a cycle. Nil uses the multiplexer drivers, or nothing when
 	// PaneList is set.
 	ProgramStatusWatch mux.ProgramStatusWatch
-	Now                func() time.Time
-	ErrorWriter        io.Writer
-	Quiet              bool
+	// IdleInterval is how long a continuously running observer waits after a
+	// cycle that changed nothing in a store that reports revisions. Zero uses a
+	// 20 second default; a negative value keeps polling at Interval.
+	//exhaustruct:optional
+	IdleInterval time.Duration
+	Now          func() time.Time
+	ErrorWriter  io.Writer
+	Quiet        bool
 }
 
 type Result struct {
@@ -147,6 +152,7 @@ type paneScreen struct {
 type screenDetection struct {
 	observation registry.Observation
 	detected    bool
+	polled      bool
 	probe       *screenProbe
 	err         error
 }
@@ -179,12 +185,14 @@ type cycleInventory struct {
 type trackedUpdate struct {
 	next       map[processKey]trackedProcess
 	retired    []processKey
+	retiredAt  int
 	candidates map[processKey]time.Time
 }
 
 type Observer struct {
 	store                   Store
 	interval                time.Duration
+	idleInterval            time.Duration
 	grace                   time.Duration
 	healthPath              string
 	processList             ProcessLister
@@ -208,6 +216,7 @@ type Observer struct {
 	candidates    map[processKey]time.Time
 	screenPending map[processKey]pendingScreenDecision
 	statusServers map[statusServer]struct{}
+	screenPolled  bool
 	// statusMu orders program status readings: a cycle holds it from listing
 	// panes to recording, and a watch holds it while recording a change.
 	//exhaustruct:optional
@@ -281,9 +290,15 @@ func New(opts Options) *Observer {
 		confirmAfter = defaultProcessConfirmation
 	}
 
+	idleInterval := opts.IdleInterval
+	if idleInterval == 0 {
+		idleInterval = idleObserverInterval
+	}
+
 	return &Observer{
 		store:                   store,
 		interval:                interval,
+		idleInterval:            idleInterval,
 		grace:                   opts.GracePeriod,
 		healthPath:              healthPath,
 		processList:             processList,
@@ -304,6 +319,7 @@ func New(opts Options) *Observer {
 		candidates:    make(map[processKey]time.Time),
 		screenPending: make(map[processKey]pendingScreenDecision),
 		statusServers: make(map[statusServer]struct{}),
+		screenPolled:  false,
 		startedAt:     time.Time{},
 		initialized:   false,
 		health: Health{
@@ -359,7 +375,7 @@ func (o *Observer) Health() Health {
 }
 
 func (o *Observer) nextInterval(schedule *pollSchedule, cycleErr error) time.Duration {
-	if cycleErr != nil || schedule.source == nil {
+	if cycleErr != nil || schedule.source == nil || o.idleInterval < 0 {
 		return o.interval
 	}
 
@@ -368,11 +384,25 @@ func (o *Observer) nextInterval(schedule *pollSchedule, cycleErr error) time.Dur
 	schedule.revision = revision
 	schedule.known = true
 
-	if !unchanged || len(o.candidates) > 0 || len(o.screenPending) > 0 {
+	if !unchanged || o.pollingPending() {
 		return o.interval
 	}
 
-	return max(o.interval, idleObserverInterval)
+	return max(o.interval, o.idleInterval)
+}
+
+func (o *Observer) pollingPending() bool {
+	if len(o.candidates) > 0 || len(o.screenPending) > 0 || o.screenPolled {
+		return true
+	}
+
+	for _, process := range o.tracked {
+		if process.missingCount > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (o *Observer) run(ctx context.Context, handle func(Result) error) (err error) {
@@ -494,7 +524,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 	tree := newProcessTree(processByPID)
 	catalogEntries, catalogByPID := claimCurrentCatalogEntries(catalogEntries, processByPID)
 	harnessByPID := resolveHarnesses(processes)
-	pruneNestedHarnesses(processes, tree, harnessByPID)
+	pruneNestedHarnesses(processes, tree, harnessByPID, knownSessions)
 	normalizeHarnessForeground(processes, tree, harnessByPID)
 
 	candidates := o.holdUnconfirmedProcesses(
@@ -543,6 +573,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 
 	gone, update := o.retireMissingProcesses(current, at)
 	update.candidates = candidates
+	update.retiredAt = len(observations)
 
 	observations = append(observations, gone...)
 	result.Gone += len(gone)
@@ -583,8 +614,14 @@ func (o *Observer) paneObservations(
 
 	var detectErr error
 
+	o.screenPolled = false
+
 	for _, screen := range screens {
 		observations = append(observations, screen.placements...)
+
+		if screen.polled {
+			o.screenPolled = true
+		}
 
 		if screen.probe != nil {
 			screen.screenDetection = o.screenState(*screen.probe, captures[0], at)
@@ -600,9 +637,7 @@ func (o *Observer) paneObservations(
 			observations = append(observations, screen.observation)
 		}
 
-		if screen.err != nil {
-			detectErr = screen.err
-		}
+		detectErr = errors.Join(detectErr, screen.err)
 	}
 
 	return observations, locationPIDs, detectErr
@@ -673,6 +708,7 @@ func (o *Observer) retireMissingProcesses(
 	update := trackedUpdate{
 		next:       make(map[processKey]trackedProcess, len(current)+len(o.tracked)),
 		retired:    make([]processKey, 0),
+		retiredAt:  0,
 		candidates: nil,
 	}
 	maps.Copy(update.next, current)
@@ -722,27 +758,30 @@ func (o *Observer) recordObservations(
 	result Result,
 ) (Result, error) {
 	result.Observations = len(observations)
+
+	var recorded []bool
+
 	if len(observations) > 0 {
-		sessions, observeErr := o.observeBatch(ctx, observations)
+		var (
+			sessions   []registry.Session
+			observeErr error
+		)
+
+		sessions, recorded, observeErr = o.observeBatch(ctx, observations)
 		result.Sessions = len(sessions)
 		result.Changed = len(sessions)
 
 		if observeErr != nil {
 			if errors.Is(observeErr, registry.ErrObservationConflict) {
-				o.tracked = update.next
+				o.applyTrackedUpdate(update, recorded)
 			}
 
 			return o.failCycle(at, "registry", observeErr, "recording observations", result)
 		}
 	}
 
-	for _, key := range update.retired {
-		delete(update.next, key)
-	}
+	o.applyTrackedUpdate(update, recorded)
 
-	o.tracked = update.next
-
-	o.candidates = update.candidates
 	if err := o.recordCycleHealth(at, result); err != nil {
 		result = result.withDegradation(err)
 
@@ -752,6 +791,17 @@ func (o *Observer) recordObservations(
 	return result, nil
 }
 
+func (o *Observer) applyTrackedUpdate(update trackedUpdate, recorded []bool) {
+	for index, key := range update.retired {
+		if recorded[update.retiredAt+index] {
+			delete(update.next, key)
+		}
+	}
+
+	o.tracked = update.next
+	o.candidates = update.candidates
+}
+
 func (o *Observer) failCycle(
 	at time.Time,
 	component string,
@@ -759,8 +809,7 @@ func (o *Observer) failCycle(
 	wrapMsg string,
 	result Result,
 ) (Result, error) {
-	result.Degraded = true
-	result.Error = err.Error()
+	result = result.withDegradation(err)
 	healthErr := o.recordHealth(at, true, component, err, result)
 
 	return result, joinObserverHealthError(fmt.Errorf("%s: %w", wrapMsg, err), healthErr)
@@ -900,6 +949,7 @@ func pruneNestedHarnesses(
 	processes []processinfo.Process,
 	tree *processTree,
 	harnessByPID map[int]registry.Harness,
+	sessions []registry.Session,
 ) {
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
@@ -924,10 +974,32 @@ func pruneNestedHarnesses(
 			continue
 		}
 
-		if hasAncestorHarness(process.PID, harnessID, tree, harnessByPID) {
+		// A native report attaches to the innermost agent of a nested chain,
+		// so the inner process stays tracked once a reported session owns it.
+		if hasAncestorHarness(process.PID, harnessID, tree, harnessByPID) &&
+			!reportedSessionOwns(sessions, harnessID, process) {
 			delete(harnessByPID, process.PID)
 		}
 	}
+}
+
+func reportedSessionOwns(
+	sessions []registry.Session,
+	harnessID registry.Harness,
+	process processinfo.Process,
+) bool {
+	for _, session := range sessions {
+		if session.Harness == harnessID &&
+			session.Presence() == registry.PresenceLive &&
+			(session.SessionID != "" || session.SessionPath != "") &&
+			session.Process != nil &&
+			session.Process.PID == process.PID &&
+			session.Process.StartIdentity == process.StartIdentity {
+			return true
+		}
+	}
+
+	return false
 }
 
 func processSightings(
@@ -1378,7 +1450,7 @@ func (o *Observer) detectScreenState(
 			reason = "multiplexer_agent_status"
 		}
 
-		detection.detected = true
+		detection.detected, detection.polled = true, true
 		detection.observation = screenObservation(
 			session,
 			harnessID,
@@ -1411,6 +1483,7 @@ func (o *Observer) detectScreenState(
 		return detection
 	}
 
+	detection.polled = true
 	detection.probe = &screenProbe{
 		session:   session,
 		harnessID: harnessID,
@@ -1497,20 +1570,13 @@ func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedPro
 }
 
 func shouldDetectScreen(session registry.Session, at time.Time) bool {
-	if catalog.SupportsScreen(session.Harness) {
-		authority, _ := registry.ActivityAuthority(
-			session,
-			(catalog.Rules{}).Policy(session.Harness),
-			at,
-		)
+	authority, _ := registry.ActivityAuthority(
+		session,
+		(catalog.Rules{}).Policy(session.Harness),
+		at,
+	)
 
-		return authority == registry.AuthorityScreen
-	}
-
-	policy := (catalog.Rules{}).Policy(session.Harness)
-
-	return policy.Authority == registry.AuthorityHook &&
-		!registry.EvaluateHook(session, policy, at).Active
+	return authority == registry.AuthorityScreen
 }
 
 func screenObservationTime(cycleAt time.Time, capturedAt time.Time) time.Time {
@@ -1931,14 +1997,20 @@ func (o *Observer) screenState(
 func (o *Observer) observeBatch(
 	ctx context.Context,
 	observations []registry.Observation,
-) ([]registry.Session, error) {
+) ([]registry.Session, []bool, error) {
+	recorded := make([]bool, len(observations))
+
 	sessions, err := o.store.ObserveBatch(ctx, observations)
 	if !errors.Is(err, registry.ErrObservationConflict) {
 		if err != nil {
-			return sessions, fmt.Errorf("recording observation batch: %w", err)
+			return sessions, recorded, fmt.Errorf("recording observation batch: %w", err)
 		}
 
-		return sessions, nil
+		for index := range recorded {
+			recorded[index] = true
+		}
+
+		return sessions, recorded, nil
 	}
 
 	sessions = make([]registry.Session, 0, len(observations))
@@ -1955,10 +2027,12 @@ func (o *Observer) observeBatch(
 			continue
 		}
 
+		recorded[index] = true
+
 		sessions = append(sessions, session)
 	}
 
-	return sessions, errors.Join(observationErrs...)
+	return sessions, recorded, errors.Join(observationErrs...)
 }
 
 func (o *Observer) clearRunning() {
@@ -1989,7 +2063,12 @@ func (r Result) String() string {
 
 func (r Result) withDegradation(err error) Result {
 	r.Degraded = true
-	r.Error = err.Error()
+
+	if r.Error == "" {
+		r.Error = err.Error()
+	} else {
+		r.Error += "; " + err.Error()
+	}
 
 	return r
 }

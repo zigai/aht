@@ -30,10 +30,15 @@ type statusServer struct {
 
 type statusWatchState uint8
 
+type statusWatch struct {
+	state  statusWatchState
+	cancel context.CancelFunc
+}
+
 type statusWatchers struct {
 	watch mux.ProgramStatusWatch
 	read  func(context.Context, []mux.Pane)
-	state map[statusServer]statusWatchState
+	state map[statusServer]*statusWatch
 	//exhaustruct:optional
 	group sync.WaitGroup
 	//exhaustruct:optional
@@ -146,7 +151,7 @@ func newStatusWatchers(
 	return &statusWatchers{
 		watch: watch,
 		read:  read,
-		state: make(map[statusServer]statusWatchState),
+		state: make(map[statusServer]*statusWatch),
 	}
 }
 
@@ -158,8 +163,9 @@ func (w *statusWatchers) sync(ctx context.Context, servers map[statusServer]stru
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	for server, state := range w.state {
-		if _, listed := servers[server]; !listed && state == statusWatchUnsignaled {
+	for server, watch := range w.state {
+		if _, listed := servers[server]; !listed {
+			watch.cancel()
 			delete(w.state, server)
 		}
 	}
@@ -169,19 +175,28 @@ func (w *statusWatchers) sync(ctx context.Context, servers map[statusServer]stru
 			continue
 		}
 
-		w.state[server] = statusWatchRunning
-		w.group.Go(func() { w.run(ctx, server) })
+		watchCtx, cancel := context.WithCancel(ctx)
+		watch := &statusWatch{state: statusWatchRunning, cancel: cancel}
+		w.state[server] = watch
+		w.group.Go(func() { w.run(watchCtx, server, watch) })
 	}
 }
 
-func (w *statusWatchers) run(ctx context.Context, server statusServer) {
+func (w *statusWatchers) run(ctx context.Context, server statusServer, watch *statusWatch) {
 	err := w.watch(ctx, server.kind, server.id, func(panes []mux.Pane) { w.read(ctx, panes) })
+	canceled := ctx.Err() != nil
 
+	watch.cancel()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if errors.Is(err, mux.ErrProgramStatusUnsignaled) {
-		w.state[server] = statusWatchUnsignaled
+	// The server may have vanished and come back with a new watch meanwhile.
+	if w.state[server] != watch {
+		return
+	}
+
+	if errors.Is(err, mux.ErrProgramStatusUnsignaled) && !canceled {
+		watch.state = statusWatchUnsignaled
 
 		return
 	}
@@ -197,7 +212,7 @@ func (o *Observer) readProgramStatus(ctx context.Context, panes []mux.Pane) {
 	if err == nil {
 		observations := programStatusObservations(sessions, panes, o.now().UTC())
 		if len(observations) > 0 {
-			_, err = o.observeBatch(ctx, observations)
+			_, _, err = o.observeBatch(ctx, observations)
 		}
 	}
 

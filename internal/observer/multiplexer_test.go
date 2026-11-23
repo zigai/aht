@@ -617,6 +617,57 @@ func TestObserverRestartsProgramStatusWatch(t *testing.T) {
 	})
 }
 
+func TestObserverStopsWatchOfVanishedServer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		watches := &programStatusWatches{}
+
+		var listed atomic.Bool
+
+		listed.Store(true)
+
+		run := runProgramStatusObserver(t, time.Second, watches, func() []mux.Pane {
+			if !listed.Load() {
+				return nil
+			}
+
+			return []mux.Pane{programStatusPane("/tmp/agents.sock", "/dev/pts/7", 42, "")}
+		})
+
+		cycle := func() (int, int) {
+			<-run.cycles
+			synctest.Wait()
+
+			watches.mu.Lock()
+			defer watches.mu.Unlock()
+
+			return len(watches.servers), watches.stopped
+		}
+
+		if started, stopped := cycle(); started != 1 || stopped != 0 {
+			t.Fatalf("watches after the first cycle: started %d, stopped %d", started, stopped)
+		}
+
+		listed.Store(false)
+
+		if started, stopped := cycle(); started != 1 || stopped != 1 {
+			t.Fatalf("watches after the server vanished: started %d, stopped %d", started, stopped)
+		}
+
+		listed.Store(true)
+
+		if started, stopped := cycle(); started != 2 || stopped != 1 {
+			t.Fatalf("watches after the server came back: started %d, stopped %d", started, stopped)
+		}
+
+		run.stop()
+
+		if watches.stopped != 2 {
+			t.Fatalf("watches stopped with the observer = %d, want 2", watches.stopped)
+		}
+	})
+}
+
 func TestObserverPrefersRicherNestedMultiplexerLocation(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})

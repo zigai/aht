@@ -1348,3 +1348,235 @@ func TestObserverKeepsConfiguredPollingAfterDiscoveryFailures(t *testing.T) {
 		}
 	})
 }
+
+func TestObserverKeepsPollingWhileMissingProcessAwaitsRetirement(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	at := time.Now().UTC().Add(-time.Minute)
+	processes := []processinfo.Process{{
+		PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A",
+		Executable: "/usr/bin/codex", CWD: "/work", TTY: "/dev/pts/1",
+	}}
+	watcher := New(Options{
+		Store:       store,
+		Interval:    time.Second,
+		Now:         func() time.Time { return at },
+		ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil },
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+	schedule := pollSchedule{source: unchangedRevision{}, revision: 0, known: false}
+
+	cycle := func() time.Duration {
+		t.Helper()
+
+		if _, err := watcher.RunOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		at = at.Add(time.Second)
+
+		return watcher.nextInterval(&schedule, nil)
+	}
+
+	cycle()
+
+	if got := cycle(); got != idleObserverInterval {
+		t.Fatalf("interval with a steady process = %s, want idle %s", got, idleObserverInterval)
+	}
+
+	processes = nil
+
+	if got := cycle(); got != time.Second {
+		t.Fatalf("interval while a process awaits retirement = %s, want 1s", got)
+	}
+
+	if got := cycle(); got != idleObserverInterval {
+		t.Fatalf("interval after retirement = %s, want idle %s", got, idleObserverInterval)
+	}
+
+	requireNoSessions(t, store)
+}
+
+func TestObserverKeepsPollingWhileScreenDecidesActivity(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	process, pane := detectionProcessPane(140, "codex")
+	options := detectionObserverOptions(store, process, pane, t.TempDir())
+	options.Interval = time.Second
+	options.ScreenCapture = func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+		return mux.ScreenSnapshot{Text: "› next task\nContext 63% used", Title: "codex"}, nil
+	}
+	watcher := New(options)
+	schedule := pollSchedule{source: unchangedRevision{}, revision: 0, known: false}
+
+	for range 3 {
+		if _, err := watcher.RunOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := watcher.nextInterval(&schedule, nil); got != time.Second {
+			t.Fatalf("interval while screen decides activity = %s, want 1s", got)
+		}
+	}
+
+	idle := New(Options{
+		Store:        store,
+		Interval:     time.Second,
+		IdleInterval: 5 * time.Second,
+		ProcessList:  func(context.Context) ([]processinfo.Process, error) { return nil, nil },
+		PaneList:     func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList:  func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+	idleSchedule := pollSchedule{source: unchangedRevision{}, revision: 1, known: true}
+
+	if got := idle.nextInterval(&idleSchedule, nil); got != 5*time.Second {
+		t.Fatalf("interval without polled state = %s, want configured idle 5s", got)
+	}
+}
+
+func TestObserverConflictRecoveryCommitsRecordedRetirements(t *testing.T) {
+	t.Parallel()
+
+	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234}
+	at := time.Now().UTC().Add(-time.Minute)
+	conflicting := processinfo.Process{
+		PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A",
+		Executable: "/usr/bin/codex", CWD: "/conflict", TTY: "/dev/pts/1",
+	}
+	retiring := processinfo.Process{
+		PID: 5678, PPID: 1, ProcessGroupID: 5678, StartIdentity: "boot:B",
+		Executable: "/usr/bin/codex", CWD: "/retiring", TTY: "/dev/pts/2",
+	}
+	fresh := processinfo.Process{
+		PID: 9012, PPID: 1, ProcessGroupID: 9012, StartIdentity: "boot:C",
+		Executable: "/usr/bin/codex", CWD: "/fresh", TTY: "/dev/pts/3",
+	}
+	processes := []processinfo.Process{conflicting, retiring}
+	watcher := New(Options{
+		Store:       store,
+		Now:         func() time.Time { return at },
+		ProcessList: func(context.Context) ([]processinfo.Process, error) { return processes, nil },
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+
+	for _, next := range [][]processinfo.Process{{conflicting}, {conflicting, fresh}} {
+		if _, err := watcher.RunOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		processes = next
+		at = at.Add(time.Second)
+	}
+
+	store.enabled = true
+	watcher.continuous = true
+
+	if _, err := watcher.RunOnce(t.Context()); !errors.Is(err, registry.ErrObservationConflict) {
+		t.Fatalf("conflicting cycle error = %v, want observation conflict", err)
+	}
+
+	retiredKey := processKey{harness: registry.Harness("codex"), pid: 5678, start: "boot:B"}
+	if _, tracked := watcher.tracked[retiredKey]; tracked {
+		t.Fatalf("recorded retirement still tracked: %#v", watcher.tracked)
+	}
+
+	freshKey := processKey{harness: registry.Harness("codex"), pid: 9012, start: "boot:C"}
+	if _, held := watcher.candidates[freshKey]; !held {
+		t.Fatalf(
+			"candidates after conflict = %#v, want the unconfirmed process",
+			watcher.candidates,
+		)
+	}
+
+	sessions, err := baseStore.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, session := range sessions {
+		if session.Process != nil && session.Process.PID == 5678 &&
+			session.Presence() == registry.PresenceLive {
+			t.Fatalf("retired process session stayed live: %#v", session)
+		}
+	}
+}
+
+func TestObserverTracksReportedInnerAgentOfSameHarness(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	outer := processinfo.Process{
+		PID: 20, PPID: 1, ProcessGroupID: 20, StartIdentity: "boot:20",
+		Executable: "/usr/bin/claude", CWD: "/work", TTY: "/dev/pts/4",
+	}
+	shell := processinfo.Process{
+		PID: 21, PPID: 20, ProcessGroupID: 21, StartIdentity: "boot:21",
+		Executable: "/usr/bin/bash", CWD: "/work", TTY: "/dev/pts/4",
+	}
+	inner := processinfo.Process{
+		PID: 22, PPID: 21, ProcessGroupID: 22, StartIdentity: "boot:22",
+		Executable: "/usr/bin/claude", CWD: "/work/inner", TTY: "/dev/pts/4",
+	}
+	presence := registry.PresenceLive
+	start := registry.NativeLifecycleStart
+
+	if _, err := store.Observe(t.Context(), registry.Observation{
+		Harness: registry.Harness("claude"),
+		At:      time.Now().UTC(),
+		Subject: registry.ObservationIdentity{SessionID: "inner-session"},
+		Evidence: &registry.Report{
+			Event:     "session_start",
+			Lifecycle: &start,
+			Claim:     &presence,
+			Process:   observerProcessIdentity(inner),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	watcher := New(Options{
+		Store: store,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return []processinfo.Process{outer, shell, inner}, nil
+		},
+		PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, nil },
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+	})
+	if _, err := watcher.RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	innerKey := processKey{harness: registry.Harness("claude"), pid: 22, start: "boot:22"}
+	if _, tracked := watcher.tracked[innerKey]; !tracked {
+		t.Fatalf("tracked processes = %#v, want the reported inner agent", watcher.tracked)
+	}
+
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, session := range sessions {
+		if session.SessionID != "inner-session" {
+			continue
+		}
+
+		sighting := session.Observations.Process
+		if sighting == nil || !sighting.Sighting.Present || sighting.Sighting.Process.PID != 22 {
+			t.Fatalf("inner session process observation = %#v, want a sighting of PID 22", sighting)
+		}
+
+		return
+	}
+
+	t.Fatalf("sessions = %#v, want the reported inner session", sessions)
+}
+
+type unchangedRevision struct{}
+
+func (unchangedRevision) Revision() uint64 { return 1 }
