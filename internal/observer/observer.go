@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/mux/drivers"
@@ -77,10 +77,10 @@ type Options struct {
 	Interval         time.Duration
 	GracePeriod      time.Duration
 	ProcessList      ProcessLister
-	PaneList         mux.PaneLister
+	PaneList         mux.PaneListFunc
 	LocationPresence func(context.Context, registry.Location) (registry.Presence, error)
 	CatalogList      CatalogLister
-	ScreenCapture    mux.ScreenCapturer
+	ScreenCapture    mux.ScreenCaptureFunc
 	// DisableScreenInspection disables terminal capture and screen-derived state.
 	// Native multiplexer activity remains available without reading screen text.
 	DisableScreenInspection bool
@@ -95,7 +95,7 @@ type Options struct {
 	// status changes, so a continuously running observer records it without
 	// waiting for a cycle. Nil uses the multiplexer drivers, or nothing when
 	// PaneList is set.
-	ProgramStatusWatch mux.ProgramStatusWatch
+	ProgramStatusWatch mux.ProgramStatusWatchFunc
 	// IdleInterval is how long a continuously running observer waits after a
 	// cycle that changed nothing in a store that reports revisions. Zero uses a
 	// 20 second default; a negative value keeps polling at Interval.
@@ -206,7 +206,7 @@ type Observer struct {
 	errorWriter             io.Writer
 	quiet                   bool
 	confirmAfter            time.Duration
-	statusWatch             mux.ProgramStatusWatch
+	statusWatch             mux.ProgramStatusWatchFunc
 
 	//exhaustruct:optional
 	mu            sync.Mutex
@@ -237,7 +237,7 @@ func New(opts Options) *Observer {
 	if processList == nil {
 		keys := append(drivers.EnvKeys(), processinfo.ChildRoleEnv)
 		includeEnv := func(process processinfo.Process) bool {
-			_, ok := catalog.ResolveProcess(process)
+			_, ok := adapters.ResolveProcess(process)
 			return ok
 		}
 		processList = func(ctx context.Context) ([]processinfo.Process, error) {
@@ -839,7 +839,7 @@ func observerStore(opts Options) (Store, string) {
 		storePath = registry.DefaultStorePath()
 	}
 
-	return registry.NewJournal(storePath, catalog.Rules{}), storePath
+	return registry.NewJournal(storePath, adapters.Rules{}), storePath
 }
 
 // An agent can itself look like a wrapper (pi runs as node), so only a chain of
@@ -863,7 +863,7 @@ func launchesHarnessThroughWrappers(
 			}
 
 			parent, ok := tree.byPID[ppid]
-			if !ok || !catalog.IsWrapper(parent) {
+			if !ok || !adapters.IsWrapper(parent) {
 				break
 			}
 		}
@@ -953,7 +953,7 @@ func pruneNestedHarnesses(
 ) {
 	for _, process := range processes {
 		harnessID, ok := harnessByPID[process.PID]
-		if !ok || !catalog.IsWrapper(process) {
+		if !ok || !adapters.IsWrapper(process) {
 			continue
 		}
 
@@ -1097,7 +1097,7 @@ func catalogObservations(
 			},
 		)
 		if report, ok := catalogActivityReport(entry, processByPID); ok {
-			observations = append(observations, catalog.PrepareObservation(registry.Observation{
+			observations = append(observations, adapters.PrepareObservation(registry.Observation{
 				Harness: entry.Harness, At: at, Subject: identity, Evidence: report,
 			}))
 		}
@@ -1186,7 +1186,7 @@ func (o *Observer) processConfirmed(
 }
 
 func resolveHarness(process processinfo.Process) (registry.Harness, bool) {
-	harnessID, ok := catalog.ResolveProcess(process)
+	harnessID, ok := adapters.ResolveProcess(process)
 	if !ok {
 		return "", false
 	}
@@ -1203,7 +1203,7 @@ func observableHarness(
 		return "", false
 	}
 
-	if filter, ok := catalog.ProcessFilterFor(harnessID); ok {
+	if filter, ok := adapters.ProcessFilterFor(harnessID); ok {
 		if !filter.ObservableProcess(process) {
 			return "", false
 		}
@@ -1373,7 +1373,7 @@ func screenFallbackMetadata(
 	harnessID registry.Harness,
 	at time.Time,
 ) (string, string) {
-	policy := (catalog.Rules{}).Policy(harnessID)
+	policy := (adapters.Rules{}).Policy(harnessID)
 	if policy.Authority != registry.AuthorityHook {
 		return "", ""
 	}
@@ -1572,7 +1572,7 @@ func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedPro
 func shouldDetectScreen(session registry.Session, at time.Time) bool {
 	authority, _ := registry.ActivityAuthority(
 		session,
-		(catalog.Rules{}).Policy(session.Harness),
+		(adapters.Rules{}).Policy(session.Harness),
 		at,
 	)
 
@@ -1606,11 +1606,11 @@ func preferForegroundProcess(candidate processinfo.Process, current processinfo.
 }
 
 func isDirectAgentProcess(process processinfo.Process) bool {
-	if catalog.IsWrapper(process) {
+	if adapters.IsWrapper(process) {
 		return false
 	}
 
-	_, ok := catalog.ResolveProcess(process)
+	_, ok := adapters.ResolveProcess(process)
 
 	return ok
 }
@@ -1624,7 +1624,7 @@ func catalogListedProcess(
 		return process, false
 	}
 
-	if executableHarness, known := catalog.FromCommand(
+	if executableHarness, known := adapters.FromCommand(
 		process.Executable,
 	); known &&
 		executableHarness != entry.Harness {

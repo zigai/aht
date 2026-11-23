@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/harness"
 )
 
 func TestParseMatchesNamesWithoutPunctuation(t *testing.T) {
 	t.Parallel()
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		def := adapter.Definition()
 		for _, name := range append([]string{string(def.ID)}, def.Aliases...) {
 			for _, separator := range []string{" ", ".", "-", "_", ":", "!"} {

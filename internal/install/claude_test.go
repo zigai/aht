@@ -38,15 +38,15 @@ func claudeConfigDir(t *testing.T) string {
 	return dir
 }
 
-func installClaude(t *testing.T, options Options) Result {
+func installClaude(t *testing.T, opts Options) Result {
 	t.Helper()
 
-	options.Harness = registry.Harness("claude")
-	if options.Binary == "" {
-		options.Binary = testInstallBinary
+	opts.Harness = registry.Harness("claude")
+	if opts.Binary == "" {
+		opts.Binary = testInstallBinary
 	}
 
-	result, err := Run(t.Context(), options)
+	result, err := Run(t.Context(), opts)
 	if err != nil {
 		t.Fatalf("installing claude plugin: %v", err)
 	}
@@ -380,8 +380,7 @@ func upgradeClaude(t *testing.T, dryRun bool) Result {
 	results, err := UpgradeHarness(
 		t.Context(),
 		registry.Harness("claude"),
-		testInstallBinary,
-		dryRun,
+		UpgradeOptions{Binary: testInstallBinary, DryRun: dryRun},
 	)
 	if err != nil || len(results) != 1 {
 		t.Fatalf("upgrading claude integration = %+v, %v", results, err)
@@ -587,7 +586,11 @@ func TestUpgradeRecoversRegisteredMarkerlessClaudePlugin(t *testing.T) {
 
 	id := registry.Harness("claude")
 
-	preview, err := UpgradeHarness(t.Context(), id, testInstallBinary, true)
+	preview, err := UpgradeHarness(
+		t.Context(),
+		id,
+		UpgradeOptions{Binary: testInstallBinary, DryRun: true},
+	)
 	if err != nil || len(preview) != 1 || !preview[0].Changed {
 		t.Fatalf("registered plugin recovery preview = %+v, %v; want Changed", preview, err)
 	}
@@ -596,7 +599,7 @@ func TestUpgradeRecoversRegisteredMarkerlessClaudePlugin(t *testing.T) {
 		t.Fatalf("dry run changed the target: %v", err)
 	}
 
-	result, err := UpgradeHarness(t.Context(), id, testInstallBinary, false)
+	result, err := UpgradeHarness(t.Context(), id, UpgradeOptions{Binary: testInstallBinary})
 	if err != nil || len(result) != 1 || !result[0].Changed {
 		t.Fatalf("registered plugin recovery = %+v, %v; want Changed", result, err)
 	}

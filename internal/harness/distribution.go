@@ -11,8 +11,8 @@ const (
 )
 
 const (
-	FamilyTreeExtension DistributionFamily = "tree-extension"
-	FamilyPartPlugin    DistributionFamily = "part-plugin"
+	DistributionFamilyTreeExtension DistributionFamily = "tree-extension"
+	DistributionFamilyPartPlugin    DistributionFamily = "part-plugin"
 )
 
 type DistributionSource string

@@ -76,7 +76,7 @@ must leave a building tree. `internal/harness/amp` is a compact reference adapte
    `aht manage integrations status` reports stale artifacts and
    `aht manage integrations upgrade` replaces them.
 4. Register the harness:
-   - Add `<name>.New()` to `adapters` in `internal/harness/catalog/catalog.go`.
+   - Add `<name>.New()` to `adapters` in `internal/harness/adapters/adapters.go`.
    - Add the public `Harness<Name>` constant to `pkg/aht/harnesses.go`, the only
      place public harness names are declared.
    - Add `<Name>` to the harness-name `forbidigo` pattern in `.golangci.yaml`.
@@ -85,7 +85,7 @@ must leave a building tree. `internal/harness/amp` is a compact reference adapte
      `test/hostcompat/contracts_test.go`.
 5. Do not reference harness names or add per-harness switches in
    `pkg/registry`, `pkg/history`, `internal/cli`, `internal/observer`, or
-   `internal/agentstate`. Dispatch through `internal/harness/catalog`.
+   `internal/agentstate`. Dispatch through `internal/harness/adapters`.
    `depguard`, `forbidigo`, and `internal/architecture/conventions_test.go`
    enforce this.
 6. Tests:
@@ -99,7 +99,7 @@ must leave a building tree. `internal/harness/amp` is a compact reference adapte
      capabilities automatically. Keep adapter payload fixtures in
      `adapter_test.go` and history fixtures in `pkg/history/history_test.go`.
    - The adapter is picked up automatically by the generated lifecycle
-     properties in `internal/harness/catalog/lifecycle_property_test.go`. It
+     properties in `internal/harness/adapters/lifecycle_property_test.go`. It
      must pass them without per-harness exceptions.
 7. Verify with `just check`.
 

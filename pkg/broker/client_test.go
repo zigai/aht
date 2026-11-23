@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -152,7 +152,7 @@ func TestBrokerStoreFallbackParity(t *testing.T) {
 
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "sessions.json")
-	fileStore := registry.NewJournal(storePath, catalog.Rules{})
+	fileStore := registry.NewJournal(storePath, adapters.Rules{})
 
 	running := registry.ActivityRunning
 
@@ -322,7 +322,7 @@ func startBrokerServer(t *testing.T) (*registry.MemoryStore, string) {
 
 	store, err := registry.OpenMemoryStore(
 		filepath.Join(t.TempDir(), "state.json"),
-		catalog.Rules{},
+		adapters.Rules{},
 	)
 	if err != nil {
 		t.Fatal(err)

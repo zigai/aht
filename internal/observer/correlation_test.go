@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -67,7 +67,7 @@ func TestObserverCatalogCorrelatesCurrentClaudeProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("correlated sessions: %v %#v", err, sessions)
@@ -86,7 +86,7 @@ func TestObserverCatalogCorrelatesCurrentClaudeProcess(t *testing.T) {
 func TestObserverCorrelatesAgentAcrossIntermediateShells(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	processes := []processinfo.Process{
 		{PID: 10, PPID: 1, StartIdentity: "boot:10", Executable: "/bin/bash", CWD: "/pane"},
 		{PID: 11, PPID: 10, StartIdentity: "boot:11", Executable: "/bin/sh", CWD: "/pane"},
@@ -131,7 +131,7 @@ func TestObserverCorrelatesAgentAcrossIntermediateShells(t *testing.T) {
 func TestObserverSuppressesWrapperWhenDirectAgentChildExists(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	processes := []processinfo.Process{
 		{
 			PID: 20, PPID: 1, StartIdentity: "boot:20", Executable: "/usr/bin/env",
@@ -170,7 +170,7 @@ func TestObserverSuppressesWrapperWhenDirectAgentChildExists(t *testing.T) {
 func TestObserverKeepsAgentThatLaunchesNestedAgentThroughNonWrapper(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	processes := []processinfo.Process{
 		{
 			PID:           10,

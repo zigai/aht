@@ -11,7 +11,7 @@ import (
 
 	"github.com/zigai/aht/v2/pkg/registry"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 // requireNoSubagentHooks asserts that child-agent events, which fire while the
@@ -652,7 +652,7 @@ func TestInstallRefusesHookConfigWithUnexpectedShape(t *testing.T) {
 				t.Context(),
 				Options{Harness: registry.Harness(test.harness), Binary: testInstallBinary},
 			)
-			if !errors.Is(err, harnesspkg.ErrHookConfigShape) {
+			if !errors.Is(err, harness.ErrHookConfigShape) {
 				t.Fatalf("install error = %v, want errHookConfigShape", err)
 			}
 

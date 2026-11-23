@@ -280,26 +280,26 @@ func runPermissionScenarios(t *testing.T, contract hostContract, oracle string) 
 	t.Helper()
 
 	switch contract.PermissionDriver {
-	case driverControlCLI, driverAppServer, driverSDKCLI:
+	case nativeDriverControlCLI, nativeDriverAppServer, nativeDriverSDKCLI:
 		runCLIPermissionScenarios(t, contract, oracle)
-	case driverCompletionRPC, driverExtensionRPC:
+	case nativeDriverCompletionRPC, nativeDriverExtensionRPC:
 		runRPCPermissionScenarios(t, contract, oracle)
-	case driverACP:
+	case nativeDriverACP:
 		runKimiPermissionScenarios(t, contract, oracle)
-	case driverPythonACP:
+	case nativeDriverPythonACP:
 		runPythonPermissionScenarios(t, contract, oracle)
-	case driverExecutionServer:
+	case nativeDriverExecutionServer:
 		runOpenCodePermissionScenarios(t, contract, oracle)
-	case driverPluginServer:
+	case nativeDriverPluginServer:
 		runServerPermissionScenarios(t, contract, oracle)
-	case driverTerminalDialog:
+	case nativeDriverTerminalDialog:
 		runQwenPermissionScenarios(t, contract, oracle)
-	case driverProcess:
+	case nativeDriverProcess:
 		t.Run(
 			"permission",
 			func(t *testing.T) { t.Skipf("%s has no permission-wait host claim", contract.ID) },
 		)
-	case driverExecRPC, driverTerminalQuit, driverCLIACP:
+	case nativeDriverExecRPC, nativeDriverTerminalQuit, nativeDriverCLIACP:
 		fallthrough
 	default:
 		t.Fatalf("unknown permission driver %q", contract.PermissionDriver)

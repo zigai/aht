@@ -27,7 +27,7 @@ func TestCurrentProcessInfo(t *testing.T) {
 		t.Fatal("expected current process command name")
 	}
 
-	process, found, err := Find(ctx, pid)
+	process, found, err := Lookup(ctx, pid)
 	if err != nil {
 		t.Fatalf("finding current process returned error: %v", err)
 	}

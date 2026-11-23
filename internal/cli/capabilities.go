@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -25,7 +25,7 @@ func (app *application) newCapabilitiesCommand() *cobra.Command {
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if options.harness != "" {
-				harnessID, err := catalog.Parse(options.harness)
+				harnessID, err := adapters.Parse(options.harness)
 				if err != nil {
 					return exitCode(
 						fmt.Errorf("%w %q", registry.ErrUnknownHarness, options.harness),

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -19,7 +19,7 @@ const (
 	boundedSQLSuffix = `) ORDER BY session_id, timestamp, message_order`
 )
 
-type databaseRow = native.Row
+type databaseRow = transcript.Row
 
 func (s *parser) scanDatabase(
 	ctx context.Context,
@@ -27,7 +27,7 @@ func (s *parser) scanDatabase(
 	path string,
 	buffer *fileIssueBuffer,
 ) {
-	db, err := native.OpenDatabase(path)
+	db, err := transcript.OpenDatabase(path)
 	if err != nil {
 		buffer.issue(source, path, fmt.Errorf("open history database: %w", err))
 		return
@@ -63,8 +63,8 @@ func historySQL(
 	ctx context.Context,
 	db *sql.DB,
 	h registry.Harness,
-) (string, native.RowReader, error) {
-	reader := catalog.TranscriptFor(h)
+) (string, transcript.RowReader, error) {
+	reader := adapters.TranscriptFor(h)
 	if reader.Query == nil {
 		return "", nil, errUnknownFormat
 	}
@@ -81,11 +81,11 @@ func (s *parser) databaseRows(
 	ctx context.Context,
 	source Source,
 	path string,
-	parse native.RowReader,
+	parse transcript.RowReader,
 	rows *sql.Rows,
 	buffer *fileIssueBuffer,
 ) {
-	var t transcript
+	var t transcriptState
 	defer func() {
 		buffer.selectConversation(
 			t.match.Conversation,
@@ -135,8 +135,8 @@ func (s *parser) databaseRows(
 					GitBranch:   "",
 					Model:       "",
 					Messages:    0,
-					CreatedAt:   native.StoredTime(row.Created),
-					UpdatedAt:   native.StoredTime(row.Updated),
+					CreatedAt:   transcript.StoredTime(row.Created),
+					UpdatedAt:   transcript.StoredTime(row.Updated),
 				},
 			)
 		}

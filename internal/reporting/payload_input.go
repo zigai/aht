@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -41,7 +41,7 @@ func readReportPayloadInput(reader io.Reader, harnessID registry.Harness) ([]byt
 		return retainBoundedReportPayload(data)
 	}
 
-	for _, key := range catalog.PayloadOmissions(harnessID) {
+	for _, key := range adapters.PayloadOmissions(harnessID) {
 		delete(payload, key)
 	}
 

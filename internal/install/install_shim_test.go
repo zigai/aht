@@ -46,7 +46,7 @@ func TestPersistedShimOwnershipAcrossManagement(t *testing.T) {
 					t.Fatalf("status = %+v, %v", status, err)
 				}
 			case "upgrade":
-				results, err := Upgrade(t.Context(), opts.Binary, false)
+				results, err := Upgrade(t.Context(), UpgradeOptions{Binary: opts.Binary})
 				if err != nil || len(results) != 1 || results[0].Error != "" ||
 					!results[0].Changed {
 					t.Fatalf("upgrade = %+v, %v", results, err)

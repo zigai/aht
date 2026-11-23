@@ -13,6 +13,7 @@ import (
 const MaxRecordBytes = 16 << 20
 
 const (
+	// FormatJSONL is the default zero format.
 	FormatJSONL Format = iota
 	FormatDocument
 	FormatDatabase

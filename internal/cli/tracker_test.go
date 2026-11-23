@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/observer"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/service"
@@ -116,7 +116,7 @@ func TestTrackerRunOnceSupportsHumanAndJSONOutput(t *testing.T) {
 
 func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	now := time.Now().UTC()
 	for index, goneAt := range []time.Time{now.Add(-time.Hour), now.Add(-time.Minute)} {
@@ -154,7 +154,7 @@ func TestTrackerRunOnceExpiresIdentifiedTombstones(t *testing.T) {
 		CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
 	})
 
-	opts := observeOptions{once: true, quiet: true, tombstoneTTL: registry.DefaultTombstoneTTL}
+	opts := trackerRunOptions{once: true, quiet: true, tombstoneTTL: registry.DefaultTombstoneTTL}
 	if err := app.runObserverOnce(t.Context(), opts, watcher); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestQuietLongRunningObserverStreamsRequestedJSONLines(t *testing.T) {
 	app := &application{outputJSON: true, stdout: &stdout, stderr: &stderr}
 
 	watcher := observer.New(observer.Options{
-		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			cancel()
 			return nil, nil
@@ -199,7 +199,7 @@ func TestQuietLongRunningObserverStreamsRequestedJSONLines(t *testing.T) {
 	})
 	if err := app.runObserver(
 		ctx,
-		observeOptions{interval: time.Second, quiet: true},
+		trackerRunOptions{interval: time.Second, quiet: true},
 		watcher,
 	); err != nil {
 		t.Fatal(err)
@@ -230,14 +230,14 @@ func TestRunObserverOnceReturnsDegradedErrorAfterWritingResult(t *testing.T) {
 		watcher := observer.New(observer.Options{
 			Store: registry.NewJournal(
 				filepath.Join(t.TempDir(), "sessions.json"),
-				catalog.Rules{},
+				adapters.Rules{},
 			),
 			ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
 			PaneList:    func(context.Context) ([]mux.Pane, error) { return nil, errTestPaneList },
 			CatalogList: func(context.Context) ([]observer.CatalogEntry, error) { return nil, nil },
 		})
 
-		err := app.runObserver(context.Background(), observeOptions{once: true}, watcher)
+		err := app.runObserver(context.Background(), trackerRunOptions{once: true}, watcher)
 		if !errors.Is(err, errObserverRunDegraded) {
 			t.Fatalf("outputJSON=%t error = %v", outputJSON, err)
 		}
@@ -406,7 +406,7 @@ func historyRefreshStore(t *testing.T) *registry.MemoryStore {
 
 	store, err := registry.OpenMemoryStore(
 		filepath.Join(t.TempDir(), "state.json"),
-		catalog.Rules{},
+		adapters.Rules{},
 	)
 	if err != nil {
 		t.Fatal(err)

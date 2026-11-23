@@ -101,40 +101,40 @@ func (app *application) newStateCleanCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) prepareCleanOptions(cmd *cobra.Command, options *cleanOptions) error {
+func (app *application) prepareCleanOptions(cmd *cobra.Command, opts *cleanOptions) error {
 	cfg, err := app.loadConfig()
 	if err != nil {
 		return err
 	}
 
-	options.ageSet = cmd.Flags().Changed("older-than")
-	if options.all && options.ageSet {
+	opts.ageSet = cmd.Flags().Changed("older-than")
+	if opts.all && opts.ageSet {
 		return exitCode(errCleanSelection, exitCodeUsage)
 	}
 
-	if !options.all && !options.ageSet && cfg.Retention.TombstoneTTL != "" {
+	if !opts.all && !opts.ageSet && cfg.Retention.TombstoneTTL != "" {
 		d, err := config.TombstoneTTL(cfg)
 		if err != nil {
 			return fmt.Errorf("parsing tombstone TTL: %w", err)
 		}
 
-		options.olderThan = d
-		options.ageSet = true
+		opts.olderThan = d
+		opts.ageSet = true
 	}
 
-	if options.all == options.ageSet {
+	if opts.all == opts.ageSet {
 		return exitCode(errCleanSelection, exitCodeUsage)
 	}
 
-	if options.olderThan < 0 {
+	if opts.olderThan < 0 {
 		return exitCode(errNegativeCleanAge, exitCodeUsage)
 	}
 
 	return nil
 }
 
-func (app *application) runStateClean(ctx context.Context, options cleanOptions, yes bool) error {
-	if options.all && !yes {
+func (app *application) runStateClean(ctx context.Context, opts cleanOptions, yes bool) error {
+	if opts.all && !yes {
 		stdin := app.stdin
 		if stdin == nil {
 			stdin = os.Stdin
@@ -155,7 +155,7 @@ func (app *application) runStateClean(ctx context.Context, options cleanOptions,
 		}
 	}
 
-	return app.runRegistryClean(ctx, options)
+	return app.runRegistryClean(ctx, opts)
 }
 
 func (app *application) runRegistryClean(ctx context.Context, opts cleanOptions) error {

@@ -116,11 +116,15 @@ func (databases titleDatabases) open(ctx context.Context, path string) (*titleDa
 	return database, err
 }
 
+func (d *titleDatabase) close() {
+	_ = d.statement.Close()
+	_ = d.db.Close()
+}
+
 func (databases titleDatabases) close() {
 	for _, database := range databases {
 		if database != nil {
-			_ = database.statement.Close()
-			_ = database.db.Close()
+			database.close()
 		}
 	}
 }

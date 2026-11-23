@@ -12,14 +12,15 @@ const (
 )
 
 const (
-	incarnationContinue incarnationAction = iota
-	incarnationReject
-	incarnationIgnore
-	incarnationVerify
-	incarnationRetire
-	incarnationReplace
-	incarnationBind
-	incarnationResume
+	_ incarnationAction = iota
+	incarnationActionContinue
+	incarnationActionReject
+	incarnationActionIgnore
+	incarnationActionVerify
+	incarnationActionRetire
+	incarnationActionReplace
+	incarnationActionBind
+	incarnationActionResume
 )
 
 type IncarnationState string
@@ -75,17 +76,17 @@ func transitionIncarnation(
 	input := normalizeIncarnationInput(session, observation, at, retire)
 
 	rules := []incarnationRule{
-		{matches: incarnationInput.verificationRejected, action: incarnationReject},
-		{matches: incarnationInput.verifies, action: incarnationVerify},
-		{matches: incarnationInput.retirementIgnored, action: incarnationIgnore},
-		{matches: incarnationInput.retirementRejected, action: incarnationReject},
-		{matches: incarnationInput.retires, action: incarnationRetire},
-		{matches: incarnationInput.replacementRejected, action: incarnationReject},
-		{matches: incarnationInput.replaces, action: incarnationReplace},
-		{matches: incarnationInput.terminalStale, action: incarnationReject},
-		{matches: incarnationInput.bindsTerminalProcess, action: incarnationBind},
-		{matches: incarnationInput.resumesTerminal, action: incarnationResume},
-		{matches: incarnationInput.terminalRejected, action: incarnationReject},
+		{matches: incarnationInput.verificationRejected, action: incarnationActionReject},
+		{matches: incarnationInput.verifies, action: incarnationActionVerify},
+		{matches: incarnationInput.retirementIgnored, action: incarnationActionIgnore},
+		{matches: incarnationInput.retirementRejected, action: incarnationActionReject},
+		{matches: incarnationInput.retires, action: incarnationActionRetire},
+		{matches: incarnationInput.replacementRejected, action: incarnationActionReject},
+		{matches: incarnationInput.replaces, action: incarnationActionReplace},
+		{matches: incarnationInput.terminalStale, action: incarnationActionReject},
+		{matches: incarnationInput.bindsTerminalProcess, action: incarnationActionBind},
+		{matches: incarnationInput.resumesTerminal, action: incarnationActionResume},
+		{matches: incarnationInput.terminalRejected, action: incarnationActionReject},
 	}
 	for _, rule := range rules {
 		if rule.matches(input) {
@@ -93,7 +94,7 @@ func transitionIncarnation(
 		}
 	}
 
-	return input.transition(incarnationContinue)
+	return input.transition(incarnationActionContinue)
 }
 
 func normalizeIncarnationInput(
@@ -180,12 +181,12 @@ func (input incarnationInput) transition(action incarnationAction) incarnationTr
 	}
 
 	switch action {
-	case incarnationReject, incarnationIgnore:
+	case incarnationActionReject, incarnationActionIgnore:
 		result.accepted = false
-		result.ignored = action == incarnationIgnore
+		result.ignored = action == incarnationActionIgnore
 
 		return result
-	case incarnationVerify:
+	case incarnationActionVerify:
 		result.next.State = IncarnationStarting
 		if input.verification.Presence == PresenceGone {
 			result.next.State = IncarnationExited
@@ -195,31 +196,31 @@ func (input incarnationInput) transition(action incarnationAction) incarnationTr
 		result.next.TransitionAt = input.at
 
 		return result
-	case incarnationRetire:
+	case incarnationActionRetire:
 		result.next.State = IncarnationExited
 		result.next.TransitionAt = maxTime(input.current.TransitionAt, input.at)
 		result.terminal = true
 
 		return result
-	case incarnationReplace:
+	case incarnationActionReplace:
 		result.reset = true
 		result.next = Incarnation{
 			State: IncarnationStarting, Process: *input.process, EvidenceAt: time.Time{},
 			TransitionAt: time.Time{}, Previous: new(input.current.Process),
 		}
-	case incarnationBind:
+	case incarnationActionBind:
 		result.reset = true
 		result.next = Incarnation{
 			State: IncarnationLive, Process: *input.process, EvidenceAt: time.Time{},
 			TransitionAt: time.Time{}, Previous: nil,
 		}
-	case incarnationResume:
+	case incarnationActionResume:
 		result.reset = true
 		result.next = Incarnation{
 			State: IncarnationStarting, Process: input.current.Process, EvidenceAt: time.Time{},
 			TransitionAt: time.Time{}, Previous: input.current.Previous,
 		}
-	case incarnationContinue:
+	case incarnationActionContinue:
 		if input.current.State == "" {
 			result.next.State = IncarnationStarting
 		}
@@ -334,8 +335,8 @@ func (m lifecycleMachine) hookActivity(event string, at time.Time) {
 	})
 }
 func (*Reading) apply(m lifecycleMachine, policy Policy, at time.Time) { m.reading(policy, at) }
-func (verification *Verification) apply(m lifecycleMachine, _ Policy, at time.Time) {
-	m.verify(*verification, at)
+func (v *Verification) apply(m lifecycleMachine, _ Policy, at time.Time) {
+	m.verify(*v, at)
 }
 
 func (m lifecycleMachine) commit(transition incarnationTransition, at time.Time) {

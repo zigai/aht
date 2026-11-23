@@ -63,7 +63,7 @@ func verifyLaunchAgentUpgrade(t *testing.T, state string) {
 
 	executor := &launchUpgradeExecutor{state: state}
 
-	result, err := New(executor).Upgrade(t.Context(), options.Binary, false)
+	result, err := New(executor).Upgrade(t.Context(), UpgradeOptions{Binary: options.Binary})
 	if err != nil || !result.Current || !result.Changed || result.Running != (state == "running") {
 		t.Fatalf("upgrade = %+v, %v", result, err)
 	}

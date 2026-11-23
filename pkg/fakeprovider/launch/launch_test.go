@@ -107,7 +107,7 @@ func TestNewRejectsUnregisteredHarness(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "root")
 
-	_, err := New(
+	_, err := Open(
 		t.Context(),
 		Options{
 			Harness:  registry.Harness("unregistered"),

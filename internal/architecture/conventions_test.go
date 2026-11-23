@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -32,9 +32,9 @@ func TestAdapterNamesStayOwned(t *testing.T) {
 
 	owners := make(map[string]string)
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		id := adapter.Definition().ID
-		owners[string(id)] = "internal/harness/" + catalog.DistributionFor(id).Directory + "/"
+		owners[string(id)] = "internal/harness/" + adapters.DistributionFor(id).Directory + "/"
 	}
 
 	visitProductionGo(t, func(path string, data []byte) {

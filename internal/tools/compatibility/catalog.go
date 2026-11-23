@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 )
 
 const (
@@ -331,9 +331,9 @@ func versionCharacter(char byte) bool {
 }
 
 func distributionCatalog() []harnessSpec {
-	specs := make([]harnessSpec, 0, len(catalog.All()))
-	for _, adapter := range catalog.All() {
-		d := catalog.DistributionFor(adapter.Definition().ID)
+	specs := make([]harnessSpec, 0, len(adapters.All()))
+	for _, adapter := range adapters.All() {
+		d := adapters.DistributionFor(adapter.Definition().ID)
 		specs = append(
 			specs,
 			harnessSpec{

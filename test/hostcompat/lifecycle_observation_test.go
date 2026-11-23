@@ -69,7 +69,7 @@ func (host *isolatedHost) assertInterrupted(t *testing.T) {
 				return false
 			}
 
-			if host.contract.InterruptionDriver == driverPluginServer {
+			if host.contract.InterruptionDriver == nativeDriverPluginServer {
 				// Its abort API ends the held turn with native idle, without
 				// deleting the durable session. Running was required before abort.
 				return terminalSession(host.contract.ID, session)

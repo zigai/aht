@@ -1,4 +1,4 @@
-package catalog
+package adapters
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -15,15 +15,15 @@ func FuzzPayloadAdapters(f *testing.F) {
 	f.Setenv("KIMI_CODE_HOME", f.TempDir())
 
 	for _, id := range Harnesses() {
-		harness := string(id)
+		harnessID := string(id)
 		f.Add(
-			harness,
+			harnessID,
 			[]byte(
 				`{"session_id":"session","cwd":"/work","hook_event_name":"Stop","model":"model"}`,
 			),
 		)
 		f.Add(
-			harness,
+			harnessID,
 			[]byte(
 				`{"session_id":"snake","sessionId":"camel",`+
 					`"conversation_id":"conversation-snake",`+
@@ -33,7 +33,7 @@ func FuzzPayloadAdapters(f *testing.F) {
 			),
 		)
 		f.Add(
-			harness,
+			harnessID,
 			[]byte(
 				`{"session_id":" padded ","sessionId":"padded",`+
 					`"taskId":"padded","sessionContext":{"rootSessionId":"\tpadde`+
@@ -41,15 +41,15 @@ func FuzzPayloadAdapters(f *testing.F) {
 			),
 		)
 		f.Add(
-			harness,
+			harnessID,
 			[]byte(
 				`{"session_id":null,"sessionId":4,"conversation_id":[],`+
 					`"taskId":{},"sessionContext":{"rootSessionId":false},`+
 					`"prompt":"unrelated-identity"}`,
 			),
 		)
-		f.Add(harness, []byte(`null`))
-		f.Add(harness, []byte(`["session"]`))
+		f.Add(harnessID, []byte(`null`))
+		f.Add(harnessID, []byte(`["session"]`))
 	}
 
 	f.Add(
@@ -69,58 +69,58 @@ func FuzzPayloadAdapters(f *testing.F) {
 	)
 
 	f.Fuzz(func(t *testing.T, harnessName string, payload []byte) {
-		harness, err := Parse(harnessName)
+		harnessID, err := Parse(harnessName)
 		if err != nil {
 			return
 		}
 
 		raw := json.RawMessage(payload)
-		checkPayloadCompatibility(t, harness, raw)
-		checkPayloadIdentity(t, harness, raw)
+		checkPayloadCompatibility(t, harnessID, raw)
+		checkPayloadIdentity(t, harnessID, raw)
 
 		activity, activityErr := ActivityFromPayload(
-			harness,
+			harnessID,
 			"Stop",
 			registry.ActivityIdle,
 			raw,
 			time.Unix(0, 0),
 		)
 		if !activity.Valid() || (activityErr != nil && activity != registry.ActivityIdle) {
-			t.Fatalf("%s activity = %q, error = %v", harness, activity, activityErr)
+			t.Fatalf("%s activity = %q, error = %v", harnessID, activity, activityErr)
 		}
 	})
 }
 
-func checkPayloadCompatibility(t *testing.T, harness registry.Harness, payload json.RawMessage) {
+func checkPayloadCompatibility(t *testing.T, harnessID registry.Harness, payload json.RawMessage) {
 	t.Helper()
 
-	adapter, found := Find(harness)
+	adapter, found := Find(harnessID)
 	if !found {
-		t.Fatalf("parsed harness %s has no adapter", harness)
+		t.Fatalf("parsed harness %s has no adapter", harnessID)
 	}
 
-	if _, native := adapter.(harnesspkg.PayloadAdapter); !native || len(payload) == 0 ||
-		!PayloadCompatible(harness, payload) {
+	if _, native := adapter.(harness.PayloadAdapter); !native || len(payload) == 0 ||
+		!PayloadCompatible(harnessID, payload) {
 		return
 	}
 
-	if _, object := harnesspkg.PayloadObject(payload); !object {
-		t.Fatalf("%s accepted a non-object payload: %s", harness, payload)
+	if _, object := harness.PayloadObject(payload); !object {
+		t.Fatalf("%s accepted a non-object payload: %s", harnessID, payload)
 	}
 }
 
-func checkPayloadIdentity(t *testing.T, harness registry.Harness, payload json.RawMessage) {
+func checkPayloadIdentity(t *testing.T, harnessID registry.Harness, payload json.RawMessage) {
 	t.Helper()
 
-	defaults, defaultsErr := PayloadDefaults(harness, payload)
+	defaults, defaultsErr := PayloadDefaults(harnessID, payload)
 
-	document, object := harnesspkg.PayloadObject(payload)
+	document, object := harness.PayloadObject(payload)
 	if !object {
 		return
 	}
 
 	if defaultsErr != nil {
-		t.Fatalf("%s rejected an object payload: %v", harness, defaultsErr)
+		t.Fatalf("%s rejected an object payload: %v", harnessID, defaultsErr)
 	}
 
 	if defaults.SessionID == "" {
@@ -128,7 +128,7 @@ func checkPayloadIdentity(t *testing.T, harness registry.Harness, payload json.R
 	}
 
 	if !containsPayloadString(document, defaults.SessionID) {
-		t.Fatalf("%s invented identity %q absent from %s", harness, defaults.SessionID, payload)
+		t.Fatalf("%s invented identity %q absent from %s", harnessID, defaults.SessionID, payload)
 	}
 
 	withoutIdentity, err := json.Marshal(withoutPayloadString(document, defaults.SessionID))
@@ -136,15 +136,15 @@ func checkPayloadIdentity(t *testing.T, harness registry.Harness, payload json.R
 		t.Fatal(err)
 	}
 
-	remaining, err := PayloadDefaults(harness, withoutIdentity)
+	remaining, err := PayloadDefaults(harnessID, withoutIdentity)
 	if err != nil {
-		t.Fatalf("%s rejected a payload without its identity: %v", harness, err)
+		t.Fatalf("%s rejected a payload without its identity: %v", harnessID, err)
 	}
 
 	if remaining.SessionID == defaults.SessionID {
 		t.Fatalf(
 			"%s kept identity %q after every payload value carrying it was removed: %s",
-			harness,
+			harnessID,
 			defaults.SessionID,
 			withoutIdentity,
 		)

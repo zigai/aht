@@ -16,7 +16,7 @@ func scanToolsFiles(
 	metadata := new(search)
 	metadata.scanEnvironment = s.scanEnvironment
 	metadata.queryPlan = queryPlan{
-		mode:      modeList,
+		mode:      scanModeList,
 		query:     (ListQuery{Filter: s.query.Filter, Sort: "", Limit: 0}).searchQuery(),
 		terms:     nil,
 		exclude:   nil,

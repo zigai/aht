@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -140,7 +140,7 @@ func TestObserverFindsHarnessBehindWrapper(t *testing.T) {
 		PID: 42, StartIdentity: "boot:42", Executable: "/usr/bin/env",
 		Args: []string{"env", "AGENT_MODE=1", "--", "/usr/bin/codex"},
 	}
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 
 	watcher := New(Options{
 		Store: store,

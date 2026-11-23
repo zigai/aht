@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 	"github.com/zigai/aht/v2/pkg/zellij"
@@ -17,7 +17,7 @@ func TestCurrentAncestorLookup(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	agentPID := 100
 	agentIdentity := "boot-1:100:agent-start"
@@ -128,7 +128,7 @@ func TestCurrentPIDReuseDefense(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	agentPID := 500
 	originalIdentity := "boot-1:500:original-start"
@@ -210,7 +210,7 @@ func TestCurrentTerminalContext(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning

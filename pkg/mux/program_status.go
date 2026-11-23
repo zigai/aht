@@ -35,9 +35,9 @@ type ProgramStatusWatcher interface {
 	WatchProgramStatus(ctx context.Context, serverIdentity string, changed func([]Pane)) error
 }
 
-// ProgramStatusWatch watches one multiplexer server as
+// ProgramStatusWatchFunc watches one multiplexer server as
 // [ProgramStatusWatcher.WatchProgramStatus] does.
-type ProgramStatusWatch func(
+type ProgramStatusWatchFunc func(
 	ctx context.Context,
 	kind registry.MultiplexerKind,
 	serverIdentity string,

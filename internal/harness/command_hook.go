@@ -8,11 +8,11 @@ import "cmp"
 //
 //exhaustruct:optional
 type CommandHook struct {
-	Event      string
-	Matcher    string
-	Transition HookTransition
-	Stdin      ReportStdin
-	Timeout    int
+	Event          string
+	Matcher        string
+	Transition     HookTransition
+	Stdin          ReportStdin
+	TimeoutSeconds int
 }
 
 // CommandHookPayload is the payload that Claude Code-style command hooks
@@ -41,7 +41,7 @@ func CommandHookSpecs(
 				hook.Transition,
 				hook.Event,
 			),
-			Timeout: hook.Timeout,
+			TimeoutSeconds: hook.TimeoutSeconds,
 		})
 	}
 

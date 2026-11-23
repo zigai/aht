@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/aht"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -51,7 +51,7 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	live := aht.PresenceLive
 	activity := aht.ActivityRunning
@@ -92,7 +92,7 @@ func TestAhtFacadeResolveAndCurrent(t *testing.T) {
 		t.Fatalf("resolved ID = %q, want %q", resolved.ID, created.ID)
 	}
 
-	_, err = aht.Current(t.Context(), c)
+	_, err = c.Current(t.Context())
 	if !errors.Is(err, aht.ErrNoCurrentSession) {
 		t.Fatalf("expected ErrNoCurrentSession, got: %v", err)
 	}

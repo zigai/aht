@@ -28,7 +28,7 @@ func New() piHarness {
 			Source:    harness.DistributionNPM,
 			Package:   "@earendil-works/pi-coding-agent",
 			Directory: "pi",
-			Family:    harness.FamilyTreeExtension,
+			Family:    harness.DistributionFamilyTreeExtension,
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},

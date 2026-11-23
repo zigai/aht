@@ -136,8 +136,8 @@ func TestGotmuxCapturePaneAndCurrent(t *testing.T) {
 		t.Fatalf("unexpected current context: %#v", current)
 	}
 
-	if err := SendInterruptTo(t.Context(), server.Socket, paneID); err != nil {
-		t.Fatalf("SendInterruptTo failed: %v", err)
+	if err := SendInterrupt(t.Context(), server.Socket, paneID); err != nil {
+		t.Fatalf("SendInterrupt failed: %v", err)
 	}
 }
 

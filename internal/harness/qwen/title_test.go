@@ -36,7 +36,7 @@ func writeSession(t *testing.T, path string, records ...string) {
 	}
 }
 
-func lookupTitle(t *testing.T, identity registry.ObservationIdentity) string {
+func sessionTitle(t *testing.T, identity registry.ObservationIdentity) string {
 	t.Helper()
 
 	titles, err := New().SessionTitles(t.Context(), []registry.ObservationIdentity{identity})
@@ -102,7 +102,7 @@ func TestSessionTitles(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s1.jsonl")
 			writeSession(t, path, test.records...)
 
-			if got := lookupTitle(
+			if got := sessionTitle(
 				t,
 				registry.ObservationIdentity{
 					SessionID:   "s1",
@@ -139,7 +139,7 @@ func TestSessionTitleFromProjectDirectory(t *testing.T) {
 				titleRecord("s1", "Project title", "auto"),
 			)
 
-			if got := lookupTitle(
+			if got := sessionTitle(
 				t,
 				registry.ObservationIdentity{
 					SessionID:   "s1",
@@ -151,7 +151,7 @@ func TestSessionTitleFromProjectDirectory(t *testing.T) {
 				t.Fatalf("title = %q, want %q", got, "Project title")
 			}
 
-			if got := lookupTitle(
+			if got := sessionTitle(
 				t,
 				registry.ObservationIdentity{
 					SessionID:   "missing",

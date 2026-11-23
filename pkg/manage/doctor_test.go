@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -275,7 +275,7 @@ func TestDoctorLeavesStateDirectoryUnchanged(t *testing.T) {
 
 	presence := registry.PresenceLive
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	if _, err := store.Observe(
 		t.Context(),
 		registry.Observation{

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -532,7 +532,7 @@ func TestPrepareReportProcessEvidenceDoesNotCarryNativeAuthority(t *testing.T) {
 		t.Fatalf("process observation retained native fields: %#v", observation)
 	}
 
-	if err := observation.Validate(catalog.Rules{}); err != nil {
+	if err := observation.Validate(adapters.Rules{}); err != nil {
 		t.Fatalf("process observation is invalid: %v", err)
 	}
 }
@@ -549,7 +549,7 @@ func TestShimProcessReportsInferIdentityAndTransitionState(t *testing.T) {
 		CWD:            "/work",
 		TTY:            "/dev/pts/4",
 	}
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	base := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 
 	var sessionID string
@@ -753,8 +753,8 @@ func TestPrepareReportDropsGrokSessionEndStop(t *testing.T) {
 		want   IgnoreReason
 	}{
 		"turn end":       {reason: "end_turn", want: ""},
-		"channel closed": {reason: "channel_closed", want: IgnoreSessionTeardown},
-		"shutdown":       {reason: "shutdown", want: IgnoreSessionTeardown},
+		"channel closed": {reason: "channel_closed", want: IgnoreReasonSessionTeardown},
+		"shutdown":       {reason: "shutdown", want: IgnoreReasonSessionTeardown},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

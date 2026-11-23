@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -71,7 +71,7 @@ func TestInfoValidatesReferenceAndExplanationFlags(t *testing.T) {
 
 func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	session := observeTestSession(t, store, "info-session", time.Now())
 	reference := shortRegistryID(session.ID)
 
@@ -110,7 +110,7 @@ func TestInfoResolvesShortIDAndRequiresJSONExplicitly(t *testing.T) {
 func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/sessions.json"
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	at := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	activity := registry.ActivityIdle
 
@@ -165,7 +165,7 @@ func TestInfoCommandUsesHumanOutputUnlessJSONRequested(t *testing.T) {
 func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	at := time.Now().UTC()
 	process := registry.ProcessIdentity{
 		PID:            654,
@@ -239,7 +239,7 @@ func TestInfoExplainReportsFallbackReasonForInactiveIntegration(t *testing.T) {
 func TestInfoExplainWithoutLivePaneReportsUnavailableState(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	idle := registry.ActivityIdle
 
 	session, err := store.Observe(
@@ -279,7 +279,7 @@ func TestInfoExplainWithoutLivePaneReportsUnavailableState(t *testing.T) {
 func createActivePiInfoSession(t *testing.T) string {
 	t.Helper()
 	path := t.TempDir() + "/state.json"
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	at := time.Now().UTC()
 	process := registry.ProcessIdentity{
 		PID:            321,

@@ -7,13 +7,13 @@ import (
 	"os"
 	"strings"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
 	defaultBinary = "aht"
-	managedMarker = harnesspkg.ManagedMarker
+	managedMarker = harness.ManagedMarker
 )
 
 var (
@@ -76,9 +76,9 @@ func fileNeedsUpdate(path string, content string, force bool) (bool, error) {
 	}
 
 	if !force {
-		currentIdentity, _ := harnesspkg.ParseArtifactIdentity(string(current))
+		currentIdentity, _ := harness.ParseArtifactIdentity(string(current))
 
-		nextIdentity, _ := harnesspkg.ParseArtifactIdentity(content)
+		nextIdentity, _ := harness.ParseArtifactIdentity(content)
 		if currentIdentity.ID != "" && nextIdentity.ID != "" &&
 			currentIdentity.ID != nextIdentity.ID {
 			return false, fmt.Errorf(

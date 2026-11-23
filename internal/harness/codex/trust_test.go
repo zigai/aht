@@ -311,7 +311,7 @@ func newNativeTrustFixture(t *testing.T) *nativeTrustFixture {
 		t.Fatal(err)
 	}
 
-	action, ok := installPlan.Actions[0].(harness.JSONCommandHooksAction)
+	action, ok := installPlan.Actions[0].(harness.JSONCommandHookAction)
 	if !ok {
 		t.Fatal("Codex install plan does not contain a command hook action")
 	}

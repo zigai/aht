@@ -44,15 +44,15 @@ func (r *Report) slot(s Session) (any, time.Time) {
 	return s.Observations.Native, s.Observations.Native.ObservedAt
 }
 
-func (r *Sighting) slot(s Session) (any, time.Time) {
-	if s.Observations.Process == nil {
+func (s *Sighting) slot(session Session) (any, time.Time) {
+	if session.Observations.Process == nil {
 		return nil, time.Time{}
 	}
 
-	return s.Observations.Process, s.Observations.Process.ObservedAt
+	return session.Observations.Process, session.Observations.Process.ObservedAt
 }
 
-func (r *Placement) slot(s Session) (any, time.Time) {
+func (p *Placement) slot(s Session) (any, time.Time) {
 	if s.Observations.Location == nil {
 		return nil, time.Time{}
 	}
@@ -60,7 +60,7 @@ func (r *Placement) slot(s Session) (any, time.Time) {
 	return s.Observations.Location, s.Observations.Location.ObservedAt
 }
 
-func (r *Listing) slot(s Session) (any, time.Time) {
+func (l *Listing) slot(s Session) (any, time.Time) {
 	if s.Observations.Catalog == nil {
 		return nil, time.Time{}
 	}
@@ -214,20 +214,20 @@ func (s Session) nativeActivity(report *Report, process ProcessIdentity) *Activi
 	return clonePtr(activity)
 }
 
-func (r *Sighting) store(session *Session, _ ObservationIdentity, at time.Time) {
-	session.Observations.Process = &ProcessObservation{Sighting: *r, ObservedAt: at}
+func (s *Sighting) store(session *Session, _ ObservationIdentity, at time.Time) {
+	session.Observations.Process = &ProcessObservation{Sighting: *s, ObservedAt: at}
 }
 
-func (r *Placement) store(session *Session, _ ObservationIdentity, at time.Time) {
+func (p *Placement) store(session *Session, _ ObservationIdentity, at time.Time) {
 	session.Observations.Location = &MultiplexerObservation{
-		Placement:  *r,
+		Placement:  *p,
 		ObservedAt: at,
 	}
 }
 
-func (r *Listing) store(session *Session, subject ObservationIdentity, at time.Time) {
+func (l *Listing) store(session *Session, subject ObservationIdentity, at time.Time) {
 	session.Observations.Catalog = &CatalogObservation{
-		ListingMetadata: r.ListingMetadata.clone(),
+		ListingMetadata: l.ListingMetadata.clone(),
 		SessionID:       subject.SessionID,
 		SessionPath:     subject.SessionPath,
 		ObservedAt:      at,

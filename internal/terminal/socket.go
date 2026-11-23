@@ -5,8 +5,8 @@ import (
 	"os"
 )
 
-// NewSocketDir creates a short directory for a Unix socket. The caller owns cleanup.
-func NewSocketDir(prefix string) (string, error) {
+// CreateSocketDir creates a short directory for a Unix socket. The caller owns cleanup.
+func CreateSocketDir(prefix string) (string, error) {
 	dir, err := os.MkdirTemp("/tmp", prefix)
 	if err != nil {
 		return "", fmt.Errorf("create socket directory: %w", err)

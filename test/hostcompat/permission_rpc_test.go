@@ -27,22 +27,22 @@ func runRPCPermissionScenarios(t *testing.T, contract hostContract, oracle strin
 		t.Run(name, func(t *testing.T) {
 			host := newPermissionHost(t, contract, oracle, allow)
 			switch contract.PermissionDriver {
-			case driverCompletionRPC:
+			case nativeDriverCompletionRPC:
 				runPiPermission(t, host, allow)
-			case driverExtensionRPC:
+			case nativeDriverExtensionRPC:
 				runOmpPermission(t, host, allow)
-			case driverProcess,
-				driverExecRPC,
-				driverACP,
-				driverPythonACP,
-				driverExecutionServer,
-				driverPluginServer,
-				driverTerminalQuit,
-				driverTerminalDialog,
-				driverCLIACP,
-				driverControlCLI,
-				driverAppServer,
-				driverSDKCLI:
+			case nativeDriverProcess,
+				nativeDriverExecRPC,
+				nativeDriverACP,
+				nativeDriverPythonACP,
+				nativeDriverExecutionServer,
+				nativeDriverPluginServer,
+				nativeDriverTerminalQuit,
+				nativeDriverTerminalDialog,
+				nativeDriverCLIACP,
+				nativeDriverControlCLI,
+				nativeDriverAppServer,
+				nativeDriverSDKCLI:
 				fallthrough
 			default:
 				t.Fatalf("no RPC-family permission driver for %s", contract.ID)

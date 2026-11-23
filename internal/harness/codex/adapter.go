@@ -98,15 +98,15 @@ func (adapter codexHarness) InstallPlan(binary string) (harness.InstallPlan, err
 			// parent turn, which keeps running until Stop.
 			{Event: "Stop", Transition: harness.HookActivityIdle},
 			{
-				Event:      "Interrupt",
-				Transition: harness.HookActivityInterrupted,
-				Timeout:    terminalHookTimeoutSeconds,
+				Event:          "Interrupt",
+				Transition:     harness.HookActivityInterrupted,
+				TimeoutSeconds: terminalHookTimeoutSeconds,
 			},
 			{
-				Event:      "SessionEnd",
-				Matcher:    "other",
-				Transition: harness.HookPresenceGone,
-				Timeout:    terminalHookTimeoutSeconds,
+				Event:          "SessionEnd",
+				Matcher:        "other",
+				Transition:     harness.HookPresenceGone,
+				TimeoutSeconds: terminalHookTimeoutSeconds,
 			},
 		}),
 	}
@@ -114,7 +114,7 @@ func (adapter codexHarness) InstallPlan(binary string) (harness.InstallPlan, err
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
-			harness.JSONCommandHooksAction{Plan: plan},
+			harness.JSONCommandHookAction{Plan: plan},
 			harness.ShimAction{},
 		},
 	}, nil

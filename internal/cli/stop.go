@@ -17,7 +17,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/text"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/mux/drivers"
@@ -377,7 +377,7 @@ func revalidatePaneForegroundProcess(
 		return stopTargetValidation{OK: false, Reason: "missing process start identity"}, nil
 	}
 
-	proc, found, err := processinfo.Find(ctx, s.Process.PID)
+	proc, found, err := processinfo.Lookup(ctx, s.Process.PID)
 	if err != nil {
 		return stopTargetValidation{}, fmt.Errorf("find process: %w", err)
 	}
@@ -420,7 +420,7 @@ func paneStopTargetValidation(session registry.Session, panes []mux.Pane) stopTa
 }
 
 func revalidateProcess(ctx context.Context, s registry.Session) (stopTargetValidation, error) {
-	proc, found, err := processinfo.Find(ctx, s.Process.PID)
+	proc, found, err := processinfo.Lookup(ctx, s.Process.PID)
 	if err != nil {
 		return stopTargetValidation{}, fmt.Errorf("find process: %w", err)
 	}
@@ -441,7 +441,7 @@ func stopProcessValidation(
 		return stopTargetValidation{OK: false, Reason: "process identity changed"}
 	}
 
-	if id, ok := catalog.ResolveProcess(proc); !ok || id != s.Harness {
+	if id, ok := adapters.ResolveProcess(proc); !ok || id != s.Harness {
 		return stopTargetValidation{OK: false, Reason: "process command changed"}
 	}
 
@@ -515,7 +515,7 @@ func stopTargetForSession(s registry.Session) (stopTarget, bool) {
 }
 
 func sharedHarnessProcess(id registry.Harness) bool {
-	rules := catalog.Rules{}
+	rules := adapters.Rules{}
 
 	return rules.Known(id) && !rules.Policy(id).ExclusiveProcess
 }

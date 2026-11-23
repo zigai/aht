@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const (
@@ -154,7 +154,7 @@ func databaseStamp(path string) string {
 }
 
 func transcriptExtra(metadata map[string]string, source Source, path string) string {
-	if extra := catalog.TranscriptFor(source.Harness).Extra; extra != nil {
+	if extra := adapters.TranscriptFor(source.Harness).Extra; extra != nil {
 		return extra(path, metadata, stampPath)
 	}
 
@@ -179,7 +179,7 @@ func (index *historyIndex) scanFiles(
 		return
 	}
 
-	if s.mode != modeRefresh {
+	if s.mode != scanModeRefresh {
 		if err := index.prepareQuery(ctx, s.queryPlan); err != nil {
 			index.report(s, source, source.Path, err)
 			return
@@ -449,7 +449,7 @@ func (index *historyIndex) settle(
 		return settled, false
 	}
 
-	if s.mode == modeRefresh {
+	if s.mode == scanModeRefresh {
 		bytes := result.writer.textBytes()
 		if batch.bytes+bytes > refreshBatchBytes {
 			index.flushRefresh(ctx, s, batch, progress)
@@ -661,7 +661,7 @@ func (index *historyIndex) reportGroupIssues(
 	source Source,
 	group []groupFile,
 ) error {
-	if s.mode == modeRefresh {
+	if s.mode == scanModeRefresh {
 		for _, member := range group {
 			index.reportIssues(s, source, member.file, nil)
 		}
@@ -765,7 +765,7 @@ func parseRefresh(ctx context.Context, job *refreshJob) refreshResult {
 		sourceMetadata: job.metadata,
 		writer:         writer,
 		sink:           writer,
-		selected:       func(*transcript) bool { return true },
+		selected:       func(*transcriptState) bool { return true },
 		includeTools:   false,
 	}
 
@@ -883,7 +883,7 @@ func parseTranscriptRefresh(
 	if err := file.Close(); err != nil {
 		result.issues = append(
 			result.issues,
-			Issue{Source: source, Path: path, Message: err.Error(), Record: false},
+			Issue{Source: source, Path: path, Message: err.Error(), IsRecord: false},
 		)
 	}
 
@@ -891,7 +891,9 @@ func parseTranscriptRefresh(
 }
 
 func (job *refreshJob) lacksTerms(ctx context.Context, file *os.File) (bool, error) {
-	if catalog.TranscriptFor(job.source.Harness).Format(job.file.path) == native.FormatCompressed {
+	if adapters.TranscriptFor(job.source.Harness).
+		Format(job.file.path) ==
+		transcript.FormatCompressed {
 		return false, nil
 	}
 
@@ -963,7 +965,7 @@ func (writer *indexWriter) prepareTranscript(
 	writer.checkpoint.Extra = extra
 	writer.checkpoint.Size = info.Size()
 
-	if catalog.TranscriptFor(job.source.Harness).Format(job.file.path) != native.FormatJSONL {
+	if adapters.TranscriptFor(job.source.Harness).Format(job.file.path) != transcript.FormatJSONL {
 		return nil
 	}
 
@@ -1085,7 +1087,7 @@ func (index *historyIndex) addFile(
 	source Source,
 	path string,
 ) (indexedFile, error) {
-	parent := catalog.TranscriptFor(source.Harness).Parent
+	parent := adapters.TranscriptFor(source.Harness).Parent
 
 	child := parent != nil && parent(path) != ""
 	if _, err := index.tx.ExecContext(
@@ -1458,7 +1460,7 @@ func (writer *indexWriter) prepareAppendResume(
 		ctx,
 		file,
 		info.Size(),
-		catalog.TranscriptFor(job.source.Harness).RewritableHeaders,
+		adapters.TranscriptFor(job.source.Harness).RewritableHeaders,
 	)
 	for _, header := range writer.headers {
 		writer.checkpoint.HeaderSizes = append(writer.checkpoint.HeaderSizes, header.size)

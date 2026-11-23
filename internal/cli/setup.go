@@ -52,23 +52,23 @@ func (app *application) newSetupCommand() *cobra.Command {
 func (app *application) runSetup(
 	ctx context.Context,
 	args []string,
-	options integrationCommandOptions,
+	opts integrationCommandOptions,
 ) error {
 	harnesses, err := selectedHarnesses(args, false)
 	if err != nil {
 		return exitCode(err, exitCodeUsage)
 	}
 
-	manager := app.manager(options.binary)
+	manager := app.manager(opts.binary)
 	if err := manager.ValidateConfig(); err != nil {
 		return managerError(err)
 	}
 
-	integrations, integrationErr := installIntegrations(ctx, manager, harnesses, options)
+	integrations, integrationErr := installIntegrations(ctx, manager, harnesses, opts)
 
 	tracker, trackerErr := manager.EnableTracker(
 		ctx,
-		manage.TrackerOptions{DryRun: options.dryRun},
+		manage.TrackerOptions{DryRun: opts.dryRun},
 	)
 	trackerErr = managerError(trackerErr)
 

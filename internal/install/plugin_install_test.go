@@ -158,15 +158,15 @@ func TestUpgradeMovesAgyPluginFromLegacyDirectory(t *testing.T) {
 		t.Fatalf("status with only the legacy install = %+v, %v; want partial", status, err)
 	}
 
-	requireAgyUpgrade(t, true, true)
-	requireAgyUpgrade(t, false, true)
+	requireAgyUpgrade(t, agyUpgradeExpectation{dryRun: true, wantChanged: true})
+	requireAgyUpgrade(t, agyUpgradeExpectation{wantChanged: true})
 
 	requireAgyPluginHooks(t, nativePlugin)
 	requireAgyPluginMarker(t, nativePlugin)
 	requireAgyImportManifest(t, filepath.Join(home, ".gemini", "config", agyImportManifestName))
 	requireLegacyAgyRetired(t, legacyPlugin, legacyManifest)
 
-	requireAgyUpgrade(t, false, false)
+	requireAgyUpgrade(t, agyUpgradeExpectation{})
 
 	status, err = Inspect(t.Context(), registry.Harness("agy"), testInstallBinary)
 	if err != nil || status.Status != ArtifactCurrent {
@@ -174,13 +174,27 @@ func TestUpgradeMovesAgyPluginFromLegacyDirectory(t *testing.T) {
 	}
 }
 
-func requireAgyUpgrade(t *testing.T, dryRun bool, wantChanged bool) {
+type agyUpgradeExpectation struct {
+	dryRun      bool
+	wantChanged bool
+}
+
+func requireAgyUpgrade(t *testing.T, want agyUpgradeExpectation) {
 	t.Helper()
 
-	results, err := Upgrade(t.Context(), testInstallBinary, dryRun)
+	results, err := Upgrade(
+		t.Context(),
+		UpgradeOptions{Binary: testInstallBinary, DryRun: want.dryRun},
+	)
 	if err != nil || len(results) != 1 || results[0].Harness != "agy" ||
-		results[0].Changed != wantChanged {
-		t.Fatalf("upgrade(dryRun=%v) = %+v, %v; want changed=%v", dryRun, results, err, wantChanged)
+		results[0].Changed != want.wantChanged {
+		t.Fatalf(
+			"upgrade(dryRun=%v) = %+v, %v; want changed=%v",
+			want.dryRun,
+			results,
+			err,
+			want.wantChanged,
+		)
 	}
 }
 
@@ -276,7 +290,7 @@ func TestUpgradeKeepsLegacyManifestDataAgyOwns(t *testing.T) {
 	_, legacyManifest := writeLegacyAgyInstall(t, home, legacyAgyMarker)
 	writeAgyManifest(t, legacyManifest, agyManifestWithExtras)
 
-	requireAgyUpgrade(t, false, true)
+	requireAgyUpgrade(t, agyUpgradeExpectation{wantChanged: true})
 
 	manifest, entries := decodeAgyManifestEntries(t, legacyManifest)
 	requireAgyManifestExtras(t, manifest)

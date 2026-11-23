@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -37,7 +37,7 @@ func SessionTitles(ctx context.Context, sessions []Session) ([]string, error) {
 	var failures []error
 
 	for id, indices := range byHarness {
-		adapter, ok := catalog.Find(id)
+		adapter, ok := adapters.Find(id)
 		if !ok {
 			continue
 		}

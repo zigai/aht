@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -39,7 +39,7 @@ func TestGoldenScreenFixtures(t *testing.T) {
 		t.Run(fixture.Agent+"/"+fixture.Name, func(t *testing.T) {
 			t.Parallel()
 
-			harness, err := catalog.Parse(fixture.Agent)
+			harness, err := adapters.Parse(fixture.Agent)
 			if err != nil {
 				t.Fatal(err)
 			}

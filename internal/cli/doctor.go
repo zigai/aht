@@ -302,7 +302,7 @@ func (app *application) newDoctorReport(
 func (app *application) doctorConfigFiles(result manage.DoctorResult) []doctorConfigFile {
 	explicit, source := app.configPath, "--config"
 	if explicit == "" {
-		explicit, source = strings.TrimSpace(os.Getenv(config.ConfigEnv)), config.ConfigEnv
+		explicit, source = strings.TrimSpace(os.Getenv(config.PathEnv)), config.PathEnv
 	}
 
 	user := config.UserPath()
@@ -600,7 +600,7 @@ func hasAutomaticFix(check manage.DoctorCheck) bool {
 
 func doctorEnv() map[string]string {
 	names := []string{
-		config.ConfigEnv,
+		config.PathEnv,
 		registry.StorePathEnv,
 		registry.StateDirEnv,
 		broker.SocketPathEnv,

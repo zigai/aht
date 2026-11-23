@@ -4,7 +4,7 @@ import (
 	"os"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -48,7 +48,7 @@ type (
 // variable at call time. Project locations are joined under projectDir and
 // omitted when it is empty. It returns false for an unknown harness.
 func LocationsFor(harnessID registry.Harness, projectDir string) ([]Location, bool) {
-	found, ok := catalog.LocationsFor(harnessID, projectDir)
+	found, ok := adapters.LocationsFor(harnessID, projectDir)
 	if !ok {
 		return nil, false
 	}
@@ -72,7 +72,7 @@ func LocationsFor(harnessID registry.Harness, projectDir string) ([]Location, bo
 func AllLocations(projectDir string) []Location {
 	var locations []Location
 
-	for _, harnessID := range catalog.Harnesses() {
+	for _, harnessID := range adapters.Harnesses() {
 		found, ok := LocationsFor(harnessID, projectDir)
 		if ok {
 			locations = append(locations, found...)

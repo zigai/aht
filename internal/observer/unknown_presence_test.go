@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/registrycheck"
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -42,7 +42,7 @@ func TestObserverReconcilesUnknownNativeSession(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "sessions.json")
 			at := time.Now().UTC().Add(-time.Hour)
-			store := registry.NewJournal(path, catalog.Rules{})
+			store := registry.NewJournal(path, adapters.Rules{})
 			activity := registry.ActivityIdle
 
 			session, err := store.Observe(
@@ -139,7 +139,7 @@ func TestObserverReconcilesUnverifiedLiveSession(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "sessions.json")
 			at := time.Now().UTC().Add(-time.Hour)
-			store := registry.NewJournal(path, catalog.Rules{})
+			store := registry.NewJournal(path, adapters.Rules{})
 			idle, live := registry.ActivityIdle, registry.PresenceLive
 
 			var location *registry.Location

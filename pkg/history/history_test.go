@@ -388,7 +388,7 @@ func TestPartialSearchAndLimits(t *testing.T) {
 
 	result, err := c.Search(t.Context(), history.Query{Terms: []string{"refresh"}, Limit: 1})
 	if err != nil || len(result.Matches) != 1 || !result.Truncated || len(result.Issues) != 1 ||
-		!result.Issues[0].Record {
+		!result.Issues[0].IsRecord {
 		t.Fatalf("partial = %#v, %v", result, err)
 	}
 
@@ -920,7 +920,7 @@ func TestOversizedRecordDoesNotHideLaterMessages(t *testing.T) {
 
 	result, err := c.Search(t.Context(), history.Query{Terms: []string{"after-big-record"}})
 	if err != nil || len(result.Matches) != 1 || len(result.Issues) != 1 ||
-		!result.Issues[0].Record {
+		!result.Issues[0].IsRecord {
 		t.Fatalf("oversized record = %#v, %v", result, err)
 	}
 }

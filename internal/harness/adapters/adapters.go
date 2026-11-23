@@ -1,4 +1,4 @@
-package catalog
+package adapters
 
 import (
 	"context"

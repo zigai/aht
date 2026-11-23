@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -17,7 +17,7 @@ func TestAutoWatchReturnsToBrokerAfterOutage(t *testing.T) {
 
 	socketPath := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(storePath, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

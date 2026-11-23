@@ -18,7 +18,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -186,7 +186,7 @@ func TestReportQwenSubagentHooksPreserveForegroundState(t *testing.T) {
 func TestInferredNativeEndCannotBeResurrectedByProcessEvidence(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	at := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
 
@@ -428,7 +428,8 @@ func assertQwenSubagentReportPreservesSession(t *testing.T, state string, event 
 		t.Fatalf("subagent result = %s, error = %v", output.Bytes(), err)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).List(t.Context(), registry.Filter{})
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
+		List(t.Context(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("sessions = %#v, error = %v", sessions, err)
 	}
@@ -450,7 +451,7 @@ func testLifecycleReports(
 ) {
 	t.Helper()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 
 	for index, test := range tests {
 		prepared, err := reporting.Prepare(nil, reporting.Options{
@@ -592,7 +593,7 @@ func waitForNamedProcess(t *testing.T, pid int, name string) {
 	deadline := time.Now().Add(5 * time.Second)
 
 	for {
-		process, found, err := processinfo.Find(context.Background(), pid)
+		process, found, err := processinfo.Lookup(context.Background(), pid)
 		if err == nil && found && len(process.Args) > 0 && process.Args[0] == name {
 			return
 		}
@@ -730,7 +731,7 @@ func TestReportSucceedsOnceWhenBrokerRecordsAndClosesBeforeReplying(t *testing.T
 			return
 		}
 
-		_, observeErr := registry.NewJournal(storePath, catalog.Rules{}).
+		_, observeErr := registry.NewJournal(storePath, adapters.Rules{}).
 			Observe(context.Background(), *request.Observation)
 		applied <- observeErr
 	}()
@@ -765,7 +766,7 @@ func TestReportSucceedsOnceWhenBrokerRecordsAndClosesBeforeReplying(t *testing.T
 		t.Fatalf("report after broker recorded it and closed: %v", reportErr)
 	}
 
-	sessions, err := registry.NewJournal(storePath, catalog.Rules{}).
+	sessions, err := registry.NewJournal(storePath, adapters.Rules{}).
 		List(t.Context(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -135,7 +135,7 @@ func historyRefreshSources(names []string, sources []history.Source) ([]history.
 	var selected []registry.Harness
 
 	for _, name := range names {
-		id, err := catalog.Parse(strings.TrimSpace(name))
+		id, err := adapters.Parse(strings.TrimSpace(name))
 		if err != nil {
 			return nil, exitCode(fmt.Errorf("history refresh: %w", err), exitCodeUsage)
 		}

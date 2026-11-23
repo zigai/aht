@@ -76,9 +76,9 @@ func ListWithEnv(
 	return listLinuxProcessEntries(ctx, entries, boot, uid, envKeys, includeEnv)
 }
 
-// Find returns the current-user process identified by pid. A false found
+// Lookup returns the current-user process identified by pid. A false found
 // result means the process does not exist or belongs to another user.
-func Find(ctx context.Context, pid int) (Process, bool, error) {
+func Lookup(ctx context.Context, pid int) (Process, bool, error) {
 	var zero Process
 	if err := ctx.Err(); err != nil {
 		return zero, false, fmt.Errorf("finding process context: %w", err)
@@ -125,7 +125,7 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 
 // StartIdentity returns a boot-qualified process start identity for pid.
 func StartIdentity(ctx context.Context, pid int) string {
-	process, found, err := Find(ctx, pid)
+	process, found, err := Lookup(ctx, pid)
 	if err != nil || !found {
 		return ""
 	}

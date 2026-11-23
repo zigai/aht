@@ -1,4 +1,4 @@
-package catalog
+package adapters
 
 import (
 	"github.com/zigai/aht/v2/pkg/mux/drivers"

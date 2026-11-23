@@ -10,25 +10,31 @@ import (
 
 	"github.com/google/shlex"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+//exhaustruct:optional
+type UpgradeOptions struct {
+	Binary string
+	DryRun bool
+}
+
 // Upgrade refreshes existing AHT-owned integrations through their native install
 // plans. It does not select new harnesses or switch a shim to a native adapter.
-func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) {
+func Upgrade(ctx context.Context, opts UpgradeOptions) ([]Result, error) {
 	results := make([]Result, 0)
 
 	var failures []error
 
-	for _, id := range catalog.Harnesses() {
+	for _, id := range adapters.Harnesses() {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			break
 		}
 
-		harnessResults, err := UpgradeHarness(ctx, id, binary, dryRun)
+		harnessResults, err := UpgradeHarness(ctx, id, opts)
 		results = append(results, harnessResults...)
 		failures = append(failures, err)
 
@@ -45,19 +51,19 @@ func Upgrade(ctx context.Context, binary string, dryRun bool) ([]Result, error) 
 func UpgradeHarness(
 	ctx context.Context,
 	id registry.Harness,
-	binary string,
-	dryRun bool,
+	opts UpgradeOptions,
 ) ([]Result, error) {
 	var (
 		results  []Result
 		failures []error
 	)
 
+	binary := opts.Binary
 	if binary == "" {
 		binary = defaultBinary
 	}
 
-	options := Options{Harness: id, Binary: binary, DryRun: dryRun}
+	options := Options{Harness: id, Binary: binary, DryRun: opts.DryRun}
 
 	plan, _, err := installPlanForHarness(id, binary)
 	if err != nil {
@@ -110,7 +116,7 @@ func upgradeInstalledNative(
 	}
 
 	switch {
-	case errors.Is(err, harnesspkg.ErrCommandMissing):
+	case errors.Is(err, harness.ErrCommandMissing):
 		// A harness uninstalled without removing its integration cannot be
 		// upgraded, and nothing runs the stale integration either.
 		return []Result{{
@@ -152,7 +158,7 @@ func upgradeNative(ctx context.Context, opts Options) (Result, error) {
 func upgradeRegisteredPlugin(
 	ctx context.Context,
 	opts Options,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (Result, error) {
 	registration := plan.Registration
 
@@ -162,9 +168,9 @@ func upgradeRegisteredPlugin(
 	}
 
 	switch {
-	case state == harnesspkg.PluginRegistrationForeign:
+	case state == harness.PluginRegistrationForeign:
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
-	case state == harnesspkg.PluginRegistrationDisabled:
+	case state == harness.PluginRegistrationDisabled:
 		return Result{
 			Harness: string(
 				opts.Harness,
@@ -177,8 +183,8 @@ func upgradeRegisteredPlugin(
 			NextStep: "enable " + registration.Label() + " through the harness plugin settings; " +
 				"upgrade preserves disablement",
 		}, nil
-	case state == harnesspkg.PluginRegistrationMissing,
-		state == harnesspkg.PluginRegistrationStale && plan.UpgradeRegisters:
+	case state == harness.PluginRegistrationMissing,
+		state == harness.PluginRegistrationStale && plan.UpgradeRegisters:
 		return installPluginDirectory(ctx, opts, opts.Harness, plan)
 	}
 
@@ -280,11 +286,11 @@ func installedShim(id registry.Harness) (string, bool, error) {
 // Check for recoverable installs even when the plugin target is missing.
 // The install path applies recovery (or previews it) along with the upgrade,
 // so cleanup is not performed before the upgrade decides whether to write.
-func pluginRecoveryPending(plan harnesspkg.InstallPlan) (bool, error) {
+func pluginRecoveryPending(plan harness.InstallPlan) (bool, error) {
 	pending := false
 
 	for _, action := range plan.Actions {
-		if plugin, ok := action.(harnesspkg.PluginDirectoryAction); ok {
+		if plugin, ok := action.(harness.PluginDirectoryAction); ok {
 			directory := newPluginDirectoryInstall(plugin.Plan, nil, nil)
 
 			recovery, err := directory.inspectRecovery()

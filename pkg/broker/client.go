@@ -302,12 +302,12 @@ func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrUnavailable)
 }
 
-func StreamClosed(err error) bool {
+func IsStreamClosed(err error) bool {
 	return errors.Is(err, ErrStreamClosed)
 }
 
-// NoReply reports whether a sent request lost its transport before a reply.
-func NoReply(err error) bool {
+// IsNoReply reports whether a sent request lost its transport before a reply.
+func IsNoReply(err error) bool {
 	return errors.Is(err, ErrNoReply)
 }
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -42,7 +42,7 @@ func TestListRejectsModeSpecificFlags(t *testing.T) {
 
 func TestListDefaultsToLatestUpdateLastWithUsefulLabelsAndShortIDs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	old := observeTestSession(t, store, "older-session", time.Now().Add(-time.Hour))
 	newer := observeTestSession(t, store, "newer-session", time.Now())
 
@@ -120,7 +120,7 @@ func assertListJSONOutput(t *testing.T, data []byte, oldID string, newerID strin
 
 func TestListDisplaysAndFiltersZellijLocation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	location := &registry.Location{
 		Kind:        registry.MultiplexerZellij,
@@ -180,7 +180,7 @@ func TestAbbreviatedRegistryIDsExpandCollidingPrefixes(t *testing.T) {
 func TestListFullFlagRendersCompleteValues(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	now := time.Now().UTC()
 	live := registry.PresenceLive
 	longSession := "Deploy new analytics dashboard to production cluster for quarterly report"
@@ -336,7 +336,7 @@ func TestListJSONEscapesBidiControls(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	rawID := "session-\u202ereversed"
 
 	if _, err := store.Observe(

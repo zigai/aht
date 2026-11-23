@@ -81,20 +81,20 @@ type application struct {
 	stderr io.Writer
 }
 
-type exitCoderError struct {
+type exitCodeError struct {
 	err  error
 	code int
 }
 
-func (e *exitCoderError) Error() string {
+func (e *exitCodeError) Error() string {
 	return e.err.Error()
 }
 
-func (e *exitCoderError) Unwrap() error {
+func (e *exitCodeError) Unwrap() error {
 	return e.err
 }
 
-func (e *exitCoderError) ExitCode() int {
+func (e *exitCodeError) ExitCode() int {
 	return e.code
 }
 
@@ -114,7 +114,7 @@ func exitCode(err error, code int) error {
 		return nil
 	}
 
-	return &exitCoderError{err: err, code: code}
+	return &exitCodeError{err: err, code: code}
 }
 
 func (app *application) configureCommandTree(cmd *cobra.Command) {

@@ -82,7 +82,7 @@ func (app *application) doctorConfigPath() string {
 		return app.configPath
 	}
 
-	return strings.TrimSpace(os.Getenv(config.ConfigEnv))
+	return strings.TrimSpace(os.Getenv(config.PathEnv))
 }
 
 func doctorFixPath(path string) string {

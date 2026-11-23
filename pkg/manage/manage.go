@@ -13,19 +13,19 @@ import (
 	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/internal/service"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 const (
-	ArtifactMissing  ArtifactState = "missing"
-	ArtifactCurrent  ArtifactState = "current"
-	ArtifactStale    ArtifactState = "stale"
-	ArtifactForeign  ArtifactState = "foreign"
-	ArtifactPartial  ArtifactState = "partial"
-	ArtifactDisabled ArtifactState = "disabled"
+	ArtifactMissing  ArtifactStatus = "missing"
+	ArtifactCurrent  ArtifactStatus = "current"
+	ArtifactStale    ArtifactStatus = "stale"
+	ArtifactForeign  ArtifactStatus = "foreign"
+	ArtifactPartial  ArtifactStatus = "partial"
+	ArtifactDisabled ArtifactStatus = "disabled"
 )
 
 var (
@@ -72,10 +72,8 @@ type UpgradeOptions struct {
 	DryRun bool
 }
 
-// ArtifactState describes the ownership and freshness of an integration artifact.
-type ArtifactState string
-
-type ArtifactStatus = ArtifactState
+// ArtifactStatus describes the ownership and freshness of an integration artifact.
+type ArtifactStatus string
 
 type IntegrationStatus struct {
 	Harness  registry.Harness `json:"harness"`
@@ -140,7 +138,7 @@ func New(cfg Config) *Manager {
 }
 
 func InstallableHarnesses() []registry.Harness {
-	return catalog.Harnesses()
+	return adapters.Harnesses()
 }
 
 // InstallIntegration idempotently installs or updates one harness integration.
@@ -189,7 +187,10 @@ func (m *Manager) UpgradeIntegrations(
 	ctx context.Context,
 	opts UpgradeOptions,
 ) ([]IntegrationResult, error) {
-	results, err := install.Upgrade(ctx, m.config.Binary, opts.DryRun)
+	results, err := install.Upgrade(
+		ctx,
+		install.UpgradeOptions{Binary: m.config.Binary, DryRun: opts.DryRun},
+	)
 	if err != nil {
 		return integrationResults(results), fmt.Errorf("upgrading integrations: %w", err)
 	}
@@ -203,7 +204,11 @@ func (m *Manager) UpgradeIntegration(
 	harness registry.Harness,
 	opts UpgradeOptions,
 ) ([]IntegrationResult, error) {
-	results, err := install.UpgradeHarness(ctx, harness, m.config.Binary, opts.DryRun)
+	results, err := install.UpgradeHarness(
+		ctx,
+		harness,
+		install.UpgradeOptions{Binary: m.config.Binary, DryRun: opts.DryRun},
+	)
 	if err != nil {
 		return integrationResults(results), fmt.Errorf("upgrading %s integration: %w", harness, err)
 	}
@@ -226,7 +231,7 @@ func (m *Manager) IntegrationStatus(
 
 	return IntegrationStatus{
 		Harness:  status.Harness,
-		Status:   ArtifactState(status.Status),
+		Status:   ArtifactStatus(status.Status),
 		Paths:    status.Paths,
 		Message:  status.Message,
 		NextStep: status.NextStep,
@@ -240,14 +245,14 @@ func (m *Manager) EnableTracker(ctx context.Context, opts TrackerOptions) (Track
 		return TrackerResult{}, fmt.Errorf("enabling tracker: %w", err)
 	}
 
-	result, err := service.Update(ctx, options)
+	result, err := service.Install(ctx, options)
 
 	return trackerResult(result), trackerError("enabling tracker", err)
 }
 
 // DisableTracker stops and removes background agent-session tracking.
 func (m *Manager) DisableTracker(ctx context.Context, opts TrackerOptions) (TrackerResult, error) {
-	result, err := service.Uninstall(ctx, opts.DryRun)
+	result, err := service.Uninstall(ctx, service.UninstallOptions{DryRun: opts.DryRun})
 
 	return trackerResult(result), trackerError("disabling tracker", err)
 }
@@ -267,7 +272,10 @@ func (m *Manager) TrackerStatus(ctx context.Context) (TrackerResult, error) {
 // binary, preserving its stored settings and running state. A tracker that is
 // not installed stays uninstalled.
 func (m *Manager) UpgradeTracker(ctx context.Context, opts TrackerOptions) (TrackerResult, error) {
-	result, err := service.Upgrade(ctx, m.config.Binary, opts.DryRun)
+	result, err := service.Upgrade(
+		ctx,
+		service.UpgradeOptions{Binary: m.config.Binary, DryRun: opts.DryRun},
+	)
 
 	return trackerResult(result), trackerError("upgrading tracker", err)
 }
@@ -329,7 +337,7 @@ func (m *Manager) loadConfig() (config.Config, error) {
 func (m *Manager) loadConfigWithMetadata() (config.Config, *strata.Metadata, string, error) {
 	path := m.config.ConfigPath
 	if path == "" {
-		path = strings.TrimSpace(os.Getenv(config.ConfigEnv))
+		path = strings.TrimSpace(os.Getenv(config.PathEnv))
 	}
 
 	if path == "-" && !m.config.NoConfig {
@@ -341,7 +349,7 @@ func (m *Manager) loadConfigWithMetadata() (config.Config, *strata.Metadata, str
 }
 
 func (m *Manager) readConfigWithMetadata() (config.Config, *strata.Metadata, string, error) {
-	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
+	cfg, meta, resolved, err := config.Load(config.Options{
 		Path:     m.config.ConfigPath,
 		Explicit: m.config.ConfigPath != "",
 		NoConfig: m.config.NoConfig,

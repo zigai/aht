@@ -43,7 +43,7 @@ func TestJournalReadersSeeUnflushedBrokerAndFallbackWrites(t *testing.T) {
 	if _, err := NewJournal(
 		path,
 		fixtureRules{},
-	).Append(t.Context(), []Observation{observation}); err != nil {
+	).ObserveBatch(t.Context(), []Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,7 +172,7 @@ func TestJournalHeartbeatDoesNotAdvanceConsumerRevision(t *testing.T) {
 	if _, err := NewJournal(
 		path,
 		fixtureRules{},
-	).Append(t.Context(), []Observation{observation}); err != nil {
+	).ObserveBatch(t.Context(), []Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 

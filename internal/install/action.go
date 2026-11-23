@@ -6,42 +6,42 @@ import (
 	"fmt"
 	"path/filepath"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 type actionHandler interface {
-	install(ctx context.Context, opts Options, harness registry.Harness) (Result, error)
-	remove(ctx context.Context, opts Options, harness registry.Harness) (Result, error)
-	inspect(ctx context.Context, harness registry.Harness) ([]inspectedArtifact, error)
+	install(ctx context.Context, opts Options, harnessID registry.Harness) (Result, error)
+	remove(ctx context.Context, opts Options, harnessID registry.Harness) (Result, error)
+	inspect(ctx context.Context, harnessID registry.Harness) ([]inspectedArtifact, error)
 	paths() []string
 }
 
 type (
 	jsonCommandHooksHandler struct {
-		plan harnesspkg.JSONCommandHookInstallPlan
+		plan harness.JSONCommandHookInstallPlan
 	}
 	jsonMergeHandler struct {
-		plan harnesspkg.JSONMergeInstallPlan
+		plan harness.JSONMergeInstallPlan
 	}
 	managedTextBlockHandler struct {
-		plan harnesspkg.ManagedTextBlockInstallPlan
+		plan harness.ManagedTextBlockInstallPlan
 	}
 	renderedFileHandler struct {
-		plan harnesspkg.RenderedFileInstallPlan
+		plan harness.RenderedFileInstallPlan
 	}
 	pluginDirectoryHandler struct {
-		plan harnesspkg.PluginDirectoryInstallPlan
+		plan harness.PluginDirectoryInstallPlan
 	}
 	nativeCatalogHandler struct {
-		action harnesspkg.NativeCatalogAction
+		action harness.NativeCatalogAction
 	}
 )
 
 func runNativeActions(
 	ctx context.Context,
 	opts Options,
-	plan harnesspkg.InstallPlan,
+	plan harness.InstallPlan,
 	run func(actionHandler) (Result, error),
 ) (Result, error) {
 	var (
@@ -107,19 +107,19 @@ func joinActionText(first string, next string) string {
 	return first + "\n" + next
 }
 
-func handlerFor(action harnesspkg.InstallAction) (actionHandler, bool) {
+func handlerFor(action harness.InstallAction) (actionHandler, bool) {
 	switch typed := action.(type) {
-	case harnesspkg.JSONCommandHooksAction:
+	case harness.JSONCommandHookAction:
 		return jsonCommandHooksHandler{plan: typed.Plan}, true
-	case harnesspkg.JSONMergeAction:
+	case harness.JSONMergeAction:
 		return jsonMergeHandler{plan: typed.Plan}, true
-	case harnesspkg.ManagedTextBlockAction:
+	case harness.ManagedTextBlockAction:
 		return managedTextBlockHandler{plan: typed.Plan}, true
-	case harnesspkg.RenderedFileAction:
+	case harness.RenderedFileAction:
 		return renderedFileHandler{plan: typed.Plan}, true
-	case harnesspkg.PluginDirectoryAction:
+	case harness.PluginDirectoryAction:
 		return pluginDirectoryHandler{plan: typed.Plan}, true
-	case harnesspkg.NativeCatalogAction:
+	case harness.NativeCatalogAction:
 		return nativeCatalogHandler{action: typed}, true
 	default:
 		return nil, false
@@ -129,24 +129,24 @@ func handlerFor(action harnesspkg.InstallAction) (actionHandler, bool) {
 func (handler jsonCommandHooksHandler) install(
 	ctx context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return installTrustedJSONCommandHooks(ctx, opts, harness, handler.plan)
+	return installTrustedJSONCommandHooks(ctx, opts, harnessID, handler.plan)
 }
 
 func (handler jsonCommandHooksHandler) remove(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return removeJSONCommandHooks(opts, harness, handler.plan)
+	return removeJSONCommandHooks(opts, harnessID, handler.plan)
 }
 
 func (handler jsonCommandHooksHandler) inspect(
 	ctx context.Context,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	return inspectCommandHooks(ctx, handler.plan, harness)
+	return inspectCommandHooks(ctx, handler.plan, harnessID)
 }
 
 func (handler jsonCommandHooksHandler) paths() []string {
@@ -156,24 +156,24 @@ func (handler jsonCommandHooksHandler) paths() []string {
 func (handler jsonMergeHandler) install(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return installJSONMerge(opts, harness, handler.plan)
+	return installJSONMerge(opts, harnessID, handler.plan)
 }
 
 func (handler jsonMergeHandler) remove(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return removeJSONMerge(opts, harness, handler.plan)
+	return removeJSONMerge(opts, harnessID, handler.plan)
 }
 
 func (handler jsonMergeHandler) inspect(
 	_ context.Context,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	return inspectSharedFile(handler.plan.Path, harness)
+	return inspectSharedFile(handler.plan.Path, harnessID)
 }
 
 func (handler jsonMergeHandler) paths() []string {
@@ -183,24 +183,24 @@ func (handler jsonMergeHandler) paths() []string {
 func (handler managedTextBlockHandler) install(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return installManagedTextBlock(opts, harness, handler.plan)
+	return installManagedTextBlock(opts, harnessID, handler.plan)
 }
 
 func (handler managedTextBlockHandler) remove(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return removeTextBlock(opts, harness, handler.plan)
+	return removeTextBlock(opts, harnessID, handler.plan)
 }
 
 func (handler managedTextBlockHandler) inspect(
 	_ context.Context,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	return inspectSharedFile(handler.plan.Path, harness)
+	return inspectSharedFile(handler.plan.Path, harnessID)
 }
 
 func (handler managedTextBlockHandler) paths() []string {
@@ -210,24 +210,24 @@ func (handler managedTextBlockHandler) paths() []string {
 func (handler renderedFileHandler) install(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return installRenderedPlan(opts, harness, handler.plan)
+	return installRenderedPlan(opts, harnessID, handler.plan)
 }
 
 func (handler renderedFileHandler) remove(
 	_ context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return removeOwnedFiles(opts, harness, []string{handler.plan.Path}, handler.plan.Path)
+	return removeOwnedFiles(opts, harnessID, []string{handler.plan.Path}, handler.plan.Path)
 }
 
 func (handler renderedFileHandler) inspect(
 	_ context.Context,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	return inspectOwnedPath(handler.plan.Path, harness)
+	return inspectOwnedPath(handler.plan.Path, harnessID)
 }
 
 func (handler renderedFileHandler) paths() []string {
@@ -237,24 +237,24 @@ func (handler renderedFileHandler) paths() []string {
 func (handler pluginDirectoryHandler) install(
 	ctx context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return installPluginDirectory(ctx, opts, harness, handler.plan)
+	return installPluginDirectory(ctx, opts, harnessID, handler.plan)
 }
 
 func (handler pluginDirectoryHandler) remove(
 	ctx context.Context,
 	opts Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return removePluginDirectoryWithRetired(ctx, opts, harness, handler.plan)
+	return removePluginDirectoryWithRetired(ctx, opts, harnessID, handler.plan)
 }
 
 func (handler pluginDirectoryHandler) inspect(
 	ctx context.Context,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) ([]inspectedArtifact, error) {
-	return inspectPluginAction(ctx, handler.plan, harness)
+	return inspectPluginAction(ctx, handler.plan, harnessID)
 }
 
 func (handler pluginDirectoryHandler) paths() []string {
@@ -270,17 +270,17 @@ func (handler pluginDirectoryHandler) paths() []string {
 func (handler nativeCatalogHandler) install(
 	_ context.Context,
 	_ Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return noInstallRequiredResult(harness, handler.action.Label), nil
+	return noInstallRequiredResult(harnessID, handler.action.Label), nil
 }
 
 func (handler nativeCatalogHandler) remove(
 	_ context.Context,
 	_ Options,
-	harness registry.Harness,
+	harnessID registry.Harness,
 ) (Result, error) {
-	return noInstallRequiredResult(harness, handler.action.Label), nil
+	return noInstallRequiredResult(harnessID, handler.action.Label), nil
 }
 
 func (handler nativeCatalogHandler) inspect(

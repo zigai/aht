@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -236,7 +236,7 @@ func applyClockObservation(
 ) (registry.State, registry.Session) {
 	t.Helper()
 
-	state, _, err := registry.NewReducer(catalog.Rules{}).
+	state, _, err := registry.NewReducer(adapters.Rules{}).
 		Apply(state, []registry.Observation{observation}, observation.At)
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func TestPayloadDefaults(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := catalog.PayloadDefaults(test.harness, json.RawMessage(test.payload))
+			got, err := adapters.PayloadDefaults(test.harness, json.RawMessage(test.payload))
 			if err != nil {
 				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 			}
@@ -376,7 +376,7 @@ func TestPayloadCompatible(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := catalog.PayloadCompatible(test.harness, json.RawMessage(test.payload))
+			got := adapters.PayloadCompatible(test.harness, json.RawMessage(test.payload))
 			if got != test.want {
 				t.Fatalf("expected %t, got %t", test.want, got)
 			}
@@ -399,7 +399,7 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 			}
 
 			t.Run(name, func(t *testing.T) {
-				testharness.Isolate(t, catalog.All()...)
+				testharness.Isolate(t, adapters.All()...)
 
 				if !knownHome {
 					t.Setenv("HOME", "")
@@ -414,7 +414,7 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 				}
 
 				t.Setenv(test.variable, value)
-				locations, _ := catalog.LocationsFor(test.harness, "")
+				locations, _ := adapters.LocationsFor(test.harness, "")
 
 				config := testharness.LocationPaths(locations, harness.LocationKindConfig)
 				if len(config) == 0 || slices.ContainsFunc(config, func(path string) bool {
@@ -441,10 +441,10 @@ func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
 		}},
 	} {
 		t.Run(string(test.harness), func(t *testing.T) {
-			workDir := testharness.WithoutHome(t, catalog.All()...)
+			workDir := testharness.WithoutHome(t, adapters.All()...)
 			test.plant(t, workDir)
 
-			adapter, ok := catalog.Find(test.harness)
+			adapter, ok := adapters.Find(test.harness)
 			if !ok {
 				t.Fatalf("adapter %s not found", test.harness)
 			}
@@ -484,7 +484,7 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 				Attributes: test.attributes,
 			}
 
-			observation := catalog.PrepareObservation(
+			observation := adapters.PrepareObservation(
 				registry.Observation{Harness: test.harness, Evidence: report},
 			)
 			if !reflect.DeepEqual(observation.Report().Detail, test.want) {

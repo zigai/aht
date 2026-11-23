@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -246,12 +246,12 @@ func TestReinstallAfterInterruptedPluginReplaceLeavesOnlyPluginDirectory(t *test
 	t.Parallel()
 
 	root := t.TempDir()
-	plan := harnesspkg.PluginDirectoryInstallPlan{
+	plan := harness.PluginDirectoryInstallPlan{
 		Dir: filepath.Join(root, "plugin"),
-		Files: []harnesspkg.RenderedFileInstallSpec{
+		Files: []harness.RenderedFileInstallSpec{
 			{Name: "plugin.json", Content: "{}\n"},
 		},
-		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
+		Identity: harness.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
 	}
 
 	if _, err := installPluginDirectory(
@@ -326,24 +326,24 @@ func TestInstallIgnoresUnprovenPluginBackups(t *testing.T) {
 			t.Parallel()
 
 			root := t.TempDir()
-			plan := harnesspkg.PluginDirectoryInstallPlan{
+			plan := harness.PluginDirectoryInstallPlan{
 				Dir: filepath.Join(root, "plugin"),
-				Files: []harnesspkg.RenderedFileInstallSpec{
+				Files: []harness.RenderedFileInstallSpec{
 					{Name: "plugin.json", Content: "{}\n"},
 				},
-				Identity: harnesspkg.ArtifactIdentity{
+				Identity: harness.ArtifactIdentity{
 					ID:      "test",
 					Version: 1,
 					Source:  "test-plugin",
 				},
 			}
 
-			harness := registry.Harness("test")
+			harnessID := registry.Harness("test")
 			if targetExists {
 				if _, err := installPluginDirectory(
 					t.Context(),
 					Options{},
-					harness,
+					harnessID,
 					plan,
 				); err != nil {
 					t.Fatal(err)
@@ -369,7 +369,7 @@ func TestInstallIgnoresUnprovenPluginBackups(t *testing.T) {
 				result, err := installPluginDirectory(
 					t.Context(),
 					Options{DryRun: dryRun},
-					harness,
+					harnessID,
 					plan,
 				)
 				if err != nil || result.Changed == targetExists {
@@ -403,10 +403,10 @@ func TestReinstallRestoresProvenMarkerlessBackupWithoutForce(t *testing.T) {
 
 	root := t.TempDir()
 
-	plan := harnesspkg.PluginDirectoryInstallPlan{
+	plan := harness.PluginDirectoryInstallPlan{
 		Dir:      filepath.Join(root, "plugin"),
-		Files:    []harnesspkg.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
-		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
+		Files:    []harness.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
+		Identity: harness.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
 	}
 	if err := os.Mkdir(plan.Dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -429,11 +429,11 @@ func TestReinstallRestoresProvenMarkerlessBackupWithoutForce(t *testing.T) {
 		t.Fatalf("backing up markerless plugin = %q, %t, %v", backup, exists, err)
 	}
 
-	harness := registry.Harness("test")
+	harnessID := registry.Harness("test")
 	if _, err := installPluginDirectory(
 		t.Context(),
 		Options{DryRun: true},
-		harness,
+		harnessID,
 		plan,
 	); !errors.Is(
 		err,
@@ -449,7 +449,7 @@ func TestReinstallRestoresProvenMarkerlessBackupWithoutForce(t *testing.T) {
 	if _, err := installPluginDirectory(
 		t.Context(),
 		Options{},
-		harness,
+		harnessID,
 		plan,
 	); !errors.Is(
 		err,
@@ -472,14 +472,14 @@ func TestReinstallRestoresManagedLegacyBackupWithoutRewriting(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	plan := harnesspkg.PluginDirectoryInstallPlan{
+	plan := harness.PluginDirectoryInstallPlan{
 		Dir:      filepath.Join(root, "plugin"),
-		Files:    []harnesspkg.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
-		Identity: harnesspkg.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
+		Files:    []harness.RenderedFileInstallSpec{{Name: "plugin.json", Content: "{}\n"}},
+		Identity: harness.ArtifactIdentity{ID: "test", Version: 1, Source: "test-plugin"},
 	}
 
-	harness := registry.Harness("test")
-	if _, err := installPluginDirectory(t.Context(), Options{}, harness, plan); err != nil {
+	harnessID := registry.Harness("test")
+	if _, err := installPluginDirectory(t.Context(), Options{}, harnessID, plan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -493,7 +493,7 @@ func TestReinstallRestoresManagedLegacyBackupWithoutRewriting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := installPluginDirectory(t.Context(), Options{DryRun: true}, harness, plan)
+	result, err := installPluginDirectory(t.Context(), Options{DryRun: true}, harnessID, plan)
 	if err != nil || !result.Changed {
 		t.Fatalf("preview of legacy backup recovery = %+v, %v; want Changed", result, err)
 	}
@@ -502,7 +502,7 @@ func TestReinstallRestoresManagedLegacyBackupWithoutRewriting(t *testing.T) {
 		t.Fatalf("dry run changed the target: %v", err)
 	}
 
-	result, err = installPluginDirectory(t.Context(), Options{}, harness, plan)
+	result, err = installPluginDirectory(t.Context(), Options{}, harnessID, plan)
 	if err != nil || !result.Changed {
 		t.Fatalf("legacy backup recovery = %+v, %v; want Changed", result, err)
 	}

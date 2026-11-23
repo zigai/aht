@@ -107,7 +107,7 @@ func (adapter qwenHarness) InstallPlan(binary string) (harness.InstallPlan, erro
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
-			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
+			harness.JSONCommandHookAction{Plan: harness.JSONCommandHookInstallPlan{
 				HooksKey:    "hooks",
 				Path:        filepath.Join(base, "settings.json"),
 				Source:      qwenIntegrationSource,

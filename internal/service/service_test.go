@@ -153,7 +153,7 @@ func TestInstallUsesAtomicContentAndManagerArgv(t *testing.T) {
 		Interval:  3 * time.Second,
 	}
 
-	result, err := New(executor).Update(context.Background(), options)
+	result, err := New(executor).Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestInstallDryRunAndForeignRefusal(t *testing.T) {
 
 	_, err := New(
 		&recordingExecutor{},
-	).Update(context.Background(), Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second})
+	).Install(context.Background(), Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second})
 	if !errors.Is(err, ErrForeign) {
 		t.Fatalf("error = %v, want ErrForeign", err)
 	}
@@ -213,7 +213,7 @@ func TestInstallDryRunAndForeignRefusal(t *testing.T) {
 		DryRun:    true,
 	}
 
-	result, err := New(executor).Update(context.Background(), options)
+	result, err := New(executor).Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestStatusManagerStoppedIsRepresented(t *testing.T) {
 	executor := &recordingExecutor{}
 
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
-	if _, err := New(executor).Update(context.Background(), options); err != nil {
+	if _, err := New(executor).Install(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,7 +268,7 @@ func TestStatusPropagatesManagerCancellation(t *testing.T) {
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
 	manager := New(&recordingExecutor{})
-	if _, err := manager.Update(context.Background(), options); err != nil {
+	if _, err := manager.Install(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -328,7 +328,7 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 
 	executor := &recordingExecutor{}
 
-	result, err := New(executor).Update(context.Background(), options)
+	result, err := New(executor).Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,13 +366,13 @@ func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 	executor := &recordingExecutor{}
 
 	manager := New(executor)
-	if _, err := manager.Update(context.Background(), options); err != nil {
+	if _, err := manager.Install(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 
 	executor.calls = nil
 
-	result, err := manager.Update(context.Background(), options)
+	result, err := manager.Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,14 +398,14 @@ func TestUpdateCurrentRunningServiceDryRunAndFailure(t *testing.T) {
 	executor := &recordingExecutor{}
 
 	manager := New(executor)
-	if _, err := manager.Update(t.Context(), options); err != nil {
+	if _, err := manager.Install(t.Context(), options); err != nil {
 		t.Fatal(err)
 	}
 
 	executor.calls = nil
 	options.DryRun = true
 
-	result, err := manager.Update(t.Context(), options)
+	result, err := manager.Install(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestUpdateCurrentRunningServiceDryRunAndFailure(t *testing.T) {
 	executor.calls = nil
 	executor.failAt = 2
 
-	result, err = manager.Update(t.Context(), options)
+	result, err = manager.Install(t.Context(), options)
 	if !errors.Is(err, errManagerTestFailure) || result.Changed {
 		t.Fatalf("failed restart = %+v, error = %v", result, err)
 	}
@@ -454,7 +454,7 @@ func requireRetryableUpdateAfterManagerFailure(t *testing.T, failAt int) {
 	manager := New(executor)
 
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
-	if _, err := manager.Update(
+	if _, err := manager.Install(
 		context.Background(),
 		options,
 	); !errors.Is(
@@ -476,7 +476,7 @@ func requireRetryableUpdateAfterManagerFailure(t *testing.T, failAt int) {
 	executor.calls = nil
 	executor.failAt = 0
 
-	result, err := manager.Update(context.Background(), options)
+	result, err := manager.Install(context.Background(), options)
 	if err != nil {
 		t.Fatalf("retry Update() error = %v", err)
 	}
@@ -506,7 +506,7 @@ func requireRetryableInstallAfterManagerFailure(t *testing.T, failAt int) {
 	manager := New(executor)
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
-	result, err := manager.Update(context.Background(), options)
+	result, err := manager.Install(context.Background(), options)
 	if !errors.Is(err, errManagerTestFailure) {
 		t.Fatalf("Install() error = %v, want manager failure", err)
 	}
@@ -518,7 +518,7 @@ func requireRetryableInstallAfterManagerFailure(t *testing.T, failAt int) {
 	executor.calls = nil
 	executor.failAt = 0
 
-	if _, err := manager.Update(context.Background(), options); err != nil {
+	if _, err := manager.Install(context.Background(), options); err != nil {
 		t.Fatalf("retry Install() error = %v", err)
 	}
 }
@@ -531,14 +531,14 @@ func TestUninstallRemovesManagedServiceAndIsIdempotent(t *testing.T) {
 	executor := &recordingExecutor{}
 	manager := New(executor)
 
-	installed, err := manager.Update(context.Background(), options)
+	installed, err := manager.Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	executor.calls = nil
 
-	result, err := manager.Uninstall(context.Background(), false)
+	result, err := manager.Uninstall(context.Background(), UninstallOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestUninstallRemovesManagedServiceAndIsIdempotent(t *testing.T) {
 
 	executor.calls = nil
 
-	result, err = manager.Uninstall(context.Background(), false)
+	result, err = manager.Uninstall(context.Background(), UninstallOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 	manager := New(executor)
 	options := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
 
-	installed, err := manager.Update(context.Background(), options)
+	installed, err := manager.Install(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 
 	if _, err := manager.Uninstall(
 		context.Background(),
-		false,
+		UninstallOptions{},
 	); !errors.Is(
 		err,
 		errManagerTestFailure,
@@ -600,7 +600,7 @@ func TestUninstallReloadFailureRestoresRetryableDefinition(t *testing.T) {
 	executor.calls = nil
 	executor.failAt = 0
 
-	result, err := manager.Uninstall(context.Background(), false)
+	result, err := manager.Uninstall(context.Background(), UninstallOptions{})
 	if err != nil {
 		t.Fatalf("retry Uninstall() error = %v", err)
 	}
@@ -684,7 +684,7 @@ func TestUpdateReloadsCurrentUnitBeforeRestart(t *testing.T) {
 
 	executor := &recordingExecutor{}
 
-	if _, err := New(executor).Update(t.Context(), options); err != nil {
+	if _, err := New(executor).Install(t.Context(), options); err != nil {
 		t.Fatal(err)
 	}
 

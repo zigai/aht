@@ -27,7 +27,7 @@ func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			results, err := app.upgradeIntegrations(cmd.Context(), args, binary, dryRun)
 
-			if _, usage := errors.AsType[*exitCoderError](err); usage {
+			if _, usage := errors.AsType[*exitCodeError](err); usage {
 				return err
 			}
 

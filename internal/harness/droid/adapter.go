@@ -85,7 +85,7 @@ func (adapter droidHarness) InstallPlan(binary string) (harness.InstallPlan, err
 
 	return harness.InstallPlan{
 		Actions: []harness.InstallAction{
-			harness.JSONCommandHooksAction{Plan: harness.JSONCommandHookInstallPlan{
+			harness.JSONCommandHookAction{Plan: harness.JSONCommandHookInstallPlan{
 				HooksKey:    "",
 				Path:        filepath.Join(base, "hooks.json"),
 				Source:      droidIntegrationSource,

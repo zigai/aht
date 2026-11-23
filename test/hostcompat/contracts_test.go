@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -34,20 +34,20 @@ type loadCheck struct {
 type nativeDriver string
 
 const (
-	driverProcess         nativeDriver = ""
-	driverExecRPC         nativeDriver = "exec-rpc"
-	driverACP             nativeDriver = "acp"
-	driverCompletionRPC   nativeDriver = "completion-rpc"
-	driverExtensionRPC    nativeDriver = "extension-rpc"
-	driverPythonACP       nativeDriver = "python-acp"
-	driverExecutionServer nativeDriver = "execution-server"
-	driverPluginServer    nativeDriver = "plugin-server"
-	driverTerminalQuit    nativeDriver = "terminal-quit"
-	driverTerminalDialog  nativeDriver = "terminal-dialog"
-	driverCLIACP          nativeDriver = "cli-acp"
-	driverControlCLI      nativeDriver = "control-cli"
-	driverAppServer       nativeDriver = "app-server"
-	driverSDKCLI          nativeDriver = "sdk-cli"
+	nativeDriverProcess         nativeDriver = ""
+	nativeDriverExecRPC         nativeDriver = "exec-rpc"
+	nativeDriverACP             nativeDriver = "acp"
+	nativeDriverCompletionRPC   nativeDriver = "completion-rpc"
+	nativeDriverExtensionRPC    nativeDriver = "extension-rpc"
+	nativeDriverPythonACP       nativeDriver = "python-acp"
+	nativeDriverExecutionServer nativeDriver = "execution-server"
+	nativeDriverPluginServer    nativeDriver = "plugin-server"
+	nativeDriverTerminalQuit    nativeDriver = "terminal-quit"
+	nativeDriverTerminalDialog  nativeDriver = "terminal-dialog"
+	nativeDriverCLIACP          nativeDriver = "cli-acp"
+	nativeDriverControlCLI      nativeDriver = "control-cli"
+	nativeDriverAppServer       nativeDriver = "app-server"
+	nativeDriverSDKCLI          nativeDriver = "sdk-cli"
 )
 
 type resumeMode string
@@ -91,7 +91,7 @@ type hostContract struct {
 
 var hostContracts = []hostContract{
 	{
-		PermissionDriver: driverControlCLI,
+		PermissionDriver: nativeDriverControlCLI,
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
 			TurnEnd:  "Stop",
@@ -112,7 +112,7 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		PermissionDriver: driverAppServer,
+		PermissionDriver: nativeDriverAppServer,
 		Resume:           resumeExec,
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
@@ -156,7 +156,7 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		PermissionDriver: driverSDKCLI,
+		PermissionDriver: nativeDriverSDKCLI,
 		InterruptGone:    true,
 		Lifecycle: lifecycleContract{
 			Start:    "sessionStart",
@@ -178,7 +178,7 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver: driverCLIACP,
+		InterruptionDriver: nativeDriverCLIACP,
 		Lifecycle: lifecycleContract{
 			Start:      "beforeRun",
 			TurnEnd:    "afterRun",
@@ -199,9 +199,9 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		LifecycleDriver:    driverACP,
-		InterruptionDriver: driverACP,
-		PermissionDriver:   driverACP,
+		LifecycleDriver:    nativeDriverACP,
+		InterruptionDriver: nativeDriverACP,
+		PermissionDriver:   nativeDriverACP,
 		ShellCommand:       "printf 'aht-compat-marker\\n'",
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
@@ -221,7 +221,7 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver: driverTerminalQuit,
+		InterruptionDriver: nativeDriverTerminalQuit,
 		InterruptTerminal:  true,
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
@@ -261,9 +261,9 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		LifecycleDriver:    driverCompletionRPC,
-		InterruptionDriver: driverCompletionRPC,
-		PermissionDriver:   driverCompletionRPC,
+		LifecycleDriver:    nativeDriverCompletionRPC,
+		InterruptionDriver: nativeDriverCompletionRPC,
+		PermissionDriver:   nativeDriverCompletionRPC,
 		Lifecycle: lifecycleContract{
 			Start:    "session_start",
 			TurnEnd:  "agent_settled",
@@ -281,8 +281,8 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver: driverExtensionRPC,
-		PermissionDriver:   driverExtensionRPC,
+		InterruptionDriver: nativeDriverExtensionRPC,
+		PermissionDriver:   nativeDriverExtensionRPC,
 		Lifecycle: lifecycleContract{
 			Start:    "session_start",
 			TurnEnd:  "session_stop",
@@ -303,8 +303,8 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver: driverExecutionServer,
-		PermissionDriver:   driverExecutionServer,
+		InterruptionDriver: nativeDriverExecutionServer,
+		PermissionDriver:   nativeDriverExecutionServer,
 		Lifecycle: lifecycleContract{
 			Start:      "session.execution.started",
 			TurnEnd:    "session.execution.succeeded",
@@ -350,8 +350,8 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver: driverPluginServer,
-		PermissionDriver:   driverPluginServer,
+		InterruptionDriver: nativeDriverPluginServer,
+		PermissionDriver:   nativeDriverPluginServer,
 		PermissionConfig:   "kilo.json",
 		Lifecycle: lifecycleContract{
 			Start:      "session.created",
@@ -373,8 +373,8 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		LifecycleDriver:    driverExecRPC,
-		InterruptionDriver: driverExecRPC,
+		LifecycleDriver:    nativeDriverExecRPC,
+		InterruptionDriver: nativeDriverExecRPC,
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
 			TurnEnd:  "Stop",
@@ -416,8 +416,8 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		InterruptionDriver:  driverPythonACP,
-		PermissionDriver:    driverPythonACP,
+		InterruptionDriver:  nativeDriverPythonACP,
+		PermissionDriver:    nativeDriverPythonACP,
 		DangerousPermission: true,
 		Resume:              resumeQuery,
 		Lifecycle: lifecycleContract{
@@ -480,9 +480,9 @@ var hostContracts = []hostContract{
 		},
 	},
 	{
-		LifecycleDriver:    driverTerminalDialog,
-		InterruptionDriver: driverTerminalDialog,
-		PermissionDriver:   driverTerminalDialog,
+		LifecycleDriver:    nativeDriverTerminalDialog,
+		InterruptionDriver: nativeDriverTerminalDialog,
+		PermissionDriver:   nativeDriverTerminalDialog,
 		Lifecycle: lifecycleContract{
 			Start:    "SessionStart",
 			TurnEnd:  "Stop",
@@ -556,7 +556,7 @@ func TestEveryHarnessHasCurrentHostContract(t *testing.T) {
 		contracts[contract.ID] = contract
 	}
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		assertAdapterContract(t, adapter)
 		delete(contracts, adapter.Definition().ID)
 	}

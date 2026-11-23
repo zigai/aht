@@ -29,7 +29,7 @@ func New() ompHarness {
 			Source:    harness.DistributionNPM,
 			Package:   "@oh-my-pi/pi-coding-agent",
 			Directory: "omp",
-			Family:    harness.FamilyTreeExtension,
+			Family:    harness.DistributionFamilyTreeExtension,
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},

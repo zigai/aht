@@ -1027,10 +1027,10 @@ func TestSearchDiagnosticsReportedIssues(t *testing.T) {
 		result := history.Result{OmittedIssues: 7}
 		for position := range count {
 			result.Issues = append(result.Issues, history.Issue{
-				Source:  history.Source{Harness: registry.Harness("pi"), Path: "/histories"},
-				Path:    "/histories/broken.jsonl",
-				Message: "cannot read history",
-				Record:  position > 0,
+				Source:   history.Source{Harness: registry.Harness("pi"), Path: "/histories"},
+				Path:     "/histories/broken.jsonl",
+				Message:  "cannot read history",
+				IsRecord: position > 0,
 			})
 		}
 

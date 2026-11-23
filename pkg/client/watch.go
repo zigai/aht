@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -212,7 +212,7 @@ func (s *sessionStream) close() {
 }
 
 func brokerOffline(err error) bool {
-	return broker.IsUnavailable(err) || broker.StreamClosed(err)
+	return broker.IsUnavailable(err) || broker.IsStreamClosed(err)
 }
 
 func openBrokerWatcher(
@@ -328,7 +328,7 @@ func (w *durableSessionWatcher) run(ctx context.Context, storePath string, filte
 	defer close(w.done)
 	defer close(w.events)
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	err := store.Watch(ctx, registry.WatchOptions{
 		Filter:   filter,

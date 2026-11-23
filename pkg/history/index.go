@@ -235,7 +235,7 @@ func (index *historyIndex) connect(ctx context.Context, waiting func()) error {
 		return fmt.Errorf("connect history index: %w", err)
 	}
 
-	index.conn = &indexConnection{Conn: conn, waiting: waiting}
+	index.conn = &indexConnection{Conn: conn, onWait: waiting}
 
 	return nil
 }

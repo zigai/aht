@@ -52,19 +52,19 @@ func TestCurrentWithEnvPreservesCancellation(t *testing.T) {
 func TestSendInterruptRequiresPaneID(t *testing.T) {
 	t.Parallel()
 
-	err := SendInterruptTo(context.Background(), "default", "")
+	err := SendInterrupt(context.Background(), "default", "")
 	if !errors.Is(err, errMissingTmuxPaneID) {
-		t.Fatalf("SendInterruptTo with empty pane ID error = %v, want errMissingTmuxPaneID", err)
+		t.Fatalf("SendInterrupt with empty pane ID error = %v, want errMissingTmuxPaneID", err)
 	}
 }
 
 func TestSendInterruptRejectsInvalidServerIdentity(t *testing.T) {
 	t.Parallel()
 
-	err := SendInterruptTo(context.Background(), "-L:", "%1")
+	err := SendInterrupt(context.Background(), "-L:", "%1")
 	if !errors.Is(err, errInvalidServerIdentity) {
 		t.Fatalf(
-			"SendInterruptTo with invalid server identity error = %v, want errInvalidServerIdentity",
+			"SendInterrupt with invalid server identity error = %v, want errInvalidServerIdentity",
 			err,
 		)
 	}

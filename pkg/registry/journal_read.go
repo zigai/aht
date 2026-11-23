@@ -113,7 +113,7 @@ func (s *MemoryStore) lockCurrentExclusive(ctx context.Context) error {
 		}
 
 		// TryLock never waits, so trying it under s.mu keeps the lock order.
-		if s.files.TryLock() {
+		if s.filesMu.TryLock() {
 			break
 		}
 
@@ -161,7 +161,7 @@ func (s *MemoryStore) drainLocked(ctx context.Context) error {
 func (s *MemoryStore) lockFiles(ctx context.Context) (*storeLock, error) {
 	// The mutex lets this process's goroutines hand off without polling the
 	// flock. Both come before s.mu, which is never held across file syncs.
-	s.files.Lock()
+	s.filesMu.Lock()
 
 	lock, err := openStoreLock(ctx, storeLockPath(s.path), nil)
 	if err != nil {
@@ -177,7 +177,7 @@ func (s *MemoryStore) lockFiles(ctx context.Context) (*storeLock, error) {
 }
 
 func (s *MemoryStore) releaseFiles() {
-	s.files.Unlock()
+	s.filesMu.Unlock()
 
 	s.mu.Lock()
 	s.signalFilesLocked()
@@ -187,7 +187,7 @@ func (s *MemoryStore) releaseFiles() {
 func (s *MemoryStore) unlockFilesLocked(lock *storeLock, err error) error {
 	s.filesDrained = false
 	err = closeStoreLock(lock, err)
-	s.files.Unlock()
+	s.filesMu.Unlock()
 	s.signalFilesLocked()
 
 	return err

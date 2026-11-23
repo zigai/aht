@@ -57,18 +57,18 @@ type session struct {
 }
 
 // Start listens on options.Address and serves until Close.
-func Start(options Options) (*Server, error) {
-	address := options.Address
+func Start(opts Options) (*Server, error) {
+	address := opts.Address
 	if address == "" {
 		address = defaultAddress
 	}
 
-	model := options.Model
+	model := opts.Model
 	if model == "" {
 		model = defaultModel
 	}
 
-	script := options.Script
+	script := opts.Script
 	if script == nil {
 		script = Echo()
 	}
@@ -82,8 +82,8 @@ func Start(options Options) (*Server, error) {
 
 	server := &Server{
 		model:       model,
-		sideRequest: options.SideRequest,
-		holdAll:     options.Hold,
+		sideRequest: opts.SideRequest,
+		holdAll:     opts.Hold,
 		url:         "http://" + listener.Addr().String(),
 		httpServer:  nil,
 		serveDone:   make(chan error, 1),

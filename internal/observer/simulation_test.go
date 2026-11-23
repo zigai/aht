@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	harness "github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/registrycheck"
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -287,7 +287,7 @@ func newSimulationWorld(t *testing.T, coverage *registrycheck.Coverage) *simulat
 
 	store, err := registry.OpenMemoryStore(
 		filepath.Join(t.TempDir(), "state.json"),
-		harness.Rules{},
+		adapters.Rules{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +295,7 @@ func newSimulationWorld(t *testing.T, coverage *registrycheck.Coverage) *simulat
 
 	world := &simulationWorld{
 		store:       store,
-		app:         harness.ProgramStatusApp(id),
+		app:         adapters.ProgramStatusApp(id),
 		harness:     id,
 		command:     command,
 		reporter:    reporter,
@@ -327,13 +327,13 @@ func simulationHarness(t *testing.T) (registry.Harness, string, string) {
 		command, reporter string
 	)
 
-	for _, adapter := range harness.All() {
+	for _, adapter := range adapters.All() {
 		definition := adapter.Definition()
 
-		policy := (harness.Rules{}).Policy(definition.ID)
+		policy := (adapters.Rules{}).Policy(definition.ID)
 		if !policy.ExclusiveProcess || policy.Authority != registry.AuthorityHook ||
 			!policy.ScreenFallback || definition.ProgramStatusApp == "" ||
-			!harness.SupportsScreen(definition.ID) ||
+			!adapters.SupportsScreen(definition.ID) ||
 			len(definition.ProcessNames) == 0 {
 			continue
 		}
@@ -627,7 +627,7 @@ func (w *simulationWorld) makeReport(
 	report := &registry.Report{
 		Reporter: registry.Reporter{
 			Integration: w.reporter,
-			Version:     harness.IntegrationVersionFor(w.harness),
+			Version:     adapters.IntegrationVersionFor(w.harness),
 			Sequence:    &sequence,
 		},
 		Event:   event,
@@ -864,7 +864,7 @@ func simulationSessions(sessions []registry.Session) error {
 	for _, session := range sessions {
 		if session.Presence() != registry.PresenceLive || session.Process == nil ||
 			!session.Process.Complete() ||
-			!(harness.Rules{}).Policy(session.Harness).ExclusiveProcess {
+			!(adapters.Rules{}).Policy(session.Harness).ExclusiveProcess {
 			continue
 		}
 
@@ -980,7 +980,7 @@ func (w *simulationWorld) checkTerminalAuthority(session registry.Session, now t
 		return nil
 	}
 
-	policy := (harness.Rules{}).Policy(session.Harness)
+	policy := (adapters.Rules{}).Policy(session.Harness)
 	native := session.Observations.Native
 
 	if authority, _ := registry.ActivityAuthority(
@@ -1009,7 +1009,7 @@ func (w *simulationWorld) checkTerminalAuthority(session registry.Session, now t
 }
 
 func (w *simulationWorld) checkHookAuthority(session registry.Session, now time.Time) error {
-	policy := (harness.Rules{}).Policy(session.Harness)
+	policy := (adapters.Rules{}).Policy(session.Harness)
 
 	authority, _ := registry.ActivityAuthority(session, policy, now)
 	if authority != registry.AuthorityHook || session.Observations.Native == nil ||

@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -92,7 +92,7 @@ func (app *application) newDetectionTestCommand() *cobra.Command {
 				options.configDir = cfg.Detection.ManifestsDir
 			}
 
-			harnessID, err = catalog.Parse(args[0])
+			harnessID, err = adapters.Parse(args[0])
 			if err != nil {
 				if options.manifestPath == "" {
 					return exitCode(err, exitCodeUsage)

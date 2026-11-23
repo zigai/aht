@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -57,7 +57,7 @@ func TestListProjectAndCWDAndLocationFilterFlags(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	tempDir := t.TempDir()
 	proj1 := filepath.Join(tempDir, "proj1")
@@ -170,7 +170,7 @@ func TestInfoQualifiedPaneResolution(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
@@ -261,12 +261,12 @@ func TestCurrentWithVerifiedProcess(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	live := registry.PresenceLive
 	activity := registry.ActivityRunning
 
-	proc, found, err := processinfo.Find(t.Context(), os.Getpid())
+	proc, found, err := processinfo.Lookup(t.Context(), os.Getpid())
 	if err != nil || !found {
 		t.Fatalf("find current process: found=%v err=%v", found, err)
 	}

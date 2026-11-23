@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -38,7 +38,7 @@ func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 	path := shortStatePath(t)
 	socketPath := broker.SocketPath(path)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestShutdownDoesNotRemoveReplacementSocket(t *testing.T) {
 	path := shortStatePath(t)
 	socketPath := broker.SocketPath(path)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

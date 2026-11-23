@@ -18,8 +18,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/zigai/aht/v2/internal/config"
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/history"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -342,7 +342,7 @@ func (options *searchOptions) validate(now time.Time) ([]history.Source, error) 
 
 func (options *searchOptions) validateFilters(now time.Time) error {
 	for _, name := range options.harnesses {
-		id, err := catalog.Parse(strings.TrimSpace(name))
+		id, err := adapters.Parse(strings.TrimSpace(name))
 		if err != nil {
 			return fmt.Errorf("search harness: %w", err)
 		}
@@ -425,7 +425,7 @@ func (options *searchOptions) validateSources() ([]history.Source, error) {
 			)
 		}
 
-		id, err := catalog.Parse(name)
+		id, err := adapters.Parse(name)
 		if err != nil {
 			return nil, fmt.Errorf("search source: %w", err)
 		}
@@ -720,7 +720,7 @@ func configuredIgnoreHarnesses(
 ) []registry.Harness {
 	ignored := make([]registry.Harness, 0, len(configured))
 	for _, name := range configured {
-		id, err := catalog.Parse(name)
+		id, err := adapters.Parse(name)
 		if err != nil || slices.Contains(explicit, id) {
 			continue
 		}
@@ -845,7 +845,7 @@ func (app *application) writeSearchIssues(result history.Result, verbose bool) {
 		records := 0
 
 		for _, issue := range result.Issues {
-			if issue.Record {
+			if issue.IsRecord {
 				records++
 			}
 		}
@@ -890,7 +890,7 @@ func (app *application) writeSearchUnsupported(sources []history.SourceStatus, o
 		requested := opts.verbose || slices.Contains(opts.query.Harnesses, source.Source.Harness)
 		for _, value := range opts.sources {
 			name, _, _ := strings.Cut(value, "=")
-			id, _ := catalog.Parse(name)
+			id, _ := adapters.Parse(name)
 			requested = requested || id == source.Source.Harness
 		}
 
@@ -929,7 +929,7 @@ func resumeLine(match history.Match) string {
 
 	quoted := make([]string, len(match.ResumeCommand))
 	for i, arg := range match.ResumeCommand {
-		quoted[i] = harnesspkg.ShellQuote(arg)
+		quoted[i] = harness.ShellQuote(arg)
 	}
 
 	command := strings.Join(quoted, " ")
@@ -937,7 +937,7 @@ func resumeLine(match history.Match) string {
 		return command
 	}
 
-	return "cd " + harnesspkg.ShellQuote(match.Conversation.CWD) + " && " + command
+	return "cd " + harness.ShellQuote(match.Conversation.CWD) + " && " + command
 }
 
 func pasteableResumeLine(match history.Match) string {

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	ConfigEnv = "AHT_CONFIG"
+	PathEnv = "AHT_CONFIG"
 
 	maxConfigFileSize = 1024 * 1024
 
@@ -247,7 +247,7 @@ func UserConfigDir() string {
 }
 
 func DefaultPath() string {
-	if val := strings.TrimSpace(os.Getenv(ConfigEnv)); val != "" {
+	if val := strings.TrimSpace(os.Getenv(PathEnv)); val != "" {
 		return val
 	}
 
@@ -270,9 +270,9 @@ func UserPath() string {
 	return filepath.Join(os.TempDir(), "aht", "config.toml")
 }
 
-// DefaultConfigTemplate returns a formatted TOML string containing every default
+// DefaultTemplate returns a formatted TOML string containing every default
 // option with descriptive comments.
-func DefaultConfigTemplate() string {
+func DefaultTemplate() string {
 	return `# AHT Configuration (config.toml)
 # Track local coding-agent sessions and where they are running.
 # Override location with $AHT_CONFIG or --config <path>.
@@ -327,9 +327,9 @@ screen_inspection = true
 `
 }
 
-// WriteConfigFile writes the default configuration template to path, creating
+// WriteFile writes the default configuration template to path, creating
 // parent directories if needed. It overwrites any existing file at path.
-func WriteConfigFile(path string) error {
+func WriteFile(path string) error {
 	if path == "" {
 		path = DefaultPath()
 	}
@@ -343,13 +343,13 @@ func WriteConfigFile(path string) error {
 	return err
 }
 
-// EnsureConfigFile ensures that a configuration file exists at path.
+// EnsureFile ensures that a configuration file exists at path.
 // If path is empty, DefaultPath() is used.
 // If the file already exists, it returns created=false, nil.
-// If the file does not exist, it creates the parent directories and writes DefaultConfigTemplate()
+// If the file does not exist, it creates the parent directories and writes DefaultTemplate()
 // with 0o600 permissions, returning created=true, nil. Publication is atomic and
 // never overwrites a file created by another process.
-func EnsureConfigFile(path string) (bool, error) {
+func EnsureFile(path string) (bool, error) {
 	if path == "" {
 		path = DefaultPath()
 	}
@@ -399,7 +399,7 @@ func SortKey(s string) (string, bool) {
 	return key, ok
 }
 
-func NormalizeSort(s string) (string, error) {
+func ParseSort(s string) (string, error) {
 	if key, ok := SortKey(s); ok {
 		return key, nil
 	}
@@ -446,7 +446,7 @@ func (c *Config) validatePresence(meta *strata.Metadata) error {
 		return nil
 	}
 
-	if _, err := registry.NormalizePresence(trimmed); err != nil {
+	if _, err := registry.ParsePresence(trimmed); err != nil {
 		valErr := fmt.Errorf(
 			"%w %q (allowed: live, gone, unknown, all): %w",
 			ErrInvalidPresence,
@@ -471,7 +471,7 @@ func (c *Config) validateSort(meta *strata.Metadata) error {
 		return nil
 	}
 
-	norm, err := NormalizeSort(c.UI.Sort)
+	norm, err := ParseSort(c.UI.Sort)
 	if err != nil {
 		if meta != nil {
 			return fmt.Errorf("validate configuration: %w", meta.NewConfigError("ui.sort", err))
@@ -635,7 +635,7 @@ func TombstoneTTL(cfg Config) (time.Duration, error) {
 	return ParseDuration(cfg.Retention.TombstoneTTL)
 }
 
-func LoadWithMetadata(opts Options) (Config, *strata.Metadata, string, error) {
+func Load(opts Options) (Config, *strata.Metadata, string, error) {
 	strataOpts, targetPath := strataLoadOptions(opts)
 	cfg, meta, err := strata.LoadWithMetadata[Config](strataOpts...)
 
@@ -661,7 +661,7 @@ func strataLoadOptions(opts Options) ([]strata.Option, string) {
 
 	targetPath := opts.Path
 	if targetPath == "" {
-		targetPath = strings.TrimSpace(os.Getenv(ConfigEnv))
+		targetPath = strings.TrimSpace(os.Getenv(PathEnv))
 	}
 
 	if targetPath == "" {

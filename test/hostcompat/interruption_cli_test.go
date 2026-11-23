@@ -23,24 +23,24 @@ func runCLIInterruption(t *testing.T, host *isolatedHost, env []string) {
 	var command *exec.Cmd
 
 	switch host.contract.InterruptionDriver {
-	case driverCLIACP:
+	case nativeDriverCLIACP:
 		// ACP branches before the CLI's ordinary provider/sandbox argument
 		// handling. Its documented environment supplies provider selection;
 		// force the native local backend to avoid a detached hub daemon.
 		command = clineACPCommand(t, host, env)
-	case driverProcess,
-		driverExecRPC,
-		driverACP,
-		driverCompletionRPC,
-		driverExtensionRPC,
-		driverPythonACP,
-		driverExecutionServer,
-		driverPluginServer,
-		driverTerminalQuit,
-		driverTerminalDialog,
-		driverControlCLI,
-		driverAppServer,
-		driverSDKCLI:
+	case nativeDriverProcess,
+		nativeDriverExecRPC,
+		nativeDriverACP,
+		nativeDriverCompletionRPC,
+		nativeDriverExtensionRPC,
+		nativeDriverPythonACP,
+		nativeDriverExecutionServer,
+		nativeDriverPluginServer,
+		nativeDriverTerminalQuit,
+		nativeDriverTerminalDialog,
+		nativeDriverControlCLI,
+		nativeDriverAppServer,
+		nativeDriverSDKCLI:
 		fallthrough
 	default:
 		t.Fatalf("no native CLI interruption driver for %s", host.contract.ID)

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -20,7 +20,7 @@ func TestClientListFallsBackToDurableRegistry(t *testing.T) {
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("fallback")); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestClientRealtimeOnlyFailsWhenOffline(t *testing.T) {
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("fallback")); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestClientDurableOnlyBypassesBroker(t *testing.T) {
 
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	if _, err := store.Observe(t.Context(), runningObservation("durable-session")); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestClientWatchYieldsRealtimeRevisions(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(storePath, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestClientSummaryModesParity(t *testing.T) {
 
 	socketPath := broker.SocketPath(storePath)
 
-	fileStore := registry.NewJournal(storePath, catalog.Rules{})
+	fileStore := registry.NewJournal(storePath, adapters.Rules{})
 	running := registry.ActivityRunning
 
 	obs1 := registry.Observation{
@@ -265,7 +265,7 @@ func TestClientSummaryModesParity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	memStore, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
+	memStore, err := registry.OpenMemoryStore(storePath, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

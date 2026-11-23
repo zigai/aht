@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -21,7 +21,7 @@ func createTestStoreSession(
 ) registry.Session {
 	t.Helper()
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	var act *registry.Activity
 	if activity != "" {

@@ -257,7 +257,7 @@ func writeEvents(
 			return OutcomeCanceled
 		}
 
-		if !event.content {
+		if !event.hasContent {
 			continue
 		}
 

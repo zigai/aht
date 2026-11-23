@@ -14,8 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const (
@@ -24,14 +24,14 @@ const (
 	promptRunes         = 160
 )
 
-var errInvalidRecord = native.ErrInvalidRecord
+var errInvalidRecord = transcript.ErrInvalidRecord
 
 type transcriptHeader struct {
-	record native.Record
+	record transcript.Record
 	size   int64
 }
 
-type transcript struct {
+type transcriptState struct {
 	conversationHits
 
 	match       Match
@@ -63,8 +63,8 @@ func readTranscriptHeaders(
 			break
 		}
 
-		var record native.Record
-		if json.Unmarshal(data, &record) != nil || native.Str(record, "type") != kind {
+		var record transcript.Record
+		if json.Unmarshal(data, &record) != nil || transcript.Str(record, "type") != kind {
 			break
 		}
 
@@ -83,8 +83,8 @@ func transcriptHeaderBytes(headers []transcriptHeader) int64 {
 	return size
 }
 
-func newDatabaseTranscript(c Conversation) transcript {
-	return transcript{
+func newDatabaseTranscript(c Conversation) transcriptState {
+	return transcriptState{
 		match: Match{
 			Conversation:   c,
 			Excerpts:       nil,
@@ -110,7 +110,7 @@ func newDatabaseTranscript(c Conversation) transcript {
 	}
 }
 
-func (t *transcript) keepLast(part Excerpt) {
+func (t *transcriptState) keepLast(part Excerpt) {
 	if t.hasLast && part.MessageID != "" && part.MessageID == t.last.MessageID {
 		t.last.Text += "\n" + part.Text
 
@@ -122,7 +122,7 @@ func (t *transcript) keepLast(part Excerpt) {
 
 // absorb folds the text matches of a child history into t. Conversation
 // metadata stays t's own, so filters judge the session its parent recorded.
-func (t *transcript) absorb(child *transcript, excerpts int) {
+func (t *transcriptState) absorb(child *transcriptState, excerpts int) {
 	t.excluded = t.excluded || child.excluded
 
 	t.conversationHits.absorb(child.conversationHits)
@@ -135,7 +135,7 @@ func (t *transcript) absorb(child *transcript, excerpts int) {
 }
 
 // qualifies reports whether every term matched and no exclusion did.
-func (t *transcript) qualifies(terms int) bool {
+func (t *transcriptState) qualifies(terms int) bool {
 	return !t.excluded && t.conversationHits.qualifies(terms)
 }
 
@@ -146,14 +146,14 @@ func (s *parser) scanJSONL(
 	file *os.File,
 	buffer *fileIssueBuffer,
 	identifyOnly bool,
-) *transcript {
+) *transcriptState {
 	info, err := file.Stat()
 	if err != nil {
 		buffer.issue(source, path, err)
 		return nil
 	}
 
-	var t transcript
+	var t transcriptState
 	if err := s.prepareProjection(ctx, source, file, info.Size(), &t); err != nil {
 		buffer.issue(source, path, err)
 		return nil
@@ -215,7 +215,7 @@ func (s *parser) transcriptHeaders(
 		ctx,
 		file,
 		size,
-		catalog.TranscriptFor(source.Harness).RewritableHeaders,
+		adapters.TranscriptFor(source.Harness).RewritableHeaders,
 	)
 }
 
@@ -225,14 +225,14 @@ func (s *parser) jsonlState(
 	headers []transcriptHeader,
 	buffer *fileIssueBuffer,
 	projection string,
-) (transcript, int64, int) {
-	var current transcript
+) (transcriptState, int64, int) {
+	var current transcriptState
 
 	current.match.Conversation.Harness = source.Harness
 	current.match.Conversation.Path = path
 
 	current.projection = projection
-	if initialize := catalog.TranscriptFor(source.Harness).Initialize; initialize != nil {
+	if initialize := adapters.TranscriptFor(source.Harness).Initialize; initialize != nil {
 		initialize(s.decoder(source, &current, buffer))
 	}
 
@@ -250,11 +250,11 @@ func (s *parser) jsonlState(
 func (s *parser) replayTranscriptHeaders(
 	ctx context.Context,
 	source Source,
-	current *transcript,
+	current *transcriptState,
 	headers []transcriptHeader,
 	buffer *fileIssueBuffer,
 ) {
-	if record := catalog.TranscriptFor(source.Harness).Record; record != nil {
+	if record := adapters.TranscriptFor(source.Harness).Record; record != nil {
 		decoder := s.decoder(source, current, buffer)
 		for number, header := range headers {
 			record(ctx, decoder, header.record, number+1)
@@ -264,7 +264,7 @@ func (s *parser) replayTranscriptHeaders(
 
 func (writer *indexWriter) finishJSONL(
 	ctx context.Context,
-	t *transcript,
+	t *transcriptState,
 	info os.FileInfo,
 	lines int,
 	complete bool,
@@ -282,9 +282,9 @@ func (s *parser) prepareProjection(
 	source Source,
 	file *os.File,
 	size int64,
-	t *transcript,
+	t *transcriptState,
 ) error {
-	if project := catalog.TranscriptFor(source.Harness).Projection; project != nil {
+	if project := adapters.TranscriptFor(source.Harness).Projection; project != nil {
 		projection, err := project(ctx, file, size)
 		if err != nil {
 			return fmt.Errorf("prepare transcript projection: %w", err)
@@ -315,14 +315,14 @@ func (s *parser) readJSONLLines(
 	source Source,
 	path string,
 	reader *bufio.Reader,
-	t *transcript,
+	t *transcriptState,
 	lines int,
 	buffer *fileIssueBuffer,
 	identifyOnly bool,
 ) (int, int, bool) {
 	complete := lines > 0
 	records := 0
-	readerSpec := catalog.TranscriptFor(source.Harness)
+	readerSpec := adapters.TranscriptFor(source.Harness)
 
 	decoder := s.decoder(source, t, buffer)
 	for line := lines + 1; !identifyOnly || !t.identified(); line++ {
@@ -359,8 +359,8 @@ func (s *parser) readJSONLLines(
 
 func decodeJSONLRecord(
 	ctx context.Context,
-	reader native.Reader,
-	decoder *native.Decoder,
+	reader transcript.Reader,
+	decoder *transcript.Decoder,
 	data []byte,
 	line int,
 ) error {
@@ -368,7 +368,7 @@ func decodeJSONLRecord(
 		return nil
 	}
 
-	var record native.Record
+	var record transcript.Record
 	if json.Unmarshal(data, &record) != nil {
 		return errInvalidRecord
 	}
@@ -434,14 +434,16 @@ func readLongRecord(
 	return nil, io.EOF
 }
 
-func (t *transcript) identified() bool { return t.recognized && t.match.Conversation.SessionID != "" }
+func (t *transcriptState) identified() bool {
+	return t.recognized && t.match.Conversation.SessionID != ""
+}
 
 // capture aggregates conversation metadata for every recognized message and then
 // either appends it to the index writer or matches it. Metadata is
 // mode-independent: IncludeTools filtering belongs to the writer and to
 // matchText, never here.
 func (s *parser) capture(
-	t *transcript,
+	t *transcriptState,
 	nativeRole string,
 	body string,
 	id string,
@@ -455,15 +457,15 @@ func (s *parser) capture(
 
 	switch nativeRole {
 	case string(RoleUser):
-		injected, typed := native.SplitPrompt(body)
+		injected, typed := transcript.SplitPrompt(body)
 		if injected != "" {
 			s.capturePart(t, RoleContext, injected, id, line, timestamp)
 		}
 
 		body = typed
-	case native.TypedUserRole:
+	case transcript.TypedUserRole:
 		role = RoleUser
-	case native.InjectedUserRole:
+	case transcript.InjectedUserRole:
 		role = RoleContext
 	}
 
@@ -481,7 +483,7 @@ func (s *parser) capture(
 }
 
 func (s *parser) capturePart(
-	t *transcript,
+	t *transcriptState,
 	role Role,
 	body string,
 	id string,
@@ -515,7 +517,7 @@ func extendTimes(c *Conversation, timestamp time.Time) {
 	}
 }
 
-func (t *transcript) countMessage(role Role, id string, line int) {
+func (t *transcriptState) countMessage(role Role, id string, line int) {
 	if role != RoleUser && role != RoleAssistant {
 		return
 	}
@@ -531,7 +533,7 @@ func (t *transcript) countMessage(role Role, id string, line int) {
 // tools: this is the only place that decision is made for matching, so
 // conversation metadata stays independent of IncludeTools.
 func (s *queryPlan) matchText(
-	t *transcript,
+	t *transcriptState,
 	role Role,
 	body string,
 	id string,
@@ -584,15 +586,19 @@ func (s *queryPlan) matchText(
 	)
 }
 
-func (s *queryPlan) skipsPart(t *transcript, role Role) bool {
-	if s.mode != modeSearch || t.excluded {
+func (s *queryPlan) skipsPart(t *transcriptState, role Role) bool {
+	if s.mode != scanModeSearch || t.excluded {
 		return true
 	}
 
 	return !s.query.acceptsRole(role)
 }
 
-func (t *transcript) recordHits(terms []matcher, body string, normalized string) (int, int, bool) {
+func (t *transcriptState) recordHits(
+	terms []matcher,
+	body string,
+	normalized string,
+) (int, int, bool) {
 	anchor, length, matched := 0, 0, false
 
 	for i, m := range terms {

@@ -62,7 +62,7 @@ func newCrashFS(dir string) *crashFS {
 
 func (m *crashFS) Open(path string) (registryFile, error) {
 	if path == m.dir {
-		return &crashHandle{fs: m, name: path, dir: true}, nil
+		return &crashHandle{fs: m, name: path, isDir: true}, nil
 	}
 
 	file, ok := m.live[path]
@@ -138,7 +138,7 @@ func (m *crashFS) Lstat(path string) (os.FileInfo, error) {
 		return nil, os.ErrNotExist
 	}
 
-	return crashInfo{size: int64(len(file.live))}, nil
+	return crashFileStat{size: int64(len(file.live))}, nil
 }
 
 func (m *crashFS) capture(boundary string) {
@@ -198,12 +198,12 @@ type crashHandle struct {
 	name   string
 	file   *crashFile
 	pos    int64
-	dir    bool
+	isDir  bool
 	append bool
 }
 
 func (h *crashHandle) Read(p []byte) (int, error) {
-	if h.dir {
+	if h.isDir {
 		return 0, io.EOF
 	}
 
@@ -218,7 +218,7 @@ func (h *crashHandle) Read(p []byte) (int, error) {
 }
 
 func (h *crashHandle) ReadAt(p []byte, off int64) (int, error) {
-	if h.dir || off >= int64(len(h.file.live)) {
+	if h.isDir || off >= int64(len(h.file.live)) {
 		return 0, io.EOF
 	}
 
@@ -250,15 +250,15 @@ func (h *crashHandle) Close() error            { return nil }
 func (h *crashHandle) Chmod(os.FileMode) error { return nil }
 func (h *crashHandle) Name() string            { return h.name }
 func (h *crashHandle) Stat() (os.FileInfo, error) {
-	if h.dir {
-		return crashInfo{size: 0}, nil
+	if h.isDir {
+		return crashFileStat{size: 0}, nil
 	}
 
-	return crashInfo{size: int64(len(h.file.live))}, nil
+	return crashFileStat{size: int64(len(h.file.live))}, nil
 }
 
 func (h *crashHandle) Sync() error {
-	if h.dir {
+	if h.isDir {
 		h.fs.durable = make(map[string]*crashFile, len(h.fs.live))
 		maps.Copy(h.fs.durable, h.fs.live)
 		h.fs.capture("dir-sync")
@@ -288,14 +288,14 @@ func (h *crashHandle) Truncate(size int64) error {
 	return nil
 }
 
-type crashInfo struct{ size int64 }
+type crashFileStat struct{ size int64 }
 
-func (i crashInfo) Name() string       { return "state" }
-func (i crashInfo) Size() int64        { return i.size }
-func (i crashInfo) Mode() fs.FileMode  { return 0o600 }
-func (i crashInfo) ModTime() time.Time { return time.Time{} }
-func (i crashInfo) IsDir() bool        { return false }
-func (i crashInfo) Sys() any           { return nil }
+func (i crashFileStat) Name() string       { return "state" }
+func (i crashFileStat) Size() int64        { return i.size }
+func (i crashFileStat) Mode() fs.FileMode  { return 0o600 }
+func (i crashFileStat) ModTime() time.Time { return time.Time{} }
+func (i crashFileStat) IsDir() bool        { return false }
+func (i crashFileStat) Sys() any           { return nil }
 
 func crashFSFromImage(dir string, image map[string][]byte) *crashFS {
 	m := newCrashFS(dir)

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -31,7 +31,7 @@ func TestInstallRemoveRoundTripForEveryHarness(t *testing.T) {
 	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
 
-	for _, harnessID := range catalog.Harnesses() {
+	for _, harnessID := range adapters.Harnesses() {
 		result, err := Run(t.Context(), Options{Harness: harnessID, Binary: testInstallBinary})
 		if err != nil {
 			t.Fatalf("install %s: %v", harnessID, err)
@@ -388,7 +388,7 @@ func TestPluginRemovalRollsBackDirectoryWhenManifestWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := harnesspkg.PluginDirectoryInstallPlan{
+	plan := harness.PluginDirectoryInstallPlan{
 		Dir: pluginDir,
 	}
 
@@ -421,7 +421,7 @@ var (
 
 func setupPluginRemovalTestDir(
 	t *testing.T,
-) (string, []byte, harnesspkg.PluginDirectoryInstallPlan) {
+) (string, []byte, harness.PluginDirectoryInstallPlan) {
 	t.Helper()
 	root := t.TempDir()
 
@@ -445,7 +445,7 @@ func setupPluginRemovalTestDir(
 		t.Fatal(err)
 	}
 
-	plan := harnesspkg.PluginDirectoryInstallPlan{
+	plan := harness.PluginDirectoryInstallPlan{
 		Dir: pluginDir,
 	}
 

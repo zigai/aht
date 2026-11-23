@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -90,7 +90,7 @@ func TestOpenClawInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t *testing.T) {
 	t.Setenv(registry.StateDirEnv, t.TempDir())
 
-	adapter, ok := catalog.Find(registry.Harness("openclaw"))
+	adapter, ok := adapters.Find(registry.Harness("openclaw"))
 	if !ok {
 		t.Fatal("OpenClaw adapter not found")
 	}
@@ -100,7 +100,7 @@ func TestOpenClawPluginShapeUsesDocumentedTypedHooksWithoutConversationContent(t
 		t.Fatalf("plan OpenClaw integration: %v", err)
 	}
 
-	pluginAction, ok := plan.Actions[0].(harnesspkg.PluginDirectoryAction)
+	pluginAction, ok := plan.Actions[0].(harness.PluginDirectoryAction)
 	if !ok {
 		t.Fatalf("unexpected OpenClaw install action: %T", plan.Actions[0])
 	}

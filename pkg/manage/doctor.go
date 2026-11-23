@@ -19,7 +19,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/install"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/history"
@@ -147,7 +147,7 @@ func (m *Manager) Doctor(ctx context.Context, opts DoctorOptions) DoctorResult {
 	configCheck, cfg := m.checkConfigFile()
 	platform := checkPlatform()
 	serviceCheck := m.checkService(ctx, cfg, platform)
-	checks := make([]DoctorCheck, 0, doctorCoreCheckCount+len(catalog.All()))
+	checks := make([]DoctorCheck, 0, doctorCoreCheckCount+len(adapters.All()))
 	checks = append(checks,
 		m.checkInstallPath(copies),
 		configCheck,
@@ -276,7 +276,7 @@ func (m *Manager) checkInstallPath(copies []executableCopy) DoctorCheck {
 func (m *Manager) checkStore(ctx context.Context) DoctorCheck {
 	check := newDoctorCheck(doctorGroupStore, "read")
 
-	sessions, err := registry.NewJournal(m.config.StorePath, catalog.Rules{}).Verify(ctx)
+	sessions, err := registry.NewJournal(m.config.StorePath, adapters.Rules{}).Verify(ctx)
 	if err == nil {
 		check.Status = DoctorStatusOK
 		check.Message = fmt.Sprintf(
@@ -409,7 +409,7 @@ func (m *Manager) checkIntegrations(
 ) []DoctorCheck {
 	var checks []DoctorCheck
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		id := adapter.Definition().ID
 		check := newDoctorCheck(doctorGroupIntegrations, string(id))
 
@@ -575,7 +575,7 @@ func describeConfigError(check *DoctorCheck, explicit string, resolved string, e
 
 	target := explicit
 	if target == "" {
-		target = strings.TrimSpace(os.Getenv(config.ConfigEnv))
+		target = strings.TrimSpace(os.Getenv(config.PathEnv))
 	}
 
 	switch {
@@ -589,7 +589,7 @@ func describeConfigError(check *DoctorCheck, explicit string, resolved string, e
 		}
 	case errors.Is(err, config.ErrConfigIsDirectory):
 		check.Message = target + " is a directory"
-		check.Fix = manualFix("Point --config or " + config.ConfigEnv + " at a TOML file")
+		check.Fix = manualFix("Point --config or " + config.PathEnv + " at a TOML file")
 	case errors.Is(err, config.ErrConfigFileTooLarge):
 		check.Message = resolved + " is larger than 1 MiB"
 		check.Fix = manualFix("Shrink the config file")
@@ -693,7 +693,7 @@ func checkManifests(cfg configState) DoctorCheck {
 
 	var failures, warnings []string
 
-	for _, harnessID := range catalog.Harnesses() {
+	for _, harnessID := range adapters.Harnesses() {
 		if !loader.Supports(harnessID) {
 			continue
 		}

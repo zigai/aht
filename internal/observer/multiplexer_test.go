@@ -13,7 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -31,7 +31,7 @@ func multiplexerPanesFromTmux(panes []tmux.Pane) []mux.Pane {
 
 func TestObserverCorrelatesZellijEnvironmentIdentityAndDetectsScreen(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	process := processinfo.Process{
 		PID: 42, PPID: 1, ProcessGroupID: 42, Foreground: true, StartIdentity: "boot:42",
 		Executable: "/usr/bin/codex", CWD: "/repo",
@@ -82,7 +82,7 @@ func TestObserverCorrelatesZellijEnvironmentIdentityAndDetectsScreen(t *testing.
 
 func TestObserverUsesHerdrForegroundProcessAndSemanticState(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	process := processinfo.Process{
 		PID: 42, PPID: 40, ProcessGroupID: 42, StartIdentity: "boot:42",
 		Executable: "/usr/bin/claude", CWD: "/repo",
@@ -165,7 +165,7 @@ func TestObserverUsesProgramStatusOfTheHarnessOnly(t *testing.T) {
 
 			store := registry.NewJournal(
 				filepath.Join(t.TempDir(), "sessions.json"),
-				catalog.Rules{},
+				adapters.Rules{},
 			)
 			process := processinfo.Process{
 				PID: 42, PPID: 40, ProcessGroupID: 42, StartIdentity: "boot:42",
@@ -231,7 +231,7 @@ func TestObserverUsesProgramStatusOfTheHarnessOnly(t *testing.T) {
 func TestObserverFollowsProgramStatusOverHookReports(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	process := processinfo.Process{
 		PID: 42, PPID: 40, ProcessGroupID: 42, StartIdentity: "boot:42",
 		Executable: "/usr/bin/claude", CWD: "/repo", TTY: "/dev/pts/7", Foreground: true,
@@ -277,7 +277,7 @@ func TestObserverFollowsProgramStatusOverHookReports(t *testing.T) {
 		At:      now,
 		Subject: registry.ObservationIdentity{SessionID: "followed"},
 		Evidence: &registry.Report{
-			Reporter: registry.Reporter{Integration: (catalog.Rules{}).Policy("claude").Reporter},
+			Reporter: registry.Reporter{Integration: (adapters.Rules{}).Policy("claude").Reporter},
 			Event:    "PreToolUse",
 			Claim:    &live,
 			Activity: &running,
@@ -406,7 +406,7 @@ func runProgramStatusObserver(
 
 	store, err := registry.OpenMemoryStore(
 		filepath.Join(t.TempDir(), "state.json"),
-		catalog.Rules{},
+		adapters.Rules{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -511,7 +511,7 @@ func TestObserverRecordsProgramStatusChangeBetweenCycles(t *testing.T) {
 			Subject: registry.ObservationIdentity{SessionID: "watched"},
 			Evidence: &registry.Report{
 				Reporter: registry.Reporter{
-					Integration: (catalog.Rules{}).Policy("claude").Reporter,
+					Integration: (adapters.Rules{}).Policy("claude").Reporter,
 				},
 				Event:    "PreToolUse",
 				Claim:    &live,
@@ -670,7 +670,7 @@ func TestObserverStopsWatchOfVanishedServer(t *testing.T) {
 
 func TestObserverPrefersRicherNestedMultiplexerLocation(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	process := processinfo.Process{
 		PID:            42,
 		PPID:           40,

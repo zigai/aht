@@ -46,6 +46,17 @@ type Options struct {
 	NoConfig bool
 }
 
+//exhaustruct:optional
+type UninstallOptions struct {
+	DryRun bool
+}
+
+//exhaustruct:optional
+type UpgradeOptions struct {
+	Binary string
+	DryRun bool
+}
+
 type Result struct {
 	Platform       string `json:"platform"`
 	Manager        string `json:"manager"`
@@ -93,19 +104,19 @@ func New(executor CommandExecutor) *Service {
 	return &Service{executor: executor}
 }
 
-func Update(ctx context.Context, opts Options) (Result, error) {
-	return defaultService.Update(ctx, opts)
+func Install(ctx context.Context, opts Options) (Result, error) {
+	return defaultService.Install(ctx, opts)
 }
 
-func Uninstall(ctx context.Context, dryRun bool) (Result, error) {
-	return defaultService.Uninstall(ctx, dryRun)
+func Uninstall(ctx context.Context, opts UninstallOptions) (Result, error) {
+	return defaultService.Uninstall(ctx, opts)
 }
 
 func Status(ctx context.Context, opts Options) (Result, error) {
 	return defaultService.Status(ctx, opts)
 }
 
-func (s *Service) Uninstall(ctx context.Context, dryRun bool) (Result, error) {
+func (s *Service) Uninstall(ctx context.Context, opts UninstallOptions) (Result, error) {
 	backend, err := definitionBackend("")
 	if err != nil {
 		return Result{}, err
@@ -128,7 +139,7 @@ func (s *Service) Uninstall(ctx context.Context, dryRun bool) (Result, error) {
 	}
 
 	result.Installed = true
-	if dryRun {
+	if opts.DryRun {
 		result.Message = "would uninstall"
 		return result, nil
 	}
@@ -204,7 +215,7 @@ func TrackerArgs(storePath string, interval time.Duration, grace time.Duration) 
 	return append(args, "--quiet")
 }
 
-func (s *Service) Update(ctx context.Context, opts Options) (Result, error) {
+func (s *Service) Install(ctx context.Context, opts Options) (Result, error) {
 	backend, err := platformBackend(opts)
 	if err != nil {
 		return Result{}, err

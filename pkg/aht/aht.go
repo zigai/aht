@@ -55,12 +55,12 @@ const (
 	HarnessLocationScopeGlobal      HarnessLocationScope = harness.LocationScopeGlobal
 	HarnessLocationScopeProject     HarnessLocationScope = harness.LocationScopeProject
 
-	ArtifactMissing  ArtifactState = manage.ArtifactMissing
-	ArtifactCurrent  ArtifactState = manage.ArtifactCurrent
-	ArtifactStale    ArtifactState = manage.ArtifactStale
-	ArtifactForeign  ArtifactState = manage.ArtifactForeign
-	ArtifactPartial  ArtifactState = manage.ArtifactPartial
-	ArtifactDisabled ArtifactState = manage.ArtifactDisabled
+	ArtifactMissing  ArtifactStatus = manage.ArtifactMissing
+	ArtifactCurrent  ArtifactStatus = manage.ArtifactCurrent
+	ArtifactStale    ArtifactStatus = manage.ArtifactStale
+	ArtifactForeign  ArtifactStatus = manage.ArtifactForeign
+	ArtifactPartial  ArtifactStatus = manage.ArtifactPartial
+	ArtifactDisabled ArtifactStatus = manage.ArtifactDisabled
 
 	HealthStatusHealthy  HealthStatus = manage.HealthStatusHealthy
 	HealthStatusDegraded HealthStatus = manage.HealthStatusDegraded
@@ -281,8 +281,6 @@ type (
 	// ArtifactStatus describes the ownership and freshness of a managed integration artifact.
 	ArtifactStatus = manage.ArtifactStatus
 
-	ArtifactState = manage.ArtifactState
-
 	TrackerOptions = manage.TrackerOptions
 
 	TrackerResult = manage.TrackerResult
@@ -333,8 +331,8 @@ func IsUnavailable(err error) bool {
 	return broker.IsUnavailable(err)
 }
 
-func StreamClosed(err error) bool {
-	return broker.StreamClosed(err)
+func IsStreamClosed(err error) bool {
+	return broker.IsStreamClosed(err)
 }
 
 func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Session, error) {
@@ -343,10 +341,6 @@ func Resolve(ctx context.Context, lister SessionLister, selector Selector) (Sess
 
 func ResolveSessions(sessions []Session, selector Selector) (Session, error) {
 	return client.ResolveSessions(sessions, selector)
-}
-
-func Current(ctx context.Context, c *Client) (Session, error) {
-	return c.Current(ctx)
 }
 
 func ExplainSession(

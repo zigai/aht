@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -81,7 +81,7 @@ func requireKimiHookShape(t *testing.T, text string) {
 		"--raw-stdin",
 		"--quiet",
 		"--reporter kimi-code-hook",
-		"--reporter-version " + strconv.Itoa(catalog.IntegrationVersionFor(registry.Harness("kimi-code"))),
+		"--reporter-version " + strconv.Itoa(adapters.IntegrationVersionFor(registry.Harness("kimi-code"))),
 		"AHT_INTEGRATION_ID=kimi-code",
 		"--multi-session",
 		managedMarker,
@@ -293,8 +293,8 @@ func TestInstallKimiCodeRefusesHooksItCannotExtend(t *testing.T) {
 				Options{Harness: registry.Harness("kimi-code"), Binary: testInstallBinary},
 			)
 
-			if !errors.Is(err, harnesspkg.ErrHookConfigShape) {
-				t.Fatalf("error = %v, want %v", err, harnesspkg.ErrHookConfigShape)
+			if !errors.Is(err, harness.ErrHookConfigShape) {
+				t.Fatalf("error = %v, want %v", err, harness.ErrHookConfigShape)
 			}
 
 			if data, err := os.ReadFile(path); err != nil || string(data) != config {

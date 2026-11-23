@@ -15,8 +15,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"go.yaml.in/yaml/v3"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -48,13 +48,13 @@ func TestGeneratedArtifactsParse(t *testing.T) {
 		checkTypescriptModules(t, typescript)
 	})
 
-	for _, harness := range catalog.Harnesses() {
-		if noInstallRequiredHarness(t, harness) {
+	for _, harnessID := range adapters.Harnesses() {
+		if noInstallRequiredHarness(t, harnessID) {
 			continue
 		}
 
-		if !seenHarnesses[harness] {
-			t.Fatalf("generated artifact validation missed harness %q", harness)
+		if !seenHarnesses[harnessID] {
+			t.Fatalf("generated artifact validation missed harness %q", harnessID)
 		}
 	}
 }
@@ -96,7 +96,7 @@ func validateGeneratedArtifact(t *testing.T, artifact generatedArtifact) {
 			writeRuntimeArtifact(t, filepath.Base(artifact.path), artifact.content),
 		)
 	default:
-		if !strings.Contains(artifact.content, harnesspkg.ManagedMarker) {
+		if !strings.Contains(artifact.content, harness.ManagedMarker) {
 			t.Fatalf("unrecognized generated artifact %q lacks managed marker", artifact.path)
 		}
 	}
@@ -151,16 +151,16 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 
 	artifacts := make([]generatedArtifact, 0)
 
-	for _, adapter := range catalog.All() {
-		harness := adapter.Definition().ID
+	for _, adapter := range adapters.All() {
+		harnessID := adapter.Definition().ID
 
 		plan, err := adapter.InstallPlan(binary.command)
 		if err != nil {
-			t.Fatalf("plan %s integration: %v", harness, err)
+			t.Fatalf("plan %s integration: %v", harnessID, err)
 		}
 
 		for _, action := range plan.Actions {
-			artifacts = append(artifacts, generatedActionArtifacts(t, harness, binary, action)...)
+			artifacts = append(artifacts, generatedActionArtifacts(t, harnessID, binary, action)...)
 		}
 	}
 
@@ -169,7 +169,7 @@ func collectGeneratedArtifacts(t *testing.T, binary captureExecutable) []generat
 
 func generatedHookArtifact(
 	t *testing.T,
-	harness registry.Harness,
+	harnessID registry.Harness,
 	path string,
 	apply func(map[string]any) (bool, error),
 ) generatedArtifact {
@@ -177,89 +177,89 @@ func generatedHookArtifact(
 
 	config := make(map[string]any)
 	if _, err := apply(config); err != nil {
-		t.Fatalf("apply %s hooks: %v", harness, err)
+		t.Fatalf("apply %s hooks: %v", harnessID, err)
 	}
 
-	return generatedJSONArtifact(t, harness, path, config)
+	return generatedJSONArtifact(t, harnessID, path, config)
 }
 
 func generatedActionArtifacts(
 	t *testing.T,
-	harness registry.Harness,
+	harnessID registry.Harness,
 	binary captureExecutable,
-	action harnesspkg.InstallAction,
+	action harness.InstallAction,
 ) []generatedArtifact {
 	t.Helper()
 
 	switch plan := action.(type) {
-	case harnesspkg.JSONCommandHooksAction:
+	case harness.JSONCommandHookAction:
 		return []generatedArtifact{
 			generatedHookArtifact(
 				t,
-				harness,
+				harnessID,
 				plan.Plan.Path,
-				applyJSONCommandHooks(harness, plan.Plan),
+				applyJSONCommandHooks(harnessID, plan.Plan),
 			),
 		}
-	case harnesspkg.JSONMergeAction:
+	case harness.JSONMergeAction:
 		return []generatedArtifact{
 			generatedHookArtifact(
 				t,
-				harness,
+				harnessID,
 				plan.Plan.Path,
 				applyJSONMerge(plan.Plan),
 			),
 		}
-	case harnesspkg.ManagedTextBlockAction:
+	case harness.ManagedTextBlockAction:
 		return []generatedArtifact{
-			{harness: harness, path: plan.Plan.Path, content: plan.Plan.Block},
+			{harness: harnessID, path: plan.Plan.Path, content: plan.Plan.Block},
 		}
-	case harnesspkg.RenderedFileAction:
+	case harness.RenderedFileAction:
 		content, err := renderInstallContent(plan.Plan.Content, plan.Plan.JSONContent)
 		if err != nil {
-			t.Fatalf("render %s artifact: %v", harness, err)
+			t.Fatalf("render %s artifact: %v", harnessID, err)
 		}
 
-		return []generatedArtifact{{harness: harness, path: plan.Plan.Path, content: content}}
-	case harnesspkg.PluginDirectoryAction:
+		return []generatedArtifact{{harness: harnessID, path: plan.Plan.Path, content: content}}
+	case harness.PluginDirectoryAction:
 		artifacts := make([]generatedArtifact, 0, len(plan.Plan.Files))
 		for _, file := range plan.Plan.Files {
 			content, err := renderInstallContent(file.Content, file.JSONContent)
 			if err != nil {
-				t.Fatalf("render %s plugin artifact %s: %v", harness, file.Name, err)
+				t.Fatalf("render %s plugin artifact %s: %v", harnessID, file.Name, err)
 			}
 
 			artifacts = append(
 				artifacts,
-				generatedArtifact{harness: harness, path: file.Name, content: content},
+				generatedArtifact{harness: harnessID, path: file.Name, content: content},
 			)
 		}
 
 		return artifacts
-	case harnesspkg.NativeCatalogAction:
+	case harness.NativeCatalogAction:
 		return nil
-	case harnesspkg.ShimAction:
+	case harness.ShimAction:
 		return []generatedArtifact{
 			{
-				harness: harness,
-				path:    string(harness) + ".sh",
+				harness: harnessID,
+				path:    string(harnessID) + ".sh",
 				content: shimScript(
 					binary.command,
-					harness,
+					harnessID,
 					"/usr/bin/true",
-					catalog.IntegrationVersionFor(harness),
+					adapters.IntegrationVersionFor(harnessID),
 				),
 			},
 		}
 	default:
-		t.Fatalf("unvalidated install action for %s: %T", harness, action)
+		t.Fatalf("unvalidated install action for %s: %T", harnessID, action)
 		return nil
 	}
 }
 
 func generatedJSONArtifact(
 	t *testing.T,
-	harness registry.Harness,
+	harnessID registry.Harness,
 	path string,
 	value any,
 ) generatedArtifact {
@@ -267,43 +267,43 @@ func generatedJSONArtifact(
 
 	content, err := json.Marshal(value)
 	if err != nil {
-		t.Fatalf("marshal %s generated JSON: %v", harness, err)
+		t.Fatalf("marshal %s generated JSON: %v", harnessID, err)
 	}
 
-	return generatedArtifact{harness: harness, path: path, content: string(content)}
+	return generatedArtifact{harness: harnessID, path: path, content: string(content)}
 }
 
-func generatedCommandHook(t *testing.T, harness registry.Harness) string {
+func generatedCommandHook(t *testing.T, harnessID registry.Harness) string {
 	t.Helper()
 
-	adapter, ok := catalog.Find(harness)
+	adapter, ok := adapters.Find(harnessID)
 	if !ok {
-		t.Fatalf("find harness %s", harness)
+		t.Fatalf("find harness %s", harnessID)
 	}
 
 	plan, err := adapter.InstallPlan(captureBinaryCommand(t))
 	if err != nil {
-		t.Fatalf("plan %s integration: %v", harness, err)
+		t.Fatalf("plan %s integration: %v", harnessID, err)
 	}
 
 	for _, action := range plan.Actions {
-		if plan, ok := action.(harnesspkg.JSONCommandHooksAction); ok && len(plan.Plan.Hooks) > 0 {
+		if plan, ok := action.(harness.JSONCommandHookAction); ok && len(plan.Plan.Hooks) > 0 {
 			return plan.Plan.Hooks[0].Command
 		}
 	}
 
-	t.Fatalf("harness %s has no command hook", harness)
+	t.Fatalf("harness %s has no command hook", harnessID)
 
 	return ""
 }
 
-func generatedArtifactContent(t *testing.T, harness registry.Harness, suffix string) string {
+func generatedArtifactContent(t *testing.T, harnessID registry.Harness, suffix string) string {
 	t.Helper()
 
 	return generatedArtifactContentFor(
 		t,
 		captureExecutable{command: captureBinaryCommand(t), path: os.Getenv("AHT_CAPTURE")},
-		harness,
+		harnessID,
 		suffix,
 	)
 }
@@ -311,19 +311,19 @@ func generatedArtifactContent(t *testing.T, harness registry.Harness, suffix str
 func generatedArtifactContentFor(
 	t *testing.T,
 	binary captureExecutable,
-	harness registry.Harness,
+	harnessID registry.Harness,
 	suffix string,
 ) string {
 	t.Helper()
 
 	for _, artifact := range collectGeneratedArtifacts(t, binary) {
-		if artifact.harness == harness &&
+		if artifact.harness == harnessID &&
 			strings.HasSuffix(filepath.ToSlash(artifact.path), suffix) {
 			return artifact.content
 		}
 	}
 
-	t.Fatalf("generated artifact %s/%s not found", harness, suffix)
+	t.Fatalf("generated artifact %s/%s not found", harnessID, suffix)
 
 	return ""
 }

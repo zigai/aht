@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
@@ -215,7 +215,7 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 			Timeout:   5 * time.Second,
 		},
 	)
-	if !broker.StreamClosed(err) || broker.IsUnavailable(err) {
+	if !broker.IsStreamClosed(err) || broker.IsUnavailable(err) {
 		t.Fatalf("Wait after disconnect = %v, want stream closed", err)
 	}
 }
@@ -223,7 +223,7 @@ func TestWaitBrokerDisconnect(t *testing.T) {
 func TestWaitDurableWatchBehavior(t *testing.T) {
 	t.Parallel()
 	storePath := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	observation := runningObservation("durable-session")
 
 	observed, err := store.Observe(t.Context(), observation)

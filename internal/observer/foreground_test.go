@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -199,7 +199,7 @@ func TestSuspendedHarnessKeepsPaneLocationWhenAnotherStarts(t *testing.T) {
 func sessionLocationForPID(t *testing.T, path string, pid int) registry.Location {
 	t.Helper()
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)

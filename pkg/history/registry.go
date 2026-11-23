@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -86,7 +86,7 @@ func (s *search) registryStates(c Conversation) []RegistryState {
 
 	var matched []registryEntry
 
-	database := catalog.TranscriptFor(c.Harness).Format(c.Path) == native.FormatDatabase
+	database := adapters.TranscriptFor(c.Harness).Format(c.Path) == transcript.FormatDatabase
 	for _, entry := range lookup.ids[c.SessionID] {
 		if entry.path == "" ||
 			(!database && (entry.path == c.Path || entry.canonical == canonical())) {

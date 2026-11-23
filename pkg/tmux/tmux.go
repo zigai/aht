@@ -150,7 +150,7 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]Pane, error)
 	return listPanesWithOptions(ctx, opts, queryServerPanesGotmux)
 }
 
-func SendInterruptTo(ctx context.Context, serverIdentity string, paneID string) error {
+func SendInterrupt(ctx context.Context, serverIdentity string, paneID string) error {
 	if strings.TrimSpace(paneID) == "" {
 		return errMissingTmuxPaneID
 	}

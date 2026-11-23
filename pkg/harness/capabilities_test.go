@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	internalharness "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -27,7 +27,7 @@ func TestCapabilitiesForUnsupported(t *testing.T) {
 func TestCapabilitiesReportNativeTitleReaders(t *testing.T) {
 	t.Parallel()
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		id := adapter.Definition().ID
 		_, titleReader := adapter.(internalharness.TitleReader)
 
@@ -48,7 +48,7 @@ func TestAllCapabilities(t *testing.T) {
 	t.Parallel()
 
 	all := harness.AllCapabilities()
-	supported := catalog.Harnesses()
+	supported := adapters.Harnesses()
 
 	if len(all) != len(supported) {
 		t.Fatalf("len(AllCapabilities) = %d, len(Supported) = %d", len(all), len(supported))

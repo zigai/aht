@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -57,8 +57,8 @@ func DefaultSources() ([]Source, error) {
 
 	var sources []Source
 
-	for _, adapter := range catalog.All() {
-		reader := catalog.TranscriptFor(adapter.Definition().ID)
+	for _, adapter := range adapters.All() {
+		reader := adapters.TranscriptFor(adapter.Definition().ID)
 		if reader.Sources != nil {
 			paths, err := reader.Sources(home)
 			if err != nil {
@@ -95,11 +95,11 @@ func (buffer *fileIssueBuffer) recordIssue(issue Issue) {
 }
 
 func (buffer *fileIssueBuffer) issue(source Source, path string, err error) {
-	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), IsRecord: false})
 }
 
 func (buffer *fileIssueBuffer) recordProblem(source Source, path string, err error) {
-	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: true})
+	buffer.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), IsRecord: true})
 }
 
 func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, selected bool) {
@@ -107,7 +107,7 @@ func (buffer *fileIssueBuffer) selectConversation(conversation Conversation, sel
 		(conversation.SessionID != "" && selected)
 }
 
-func supported(h registry.Harness) bool { return len(catalog.TranscriptFor(h).Patterns) > 0 }
+func supported(h registry.Harness) bool { return len(adapters.TranscriptFor(h).Patterns) > 0 }
 
 func (s *search) forgetMissingDirectories(source Source, status SourceStatus) {
 	if s.index == nil || status.Status != StatusMissing {
@@ -164,7 +164,7 @@ func (s *search) scanSource(ctx context.Context, source Source) {
 	}
 
 	switch {
-	case s.mode == modeSearch && s.query.IncludeTools:
+	case s.mode == scanModeSearch && s.query.IncludeTools:
 		scanToolsFiles(ctx, s, source, files, &status)
 	case s.index != nil:
 		s.scanIndex(ctx, source, files, &status)
@@ -209,7 +209,7 @@ func (s *search) directoryScan() directoryScan {
 // groupChildren attaches each history whose native parent was also found to
 // that parent. A child whose parent is missing stays a history of its own.
 func groupChildren(h registry.Harness, files []historyFile) []historyFile {
-	parent := catalog.TranscriptFor(h).Parent
+	parent := adapters.TranscriptFor(h).Parent
 	if parent == nil {
 		return files
 	}
@@ -245,7 +245,7 @@ func groupChildren(h registry.Harness, files []historyFile) []historyFile {
 
 func rootFile(h registry.Harness, root *os.Root, base string, relative string) historyFile {
 	absolute := filepath.Join(base, relative)
-	if catalog.TranscriptFor(h).Format(relative) == native.FormatDatabase {
+	if adapters.TranscriptFor(h).Format(relative) == transcript.FormatDatabase {
 		return historyFile{
 			path:       absolute,
 			database:   true,
@@ -259,7 +259,7 @@ func rootFile(h registry.Harness, root *os.Root, base string, relative string) h
 	return historyFile{
 		path:       absolute,
 		database:   false,
-		compressed: catalog.TranscriptFor(h).Format(relative) == native.FormatCompressed,
+		compressed: adapters.TranscriptFor(h).Format(relative) == transcript.FormatCompressed,
 		open:       func() (*os.File, error) { return root.Open(relative) },
 		stat:       func() (os.FileInfo, error) { return root.Stat(relative) },
 		children:   nil,
@@ -284,15 +284,15 @@ func (s *search) singleFile(source Source, path string) (historyFile, bool) {
 		return historyFile{}, false
 	}
 
-	format := catalog.TranscriptFor(source.Harness).Format(resolved)
+	format := adapters.TranscriptFor(source.Harness).Format(resolved)
 
 	file := historyFile{
 		path:       resolved,
-		database:   format == native.FormatDatabase,
+		database:   format == transcript.FormatDatabase,
 		open:       func() (*os.File, error) { return os.Open(resolved) },
 		stat:       func() (os.FileInfo, error) { return os.Stat(resolved) },
 		children:   nil,
-		compressed: format == native.FormatCompressed,
+		compressed: format == transcript.FormatCompressed,
 	}
 	if file.database {
 		file.open = nil
@@ -430,14 +430,14 @@ func (s *search) readTranscriptFile(
 	file historyFile,
 	buffer *fileIssueBuffer,
 	prefilter *bytePrefilter,
-) (*transcript, bool) {
+) (*transcriptState, bool) {
 	opened, err := file.open()
 	if err != nil {
 		buffer.issue(source, file.path, err)
 		return nil, false
 	}
 
-	var parsed *transcript
+	var parsed *transcriptState
 
 	candidate, err := prefilter.matchesFile(ctx, opened)
 	switch {
@@ -456,8 +456,8 @@ func (s *search) readTranscriptFile(
 	return parsed, true
 }
 
-func (filter Filter) acceptsModificationTime(modified time.Time) bool {
-	return filter.Since.IsZero() || modified.IsZero() || !modified.Before(filter.Since)
+func (f Filter) acceptsModificationTime(modified time.Time) bool {
+	return f.Since.IsZero() || modified.IsZero() || !modified.Before(f.Since)
 }
 
 func (file historyFile) mayMatchTime(filter Filter) bool {
@@ -510,7 +510,7 @@ func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry)
 		return skipHistoryDirectory(source.Harness, path), false
 	}
 
-	if skip := catalog.TranscriptFor(source.Harness).SkipFile; skip != nil && skip(path) {
+	if skip := adapters.TranscriptFor(source.Harness).SkipFile; skip != nil && skip(path) {
 		return false, false
 	}
 
@@ -518,7 +518,7 @@ func (s *search) shouldVisitEntry(source Source, path string, entry fs.DirEntry)
 }
 
 func historyName(h registry.Harness, name string) bool {
-	for _, pattern := range catalog.TranscriptFor(h).Patterns {
+	for _, pattern := range adapters.TranscriptFor(h).Patterns {
 		matched, err := filepath.Match(pattern, name)
 		if err == nil && matched {
 			return true
@@ -555,7 +555,7 @@ func skipHistoryDirectory(h registry.Harness, path string) bool {
 		return true
 	}
 
-	if skip := catalog.TranscriptFor(h).SkipDirectory; skip != nil {
+	if skip := adapters.TranscriptFor(h).SkipDirectory; skip != nil {
 		return skip(path)
 	}
 
@@ -662,7 +662,7 @@ func resolveSymlinkFile(path string) (string, error) {
 
 func (s *search) loadSourceMetadata(source Source, path string, isDir bool) {
 	s.sourceMetadata = nil
-	if load := catalog.TranscriptFor(source.Harness).SourceMetadata; load != nil {
+	if load := adapters.TranscriptFor(source.Harness).SourceMetadata; load != nil {
 		s.sourceMetadata = load(
 			path,
 			isDir,

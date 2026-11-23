@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const maxDocumentBytes = 64 << 20
@@ -27,14 +27,14 @@ func (s *parser) scanTranscript(
 	path string,
 	file *os.File,
 	buffer *fileIssueBuffer,
-) *transcript {
-	reader := catalog.TranscriptFor(source.Harness)
-	if reader.Format(path) == native.FormatCompressed {
+) *transcriptState {
+	reader := adapters.TranscriptFor(source.Harness)
+	if reader.Format(path) == transcript.FormatCompressed {
 		buffer.issue(source, path, errCompressedArchive)
 		return nil
 	}
 
-	if reader.Format(path) == native.FormatDocument {
+	if reader.Format(path) == transcript.FormatDocument {
 		return s.scanDocument(ctx, source, path, file, reader.Document, buffer)
 	}
 
@@ -48,7 +48,7 @@ func (s *parser) checkTranscriptFormat(
 	file *os.File,
 	buffer *fileIssueBuffer,
 ) {
-	if catalog.TranscriptFor(source.Harness).Format(path) != native.FormatJSONL {
+	if adapters.TranscriptFor(source.Harness).Format(path) != transcript.FormatJSONL {
 		s.scanTranscript(ctx, source, path, file, buffer)
 		return
 	}
@@ -61,9 +61,9 @@ func (s *parser) scanDocument(
 	source Source,
 	path string,
 	file *os.File,
-	parse func(context.Context, *native.Decoder, []byte) error,
+	parse func(context.Context, *transcript.Decoder, []byte) error,
 	buffer *fileIssueBuffer,
-) *transcript {
+) *transcriptState {
 	data, err := io.ReadAll(io.LimitReader(file, maxDocumentBytes+1))
 	if err != nil {
 		buffer.issue(source, path, fmt.Errorf("read document: %w", err))
@@ -75,7 +75,7 @@ func (s *parser) scanDocument(
 		return nil
 	}
 
-	var t transcript
+	var t transcriptState
 
 	t.match.Conversation.Harness = source.Harness
 

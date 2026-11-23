@@ -30,7 +30,7 @@ func TestCurrentHarnessInteractive(t *testing.T) {
 
 	provider := startProvider(t, harnessID)
 
-	launched, err := launch.New(t.Context(), launch.Options{
+	launched, err := launch.Open(t.Context(), launch.Options{
 		Harness:    harnessID,
 		Root:       filepath.Join(t.TempDir(), "root"),
 		Endpoint:   provider.URL(),

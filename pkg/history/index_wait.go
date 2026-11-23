@@ -13,13 +13,13 @@ const indexRetryDelay = 100 * time.Millisecond
 type indexConnection struct {
 	*sql.Conn
 
-	waiting func()
+	onWait func()
 }
 
 type indexStatement struct {
 	*sql.Stmt
 
-	waiting func()
+	onWait func()
 }
 
 type indexRow struct {
@@ -70,7 +70,7 @@ func (conn *indexConnection) ExecContext(
 	query string,
 	args ...any,
 ) (sql.Result, error) {
-	return retryIndex(ctx, conn.waiting, func() (sql.Result, error) {
+	return retryIndex(ctx, conn.onWait, func() (sql.Result, error) {
 		return conn.Conn.ExecContext(ctx, query, args...)
 	})
 }
@@ -80,7 +80,7 @@ func (conn *indexConnection) QueryContext(
 	query string,
 	args ...any,
 ) (*sql.Rows, error) {
-	return retryIndex(ctx, conn.waiting, func() (*sql.Rows, error) {
+	return retryIndex(ctx, conn.onWait, func() (*sql.Rows, error) {
 		return conn.Conn.QueryContext(ctx, query, args...)
 	})
 }
@@ -89,14 +89,14 @@ func (conn *indexConnection) PrepareContext(
 	ctx context.Context,
 	query string,
 ) (*indexStatement, error) {
-	statement, err := retryIndex(ctx, conn.waiting, func() (*sql.Stmt, error) {
+	statement, err := retryIndex(ctx, conn.onWait, func() (*sql.Stmt, error) {
 		return conn.Conn.PrepareContext(ctx, query)
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &indexStatement{Stmt: statement, waiting: conn.waiting}, nil
+	return &indexStatement{Stmt: statement, onWait: conn.onWait}, nil
 }
 
 func (conn *indexConnection) queryRow(query string, args ...any) *indexRow {
@@ -104,7 +104,7 @@ func (conn *indexConnection) queryRow(query string, args ...any) *indexRow {
 }
 
 func (row *indexRow) Scan(ctx context.Context, dest ...any) error {
-	_, err := retryIndex(ctx, row.conn.waiting, func() (struct{}, error) {
+	_, err := retryIndex(ctx, row.conn.onWait, func() (struct{}, error) {
 		return struct{}{}, row.conn.Conn.QueryRowContext(ctx, row.query, row.args...).Scan(dest...)
 	})
 
@@ -112,13 +112,13 @@ func (row *indexRow) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (statement *indexStatement) ExecContext(ctx context.Context, args ...any) (sql.Result, error) {
-	return retryIndex(ctx, statement.waiting, func() (sql.Result, error) {
+	return retryIndex(ctx, statement.onWait, func() (sql.Result, error) {
 		return statement.Stmt.ExecContext(ctx, args...)
 	})
 }
 
 func (statement *indexStatement) QueryContext(ctx context.Context, args ...any) (*sql.Rows, error) {
-	return retryIndex(ctx, statement.waiting, func() (*sql.Rows, error) {
+	return retryIndex(ctx, statement.onWait, func() (*sql.Rows, error) {
 		return statement.Stmt.QueryContext(ctx, args...)
 	})
 }

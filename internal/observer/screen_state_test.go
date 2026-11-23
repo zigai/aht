@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -64,7 +64,7 @@ func TestObserverDetectsScreenStateForTargetAgents(t *testing.T) {
 	for index, test := range tests {
 		t.Run(string(test.harness), func(t *testing.T) {
 			t.Parallel()
-			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 			process, pane := detectionProcessPane(index+100, test.command)
 			options := detectionObserverOptions(store, process, pane, t.TempDir())
 
@@ -104,7 +104,7 @@ func TestObserverDisablesScreenInspection(t *testing.T) {
 	for _, located := range []bool{true, false} {
 		t.Run(fmt.Sprintf("located=%t", located), func(t *testing.T) {
 			t.Parallel()
-			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 			process, pane := detectionProcessPane(198, "codex")
 			options := detectionObserverOptions(store, process, pane, t.TempDir())
 			options.DisableScreenInspection = true
@@ -135,7 +135,7 @@ func TestObserverDisablesScreenInspection(t *testing.T) {
 
 func TestObserverUsesBundledOmpFallbackWhenNativeIntegrationIsMissing(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(198, "omp")
 	options := detectionObserverOptions(store, process, pane, t.TempDir())
 
@@ -172,7 +172,7 @@ func TestObserverUsesBundledOmpFallbackWhenNativeIntegrationIsMissing(t *testing
 
 func TestObserverTracksOmpScreenStateTransitions(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(208, "omp")
 	at := time.Date(2026, 8, 25, 8, 0, 0, 0, time.UTC)
 	screen := ""
@@ -226,7 +226,7 @@ func TestObserverTracksOmpScreenStateTransitions(t *testing.T) {
 
 func TestObserverRecordsUnknownWhenStaleIntegrationHasNoTmuxPane(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(197, "omp")
 	identity := observerProcessIdentity(process)
 	presence := registry.PresenceLive
@@ -285,7 +285,7 @@ func TestObserverRecordsUnknownWhenStaleIntegrationHasNoTmuxPane(t *testing.T) {
 func TestObserverPreservesKnownActivityWhenScreenCaptureFails(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(198, "codex")
 	at := time.Date(2026, 8, 12, 5, 0, 0, 0, time.UTC)
 	captureFails := false
@@ -337,7 +337,7 @@ func TestObserverPreservesKnownActivityWhenScreenCaptureFails(t *testing.T) {
 func TestObserverMatchesEachScreenToItsPane(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	screens := map[string]string{
 		"%1": "› next task\nContext 63% used",
 		"%4": "Working · esc to interrupt",
@@ -420,7 +420,7 @@ func TestObserverMatchesEachScreenToItsPane(t *testing.T) {
 func TestObserverPreservesIdleSinceAcrossUnrecognizedScreenRedraw(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(199, "codex")
 	at := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
 	screen := "› next task\nContext 63% used"
@@ -462,7 +462,7 @@ func TestObserverReportsDetectionManifestLoadFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(298, "omp")
 	options := detectionObserverOptions(store, process, pane, configDir)
 	options.ScreenCapture = func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
@@ -482,7 +482,7 @@ func TestObserverReportsDetectionManifestLoadFailure(t *testing.T) {
 func TestObserverPreservesKnownActivityAcrossPaneEnumerationFailure(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(299, "codex")
 	at := time.Date(2026, 8, 12, 4, 30, 0, 0, time.UTC)
 	paneEnumerationFails := false
@@ -549,7 +549,7 @@ func TestObserverNeverPersistsRawTerminalContents(t *testing.T) {
 	const secret = "PRIVATE-COMMAND-ARGUMENT"
 
 	path := filepath.Join(t.TempDir(), "state.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	process, pane := detectionProcessPane(199, "codex")
 	options := detectionObserverOptions(store, process, pane, t.TempDir())
 
@@ -576,7 +576,7 @@ func TestObserverNeverPersistsRawTerminalContents(t *testing.T) {
 
 func TestObserverScreenDetectionRecoversMissedPermissionTransition(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(201, "codex")
 	at := time.Now().UTC()
 	screen := "Would you like to run the following command?"
@@ -617,7 +617,7 @@ func TestScreenFallbackCannotOverrideConcurrentCompleteIntegration(t *testing.T)
 	for _, harness := range []registry.Harness{registry.Harness("pi"), registry.Harness("opencode")} {
 		t.Run(string(harness), func(t *testing.T) {
 			t.Parallel()
-			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+			store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 			process, pane := detectionProcessPane(300+len(harness), string(harness))
 			options := detectionObserverOptions(store, process, pane, t.TempDir())
 
@@ -678,7 +678,7 @@ func TestScreenFallbackCannotOverrideConcurrentCompleteIntegration(t *testing.T)
 func TestObserverScreenConfirmationRequiredOnStateChange(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(311, "codex")
 	at := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	screen := "› next task\nContext 63% used"

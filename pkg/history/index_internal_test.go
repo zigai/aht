@@ -48,7 +48,7 @@ func TestDirectScanChecksEscapedTextAndMalformedRecords(t *testing.T) {
 	query := Query{Terms: []string{"needle"}}
 
 	got, err := c.searchDirect(t.Context(), query)
-	if err != nil || len(got.Matches) != 1 || len(got.Issues) != 1 || !got.Issues[0].Record {
+	if err != nil || len(got.Matches) != 1 || len(got.Issues) != 1 || !got.Issues[0].IsRecord {
 		t.Fatalf(
 			"direct search: matches=%d issues=%d err=%v",
 			len(got.Matches),
@@ -121,7 +121,7 @@ func TestIssuesFollowTextMatchesAndMetadata(t *testing.T) {
 			}
 
 			for _, issue := range result.Issues {
-				if filepath.Base(issue.Path) != "recent.jsonl" || !issue.Record {
+				if filepath.Base(issue.Path) != "recent.jsonl" || !issue.IsRecord {
 					t.Fatalf("matching issue=%#v", issue)
 				}
 			}
@@ -228,7 +228,7 @@ func TestFileFailuresAreScopedByModificationTime(t *testing.T) {
 			if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 ||
 				result.OmittedIssues != 0 ||
 				filepath.Base(result.Issues[0].Path) != "recent.jsonl" ||
-				result.Issues[0].Record {
+				result.Issues[0].IsRecord {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
 
@@ -302,7 +302,7 @@ func TestRefreshReportsMalformedRecordsOnFreshAndWarmIndex(t *testing.T) {
 
 	for range 2 {
 		result, err := catalog.Refresh(t.Context())
-		if err != nil || len(result.Issues) != 1 || !result.Issues[0].Record ||
+		if err != nil || len(result.Issues) != 1 || !result.Issues[0].IsRecord ||
 			result.OmittedIssues != 0 {
 			t.Fatalf("refresh=%#v err=%v", result, err)
 		}
@@ -493,7 +493,7 @@ func TestNativeFastRecordsKeepSearchMetadataAndInvalidLines(t *testing.T) {
 					wantParts = tt.tools
 				}
 
-				if err != nil || len(got.Issues) != 1 || !got.Issues[0].Record ||
+				if err != nil || len(got.Issues) != 1 || !got.Issues[0].IsRecord ||
 					len(got.Matches) != 1 ||
 					got.Matches[0].MatchingParts != wantParts ||
 					got.Matches[0].Conversation.UpdatedAt.Format(time.RFC3339) != tt.updated {
@@ -1513,7 +1513,7 @@ func compareGeneratedHistorySearch(property *rapid.T, catalog Catalog, query Que
 
 	query.Registry = generatedRegistry(catalog)
 	want, wantErr := catalog.searchDirect(property.Context(), query)
-	unfiltered := &search{mode: modeSearch, query: query}
+	unfiltered := &search{mode: scanModeSearch, query: query}
 
 	sources, err := catalog.begin(property.Context(), unfiltered)
 	if err != nil {
@@ -3701,7 +3701,7 @@ func TestToolsSearchFoldsChildPartsAndReportsIssuesOnce(t *testing.T) {
 	if err != nil || !slices.Equal(sessionIDs(result), []string{"main"}) ||
 		result.Matches[0].MatchingParts != 2 ||
 		len(result.Issues) != 1 ||
-		!result.Issues[0].Record {
+		!result.Issues[0].IsRecord {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 
@@ -3764,7 +3764,7 @@ func TestToolsUnknownFamilyFileReportsFailure(t *testing.T) {
 		compareIndexedSearch(t, catalog, query)
 
 		result, err := catalog.Search(t.Context(), query)
-		if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.Issues[0].Record ||
+		if !errors.Is(err, ErrIncomplete) || len(result.Issues) != 1 || result.Issues[0].IsRecord ||
 			result.Issues[0].Path != path {
 			t.Fatalf("warm=%t result=%#v err=%v", warm, result, err)
 		}
@@ -4334,7 +4334,7 @@ func TestOpeningNewerBuildIndexLeavesItUntouched(t *testing.T) {
 func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) {
 	var s search
 
-	s.mode = modeSearch
+	s.mode = scanModeSearch
 	s.query = query
 
 	return c.runDirect(ctx, &s)
@@ -4343,7 +4343,7 @@ func (c Catalog) searchDirect(ctx context.Context, query Query) (Result, error) 
 func (c Catalog) listDirect(ctx context.Context, query ListQuery) (Result, error) {
 	var s search
 
-	s.mode = modeList
+	s.mode = scanModeList
 	s.query = query.searchQuery()
 
 	return c.runDirect(ctx, &s)

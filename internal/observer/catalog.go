@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 )
 
 const (
@@ -31,12 +31,12 @@ var (
 // payload is either an array of catalog entries or an object with a sessions
 // array. Successful sources are retained when another source fails.
 func DefaultCatalogList(ctx context.Context) ([]CatalogEntry, error) {
-	return defaultCatalogList(ctx, catalog.NativeCatalog)
+	return defaultCatalogList(ctx, adapters.NativeCatalog)
 }
 
 func defaultCatalogList(
 	ctx context.Context,
-	listNative func(context.Context) ([]catalog.NativeCatalogEntry, error),
+	listNative func(context.Context) ([]adapters.NativeCatalogEntry, error),
 ) ([]CatalogEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("catalog context: %w", err)
@@ -69,7 +69,7 @@ func configuredCatalog() ([]CatalogEntry, error) {
 			return nil, fmt.Errorf("%w at index %d", errCatalogEntryHarness, index)
 		}
 
-		normalized, err := catalog.Parse(string(entries[index].Harness))
+		normalized, err := adapters.Parse(string(entries[index].Harness))
 		if err != nil {
 			return nil, fmt.Errorf("catalog entry %d: %w", index, err)
 		}
@@ -82,7 +82,7 @@ func configuredCatalog() ([]CatalogEntry, error) {
 	return entries, nil
 }
 
-func nativeCatalogEntries(entries []catalog.NativeCatalogEntry) []CatalogEntry {
+func nativeCatalogEntries(entries []adapters.NativeCatalogEntry) []CatalogEntry {
 	result := make([]CatalogEntry, 0, len(entries))
 	for _, entry := range entries {
 		result = append(result, CatalogEntry{

@@ -11,7 +11,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/observer"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -25,7 +25,7 @@ const (
 var errObserverRunDegraded = errors.New("observer reconciliation degraded")
 
 //exhaustruct:optional
-type observeOptions struct {
+type trackerRunOptions struct {
 	once         bool
 	quiet        bool
 	interval     time.Duration
@@ -39,7 +39,7 @@ type trackerComponentResult struct {
 }
 
 func (app *application) newTrackerRunCommand() *cobra.Command {
-	o := observeOptions{interval: config.DefaultTrackerInterval}
+	o := trackerRunOptions{interval: config.DefaultTrackerInterval}
 	screenInspection := true
 
 	var disableScreenInspection bool
@@ -93,7 +93,7 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 
 			store, err := registry.OpenMemoryStoreWithOptions(
 				app.resolvedStorePath(),
-				catalog.Rules{},
+				adapters.Rules{},
 				registry.MemoryStoreOptions{TombstoneTTL: o.tombstoneTTL},
 			)
 			if err != nil {
@@ -142,7 +142,7 @@ func (app *application) newTrackerRunCommand() *cobra.Command {
 	return command
 }
 
-func applyTrackerConfig(opts *observeOptions, cmd *cobra.Command, cfg config.Config) error {
+func applyTrackerConfig(opts *trackerRunOptions, cmd *cobra.Command, cfg config.Config) error {
 	if err := applyTrackerIntervals(opts, cmd, cfg); err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func applyTrackerConfig(opts *observeOptions, cmd *cobra.Command, cfg config.Con
 	return nil
 }
 
-func applyTrackerIntervals(opts *observeOptions, cmd *cobra.Command, cfg config.Config) error {
+func applyTrackerIntervals(opts *trackerRunOptions, cmd *cobra.Command, cfg config.Config) error {
 	interval, grace, err := config.TrackerDurations(cfg)
 	if err != nil {
 		return exitCode(err, exitCodeUsage)
@@ -180,7 +180,7 @@ func applyTrackerIntervals(opts *observeOptions, cmd *cobra.Command, cfg config.
 
 func (app *application) runRealtimeObserver(
 	ctx context.Context,
-	opts observeOptions,
+	opts trackerRunOptions,
 	watcher *observer.Observer,
 	store *registry.MemoryStore,
 	server *brokerserver.Server,
@@ -230,7 +230,7 @@ func (app *application) runRealtimeObserver(
 
 func (app *application) runObserver(
 	ctx context.Context,
-	opts observeOptions,
+	opts trackerRunOptions,
 	watcher *observer.Observer,
 ) error {
 	if opts.once {
@@ -269,7 +269,7 @@ func (app *application) runObserver(
 
 func (app *application) runObserverOnce(
 	ctx context.Context,
-	opts observeOptions,
+	opts trackerRunOptions,
 	watcher *observer.Observer,
 ) error {
 	result, err := watcher.RunOnce(ctx)

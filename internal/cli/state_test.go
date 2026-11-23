@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	presence := registry.PresenceGone
 	if _, err := store.Observe(
@@ -96,7 +96,7 @@ func TestStateCleanRequiresExplicitPolicy(t *testing.T) {
 
 func TestStatePathAndResetCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	observeTestSession(t, store, "reset-session", time.Now())
 
 	var stdout bytes.Buffer
@@ -166,7 +166,7 @@ func TestStateResetCommandRecoversMalformedState(t *testing.T) {
 		t.Fatalf("state reset output = %q", stdout.String())
 	}
 
-	if _, err := registry.NewJournal(path, catalog.Rules{}).
+	if _, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{}); err != nil {
 		t.Fatalf("registry remains unreadable after reset: %v", err)
 	}

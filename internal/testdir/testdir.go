@@ -14,7 +14,7 @@ import (
 func Short(tb testing.TB, prefix string) string {
 	tb.Helper()
 
-	dir, err := terminal.NewSocketDir(prefix)
+	dir, err := terminal.CreateSocketDir(prefix)
 	if err != nil {
 		tb.Fatalf("create short temporary directory: %v", err)
 	}

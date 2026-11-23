@@ -8,7 +8,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/reporting"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -31,7 +31,7 @@ func BenchmarkPrepareReport(b *testing.B) {
 }
 
 func BenchmarkObserveBatch(b *testing.B) {
-	store := registry.NewJournal(filepath.Join(b.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(b.TempDir(), "sessions.json"), adapters.Rules{})
 	observation := registry.Observation{
 		Harness:  registry.Harness("codex"),
 		At:       time.Now().UTC(),

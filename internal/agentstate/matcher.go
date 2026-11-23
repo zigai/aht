@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	matchAll matchMode = iota
+	_ matchMode = iota
+	matchAll
 	matchAny
 	matchNone
 )
@@ -15,7 +16,7 @@ const (
 var matcherSpecs = []matcherSpec{
 	{
 		name:        "all",
-		title:       false,
+		matchTitle:  false,
 		regex:       false,
 		mode:        matchAll,
 		values:      func(r Rule) []string { return r.All },
@@ -24,7 +25,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "any",
-		title:       false,
+		matchTitle:  false,
 		regex:       false,
 		mode:        matchAny,
 		values:      func(r Rule) []string { return r.Any },
@@ -33,7 +34,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "none",
-		title:       false,
+		matchTitle:  false,
 		regex:       false,
 		mode:        matchNone,
 		values:      func(r Rule) []string { return r.None },
@@ -42,7 +43,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "regex_all",
-		title:       false,
+		matchTitle:  false,
 		regex:       true,
 		mode:        matchAll,
 		values:      func(r Rule) []string { return r.RegexAll },
@@ -51,7 +52,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "regex_any",
-		title:       false,
+		matchTitle:  false,
 		regex:       true,
 		mode:        matchAny,
 		values:      func(r Rule) []string { return r.RegexAny },
@@ -60,7 +61,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "regex_none",
-		title:       false,
+		matchTitle:  false,
 		regex:       true,
 		mode:        matchNone,
 		values:      func(r Rule) []string { return r.RegexNone },
@@ -69,7 +70,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "title_any",
-		title:       true,
+		matchTitle:  true,
 		regex:       false,
 		mode:        matchAny,
 		values:      func(r Rule) []string { return r.TitleAny },
@@ -78,7 +79,7 @@ var matcherSpecs = []matcherSpec{
 	},
 	{
 		name:        "title_regex_any",
-		title:       true,
+		matchTitle:  true,
 		regex:       true,
 		mode:        matchAny,
 		values:      func(r Rule) []string { return r.TitleRegexAny },
@@ -91,7 +92,7 @@ type matchMode uint8
 
 type matcherSpec struct {
 	name        string
-	title       bool
+	matchTitle  bool
 	regex       bool
 	mode        matchMode
 	values      func(Rule) []string
@@ -101,7 +102,7 @@ type matcherSpec struct {
 
 type matcher struct {
 	name        string
-	title       bool
+	matchTitle  bool
 	mode        matchMode
 	values      []string
 	test        func(text string, index int) bool
@@ -112,7 +113,7 @@ type matcher struct {
 func compileMatcher(spec matcherSpec, values []string, caseSensitive bool) (matcher, error) {
 	compiled := matcher{
 		name:        spec.name,
-		title:       spec.title,
+		matchTitle:  spec.matchTitle,
 		mode:        spec.mode,
 		values:      values,
 		test:        nil,

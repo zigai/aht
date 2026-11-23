@@ -7,7 +7,7 @@ import (
 	"io"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 )
 
 var errUnsupportedManagedHook = errors.New("harness does not support managed hooks")
@@ -17,7 +17,7 @@ func PrepareHook(
 	stdin io.Reader,
 	harnessName string, event string,
 ) (harness.HookResult, error) {
-	id, err := catalog.Parse(harnessName)
+	id, err := adapters.Parse(harnessName)
 	if err != nil {
 		return harness.HookResult{}, fmt.Errorf("normalizing hook harness: %w", err)
 	}
@@ -34,7 +34,7 @@ func PrepareHook(
 
 	payload, _ := harness.PayloadObject(raw)
 
-	result, ok, err := catalog.HandleHook(ctx, id, event, raw, payload, parentProcessArgs(ctx))
+	result, ok, err := adapters.HandleHook(ctx, id, event, raw, payload, parentProcessArgs(ctx))
 	if !ok {
 		return harness.HookResult{}, fmt.Errorf("%w: %s", errUnsupportedManagedHook, id)
 	}
@@ -47,7 +47,7 @@ func PrepareHook(
 		runtime := CollectRuntime(ctx, 0, false)
 		result.Report.SetProcess(processIdentity(id, runtime.Processes))
 
-		result.Report = catalog.PrepareObservation(result.Report)
+		result.Report = adapters.PrepareObservation(result.Report)
 		if location := runtime.reportLocation(id); !location.Empty() {
 			result.Report.SetLocation(&location)
 		}

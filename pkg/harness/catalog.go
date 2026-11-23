@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
 // Parse returns the supported harness identified by value. Harness names and
 // documented aliases are matched without punctuation or case sensitivity.
 func Parse(value string) (registry.Harness, error) {
-	harnessID, err := catalog.Parse(value)
+	harnessID, err := adapters.Parse(value)
 	if err != nil {
 		return "", fmt.Errorf("parsing harness: %w", err)
 	}
@@ -20,10 +20,10 @@ func Parse(value string) (registry.Harness, error) {
 }
 
 func Supported() []registry.Harness {
-	adapters := catalog.All()
+	all := adapters.All()
 
-	harnesses := make([]registry.Harness, 0, len(adapters))
-	for _, adapter := range adapters {
+	harnesses := make([]registry.Harness, 0, len(all))
+	for _, adapter := range all {
 		harnesses = append(harnesses, adapter.Definition().ID)
 	}
 
@@ -32,9 +32,9 @@ func Supported() []registry.Harness {
 
 // FromCommand identifies a supported harness from an executable path or name.
 func FromCommand(command string) (registry.Harness, bool) {
-	return catalog.FromCommand(command)
+	return adapters.FromCommand(command)
 }
 
 func ProcessNames(harnessID registry.Harness) []string {
-	return slices.Clone(catalog.ProcessNames(harnessID))
+	return slices.Clone(adapters.ProcessNames(harnessID))
 }

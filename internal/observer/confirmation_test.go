@@ -14,7 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -152,7 +152,7 @@ func TestObserverNeverRecordsShortLivedUnconfirmedProcess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "state.json")
 
-		store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+		store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -195,7 +195,7 @@ func TestObserverNeverRecordsShortLivedUnconfirmedProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		persisted, err := registry.NewJournal(path, catalog.Rules{}).
+		persisted, err := registry.NewJournal(path, adapters.Rules{}).
 			List(context.Background(), registry.Filter{})
 		if err != nil {
 			t.Fatal(err)
@@ -216,7 +216,7 @@ func TestObserverNeverRecordsShortLivedUnconfirmedProcess(t *testing.T) {
 func TestObserverRecordsProcessAfterConfirmationPeriod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 		process := agentProcess(4200)
 		fixture := &confirmationFixture{
 			at:        time.Now().UTC(),
@@ -249,7 +249,7 @@ func TestObserverRecordsProcessAfterConfirmationPeriod(t *testing.T) {
 func TestObserverConfirmsNativeAndCatalogProcessesImmediately(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 		native := agentProcess(4300)
 		listed := agentProcess(4301)
 		fixture := &confirmationFixture{
@@ -339,7 +339,7 @@ func TestTrackerSteadyStateDoesNotRewriteState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "state.json")
 
-		store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+		store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,7 +497,7 @@ func TestObserverHealthFileWrittenOnStatusChangeOrSlowInterval(t *testing.T) {
 	paneErr := errConfirmationPanes
 	failPanes := true
 	watcher := New(Options{
-		Store:       registry.NewJournal(storePath, catalog.Rules{}),
+		Store:       registry.NewJournal(storePath, adapters.Rules{}),
 		StorePath:   storePath,
 		Now:         func() time.Time { return at },
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
@@ -574,7 +574,7 @@ func (store *failFirstBatchStore) ObserveBatch(
 func TestObserverRecordsConfirmedProcessAfterFailedWrite(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		journal := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+		journal := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 		store := &failFirstBatchStore{Store: journal}
 		process := agentProcess(4250)
 		fixture := &confirmationFixture{

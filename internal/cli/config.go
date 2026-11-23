@@ -43,7 +43,7 @@ func (app *application) loadConfig() (config.Config, error) {
 		return app.cfg, app.cfgErr
 	}
 
-	cfg, meta, resolved, err := config.LoadWithMetadata(config.Options{
+	cfg, meta, resolved, err := config.Load(config.Options{
 		Path:     app.configPath,
 		Explicit: app.configPath != "",
 		NoConfig: app.noConfig,
@@ -354,7 +354,7 @@ func (app *application) runConfigInit(force bool) error {
 	}
 
 	if app.configPath == "-" {
-		return app.writef("%s", config.DefaultConfigTemplate())
+		return app.writef("%s", config.DefaultTemplate())
 	}
 
 	path, err := config.EditPath(app.configPath)
@@ -371,7 +371,7 @@ func (app *application) runConfigInit(force bool) error {
 		return app.reportConfigInit(path, false)
 	}
 
-	if err := config.WriteConfigFile(path); err != nil {
+	if err := config.WriteFile(path); err != nil {
 		return fmt.Errorf("init config: %w", err)
 	}
 

@@ -3,7 +3,7 @@ package aht
 import (
 	"context"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/history"
 )
 
@@ -89,5 +89,5 @@ func ListHistory(ctx context.Context, query HistoryListQuery) (HistoryResult, er
 // run in the session's working directory. sessionPath is the native transcript
 // path when known. It returns nil when the harness cannot resume by identity.
 func ResumeCommand(harness Harness, sessionID string, sessionPath string) []string {
-	return catalog.ResumeCommandFor(harness, sessionID, sessionPath)
+	return adapters.ResumeCommandFor(harness, sessionID, sessionPath)
 }

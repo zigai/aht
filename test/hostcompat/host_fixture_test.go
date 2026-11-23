@@ -18,7 +18,7 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/internal/testtmux"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
@@ -71,7 +71,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string, hold bo
 
 	aht, nativeEvents := stageOracle(t, oracle)
 
-	launched, err := launch.New(t.Context(), launch.Options{
+	launched, err := launch.Open(t.Context(), launch.Options{
 		Harness:    contract.ID,
 		Root:       filepath.Join(t.TempDir(), "root"),
 		Endpoint:   endpoint,
@@ -141,7 +141,7 @@ func (host *isolatedHost) assertIntegrationCurrent(t *testing.T) {
 		t.Fatalf("installed integration is not current:\n%s", output)
 	}
 
-	if adapter, ok := catalog.Find(host.contract.ID); ok {
+	if adapter, ok := adapters.Find(host.contract.ID); ok {
 		plan, err := adapter.InstallPlan(host.aht)
 		if err != nil {
 			t.Fatal(err)

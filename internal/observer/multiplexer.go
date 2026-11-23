@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/mux/drivers"
@@ -122,7 +122,7 @@ func driverCaptures(ctx context.Context, driver mux.Driver, panes []mux.Pane) []
 }
 
 func captureEachPane(
-	capture mux.ScreenCapturer,
+	capture mux.ScreenCaptureFunc,
 ) func(context.Context, []mux.Pane) []mux.ScreenCapture {
 	return func(ctx context.Context, panes []mux.Pane) []mux.ScreenCapture {
 		captures := make([]mux.ScreenCapture, len(panes))
@@ -415,7 +415,7 @@ func commandPaneKey(pane mux.Pane) (string, registry.Harness, bool) {
 		return "", "", false
 	}
 
-	paneHarness, ok := catalog.FromCommand(filepath.Base(fields[0]))
+	paneHarness, ok := adapters.FromCommand(filepath.Base(fields[0]))
 	if !ok {
 		return "", "", false
 	}

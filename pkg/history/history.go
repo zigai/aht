@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/pathmatch"
@@ -23,7 +23,7 @@ import (
 const (
 	defaultExcerpts = 3
 	maxQueryBytes   = 4096
-	maxRecordBytes  = native.MaxRecordBytes
+	maxRecordBytes  = transcript.MaxRecordBytes
 	maxIssues       = 100
 )
 
@@ -39,9 +39,10 @@ const (
 )
 
 const (
-	modeSearch scanMode = iota
-	modeList
-	modeRefresh
+	_ scanMode = iota
+	scanModeSearch
+	scanModeList
+	scanModeRefresh
 )
 
 var (
@@ -54,8 +55,8 @@ var (
 	// ErrIndexUnavailable reports that the disposable index could not be used.
 	// Search, List, and Stream fall back to scanning native history; Refresh fails.
 	ErrIndexUnavailable = errors.New("history index unavailable")
-	errRecordSize       = native.ErrRecordSize
-	errUnknownFormat    = native.ErrUnknownFormat
+	errRecordSize       = transcript.ErrRecordSize
+	errUnknownFormat    = transcript.ErrUnknownFormat
 )
 
 // Source identifies a harness's transcript directory or native SQLite database.
@@ -224,14 +225,14 @@ type SourceStatus struct {
 }
 
 // Issue identifies an unreadable, invalid, or bounded source. It never contains
-// transcript content. Record marks one malformed or oversized record skipped
+// transcript content. IsRecord marks one malformed or oversized record skipped
 // inside an otherwise searched history; record issues alone never make a search
 // incomplete. Diagnostics are bounded; additional issues are counted.
 type Issue struct {
-	Source  Source `json:"source"`
-	Path    string `json:"path"`
-	Message string `json:"message"`
-	Record  bool   `json:"record,omitempty"`
+	Source   Source `json:"source"`
+	Path     string `json:"path"`
+	Message  string `json:"message"`
+	IsRecord bool   `json:"record,omitempty"`
 }
 
 // Result includes partial matches even when an error reports ErrIncomplete.
@@ -468,7 +469,7 @@ func validateSort(sort Sort, search bool) error {
 func (c Catalog) Search(ctx context.Context, query Query) (Result, error) {
 	var s search
 
-	s.mode = modeSearch
+	s.mode = scanModeSearch
 	s.query = query
 
 	return c.run(ctx, &s)
@@ -479,7 +480,7 @@ func (c Catalog) Search(ctx context.Context, query Query) (Result, error) {
 func (c Catalog) List(ctx context.Context, query ListQuery) (Result, error) {
 	var s search
 
-	s.mode = modeList
+	s.mode = scanModeList
 	s.query = query.searchQuery()
 
 	return c.run(ctx, &s)
@@ -508,7 +509,7 @@ func (c Catalog) Stream(ctx context.Context, query Query, yield func(Match) bool
 
 	var s search
 
-	s.mode = modeSearch
+	s.mode = scanModeSearch
 	s.query = query
 	s.stream = yield
 
@@ -539,7 +540,7 @@ func (c Catalog) LastMessage(
 		s          search
 	)
 
-	s.mode = modeList
+	s.mode = scanModeList
 	s.query = everything.searchQuery()
 	s.last = &lastMessage{session: sessionID, role: role, message: none, found: false}
 
@@ -560,7 +561,7 @@ func (c Catalog) LastMessage(
 func (c Catalog) Refresh(ctx context.Context) (Result, error) {
 	var s search
 
-	s.mode = modeRefresh
+	s.mode = scanModeRefresh
 
 	sources, err := c.begin(ctx, &s)
 	if err != nil || len(sources) == 0 {
@@ -697,7 +698,7 @@ func (s *search) runIndexed(ctx context.Context, sources []Source) error {
 	}
 
 	var excerptErr error
-	if s.mode != modeRefresh {
+	if s.mode != scanModeRefresh {
 		excerptErr = s.readRetained(ctx, s.index)
 	}
 
@@ -767,7 +768,7 @@ func (s *search) forEachSource(ctx context.Context, sources []Source) error {
 		)
 		skipped = append(
 			skipped,
-			Issue{Source: source, Path: source.Path, Message: reason, Record: false},
+			Issue{Source: source, Path: source.Path, Message: reason, IsRecord: false},
 		)
 	}
 
@@ -830,7 +831,7 @@ func (s *queryPlan) compile() error {
 		return err
 	}
 
-	if s.mode == modeSearch {
+	if s.mode == scanModeSearch {
 		s.prefilter = newBytePrefilter(s.terms)
 	}
 
@@ -839,11 +840,11 @@ func (s *queryPlan) compile() error {
 
 func (s *queryPlan) validate() error {
 	switch s.mode {
-	case modeSearch:
+	case scanModeSearch:
 		return s.query.validate()
-	case modeList:
+	case scanModeList:
 		return (ListQuery{Filter: s.query.Filter, Sort: s.query.Sort, Limit: s.query.Limit}).Validate()
-	case modeRefresh:
+	case scanModeRefresh:
 	}
 
 	return nil
@@ -940,14 +941,14 @@ func (s *search) selectSource(source Source) (string, bool) {
 }
 
 func (s *search) issue(source Source, path string, err error) {
-	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), Record: false})
+	s.recordIssue(Issue{Source: source, Path: path, Message: err.Error(), IsRecord: false})
 }
 
 func (s *search) recordIssue(issue Issue) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !issue.Record {
+	if !issue.IsRecord {
 		s.failures++
 	}
 
@@ -1015,11 +1016,11 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 	for _, issue := range issues {
 		matches := selected
 
-		if issue.Record && !recordsSelected {
+		if issue.IsRecord && !recordsSelected {
 			continue
 		}
 
-		if !issue.Record {
+		if !issue.IsRecord {
 			if s.toolsFailures[issue.Path] {
 				continue
 			}
@@ -1033,7 +1034,7 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 			matches = s.fileIssueSelected(issue.Source, issue.Path)
 		}
 
-		if s.mode == modeRefresh || s.explicitFileSource(issue.Source) || matches {
+		if s.mode == scanModeRefresh || s.explicitFileSource(issue.Source) || matches {
 			s.recordIssue(issue)
 		} else {
 			omitted++
@@ -1044,7 +1045,7 @@ func (s *search) reportFileIssues(buffer *fileIssueBuffer, path string) int {
 }
 
 func (s *search) recordIssuesSelected(selected bool) bool {
-	return s.metadataFailures == nil && (s.mode != modeSearch || selected)
+	return s.metadataFailures == nil && (s.mode != scanModeSearch || selected)
 }
 
 func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
@@ -1052,7 +1053,7 @@ func (s *search) issueConversationSelected(c Conversation, matches bool) bool {
 		return false
 	}
 
-	if s.mode != modeSearch {
+	if s.mode != scanModeSearch {
 		return true
 	}
 
@@ -1070,7 +1071,7 @@ func (s *search) explicitFileSource(source Source) bool {
 }
 
 func (s *search) fileIssueSelected(source Source, path string) bool {
-	if s.mode == modeRefresh || s.explicitFileSource(source) || s.query.Since.IsZero() {
+	if s.mode == scanModeRefresh || s.explicitFileSource(source) || s.query.Since.IsZero() {
 		return true
 	}
 
@@ -1179,7 +1180,7 @@ func presence(states []RegistryState) registry.Presence {
 
 // add accepts a parsed conversation: an index refresh stores it, and a scan
 // keeps it when it satisfies every term and no exclusion.
-func (s *search) add(ctx context.Context, t *transcript) {
+func (s *search) add(ctx context.Context, t *transcriptState) {
 	if s.last != nil {
 		if t.hasLast && t.match.Conversation.SessionID == s.last.session {
 			s.mu.Lock()
@@ -1190,7 +1191,7 @@ func (s *search) add(ctx context.Context, t *transcript) {
 		return
 	}
 
-	if s.mode == modeSearch && !t.qualifies(len(s.terms)) {
+	if s.mode == scanModeSearch && !t.qualifies(len(s.terms)) {
 		return
 	}
 
@@ -1202,8 +1203,8 @@ func (s *search) add(ctx context.Context, t *transcript) {
 // have their excerpts. A positive limit never stops the scan: the heap holds
 // the best Limit matches seen so far, and Truncated records that more matched.
 func (s *search) keep(ctx context.Context, m Match, indexID int64) {
-	if s.mode == modeRefresh || m.Conversation.SessionID == "" ||
-		(s.mode == modeSearch && m.MatchingParts == 0) {
+	if s.mode == scanModeRefresh || m.Conversation.SessionID == "" ||
+		(s.mode == scanModeSearch && m.MatchingParts == 0) {
 		return
 	}
 
@@ -1381,7 +1382,7 @@ func (s *search) resultError() error {
 // readRetained hydrates only the final heap after every selected history has
 // been checked. Failed or canceled reads cannot expose metadata-only matches.
 func (s *search) readRetained(ctx context.Context, index *historyIndex) error {
-	if s.mode != modeSearch || s.query.IncludeTools {
+	if s.mode != scanModeSearch || s.query.IncludeTools {
 		return nil
 	}
 

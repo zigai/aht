@@ -14,8 +14,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"pgregory.net/rapid"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -32,7 +32,7 @@ func TestInstalledKimiHookPreservesShellArguments(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KIMI_CODE_HOME", home)
 
-	adapter, found := catalog.Find(registry.Harness("kimi-code"))
+	adapter, found := adapters.Find(registry.Harness("kimi-code"))
 	if !found {
 		t.Fatal("Kimi adapter is missing")
 	}
@@ -327,7 +327,7 @@ func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
 
 	const binary = "/nonexistent/binary/absent-aht"
 
-	adapter, ok := catalog.Find(h)
+	adapter, ok := adapters.Find(h)
 	if !ok {
 		t.Fatalf("find harness %s", h)
 	}
@@ -338,7 +338,7 @@ func renderedRuntimeModule(t *testing.T, h registry.Harness) string {
 	}
 
 	for _, action := range plan.Actions {
-		rf, ok := action.(harnesspkg.RenderedFileAction)
+		rf, ok := action.(harness.RenderedFileAction)
 		if !ok {
 			continue
 		}

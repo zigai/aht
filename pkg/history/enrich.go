@@ -3,9 +3,9 @@ package history
 import (
 	"context"
 
-	adapter "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -18,23 +18,23 @@ func enrich(ctx context.Context, matches []Match) {
 		c := matches[i].Conversation
 
 		path := c.Path
-		if catalog.TranscriptFor(c.Harness).Format(path) == native.FormatDatabase {
+		if adapters.TranscriptFor(c.Harness).Format(path) == transcript.FormatDatabase {
 			path = ""
 		}
 
-		matches[i].ResumeCommand = catalog.ResumeCommandFor(c.Harness, c.SessionID, path)
-		if catalog.TranscriptFor(c.Harness).LocalTitles {
+		matches[i].ResumeCommand = adapters.ResumeCommandFor(c.Harness, c.SessionID, path)
+		if adapters.TranscriptFor(c.Harness).LocalTitles {
 			lookups[c.Harness] = append(lookups[c.Harness], i)
 		}
 	}
 
 	for id, indices := range lookups {
-		found, ok := catalog.Find(id)
+		found, ok := adapters.Find(id)
 		if !ok {
 			continue
 		}
 
-		reader, ok := found.(adapter.TitleReader)
+		reader, ok := found.(harness.TitleReader)
 		if !ok {
 			continue
 		}

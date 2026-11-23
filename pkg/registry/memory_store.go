@@ -56,7 +56,7 @@ type MemoryStore struct {
 	//exhaustruct:optional
 	mu sync.RWMutex
 	//exhaustruct:optional
-	files sync.Mutex
+	filesMu sync.Mutex
 	//exhaustruct:optional
 	filesDrained bool
 	filesChanged chan struct{}
@@ -176,8 +176,8 @@ func OpenMemoryStoreWithOptions(
 func (s *MemoryStore) Close() error {
 	err := s.Flush(context.Background())
 
-	s.files.Lock()
-	defer s.files.Unlock()
+	s.filesMu.Lock()
+	defer s.filesMu.Unlock()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

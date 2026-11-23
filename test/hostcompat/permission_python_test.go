@@ -66,21 +66,21 @@ func pythonPermissionCommand(t *testing.T, host *isolatedHost, env []string) *ex
 	t.Helper()
 
 	switch host.contract.PermissionDriver {
-	case driverPythonACP:
+	case nativeDriverPythonACP:
 		return host.command(t, env, "acp", "--accept-hooks")
-	case driverProcess,
-		driverExecRPC,
-		driverACP,
-		driverCompletionRPC,
-		driverExtensionRPC,
-		driverExecutionServer,
-		driverPluginServer,
-		driverTerminalQuit,
-		driverTerminalDialog,
-		driverCLIACP,
-		driverControlCLI,
-		driverAppServer,
-		driverSDKCLI:
+	case nativeDriverProcess,
+		nativeDriverExecRPC,
+		nativeDriverACP,
+		nativeDriverCompletionRPC,
+		nativeDriverExtensionRPC,
+		nativeDriverExecutionServer,
+		nativeDriverPluginServer,
+		nativeDriverTerminalQuit,
+		nativeDriverTerminalDialog,
+		nativeDriverCLIACP,
+		nativeDriverControlCLI,
+		nativeDriverAppServer,
+		nativeDriverSDKCLI:
 		fallthrough
 	default:
 		t.Fatalf("unsupported Python permission host %s", host.contract.ID)

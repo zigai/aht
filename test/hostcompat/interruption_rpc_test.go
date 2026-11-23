@@ -38,7 +38,9 @@ func runRPCInterruption(t *testing.T, host *isolatedHost, env []string) {
 	// been delivered, and this command must cancel actual in-flight model IO.
 	sendPermissionJSON(t, input, map[string]any{"id": "interruption-abort", "type": "abort"})
 
-	abort := rpcAbortProgress{terminalEnd: host.contract.InterruptionDriver == driverExtensionRPC}
+	abort := rpcAbortProgress{
+		terminalEnd: host.contract.InterruptionDriver == nativeDriverExtensionRPC,
+	}
 	for !abort.acknowledged || !abort.ended || !abort.settled {
 		abort.observe(t, next())
 	}
@@ -60,7 +62,7 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 	t.Helper()
 
 	switch host.contract.InterruptionDriver {
-	case driverCompletionRPC:
+	case nativeDriverCompletionRPC:
 		return []string{
 			"--mode",
 			"rpc",
@@ -69,7 +71,7 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--model",
 			fakeModel,
 		}
-	case driverExtensionRPC:
+	case nativeDriverExtensionRPC:
 		// The launch has configured the isolated model and installed the hook.
 		// Preserve its explicit managed extension loading without print-mode flags.
 		hooks, err := filepath.Glob(
@@ -87,18 +89,18 @@ func rpcInterruptionArguments(t *testing.T, host *isolatedHost) []string {
 			"--hook",
 			hooks[0],
 		}
-	case driverProcess,
-		driverExecRPC,
-		driverACP,
-		driverPythonACP,
-		driverExecutionServer,
-		driverPluginServer,
-		driverTerminalQuit,
-		driverTerminalDialog,
-		driverCLIACP,
-		driverControlCLI,
-		driverAppServer,
-		driverSDKCLI:
+	case nativeDriverProcess,
+		nativeDriverExecRPC,
+		nativeDriverACP,
+		nativeDriverPythonACP,
+		nativeDriverExecutionServer,
+		nativeDriverPluginServer,
+		nativeDriverTerminalQuit,
+		nativeDriverTerminalDialog,
+		nativeDriverCLIACP,
+		nativeDriverControlCLI,
+		nativeDriverAppServer,
+		nativeDriverSDKCLI:
 		fallthrough
 	default:
 		t.Fatalf("unsupported native RPC interruption host %s", host.contract.ID)

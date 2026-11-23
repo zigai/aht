@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -363,7 +363,7 @@ func TestListSummaryEmptyState(t *testing.T) {
 	}
 }
 
-type summaryFixtureRules struct{ catalog.Rules }
+type summaryFixtureRules struct{ adapters.Rules }
 
 func (r summaryFixtureRules) Policy(id registry.Harness) registry.Policy {
 	policy := r.Rules.Policy(id)

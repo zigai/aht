@@ -30,7 +30,7 @@ func New() kiloHarness {
 			Source:    harness.DistributionNPM,
 			Package:   "@kilocode/cli",
 			Directory: "kilo",
-			Family:    harness.FamilyPartPlugin,
+			Family:    harness.DistributionFamilyPartPlugin,
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: true, Question: false, UsageLimit: false},

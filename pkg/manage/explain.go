@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 
 	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/pkg/broker"
@@ -114,7 +114,7 @@ func ExplainSession(
 		now = time.Now().UTC()
 	}
 
-	policy := (catalog.Rules{}).Policy(session.Harness)
+	policy := (adapters.Rules{}).Policy(session.Harness)
 	hookEvaluation := registry.EvaluateHook(session, policy, now)
 	selected, reason := registry.ActivityAuthority(session, policy, now)
 	authority := string(selected)

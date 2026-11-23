@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/mux/drivers"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -36,7 +36,7 @@ type statusWatch struct {
 }
 
 type statusWatchers struct {
-	watch mux.ProgramStatusWatch
+	watch mux.ProgramStatusWatchFunc
 	read  func(context.Context, []mux.Pane)
 	state map[statusServer]*statusWatch
 	//exhaustruct:optional
@@ -87,7 +87,7 @@ func trustedProgramStatus(
 	pane mux.Pane,
 ) (registry.Activity, registry.ActivityDetail, bool) {
 	// Any program in the pane can write the record, so it must name the harness.
-	app := catalog.ProgramStatusApp(harnessID)
+	app := adapters.ProgramStatusApp(harnessID)
 	if pane.Program == nil || app == "" || pane.Program.App != app {
 		return "", "", false
 	}
@@ -103,7 +103,7 @@ func programStatusApplied(session registry.Session, activity registry.Activity, 
 
 	authority, _ := registry.ActivityAuthority(
 		session,
-		(catalog.Rules{}).Policy(session.Harness),
+		(adapters.Rules{}).Policy(session.Harness),
 		at,
 	)
 	if decision.Authority != authority {
@@ -145,7 +145,7 @@ func terminalReading(
 }
 
 func newStatusWatchers(
-	watch mux.ProgramStatusWatch,
+	watch mux.ProgramStatusWatchFunc,
 	read func(context.Context, []mux.Pane),
 ) *statusWatchers {
 	return &statusWatchers{
@@ -251,7 +251,7 @@ func paneSession(sessions []registry.Session, pane registry.Location) (registry.
 
 	for _, session := range sessions {
 		if session.Presence() == registry.PresenceLive && session.Process != nil &&
-			(catalog.Rules{}).SamePane(session.Location, pane) {
+			(adapters.Rules{}).SamePane(session.Location, pane) {
 			found = session
 			count++
 		}
@@ -262,7 +262,7 @@ func paneSession(sessions []registry.Session, pane registry.Location) (registry.
 	return found, count == 1
 }
 
-func programStatusWatch(opts Options) mux.ProgramStatusWatch {
+func programStatusWatch(opts Options) mux.ProgramStatusWatchFunc {
 	if opts.ProgramStatusWatch == nil && opts.PaneList == nil {
 		return watchProgramStatus
 	}

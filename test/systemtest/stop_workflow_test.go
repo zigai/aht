@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testtmux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -244,7 +244,7 @@ func testStopOwnedTmuxTarget(t *testing.T) {
 	}
 
 	registryPath := filepath.Join(stateDir, "tmux-stop-sessions.json")
-	store := registry.NewJournal(registryPath, catalog.Rules{})
+	store := registry.NewJournal(registryPath, adapters.Rules{})
 	targetSession := seedTmuxStopSession(t, store, "target-tmux", targetPane)
 	_ = seedTmuxStopSession(t, store, "control-tmux", controlPane)
 
@@ -457,9 +457,9 @@ func startTmuxAgentSession(
 ) *testtmux.Server {
 	t.Helper()
 
-	shellCommand := "exec " + harnesspkg.ShellQuote(
+	shellCommand := "exec " + harness.ShellQuote(
 		binary,
-	) + " --store " + harnesspkg.ShellQuote(
+	) + " --store " + harness.ShellQuote(
 		storePath,
 	) + " manage tracker run --quiet"
 

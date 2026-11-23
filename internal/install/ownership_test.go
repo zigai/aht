@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -12,7 +12,7 @@ func TestClassifyArtifactContentAcceptsSourceMetadata(t *testing.T) {
 	t.Parallel()
 
 	codex := registry.Harness("codex")
-	version := catalog.IntegrationVersionFor(codex)
+	version := adapters.IntegrationVersionFor(codex)
 
 	current := fmt.Sprintf(
 		`{"command":"aht report codex --reporter-version %d --reporter codex-hook"}`,
@@ -47,7 +47,7 @@ func TestClassifyArtifactContentUsesHarnessGeneration(t *testing.T) {
 	t.Parallel()
 
 	agy := registry.Harness("agy")
-	version := catalog.IntegrationVersionFor(agy)
+	version := adapters.IntegrationVersionFor(agy)
 
 	current := fmt.Sprintf(
 		"aht managed integration\nAHT_INTEGRATION_ID=agy\nAHT_INTEGRATION_VERSION=%d",

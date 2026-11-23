@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -366,7 +366,7 @@ func checkDocumentedLocation(t *testing.T, tt locationCase) {
 
 func createLocationFixture(t *testing.T, tt locationCase) (string, string) {
 	t.Helper()
-	home := testharness.Isolate(t, catalog.All()...)
+	home := testharness.Isolate(t, adapters.All()...)
 	project := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 

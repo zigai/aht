@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -91,7 +91,7 @@ func errorContractBroker(
 
 	socketPath := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(storePath, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,9 +230,9 @@ func assertRegistryError(t *testing.T, err error, sentinel error, code string, o
 		t.Fatalf("error = %v, want errors.Is(_, %v)", err, sentinel)
 	}
 
-	remoteError, isRemote := errors.AsType[*broker.RemoteError](err)
-	if isRemote != online {
-		t.Fatalf("error = %T, broker remote error = %t, want %t", err, isRemote, online)
+	remoteError, remote := errors.AsType[*broker.RemoteError](err)
+	if remote != online {
+		t.Fatalf("error = %T, broker remote error = %t, want %t", err, remote, online)
 	}
 
 	if !online {

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -102,7 +102,7 @@ func TestListSummaryAcceptsDefaultSortingConfig(t *testing.T) {
 
 func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	presence := registry.PresenceGone
 	if _, err := store.Observe(
@@ -161,7 +161,7 @@ func TestCleanAllRequiresConfirmationAndPreservesRecords(t *testing.T) {
 func TestFilesystemWatchPreservesRequestedFilter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	for _, harness := range []registry.Harness{registry.Harness("codex"), registry.Harness("claude")} {
 		if _, err := store.Observe(
 			t.Context(),

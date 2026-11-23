@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/brokerserver"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -260,7 +260,7 @@ func TestClientResolveDurableMode(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	createdSession := setupTestSessionForStore(t, store)
 
 	durableClient := client.New(client.Config{
@@ -290,7 +290,7 @@ func TestClientResolveRealtimeBrokerMode(t *testing.T) {
 		_ = os.Remove(broker.SocketPath(storePath))
 	})
 
-	memoryStore, err := registry.OpenMemoryStore(storePath, catalog.Rules{})
+	memoryStore, err := registry.OpenMemoryStore(storePath, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestResolveWithSessionLister(t *testing.T) {
 
 	store, err := registry.OpenMemoryStore(
 		filepath.Join(t.TempDir(), "state.json"),
-		catalog.Rules{},
+		adapters.Rules{},
 	)
 	if err != nil {
 		t.Fatal(err)

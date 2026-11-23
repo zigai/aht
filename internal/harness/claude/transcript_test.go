@@ -286,9 +286,9 @@ func TestFastTranscriptPreservesConversationAndCaptures(t *testing.T) {
 		`{"type":"user","isMeta":true,"message":null}`,
 	}
 	for _, includeTools := range []bool{false, true} {
-		want := replayTranscript(t, false, includeTools, lines)
+		want := replayTranscript(t, replayOptions{includeTools: includeTools}, lines)
 
-		got := replayTranscript(t, true, includeTools, lines)
+		got := replayTranscript(t, replayOptions{fast: true, includeTools: includeTools}, lines)
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Fatalf("includeTools=%t (-ordinary +fast):\n%s", includeTools, diff)
 		}
@@ -370,7 +370,11 @@ func TestTranscriptContextProjectionPreservesMetadata(t *testing.T) {
 
 	for _, fast := range []bool{false, true} {
 		for _, includeTools := range []bool{false, true} {
-			state := replayTranscript(t, fast, includeTools, lines)
+			state := replayTranscript(
+				t,
+				replayOptions{fast: fast, includeTools: includeTools},
+				lines,
+			)
 
 			want := []transcriptCapture{
 				{Role: "context", Body: "injected", Line: 1},
@@ -413,10 +417,14 @@ func TestTranscriptContextProjectionPreservesMetadata(t *testing.T) {
 	}
 }
 
+type replayOptions struct {
+	fast         bool
+	includeTools bool
+}
+
 func replayTranscript(
 	t *testing.T,
-	fast bool,
-	includeTools bool,
+	opts replayOptions,
 	lines []string,
 ) transcriptReadState {
 	t.Helper()
@@ -429,9 +437,9 @@ func replayTranscript(
 		UserParts:    reader.UserParts,
 		Conversation: &state.Conversation,
 		Recognized:   &state.Recognized,
-		IncludeTools: includeTools,
+		IncludeTools: opts.includeTools,
 		Emit: func(_ context.Context, role, body, id string, line int, at time.Time) {
-			if role == "tool" && !includeTools {
+			if role == "tool" && !opts.includeTools {
 				body = ""
 			}
 
@@ -439,7 +447,7 @@ func replayTranscript(
 		},
 	}
 	for index, line := range lines {
-		if fast && readFastRecord(t.Context(), decoder, []byte(line), index+1) {
+		if opts.fast && readFastRecord(t.Context(), decoder, []byte(line), index+1) {
 			continue
 		}
 

@@ -55,27 +55,27 @@ func (host *isolatedHost) runInterruption(t *testing.T, command *exec.Cmd) {
 	t.Helper()
 
 	switch host.contract.InterruptionDriver {
-	case driverExecRPC:
+	case nativeDriverExecRPC:
 		host.runDroidRPC(t, command.Env, nil, true)
-	case driverACP:
+	case nativeDriverACP:
 		host.runKimiACP(t, command, nil, true)
-	case driverExecutionServer:
+	case nativeDriverExecutionServer:
 		host.runOpenCodeInterruption(t, command.Env)
-	case driverPluginServer:
+	case nativeDriverPluginServer:
 		host.runServerInterruption(t, command.Env)
-	case driverCompletionRPC, driverExtensionRPC:
+	case nativeDriverCompletionRPC, nativeDriverExtensionRPC:
 		runRPCInterruption(t, host, command.Env)
-	case driverPythonACP:
+	case nativeDriverPythonACP:
 		runPythonInterruption(t, host, command.Env)
-	case driverCLIACP:
+	case nativeDriverCLIACP:
 		runCLIInterruption(t, host, command.Env)
-	case driverTerminalQuit:
+	case nativeDriverTerminalQuit:
 		host.runGrokInterruption(t, command)
-	case driverTerminalDialog:
+	case nativeDriverTerminalDialog:
 		host.runQwenTUI(t, command, true)
-	case driverProcess:
+	case nativeDriverProcess:
 		host.runHostCommand(t, command)
-	case driverControlCLI, driverAppServer, driverSDKCLI:
+	case nativeDriverControlCLI, nativeDriverAppServer, nativeDriverSDKCLI:
 		fallthrough
 	default:
 		t.Fatalf("unsupported interruption driver %q", host.contract.InterruptionDriver)
@@ -158,27 +158,27 @@ func (host *isolatedHost) runNativeDriver(t *testing.T, command *exec.Cmd) ([]by
 	t.Helper()
 
 	switch host.contract.LifecycleDriver {
-	case driverExecRPC:
+	case nativeDriverExecRPC:
 		return host.runDroidRPC(t, command.Env, nil, false), true
-	case driverACP:
+	case nativeDriverACP:
 		host.runKimiACP(t, command, nil, false)
 		return nil, true
-	case driverCompletionRPC:
+	case nativeDriverCompletionRPC:
 		host.runPiCompletion(t, command)
 		return nil, true
-	case driverTerminalDialog:
+	case nativeDriverTerminalDialog:
 		return host.runQwenTUI(t, command, false), true
-	case driverProcess:
+	case nativeDriverProcess:
 		return nil, false
-	case driverExtensionRPC,
-		driverPythonACP,
-		driverExecutionServer,
-		driverPluginServer,
-		driverTerminalQuit,
-		driverCLIACP,
-		driverControlCLI,
-		driverAppServer,
-		driverSDKCLI:
+	case nativeDriverExtensionRPC,
+		nativeDriverPythonACP,
+		nativeDriverExecutionServer,
+		nativeDriverPluginServer,
+		nativeDriverTerminalQuit,
+		nativeDriverCLIACP,
+		nativeDriverControlCLI,
+		nativeDriverAppServer,
+		nativeDriverSDKCLI:
 		fallthrough
 	default:
 		t.Fatalf("unsupported lifecycle driver %q", host.contract.LifecycleDriver)

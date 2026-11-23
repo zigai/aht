@@ -12,7 +12,7 @@ import (
 )
 
 //exhaustruct:optional
-type trackerFlags struct {
+type trackerOptions struct {
 	binary   string
 	interval time.Duration
 	grace    time.Duration
@@ -57,24 +57,24 @@ func (app *application) managerConfig(binary string) manage.Config {
 
 func (app *application) trackerManager(
 	cmd *cobra.Command,
-	flags trackerFlags,
+	opts trackerOptions,
 ) (*manage.Manager, error) {
-	config := app.managerConfig(flags.binary)
+	config := app.managerConfig(opts.binary)
 
 	if cmd.Flags().Changed("interval") {
-		if flags.interval <= 0 {
+		if opts.interval <= 0 {
 			return nil, exitCode(errInvalidObserveInterval, exitCodeUsage)
 		}
 
-		config.TrackerInterval = flags.interval
+		config.TrackerInterval = opts.interval
 	}
 
 	if cmd.Flags().Changed("grace-period") {
-		if flags.grace < 0 {
+		if opts.grace < 0 {
 			return nil, exitCode(errInvalidObserveGracePeriod, exitCodeUsage)
 		}
 
-		config.TrackerGracePeriod = &flags.grace
+		config.TrackerGracePeriod = &opts.grace
 	}
 
 	return manage.New(config), nil

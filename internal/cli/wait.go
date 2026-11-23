@@ -12,7 +12,7 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-type waitFlags struct {
+type waitOptions struct {
 	activity    string
 	presence    string
 	timeout     time.Duration
@@ -22,7 +22,7 @@ type waitFlags struct {
 }
 
 func (app *application) newWaitCommand() *cobra.Command {
-	var flags waitFlags
+	var flags waitOptions
 
 	command := &cobra.Command{
 		Use:           "wait <session>",
@@ -62,8 +62,12 @@ func (app *application) newWaitCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) executeWait(ctx context.Context, sessionArg string, flags waitFlags) error {
-	options, err := waitOptions(strings.TrimSpace(sessionArg), flags)
+func (app *application) executeWait(
+	ctx context.Context,
+	sessionArg string,
+	opts waitOptions,
+) error {
+	options, err := parseWaitOptions(strings.TrimSpace(sessionArg), opts)
 	if err != nil {
 		return exitCode(err, exitCodeUsage)
 	}
@@ -80,17 +84,17 @@ func (app *application) executeWait(ctx context.Context, sessionArg string, flag
 	return app.writeSessionDetails(res.Session)
 }
 
-func waitOptions(reference string, flags waitFlags) (client.WaitOptions, error) {
+func parseWaitOptions(reference string, opts waitOptions) (client.WaitOptions, error) {
 	options := client.WaitOptions{
 		Reference: reference,
 		Activity:  "",
 		Presence:  "",
-		Timeout:   flags.timeout,
-		StableFor: flags.stableFor,
+		Timeout:   opts.timeout,
+		StableFor: opts.stableFor,
 	}
 
-	if flags.hasPresence {
-		presence, err := registry.NormalizePresence(flags.presence)
+	if opts.hasPresence {
+		presence, err := registry.ParsePresence(opts.presence)
 		if err != nil {
 			return options, fmt.Errorf("normalize presence: %w", err)
 		}
@@ -98,8 +102,8 @@ func waitOptions(reference string, flags waitFlags) (client.WaitOptions, error) 
 		options.Presence = presence
 	}
 
-	if flags.hasActivity {
-		activity, err := registry.NormalizeActivity(flags.activity)
+	if opts.hasActivity {
+		activity, err := registry.ParseActivity(opts.activity)
 		if err != nil {
 			return options, fmt.Errorf("normalize activity: %w", err)
 		}

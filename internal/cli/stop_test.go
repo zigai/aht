@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -52,12 +52,12 @@ func TestStopRevalidatesInterpretedHarness(t *testing.T) {
 		t.Fatalf("wait for interpreted process: %v", err)
 	}
 
-	proc, found, err := processinfo.Find(t.Context(), cmd.Process.Pid)
+	proc, found, err := processinfo.Lookup(t.Context(), cmd.Process.Pid)
 	if err != nil || !found {
 		t.Fatalf("find interpreted process: found=%t, error=%v", found, err)
 	}
 
-	id, ok := catalog.ResolveProcess(proc)
+	id, ok := adapters.ResolveProcess(proc)
 	if !ok {
 		t.Fatalf("discovery rejected interpreted process: %+v", proc)
 	}
@@ -137,7 +137,7 @@ func TestStopRejectsInvalidSelection(t *testing.T) {
 
 func TestStopMultipleSessions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	now := time.Now().UTC()
 	live := registry.PresenceLive
 
@@ -234,7 +234,7 @@ func TestStopAllConfirmationHandling(t *testing.T) {
 func createSkippedStopSession(t *testing.T) (string, registry.Session) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	present := true
 
 	session, err := store.Observe(
@@ -481,10 +481,10 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 func TestStopTargetSkipsSharedHarnessProcess(t *testing.T) {
 	t.Parallel()
 
-	rules := catalog.Rules{}
+	rules := adapters.Rules{}
 	process := &registry.ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
 
-	for _, id := range catalog.Harnesses() {
+	for _, id := range adapters.Harnesses() {
 		session := registry.Session{Harness: id, Process: process}
 		target, ok := stopTargetForSession(session)
 

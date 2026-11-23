@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	_ = os.Setenv(config.ConfigEnv, emptyConfig)
+	_ = os.Setenv(config.PathEnv, emptyConfig)
 	_ = os.Setenv("XDG_CONFIG_DIRS", filepath.Join(tempDir, "system"))
 	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(tempDir, "user"))
 

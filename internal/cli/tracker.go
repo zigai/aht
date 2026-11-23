@@ -40,7 +40,7 @@ func (app *application) newTrackerCommand() *cobra.Command {
 }
 
 func (app *application) newTrackerEnableCommand() *cobra.Command {
-	options := trackerFlags{interval: config.DefaultTrackerInterval}
+	options := trackerOptions{interval: config.DefaultTrackerInterval}
 	dryRun := false
 	command := &cobra.Command{
 		Use:           "enable",
@@ -105,7 +105,7 @@ func (app *application) newTrackerDisableCommand() *cobra.Command {
 }
 
 func (app *application) newTrackerStatusCommand() *cobra.Command {
-	options := trackerFlags{interval: config.DefaultTrackerInterval}
+	options := trackerOptions{interval: config.DefaultTrackerInterval}
 	command := &cobra.Command{
 		Use:           statusCommandName,
 		Short:         "Show background tracking state",

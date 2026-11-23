@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -66,7 +66,7 @@ func (index *historyIndex) listParents() []int64 {
 	for _, file := range index.files {
 		harnessID := registry.Harness(file.harness)
 
-		parent := catalog.TranscriptFor(harnessID).Parent
+		parent := adapters.TranscriptFor(harnessID).Parent
 		if parent == nil {
 			continue
 		}

@@ -222,7 +222,7 @@ func startTerminal(
 		return nil, fmt.Errorf("resolve terminal tmux: %w", err)
 	}
 
-	directory, err := terminal.NewSocketDir("aht-launch-tmux-")
+	directory, err := terminal.CreateSocketDir("aht-launch-tmux-")
 	if err != nil {
 		return nil, fmt.Errorf("create terminal directory: %w", err)
 	}

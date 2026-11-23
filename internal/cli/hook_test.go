@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -66,7 +66,7 @@ func TestManagedHookEmitsProtocolJSONWhenRequested(t *testing.T) {
 		t.Fatalf("expected empty response map for PreInvocation, got %#v", response)
 	}
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
@@ -135,7 +135,7 @@ func assertStoredHookSession(
 ) {
 	t.Helper()
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	sessions, err := store.List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {

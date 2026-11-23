@@ -113,16 +113,16 @@ func TestPrepareRejectsFlagsTheEvidenceIgnores(t *testing.T) {
 		PID: 42, StartIdentity: "boot:42",
 	}
 	withNative := func(change func(*Options)) Options {
-		opts := native
-		change(&opts)
+		base := native
+		change(&base)
 
-		return opts
+		return base
 	}
 	withProcess := func(change func(*Options)) Options {
-		opts := process
-		change(&opts)
+		base := process
+		change(&base)
 
-		return opts
+		return base
 	}
 
 	tests := []struct {
@@ -132,54 +132,58 @@ func TestPrepareRejectsFlagsTheEvidenceIgnores(t *testing.T) {
 	}{
 		{
 			"native start identity",
-			withNative(func(o *Options) { o.StartIdentity = "boot:1" }),
+			withNative(func(opts *Options) { opts.StartIdentity = "boot:1" }),
 			errNativeProcessFlags,
 		},
-		{"native ppid", withNative(func(o *Options) { o.PPID = 1 }), errNativeProcessFlags},
+		{"native ppid", withNative(func(opts *Options) { opts.PPID = 1 }), errNativeProcessFlags},
 		{
 			"native process group",
-			withNative(func(o *Options) { o.ProcessGroupID = 1 }),
+			withNative(func(opts *Options) { opts.ProcessGroupID = 1 }),
 			errNativeProcessFlags,
 		},
 		{
 			"native executable",
-			withNative(func(o *Options) { o.Executable = "/usr/bin/codex" }),
+			withNative(func(opts *Options) { opts.Executable = "/usr/bin/codex" }),
 			errNativeProcessFlags,
 		},
 		{
 			"native tty",
-			withNative(func(o *Options) { o.TTY = "/dev/pts/1" }),
+			withNative(func(opts *Options) { opts.TTY = "/dev/pts/1" }),
 			errNativeProcessFlags,
 		},
 		{
 			"process project root",
-			withProcess(func(o *Options) { o.ProjectRoot = "/work" }),
+			withProcess(func(opts *Options) { opts.ProjectRoot = "/work" }),
 			errProcessEvidenceListing,
 		},
 		{
 			"process resume command",
-			withProcess(func(o *Options) { o.ResumeCommand = []string{"codex", "resume"} }),
+			withProcess(func(opts *Options) { opts.ResumeCommand = []string{"codex", "resume"} }),
 			errProcessEvidenceListing,
 		},
 		{
 			"process cwd without start identity",
-			withProcess(func(o *Options) { o.StartIdentity, o.CWD = "", "/work" }),
+			withProcess(func(opts *Options) { opts.StartIdentity, opts.CWD = "", "/work" }),
 			errProcessEvidenceListing,
 		},
 		{
 			"native listing metadata",
-			withNative(func(o *Options) {
-				o.CWD, o.ProjectRoot, o.ResumeCommand = "/work", "/work", []string{
+			withNative(func(opts *Options) {
+				opts.CWD, opts.ProjectRoot, opts.ResumeCommand = "/work", "/work", []string{
 					"codex",
 					"resume",
 				}
 			}),
 			nil,
 		},
-		{"process cwd with start identity", withProcess(func(o *Options) { o.CWD = "/work" }), nil},
+		{
+			"process cwd with start identity",
+			withProcess(func(opts *Options) { opts.CWD = "/work" }),
+			nil,
+		},
 		{
 			"process automatic cwd",
-			withProcess(func(o *Options) { o.CWD, o.CWDAuto = "/work", true }),
+			withProcess(func(opts *Options) { opts.CWD, opts.CWDAuto = "/work", true }),
 			nil,
 		},
 	}

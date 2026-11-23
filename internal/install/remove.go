@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -59,7 +59,7 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 		}
 
 		result.Changed = true
-		result.Message = removeResult(opts.Harness, result.Path, true, opts.DryRun).Message
+		result.Message = removeResult(opts.Harness, result.Path, true, opts).Message
 	}
 
 	return result, nil
@@ -68,7 +68,7 @@ func Remove(ctx context.Context, opts Options) (Result, error) {
 func removeNativeIntegration(
 	ctx context.Context,
 	opts Options,
-	plan harnesspkg.InstallPlan,
+	plan harness.InstallPlan,
 ) (Result, error) {
 	return runNativeActions(ctx, opts, plan, func(handler actionHandler) (Result, error) {
 		return handler.remove(ctx, opts, opts.Harness)
@@ -94,7 +94,7 @@ func removeOwnedShim(path string, dryRun bool, status ArtifactStatus) (bool, err
 func removeJSONCommandHooks(
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.JSONCommandHookInstallPlan,
+	plan harness.JSONCommandHookInstallPlan,
 ) (Result, error) {
 	return removeJSONHooks(opts, harnessID, plan.Path, func(harnessConfig map[string]any) bool {
 		isManaged := isManagedSourceHookCommand(
@@ -145,7 +145,7 @@ func removeManagedCommandHookEvents(hooks map[string]any, isManaged func(string)
 func removeJSONMerge(
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.JSONMergeInstallPlan,
+	plan harness.JSONMergeInstallPlan,
 ) (Result, error) {
 	return removeJSONHooks(opts, harnessID, plan.Path, func(config map[string]any) bool {
 		return plan.Remove(
@@ -209,13 +209,13 @@ func removeJSONHooks(
 		}
 	}
 
-	return removeResult(harnessID, path, changed, opts.DryRun), nil
+	return removeResult(harnessID, path, changed, opts), nil
 }
 
 func removeTextBlock(
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.ManagedTextBlockInstallPlan,
+	plan harness.ManagedTextBlockInstallPlan,
 ) (Result, error) {
 	current, err := readTextFile(plan.Path)
 	if err != nil {
@@ -239,7 +239,7 @@ func removeTextBlock(
 		}
 	}
 
-	return removeResult(harnessID, plan.Path, changed, opts.DryRun), nil
+	return removeResult(harnessID, plan.Path, changed, opts), nil
 }
 
 func removeOwnedFiles(
@@ -275,14 +275,14 @@ func removeOwnedFiles(
 		}
 	}
 
-	return removeResult(harnessID, resultPath, len(managed) > 0, opts.DryRun), nil
+	return removeResult(harnessID, resultPath, len(managed) > 0, opts), nil
 }
 
 func removePluginDirectoryWithRetired(
 	ctx context.Context,
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (Result, error) {
 	result, err := removePluginDirectory(ctx, opts, harnessID, plan)
 	if err != nil {
@@ -295,7 +295,7 @@ func removePluginDirectoryWithRetired(
 	}
 
 	if retiredChanged && !result.Changed {
-		return removeResult(harnessID, plan.Dir, true, opts.DryRun), nil
+		return removeResult(harnessID, plan.Dir, true, opts), nil
 	}
 
 	return result, nil
@@ -307,7 +307,7 @@ func removeRetiredPlugins(
 	ctx context.Context,
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (bool, error) {
 	changed := false
 
@@ -336,7 +336,7 @@ func removePluginDirectory(
 	ctx context.Context,
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (Result, error) {
 	plugin := newPluginDirectoryInstall(plan, nil, nil)
 
@@ -366,11 +366,11 @@ func removePluginDirectory(
 		}
 	}
 
-	return removeResult(harnessID, plan.Dir, exists, opts.DryRun), nil
+	return removeResult(harnessID, plan.Dir, exists, opts), nil
 }
 
 func preparePluginRemoval(
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	finalizer func(parent string, backup string, backupExists bool) error,
 ) (func() error, func() error, error) {
 	plugin := newPluginDirectoryInstall(plan, nil, nil)
@@ -396,7 +396,7 @@ func preparePluginRemoval(
 }
 
 func applyPluginRemoval(
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	exists bool,
 	unregister func() error,
 	finalizer func(parent string, backup string, backupExists bool) error,
@@ -429,9 +429,9 @@ func applyPluginRemoval(
 	return nil
 }
 
-func removeResult(harnessID registry.Harness, path string, changed bool, dryRun bool) Result {
+func removeResult(harnessID registry.Harness, path string, changed bool, opts Options) Result {
 	message := "integration is not installed"
-	if changed && dryRun {
+	if changed && opts.DryRun {
 		message = "would remove integration"
 	} else if changed {
 		message = "integration removed"

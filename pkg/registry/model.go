@@ -343,7 +343,7 @@ func (p ProcessIdentity) Equal(other ProcessIdentity) bool {
 	return p.PID == other.PID && p.StartIdentity != "" && p.StartIdentity == other.StartIdentity
 }
 
-func NormalizePresence(value string) (Presence, error) {
+func ParsePresence(value string) (Presence, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "":
 		return "", nil
@@ -358,7 +358,7 @@ func NormalizePresence(value string) (Presence, error) {
 	}
 }
 
-// ActivityAliases maps every lowercase name NormalizeActivity accepts to its
+// ActivityAliases maps every lowercase name ParseActivity accepts to its
 // activity.
 func ActivityAliases() map[string]Activity {
 	return map[string]Activity{
@@ -384,7 +384,7 @@ func ActivityAliases() map[string]Activity {
 	}
 }
 
-func NormalizeActivity(value string) (Activity, error) {
+func ParseActivity(value string) (Activity, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if normalized == "" {
 		return "", nil
@@ -398,7 +398,7 @@ func NormalizeActivity(value string) (Activity, error) {
 	return activity, nil
 }
 
-func NormalizeLifecycle(value string) (NativeLifecycle, error) {
+func ParseLifecycle(value string) (NativeLifecycle, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(NativeLifecycleStart):
 		return NativeLifecycleStart, nil

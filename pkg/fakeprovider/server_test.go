@@ -28,10 +28,10 @@ var (
 	errOther  = errors.New("other script failure")
 )
 
-func startServer(t *testing.T, options fakeprovider.Options) *fakeprovider.Server {
+func startServer(t *testing.T, opts fakeprovider.Options) *fakeprovider.Server {
 	t.Helper()
 
-	server, err := fakeprovider.Start(options)
+	server, err := fakeprovider.Start(opts)
 	if err != nil {
 		t.Fatal(err)
 	}

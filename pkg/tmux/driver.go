@@ -124,7 +124,7 @@ func (d Driver) SamePane(a registry.Location, b registry.Location) bool {
 }
 
 func (d Driver) SendInterrupt(ctx context.Context, serverIdentity string, paneID string) error {
-	return SendInterruptTo(ctx, serverIdentity, paneID)
+	return SendInterrupt(ctx, serverIdentity, paneID)
 }
 
 func (d Driver) WatchProgramStatus(

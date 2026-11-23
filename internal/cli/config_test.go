@@ -14,7 +14,7 @@ import (
 	"github.com/zigai/strata"
 
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -24,7 +24,7 @@ func TestCLIConfigFlagPrecedenceAndDefaults(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -170,7 +170,7 @@ func TestCLIConfigFiltering(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	ctx := context.Background()
 	presentTrue := true
 
@@ -297,7 +297,7 @@ func TestCLIStateCleanDefaultsToConfiguredTombstoneTTL(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	configPath := filepath.Join(tempDir, "config.toml")
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 	ctx := context.Background()
 	presentGone := false
 
@@ -425,13 +425,13 @@ interval = "5s"
 		t.Fatalf("config path --json failed: %v", err)
 	}
 
-	var pathMap map[string]string
+	var payload map[string]string
 	if err := json.Unmarshal(
 		stdout.Bytes(),
-		&pathMap,
+		&payload,
 	); err != nil ||
-		pathMap["path"] != configPath {
-		t.Fatalf("config path JSON = %v, want %q", pathMap, configPath)
+		payload["path"] != configPath {
+		t.Fatalf("config path JSON = %v, want %q", payload, configPath)
 	}
 
 	stdout.Reset()
@@ -526,7 +526,7 @@ func TestCLIConfigDoctorWithNoConfigFile(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.Chmod(readOnlyDir, 0o755)
 	})
-	t.Setenv(config.ConfigEnv, filepath.Join(readOnlyDir, "does-not-exist.toml"))
+	t.Setenv(config.PathEnv, filepath.Join(readOnlyDir, "does-not-exist.toml"))
 
 	var stdout bytes.Buffer
 
@@ -577,7 +577,7 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv(config.ConfigEnv, brokenConfigPath)
+	t.Setenv(config.PathEnv, brokenConfigPath)
 
 	ctx := context.Background()
 
@@ -592,7 +592,7 @@ func TestProtocolCommandIsolationWithBrokenConfig(t *testing.T) {
 		t.Fatalf("aht report failed with broken config: %v; stderr=%s", err, stderr.String())
 	}
 
-	store := registry.NewJournal(storePath, catalog.Rules{})
+	store := registry.NewJournal(storePath, adapters.Rules{})
 
 	sessions, err := store.List(ctx, registry.Filter{})
 	if err != nil {
@@ -629,7 +629,7 @@ func TestCLIFirstRunDoesNotCreateConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
 	targetConfigPath := filepath.Join(tempDir, "config", "config.toml")
-	t.Setenv(config.ConfigEnv, targetConfigPath)
+	t.Setenv(config.PathEnv, targetConfigPath)
 
 	var stdout bytes.Buffer
 	if err := runTestCLI(
@@ -701,7 +701,7 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatalf("reading created config: %v", err)
 	}
 
-	if string(content) != config.DefaultConfigTemplate() {
+	if string(content) != config.DefaultTemplate() {
 		t.Fatal("created config content does not match template")
 	}
 
@@ -771,7 +771,7 @@ func TestCLIManageConfigInit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(reRead) != config.DefaultConfigTemplate() {
+	if string(reRead) != config.DefaultTemplate() {
 		t.Fatal("file was not overwritten with default template on --force")
 	}
 }
@@ -782,7 +782,7 @@ func TestTrackerConfigAppliesTombstoneTTL(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Retention.TombstoneTTL = "45m"
 
-	var opts observeOptions
+	var opts trackerRunOptions
 	if err := applyTrackerConfig(&opts, (&application{}).newTrackerRunCommand(), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -927,7 +927,7 @@ func TestCLIManageConfigIgnoresExistingUserYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "aht", "config.yaml")
 
-	t.Setenv(config.ConfigEnv, "")
+	t.Setenv(config.PathEnv, "")
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -954,7 +954,7 @@ func TestCLIManageConfigIgnoresExistingUserYAML(t *testing.T) {
 
 	tomlPath := filepath.Join(dir, "aht", "config.toml")
 
-	cfg, _, resolved, err := config.LoadWithMetadata(config.Options{})
+	cfg, _, resolved, err := config.Load(config.Options{})
 	if err != nil || cfg.UI.Sort != "created" || resolved != tomlPath {
 		t.Fatalf("TOML config: sort = %q, path = %q, error = %v", cfg.UI.Sort, resolved, err)
 	}

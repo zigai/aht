@@ -131,7 +131,7 @@ func (server *Server) Close(ctx context.Context) error {
 		}
 	}
 
-	if err := server.killTmuxServer(ctx); err != nil {
+	if err := server.killTmux(ctx); err != nil {
 		return err
 	}
 
@@ -158,7 +158,7 @@ func (server *Server) Close(ctx context.Context) error {
 	return nil
 }
 
-func (server *Server) killTmuxServer(ctx context.Context) error {
+func (server *Server) killTmux(ctx context.Context) error {
 	if server.executable != "" {
 		cfg := gotmux.Config{
 			Binary:     server.executable,
@@ -281,7 +281,7 @@ func (server *Server) exited(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	process, found, err := processinfo.Find(ctx, server.pid)
+	process, found, err := processinfo.Lookup(ctx, server.pid)
 	if err != nil {
 		return false, fmt.Errorf("inspect test tmux process: %w", err)
 	}

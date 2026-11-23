@@ -28,7 +28,7 @@ func New() opencodeHarness {
 			Source:    harness.DistributionNPM,
 			Package:   "@opencode/cli",
 			Directory: "opencode",
-			Family:    harness.FamilyPartPlugin,
+			Family:    harness.DistributionFamilyPartPlugin,
 		},
 		DetailCapabilities: registry.DetailCapabilities{
 			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},

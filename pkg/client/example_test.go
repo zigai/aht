@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -23,7 +23,7 @@ func ExampleClient_List() {
 	presence := registry.PresenceLive
 
 	activity := registry.ActivityRunning
-	if _, err := registry.NewJournal(storePath, catalog.Rules{}).
+	if _, err := registry.NewJournal(storePath, adapters.Rules{}).
 		Observe(context.Background(), registry.Observation{
 			Harness: registry.Harness(
 				"pi",
@@ -68,7 +68,7 @@ func ExampleClient_Wait() {
 	presence := registry.PresenceLive
 	activity := registry.ActivityIdle
 
-	observed, err := registry.NewJournal(storePath, catalog.Rules{}).
+	observed, err := registry.NewJournal(storePath, adapters.Rules{}).
 		Observe(context.Background(), registry.Observation{
 			Harness: registry.Harness(
 				"pi",

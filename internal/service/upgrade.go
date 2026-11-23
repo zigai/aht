@@ -12,11 +12,11 @@ var errInstalledArguments = errors.New("cannot recover installed tracker setting
 
 // Upgrade refreshes an existing definition, preserving its stored options and
 // running state. Missing services remain uninstalled.
-func Upgrade(ctx context.Context, binary string, dryRun bool) (Result, error) {
-	return defaultService.Upgrade(ctx, binary, dryRun)
+func Upgrade(ctx context.Context, opts UpgradeOptions) (Result, error) {
+	return defaultService.Upgrade(ctx, opts)
 }
 
-func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Result, error) {
+func (s *Service) Upgrade(ctx context.Context, opts UpgradeOptions) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("upgrade service: %w", err)
 	}
@@ -44,7 +44,7 @@ func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Resu
 
 	result.Installed = true
 
-	b, err := recoveredBackend(previous, binary)
+	b, err := recoveredBackend(previous, opts.Binary)
 	if err != nil {
 		return result, err
 	}
@@ -59,7 +59,7 @@ func (s *Service) Upgrade(ctx context.Context, binary string, dryRun bool) (Resu
 	result.Running = state.Running
 	restart := state.Running || (state.Loaded && !result.Current)
 
-	if dryRun {
+	if opts.DryRun {
 		result.Message = "would update (stopped)"
 		if restart {
 			result.Message = "would update and restart"
@@ -178,14 +178,14 @@ func recoverOptions(args []string, binary string) (Options, error) {
 	return options, nil
 }
 
-func applyInstalledFlag(options *Options, args []string, index int) (int, error) {
+func applyInstalledFlag(opts *Options, args []string, index int) (int, error) {
 	flag := args[index]
 
 	switch flag {
 	case "manage", "tracker", "run", "--quiet":
 		return index, nil
 	case "--no-config":
-		options.NoConfig = true
+		opts.NoConfig = true
 
 		return index, nil
 	case "--store", "--interval", "--grace-period", "--config":
@@ -193,20 +193,20 @@ func applyInstalledFlag(options *Options, args []string, index int) (int, error)
 			return index, errInstalledArguments
 		}
 
-		return index + 1, applyInstalledValue(options, flag, args[index+1])
+		return index + 1, applyInstalledValue(opts, flag, args[index+1])
 	default:
 		return index, fmt.Errorf("%w: unsupported argument %q", errInstalledArguments, flag)
 	}
 }
 
-func applyInstalledValue(options *Options, flag string, value string) error {
+func applyInstalledValue(opts *Options, flag string, value string) error {
 	switch flag {
 	case "--store":
-		options.StorePath = value
+		opts.StorePath = value
 
 		return nil
 	case "--config":
-		options.ConfigPath = value
+		opts.ConfigPath = value
 
 		return nil
 	}
@@ -217,9 +217,9 @@ func applyInstalledValue(options *Options, flag string, value string) error {
 	}
 
 	if flag == "--interval" {
-		options.Interval = duration
+		opts.Interval = duration
 	} else {
-		options.GracePeriod = duration
+		opts.GracePeriod = duration
 	}
 
 	return nil

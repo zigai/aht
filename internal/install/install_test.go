@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -54,7 +54,7 @@ func TestRunAllInstallsEveryHarness(t *testing.T) {
 	t.Setenv("AGY_CLI_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 
-	harnesses := catalog.Harnesses()
+	harnesses := adapters.Harnesses()
 
 	results := make([]Result, 0, len(harnesses))
 	for _, h := range harnesses {
@@ -115,12 +115,12 @@ func withoutHome(t *testing.T) string {
 func TestInstallPlansWithoutHomeFailOrStayAbsolute(t *testing.T) {
 	withoutHome(t)
 
-	for _, harness := range catalog.Harnesses() {
-		t.Run(string(harness), func(t *testing.T) {
-			plan, _, err := installPlanForHarness(harness, testInstallBinary)
+	for _, harnessID := range adapters.Harnesses() {
+		t.Run(string(harnessID), func(t *testing.T) {
+			plan, _, err := installPlanForHarness(harnessID, testInstallBinary)
 			if err != nil {
-				if !errors.Is(err, harnesspkg.ErrHomeUnknown) {
-					t.Fatalf("plan error = %v, want %v", err, harnesspkg.ErrHomeUnknown)
+				if !errors.Is(err, harness.ErrHomeUnknown) {
+					t.Fatalf("plan error = %v, want %v", err, harness.ErrHomeUnknown)
 				}
 
 				return
@@ -159,8 +159,8 @@ func TestIntegrationEntryPointsWithoutHomeFailWithoutTouchingWorkingDirectory(t 
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := test.run(); !errors.Is(err, harnesspkg.ErrHomeUnknown) {
-				t.Fatalf("%s error = %v, want %v", test.name, err, harnesspkg.ErrHomeUnknown)
+			if err := test.run(); !errors.Is(err, harness.ErrHomeUnknown) {
+				t.Fatalf("%s error = %v, want %v", test.name, err, harness.ErrHomeUnknown)
 			}
 		})
 	}
@@ -257,7 +257,7 @@ func TestNoInstallRequiredIntegrationManagementIsArtifactFree(t *testing.T) {
 
 	requireNoInstallResult(t, removed, label)
 
-	upgraded, err := Upgrade(t.Context(), testInstallBinary, false)
+	upgraded, err := Upgrade(t.Context(), UpgradeOptions{Binary: testInstallBinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,11 +298,11 @@ func requireNoInstallStatus(t *testing.T, status IntegrationStatus, label string
 	}
 }
 
-func requireUpgradeExcludesHarness(t *testing.T, results []Result, harness string) {
+func requireUpgradeExcludesHarness(t *testing.T, results []Result, harnessID string) {
 	t.Helper()
 
 	for _, result := range results {
-		if result.Harness == harness {
+		if result.Harness == harnessID {
 			t.Fatalf("upgrade included no-artifact integration: %+v", result)
 		}
 	}

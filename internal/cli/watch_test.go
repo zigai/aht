@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -276,7 +276,7 @@ func TestWaitTestWatchReadyObservesStartupError(t *testing.T) {
 
 func TestWatchJSONModeEmitsJSONLinesOnlyWhenRequested(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	activity := registry.ActivityIdle
 	if _, err := store.Observe(
@@ -321,7 +321,7 @@ func TestWatchJSONModeEmitsJSONLinesOnlyWhenRequested(t *testing.T) {
 
 func TestWatchDefaultsToHumanTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	activity := registry.ActivityIdle
 	if _, err := store.Observe(
@@ -359,7 +359,7 @@ func TestWatchDefaultsToHumanTable(t *testing.T) {
 
 func TestWatchNoSnapshotSignalsReadyWithoutOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 
 	activity := registry.ActivityIdle
 	if _, err := store.Observe(
@@ -518,7 +518,7 @@ func TestWatchEmitsTransitionsAcrossBrokerDropToFilesystem(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "sessions.json")
-			store := registry.NewJournal(path, catalog.Rules{})
+			store := registry.NewJournal(path, adapters.Rules{})
 
 			live := registry.PresenceLive
 			running := registry.ActivityRunning

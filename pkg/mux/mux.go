@@ -97,8 +97,8 @@ type ScreenCapture struct {
 }
 
 type (
-	PaneLister     func(context.Context) ([]Pane, error)
-	ScreenCapturer func(context.Context, Pane) (ScreenSnapshot, error)
+	PaneListFunc      func(context.Context) ([]Pane, error)
+	ScreenCaptureFunc func(context.Context, Pane) (ScreenSnapshot, error)
 )
 
 // BoundBottomLines normalizes line endings, strips any trailing empty line, and returns at most limit bottom lines.

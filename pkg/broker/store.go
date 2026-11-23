@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -31,7 +31,7 @@ func NewStore(storePath string) *Store {
 func NewStoreForSocket(storePath string, socketPath string) *Store {
 	return &Store{
 		client:   NewClient(socketPath),
-		fallback: registry.NewJournal(storePath, catalog.Rules{}),
+		fallback: registry.NewJournal(storePath, adapters.Rules{}),
 	}
 }
 
@@ -40,7 +40,7 @@ func (s *Store) Observe(
 	observation registry.Observation,
 ) (registry.Session, error) {
 	session, err := s.client.Observe(ctx, observation)
-	if !IsUnavailable(err) && !NoReply(err) {
+	if !IsUnavailable(err) && !IsNoReply(err) {
 		return session, err
 	}
 
@@ -57,11 +57,11 @@ func (s *Store) ObserveBatch(
 	observations []registry.Observation,
 ) ([]registry.Session, error) {
 	sessions, err := s.client.ObserveBatch(ctx, observations)
-	if !IsUnavailable(err) && !NoReply(err) {
+	if !IsUnavailable(err) && !IsNoReply(err) {
 		return sessions, err
 	}
 
-	sessions, err = s.fallback.Append(ctx, observations)
+	sessions, err = s.fallback.ObserveBatch(ctx, observations)
 	if err != nil {
 		return nil, fmt.Errorf("recording fallback observations: %w", err)
 	}

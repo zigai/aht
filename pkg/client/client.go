@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -112,7 +112,7 @@ func New(config Config) *Client {
 	case ModeRealtimeOnly:
 		store = realtime
 	case ModeDurableOnly:
-		store = registry.NewJournal(storePath, catalog.Rules{})
+		store = registry.NewJournal(storePath, adapters.Rules{})
 	case ModeAuto:
 		store = broker.NewStoreForSocket(storePath, socketPath)
 	default:

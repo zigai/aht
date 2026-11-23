@@ -8,9 +8,9 @@ import (
 )
 
 type sseEvent struct {
-	name    string
-	data    string
-	content bool
+	name       string
+	data       string
+	hasContent bool
 }
 
 type eventWriter struct {
@@ -137,8 +137,8 @@ func (w *eventWriter) add(name string, payload any, carriesContent bool) {
 }
 
 func (w *eventWriter) addRaw(name string, data string, carriesContent bool) {
-	event := sseEvent{name: name, data: data, content: carriesContent && !w.marked}
-	if event.content {
+	event := sseEvent{name: name, data: data, hasContent: carriesContent && !w.marked}
+	if event.hasContent {
 		w.marked = true
 	}
 

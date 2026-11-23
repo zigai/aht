@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 )
 
 const (
@@ -27,7 +27,7 @@ var (
 //exhaustruct:optional
 type pluginDirectoryInstall struct {
 	dir          string
-	identity     harnesspkg.ArtifactIdentity
+	identity     harness.ArtifactIdentity
 	files        map[string]string
 	snippetOrder []string
 	renameFile   func(string, string) error
@@ -41,7 +41,7 @@ type pluginRecovery struct {
 }
 
 func renderInstallFiles(
-	specs []harnesspkg.RenderedFileInstallSpec,
+	specs []harness.RenderedFileInstallSpec,
 	kind string,
 ) (map[string]string, error) {
 	files := make(map[string]string, len(specs))
@@ -88,10 +88,10 @@ func validateInstallRelativePath(name string) error {
 // renderPluginFiles renders the plan's files followed by its marker file, in
 // install order.
 func renderPluginFiles(
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (map[string]string, []string, error) {
-	specs := append(slices.Clone(plan.Files), harnesspkg.RenderedFileInstallSpec{
-		Name:    harnesspkg.ArtifactMarkerFile,
+	specs := append(slices.Clone(plan.Files), harness.RenderedFileInstallSpec{
+		Name:    harness.ArtifactMarkerFile,
 		Content: plan.Identity.Marker(""),
 	})
 
@@ -109,7 +109,7 @@ func renderPluginFiles(
 }
 
 func newPluginDirectoryInstall(
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	files map[string]string,
 	order []string,
 ) pluginDirectoryInstall {
@@ -160,11 +160,11 @@ func (plugin pluginDirectoryInstall) applyRecovery(recovery pluginRecovery) erro
 			return err
 		}
 
-		if err := harnesspkg.SyncDir(filepath.Dir(recovery.restore)); err != nil {
+		if err := harness.SyncDir(filepath.Dir(recovery.restore)); err != nil {
 			return err
 		}
 
-		if err := harnesspkg.SyncDir(parent); err != nil {
+		if err := harness.SyncDir(parent); err != nil {
 			return err
 		}
 	}
@@ -175,7 +175,7 @@ func (plugin pluginDirectoryInstall) applyRecovery(recovery pluginRecovery) erro
 		}
 	}
 
-	return harnesspkg.SyncDir(parent)
+	return harness.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) inspectRecovery() (pluginRecovery, error) {
@@ -264,7 +264,7 @@ func (plugin pluginDirectoryInstall) recoveryCandidate(
 
 	// Legacy backups were the original directory itself. A temp-looking
 	// name alone cannot distinguish a forced markerless backup from user data.
-	marker, err := readPluginRecoveryMarker(filepath.Join(path, harnesspkg.ArtifactMarkerFile))
+	marker, err := readPluginRecoveryMarker(filepath.Join(path, harness.ArtifactMarkerFile))
 	if err != nil {
 		return "", false, err
 	}
@@ -278,7 +278,7 @@ func (plugin pluginDirectoryInstall) recoveryCandidate(
 }
 
 func (plugin pluginDirectoryInstall) ownsRecoveryMarker(marker string) bool {
-	identity, _ := harnesspkg.ParseArtifactIdentity(marker)
+	identity, _ := harness.ParseArtifactIdentity(marker)
 	if identity.Version <= 0 || identity.ID == "" || identity.ID != plugin.identity.ID {
 		return false
 	}
@@ -379,7 +379,7 @@ func (plugin pluginDirectoryInstall) managed() (bool, error) {
 		return false, nil
 	}
 
-	marker, err := os.ReadFile(filepath.Join(plugin.dir, harnesspkg.ArtifactMarkerFile))
+	marker, err := os.ReadFile(filepath.Join(plugin.dir, harness.ArtifactMarkerFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
@@ -445,9 +445,9 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 
 	// Put the managed identity on disk before writing other files so an
 	// interrupted stage can be identified without trusting its directory name.
-	if marker, ok := plugin.files[harnesspkg.ArtifactMarkerFile]; ok {
+	if marker, ok := plugin.files[harness.ArtifactMarkerFile]; ok {
 		if err := writeStagedPluginFile(
-			filepath.Join(stagedDir, harnesspkg.ArtifactMarkerFile),
+			filepath.Join(stagedDir, harness.ArtifactMarkerFile),
 			[]byte(marker),
 		); err != nil {
 			return "", fmt.Errorf("writing staged plugin marker: %w", err)
@@ -455,7 +455,7 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 	}
 
 	for name, content := range plugin.files {
-		if name == harnesspkg.ArtifactMarkerFile {
+		if name == harness.ArtifactMarkerFile {
 			continue
 		}
 
@@ -465,7 +465,7 @@ func (plugin pluginDirectoryInstall) stage() (string, error) {
 		}
 	}
 
-	if err := harnesspkg.SyncDir(stagedDir); err != nil {
+	if err := harness.SyncDir(stagedDir); err != nil {
 		return "", err
 	}
 
@@ -603,7 +603,7 @@ func (plugin pluginDirectoryInstall) replace(stagedDir string) (func() error, fu
 		return plugin.commitReplacement(parent, backup, backupExists)
 	}
 
-	if err := harnesspkg.SyncDir(parent); err != nil {
+	if err := harness.SyncDir(parent); err != nil {
 		return nil, nil, errors.Join(err, rollback())
 	}
 
@@ -635,7 +635,7 @@ func (plugin pluginDirectoryInstall) backupCurrent(parent string) (string, bool,
 		)
 	}
 
-	if err := errors.Join(harnesspkg.SyncDir(backup), harnesspkg.SyncDir(parent)); err != nil {
+	if err := errors.Join(harness.SyncDir(backup), harness.SyncDir(parent)); err != nil {
 		return "", false, errors.Join(err, plugin.restoreBackup(backup, true))
 	}
 
@@ -650,11 +650,11 @@ func (plugin pluginDirectoryInstall) prepareBackup(parent string, backup string)
 		return fmt.Errorf("writing plugin backup provenance: %w", err)
 	}
 
-	if err := harnesspkg.SyncDir(backup); err != nil {
+	if err := harness.SyncDir(backup); err != nil {
 		return err
 	}
 
-	return harnesspkg.SyncDir(parent)
+	return harness.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists bool) error {
@@ -668,7 +668,7 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 	}
 
 	parent := filepath.Dir(plugin.dir)
-	if err := errors.Join(harnesspkg.SyncDir(backup), harnesspkg.SyncDir(parent)); err != nil {
+	if err := errors.Join(harness.SyncDir(backup), harness.SyncDir(parent)); err != nil {
 		return err
 	}
 
@@ -676,7 +676,7 @@ func (plugin pluginDirectoryInstall) restoreBackup(backup string, backupExists b
 		return err
 	}
 
-	return harnesspkg.SyncDir(parent)
+	return harness.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) rollbackReplacement(
@@ -693,7 +693,7 @@ func (plugin pluginDirectoryInstall) rollbackReplacement(
 	if backupExists {
 		restoreErr = plugin.restoreBackup(backup, backupExists)
 	} else {
-		restoreErr = harnesspkg.SyncDir(parent)
+		restoreErr = harness.SyncDir(parent)
 	}
 
 	return errors.Join(removeErr, restoreErr)
@@ -710,7 +710,7 @@ func (plugin pluginDirectoryInstall) commitReplacement(
 		}
 	}
 
-	return harnesspkg.SyncDir(parent)
+	return harness.SyncDir(parent)
 }
 
 func (plugin pluginDirectoryInstall) snippet() string {

@@ -275,7 +275,7 @@ func (manifest *Manifest) decide(snapshot Snapshot, explain bool) (Decision, []C
 		}
 
 		if winner {
-			decision.Activity, _ = registry.NormalizeActivity(rule.State)
+			decision.Activity, _ = registry.ParseActivity(rule.State)
 			decision.Reason = ReasonManifestRule
 			decision.Detail = rule.Detail
 			decision.RuleID = rule.ID
@@ -360,7 +360,7 @@ func (rule Rule) evaluate(snapshot Snapshot, explain bool) ruleResult {
 	text, title := rule.matchTargets(lines, snapshot.Title)
 	for _, matcher := range rule.matchers {
 		target := text
-		if matcher.title {
+		if matcher.matchTitle {
 			target = title
 		}
 

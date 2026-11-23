@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -33,11 +33,11 @@ func (host *isolatedHost) runResume(t *testing.T, original *exec.Cmd) {
 	var output []byte
 
 	switch {
-	case host.contract.LifecycleDriver == driverACP:
+	case host.contract.LifecycleDriver == nativeDriverACP:
 		host.runKimiACP(t, host.headlessCommand(t, original.Env), &previous, false)
-	case host.contract.InterruptionDriver == driverCLIACP:
+	case host.contract.InterruptionDriver == nativeDriverCLIACP:
 		host.runClineResume(t, original.Env, previous)
-	case host.contract.LifecycleDriver == driverExecRPC:
+	case host.contract.LifecycleDriver == nativeDriverExecRPC:
 		output = host.runDroidRPC(t, original.Env, &previous, false)
 	default:
 		command := exec.CommandContext(
@@ -90,7 +90,7 @@ func (host *isolatedHost) assertResumeRestoredHistory(t *testing.T, oldCallID st
 		)
 	}
 
-	if host.contract.LifecycleDriver == driverExecRPC {
+	if host.contract.LifecycleDriver == nativeDriverExecRPC {
 		if !jsonContainsString(requests[0].Body, compatibilityFinalText) {
 			t.Fatal("resumed model request did not restore the prior native conversation")
 		}
@@ -137,7 +137,7 @@ func resumeArguments(
 ) []string {
 	t.Helper()
 
-	native := catalog.ResumeCommandFor(contract.ID, session.SessionID, session.SessionPath)
+	native := adapters.ResumeCommandFor(contract.ID, session.SessionID, session.SessionPath)
 	if len(native) < 2 {
 		t.Fatalf("%s has no native resume command for %q", contract.ID, session.SessionID)
 	}

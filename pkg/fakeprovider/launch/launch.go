@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -79,9 +79,9 @@ type Harness struct {
 	tracker  *process
 }
 
-// New prepares Root and starts the plan's services.
-func New(ctx context.Context, opts Options) (*Harness, error) {
-	adapter, found := catalog.Find(opts.Harness)
+// Open prepares Root and starts the plan's services.
+func Open(ctx context.Context, opts Options) (*Harness, error) {
+	adapter, found := adapters.Find(opts.Harness)
 	if !found {
 		return nil, fmt.Errorf("%w: harness %q", ErrUnsupported, opts.Harness)
 	}

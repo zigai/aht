@@ -102,7 +102,7 @@ func normalizeCurrentOptions(opts currentInspectors) currentInspectors {
 	}
 
 	if opts.ProcessFind == nil {
-		opts.ProcessFind = processinfo.Find
+		opts.ProcessFind = processinfo.Lookup
 	}
 
 	if opts.Locations == nil {

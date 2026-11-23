@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	waitStepEvent waitStep = iota
+	_ waitStep = iota
+	waitStepEvent
 	waitStepStable
 	waitStepTimer
 	waitStepCanceled

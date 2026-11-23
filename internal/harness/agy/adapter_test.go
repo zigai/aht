@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -47,7 +47,7 @@ func TestPayloadDefaults(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := catalog.PayloadDefaults(test.harness, json.RawMessage(test.payload))
+			got, err := adapters.PayloadDefaults(test.harness, json.RawMessage(test.payload))
 			if err != nil {
 				t.Fatalf("unexpected error from PayloadDefaults: %v", err)
 			}
@@ -99,7 +99,7 @@ func TestPayloadCompatible(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := catalog.PayloadCompatible(test.harness, json.RawMessage(test.payload))
+			got := adapters.PayloadCompatible(test.harness, json.RawMessage(test.payload))
 			if got != test.want {
 				t.Fatalf("expected %t, got %t", test.want, got)
 			}
@@ -209,7 +209,7 @@ func TestHandleHookAgy(t *testing.T) {
 func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 	t.Helper()
 
-	result, ok, err := catalog.HandleHook(
+	result, ok, err := adapters.HandleHook(
 		t.Context(),
 		registry.Harness("agy"),
 		test.event,
@@ -249,9 +249,9 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 }
 
 func TestAgySettingsUseApplicationDirectory(t *testing.T) {
-	home := testharness.Isolate(t, catalog.All()...)
+	home := testharness.Isolate(t, adapters.All()...)
 
-	locations, ok := catalog.LocationsFor(registry.Harness("agy"), "")
+	locations, ok := adapters.LocationsFor(registry.Harness("agy"), "")
 	if !ok {
 		t.Fatal("missing locations")
 	}
@@ -308,7 +308,7 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 				Attributes: test.attributes,
 			}
 
-			observation := catalog.PrepareObservation(
+			observation := adapters.PrepareObservation(
 				registry.Observation{Harness: test.harness, Evidence: report},
 			)
 			if !reflect.DeepEqual(observation.Report().Detail, test.want) {

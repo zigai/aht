@@ -482,7 +482,7 @@ INSERT INTO messages VALUES(2,'native','user','refresh token',2);`+tt.extraRows)
 				t.Context(),
 				history.Query{Terms: []string{"refresh token"}},
 			)
-			if !errors.Is(err, tt.err) || (tt.issues > 0 && !result.Issues[0].Record) ||
+			if !errors.Is(err, tt.err) || (tt.issues > 0 && !result.Issues[0].IsRecord) ||
 				len(result.Issues) != tt.issues ||
 				len(result.Matches) != 1 ||
 				result.Matches[0].MatchingParts != tt.matchingParts ||

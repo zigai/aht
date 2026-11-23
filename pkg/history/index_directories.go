@@ -28,8 +28,8 @@ type directoryCache struct {
 }
 
 type directoryEntry struct {
-	name      string
-	directory bool
+	name  string
+	isDir bool
 }
 
 type directoryChange struct {
@@ -148,11 +148,11 @@ func (cache *directoryCache) walk(
 
 	entries := make([]directoryEntry, 0, len(directory.children)+len(directory.files))
 	for _, name := range directory.children {
-		entries = append(entries, directoryEntry{name: name, directory: true})
+		entries = append(entries, directoryEntry{name: name, isDir: true})
 	}
 
 	for _, name := range directory.files {
-		entries = append(entries, directoryEntry{name: name, directory: false})
+		entries = append(entries, directoryEntry{name: name, isDir: false})
 	}
 
 	slices.SortFunc(
@@ -166,7 +166,7 @@ func (cache *directoryCache) walk(
 		}
 
 		child := filepath.Join(path, entry.name)
-		if entry.directory {
+		if entry.isDir {
 			cache.walk(ctx, scan, root, child, files)
 		} else {
 			*files = append(*files, rootFile(cache.source.Harness, root, cache.source.Path, child))

@@ -231,7 +231,7 @@ func TestCLIFirstRunResolvesLayersWithoutWritingConfig(t *testing.T) {
 	userDir := filepath.Join(dir, "user")
 	systemDir := filepath.Join(dir, "system")
 
-	t.Setenv(config.ConfigEnv, "")
+	t.Setenv(config.PathEnv, "")
 	t.Setenv("XDG_CONFIG_HOME", userDir)
 	t.Setenv("XDG_CONFIG_DIRS", systemDir)
 	t.Chdir(dir)
@@ -276,7 +276,7 @@ func configureFirstRunTest(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config", "config.toml")
-	t.Setenv(config.ConfigEnv, configPath)
+	t.Setenv(config.PathEnv, configPath)
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
 	t.Setenv("CODEX_HOME", filepath.Join(dir, ".codex"))

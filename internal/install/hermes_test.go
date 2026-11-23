@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -127,7 +127,7 @@ func TestHermesInstallUsesNativePluginCLIAndIsIdempotent(t *testing.T) {
 func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.T) {
 	t.Setenv("HERMES_HOME", t.TempDir())
 
-	adapter, ok := catalog.Find(registry.Harness("hermes"))
+	adapter, ok := adapters.Find(registry.Harness("hermes"))
 	if !ok {
 		t.Fatal("Hermes adapter not found")
 	}
@@ -137,7 +137,7 @@ func TestHermesPluginShapeUsesDocumentedHooksWithoutSensitiveContent(t *testing.
 		t.Fatalf("plan Hermes integration: %v", err)
 	}
 
-	pluginAction, ok := plan.Actions[0].(harnesspkg.PluginDirectoryAction)
+	pluginAction, ok := plan.Actions[0].(harness.PluginDirectoryAction)
 	if !ok {
 		t.Fatalf("unexpected Hermes install action: %T", plan.Actions[0])
 	}

@@ -15,7 +15,7 @@ import (
 	gotmux "github.com/zigai/gotmux/tmux"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/fakeprovider"
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -111,8 +111,8 @@ func (app *application) newStartCommand() *cobra.Command {
 	return command
 }
 
-func (app *application) runStart(ctx context.Context, options startOptions) error {
-	titleRequest, err := launch.TitleRequestFor(options.harness)
+func (app *application) runStart(ctx context.Context, opts startOptions) error {
+	titleRequest, err := launch.TitleRequestFor(opts.harness)
 	if err != nil {
 		return fmt.Errorf("prepare native title recognition: %w", err)
 	}
@@ -128,13 +128,13 @@ func (app *application) runStart(ctx context.Context, options startOptions) erro
 		return fmt.Errorf("start fake provider: %w", err)
 	}
 
-	launched, term, err := startHarness(ctx, provider.URL(), options)
+	launched, term, err := startHarness(ctx, provider.URL(), opts)
 	if err != nil {
 		return finish(err, provider.Close())
 	}
 
 	run := startRun{provider: provider, launched: launched, term: term}
-	if err := app.writeStart(run, options); err != nil {
+	if err := app.writeStart(run, opts); err != nil {
 		return finish(err, run.close(ctx))
 	}
 
@@ -144,15 +144,15 @@ func (app *application) runStart(ctx context.Context, options startOptions) erro
 func startHarness(
 	ctx context.Context,
 	providerURL string,
-	options startOptions,
+	opts startOptions,
 ) (*launch.Harness, *launch.Terminal, error) {
-	launched, err := launch.New(ctx, launch.Options{
-		Harness:    options.harness,
-		Root:       options.root,
+	launched, err := launch.Open(ctx, launch.Options{
+		Harness:    opts.harness,
+		Root:       opts.root,
 		Endpoint:   providerURL,
 		Model:      "",
 		APIKey:     "",
-		AHT:        options.aht,
+		AHT:        opts.aht,
 		Executable: "",
 		Env:        nil,
 	})
@@ -160,7 +160,7 @@ func startHarness(
 		return nil, nil, fmt.Errorf("prepare launch: %w", err)
 	}
 
-	if options.aht != "" {
+	if opts.aht != "" {
 		if err := launched.StartTracker(ctx); err != nil {
 			return nil, nil, finish(fmt.Errorf("start tracker: %w", err), launched.Close(ctx))
 		}
@@ -168,7 +168,7 @@ func startHarness(
 
 	term, err := launched.StartTerminal(
 		ctx,
-		options.prompt,
+		opts.prompt,
 		gotmux.Size{Width: terminalWidth, Height: terminalHeight},
 	)
 	if err != nil {
@@ -211,18 +211,18 @@ func waitForExit(ctx context.Context, term *launch.Terminal) error {
 	}
 }
 
-func (app *application) writeStart(run startRun, options startOptions) error {
+func (app *application) writeStart(run startRun, opts startOptions) error {
 	info := startInfo{
-		Harness:     options.harness,
+		Harness:     opts.harness,
 		Root:        run.launched.Root,
 		Store:       run.launched.Store,
 		ProviderURL: run.provider.URL(),
 		Attach:      run.term.AttachCommand(),
 		Inspect:     nil,
 	}
-	if options.aht != "" {
+	if opts.aht != "" {
 		info.Inspect = []string{
-			options.aht,
+			opts.aht,
 			"--store",
 			run.launched.Store,
 			"list",
@@ -258,7 +258,7 @@ func shellCommand(argv []string) string {
 }
 
 func launchableHarness(value string) (registry.Harness, error) {
-	harnessID, err := catalog.Parse(value)
+	harnessID, err := adapters.Parse(value)
 	if err == nil {
 		if launch.Supported(harnessID) {
 			return harnessID, nil
@@ -279,7 +279,7 @@ func launchableHarness(value string) (registry.Harness, error) {
 func launchableHarnessNames() []string {
 	var names []string
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		if launch.Supported(adapter.Definition().ID) {
 			names = append(names, string(adapter.Definition().ID))
 		}

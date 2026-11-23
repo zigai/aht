@@ -20,7 +20,7 @@ func EditPath(path string) (string, error) {
 	options := []strata.Option{strata.WithFormats(".toml")}
 	if path != "" {
 		options = append(options, strata.WithPath(path))
-	} else if env := strings.TrimSpace(os.Getenv(ConfigEnv)); env != "" {
+	} else if env := strings.TrimSpace(os.Getenv(PathEnv)); env != "" {
 		options = append(options, strata.WithOptionalPath(env))
 	} else {
 		options = append(options, strata.WithAppName("aht"))
@@ -51,7 +51,7 @@ func FileExists(path string) (bool, error) {
 // the default template when it is missing. A key or value that would leave the
 // file invalid returns ErrInvalidSetting and leaves the file unchanged.
 func Set(path string, key string, value string) error {
-	if _, err := EnsureConfigFile(path); err != nil {
+	if _, err := EnsureFile(path); err != nil {
 		return fmt.Errorf("ensure config file %s: %w", path, err)
 	}
 
@@ -168,7 +168,7 @@ func writeConfigContents(file *os.File) error {
 		return errors.Join(fmt.Errorf("set config permissions: %w", err), file.Close())
 	}
 
-	if _, err := file.WriteString(DefaultConfigTemplate()); err != nil {
+	if _, err := file.WriteString(DefaultTemplate()); err != nil {
 		return errors.Join(fmt.Errorf("write config: %w", err), file.Close())
 	}
 

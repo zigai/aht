@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	native "github.com/zigai/aht/v2/internal/harness/transcript"
+	"github.com/zigai/aht/v2/internal/harness/transcript"
 )
 
 const directoryScanThreshold = 32
@@ -68,15 +68,15 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *queryPlan) (err 
 	index.excluded = map[int64]bool{}
 
 	switch s.mode {
-	case modeSearch:
+	case scanModeSearch:
 		if err := index.findParts(ctx, s, 0); err != nil {
 			return err
 		}
-	case modeList:
+	case scanModeList:
 		if err := index.prefetchConversations(ctx, s.query.Filter); err != nil {
 			return err
 		}
-	case modeRefresh:
+	case scanModeRefresh:
 	}
 
 	index.queries = new(indexQueries)
@@ -400,11 +400,11 @@ func (index *historyIndex) matches(
 	group []groupFile,
 	keep func(context.Context, Match, int64),
 ) error {
-	if s.mode == modeRefresh {
+	if s.mode == scanModeRefresh {
 		return nil
 	}
 
-	if s.mode == modeSearch {
+	if s.mode == scanModeSearch {
 		candidate, err := index.groupCandidate(ctx, s, group)
 		if err != nil || !candidate {
 			return err
@@ -579,7 +579,7 @@ func (index *historyIndex) collectMatches(
 ) error {
 	for _, c := range conversations {
 		plan := index.plans[c.id]
-		if s.mode == modeSearch && (index.excluded[c.id] || !plan.qualifies()) {
+		if s.mode == scanModeSearch && (index.excluded[c.id] || !plan.qualifies()) {
 			continue
 		}
 
@@ -591,7 +591,7 @@ func (index *historyIndex) collectMatches(
 			RegistryStates: nil,
 		}
 
-		if s.mode == modeList || s.query.Limit > 0 {
+		if s.mode == scanModeList || s.query.Limit > 0 {
 			if plan != nil {
 				match.MatchingParts = plan.count
 			}
@@ -626,7 +626,7 @@ func (index *historyIndex) readExcerpts(
 		return err
 	}
 
-	var t transcript
+	var t transcriptState
 
 	t.match = *match
 
@@ -694,7 +694,7 @@ func (index *historyIndex) eachPartText(
 			return fmt.Errorf("read indexed text: %w", err)
 		}
 
-		excerpt.Timestamp = native.NativeTime(timestamp)
+		excerpt.Timestamp = transcript.NativeTime(timestamp)
 		visit(part, excerpt)
 	}
 

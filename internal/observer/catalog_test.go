@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -51,7 +51,7 @@ func TestDefaultCatalogListCanonicalizesHarnessAlias(t *testing.T) {
 
 	entries, err := defaultCatalogList(
 		context.Background(),
-		func(context.Context) ([]catalog.NativeCatalogEntry, error) { return nil, nil },
+		func(context.Context) ([]adapters.NativeCatalogEntry, error) { return nil, nil },
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestObserverCycleAcceptsCanonicalizedCatalogAlias(t *testing.T) {
 	t.Setenv(catalogJSONEnv, `[{"harness":"claude-code","session_id":"alias","current":true}]`)
 	t.Setenv(catalogFileEnv, "")
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	watcher := New(Options{
 		Store:       store,
 		StorePath:   path,
@@ -75,7 +75,7 @@ func TestObserverCycleAcceptsCanonicalizedCatalogAlias(t *testing.T) {
 		CatalogList: func(ctx context.Context) ([]CatalogEntry, error) {
 			return defaultCatalogList(
 				ctx,
-				func(context.Context) ([]catalog.NativeCatalogEntry, error) { return nil, nil },
+				func(context.Context) ([]adapters.NativeCatalogEntry, error) { return nil, nil },
 			)
 		},
 		Now: func() time.Time { return time.Now().UTC() },
@@ -106,7 +106,7 @@ func TestDefaultCatalogListEmptyWithoutConfiguration(t *testing.T) {
 
 	entries, err := defaultCatalogList(
 		context.Background(),
-		func(context.Context) ([]catalog.NativeCatalogEntry, error) { return nil, nil },
+		func(context.Context) ([]adapters.NativeCatalogEntry, error) { return nil, nil },
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -154,8 +154,8 @@ func TestDefaultCatalogListRetainsConfiguredAndNativeEntriesOnProviderError(t *t
 
 	entries, err := defaultCatalogList(
 		t.Context(),
-		func(context.Context) ([]catalog.NativeCatalogEntry, error) {
-			return []catalog.NativeCatalogEntry{
+		func(context.Context) ([]adapters.NativeCatalogEntry, error) {
+			return []adapters.NativeCatalogEntry{
 				{
 					Harness: "goose",
 					Reporter: registry.Reporter{
@@ -300,7 +300,7 @@ func verifyPrimeCatalogListedWorker(
 		t.Fatalf("catalogActivityReport() = %t, want %t", ok, want)
 	}
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	watcher := New(Options{
 		Store: store,
 		Now:   func() time.Time { return at },
@@ -354,7 +354,7 @@ func TestPrimeCatalogInvalidPIDKeepsSavedMetadata(t *testing.T) {
 
 	at := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	if _, err := store.Observe(t.Context(), registry.Observation{
 		Harness: "prime-agent", At: at.Add(-time.Minute),
 		Subject:  registry.ObservationIdentity{SessionID: "durable"},
@@ -448,7 +448,7 @@ func assertCatalogActivityReport(t *testing.T, report *registry.Report, ok bool)
 
 func TestObserverAppliesNativeCatalogActivityEachCycle(t *testing.T) {
 	t.Parallel()
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	activity := registry.ActivityIdle
 	process := processinfo.Process{

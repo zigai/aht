@@ -79,9 +79,9 @@ func ListWithEnv(
 	return processes, nil
 }
 
-// Find returns the current-user process identified by pid. A false found
+// Lookup returns the current-user process identified by pid. A false found
 // result means the process does not exist or belongs to another user.
-func Find(ctx context.Context, pid int) (Process, bool, error) {
+func Lookup(ctx context.Context, pid int) (Process, bool, error) {
 	var zero Process
 	if pid <= 0 {
 		return zero, false, nil

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/fakeprovider/launch"
 )
 
@@ -52,7 +52,7 @@ func TestStartRejectsBadInvocationBeforeCreatingRoot(t *testing.T) {
 		},
 	}
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		if !launch.Supported(adapter.Definition().ID) {
 			cases = append(cases, struct {
 				name     string

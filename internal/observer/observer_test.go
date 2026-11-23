@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -240,7 +240,7 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 		t.Fatalf("first result: %#v", first)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("present sessions: %v %#v", err, sessions)
@@ -275,7 +275,7 @@ func TestObserverDefaultMissingRequiresTwoSnapshots(t *testing.T) {
 		t.Fatalf("second miss did not mark gone: %#v", third)
 	}
 	// A gone process-only session protects nothing, so it is removed.
-	if _, err := registry.NewJournal(path, catalog.Rules{}).
+	if _, err := registry.NewJournal(path, adapters.Rules{}).
 		Get(context.Background(), session.ID); !errors.Is(
 		err,
 		registry.ErrSessionNotFound,
@@ -288,7 +288,7 @@ func TestObserverRetriesFailedGoneObservationAndEvictsTrackedProcess(t *testing.
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewJournal(path, catalog.Rules{})
+	baseStore := registry.NewJournal(path, adapters.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{
@@ -343,7 +343,7 @@ func TestObserverConflictDoesNotBlockIndependentObservation(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewJournal(path, catalog.Rules{})
+	baseStore := registry.NewJournal(path, adapters.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
@@ -396,7 +396,7 @@ func TestObserverRunWithResultsDeliversDegradedResultOnStoreFailure(t *testing.T
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewJournal(path, catalog.Rules{})
+	baseStore := registry.NewJournal(path, adapters.Rules{})
 	store := &failGoneOnceStore{Store: baseStore}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{
@@ -469,7 +469,7 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 	store := &conflictObservationStore{
 		Store: registry.NewJournal(
 			filepath.Join(t.TempDir(), "sessions.json"),
-			catalog.Rules{},
+			adapters.Rules{},
 		),
 		conflictPID: 1234,
 		enabled:     true,
@@ -500,7 +500,7 @@ func TestObserverPreservesAtomicConflictAfterSuccessfulIndividualRetries(t *test
 func TestObserverTracksProcessesCommittedDuringConflictRecovery(t *testing.T) {
 	t.Parallel()
 
-	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234, enabled: true}
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{
@@ -570,7 +570,7 @@ func TestObserverRetriesConflictingAbsenceWithoutAdvancingTracker(t *testing.T) 
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sessions.json")
-	baseStore := registry.NewJournal(path, catalog.Rules{})
+	baseStore := registry.NewJournal(path, adapters.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234}
 	at := time.Now().UTC().Add(-time.Minute)
 	process := processinfo.Process{
@@ -633,7 +633,7 @@ func TestObserverRejectsConcurrentRunsOnOneInstance(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	watcher := New(Options{
-		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			close(entered)
 			<-release
@@ -677,7 +677,7 @@ func TestObserverRetriesHealthWriteAfterPersistenceFailure(t *testing.T) {
 	at := time.Now().UTC()
 
 	watcher := New(Options{
-		Store:       registry.NewJournal(filepath.Join(root, "sessions.json"), catalog.Rules{}),
+		Store:       registry.NewJournal(filepath.Join(root, "sessions.json"), adapters.Rules{}),
 		StorePath:   storePath,
 		Now:         func() time.Time { return at },
 		ProcessList: func(context.Context) ([]processinfo.Process, error) { return nil, nil },
@@ -747,7 +747,7 @@ func TestObserverRestartMarksMissingStoredProcessGone(t *testing.T) {
 		t.Fatalf("restart result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -769,7 +769,7 @@ func seedHookCreatedLiveSession(
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
 
-	_, err := registry.NewJournal(path, catalog.Rules{}).
+	_, err := registry.NewJournal(path, adapters.Rules{}).
 		Observe(context.Background(), registry.Observation{Harness: registry.Harness(
 			"omp",
 		), At: at, Subject: registry.ObservationIdentity{
@@ -819,7 +819,7 @@ func TestObserverMarksHookCreatedDeadProcessGoneInOneCycle(t *testing.T) {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -855,7 +855,7 @@ func TestObserverKeepsHookCreatedLiveProcessAndRetiresReusedPID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -888,7 +888,7 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 	activity := registry.ActivityRunning
 	presence := registry.PresenceLive
 
-	_, err := registry.NewJournal(path, catalog.Rules{}).
+	_, err := registry.NewJournal(path, adapters.Rules{}).
 		Observe(context.Background(), registry.Observation{
 			Harness: registry.Harness(
 				"pi",
@@ -933,7 +933,7 @@ func TestObserverMarksHookCreatedSessionWithDeadPanePIDGone(t *testing.T) {
 		t.Fatalf("result gone = %d, want 1: %#v", result.Gone, result)
 	}
 
-	sessions, err := registry.NewJournal(path, catalog.Rules{}).
+	sessions, err := registry.NewJournal(path, adapters.Rules{}).
 		List(context.Background(), registry.Filter{})
 	if err != nil {
 		t.Fatal(err)
@@ -949,7 +949,7 @@ func TestObserverRetiresStaleSessionWithPreviousProcessObservation(t *testing.T)
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	at := time.Now().UTC().Add(-time.Minute)
 
-	store := registry.NewJournal(path, catalog.Rules{})
+	store := registry.NewJournal(path, adapters.Rules{})
 	seedStaleSessionHistory(t, store, at)
 
 	preSessions, err := store.List(context.Background(), registry.Filter{})
@@ -1098,7 +1098,7 @@ func TestRunWithResultsStreamsEveryCycle(t *testing.T) {
 	results := make([]Result, 0, 1)
 
 	watcher := New(Options{
-		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{}),
+		Store: registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{}),
 		ProcessList: func(context.Context) ([]processinfo.Process, error) {
 			cancel()
 			return nil, nil
@@ -1123,7 +1123,7 @@ func TestObserverSlowsUnchangedPollingAndResumesAfterReports(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, err := registry.OpenMemoryStore(
 			filepath.Join(t.TempDir(), "state.json"),
-			catalog.Rules{},
+			adapters.Rules{},
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -1224,7 +1224,7 @@ func TestObserverIdlePollingHonorsLongerConfiguredInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, err := registry.OpenMemoryStore(
 			filepath.Join(t.TempDir(), "state.json"),
-			catalog.Rules{},
+			adapters.Rules{},
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -1295,7 +1295,7 @@ func TestObserverKeepsConfiguredPollingAfterDiscoveryFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, err := registry.OpenMemoryStore(
 			filepath.Join(t.TempDir(), "state.json"),
-			catalog.Rules{},
+			adapters.Rules{},
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -1352,7 +1352,7 @@ func TestObserverKeepsConfiguredPollingAfterDiscoveryFailures(t *testing.T) {
 func TestObserverKeepsPollingWhileMissingProcessAwaitsRetirement(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	at := time.Now().UTC().Add(-time.Minute)
 	processes := []processinfo.Process{{
 		PID: 1234, PPID: 1, ProcessGroupID: 1234, StartIdentity: "boot:A",
@@ -1402,7 +1402,7 @@ func TestObserverKeepsPollingWhileMissingProcessAwaitsRetirement(t *testing.T) {
 func TestObserverKeepsPollingWhileScreenDecidesActivity(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	process, pane := detectionProcessPane(140, "codex")
 	options := detectionObserverOptions(store, process, pane, t.TempDir())
 	options.Interval = time.Second
@@ -1440,7 +1440,7 @@ func TestObserverKeepsPollingWhileScreenDecidesActivity(t *testing.T) {
 func TestObserverConflictRecoveryCommitsRecordedRetirements(t *testing.T) {
 	t.Parallel()
 
-	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	baseStore := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	store := &conflictObservationStore{Store: baseStore, conflictPID: 1234}
 	at := time.Now().UTC().Add(-time.Minute)
 	conflicting := processinfo.Process{
@@ -1509,7 +1509,7 @@ func TestObserverConflictRecoveryCommitsRecordedRetirements(t *testing.T) {
 func TestObserverTracksReportedInnerAgentOfSameHarness(t *testing.T) {
 	t.Parallel()
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
 	outer := processinfo.Process{
 		PID: 20, PPID: 1, ProcessGroupID: 20, StartIdentity: "boot:20",
 		Executable: "/usr/bin/claude", CWD: "/work", TTY: "/dev/pts/4",

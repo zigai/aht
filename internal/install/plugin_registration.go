@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -15,7 +15,7 @@ func installRegisteredPlugin(
 	ctx context.Context,
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	plugin pluginDirectoryInstall,
 	pluginChanged bool,
 	recovered bool,
@@ -27,7 +27,7 @@ func installRegisteredPlugin(
 		return Result{}, fmt.Errorf("inspecting %s registration: %w", registration.ID(), err)
 	}
 
-	if state == harnesspkg.PluginRegistrationForeign && !opts.Force {
+	if state == harness.PluginRegistrationForeign && !opts.Force {
 		return Result{}, fmt.Errorf(
 			"%w: %s; pass --force to replace it",
 			errForeignFile,
@@ -35,7 +35,7 @@ func installRegisteredPlugin(
 		)
 	}
 
-	needsWrite := pluginChanged || state != harnesspkg.PluginRegistrationCurrent
+	needsWrite := pluginChanged || state != harness.PluginRegistrationCurrent
 	changed := needsWrite || recovered
 	label := installLabel(plan.Label, harnessID, "plugin")
 
@@ -43,7 +43,7 @@ func installRegisteredPlugin(
 		Harness:  string(harnessID),
 		Path:     plan.Dir,
 		Changed:  changed,
-		Message:  installMessage(label, changed, opts.DryRun),
+		Message:  installMessage(label, changed, opts),
 		NextStep: "",
 		Snippet:  plugin.snippet(),
 		Error:    "",
@@ -68,8 +68,8 @@ func installRegisteredPlugin(
 
 func applyRegisteredPlugin(
 	ctx context.Context,
-	registration harnesspkg.PluginRegistration,
-	state harnesspkg.PluginRegistrationState,
+	registration harness.PluginRegistration,
+	state harness.PluginRegistrationState,
 	pluginDir string,
 	plugin pluginDirectoryInstall,
 	pluginChanged bool,
@@ -118,7 +118,7 @@ func removeRegisteredPlugin(
 	ctx context.Context,
 	opts Options,
 	harnessID registry.Harness,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	exists bool,
 ) (Result, error) {
 	registration := plan.Registration
@@ -132,15 +132,15 @@ func removeRegisteredPlugin(
 		)
 	}
 
-	if state == harnesspkg.PluginRegistrationForeign {
+	if state == harness.PluginRegistrationForeign {
 		return Result{}, fmt.Errorf("%w: %s", errForeignFile, registration.Label())
 	}
 
-	registered := state != harnesspkg.PluginRegistrationMissing
+	registered := state != harness.PluginRegistrationMissing
 
 	changed := exists || registered
 	if !changed || opts.DryRun {
-		return removeResult(harnessID, plan.Dir, changed, opts.DryRun), nil
+		return removeResult(harnessID, plan.Dir, changed, opts), nil
 	}
 
 	if err := registration.EnsureMutable(plan.Dir); err != nil {
@@ -166,11 +166,11 @@ func removeRegisteredPlugin(
 		return Result{}, err
 	}
 
-	return removeResult(harnessID, plan.Dir, true, false), nil
+	return removeResult(harnessID, plan.Dir, true, opts), nil
 }
 
 func removeRegisteredPluginFiles(
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	exists bool,
 	unregister func() error,
 ) error {
@@ -195,7 +195,7 @@ func removeRegisteredPluginFiles(
 
 func inspectRegistration(
 	ctx context.Context,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 ) (inspectedArtifact, error) {
 	registration := plan.Registration
 
@@ -211,15 +211,15 @@ func inspectRegistration(
 	status := ArtifactMissing
 
 	switch state {
-	case harnesspkg.PluginRegistrationCurrent:
+	case harness.PluginRegistrationCurrent:
 		status = ArtifactCurrent
-	case harnesspkg.PluginRegistrationDisabled:
+	case harness.PluginRegistrationDisabled:
 		status = ArtifactDisabled
-	case harnesspkg.PluginRegistrationStale:
+	case harness.PluginRegistrationStale:
 		status = ArtifactStale
-	case harnesspkg.PluginRegistrationForeign:
+	case harness.PluginRegistrationForeign:
 		status = ArtifactForeign
-	case harnesspkg.PluginRegistrationMissing:
+	case harness.PluginRegistrationMissing:
 	}
 
 	return inspectedArtifact{path: registration.Label(), status: status}, nil
@@ -227,7 +227,7 @@ func inspectRegistration(
 
 func registeredPluginMissingMarker(
 	ctx context.Context,
-	plan harnesspkg.PluginDirectoryInstallPlan,
+	plan harness.PluginDirectoryInstallPlan,
 	dir string,
 ) (bool, error) {
 	if plan.Registration == nil || plan.RequireMarker {
@@ -247,7 +247,7 @@ func registeredPluginMissingMarker(
 		return false, nil
 	}
 
-	if _, err := os.Lstat(filepath.Join(dir, harnesspkg.ArtifactMarkerFile)); err == nil {
+	if _, err := os.Lstat(filepath.Join(dir, harness.ArtifactMarkerFile)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("checking registered plugin marker: %w", err)

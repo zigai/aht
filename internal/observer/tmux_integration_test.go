@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testtmux"
 	"github.com/zigai/aht/v2/pkg/mux"
@@ -49,7 +49,7 @@ func TestRealTmuxBottomScreenDetectionForFourAgents(t *testing.T) {
 	}
 	processes, panes := startScreenFixtures(t, tests)
 
-	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
 
 	result, err := New(screenFixtureOptions(t, store, processes, panes)).RunOnce(ctx)
 	if err != nil {
@@ -116,7 +116,7 @@ func writeScreenScript(t *testing.T, name string, screen string) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), name+".sh")
 
-	contents := "#!/bin/sh\nprintf '\\033[999;1H%s' " + harnesspkg.ShellQuote(
+	contents := "#!/bin/sh\nprintf '\\033[999;1H%s' " + harness.ShellQuote(
 		screen,
 	) + "\nexec sleep 60\n"
 	if err := os.WriteFile(script, []byte(contents), 0o600); err != nil {

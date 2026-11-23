@@ -2,7 +2,7 @@ package harness
 
 import (
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -26,7 +26,7 @@ type Capabilities struct {
 // CapabilitiesFor returns the static capabilities of harnessID.
 // If harnessID is unrecognized, it returns an empty Capabilities and false.
 func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
-	adapter, ok := catalog.Find(harnessID)
+	adapter, ok := adapters.Find(harnessID)
 	if !ok {
 		return Capabilities{
 			Harness:            "",
@@ -60,11 +60,11 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 	definition := adapter.Definition()
 	_, hasTitleLookup := adapter.(harness.TitleReader)
 	_, hasNativeCatalog := adapter.(harness.CatalogProvider)
-	screenSupport := catalog.SupportsScreen(harnessID)
-	policy := (catalog.Rules{}).Policy(harnessID)
+	screenSupport := adapters.SupportsScreen(harnessID)
+	policy := (adapters.Rules{}).Policy(harnessID)
 
 	return Capabilities{
-		Details:            catalog.DetailCapabilitiesFor(harnessID),
+		Details:            adapters.DetailCapabilitiesFor(harnessID),
 		Harness:            definition.ID,
 		SessionStart:       definition.Capabilities.SessionStart,
 		SessionEnd:         definition.Capabilities.SessionEnd,
@@ -83,10 +83,10 @@ func CapabilitiesFor(harnessID registry.Harness) (Capabilities, bool) {
 
 // AllCapabilities returns the static capabilities of all supported harnesses in canonical order.
 func AllCapabilities() []Capabilities {
-	adapters := catalog.All()
+	all := adapters.All()
 
-	result := make([]Capabilities, 0, len(adapters))
-	for _, adapter := range adapters {
+	result := make([]Capabilities, 0, len(all))
+	for _, adapter := range all {
 		def := adapter.Definition()
 
 		caps, ok := CapabilitiesFor(def.ID)

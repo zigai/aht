@@ -180,14 +180,14 @@ func (app *application) runReport(
 	}
 
 	switch prepared.Ignored {
-	case reporting.IgnorePayloadMismatch:
+	case reporting.IgnoreReasonPayloadMismatch:
 		return app.writeReportIgnored(
 			prepared.Harness,
 			string(prepared.Ignored),
 			"hook payload does not match harness",
 			quiet,
 		)
-	case reporting.IgnoreSessionTeardown:
+	case reporting.IgnoreReasonSessionTeardown:
 		return app.writeReportIgnored(
 			prepared.Harness,
 			string(prepared.Ignored),

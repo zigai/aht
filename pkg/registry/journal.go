@@ -87,10 +87,6 @@ func (s *Journal) Observe(ctx context.Context, observation Observation) (Session
 }
 
 func (s *Journal) ObserveBatch(ctx context.Context, observations []Observation) ([]Session, error) {
-	return s.Append(ctx, observations)
-}
-
-func (s *Journal) Append(ctx context.Context, observations []Observation) ([]Session, error) {
 	result, err := s.transact(
 		ctx,
 		journalEntry{

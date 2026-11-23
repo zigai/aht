@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -109,7 +109,7 @@ func TestServerStreamsEffectiveStateChanges(t *testing.T) {
 
 	path := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func startBrokerAdversityFixture(t *testing.T) brokerAdversityFixture {
 	t.Helper()
 	path := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +662,7 @@ func BenchmarkBrokerObserveRoundTrip(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	path := filepath.Join(b.TempDir(), "state.json")
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -722,7 +722,7 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 
 	path := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -914,7 +914,7 @@ func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
 func TestServerFreesClosedSubscriberSlot(t *testing.T) {
 	path := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1016,7 +1016,7 @@ func TestServerRejectsOversizedRequest(t *testing.T) {
 func TestServerBusyRejectionDoesNotBlockAccept(t *testing.T) {
 	path := shortStatePath(t)
 
-	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	store, err := registry.OpenMemoryStore(path, adapters.Rules{})
 	if err != nil {
 		t.Fatal(err)
 	}

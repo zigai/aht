@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 
 	"github.com/zigai/aht/v2/internal/processinfo"
 
@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	IgnorePayloadMismatch IgnoreReason = "payload_mismatch"
-	IgnoreSessionTeardown IgnoreReason = "session_teardown"
+	IgnoreReasonPayloadMismatch IgnoreReason = "payload_mismatch"
+	IgnoreReasonSessionTeardown IgnoreReason = "session_teardown"
 )
 
 //exhaustruct:optional
@@ -85,25 +85,25 @@ type Runtime struct {
 }
 
 func ApplyHarnessEnv(opts *Options) {
-	harnessID, err := catalog.Parse(opts.Harness)
+	harnessID, err := adapters.Parse(opts.Harness)
 	if err != nil {
 		return
 	}
 
 	if opts.SessionID == "" {
-		opts.SessionID = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionID)...)
+		opts.SessionID = firstEnv(adapters.EnvNames(harnessID, harness.EnvSessionID)...)
 	}
 
 	if opts.SessionPath == "" {
-		opts.SessionPath = firstEnv(catalog.EnvNames(harnessID, harness.EnvSessionPath)...)
+		opts.SessionPath = firstEnv(adapters.EnvNames(harnessID, harness.EnvSessionPath)...)
 	}
 
 	if opts.PID <= 0 {
-		opts.PID = firstEnvInt(catalog.EnvNames(harnessID, harness.EnvPID)...)
+		opts.PID = firstEnvInt(adapters.EnvNames(harnessID, harness.EnvPID)...)
 	}
 
 	if opts.Event == "" {
-		opts.Event = firstEnv(catalog.EnvNames(harnessID, harness.EnvEvent)...)
+		opts.Event = firstEnv(adapters.EnvNames(harnessID, harness.EnvEvent)...)
 	}
 }
 
@@ -134,11 +134,11 @@ func Prepare(
 		return Result{}, err
 	}
 
-	if !catalog.PayloadCompatible(harnessID, defaultsPayload) {
-		return Result{Harness: harnessID, Ignored: IgnorePayloadMismatch}, nil
+	if !adapters.PayloadCompatible(harnessID, defaultsPayload) {
+		return Result{Harness: harnessID, Ignored: IgnoreReasonPayloadMismatch}, nil
 	}
 
-	defaults, err := catalog.PayloadDefaults(harnessID, defaultsPayload)
+	defaults, err := adapters.PayloadDefaults(harnessID, defaultsPayload)
 	if err != nil {
 		return Result{}, fmt.Errorf("derive payload defaults: %w", err)
 	}
@@ -152,13 +152,13 @@ func Prepare(
 	)
 	applyPayloadDefaults(&opts, attrs, defaults)
 
-	teardown, err := catalog.TeardownPayload(harnessID, opts.Event, defaultsPayload)
+	teardown, err := adapters.TeardownPayload(harnessID, opts.Event, defaultsPayload)
 	if err != nil {
 		return Result{}, fmt.Errorf("classify teardown payload: %w", err)
 	}
 
 	if teardown {
-		return Result{Harness: harnessID, Ignored: IgnoreSessionTeardown}, nil
+		return Result{Harness: harnessID, Ignored: IgnoreReasonSessionTeardown}, nil
 	}
 
 	applyReportRuntimeDefaults(&opts)
@@ -169,7 +169,7 @@ func Prepare(
 		return Result{}, err
 	}
 
-	state.activity, err = catalog.ActivityFromPayload(
+	state.activity, err = adapters.ActivityFromPayload(
 		harnessID,
 		opts.Event,
 		state.activity,
@@ -185,7 +185,7 @@ func Prepare(
 		return Result{}, err
 	}
 
-	observation = catalog.PrepareObservation(observation)
+	observation = adapters.PrepareObservation(observation)
 	if err := applyReportDetail(&observation, opts, state.activity, state.observedAt); err != nil {
 		return Result{}, err
 	}
@@ -236,7 +236,7 @@ func parseReportTarget(opts Options) (registry.Harness, map[string]string, error
 		return "", nil, invalidInput(errMissingReportHarness)
 	}
 
-	harnessID, err := catalog.Parse(opts.Harness)
+	harnessID, err := adapters.Parse(opts.Harness)
 	if err != nil {
 		return "", nil, invalidInput(fmt.Errorf("normalizing harness: %w", err))
 	}
@@ -258,7 +258,7 @@ func translateReportLifecycle(
 		return
 	}
 
-	translated := catalog.LifecycleFor(harnessID, opts.Event, attrs)
+	translated := adapters.LifecycleFor(harnessID, opts.Event, attrs)
 
 	opts.Event = translated.Event
 	if opts.Lifecycle == "" {
@@ -271,12 +271,12 @@ func translateReportLifecycle(
 }
 
 func normalizeReportState(opts Options, defaultObservedAt time.Time) (reportState, error) {
-	presence, err := registry.NormalizePresence(opts.Presence)
+	presence, err := registry.ParsePresence(opts.Presence)
 	if err != nil {
 		return reportState{}, invalidInput(fmt.Errorf("normalize presence: %w", err))
 	}
 
-	activity, err := registry.NormalizeActivity(opts.Activity)
+	activity, err := registry.ParseActivity(opts.Activity)
 	if err != nil {
 		return reportState{}, invalidInput(fmt.Errorf("normalize activity: %w", err))
 	}
@@ -552,7 +552,7 @@ func normalizeReportLifecycle(value string) (registry.NativeLifecycle, error) {
 		return "", nil
 	}
 
-	lifecycle, err := registry.NormalizeLifecycle(value)
+	lifecycle, err := registry.ParseLifecycle(value)
 	if err != nil {
 		return "", fmt.Errorf("normalize lifecycle: %w", err)
 	}
@@ -622,7 +622,7 @@ func processAncestors(ctx context.Context, pid int) []processinfo.Process {
 	var processes []processinfo.Process
 
 	for range reportProcessAncestorLimit {
-		process, found, err := processinfo.Find(ctx, pid)
+		process, found, err := processinfo.Lookup(ctx, pid)
 		if err != nil || !found {
 			break
 		}
@@ -670,7 +670,7 @@ func harnessProcessIndex(harnessID registry.Harness, processes []processinfo.Pro
 			break
 		}
 
-		if matches && (selected < 0 || !catalog.IsWrapper(process)) {
+		if matches && (selected < 0 || !adapters.IsWrapper(process)) {
 			selected = index
 		}
 	}
@@ -688,7 +688,7 @@ func (r Runtime) reportLocation(harnessID registry.Harness) registry.Location {
 	}
 
 	for _, ancestor := range r.Processes[index+1:] {
-		if _, isAgent := catalog.ResolveProcess(ancestor); isAgent && ancestor.TTY == paneTTY {
+		if _, isAgent := adapters.ResolveProcess(ancestor); isAgent && ancestor.TTY == paneTTY {
 			// An agent in the pane started this one in a terminal of its own, for
 			// example to test it. The multiplexer variables are inherited, and the
 			// pane shows only the parent agent.
@@ -702,13 +702,13 @@ func (r Runtime) reportLocation(harnessID registry.Harness) registry.Location {
 }
 
 func reportProcessMatchesHarness(process processinfo.Process, expected registry.Harness) bool {
-	harnessID, ok := catalog.ResolveProcess(process)
+	harnessID, ok := adapters.ResolveProcess(process)
 
 	return ok && harnessID == expected
 }
 
 func parentProcessArgs(ctx context.Context) []string {
-	process, found, err := processinfo.Find(ctx, os.Getppid())
+	process, found, err := processinfo.Lookup(ctx, os.Getppid())
 	if err != nil || !found {
 		return nil
 	}
@@ -763,7 +763,7 @@ func resolveReportProjectRoot(
 		return projectRoot
 	}
 
-	if root := firstEnv(catalog.EnvNames(harnessID, harness.EnvProjectRoot)...); root != "" {
+	if root := firstEnv(adapters.EnvNames(harnessID, harness.EnvProjectRoot)...); root != "" {
 		return root
 	}
 

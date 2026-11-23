@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -46,7 +46,7 @@ func classifyArtifactWith(
 
 	contentPath := path
 	if info.IsDir() {
-		contentPath = filepath.Join(path, harnesspkg.ArtifactMarkerFile)
+		contentPath = filepath.Join(path, harness.ArtifactMarkerFile)
 	}
 
 	data, err := os.ReadFile(contentPath)
@@ -61,8 +61,8 @@ func classifyArtifactWith(
 	return classify(string(data)), nil
 }
 
-func classifyExpectedIdentity(content string, expected harnesspkg.ArtifactIdentity) ArtifactStatus {
-	identity, managed := harnesspkg.ParseArtifactIdentity(content)
+func classifyExpectedIdentity(content string, expected harness.ArtifactIdentity) ArtifactStatus {
+	identity, managed := harness.ParseArtifactIdentity(content)
 	if !managed || identity.ID != expected.ID {
 		return ArtifactForeign
 	}
@@ -75,19 +75,19 @@ func classifyExpectedIdentity(content string, expected harnesspkg.ArtifactIdenti
 }
 
 func classifyArtifactContent(content string, harnessID registry.Harness) ArtifactStatus {
-	identity, managed := harnesspkg.ParseArtifactIdentity(content)
+	identity, managed := harness.ParseArtifactIdentity(content)
 	if !managed {
 		return ArtifactForeign
 	}
 
 	if identity.ID != "" {
-		owner, err := catalog.Parse(identity.ID)
+		owner, err := adapters.Parse(identity.ID)
 		if err != nil || owner != harnessID {
 			return ArtifactForeign
 		}
 	}
 
-	if identity.Version != catalog.IntegrationVersionFor(harnessID) {
+	if identity.Version != adapters.IntegrationVersionFor(harnessID) {
 		return ArtifactStale
 	}
 

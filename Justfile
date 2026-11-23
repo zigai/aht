@@ -22,7 +22,7 @@ test *args:
 explore fuzztime="30s":
     #!/usr/bin/env bash
     set -euo pipefail
-    AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/catalog
+    AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/adapters
     packages=$(git grep --untracked -l '^func Fuzz' -- '*_test.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
     while IFS= read -r package; do
         targets=$(go test "$package" -list '^Fuzz')

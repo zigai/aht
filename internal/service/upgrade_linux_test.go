@@ -96,7 +96,9 @@ func verifyTrackerUpgrade(t *testing.T, stopped bool, stale bool, dryRun bool) {
 
 	executor := &upgradeExecutor{stopped: stopped}
 
-	result, err := New(executor).Upgrade(t.Context(), options.Binary, dryRun)
+	result, err := New(
+		executor,
+	).Upgrade(t.Context(), UpgradeOptions{Binary: options.Binary, DryRun: dryRun})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,13 +195,13 @@ func TestUpgradeRecoversStorePathsWithSystemdSyntax(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 			options := Options{Binary: "/bin/aht", StorePath: test.store, Interval: 7 * time.Second}
-			if _, err := New(&recordingExecutor{}).Update(t.Context(), options); err != nil {
+			if _, err := New(&recordingExecutor{}).Install(t.Context(), options); err != nil {
 				t.Fatal(err)
 			}
 
 			result, err := New(
 				&upgradeExecutor{stopped: true},
-			).Upgrade(t.Context(), options.Binary, true)
+			).Upgrade(t.Context(), UpgradeOptions{Binary: options.Binary, DryRun: true})
 			if err != nil {
 				t.Fatalf("upgrade could not read the installed unit: %v", err)
 			}
@@ -233,7 +235,7 @@ func TestUpgradeLeavesMissingForeignAndInvalidServicesAlone(t *testing.T) {
 
 			executor := &upgradeExecutor{}
 
-			result, err := New(executor).Upgrade(t.Context(), "/bin/aht", false)
+			result, err := New(executor).Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/aht"})
 			if (err != nil) != (content != "") || result.Changed || len(executor.calls) != 0 {
 				t.Fatalf("result = %+v, err = %v, calls = %v", result, err, executor.calls)
 			}
@@ -264,7 +266,7 @@ func TestUpgradeRollbackDoesNotStartStoppedTracker(t *testing.T) {
 
 	executor := &upgradeExecutor{stopped: true, failReload: true}
 
-	_, err = New(executor).Upgrade(t.Context(), "/bin/new-aht", false)
+	_, err = New(executor).Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 	if !errors.Is(err, errManagerTestFailure) {
 		t.Fatalf("error = %v", err)
 	}
@@ -300,7 +302,9 @@ func TestUpgradeReloadsCurrentUnitBeforeRestart(t *testing.T) {
 
 	executor := &upgradeExecutor{}
 
-	if _, err := New(executor).Upgrade(t.Context(), "/bin/aht", false); err != nil {
+	if _, err := New(
+		executor,
+	).Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/aht"}); err != nil {
 		t.Fatal(err)
 	}
 

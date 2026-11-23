@@ -37,10 +37,15 @@ func (state *transcriptState) omitToolBodies() {
 	}
 }
 
+type replayOptions struct {
+	projection   string
+	includeTools bool
+	fast         bool
+}
+
 func replayTranscript(
 	t *testing.T,
-	projection string,
-	includeTools bool, fast bool,
+	opts replayOptions,
 	lines []string,
 ) transcriptState {
 	t.Helper()
@@ -53,15 +58,15 @@ func replayTranscript(
 		UserParts:    reader.UserParts,
 		Conversation: &result.Conversation,
 		Recognized:   &result.Recognized,
-		Projection:   projection,
-		IncludeTools: includeTools,
+		Projection:   opts.projection,
+		IncludeTools: opts.includeTools,
 		Emit: func(_ context.Context, role, body, id string, line int, at time.Time) {
 			result.Captures = append(result.Captures, transcriptCapture{role, body, id, line, at})
 		},
 	}
 
 	for index, line := range lines {
-		if !fast || !reader.FastRecord(t.Context(), decoder, []byte(line), index+1) {
+		if !opts.fast || !reader.FastRecord(t.Context(), decoder, []byte(line), index+1) {
 			var record transcript.Record
 			if err := json.Unmarshal([]byte(line), &record); err != nil {
 				t.Fatal(err)
@@ -227,9 +232,17 @@ func TestFastTranscriptPreservesConversationAndCaptures(t *testing.T) {
 
 	for _, projection := range []string{"", typedUserProjection} {
 		for _, includeTools := range []bool{false, true} {
-			ordinary := replayTranscript(t, projection, includeTools, false, lines)
+			ordinary := replayTranscript(
+				t,
+				replayOptions{projection: projection, includeTools: includeTools},
+				lines,
+			)
 
-			fast := replayTranscript(t, projection, includeTools, true, lines)
+			fast := replayTranscript(
+				t,
+				replayOptions{projection: projection, includeTools: includeTools, fast: true},
+				lines,
+			)
 			if !includeTools {
 				ordinary.omitToolBodies()
 				fast.omitToolBodies()
@@ -340,7 +353,15 @@ func TestTranscriptUserProjectionCaptures(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, includeTools := range []bool{false, true} {
-				result := replayTranscript(t, test.projection, includeTools, true, lines)
+				result := replayTranscript(
+					t,
+					replayOptions{
+						projection:   test.projection,
+						includeTools: includeTools,
+						fast:         true,
+					},
+					lines,
+				)
 				if diff := cmp.Diff(test.want, result.Captures); diff != "" {
 					t.Fatalf("includeTools=%t captures (-want +got):\n%s", includeTools, diff)
 				}

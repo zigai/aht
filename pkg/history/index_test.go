@@ -992,7 +992,7 @@ func searchWithRecordIssue(t *testing.T, c history.Catalog, term string) history
 	t.Helper()
 
 	result, err := c.Search(t.Context(), history.Query{Terms: []string{term}})
-	if err != nil || len(result.Issues) != 1 || !result.Issues[0].Record ||
+	if err != nil || len(result.Issues) != 1 || !result.Issues[0].IsRecord ||
 		len(result.Matches) != 1 {
 		t.Fatalf("partial result = %#v, %v", result, err)
 	}

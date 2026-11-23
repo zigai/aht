@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/internal/testdir"
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -80,7 +80,7 @@ func runTestCLIWithStdin(
 func clearHarnessConfigEnv(t *testing.T) {
 	t.Helper()
 
-	for _, adapter := range catalog.All() {
+	for _, adapter := range adapters.All() {
 		for _, key := range adapter.Definition().Env.Config {
 			t.Setenv(key, "")
 		}

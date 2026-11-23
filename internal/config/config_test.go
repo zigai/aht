@@ -99,7 +99,7 @@ func TestParseDuration(t *testing.T) {
 
 func isolateConfigEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv(ConfigEnv, "")
+	t.Setenv(PathEnv, "")
 	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(t.TempDir(), "system"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "user"))
 }
@@ -110,7 +110,7 @@ func TestLoadMissingDefaultFile(t *testing.T) {
 	nonExistentPath := filepath.Join(tempDir, "does-not-exist.toml")
 	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(tempDir, "system"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempDir, "user"))
-	t.Setenv(ConfigEnv, nonExistentPath)
+	t.Setenv(PathEnv, nonExistentPath)
 
 	cfg, resolved, err := load("")
 	if err != nil {
@@ -432,7 +432,7 @@ func TestSettingsEnvironmentLayer(t *testing.T) {
 	dir := t.TempDir()
 	userDir := filepath.Join(dir, "user", "aht")
 
-	t.Setenv(ConfigEnv, "")
+	t.Setenv(PathEnv, "")
 	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(dir, "system"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "user"))
 	t.Setenv("AHT_UI_SORT", "created")
@@ -449,7 +449,7 @@ func TestSettingsEnvironmentLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, meta, _, err := LoadWithMetadata(Options{})
+	cfg, meta, _, err := Load(Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestSettingsEnvironmentLayer(t *testing.T) {
 		t.Fatalf("environment origin = %+v, found %t", origin, ok)
 	}
 
-	cfg, _, err = loadWithOptions(Options{NoConfig: true})
+	cfg, _, err = loadConfig(Options{NoConfig: true})
 	if err != nil || cfg.UI.Sort != "created" || cfg.UI.DefaultPresence != "all" {
 		t.Fatalf("no-config result = %+v, error = %v", cfg, err)
 	}
@@ -501,7 +501,7 @@ func TestDefaultConfigTemplateMatchesDefaults(t *testing.T) {
 	isolateConfigEnv(t)
 
 	configPath := filepath.Join(t.TempDir(), "default_template.toml")
-	if err := os.WriteFile(configPath, []byte(DefaultConfigTemplate()), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(DefaultTemplate()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -523,9 +523,9 @@ func TestEnsureConfigFile(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "subdir", "config.toml")
 
-	created, err := EnsureConfigFile(configPath)
+	created, err := EnsureFile(configPath)
 	if err != nil {
-		t.Fatalf("EnsureConfigFile failed: %v", err)
+		t.Fatalf("EnsureFile failed: %v", err)
 	}
 
 	if !created {
@@ -537,7 +537,7 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(content) != DefaultConfigTemplate() {
+	if string(content) != DefaultTemplate() {
 		t.Fatalf("file content does not match template")
 	}
 
@@ -546,9 +546,9 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err = EnsureConfigFile(configPath)
+	created, err = EnsureFile(configPath)
 	if err != nil {
-		t.Fatalf("EnsureConfigFile on existing file failed: %v", err)
+		t.Fatalf("EnsureFile on existing file failed: %v", err)
 	}
 
 	if created {
@@ -564,8 +564,8 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatalf("existing file was overwritten: got %q, want %q", string(reRead), customContent)
 	}
 
-	if err := WriteConfigFile(configPath); err != nil {
-		t.Fatalf("WriteConfigFile failed: %v", err)
+	if err := WriteFile(configPath); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
 	}
 
 	overwritten, err := os.ReadFile(configPath)
@@ -573,8 +573,8 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(overwritten) != DefaultConfigTemplate() {
-		t.Fatalf("expected DefaultConfigTemplate after WriteConfigFile")
+	if string(overwritten) != DefaultTemplate() {
+		t.Fatalf("expected DefaultTemplate after WriteFile")
 	}
 
 	dirPath := filepath.Join(tempDir, "directory")
@@ -582,17 +582,17 @@ func TestEnsureConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = EnsureConfigFile(dirPath)
+	_, err = EnsureFile(dirPath)
 	if err == nil {
 		t.Fatal("expected error when path is directory")
 	}
 
 	envPath := filepath.Join(tempDir, "env_config", "config.toml")
-	t.Setenv(ConfigEnv, envPath)
+	t.Setenv(PathEnv, envPath)
 
-	created, err = EnsureConfigFile("")
+	created, err = EnsureFile("")
 	if err != nil {
-		t.Fatalf("EnsureConfigFile(\"\") failed: %v", err)
+		t.Fatalf("EnsureFile(\"\") failed: %v", err)
 	}
 
 	if !created {
@@ -636,7 +636,7 @@ func TestLoadWithOptionsFilePrecedence(t *testing.T) {
 	userDir := filepath.Join(dir, "user")
 	explicitPath := filepath.Join(dir, "config.toml")
 
-	t.Setenv(ConfigEnv, "")
+	t.Setenv(PathEnv, "")
 	t.Setenv("XDG_CONFIG_DIRS", sysDir)
 	t.Setenv("XDG_CONFIG_HOME", userDir)
 
@@ -670,7 +670,7 @@ func TestLoadWithOptionsFilePrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, meta, resolved, err := LoadWithMetadata(Options{Path: explicitPath, Explicit: true})
+	cfg, meta, resolved, err := Load(Options{Path: explicitPath, Explicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func assertLayerOrigins(t *testing.T, meta *strata.Metadata) {
 
 func TestProjectFileRequiresExplicitPath(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv(ConfigEnv, "")
+	t.Setenv(PathEnv, "")
 	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(dir, "system"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "user"))
 	t.Chdir(dir)
@@ -713,7 +713,7 @@ func TestProjectFileRequiresExplicitPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, meta, _, err := LoadWithMetadata(Options{})
+	cfg, meta, _, err := Load(Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +726,7 @@ func TestProjectFileRequiresExplicitPath(t *testing.T) {
 		)
 	}
 
-	cfg, meta, resolved, err := LoadWithMetadata(Options{Path: path, Explicit: true})
+	cfg, meta, resolved, err := Load(Options{Path: path, Explicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +749,7 @@ sort = "activity"
 default_presence = "unknown"
 `
 
-	cfg, resolved, err := loadWithOptions(Options{
+	cfg, resolved, err := loadConfig(Options{
 		Path:  "-",
 		Stdin: strings.NewReader(stdinContent),
 	})
@@ -781,7 +781,7 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 
 	t.Run("explicit AHT_CONFIG overrides default path", func(t *testing.T) {
 		customPath := filepath.Join(tempDir, "custom", "config.toml")
-		t.Setenv(ConfigEnv, customPath)
+		t.Setenv(PathEnv, customPath)
 		t.Setenv("XDG_CONFIG_HOME", xdgDir)
 		t.Setenv("HOME", homeDir)
 
@@ -791,7 +791,7 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 	})
 
 	t.Run("XDG_CONFIG_HOME takes precedence when AHT_CONFIG unset", func(t *testing.T) {
-		t.Setenv(ConfigEnv, "")
+		t.Setenv(PathEnv, "")
 		t.Setenv("XDG_CONFIG_HOME", xdgDir)
 		t.Setenv("HOME", homeDir)
 
@@ -806,7 +806,7 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 	})
 
 	t.Run("existing user YAML is ignored", func(t *testing.T) {
-		t.Setenv(ConfigEnv, "")
+		t.Setenv(PathEnv, "")
 		t.Setenv("XDG_CONFIG_HOME", xdgDir)
 
 		path := filepath.Join(xdgDir, "aht", "config.yaml")
@@ -825,7 +825,7 @@ func TestUserConfigDirAndDefaultPath(t *testing.T) {
 	})
 
 	t.Run("HOME/.config is used when XDG_CONFIG_HOME is unset", func(t *testing.T) {
-		t.Setenv(ConfigEnv, "")
+		t.Setenv(PathEnv, "")
 		t.Setenv("XDG_CONFIG_HOME", "")
 		t.Setenv("HOME", homeDir)
 
@@ -861,12 +861,12 @@ func TestOnlyTOMLConfigFiles(t *testing.T) {
 			t.Fatalf("Load(%q) error = %v, want unsupported format", path, err)
 		}
 
-		if err := WriteConfigFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
-			t.Fatalf("WriteConfigFile(%q) error = %v, want unsupported format", path, err)
+		if err := WriteFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+			t.Fatalf("WriteFile(%q) error = %v, want unsupported format", path, err)
 		}
 
-		if _, err := EnsureConfigFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
-			t.Fatalf("EnsureConfigFile(%q) error = %v, want unsupported format", path, err)
+		if _, err := EnsureFile(path); !errors.Is(err, strata.ErrUnsupportedFormat) {
+			t.Fatalf("EnsureFile(%q) error = %v, want unsupported format", path, err)
 		}
 	}
 
@@ -879,13 +879,13 @@ func TestOnlyTOMLConfigFiles(t *testing.T) {
 		t.Fatalf("config sort = %q, path = %q", cfg.UI.Sort, resolved)
 	}
 
-	t.Setenv(ConfigEnv, filepath.Join(userDir, "config.yaml"))
+	t.Setenv(PathEnv, filepath.Join(userDir, "config.yaml"))
 
 	if _, _, err := load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
 		t.Fatalf("AHT_CONFIG YAML error = %v, want unsupported format", err)
 	}
 
-	t.Setenv(ConfigEnv, filepath.Join(userDir, "missing.yaml"))
+	t.Setenv(PathEnv, filepath.Join(userDir, "missing.yaml"))
 
 	if _, _, err := load(""); !errors.Is(err, strata.ErrUnsupportedFormat) {
 		t.Fatalf("missing AHT_CONFIG YAML error = %v, want unsupported format", err)
@@ -896,12 +896,12 @@ func TestTOMLExtensionMatchesStrataSelection(t *testing.T) {
 	isolateConfigEnv(t)
 	path := filepath.Join(t.TempDir(), "config.TOML")
 
-	created, err := EnsureConfigFile(path)
+	created, err := EnsureFile(path)
 	if err != nil || !created {
-		t.Fatalf("EnsureConfigFile(%q) = %t, %v", path, created, err)
+		t.Fatalf("EnsureFile(%q) = %t, %v", path, created, err)
 	}
 
-	if err := WriteConfigFile(path); err != nil {
+	if err := WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1009,7 +1009,7 @@ func TestConcurrentEnsurePublishesOneCompleteConfig(t *testing.T) {
 	const contenders = 16
 	for range contenders {
 		group.Go(func() {
-			created, err := EnsureConfigFile(path)
+			created, err := EnsureFile(path)
 			if err != nil {
 				t.Error(err)
 				return
@@ -1020,7 +1020,7 @@ func TestConcurrentEnsurePublishesOneCompleteConfig(t *testing.T) {
 			}
 
 			contents, err := os.ReadFile(path)
-			if err != nil || string(contents) != DefaultConfigTemplate() {
+			if err != nil || string(contents) != DefaultTemplate() {
 				t.Errorf("partially published config: %q, error: %v", contents, err)
 			}
 		})
@@ -1057,7 +1057,7 @@ func TestWriteConfigReplacesWithoutMutatingExistingInode(t *testing.T) {
 
 	defer func() { _ = old.Close() }()
 
-	if err := WriteConfigFile(path); err != nil {
+	if err := WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1068,7 +1068,7 @@ func TestWriteConfigReplacesWithoutMutatingExistingInode(t *testing.T) {
 }
 
 func load(path string) (Config, string, error) {
-	return loadWithOptions(Options{Path: path, Explicit: path != ""})
+	return loadConfig(Options{Path: path, Explicit: path != ""})
 }
 
 func TestConfigValuePreservesDefaultsTypesAndNormalizedKeys(t *testing.T) {
@@ -1136,8 +1136,8 @@ func TestConfigValuePreservesDefaultsTypesAndNormalizedKeys(t *testing.T) {
 	}
 }
 
-func loadWithOptions(opts Options) (Config, string, error) {
-	cfg, _, resolved, err := LoadWithMetadata(opts)
+func loadConfig(opts Options) (Config, string, error) {
+	cfg, _, resolved, err := Load(opts)
 	return cfg, resolved, err
 }
 
@@ -1145,7 +1145,7 @@ func TestSetFollowsSymlinkInReadOnlyDirectory(t *testing.T) {
 	isolateConfigEnv(t)
 
 	target := filepath.Join(t.TempDir(), "config.toml")
-	if _, err := EnsureConfigFile(target); err != nil {
+	if _, err := EnsureFile(target); err != nil {
 		t.Fatal(err)
 	}
 

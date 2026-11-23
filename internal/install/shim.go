@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	harnesspkg "github.com/zigai/aht/v2/internal/harness"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -16,12 +16,12 @@ const shimFileMode = 0o700
 
 var errRecursiveShimTarget = errors.New("target binary resolves to managed shim")
 
-func installShim(opts Options, harness registry.Harness) (Result, error) {
+func installShim(opts Options, harnessID registry.Harness) (Result, error) {
 	dir := filepath.Join(registry.DefaultStateDir(), "shims")
-	path := filepath.Join(dir, string(harness))
+	path := filepath.Join(dir, string(harnessID))
 
-	executable := string(harness)
-	if names := catalog.ProcessNames(harness); len(names) > 0 && names[0] != "" {
+	executable := string(harnessID)
+	if names := adapters.ProcessNames(harnessID); len(names) > 0 && names[0] != "" {
 		executable = names[0]
 	}
 
@@ -32,12 +32,12 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 
 	script := shimScript(
 		opts.Binary,
-		harness,
+		harnessID,
 		target,
-		catalog.IntegrationVersionFor(harness),
+		adapters.IntegrationVersionFor(harnessID),
 	)
 
-	contentChanged, err := shimContentNeedsUpdate(path, script, harness, opts.Force)
+	contentChanged, err := shimContentNeedsUpdate(path, script, harnessID, opts.Force)
 	if err != nil {
 		return Result{}, err
 	}
@@ -57,7 +57,7 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 
 	message := fmt.Sprintf(
 		"%s shim installed; put %s before the real harness binary in PATH",
-		harness,
+		harnessID,
 		dir,
 	)
 	if !changed {
@@ -65,11 +65,11 @@ func installShim(opts Options, harness registry.Harness) (Result, error) {
 	}
 
 	if opts.DryRun {
-		message = fmt.Sprintf("dry run: %s shim not written", harness)
+		message = fmt.Sprintf("dry run: %s shim not written", harnessID)
 	}
 
 	return Result{
-		Harness:  string(harness),
+		Harness:  string(harnessID),
 		Path:     path,
 		Changed:  changed,
 		Message:  message,
@@ -99,7 +99,7 @@ func shimContentNeedsUpdate(
 
 func writeShimChanges(path string, script string, contentChanged bool) error {
 	if contentChanged {
-		return harnesspkg.WriteFileAtomicMode(
+		return harness.WriteFileAtomicMode(
 			path,
 			[]byte(script),
 			shimFileMode,
@@ -130,16 +130,16 @@ func shimModeNeedsUpdate(path string) (bool, error) {
 
 func classifyShimArtifact(
 	path string,
-	harness registry.Harness,
+	harnessID registry.Harness,
 	binary string,
 ) (ArtifactStatus, error) {
 	status, err := classifyArtifactWith(path, func(content string) ArtifactStatus {
 		status := classifyExpectedIdentity(
 			content,
-			shimIdentity(harness, catalog.IntegrationVersionFor(harness)),
+			shimIdentity(harnessID, adapters.IntegrationVersionFor(harnessID)),
 		)
 		if status == ArtifactCurrent && binary != "" &&
-			!strings.Contains(content, "\naht_bin="+harnesspkg.ShellQuote(binary)+"\n") {
+			!strings.Contains(content, "\naht_bin="+harness.ShellQuote(binary)+"\n") {
 			return ArtifactStale
 		}
 
@@ -163,7 +163,7 @@ func classifyShimArtifact(
 
 func resolveShimTarget(
 	target string,
-	harness string,
+	harnessID string,
 	shimDir string,
 	shimPath string,
 ) (string, error) {
@@ -175,9 +175,9 @@ func resolveShimTarget(
 		return target, nil
 	}
 
-	found, err := lookPathExcludingShimDir(harness, shimDir)
+	found, err := lookPathExcludingShimDir(harnessID, shimDir)
 	if err != nil {
-		return "", fmt.Errorf("finding %s binary: %w", harness, err)
+		return "", fmt.Errorf("finding %s binary: %w", harnessID, err)
 	}
 
 	if pathInDir(found, shimDir) || samePath(found, shimPath) {
@@ -254,8 +254,8 @@ func canonicalPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func shimScript(binary string, harness registry.Harness, target string, version int) string {
-	identity := shimIdentity(harness, version)
+func shimScript(binary string, harnessID registry.Harness, target string, version int) string {
+	identity := shimIdentity(harnessID, version)
 
 	//nolint:lll // multi-line generated shell must preserve exact bytes.
 	return fmt.Sprintf(`#!/bin/sh
@@ -269,19 +269,19 @@ harness_bin=%s
 status=$?
 "$aht_bin" report %s --presence gone --evidence process --pid "$$" --event process.exit --reporter-version %d --reporter %s --quiet >/dev/null 2>&1 || true
 exit "$status"
-`, identity.Marker("# "), harnesspkg.ShellQuote(
+`, identity.Marker("# "), harness.ShellQuote(
 		binary,
-	), harnesspkg.ShellQuote(
+	), harness.ShellQuote(
 		target,
-	), harnesspkg.ShellQuote(
-		string(harness),
-	), version, identity.Source, harnesspkg.ShellQuote(
-		string(harness),
+	), harness.ShellQuote(
+		string(harnessID),
+	), version, identity.Source, harness.ShellQuote(
+		string(harnessID),
 	), version, identity.Source)
 }
 
-func shimIdentity(id registry.Harness, version int) harnesspkg.ArtifactIdentity {
-	return harnesspkg.ArtifactIdentity{
+func shimIdentity(id registry.Harness, version int) harness.ArtifactIdentity {
+	return harness.ArtifactIdentity{
 		ID:      string(id) + "-shim",
 		Version: version,
 		Source:  string(id) + "-shim",

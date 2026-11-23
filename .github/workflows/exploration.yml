@@ -29,9 +29,9 @@ jobs:
             target: FuzzParseManifest
           - package: ./internal/agentstate
             target: FuzzManifestDefinitions
-          - package: ./internal/harness/catalog
+          - package: ./internal/harness/adapters
             target: FuzzPayloadAdapters
-          - package: ./internal/harness/catalog
+          - package: ./internal/harness/adapters
             target: FuzzNativeEventSequences
           - package: ./internal/harness/transcript
             target: FuzzMessageParts
@@ -104,7 +104,7 @@ jobs:
           profile: extended-simulations
 
       - name: Run extended simulations
-        run: AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/catalog
+        run: AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/adapters
 
   vulnerabilities:
     runs-on: ubuntu-24.04

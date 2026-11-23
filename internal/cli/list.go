@@ -13,7 +13,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/config"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -253,7 +253,7 @@ func buildFilter(opts listOptions) (registry.Filter, error) {
 	}
 
 	if opts.harness != "" {
-		h, e := catalog.Parse(opts.harness)
+		h, e := adapters.Parse(opts.harness)
 		if e != nil {
 			return f, fmt.Errorf("normalize harness: %w", e)
 		}
@@ -265,7 +265,7 @@ func buildFilter(opts listOptions) (registry.Filter, error) {
 		if strings.EqualFold(opts.presence, "all") {
 			f.Presence = ""
 		} else {
-			p, e := registry.NormalizePresence(opts.presence)
+			p, e := registry.ParsePresence(opts.presence)
 			if e != nil {
 				return f, fmt.Errorf("normalize presence: %w", e)
 			}
@@ -275,7 +275,7 @@ func buildFilter(opts listOptions) (registry.Filter, error) {
 	}
 
 	if opts.activity != "" {
-		a, e := registry.NormalizeActivity(opts.activity)
+		a, e := registry.ParseActivity(opts.activity)
 		if e != nil {
 			return f, fmt.Errorf("normalize activity: %w", e)
 		}

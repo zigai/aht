@@ -40,24 +40,24 @@ func (message Message) CaptureModel(decoder *Decoder) {
 	}
 }
 
-func (t *Decoder) Message(ctx context.Context, r Record, id string, line int, timestamp time.Time) {
+func (d *Decoder) Message(ctx context.Context, r Record, id string, line int, timestamp time.Time) {
 	message := Message{
 		Role:      Str(r, "role"),
 		Model:     "",
 		Content:   r["content"],
 		ToolCalls: r["tool_calls"],
 	}
-	message.Capture(ctx, t, id, line, timestamp)
+	message.Capture(ctx, d, id, line, timestamp)
 }
 
 // CaptureModel records the model of an assistant message. Placeholder
 // models that native tools write for locally generated replies are ignored.
-func (t *Decoder) CaptureModel(message Record) {
+func (d *Decoder) CaptureModel(message Record) {
 	entry := Message{
 		Role:      Str(message, "role"),
 		Model:     Str(message, "model"),
 		Content:   nil,
 		ToolCalls: nil,
 	}
-	entry.CaptureModel(t)
+	entry.CaptureModel(d)
 }

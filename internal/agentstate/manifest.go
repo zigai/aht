@@ -16,7 +16,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/zigai/aht/v2/internal/config"
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -82,7 +82,7 @@ func DefaultConfigDir() string {
 }
 
 func (l Loader) Supports(harnessID registry.Harness) bool {
-	if catalog.SupportsScreen(harnessID) {
+	if adapters.SupportsScreen(harnessID) {
 		return true
 	}
 
@@ -215,7 +215,7 @@ func ReadScreenInput(source string, stdin io.Reader) (string, error) {
 func loadUncached(harnessID registry.Harness, path string) (Manifest, error) {
 	var bundled Manifest
 
-	supported := catalog.SupportsScreen(harnessID)
+	supported := adapters.SupportsScreen(harnessID)
 
 	if supported {
 		var err error
@@ -343,7 +343,7 @@ func (manifest *Manifest) compileRules() error {
 }
 
 func loadBundled(harnessID registry.Harness) (Manifest, error) {
-	adapter, ok := catalog.Find(harnessID)
+	adapter, ok := adapters.Find(harnessID)
 	if !ok {
 		return Manifest{}, fmt.Errorf(
 			"reading bundled manifest for %s: %w",
@@ -400,7 +400,7 @@ func (manifest *Manifest) validate() error {
 }
 
 func (rule Rule) validate() error {
-	activity, err := registry.NormalizeActivity(rule.State)
+	activity, err := registry.ParseActivity(rule.State)
 	if err != nil || activity == registry.ActivityUnknown || activity == "" {
 		return fmt.Errorf(
 			"%w: rule %q has unsupported state %q",

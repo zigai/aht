@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
+	"github.com/zigai/aht/v2/internal/harness/adapters"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -46,7 +46,7 @@ func isolateUpgradeHome(t *testing.T) string {
 func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	isolateUpgradeHome(t)
 
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+	results, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 	if err != nil || len(results) != 0 {
 		t.Fatalf("empty upgrade = %+v, %v", results, err)
 	}
@@ -74,7 +74,7 @@ func TestUpgradeOnlyInstalledIntegrationsAndPreservesUserHooks(t *testing.T) {
 	}
 
 	for _, dry := range []bool{true, false, false} {
-		results, err = Upgrade(t.Context(), "/bin/new-aht", dry)
+		results, err = Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht", DryRun: dry})
 		if err != nil || len(results) != 1 || results[0].Harness != "qwen" {
 			t.Fatalf("upgrade = %+v, %v", results, err)
 		}
@@ -133,7 +133,7 @@ func TestUpgradePreservesShimTargetWithoutInstallingNativeHooks(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+			results, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 			if err != nil || len(results) != 1 || results[0].Path != old.Path {
 				t.Fatalf("upgrade = %+v, %v", results, err)
 			}
@@ -174,7 +174,7 @@ func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+	results, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 	if err == nil || len(results) != 2 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
@@ -187,7 +187,7 @@ func TestUpgradeContinuesAfterFailureAndHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	results, err = Upgrade(ctx, "/bin/another-aht", false)
+	results, err = Upgrade(ctx, UpgradeOptions{Binary: "/bin/another-aht"})
 	if !errors.Is(err, context.Canceled) || len(results) != 0 {
 		t.Fatalf("canceled upgrade = %+v, %v", results, err)
 	}
@@ -210,7 +210,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			firstResults, err := Upgrade(t.Context(), "/bin/new-aht", false)
+			firstResults, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 			if err != nil || len(firstResults) != 1 || firstResults[0].Harness != string(id) ||
 				!firstResults[0].Changed {
 				t.Fatalf("upgrade = %+v, %v", firstResults, err)
@@ -223,7 +223,7 @@ func TestUpgradeAllInstalledArtifactShapes(t *testing.T) {
 
 			before := snapshotUpgradeArtifacts(t, planPaths(plan))
 
-			repeatedResults, err := Upgrade(t.Context(), "/bin/new-aht", false)
+			repeatedResults, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 			if err != nil || len(repeatedResults) != 1 || repeatedResults[0].Changed {
 				t.Fatalf("repeated upgrade = %+v, %v", repeatedResults, err)
 			}
@@ -246,7 +246,7 @@ func artifactHarnesses(t *testing.T) []registry.Harness {
 
 	var result []registry.Harness
 
-	for _, id := range catalog.Harnesses() {
+	for _, id := range adapters.Harnesses() {
 		if !noInstallRequiredHarness(t, id) {
 			result = append(result, id)
 		}
@@ -272,7 +272,7 @@ func TestUpgradePreservesDisabledPluginAndPermissionChoices(t *testing.T) {
 		}
 	}
 
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+	results, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 	if err != nil || len(results) != 2 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
@@ -295,7 +295,7 @@ func TestUpgradeSkipsPluginWhoseHarnessWasUninstalled(t *testing.T) {
 
 	t.Setenv("PATH", t.TempDir())
 
-	results, err := Upgrade(t.Context(), "/bin/new-aht", false)
+	results, err := Upgrade(t.Context(), UpgradeOptions{Binary: "/bin/new-aht"})
 	if err != nil || len(results) != 1 || results[0].Harness != string(id) ||
 		results[0].Changed || results[0].Error != "" ||
 		!strings.HasPrefix(results[0].Message, "skipped: ") {
@@ -449,7 +449,7 @@ func TestCodexBinaryOnlyUpgradeLeavesReviewedHooksUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := Upgrade(t.Context(), binary, false)
+	results, err := Upgrade(t.Context(), UpgradeOptions{Binary: binary})
 	if err != nil || len(results) != 1 {
 		t.Fatalf("upgrade = %+v, %v", results, err)
 	}
@@ -476,7 +476,7 @@ func TestUpgradeDoesNotSilentlySkipRegisteredPluginWithMissingDirectory(t *testi
 		t.Fatal(err)
 	}
 
-	results, err := UpgradeHarness(t.Context(), id, "/bin/new-aht", false)
+	results, err := UpgradeHarness(t.Context(), id, UpgradeOptions{Binary: "/bin/new-aht"})
 
 	if _, statErr := os.Stat(filepath.Join(installed.Path, ".aht-managed")); statErr == nil {
 		return

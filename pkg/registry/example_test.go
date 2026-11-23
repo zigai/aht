@@ -6,8 +6,8 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func ExampleNormalizeActivity() {
-	activity, err := registry.NormalizeActivity("waiting")
+func ExampleParseActivity() {
+	activity, err := registry.ParseActivity("waiting")
 	if err != nil {
 		panic(err)
 	}

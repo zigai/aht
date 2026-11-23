@@ -65,7 +65,7 @@ type InstallAction interface {
 	installAction()
 }
 
-type JSONCommandHooksAction struct {
+type JSONCommandHookAction struct {
 	Plan JSONCommandHookInstallPlan
 }
 
@@ -115,8 +115,8 @@ type CommandHookInstallSpec struct {
 	Event   string
 	Matcher string
 	Command string
-	// Timeout is in seconds; zero means HookTimeoutSeconds.
-	Timeout int
+	// TimeoutSeconds is in seconds; zero means HookTimeoutSeconds.
+	TimeoutSeconds int
 }
 
 //exhaustruct:optional
@@ -209,7 +209,7 @@ func (plan InstallPlan) NativeCatalog() (NativeCatalogAction, bool) {
 	return first, len(plan.Actions) > 0
 }
 
-func (JSONCommandHooksAction) installAction() {}
+func (JSONCommandHookAction) installAction() {}
 
 func (JSONMergeAction) installAction() {}
 
@@ -505,7 +505,7 @@ func hookTransitionArgument[T Transition](transition T) (string, string) {
 }
 
 func activityTransitionArgument(value registry.Activity) (string, string) {
-	normalized, err := registry.NormalizeActivity(string(value))
+	normalized, err := registry.ParseActivity(string(value))
 	if err != nil || normalized == "" || normalized != value {
 		panic("invalid hook activity transition")
 	}
@@ -514,7 +514,7 @@ func activityTransitionArgument(value registry.Activity) (string, string) {
 }
 
 func presenceTransitionArgument(value registry.Presence) (string, string) {
-	normalized, err := registry.NormalizePresence(string(value))
+	normalized, err := registry.ParsePresence(string(value))
 	if err != nil || normalized == "" || normalized != value {
 		panic("invalid hook presence transition")
 	}
