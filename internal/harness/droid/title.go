@@ -63,7 +63,7 @@ func droidSessionPaths(identity registry.ObservationIdentity) ([]string, error) 
 		return []string{identity.SessionPath}, nil
 	}
 
-	root := droidSessionsDir()
+	root := droidSessionsDir(harness.HomeDir())
 	if root == "" {
 		return nil, nil
 	}
@@ -129,12 +129,11 @@ func readDroidSessionTitle(ctx context.Context, sessionID string, path string) (
 	return metadata.Title, nil
 }
 
-func droidSessionsDir() string {
+func droidSessionsDir(home string) string {
 	if value := strings.TrimSpace(os.Getenv("DROID_SESSIONS_DIR")); value != "" {
 		return value
 	}
 
-	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
