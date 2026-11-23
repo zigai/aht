@@ -309,3 +309,15 @@ func caseVariant(t *rapid.T, letter string, foldCase bool) string {
 
 	return string(rapid.SampledFrom(variants).Draw(t, "case variant"))
 }
+
+func TestExcerptWindowPreservesLongMatchedTerm(t *testing.T) {
+	t.Parallel()
+
+	longTerm := strings.Repeat("a", 300)
+	text := strings.Repeat("p", 80) + longTerm + strings.Repeat("s", 80)
+
+	excerpt := excerptWindow(text, 80, len(longTerm))
+	if !strings.Contains(excerpt, longTerm) {
+		t.Fatalf("excerpt truncated long match: len(excerpt)=%d", len(excerpt))
+	}
+}

@@ -615,7 +615,7 @@ func (t *transcript) recordHits(terms []matcher, body string, normalized string)
 
 func excerptWindow(body string, anchor int, needleRunes int) string {
 	start := max(0, anchor-excerptRunes/4)
-	end := start + max(excerptRunes, needleRunes)
+	end := max(start+excerptRunes, anchor+needleRunes)
 	startByte, endByte := len(body), len(body)
 
 	runeIndex := 0
