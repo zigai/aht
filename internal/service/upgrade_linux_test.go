@@ -68,6 +68,7 @@ func verifyTrackerUpgrade(t *testing.T, stopped bool, stale bool, dryRun bool) {
 		StorePath:   filepath.Join(dir, `state with % and "quotes".json`),
 		Interval:    7 * time.Second,
 		GracePeriod: 19 * time.Second,
+		ConfigPath:  filepath.Join(dir, "config.toml"),
 	}
 
 	want, err := RenderSystemdUnit(options)
@@ -154,6 +155,7 @@ func assertUpgradeManagerCalls(
 	}
 
 	if !dryRun && !stopped {
+		calls = append(calls, []string{"systemctl", "--user", "enable", linuxUnitName})
 		calls = append(calls, []string{"systemctl", "--user", "restart", linuxUnitName})
 	}
 

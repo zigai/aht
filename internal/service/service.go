@@ -29,6 +29,8 @@ var (
 	errStorePathRequired = errors.New("store path is required")
 	errIntervalPositive  = errors.New("interval must be positive")
 	errGraceNonnegative  = errors.New("grace period must be nonnegative")
+	errConfigStdin       = errors.New(`config path "-" cannot be used for a background service`)
+	errConfigConflict    = errors.New("config path and no-config cannot be combined")
 	defaultService       = New(nil)
 )
 
@@ -38,6 +40,10 @@ type Options struct {
 	Interval    time.Duration
 	GracePeriod time.Duration
 	DryRun      bool
+	//exhaustruct:optional
+	ConfigPath string
+	//exhaustruct:optional
+	NoConfig bool
 }
 
 type Result struct {
@@ -315,7 +321,7 @@ func (s *Service) applyCurrent(
 		return result, err
 	}
 
-	result.Changed, result.Message = true, "restarted"
+	result.Running, result.Changed, result.Message = true, true, "restarted"
 
 	return result, nil
 }
@@ -472,10 +478,20 @@ func wrapManagerError(action string, output []byte, err error) error {
 }
 
 func trackerCommand(opts Options) []string {
-	return append(
-		[]string{opts.Binary},
-		TrackerArgs(opts.StorePath, opts.Interval, opts.GracePeriod)...,
-	)
+	return append([]string{opts.Binary}, trackerArgs(opts)...)
+}
+
+func trackerArgs(opts Options) []string {
+	tracker := TrackerArgs(opts.StorePath, opts.Interval, opts.GracePeriod)
+
+	switch {
+	case opts.NoConfig:
+		return append([]string{"--no-config"}, tracker...)
+	case opts.ConfigPath != "":
+		return append([]string{"--config", opts.ConfigPath}, tracker...)
+	default:
+		return tracker
+	}
 }
 
 func describeDefinition(path string) Result {
@@ -530,6 +546,33 @@ func normalizeOptions(opts Options) (Options, error) {
 	}
 
 	opts.Binary, opts.StorePath = binary, store
+
+	return normalizeConfig(opts)
+}
+
+func normalizeConfig(opts Options) (Options, error) {
+	if opts.NoConfig {
+		if opts.ConfigPath != "" {
+			return opts, errConfigConflict
+		}
+
+		return opts, nil
+	}
+
+	if opts.ConfigPath == "" {
+		return opts, nil
+	}
+
+	if opts.ConfigPath == "-" {
+		return opts, errConfigStdin
+	}
+
+	config, err := filepath.Abs(opts.ConfigPath)
+	if err != nil {
+		return opts, fmt.Errorf("resolve config: %w", err)
+	}
+
+	opts.ConfigPath = config
 
 	return opts, nil
 }

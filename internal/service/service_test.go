@@ -39,6 +39,38 @@ func (r *recordingExecutor) Run(_ context.Context, name string, args ...string) 
 	return nil, nil
 }
 
+type stateBackend struct {
+	state    runtimeState
+	rendered string
+	calls    []string
+}
+
+func (b *stateBackend) describe() Result { return describeDefinition("/tmp/state-backend") }
+func (b *stateBackend) content() string  { return b.rendered }
+func (b *stateBackend) reload(context.Context, CommandExecutor) error {
+	b.calls = append(b.calls, "reload")
+	return nil
+}
+
+func (b *stateBackend) load(context.Context, CommandExecutor) error {
+	b.calls = append(b.calls, "load")
+	return nil
+}
+
+func (b *stateBackend) restart(context.Context, CommandExecutor) error {
+	b.calls = append(b.calls, "restart")
+	return nil
+}
+
+func (b *stateBackend) unload(context.Context, CommandExecutor) error {
+	b.calls = append(b.calls, "unload")
+	return nil
+}
+
+func (b *stateBackend) running(context.Context, CommandExecutor) (runtimeState, error) {
+	return b.state, nil
+}
+
 func TestRenderSystemdUnit(t *testing.T) {
 	got, err := RenderSystemdUnit(
 		Options{
@@ -305,8 +337,13 @@ func TestUpdateRestartsManagedService(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 
-	if len(executor.calls) != 2 || executor.calls[1][2] != "restart" {
-		t.Fatalf("calls = %#v, want daemon-reload and restart", executor.calls)
+	wantCalls := [][]string{
+		{"systemctl", "--user", "daemon-reload"},
+		{"systemctl", "--user", "enable", linuxUnitName},
+		{"systemctl", "--user", "restart", linuxUnitName},
+	}
+	if !reflect.DeepEqual(executor.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", executor.calls, wantCalls)
 	}
 
 	content, err := os.ReadFile(path)
@@ -345,9 +382,12 @@ func TestUpdateCurrentRunningServiceRestartsExecutable(t *testing.T) {
 		t.Fatalf("unexpected update result: %+v", result)
 	}
 
-	if len(executor.calls) != 3 || executor.calls[1][2] != "daemon-reload" ||
-		executor.calls[2][2] != "restart" {
-		t.Fatalf("manager calls = %#v, want status, daemon-reload and restart", executor.calls)
+	if len(executor.calls) != 4 || executor.calls[1][2] != "daemon-reload" ||
+		executor.calls[2][2] != "enable" || executor.calls[3][2] != "restart" {
+		t.Fatalf(
+			"manager calls = %#v, want status, daemon-reload, enable and restart",
+			executor.calls,
+		)
 	}
 }
 
@@ -388,7 +428,7 @@ func TestUpdateManagerFailureRestoresRetryableDefinition(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		failAt int
-	}{{name: "reload", failAt: 1}, {name: "restart", failAt: 2}} {
+	}{{name: "reload", failAt: 1}, {name: "enable", failAt: 2}, {name: "restart", failAt: 3}} {
 		t.Run(test.name, func(t *testing.T) {
 			requireRetryableUpdateAfterManagerFailure(t, test.failAt)
 		})
@@ -663,5 +703,163 @@ func requireReloadBeforeRestart(t *testing.T, calls [][]string) {
 
 	if restart < 0 || reload < 0 || reload > restart {
 		t.Fatalf("manager calls = %v, want daemon-reload before restart", calls)
+	}
+}
+
+func TestRenderSystemdUnitCarriesConfigProvenance(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "config.toml")
+
+	tests := []struct {
+		name    string
+		options Options
+		want    string
+	}{
+		{
+			name: "config path",
+			options: Options{
+				Binary:     "/bin/aht",
+				StorePath:  "/tmp/store",
+				Interval:   time.Second,
+				ConfigPath: config,
+			},
+			want: "/bin/aht --config " + config + " --store /tmp/store",
+		},
+		{
+			name: "no config",
+			options: Options{
+				Binary:    "/bin/aht",
+				StorePath: "/tmp/store",
+				Interval:  time.Second,
+				NoConfig:  true,
+			},
+			want: "/bin/aht --no-config --store /tmp/store",
+		},
+		{
+			name: "default config discovery",
+			options: Options{
+				Binary:    "/bin/aht",
+				StorePath: "/tmp/store",
+				Interval:  time.Second,
+			},
+			want: "/bin/aht --store /tmp/store",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			unit, err := RenderSystemdUnit(test.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.Contains(unit, "ExecStart="+test.want+" ") {
+				t.Fatalf("rendered unit missing %q:\n%s", test.want, unit)
+			}
+		})
+	}
+}
+
+func TestRecoverOptionsPreservesConfigProvenance(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		options Options
+	}{
+		{
+			name: "config path",
+			options: Options{
+				Binary:      "/bin/aht",
+				StorePath:   filepath.Join(dir, "state.json"),
+				Interval:    3 * time.Second,
+				GracePeriod: 5 * time.Second,
+				ConfigPath:  filepath.Join(dir, "aht config.toml"),
+			},
+		},
+		{
+			name: "no config",
+			options: Options{
+				Binary:    "/bin/aht",
+				StorePath: filepath.Join(dir, "state.json"),
+				Interval:  3 * time.Second,
+				NoConfig:  true,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			unit, err := RenderSystemdUnit(test.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			args, err := installedArguments([]byte(unit))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			recovered, err := recoverOptions(args, test.options.Binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(recovered, test.options) {
+				t.Fatalf("recovered = %+v, want %+v", recovered, test.options)
+			}
+		})
+	}
+}
+
+func TestNormalizeOptionsResolvesAndRejectsConfig(t *testing.T) {
+	base := Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second}
+
+	relative := base
+	relative.ConfigPath = "relative.toml"
+
+	resolved, err := normalizeOptions(relative)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !filepath.IsAbs(resolved.ConfigPath) ||
+		resolved.ConfigPath != filepath.Clean(resolved.ConfigPath) {
+		t.Fatalf("config path = %q, want an absolute cleaned path", resolved.ConfigPath)
+	}
+
+	stdin := base
+
+	stdin.ConfigPath = "-"
+	if _, err := normalizeOptions(stdin); !errors.Is(err, errConfigStdin) {
+		t.Fatalf("stdin config error = %v", err)
+	}
+
+	conflict := base
+
+	conflict.ConfigPath = "/tmp/config.toml"
+
+	conflict.NoConfig = true
+	if _, err := normalizeOptions(conflict); !errors.Is(err, errConfigConflict) {
+		t.Fatalf("conflicting config error = %v", err)
+	}
+}
+
+func TestApplyCurrentRestartReportsRunning(t *testing.T) {
+	backend := &stateBackend{state: runtimeState{Loaded: true, Running: false}}
+
+	result, err := New(&recordingExecutor{}).applyCurrent(
+		t.Context(),
+		Options{Binary: "/bin/aht", StorePath: "/tmp/store", Interval: time.Second},
+		backend,
+		backend.describe(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !result.Running || !result.Changed || result.Message != "restarted" {
+		t.Fatalf("result = %+v, want restarted and running", result)
+	}
+
+	if !reflect.DeepEqual(backend.calls, []string{"restart"}) {
+		t.Fatalf("backend calls = %v, want restart", backend.calls)
 	}
 }

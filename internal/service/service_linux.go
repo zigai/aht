@@ -112,6 +112,17 @@ func (b *linuxBackend) restart(ctx context.Context, executor CommandExecutor) er
 		return err
 	}
 
+	// Restarting a disabled unit starts it now but leaves it off after reboot.
+	if output, err := executor.Run(
+		ctx,
+		"systemctl",
+		"--user",
+		"enable",
+		linuxUnitName,
+	); err != nil {
+		return wrapManagerError("systemctl enable observer", output, err)
+	}
+
 	if output, err := executor.Run(
 		ctx,
 		"systemctl",

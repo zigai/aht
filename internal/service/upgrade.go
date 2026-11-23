@@ -152,36 +152,23 @@ func (s *Service) rollbackUpgrade(
 }
 
 func recoverOptions(args []string, binary string) (Options, error) {
-	options := Options{Binary: binary, StorePath: "", Interval: 0, GracePeriod: 0, DryRun: false}
+	options := Options{
+		Binary:      binary,
+		StorePath:   "",
+		Interval:    0,
+		GracePeriod: 0,
+		DryRun:      false,
+		ConfigPath:  "",
+		NoConfig:    false,
+	}
 
 	for i := 1; i < len(args); i++ {
-		flag := args[i]
-		switch flag {
-		case "--store", "--interval", "--grace-period":
-			i++
-			if i >= len(args) {
-				return options, errInstalledArguments
-			}
-
-			if flag == "--store" {
-				options.StorePath = args[i]
-				continue
-			}
-
-			value, err := time.ParseDuration(args[i])
-			if err != nil {
-				return options, fmt.Errorf("%w: %s: %w", errInstalledArguments, flag, err)
-			}
-
-			if flag == "--interval" {
-				options.Interval = value
-			} else {
-				options.GracePeriod = value
-			}
-		case "manage", "tracker", "run", "--quiet":
-		default:
-			return options, fmt.Errorf("%w: unsupported argument %q", errInstalledArguments, flag)
+		next, err := applyInstalledFlag(&options, args, i)
+		if err != nil {
+			return options, err
 		}
+
+		i = next
 	}
 
 	if options.StorePath == "" || options.Interval <= 0 {
@@ -189,6 +176,53 @@ func recoverOptions(args []string, binary string) (Options, error) {
 	}
 
 	return options, nil
+}
+
+func applyInstalledFlag(options *Options, args []string, index int) (int, error) {
+	flag := args[index]
+
+	switch flag {
+	case "manage", "tracker", "run", "--quiet":
+		return index, nil
+	case "--no-config":
+		options.NoConfig = true
+
+		return index, nil
+	case "--store", "--interval", "--grace-period", "--config":
+		if index+1 >= len(args) {
+			return index, errInstalledArguments
+		}
+
+		return index + 1, applyInstalledValue(options, flag, args[index+1])
+	default:
+		return index, fmt.Errorf("%w: unsupported argument %q", errInstalledArguments, flag)
+	}
+}
+
+func applyInstalledValue(options *Options, flag string, value string) error {
+	switch flag {
+	case "--store":
+		options.StorePath = value
+
+		return nil
+	case "--config":
+		options.ConfigPath = value
+
+		return nil
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", errInstalledArguments, flag, err)
+	}
+
+	if flag == "--interval" {
+		options.Interval = duration
+	} else {
+		options.GracePeriod = duration
+	}
+
+	return nil
 }
 
 func recoveredBackend(previous []byte, binary string) (backend, error) {
