@@ -675,6 +675,79 @@ func TestScreenFallbackCannotOverrideConcurrentCompleteIntegration(t *testing.T)
 	}
 }
 
+func TestObserverScreenConfirmationRequiredOnStateChange(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), catalog.Rules{})
+	process, pane := detectionProcessPane(311, "codex")
+	at := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	screen := "› next task\nContext 63% used"
+
+	options := detectionObserverOptions(store, process, pane, t.TempDir())
+	options.Now = func() time.Time { return at }
+	options.ProcessConfirmation = -1
+	options.ScreenCapture = func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+		return mux.ScreenSnapshot{Text: screen, Title: "codex"}, nil
+	}
+
+	obs := New(options)
+	obs.continuous = true
+
+	for range initialScreenConfirmations {
+		if _, err := obs.RunOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		at = at.Add(time.Second)
+	}
+
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(sessions) != 1 ||
+		registry.ActivityValue(sessions[0].Activity()) != registry.ActivityIdle {
+		t.Fatalf("initial confirmed state = %#v, want idle", sessions)
+	}
+
+	screen = "Would you like to run the following command?"
+
+	if _, err := obs.RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err = store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if registry.ActivityValue(sessions[0].Activity()) != registry.ActivityIdle {
+		t.Fatalf(
+			"single unconfirmed screen reading switched activity to %s, want idle",
+			registry.ActivityValue(sessions[0].Activity()),
+		)
+	}
+
+	at = at.Add(time.Second)
+
+	if _, err := obs.RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err = store.List(t.Context(), registry.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if registry.ActivityValue(sessions[0].Activity()) != registry.ActivityWaiting {
+		t.Fatalf(
+			"second confirming screen reading produced %s, want waiting",
+			registry.ActivityValue(sessions[0].Activity()),
+		)
+	}
+}
+
 func detectionObserverOptions(
 	store Store,
 	process processinfo.Process,

@@ -1438,8 +1438,7 @@ func (o *Observer) screenDecisionReady(
 	identity := processIdentity(process)
 
 	session := sessionForProcess(sessions, harnessID, identity)
-	if session.Observations.Screen != nil &&
-		session.Observations.Screen.Process.Equal(*identity) {
+	if screenObservationMatches(session, identity, observation) {
 		delete(o.screenPending, processKey{
 			harness: harnessID,
 			pid:     process.PID,
@@ -1473,6 +1472,20 @@ func (o *Observer) screenDecisionReady(
 	delete(o.screenPending, key)
 
 	return true
+}
+
+func screenObservationMatches(
+	session registry.Session,
+	identity *registry.ProcessIdentity,
+	observation registry.Observation,
+) bool {
+	screen := session.Observations.Screen
+
+	return screen != nil &&
+		screen.Process.Equal(*identity) &&
+		screen.Authority == registry.AuthorityScreen &&
+		screen.Activity == *observation.ActivityClaim() &&
+		screen.RuleID == observation.Reading().RuleID
 }
 
 func (o *Observer) prunePendingScreenDecisions(current map[processKey]trackedProcess) {
