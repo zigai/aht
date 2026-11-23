@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,8 @@ var errSetupHarnessRequired = errors.New("setup requires at least one harness or
 type setupResult struct {
 	Integrations []manage.IntegrationResult `json:"integrations"`
 	Tracker      manage.TrackerResult       `json:"tracker"`
+	//exhaustruct:optional
+	TrackerError string `json:"tracker_error,omitempty"`
 }
 
 func (app *application) newSetupCommand() *cobra.Command {
@@ -30,47 +33,7 @@ func (app *application) newSetupCommand() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			harnesses, err := selectedHarnesses(args, false)
-			if err != nil {
-				return exitCode(err, exitCodeUsage)
-			}
-
-			manager := app.manager(options.binary)
-			if err := manager.ValidateConfig(); err != nil {
-				return managerError(err)
-			}
-
-			integrations, integrationErr := installIntegrations(
-				cmd.Context(),
-				manager,
-				harnesses,
-				options,
-			)
-
-			tracker, trackerErr := manager.EnableTracker(
-				cmd.Context(),
-				manage.TrackerOptions{DryRun: options.dryRun},
-			)
-			trackerErr = managerError(trackerErr)
-
-			result := setupResult{Integrations: integrations, Tracker: tracker}
-			if app.outputJSON {
-				if err := app.writeJSON(result); err != nil {
-					return err
-				}
-
-				return errors.Join(integrationErr, trackerErr)
-			}
-
-			if err := app.writeIntegrationResults(integrations, false); err != nil {
-				return err
-			}
-
-			if err := app.writef("tracker: %s\nnext: aht list\n", tracker.Message); err != nil {
-				return err
-			}
-
-			return errors.Join(integrationErr, trackerErr)
+			return app.runSetup(cmd.Context(), args, options)
 		},
 	}
 	flags := command.Flags()
@@ -84,4 +47,69 @@ func (app *application) newSetupCommand() *cobra.Command {
 	flags.BoolVarP(&options.force, "force", "f", false, "replace foreign integration files")
 
 	return command
+}
+
+func (app *application) runSetup(
+	ctx context.Context,
+	args []string,
+	options integrationCommandOptions,
+) error {
+	harnesses, err := selectedHarnesses(args, false)
+	if err != nil {
+		return exitCode(err, exitCodeUsage)
+	}
+
+	manager := app.manager(options.binary)
+	if err := manager.ValidateConfig(); err != nil {
+		return managerError(err)
+	}
+
+	integrations, integrationErr := installIntegrations(ctx, manager, harnesses, options)
+
+	tracker, trackerErr := manager.EnableTracker(
+		ctx,
+		manage.TrackerOptions{DryRun: options.dryRun},
+	)
+	trackerErr = managerError(trackerErr)
+
+	if err := app.writeSetupOutcome(integrations, tracker, integrationErr, trackerErr); err != nil {
+		return err
+	}
+
+	return errors.Join(integrationErr, trackerErr)
+}
+
+func (app *application) writeSetupOutcome(
+	integrations []manage.IntegrationResult,
+	tracker manage.TrackerResult,
+	integrationErr error,
+	trackerErr error,
+) error {
+	result := setupResult{Integrations: integrations, Tracker: tracker}
+	if trackerErr != nil {
+		result.TrackerError = trackerErr.Error()
+	}
+
+	if app.outputJSON {
+		return app.writeJSON(result)
+	}
+
+	if err := app.writeIntegrationResults(integrations, false); err != nil {
+		return err
+	}
+
+	trackerMessage := tracker.Message
+	if trackerErr != nil {
+		trackerMessage = trackerErr.Error()
+	}
+
+	if err := app.writef("tracker: %s\n", trackerMessage); err != nil {
+		return err
+	}
+
+	if integrationErr == nil && trackerErr == nil {
+		return app.writeln("next: aht list")
+	}
+
+	return nil
 }

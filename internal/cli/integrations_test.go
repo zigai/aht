@@ -518,3 +518,67 @@ func TestWriteIntegrationResultsAlreadyInstalledDoesNotRepeatHarnessName(t *test
 		}
 	}
 }
+
+func TestSetupReportsTrackerFailureInTextAndJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv(registry.StateDirEnv, filepath.Join(home, "state"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+
+	binDir := t.TempDir()
+	for _, executable := range []string{"systemctl", "launchctl"} {
+		path := filepath.Join(binDir, executable)
+
+		script := "#!/bin/sh\necho 'service manager offline' >&2\nexit 1\n"
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatalf("writing fake %s: %v", executable, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+
+	store := filepath.Join(home, "sessions.json")
+
+	var stdout bytes.Buffer
+
+	err := runTestCLI(
+		t.Context(),
+		[]string{"--store", store, "manage", "setup", "claude", "--binary", "/bin/aht"},
+		&stdout,
+		&bytes.Buffer{},
+	)
+	if err == nil {
+		t.Fatal("expected tracker failure to return an error")
+	}
+
+	text := stdout.String()
+	if !strings.Contains(text, "tracker: ") || strings.Contains(text, "tracker: \n") {
+		t.Fatalf("setup text output left tracker error blank:\n%s", text)
+	}
+
+	if strings.Contains(text, "next: aht list") {
+		t.Fatalf("setup text output advertised next: aht list after tracker failure:\n%s", text)
+	}
+
+	stdout.Reset()
+
+	err = runTestCLI(
+		t.Context(),
+		[]string{"--store", store, "--json", "manage", "setup", "claude", "--binary", "/bin/aht"},
+		&stdout,
+		&bytes.Buffer{},
+	)
+	if err == nil {
+		t.Fatal("expected JSON setup with tracker failure to return an error")
+	}
+
+	var result setupResult
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &result); unmarshalErr != nil {
+		t.Fatalf("decode setup JSON: %v\nstdout:\n%s", unmarshalErr, stdout.String())
+	}
+
+	if result.TrackerError == "" {
+		t.Fatalf("setup JSON omitted tracker_error: %s", stdout.String())
+	}
+}
