@@ -421,7 +421,7 @@ func (host *isolatedHost) startNativePane(t *testing.T, command *exec.Cmd) gotmu
 	}
 
 	pane := panes[0].Handle()
-	if err := pane.Options().SetRemainOnExit(t.Context(), gotmux.RemainOn); err != nil {
+	if err := pane.Options().SetRemainOnExit(t.Context(), gotmux.RemainOnExitOn); err != nil {
 		t.Fatal(err)
 	}
 
