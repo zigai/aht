@@ -22,17 +22,25 @@ jobs:
       matrix:
         include:
           - package: ./internal/agentstate
+            target: FuzzStripEscapesFollowsHistoricalPattern
+          - package: ./internal/agentstate
             target: FuzzNormalizeSnapshotBounded
           - package: ./internal/agentstate
             target: FuzzParseManifest
-          - package: ./internal/processinfo
-            target: FuzzParseLinuxStat
+          - package: ./internal/agentstate
+            target: FuzzManifestDefinitions
           - package: ./internal/harness/catalog
             target: FuzzPayloadAdapters
-          - package: ./pkg/tmux
-            target: FuzzParseCurrent
-          - package: ./pkg/tmux
-            target: FuzzParseListPanes
+          - package: ./internal/harness/catalog
+            target: FuzzNativeEventSequences
+          - package: ./internal/harness/transcript
+            target: FuzzMessageParts
+          - package: ./internal/harness/transcript
+            target: FuzzParseTree
+          - package: ./internal/processinfo
+            target: FuzzParseLinuxStat
+          - package: ./internal/reporting
+            target: FuzzReportAttributes
           - package: ./pkg/registry
             target: FuzzObservationCodec
           - package: ./pkg/registry
@@ -41,14 +49,6 @@ jobs:
             target: FuzzJournalEntryCodec
           - package: ./pkg/registry
             target: FuzzJournalRecovery
-          - package: ./internal/harness/transcript
-            target: FuzzMessageParts
-          - package: ./internal/harness/transcript
-            target: FuzzParseTree
-          - package: ./internal/config
-            target: FuzzDecodeTOMLLayers
-          - package: ./internal/cli
-            target: FuzzReportAttributes
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -23,13 +23,14 @@ explore fuzztime="30s":
     #!/usr/bin/env bash
     set -euo pipefail
     AHT_EXTENDED_PARITY=1 go test -count=1 ./pkg/registry ./internal/observer ./internal/harness/catalog
-    for package in ./internal/agentstate ./internal/processinfo ./internal/harness/catalog ./pkg/tmux ./pkg/registry ./internal/harness/transcript ./internal/config ./internal/cli; do
+    packages=$(git grep --untracked -l '^func Fuzz' -- '*_test.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
+    while IFS= read -r package; do
         targets=$(go test "$package" -list '^Fuzz')
         while IFS= read -r target; do
             [[ "$target" =~ ^Fuzz[A-Za-z0-9_]+$ ]] || continue
             go test "$package" -run '^$' -fuzz "^${target}$" -fuzztime '{{ fuzztime }}' -parallel 2 -timeout 0
         done <<< "$targets"
-    done
+    done <<< "$packages"
 
 # Run tests that require real local system boundaries
 integration:
@@ -117,7 +118,9 @@ build:
     version=$(git describe --tags --dirty)
     commit=$(git rev-parse --short HEAD)
     build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=${version} -X github.com/zigai/aht/v2/internal/cli.commit=${commit} -X github.com/zigai/aht/v2/internal/cli.date=${build_date}" -o bin/aht .
+    dirty=false
+    if [ -n "$(git status --porcelain)" ]; then dirty=true; fi
+    go build -ldflags "-X github.com/zigai/aht/v2/internal/cli.version=${version} -X github.com/zigai/aht/v2/internal/cli.commit=${commit} -X github.com/zigai/aht/v2/internal/cli.date=${build_date} -X github.com/zigai/aht/v2/internal/cli.dirty=${dirty}" -o bin/aht .
 
 # Install the binary and refresh existing integrations and background tracking
 install: build && (report-install home_directory() / ".local/bin/aht")
@@ -132,7 +135,12 @@ install-binary: build && (report-install home_directory() / ".local/bin/aht")
 
 # Install the fake model provider command
 install-fakeprovider: && (report-install home_directory() / ".local/bin/fakeprovider")
-    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags='-s -w' ./cmd/fakeprovider
+    #!/usr/bin/env sh
+    set -e
+    version=$(git describe --tags --dirty)
+    commit=$(git rev-parse --short HEAD)
+    build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    GOBIN="$HOME/.local/bin" go install -trimpath -ldflags "-s -w -X github.com/zigai/aht/v2/internal/fakeprovidercli.version=${version} -X github.com/zigai/aht/v2/internal/fakeprovidercli.commit=${commit} -X github.com/zigai/aht/v2/internal/fakeprovidercli.date=${build_date}" ./cmd/fakeprovider
 
 # Remove generated output and caches
 clean: (remove "bin" "aht" "aht.exe" "dist" "coverage.out" "*.test" "*.prof" ".ruff_cache" "coverage")
