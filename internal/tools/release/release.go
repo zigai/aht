@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	ciWorkflow     = "ci.yml"
-	ciWorkflowPath = ".github/workflows/" + ciWorkflow
-	releaseBranch  = "master"
-	ciPollInterval = 15 * time.Second
+	ciWorkflow      = "ci.yml"
+	ciWorkflowPath  = ".github/workflows/" + ciWorkflow
+	releaseBranch   = "master"
+	ciPollInterval  = 15 * time.Second
+	releasesPerPage = 100
+	maxReleasePages = 50
 )
 
 // requiredChecks are the CI jobs that must succeed on the tagged commit.
@@ -283,21 +285,51 @@ func (a application) cleanupDraft(ctx context.Context, t target) error {
 	return nil
 }
 
-// findRelease returns the release for the tag and whether it exists. Other
-// failures, such as a forbidden lookup, are not treated as an absent release.
+// findRelease returns the release for the tag and whether it exists. GitHub's
+// tag lookup hides drafts, so a missing tag is confirmed against the release
+// list. Other failures, such as a forbidden lookup, are not treated as an
+// absent release.
 func (a application) findRelease(ctx context.Context, t target) (release, bool, error) {
 	var found release
 
 	err := a.api.Get(ctx, t.repoPath("/releases/tags/%s", url.PathEscape(t.tag)), &found)
-	if githubapi.HasStatus(err, http.StatusNotFound) {
-		return release{}, false, nil
+	if err == nil {
+		return found, true, nil
 	}
 
-	if err != nil {
+	if !githubapi.HasStatus(err, http.StatusNotFound) {
 		return release{}, false, fmt.Errorf("find release %s: %w", t.tag, err)
 	}
 
-	return found, true, nil
+	return a.findListedRelease(ctx, t)
+}
+
+func (a application) findListedRelease(ctx context.Context, t target) (release, bool, error) {
+	for page := 1; page <= maxReleasePages; page++ {
+		var listed []release
+
+		path := t.repoPath("/releases?per_page=%d&page=%d", releasesPerPage, page)
+		if err := a.api.Get(ctx, path, &listed); err != nil {
+			return release{}, false, fmt.Errorf("list releases page %d: %w", page, err)
+		}
+
+		for _, candidate := range listed {
+			if candidate.TagName == t.tag {
+				return candidate, true, nil
+			}
+		}
+
+		if len(listed) < releasesPerPage {
+			return release{}, false, nil
+		}
+	}
+
+	return release{}, false, fmt.Errorf(
+		"%w: release list for %s exceeds %d pages",
+		errRelease,
+		t.tag,
+		maxReleasePages,
+	)
 }
 
 func (t target) owns(r release) bool {

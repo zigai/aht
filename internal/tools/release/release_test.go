@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +55,7 @@ func successfulJobs() []workflowJob {
 type fakeGitHub struct {
 	mu           sync.Mutex
 	release      *release
+	others       []release
 	deleted      []int64
 	runs         []workflowRun
 	jobs         []workflowJob
@@ -76,12 +78,36 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 	mux.HandleFunc(
 		"GET /repos/fixture/aht/releases/tags/v1.2.3",
 		func(w http.ResponseWriter, _ *http.Request) {
-			if f.release == nil {
+			// GitHub's tag lookup only returns published releases.
+			if f.release == nil || f.release.Draft {
 				http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 				return
 			}
 
 			writeJSON(w, f.release)
+		},
+	)
+	mux.HandleFunc(
+		"GET /repos/fixture/aht/releases",
+		func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query()
+			if query.Get("per_page") != strconv.Itoa(releasesPerPage) {
+				t.Errorf("release list query = %s", r.URL.RawQuery)
+			}
+
+			page, err := strconv.Atoi(query.Get("page"))
+			if err != nil || page < 1 {
+				t.Errorf("release list page = %q", query.Get("page"))
+			}
+
+			all := slices.Clone(f.others)
+			if f.release != nil {
+				all = append(all, *f.release)
+			}
+
+			start := min((page-1)*releasesPerPage, len(all))
+			end := min(start+releasesPerPage, len(all))
+			writeJSON(w, all[start:end])
 		},
 	)
 	mux.HandleFunc(
@@ -598,12 +624,56 @@ func TestDraftRetriesReuseOwnershipPreserveNotesAndCleanUp(t *testing.T) {
 	}
 }
 
+func TestDraftLookupScansReleaseListPagesWhenTagLookupHidesDrafts(t *testing.T) {
+	f := newFixture(t)
+
+	f.github.others = make([]release, releasesPerPage)
+	for i := range f.github.others {
+		f.github.others[i] = release{
+			ID:      int64(1000 + i),
+			TagName: fmt.Sprintf("v0.0.%d", i+1),
+		}
+	}
+
+	marker := "<!-- aht-release:fixture/aht:42:" + fixtureSHA + " -->"
+	f.github.release = &release{
+		ID:              8,
+		TagName:         "v1.2.3",
+		TargetCommitish: fixtureSHA,
+		Draft:           true,
+		Body:            "notes\n" + marker,
+	}
+
+	if err := f.run(t, "prepare-draft"); err != nil {
+		t.Fatalf("prepare-draft did not reach the draft on the second page: %v", err)
+	}
+
+	if f.output(t, "release-id") != "8" {
+		t.Fatalf("release = %+v, id output = %q", f.github.release, f.output(t, "release-id"))
+	}
+}
+
+func TestDraftLookupReportsReleaseListFailures(t *testing.T) {
+	f := newFixture(t)
+
+	f.github.fail["GET /repos/fixture/aht/releases"] = failure{status: http.StatusForbidden}
+	if err := f.run(t, "cleanup-draft"); !githubapi.HasStatus(err, http.StatusForbidden) {
+		t.Fatalf("cleanup-draft = %v, want listing failure", err)
+	}
+}
+
 func TestPrereleaseTagsCreatePrereleases(t *testing.T) {
 	var created newRelease
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			if strings.HasSuffix(r.URL.Path, "/releases") {
+				writeJSON(w, []release{})
+				return
+			}
+
 			w.WriteHeader(http.StatusNotFound)
+
 			return
 		}
 
