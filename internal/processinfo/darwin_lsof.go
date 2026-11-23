@@ -1,6 +1,7 @@
 package processinfo
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -13,6 +14,42 @@ const (
 	lsofHexEscapeWidth = 4
 	lsofHighestByte    = 0xff
 )
+
+var (
+	errInvalidDarwinLsofPID = errors.New("invalid lsof pid")
+	errNoDarwinLsofCWD      = errors.New("no lsof working directories")
+)
+
+func parseDarwinLsofCWD(output []byte) (map[int]string, error) {
+	cwds := make(map[int]string)
+	pid := 0
+
+	for line := range strings.SplitSeq(string(output), "\n") {
+		if line == "" {
+			continue
+		}
+
+		switch line[0] {
+		case 'p':
+			value, err := strconv.Atoi(line[1:])
+			if err != nil || value <= 0 {
+				return nil, errInvalidDarwinLsofPID
+			}
+
+			pid = value
+		case 'n':
+			if pid > 0 && len(line) > 1 {
+				cwds[pid] = darwinLsofPath(line[1:])
+			}
+		}
+	}
+
+	if len(cwds) == 0 {
+		return nil, errNoDarwinLsofCWD
+	}
+
+	return cwds, nil
+}
 
 func darwinLsofPath(name string) string {
 	decoded := decodeDarwinLsofName(name)

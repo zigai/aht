@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -15,7 +16,11 @@ import (
 	"github.com/zigai/aht/v2/internal/command"
 )
 
-const darwinPSFieldCount = 5
+const (
+	darwinPSFieldCount = 5
+	darwinPIDSysctl    = "kern.proc.pid"
+	darwinUIDSysctl    = "kern.proc.uid"
+)
 
 var (
 	errNilDarwinProcessTable        = errors.New("nil process table")
@@ -25,7 +30,6 @@ var (
 	errInvalidDarwinPSParentPID     = errors.New("invalid ps parent pid")
 	errInvalidDarwinPSProcessGroup  = errors.New("invalid ps process group id")
 	errInvalidDarwinPSForegroundPID = errors.New("invalid ps foreground process group id")
-	errInvalidDarwinLsofPID         = errors.New("invalid lsof pid")
 )
 
 type darwinPSRow struct {
@@ -52,9 +56,9 @@ func ListWithEnv(
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
 
-	kinfo, err := unix.SysctlKinfoProcSlice("kern.proc.uid", unix.Getuid())
+	kinfo, err := unix.SysctlKinfoProcSlice(darwinUIDSysctl, unix.Getuid())
 	if err != nil {
-		return nil, classifyDarwinError("kern.proc.uid", err)
+		return nil, classifyDarwinError(darwinUIDSysctl, err)
 	}
 
 	processes, pids, err := darwinKernelProcesses(kinfo)
@@ -66,22 +70,7 @@ func ListWithEnv(
 		return processes, nil
 	}
 
-	byPID, err := darwinPSInventory(ctx, pids)
-	if err != nil {
-		return nil, err
-	}
-
-	enrichDarwinProcesses(processes, byPID)
-
-	if cwd, err := darwinLsofCWD(ctx, pids); err == nil {
-		for i := range processes {
-			processes[i].CWD = cwd[processes[i].PID]
-		}
-	} else if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, fmt.Errorf("inspect process working directories: %w", ctxErr)
-	}
-
-	if err := readDarwinArguments(ctx, processes, envKeys, includeEnv); err != nil {
+	if err := enrichDarwinInventory(ctx, processes, pids, envKeys, includeEnv); err != nil {
 		return nil, err
 	}
 
@@ -96,18 +85,41 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 		return zero, false, nil
 	}
 
-	processes, err := List(ctx)
+	if err := ctx.Err(); err != nil {
+		return zero, false, fmt.Errorf("find process: %w", err)
+	}
+
+	kinfo, err := unix.SysctlKinfoProc(darwinPIDSysctl, pid)
+	// SysctlKinfoProc returns EIO when the kernel returns no record.
+	if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EIO) {
+		return zero, false, nil
+	}
+
+	if err != nil {
+		return zero, false, classifyDarwinError(darwinPIDSysctl, err)
+	}
+
+	if kinfo == nil || int(kinfo.Proc.P_pid) != pid || int(kinfo.Eproc.Ucred.Uid) != unix.Getuid() {
+		return zero, false, nil
+	}
+
+	process, err := darwinKernelProcess(*kinfo, darwinPIDSysctl)
 	if err != nil {
 		return zero, false, err
 	}
 
-	for _, process := range processes {
-		if process.PID == pid {
-			return process, true, nil
-		}
+	processes := []Process{process}
+	if err := enrichDarwinInventory(
+		ctx,
+		processes,
+		[]string{strconv.Itoa(pid)},
+		nil,
+		nil,
+	); err != nil {
+		return zero, false, err
 	}
 
-	return zero, false, nil
+	return processes[0], true, nil
 }
 
 // StartIdentity returns the kernel process-start identity used by List and
@@ -117,7 +129,7 @@ func StartIdentity(ctx context.Context, pid int) string {
 		return ""
 	}
 
-	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	process, err := unix.SysctlKinfoProc(darwinPIDSysctl, pid)
 	if err != nil || process == nil || int(process.Proc.P_pid) != pid {
 		return ""
 	}
@@ -145,6 +157,31 @@ func CommandName(ctx context.Context, pid int) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func enrichDarwinInventory(
+	ctx context.Context,
+	processes []Process,
+	pids []string,
+	envKeys []string,
+	includeEnv func(Process) bool,
+) error {
+	byPID, err := darwinPSInventory(ctx, pids)
+	if err != nil {
+		return err
+	}
+
+	enrichDarwinProcesses(processes, byPID)
+
+	if cwd, err := darwinLsofCWD(ctx, pids); err == nil {
+		for i := range processes {
+			processes[i].CWD = cwd[processes[i].PID]
+		}
+	} else if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("inspect process working directories: %w", ctxErr)
+	}
+
+	return readDarwinArguments(ctx, processes, envKeys, includeEnv)
 }
 
 func darwinPSInventory(ctx context.Context, pids []string) (map[int]darwinPSRow, error) {
@@ -234,40 +271,51 @@ func darwinArgumentsUnavailable(err error) bool {
 
 func darwinKernelProcesses(kinfo []unix.KinfoProc) ([]Process, []string, error) {
 	if kinfo == nil {
-		return nil, nil, &TableError{Path: "kern.proc.uid", Err: errNilDarwinProcessTable}
+		return nil, nil, &TableError{Path: darwinUIDSysctl, Err: errNilDarwinProcessTable}
 	}
 
 	pids := make([]string, 0, len(kinfo))
 
 	processes := make([]Process, 0, len(kinfo))
-	for _, process := range kinfo {
-		pid := int(process.Proc.P_pid)
-
-		startIdentity, validStart := darwinProcessStartIdentity(process)
-		if pid <= 0 || process.Eproc.Ppid < 0 || process.Eproc.Pgid < 0 || !validStart {
-			return nil, nil, &TableError{
-				Path: "kern.proc.uid",
-				Err:  fmt.Errorf("pid %d: %w", pid, errInvalidDarwinProcessRecord),
-			}
+	for _, entry := range kinfo {
+		process, err := darwinKernelProcess(entry, darwinUIDSysctl)
+		if err != nil {
+			return nil, nil, err
 		}
 
-		pids = append(pids, strconv.Itoa(pid))
-		processes = append(processes, Process{
-			PID:            pid,
-			Name:           darwinCString(process.Proc.P_comm[:]),
-			PPID:           int(process.Eproc.Ppid),
-			ProcessGroupID: int(process.Eproc.Pgid),
-			Foreground:     false,
-			StartIdentity:  startIdentity,
-			Executable:     darwinCString(process.Proc.P_comm[:]),
-			CWD:            "",
-			TTY:            "",
-			Env:            nil,
-			Args:           nil,
-		})
+		pids = append(pids, strconv.Itoa(process.PID))
+		processes = append(processes, process)
 	}
 
 	return processes, pids, nil
+}
+
+func darwinKernelProcess(process unix.KinfoProc, path string) (Process, error) {
+	pid := int(process.Proc.P_pid)
+
+	startIdentity, validStart := darwinProcessStartIdentity(process)
+	if pid <= 0 || process.Eproc.Ppid < 0 || process.Eproc.Pgid < 0 || !validStart {
+		return Process{}, &TableError{
+			Path: path,
+			Err:  fmt.Errorf("pid %d: %w", pid, errInvalidDarwinProcessRecord),
+		}
+	}
+
+	name := darwinCString(process.Proc.P_comm[:])
+
+	return Process{
+		PID:            pid,
+		Name:           name,
+		PPID:           int(process.Eproc.Ppid),
+		ProcessGroupID: int(process.Eproc.Pgid),
+		Foreground:     false,
+		StartIdentity:  startIdentity,
+		Executable:     name,
+		CWD:            "",
+		TTY:            "",
+		Env:            nil,
+		Args:           nil,
+	}, nil
 }
 
 func parseDarwinPS(output string) (map[int]darwinPSRow, error) {
@@ -319,7 +367,7 @@ func parseDarwinPSRow(fields []string) (darwinPSRow, error) {
 		PPID:           ppid,
 		ProcessGroupID: pgid,
 		Foreground:     tpgid > 0 && pgid == tpgid,
-		TTY:            fields[4],
+		TTY:            normalizeDarwinTTY(fields[4]),
 	}, nil
 }
 
@@ -335,34 +383,21 @@ func darwinLsofCWD(ctx context.Context, pids []string) (map[int]string, error) {
 		strings.Join(pids, ","),
 		"-Fn",
 	)
-	if err != nil {
-		return nil, fmt.Errorf("run lsof process inventory: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("run lsof process inventory: %w", ctxErr)
 	}
 
-	cwds := make(map[int]string)
-	pid := 0
+	if err == nil {
+		return parseDarwinLsofCWD(output)
+	}
 
-	for line := range strings.SplitSeq(string(output), "\n") {
-		if line == "" {
-			continue
-		}
-
-		switch line[0] {
-		case 'p':
-			value, err := strconv.Atoi(line[1:])
-			if err != nil || value <= 0 {
-				return nil, errInvalidDarwinLsofPID
-			}
-
-			pid = value
-		case 'n':
-			if pid > 0 {
-				cwds[pid] = darwinLsofPath(line[1:])
-			}
+	if _, exited := errors.AsType[*exec.ExitError](err); exited {
+		if cwds, parseErr := parseDarwinLsofCWD(output); parseErr == nil {
+			return cwds, nil
 		}
 	}
 
-	return cwds, nil
+	return nil, fmt.Errorf("run lsof process inventory: %w", err)
 }
 
 func darwinCString(data []byte) string {
