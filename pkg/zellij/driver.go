@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -43,7 +42,7 @@ func (d Driver) LocationFromEnv(env func(string) string) registry.Location {
 
 // ListPanes enumerates live Zellij panes. Zellij reports panes without
 // process inspection, so processes is unused.
-func (d Driver) ListPanes(ctx context.Context, _ []processinfo.Process) ([]mux.Pane, error) {
+func (d Driver) ListPanes(ctx context.Context, _ []mux.Process) ([]mux.Pane, error) {
 	return ListPanesWithOptions(ctx, d.ListOptions)
 }
 

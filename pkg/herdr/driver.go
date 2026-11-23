@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -45,7 +44,7 @@ func (d Driver) LocationFromEnv(env func(string) string) registry.Location {
 
 // ListPanes enumerates live Herdr panes. Herdr reports pane processes itself,
 // so processes is unused.
-func (d Driver) ListPanes(ctx context.Context, _ []processinfo.Process) ([]mux.Pane, error) {
+func (d Driver) ListPanes(ctx context.Context, _ []mux.Process) ([]mux.Pane, error) {
 	return ListPanesWithOptions(ctx, d.ListOptions)
 }
 
@@ -58,16 +57,16 @@ func (d Driver) Presence(context.Context, registry.Location) (registry.Presence,
 	return registry.PresenceUnknown, nil
 }
 
-// SamePane matches pane ids within one server or session. Listed panes carry
-// only the session name; the environment may carry only the socket path.
+// SamePane matches pane IDs by socket path when both paths are known.
 func (d Driver) SamePane(a registry.Location, b registry.Location) bool {
 	if a.Kind != registry.MultiplexerHerdr || b.Kind != registry.MultiplexerHerdr ||
 		a.PaneID == "" || a.PaneID != b.PaneID {
 		return false
 	}
 
-	sameServer := a.ServerID != "" && a.ServerID == b.ServerID
-	sameSession := a.SessionName != "" && a.SessionName == b.SessionName
+	if a.ServerID != "" && b.ServerID != "" {
+		return registry.PathsEqual(a.ServerID, b.ServerID)
+	}
 
-	return sameServer || sameSession
+	return a.SessionName != "" && a.SessionName == b.SessionName
 }

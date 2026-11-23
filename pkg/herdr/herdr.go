@@ -107,6 +107,7 @@ type herdrSessionItem struct {
 	Name        string `json:"name"`
 	SessionName string `json:"session_name"`
 	ID          string `json:"id"`
+	SocketPath  string `json:"socket_path"`
 	Running     *bool  `json:"running"`
 	Exited      bool   `json:"exited"`
 	Dead        bool   `json:"dead"`
@@ -136,6 +137,10 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 	}
 
 	sessionOutput, err := opts.Run(ctx, nil, "session", "list", "--json")
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("list herdr sessions: %w", ctxErr)
+	}
+
 	if err != nil {
 		if herdrUnavailable(sessionOutput) {
 			return nil, nil
@@ -154,12 +159,15 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 	var listErrors []error
 
 	for _, session := range sessions {
-		sessionPanes, sessionErrors, err := listSessionPanes(ctx, opts.Run, session)
-		if err != nil {
-			return nil, err
+		sessionPanes, sessionErr := listSessionPanes(ctx, opts.Run, session)
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("list herdr panes: %w", err)
 		}
 
-		listErrors = append(listErrors, sessionErrors...)
+		if sessionErr != nil {
+			listErrors = append(listErrors, sessionErr)
+		}
+
 		panes = append(panes, sessionPanes...)
 	}
 
@@ -212,23 +220,32 @@ func (n herdrNamedItem) DisplayName() string {
 func listSessionPanes(
 	ctx context.Context,
 	run CommandRunner,
-	session string,
-) ([]mux.Pane, []error, error) {
-	env := map[string]string{"HERDR_SESSION": session}
+	session herdrSessionItem,
+) ([]mux.Pane, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("read herdr snapshot: %w", err)
+	}
+
+	name := session.liveName()
+	env := map[string]string{envSessionName: name, envSocketPath: session.SocketPath}
 
 	output, err := run(ctx, env, "api", "snapshot")
 	if err != nil {
-		return nil, []error{fmt.Errorf("read herdr session %q snapshot: %w", session, err)}, nil
+		return nil, fmt.Errorf("read herdr session %q snapshot: %w", name, err)
 	}
 
 	panes, err := parseSnapshot(session, output)
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("herdr session %q: %w", name, err)
 	}
 
 	var listErrors []error
 
 	for index := range panes {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("read herdr pane process info: %w", err)
+		}
+
 		processOutput, processErr := run(
 			ctx,
 			env,
@@ -247,11 +264,14 @@ func listSessionPanes(
 		}
 
 		if err := applyPaneProcessInfo(&panes[index], processOutput); err != nil {
-			return nil, nil, err
+			listErrors = append(
+				listErrors,
+				fmt.Errorf("herdr pane %q: %w", panes[index].Location.PaneID, err),
+			)
 		}
 	}
 
-	return panes, listErrors, nil
+	return panes, errors.Join(listErrors...)
 }
 
 func applyPaneProcessInfo(pane *mux.Pane, output string) error {
@@ -274,7 +294,7 @@ func applyPaneProcessInfo(pane *mux.Pane, output string) error {
 	return nil
 }
 
-func parseSessions(output string) ([]string, error) {
+func parseSessions(output string) ([]herdrSessionItem, error) {
 	if sessions, ok := parseContainerSessions(output); ok {
 		return sessions, nil
 	}
@@ -286,7 +306,7 @@ func parseSessions(output string) ([]string, error) {
 	return nil, errInvalidSessionsOutput
 }
 
-func parseContainerSessions(output string) ([]string, bool) {
+func parseContainerSessions(output string) ([]herdrSessionItem, bool) {
 	var container struct {
 		Result *struct {
 			Sessions []herdrSessionItem `json:"sessions"`
@@ -306,43 +326,36 @@ func parseContainerSessions(output string) ([]string, bool) {
 		list = container.Result.Sessions
 	}
 
-	if len(list) == 0 {
-		return []string{}, true
-	}
-
-	var sessions []string
-
+	sessions := make([]herdrSessionItem, 0, len(list))
 	for _, s := range list {
-		name := s.liveName()
-		if name != "" {
-			sessions = append(sessions, name)
+		if s.liveName() != "" {
+			sessions = append(sessions, s)
 		}
 	}
 
 	return sessions, true
 }
 
-func parseListSessions(output string) ([]string, bool) {
+func parseListSessions(output string) ([]herdrSessionItem, bool) {
 	var rawSessions []json.RawMessage
 	if err := json.Unmarshal([]byte(output), &rawSessions); err != nil {
 		return nil, false
 	}
 
-	var sessions []string
+	var sessions []herdrSessionItem
 
 	for _, item := range rawSessions {
-		var str string
-		if err := json.Unmarshal(item, &str); err == nil && strings.TrimSpace(str) != "" {
-			sessions = append(sessions, strings.TrimSpace(str))
+		var session herdrSessionItem
+
+		var name string
+		if err := json.Unmarshal(item, &name); err == nil {
+			session.Name = strings.TrimSpace(name)
+		} else if err := json.Unmarshal(item, &session); err != nil {
 			continue
 		}
 
-		var obj herdrSessionItem
-		if err := json.Unmarshal(item, &obj); err == nil {
-			name := obj.liveName()
-			if name != "" {
-				sessions = append(sessions, name)
-			}
+		if session.liveName() != "" {
+			sessions = append(sessions, session)
 		}
 	}
 
@@ -360,7 +373,7 @@ func snapshotNames(items []herdrNamedItem) map[string]string {
 	return names
 }
 
-func parseSnapshot(session string, output string) ([]mux.Pane, error) {
+func parseSnapshot(session herdrSessionItem, output string) ([]mux.Pane, error) {
 	var resp struct {
 		Result struct {
 			Snapshot *herdrSnapshotData `json:"snapshot"`
@@ -410,7 +423,7 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 		title := cmp.Or(item.Title, item.PaneTitle, item.Label, label)
 
 		location := registry.Location{
-			ServerID:        "",
+			ServerID:        session.SocketPath,
 			SessionID:       "",
 			TabIndex:        "",
 			WindowID:        "",
@@ -421,7 +434,7 @@ func parseSnapshot(session string, output string) ([]mux.Pane, error) {
 			PaneTTY:         "",
 			ClientTTY:       "",
 			Kind:            registry.MultiplexerHerdr,
-			SessionName:     session,
+			SessionName:     session.liveName(),
 			WorkspaceID:     item.WorkspaceID,
 			WorkspaceName:   workspaceNames[item.WorkspaceID],
 			TabID:           item.TabID,
@@ -531,7 +544,9 @@ func runHerdr(ctx context.Context, env map[string]string, args ...string) (strin
 	}
 
 	for key, value := range env {
-		commandEnv = append(commandEnv, key+"="+value)
+		if value != "" {
+			commandEnv = append(commandEnv, key+"="+value)
+		}
 	}
 
 	output, err := command.Run(ctx, "herdr", commandEnv, args...)

@@ -20,12 +20,20 @@ func listMultiplexerPanes(
 	ctx context.Context,
 	processes []processinfo.Process,
 ) ([]mux.Pane, error) {
+	var muxProcesses []mux.Process
+	if processes != nil {
+		muxProcesses = make([]mux.Process, len(processes))
+		for i, process := range processes {
+			muxProcesses[i] = mux.Process{PID: process.PID, Name: process.Name, Args: process.Args}
+		}
+	}
+
 	panes := make([]mux.Pane, 0)
 
 	var listErrors []error
 
 	for _, driver := range drivers.All() {
-		listed, listErr := driver.ListPanes(ctx, processes)
+		listed, listErr := driver.ListPanes(ctx, muxProcesses)
 
 		panes = append(panes, listed...)
 		if listErr != nil {

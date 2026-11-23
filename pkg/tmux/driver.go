@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -63,7 +62,7 @@ func (d Driver) LocationFromEnv(func(string) string) registry.Location {
 // nil, nil.
 func (d Driver) ListPanes(
 	ctx context.Context,
-	processes []processinfo.Process,
+	processes []mux.Process,
 ) ([]mux.Pane, error) {
 	lookPath := d.LookPath
 	if lookPath == nil {

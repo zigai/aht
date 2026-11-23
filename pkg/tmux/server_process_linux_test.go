@@ -3,7 +3,7 @@ package tmux
 import (
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
 )
 
 func TestIsServerProcessSeparatesServersFromClients(t *testing.T) {
@@ -25,7 +25,7 @@ func TestIsServerProcessSeparatesServersFromClients(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			process := processinfo.Process{PID: 42, Name: test.comm, Args: test.args}
+			process := mux.Process{PID: 42, Name: test.comm, Args: test.args}
 			if server := isServerProcess(process); server != test.server {
 				t.Fatalf(
 					"isServerProcess(%q, %q) = %t, want %t",

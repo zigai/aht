@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -33,7 +32,7 @@ type Driver interface {
 	Current(ctx context.Context) (registry.Location, error)
 	EnvKeys() []string
 	LocationFromEnv(env func(string) string) registry.Location
-	ListPanes(ctx context.Context, processes []processinfo.Process) ([]Pane, error)
+	ListPanes(ctx context.Context, processes []Process) ([]Pane, error)
 	CapturePane(ctx context.Context, pane Pane) (ScreenSnapshot, error)
 	Presence(ctx context.Context, location registry.Location) (registry.Presence, error)
 	SamePane(a registry.Location, b registry.Location) bool
@@ -50,6 +49,13 @@ type Interrupter interface {
 type BatchCapturer interface {
 	// CapturePanes returns one capture per pane, in the given order.
 	CapturePanes(ctx context.Context, panes []Pane) []ScreenCapture
+}
+
+// Process identifies a candidate multiplexer server process.
+type Process struct {
+	PID  int
+	Name string
+	Args []string
 }
 
 // ProcessRef identifies a process reported by a multiplexer for one pane.

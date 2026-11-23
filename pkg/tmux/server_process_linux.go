@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
 )
 
-func isServerProcess(process processinfo.Process) bool {
+func isServerProcess(process mux.Process) bool {
 	return process.PID > 0 && len(process.Args) > 0 &&
 		(isTmuxServerComm(process.Name) || isTmuxServerArgs(process.Args))
 }

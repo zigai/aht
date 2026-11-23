@@ -16,7 +16,6 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testtmux"
 	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
@@ -238,7 +237,7 @@ func TestListPanesReadsProgramStatus(t *testing.T) {
 
 	for {
 		panes, err := ListPanesWithOptions(t.Context(), ListOptions{
-			Processes:   []processinfo.Process{},
+			Processes:   []mux.Process{},
 			SocketPaths: []string{server.Socket},
 		})
 		if err != nil || len(panes) != 1 {
@@ -339,8 +338,13 @@ func TestWatchProgramStatusDeliversStateAndKindChanges(t *testing.T) {
 	}
 
 	working := mux.ProgramStatus{App: "demo", State: mux.ProgramStateWorking, Kind: ""}
-	permission := mux.ProgramStatus{App: "demo", State: mux.ProgramStateBlocked, Kind: "permission"}
-	question := mux.ProgramStatus{App: "demo", State: mux.ProgramStateBlocked, Kind: "question"}
+	other := mux.ProgramStatus{App: "other", State: mux.ProgramStateWorking, Kind: ""}
+	permission := mux.ProgramStatus{
+		App:   "other",
+		State: mux.ProgramStateBlocked,
+		Kind:  "permission",
+	}
+	question := mux.ProgramStatus{App: "other", State: mux.ProgramStateBlocked, Kind: "question"}
 
 	for _, step := range []struct {
 		record string
@@ -349,8 +353,9 @@ func TestWatchProgramStatusDeliversStateAndKindChanges(t *testing.T) {
 		{record: "state=working:app=demo", want: []mux.ProgramStatus{working}},
 		{record: "state=working:app=demo:msg=aGVsbG8=", want: nil},
 		{record: "state=blocked:kind=permission:id=child:app=demo", want: nil},
-		{record: "state=blocked:kind=permission:app=demo", want: []mux.ProgramStatus{permission}},
-		{record: "state=blocked:kind=question:app=demo", want: []mux.ProgramStatus{question}},
+		{record: "state=working:app=other", want: []mux.ProgramStatus{other}},
+		{record: "state=blocked:kind=permission:app=other", want: []mux.ProgramStatus{permission}},
+		{record: "state=blocked:kind=question:app=other", want: []mux.ProgramStatus{question}},
 		{record: "state=clear", want: []mux.ProgramStatus{{}}},
 	} {
 		if got := report(step.record); !slices.Equal(got, step.want) {

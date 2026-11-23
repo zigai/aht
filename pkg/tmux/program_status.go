@@ -18,16 +18,17 @@ const (
 	programStatusWait      = 5 * time.Minute
 
 	// The hook fires for every report, including a new message or a child
-	// record. Comparing with the pane option signals a state or kind change only.
-	programStatusChanged = "#{!=:#{program_state}#{program_kind},#{@aht-program-status}}"
-	programStatusSignal  = `set-option -pF @aht-program-status "#{program_state}#{program_kind}" ; ` +
+	// record. Comparing with the pane option ignores changes to those fields.
+	programStatusKey     = "#{program_name}|#{program_state}|#{program_kind}"
+	programStatusChanged = "#{!=:" + programStatusKey + ",#{@aht-program-status}}"
+	programStatusSignal  = `set-option -pF @aht-program-status "` + programStatusKey + `" ; ` +
 		"wait-for -S " + programStatusChannel
 )
 
 // WatchProgramStatus calls changed with the server's panes once the watch is
-// set, and again after the state or kind of a pane's own program status record
-// changes. It sets a global hook that signals a wait-for channel; the hook
-// stays on the server after ctx ends. It returns
+// set, and again after a pane's program name, state, or kind changes. The
+// global hook signals a wait-for channel and stays on the server after ctx
+// ends. WatchProgramStatus returns
 // [mux.ErrProgramStatusUnsignaled] when the server's tmux has no such hook.
 func WatchProgramStatus(
 	ctx context.Context,
@@ -49,6 +50,13 @@ func WatchProgramStatus(
 		return err
 	}
 
+	wait := func(ctx context.Context) error {
+		return server.WaitFor(ctx, programStatusChannel)
+	}
+	read := func(ctx context.Context) ([]mux.Pane, error) {
+		return serverPanes(ctx, serverIdentity)
+	}
+
 	for ctx.Err() == nil {
 		// Setting the hook again after each wait restores one the user's
 		// configuration removed.
@@ -56,7 +64,7 @@ func WatchProgramStatus(
 		if err != nil {
 			err = programStatusHookError(err)
 		} else {
-			err = awaitProgramStatus(ctx, server, serverIdentity, changed)
+			err = awaitProgramStatus(ctx, wait, read, changed)
 		}
 
 		if err != nil && ctx.Err() == nil {
@@ -85,20 +93,15 @@ func programStatusHookCommands() (gotmux.CommandSequence, error) {
 
 func awaitProgramStatus(
 	ctx context.Context,
-	server *gotmux.Server,
-	serverIdentity string,
+	wait func(context.Context) error,
+	read func(context.Context) ([]mux.Pane, error),
 	changed func([]mux.Pane),
 ) error {
 	waitCtx, cancel := context.WithTimeout(ctx, programStatusWait)
 	defer cancel()
 
 	for {
-		panes, err := serverPanes(waitCtx, serverIdentity)
-		if err == nil {
-			changed(panes)
-
-			err = server.WaitFor(waitCtx, programStatusChannel)
-		}
+		err := readProgramStatus(waitCtx, wait, read, changed)
 
 		if waitCtx.Err() != nil {
 			return nil
@@ -108,6 +111,42 @@ func awaitProgramStatus(
 			return fmt.Errorf("wait for tmux program status: %w", err)
 		}
 	}
+}
+
+func readProgramStatus(
+	ctx context.Context,
+	wait func(context.Context) error,
+	read func(context.Context) ([]mux.Pane, error),
+	changed func([]mux.Pane),
+) error {
+	ctx, cancel := context.WithCancel(ctx)
+	wakeup := make(chan struct{})
+
+	defer func() {
+		cancel()
+		<-wakeup
+	}()
+
+	var waitErr error
+
+	go func() {
+		defer close(wakeup)
+
+		waitErr = wait(ctx)
+	}()
+
+	panes, err := read(ctx)
+	if err != nil {
+		return err
+	}
+
+	if ctx.Err() == nil {
+		changed(panes)
+	}
+
+	<-wakeup
+
+	return waitErr
 }
 
 func serverPanes(ctx context.Context, serverIdentity string) ([]mux.Pane, error) {

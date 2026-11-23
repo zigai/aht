@@ -47,7 +47,7 @@ type ListOptions struct {
 	// Processes is the current-user process snapshot searched for tmux
 	// servers outside gotmux's standard socket directories. Nil lists
 	// processes; an empty slice disables the search.
-	Processes []processinfo.Process
+	Processes []mux.Process
 	// SocketPaths overrides gotmux's standard socket discovery when non-nil.
 	// An empty slice disables it for deterministic tests or explicit discovery.
 	SocketPaths []string
@@ -188,7 +188,14 @@ func listPanesWithOptions(
 			return nil, fmt.Errorf("listing tmux server processes: %w", err)
 		}
 
-		opts.Processes = processes
+		opts.Processes = make([]mux.Process, len(processes))
+		for i, process := range processes {
+			opts.Processes[i] = mux.Process{
+				PID:  process.PID,
+				Name: process.Name,
+				Args: process.Args,
+			}
+		}
 	}
 
 	servers, err := discoverServers(ctx, opts)

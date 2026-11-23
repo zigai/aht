@@ -14,8 +14,8 @@ import (
 
 	gotmux "github.com/zigai/gotmux/tmux"
 
-	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/internal/testtmux"
+	"github.com/zigai/aht/v2/pkg/mux"
 )
 
 func TestListPanesDiscoversRealNamedServer(t *testing.T) {
@@ -54,7 +54,7 @@ func TestListPanesDiscoversRealNamedServer(t *testing.T) {
 			SocketPaths: sockets,
 			// Standard sockets must be discoverable even when process arguments
 			// are unavailable or the caller is outside tmux.
-			Processes: []processinfo.Process{},
+			Processes: []mux.Process{},
 		})
 		if err == nil && namedDiscoveryPaneFound(t, panes, name) {
 			return

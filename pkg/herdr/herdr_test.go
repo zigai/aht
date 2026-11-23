@@ -60,7 +60,7 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 		calls = append(calls, call{env: env, args: append([]string(nil), args...)})
 		switch strings.Join(args, " ") {
 		case "session list --json":
-			return `{"sessions":[{"name":"work"}]}`, nil
+			return `{"sessions":[{"name":"work","socket_path":"/tmp/herdr.sock"}]}`, nil
 		case "api snapshot":
 			return `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1",` +
 				`"label":"repo"}],"tabs":[{"tab_id":"w1:t1",` +
@@ -96,6 +96,16 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 		t.Fatalf("pane location = %#v", pane.Location)
 	}
 
+	location := herdr.NewDriver().LocationFromEnv(func(key string) string {
+		return map[string]string{
+			"HERDR_SOCKET_PATH": "/tmp/./herdr.sock",
+			"HERDR_PANE_ID":     "w1:p1",
+		}[key]
+	})
+	if !herdr.NewDriver().SamePane(location, pane.Location) {
+		t.Fatalf("hook location %#v does not match listed pane %#v", location, pane.Location)
+	}
+
 	if pane.Activity == nil || *pane.Activity != registry.ActivityWaiting ||
 		pane.StateReason != "herdr_agent_status" {
 		t.Fatalf("pane state = %#v", pane)
@@ -108,7 +118,9 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 	}
 
 	if len(calls) != 3 || calls[1].env["HERDR_SESSION"] != "work" ||
-		calls[2].env["HERDR_SESSION"] != "work" {
+		calls[2].env["HERDR_SESSION"] != "work" ||
+		calls[1].env["HERDR_SOCKET_PATH"] != "/tmp/herdr.sock" ||
+		calls[2].env["HERDR_SOCKET_PATH"] != "/tmp/herdr.sock" {
 		t.Fatalf("calls = %#v", calls)
 	}
 }
