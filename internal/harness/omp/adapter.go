@@ -15,7 +15,7 @@ const (
 	ompIntegrationID       = "omp"
 	ompIntegrationSourceID = "omp-extension"
 	ompSessionFlag         = "--session"
-	integrationVersion     = 20
+	integrationVersion     = 21
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -55,6 +55,11 @@ func New() ompHarness {
 			"omp_approval_reason",
 			"source",
 			"reason",
+		},
+		LifecycleEvents: map[string]string{
+			"sessionswitch": "resume",
+			"sessionbranch": "resume",
+			"sessiontree":   "resume",
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  ompIntegrationSourceID,

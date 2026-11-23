@@ -50,6 +50,22 @@ func newTestCatalogAdapter(
 	}
 }
 
+func TestNativeWaitingDetailsRequireWaitingCapability(t *testing.T) {
+	t.Parallel()
+
+	for _, adapter := range adapters {
+		definition := adapter.Definition()
+
+		details := definition.DetailCapabilities.Native
+		if (details.Permission || details.Question) && !definition.Capabilities.WaitingPermission {
+			t.Errorf(
+				"%s reports native waiting details without the waiting capability",
+				definition.ID,
+			)
+		}
+	}
+}
+
 func TestNativeCatalogComposesPartialProviderResults(t *testing.T) {
 	t.Parallel()
 

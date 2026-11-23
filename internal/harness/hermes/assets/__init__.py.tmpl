@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import logging
 import os
 import subprocess
+from time import time_ns
 from threading import Condition, Lock, Thread
 from typing import Any
 
@@ -42,9 +43,12 @@ class Reporter:
         self._worker: Thread | None = None
         self._is_closed = False
         self._has_warned = False
+        self._sequence = time_ns() // 1000
 
     def submit(self, args: list[str], *, end: bool = False) -> None:
         with self._condition:
+            self._sequence += 1
+            args.extend(("--sequence", str(self._sequence)))
             if self._is_closed:
                 # Hermes CLI cleanup can finalize sessions after this atexit handler ran.
                 if end:
@@ -171,7 +175,7 @@ def _report(event: str, transition: dict[str, str], values: dict[str, Any]) -> N
         "report", "hermes", "--session-id", session_id,
         "--event", event,
         "--cwd", cwd, "--project-root", cwd,
-        "--quiet", "--no-tmux",
+        "--quiet", "--no-tmux", "--multi-session",
         "--reporter", {{SOURCE}},
         "--reporter-version", str(_INTEGRATION_VERSION),
     ]

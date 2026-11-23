@@ -239,10 +239,10 @@ func requireOmpReportMetadata(t *testing.T, capturePath string, mode string) {
 		}
 
 		if mode == "unknown" {
-			if strings.Contains(strings.Join(args, "\n"), "aht_interaction_mode=") {
+			if strings.Contains(strings.Join(args, "\n"), "omp_interaction_mode=") {
 				t.Fatalf("reported unsupported mode: %v", args)
 			}
-		} else if !matchInvocation(args, []string{"--attribute", "aht_interaction_mode=" + mode}) {
+		} else if !matchInvocation(args, []string{"--attribute", "omp_interaction_mode=" + mode}) {
 			t.Fatalf("report lost interaction mode: %v", args)
 		}
 	}
@@ -280,7 +280,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 			"--session-id",
 			"resumed",
 			"--attribute",
-			"aht_interaction_mode=rpc",
+			"omp_interaction_mode=rpc",
 		},
 		{
 			"--activity",
@@ -292,7 +292,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 			"--cwd",
 			"/work/original",
 			"--attribute",
-			"aht_interaction_mode=tui",
+			"omp_interaction_mode=tui",
 			"--event",
 			"agent_end",
 			"--attribute",
@@ -318,7 +318,7 @@ func TestOmpQueuedReportsRetainCapturedSessionAndTerminalState(t *testing.T) {
 			"--cwd",
 			"/work/resumed",
 			"--attribute",
-			"aht_interaction_mode=rpc",
+			"omp_interaction_mode=rpc",
 		},
 	}
 	if len(records) != len(want) {
@@ -482,7 +482,7 @@ func TestExtensionsReportNativeInteractionMode(t *testing.T) {
 					t,
 					capture.path,
 					"--attribute",
-					"aht_interaction_mode="+mode,
+					string(harness)+"_interaction_mode="+mode,
 				)
 			})
 		}

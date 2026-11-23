@@ -47,12 +47,8 @@ func FastTreeRecord(ctx context.Context, decoder *Decoder, data []byte, line int
 		return len(entry.Message) == 0
 	case "session":
 		entry.captureSession(decoder)
-	case "session_info":
-		decoder.Conversation.Title = entry.Name
-	case "title", "title_change":
-		if entry.Title != "" {
-			decoder.Conversation.Title = entry.Title
-		}
+	case "session_info", "title", "title_change":
+		return entry.captureTitle(decoder)
 	case "custom_message":
 		for _, part := range MessageParts(entry.Content, "context", false) {
 			decoder.Capture(ctx, part.Role, part.Text, entry.ID, line, ParseTime(entry.Timestamp))
@@ -70,6 +66,20 @@ func FastTreeRecord(ctx context.Context, decoder *Decoder, data []byte, line int
 // must decode and verify the top-level fields before handling the candidate.
 func HasRecordHint(data []byte, hint []byte) bool {
 	return bytes.Contains(data[:min(len(data), fastRecordHintBytes)], hint)
+}
+
+func (entry treeEnvelope) captureTitle(decoder *Decoder) bool {
+	if entry.Type == "title" && entry.Title == "" {
+		return false
+	}
+
+	if entry.Type == "session_info" {
+		decoder.Conversation.Title = entry.Name
+	} else if entry.Title != "" {
+		decoder.Conversation.Title = entry.Title
+	}
+
+	return true
 }
 
 func (entry treeEnvelope) captureSession(decoder *Decoder) {

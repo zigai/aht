@@ -120,6 +120,7 @@ function report(eventName, event, ctx, transition) {
     "--quiet", "--no-tmux",
     "--reporter", {{SOURCE}},
     "--reporter-version", String(integrationVersion),
+    "--multi-session",
   ];
   // aht stamps the end on receipt, so a process scan taken during shutdown cannot make it stale.
   if (!end) args.push("--observed-at", new Date().toISOString());

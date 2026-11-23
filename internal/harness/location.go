@@ -118,5 +118,21 @@ func (builder *LocationBuilder) Project(kind LocationKind, relative ...string) *
 }
 
 func (builder *LocationBuilder) Locations() []Location {
-	return builder.locations
+	var locations []Location
+
+	seen := make(map[Location]struct{}, len(builder.locations))
+	for _, location := range builder.locations {
+		key := location
+
+		key.Path = filepath.Clean(key.Path)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+
+		seen[key] = struct{}{}
+
+		locations = append(locations, location)
+	}
+
+	return locations
 }

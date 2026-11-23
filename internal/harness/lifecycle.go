@@ -25,12 +25,34 @@ func (adapter BaseAdapter) LifecycleDefaults(
 		sources = []string{"source", "reason"}
 	}
 
-	return TranslateLifecycle(event, FirstAttribute(attributes, sources...))
+	normalized := normalizeLifecycleEvent(event)
+
+	kind, ok := adapter.definition.LifecycleEvents[normalized]
+	if !ok {
+		kind = genericLifecycleEvent(normalized)
+	}
+
+	return translateLifecycle(event, FirstAttribute(attributes, sources...), kind)
 }
 
 func TranslateLifecycle(event string, source string) LifecycleDefaults {
+	return translateLifecycle(event, source, genericLifecycleEvent(normalizeLifecycleEvent(event)))
+}
+
+func FirstAttribute(attributes map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(attributes[key]); value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+func translateLifecycle(event string, source string, kind string) LifecycleDefaults {
 	result := LifecycleDefaults{Event: event, Lifecycle: "", Presence: ""}
-	switch normalizedLifecycleEvent(event) {
+
+	switch kind {
 	case "start":
 		result.Lifecycle = registry.NativeLifecycleStart
 
@@ -49,18 +71,8 @@ func TranslateLifecycle(event string, source string) LifecycleDefaults {
 	return result
 }
 
-func FirstAttribute(attributes map[string]string, keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(attributes[key]); value != "" {
-			return value
-		}
-	}
-
-	return ""
-}
-
-func normalizedLifecycleEvent(event string) string {
-	normalized := strings.Map(func(character rune) rune {
+func normalizeLifecycleEvent(event string) string {
+	return strings.Map(func(character rune) rune {
 		switch {
 		case character >= 'A' && character <= 'Z':
 			return character + ('a' - 'A')
@@ -70,13 +82,13 @@ func normalizedLifecycleEvent(event string) string {
 			return -1
 		}
 	}, strings.TrimSpace(event))
+}
 
-	switch normalized {
-	case "sessionstart", "sessioncreated", "onsessionstart":
+func genericLifecycleEvent(event string) string {
+	switch event {
+	case "sessionstart":
 		return "start"
-	case "sessionswitch", "sessionbranch", "sessiontree":
-		return "resume"
-	case "sessionend", "sessionshutdown", "sessiondeleted", "onsessionfinalize":
+	case "sessionend", "sessionshutdown":
 		return "end"
 	default:
 		return ""

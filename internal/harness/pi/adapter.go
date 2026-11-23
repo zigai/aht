@@ -14,7 +14,7 @@ const (
 	piExtensionName       = "aht-state.ts"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
-	integrationVersion    = 21
+	integrationVersion    = 22
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -55,11 +55,16 @@ func New() piHarness {
 		},
 		LifecycleEventAttribute:   "pi_event",
 		LifecycleSourceAttributes: []string{"pi_reason", "source", "reason"},
-		IntegrationVersion:        integrationVersion,
-		IntegrationSource:         piIntegrationSourceID,
-		StateAuthority:            registry.AuthorityHook,
-		ProgramStatusApp:          "pi",
-		ScreenFallback:            true,
+		LifecycleEvents: map[string]string{
+			"sessionswitch": "resume",
+			"sessionbranch": "resume",
+			"sessiontree":   "resume",
+		},
+		IntegrationVersion: integrationVersion,
+		IntegrationSource:  piIntegrationSourceID,
+		StateAuthority:     registry.AuthorityHook,
+		ProgramStatusApp:   "pi",
+		ScreenFallback:     true,
 	})}
 }
 
@@ -98,11 +103,14 @@ func (piHarness) ResumeCommand(sessionID string, sessionPath string) []string {
 }
 
 func piAgentDir() string {
+	return piAgentDirUnder(harness.HomeDir())
+}
+
+func piAgentDirUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); value != "" {
 		return value
 	}
 
-	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}

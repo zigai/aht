@@ -16,5 +16,10 @@ func (piHarness) Transcript() transcript.Reader {
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{filepath.Join(home, ".pi", "agent", "sessions")}, nil
+	dir := piAgentDirUnder(home)
+	if dir == "" {
+		return nil, nil
+	}
+
+	return []string{filepath.Join(dir, "sessions")}, nil
 }

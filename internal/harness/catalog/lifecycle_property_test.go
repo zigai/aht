@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -178,9 +180,11 @@ func (runner *nativeSequenceRunner) exercise(rt *rapid.T, steps int) {
 		)
 	}
 
+	events := lifecycleEvents(runner.definition)
+
 	for range steps {
 		sessionID := rapid.SampledFrom([]string{"session-a", "session-b"}).Draw(rt, "session")
-		event := rapid.SampledFrom(lifecycleEvents(capabilities)).Draw(rt, "event")
+		event := rapid.SampledFrom(events).Draw(rt, "event")
 
 		var payload json.RawMessage
 		if rapid.Bool().Draw(rt, "optional-payload") {
@@ -206,7 +210,7 @@ func (runner *nativeSequenceRunner) apply(
 	}
 
 	observation := runner.observation(rt, sessionID, event, payload, stale)
-	assertEventLifecycle(rt, runner.definition.Capabilities, observation)
+	assertEventLifecycle(rt, runner.definition, observation)
 
 	session, before, accepted := runner.observeEvent(rt, sessionID, event, observation, stale)
 	if accepted {
@@ -334,7 +338,7 @@ func (runner *nativeSequenceRunner) observation(
 
 func assertEventLifecycle(
 	rt *rapid.T,
-	capabilities harness.Capabilities,
+	definition harness.Definition,
 	observation registry.Observation,
 ) {
 	rt.Helper()
@@ -344,15 +348,15 @@ func assertEventLifecycle(
 		rt.Fatalf("invalid translated lifecycle for %q", observation.Report().Event)
 	}
 
-	if !capabilities.SessionEnd {
-		return
+	event := observation.Report().Event
+
+	want := registry.NativeLifecycle(definition.LifecycleEvents[event])
+	if definition.Capabilities.SessionEnd && (event == "SessionEnd" || event == "session_end") {
+		want = registry.NativeLifecycleEnd
 	}
 
-	switch observation.Report().Event {
-	case "SessionEnd", "session_end", "on_session_finalize":
-		if lifecycle == nil || *lifecycle != registry.NativeLifecycleEnd {
-			rt.Fatalf("end event %q did not translate to End", observation.Report().Event)
-		}
+	if want.Valid() && (lifecycle == nil || *lifecycle != want) {
+		rt.Fatalf("event %q did not translate to %q", event, want)
 	}
 }
 
@@ -536,7 +540,9 @@ func (runner *nativeSequenceRunner) assertCoverage(t *testing.T) {
 	}
 }
 
-func lifecycleEvents(capabilities harness.Capabilities) []nativeEventCase {
+func lifecycleEvents(definition harness.Definition) []nativeEventCase {
+	capabilities := definition.Capabilities
+
 	events := []nativeEventCase{
 		{event: "UserPromptSubmit", activity: registry.ActivityRunning},
 		{event: "PostToolUse", activity: registry.ActivityRunning},
@@ -549,7 +555,6 @@ func lifecycleEvents(capabilities harness.Capabilities) []nativeEventCase {
 			events,
 			nativeEventCase{event: "SessionStart", activity: registry.ActivityIdle},
 			nativeEventCase{event: "session_start", activity: registry.ActivityIdle},
-			nativeEventCase{event: "session_switch", activity: registry.ActivityRunning},
 		)
 	}
 
@@ -558,7 +563,6 @@ func lifecycleEvents(capabilities harness.Capabilities) []nativeEventCase {
 			events,
 			nativeEventCase{event: "SessionEnd"},
 			nativeEventCase{event: "session_end"},
-			nativeEventCase{event: "on_session_finalize"},
 		)
 	}
 
@@ -570,6 +574,15 @@ func lifecycleEvents(capabilities harness.Capabilities) []nativeEventCase {
 			nativeEventCase{event: "PermissionDenied", activity: registry.ActivityIdle},
 			nativeEventCase{event: "tool_approval_resolved", activity: registry.ActivityRunning},
 		)
+	}
+
+	for _, event := range slices.Sorted(maps.Keys(definition.LifecycleEvents)) {
+		activity := registry.ActivityRunning
+		if definition.LifecycleEvents[event] == "end" {
+			activity = ""
+		}
+
+		events = append(events, nativeEventCase{event: event, activity: activity})
 	}
 
 	return events

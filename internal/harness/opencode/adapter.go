@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	integrationVersion        = 18
+	integrationVersion        = 19
 	opencodePluginName        = "aht-state.ts"
 	opencodeIntegrationSource = "opencode-plugin"
 	opencodeSessionFlag       = "--session"
@@ -51,6 +51,7 @@ func New() opencodeHarness {
 			RunningIdle:       true,
 			WaitingPermission: true,
 		},
+		LifecycleEvents:    map[string]string{"sessioncreated": "start", "sessiondeleted": "end"},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  opencodeIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,

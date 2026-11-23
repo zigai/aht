@@ -91,13 +91,7 @@ func TestHermesShutdownKeepsSessionEnds(t *testing.T) {
 	}
 
 	for {
-		var sessions []string
-
-		for _, record := range readReportingRecords(t, capture) {
-			if session := ended(record); session != "" {
-				sessions = append(sessions, session)
-			}
-		}
+		sessions := capturedHermesEnds(t, readReportingRecords(t, capture), ended)
 
 		if slices.Equal(sessions, []string{"first", "second"}) {
 			return
@@ -111,6 +105,38 @@ func TestHermesShutdownKeepsSessionEnds(t *testing.T) {
 			t.Fatalf("session ends reported: %v, want first and second", sessions)
 		}
 	}
+}
+
+func capturedHermesEnds(
+	t *testing.T,
+	records []reportingRecord,
+	ended func(reportingRecord) string,
+) []string {
+	t.Helper()
+
+	var (
+		sessions []string
+		previous int64
+	)
+
+	for _, record := range records {
+		if !slices.Contains(record.Args, "--multi-session") {
+			t.Fatalf("missing multi-session flag: %v", record.Args)
+		}
+
+		if session := ended(record); session != "" {
+			sequence := capturedReportSequence(t, record.Args)
+			if sequence <= previous {
+				t.Fatalf("session end sequence = %d, want greater than %d", sequence, previous)
+			}
+
+			previous = sequence
+
+			sessions = append(sessions, session)
+		}
+	}
+
+	return sessions
 }
 
 func TestReportingPluginsMissingBinaryIsNonfatal(t *testing.T) {
@@ -162,6 +188,12 @@ func TestOpenClawGatewayStopKeepsSessionEnds(t *testing.T) {
 		!slices.Contains(records[1].Args, "openclaw_run_id=199") ||
 		!slices.Contains(records[2].Args, fixture.terminal) {
 		t.Fatalf("shutdown did not keep the newest state and then the session end: %+v", records)
+	}
+
+	for _, record := range records {
+		if !slices.Contains(record.Args, "--multi-session") {
+			t.Errorf("missing multi-session flag: %v", record.Args)
+		}
 	}
 }
 

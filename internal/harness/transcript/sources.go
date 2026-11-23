@@ -3,10 +3,11 @@ package transcript
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func EnvPath(name string, fallback string) string {
-	if path := os.Getenv(name); path != "" {
+	if path := strings.TrimSpace(os.Getenv(name)); path != "" {
 		return path
 	}
 
@@ -14,7 +15,7 @@ func EnvPath(name string, fallback string) string {
 }
 
 func DatabaseLocation(root string, variable string) string {
-	value := os.Getenv(variable)
+	value := strings.TrimSpace(os.Getenv(variable))
 	if value == "" || value == ":memory:" {
 		return root
 	}

@@ -192,7 +192,7 @@ function report(snapshot: ReportSnapshot | undefined): Promise<void> {
   args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
   args.push("--reporter", currentSessionSource);
   if (mode === "tui" || mode === "rpc" || mode === "json" || mode === "print") {
-    args.push("--attribute", `aht_interaction_mode=${mode}`);
+    args.push("--attribute", `omp_interaction_mode=${mode}`);
   }
   addAttribute(args, "omp_event", snapshot.eventType);
   addAttribute(args, "omp_reason", snapshot.reason);

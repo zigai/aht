@@ -177,11 +177,14 @@ func copilotPayloadValidator(rawPayload json.RawMessage) bool {
 }
 
 func copilotHome() string {
+	return copilotHomeUnder(harness.HomeDir())
+}
+
+func copilotHomeUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("COPILOT_HOME")); value != "" {
 		return value
 	}
 
-	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}

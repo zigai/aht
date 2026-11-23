@@ -49,8 +49,8 @@ function drainReports() {
   const timeout = setTimeout(() => {
     warnReporting();
     child.kill("SIGTERM");
-    killTimer = setTimeout(() => child.kill("SIGKILL"), 100);
-  }, 1000);
+    killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+  }, 7000);
   child.once("error", warnReporting);
   // "close", including after a spawn error, joins the child before the next job.
   child.once("close", (code) => {

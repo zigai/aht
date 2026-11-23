@@ -38,7 +38,7 @@ func kiloPaths(home string) nativePaths {
 		return paths
 	}
 
-	data := os.Getenv("XDG_DATA_HOME")
+	data := strings.TrimSpace(os.Getenv("XDG_DATA_HOME"))
 	if data == "" && home != "" {
 		data = filepath.Join(home, ".local", "share")
 	}

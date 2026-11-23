@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	_ "embed"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 const (
-	integrationVersion        = 12
+	integrationVersion        = 13
 	openclawCommand           = "openclaw"
 	openclawPluginName        = "aht-state"
 	openclawIntegrationSource = "openclaw-plugin"
@@ -54,6 +55,11 @@ func New() openclawHarness {
 }
 
 func (adapter openclawHarness) InstallPlan(binary string) (harness.InstallPlan, error) {
+	stateDir := integrationStateDir()
+	if stateDir == "" {
+		return harness.InstallPlan{}, harness.ErrHomeUnknown
+	}
+
 	version := strconv.Itoa(integrationVersion)
 	definition := adapter.Definition()
 
@@ -61,7 +67,7 @@ func (adapter openclawHarness) InstallPlan(binary string) (harness.InstallPlan, 
 		Actions: []harness.InstallAction{
 			harness.PluginDirectoryAction{Plan: harness.PluginDirectoryInstallPlan{
 				Dir: filepath.Join(
-					registry.DefaultStateDir(),
+					stateDir,
 					"integrations",
 					"openclaw",
 					openclawPluginName,
@@ -106,6 +112,22 @@ func (adapter openclawHarness) InstallPlan(binary string) (harness.InstallPlan, 
 			}},
 		},
 	}, nil
+}
+
+func integrationStateDir() string {
+	if dir := strings.TrimSpace(os.Getenv(registry.StateDirEnv)); dir != "" {
+		return dir
+	}
+
+	if dir := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); dir != "" {
+		return filepath.Join(dir, "aht")
+	}
+
+	if home := harness.HomeDir(); home != "" {
+		return filepath.Join(home, ".local", "state", "aht")
+	}
+
+	return ""
 }
 
 func (openclawHarness) ResumeCommand(sessionID string, _ string) []string {

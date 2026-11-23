@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	integrationVersion = 14
+	integrationVersion = 15
 	kiloCommand        = "kilo"
 	kiloSessionFlag    = "--session"
 )
@@ -54,6 +54,7 @@ func New() kiloHarness {
 			RunningIdle:       true,
 			WaitingPermission: true,
 		},
+		LifecycleEvents:    map[string]string{"sessioncreated": "start", "sessiondeleted": "end"},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  kiloIntegrationSource,
 		StateAuthority:     registry.AuthorityHook,

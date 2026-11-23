@@ -299,7 +299,7 @@ function reportArgs(transition: string, ctx?: ExtensionContext, event?: NativeEv
   args.push("--reporter-version", "{{INTEGRATION_VERSION}}");
   args.push("--reporter", currentSessionSource);
   if (ctx?.mode === "tui" || ctx?.mode === "rpc" || ctx?.mode === "json" || ctx?.mode === "print") {
-    args.push("--attribute", `aht_interaction_mode=${ctx.mode}`);
+    args.push("--attribute", `pi_interaction_mode=${ctx.mode}`);
   }
   if (currentSessionId) {
     args.push("--session-id", currentSessionId);

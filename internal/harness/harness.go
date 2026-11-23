@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 
@@ -80,6 +81,7 @@ type Definition struct {
 	StateAuthority            registry.Authority
 	ScreenFallback            bool
 	PayloadOmissions          []string
+	LifecycleEvents           map[string]string
 	LifecycleEventAttribute   string
 	LifecycleSourceAttributes []string
 	// ProgramStatusApp is the app name the harness reports in its OSC 7501
@@ -192,6 +194,7 @@ func cloneDefinition(definition Definition) Definition {
 		StateAuthority:            definition.StateAuthority,
 		ScreenFallback:            definition.ScreenFallback,
 		PayloadOmissions:          slices.Clone(definition.PayloadOmissions),
+		LifecycleEvents:           maps.Clone(definition.LifecycleEvents),
 		LifecycleEventAttribute:   definition.LifecycleEventAttribute,
 		LifecycleSourceAttributes: slices.Clone(definition.LifecycleSourceAttributes),
 		ProgramStatusApp:          definition.ProgramStatusApp,

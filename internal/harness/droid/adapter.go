@@ -43,9 +43,10 @@ func New() droidHarness {
 			ProjectRoot: []string{"FACTORY_PROJECT_DIR"},
 		},
 		Capabilities: harness.Capabilities{
-			SessionStart: true,
-			SessionEnd:   true,
-			RunningIdle:  true,
+			SessionStart:      true,
+			SessionEnd:        true,
+			RunningIdle:       true,
+			WaitingPermission: true,
 		},
 		LifecycleEventAttribute:   "droid_hook_event",
 		LifecycleSourceAttributes: []string{"droid_source", "source", "reason"},

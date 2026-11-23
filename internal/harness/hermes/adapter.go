@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	integrationVersion      = 11
+	integrationVersion      = 12
 	hermesCommand           = "hermes"
 	hermesPluginName        = "aht-state"
 	hermesIntegrationSource = "hermes-plugin"
@@ -38,7 +38,7 @@ func New() hermesHarness {
 			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
 		},
 		Env:              harness.EnvKeys{Config: []string{"HERMES_HOME", "HERMES_MANAGED"}},
-		ExclusiveProcess: true,
+		ExclusiveProcess: false,
 		ID:               registry.Harness("hermes"),
 		Aliases:          []string{"hermes-agent", "hermes_agent"},
 		ProcessNames:     []string{"hermes", "hermes-agent"},
@@ -47,6 +47,10 @@ func New() hermesHarness {
 			SessionEnd:        true,
 			RunningIdle:       true,
 			WaitingPermission: true,
+		},
+		LifecycleEvents: map[string]string{
+			"onsessionstart":    "start",
+			"onsessionfinalize": "end",
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  hermesIntegrationSource,

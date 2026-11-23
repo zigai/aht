@@ -19,6 +19,10 @@ func (opencodeHarness) Transcript() transcript.Reader {
 }
 
 func transcriptSources(home string) ([]string, error) {
+	if transcript.EnvPath("OPENCODE_DB", "") == ":memory:" {
+		return nil, nil
+	}
+
 	return []string{
 		transcript.DatabaseLocation(
 			filepath.Join(transcript.DataHome(home), "opencode"),

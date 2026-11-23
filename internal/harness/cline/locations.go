@@ -69,11 +69,15 @@ func clineSettingsPath(dir string, variable string, name string) string {
 }
 
 func clineDataDir() string {
+	return clineDataDirUnder(harness.HomeDir())
+}
+
+func clineDataDirUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_DATA_DIR")); value != "" {
 		return value
 	}
 
-	config := clineConfigDir()
+	config := clineConfigDirUnder(home)
 	if config == "" {
 		return ""
 	}

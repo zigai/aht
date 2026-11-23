@@ -37,13 +37,10 @@ func readTranscriptRecord(
 	payload := transcript.Obj(r, "payload")
 	switch transcript.Str(r, "type") {
 	case "session_meta":
-		*t.Recognized = true
-		t.Conversation.SessionID = transcript.Str(payload, "id")
-		t.Conversation.CWD = transcript.Str(payload, "cwd")
-
-		t.Conversation.CreatedAt = transcript.ParseTime(payload["timestamp"])
-		if branch := transcript.Str(transcript.Obj(payload, "git"), "branch"); branch != "" {
-			t.Conversation.GitBranch = branch
+		readTranscriptMetadata(t, payload)
+	case "turn_context":
+		if model := transcript.Str(payload, "model"); model != "" {
+			t.Conversation.Model = model
 		}
 	case "event_msg":
 		if item := typedUserItem(payload); item != nil && t.Projection == typedUserProjection {
@@ -90,6 +87,17 @@ func readTranscriptRecord(
 				timestamp,
 			)
 		}
+	}
+}
+
+func readTranscriptMetadata(t *transcript.Decoder, payload transcript.Record) {
+	*t.Recognized = true
+	t.Conversation.SessionID = transcript.Str(payload, "id")
+	t.Conversation.CWD = transcript.Str(payload, "cwd")
+
+	t.Conversation.CreatedAt = transcript.ParseTime(payload["timestamp"])
+	if branch := transcript.Str(transcript.Obj(payload, "git"), "branch"); branch != "" {
+		t.Conversation.GitBranch = branch
 	}
 }
 

@@ -84,5 +84,10 @@ func (copilotHarness) Transcript() transcript.Reader {
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{filepath.Join(home, ".copilot", "session-state")}, nil
+	dir := copilotHomeUnder(home)
+	if dir == "" {
+		return nil, nil
+	}
+
+	return []string{filepath.Join(dir, "session-state")}, nil
 }

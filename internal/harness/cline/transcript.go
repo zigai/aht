@@ -129,13 +129,10 @@ func (clineHarness) Transcript() transcript.Reader {
 }
 
 func transcriptSources(home string) ([]string, error) {
-	return []string{
-		transcript.EnvPath(
-			"CLINE_SESSION_DATA_DIR",
-			filepath.Join(
-				transcript.EnvPath("CLINE_DATA_DIR", filepath.Join(home, ".cline", "data")),
-				"sessions",
-			),
-		),
-	}, nil
+	dir := clineSessionDirUnder(home)
+	if dir == "" {
+		return nil, nil
+	}
+
+	return []string{dir}, nil
 }

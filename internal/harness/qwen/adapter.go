@@ -156,11 +156,6 @@ func (qwenHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDefau
 		"qwen_tool_name",
 		harness.PayloadString(payload, "tool_name"),
 	)
-	harness.AddAttributeString(
-		attributes,
-		"qwen_agent_id",
-		harness.PayloadString(payload, "agent_id"),
-	)
 
 	if harness.PayloadString(payload, "hook_event_name") == "StopFailure" {
 		harness.AddAttributeString(

@@ -17,7 +17,7 @@ const (
 	clineCommand           = "cline"
 	clinePluginName        = "aht-state"
 	clineIntegrationSource = "cline-plugin"
-	integrationVersion     = 12
+	integrationVersion     = 13
 )
 
 //go:embed assets/index.js.tmpl
@@ -185,11 +185,14 @@ func clineSessionPath(sessionID string) string {
 }
 
 func clineConfigDir() string {
+	return clineConfigDirUnder(harness.HomeDir())
+}
+
+func clineConfigDirUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_DIR")); value != "" {
 		return value
 	}
 
-	home := harness.HomeDir()
 	if home == "" {
 		return ""
 	}
@@ -198,11 +201,15 @@ func clineConfigDir() string {
 }
 
 func clineSessionDir() string {
+	return clineSessionDirUnder(harness.HomeDir())
+}
+
+func clineSessionDirUnder(home string) string {
 	if value := strings.TrimSpace(os.Getenv("CLINE_SESSION_DATA_DIR")); value != "" {
 		return value
 	}
 
-	data := clineDataDir()
+	data := clineDataDirUnder(home)
 	if data == "" {
 		return ""
 	}
