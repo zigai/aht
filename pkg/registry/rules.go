@@ -72,6 +72,8 @@ func (r Reducer) Apply(
 		return state, nil, err
 	}
 
+	removeGoneProcessOnlySessions(&candidate)
+
 	result := State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt}
 
 	return result, stateChanges(state, result), nil
