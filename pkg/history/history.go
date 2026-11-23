@@ -158,7 +158,22 @@ type Progress struct {
 // harness's native display name and Prompt the first meaningful user prompt.
 // Messages counts user and assistant message parts. Unknown metadata is omitted;
 // UpdatedAt falls back to transcript modification time when native times are absent.
-type Conversation = native.Conversation
+type Conversation struct {
+	Harness     registry.Harness `json:"harness"`
+	SessionID   string           `json:"session_id"`
+	Path        string           `json:"path"`
+	Title       string           `json:"title,omitempty"`
+	CustomTitle string           `json:"custom_title,omitempty"`
+	AITitle     string           `json:"ai_title,omitempty"`
+	Prompt      string           `json:"prompt,omitempty"`
+	CWD         string           `json:"cwd,omitempty"`
+	ProjectRoot string           `json:"project_root,omitempty"`
+	GitBranch   string           `json:"git_branch,omitempty"`
+	Model       string           `json:"model,omitempty"`
+	Messages    int              `json:"messages"`
+	CreatedAt   time.Time        `json:"created_at,omitzero"`
+	UpdatedAt   time.Time        `json:"updated_at,omitzero"`
+}
 
 // Span is a byte range of Excerpt.Text that matched a query term.
 type Span struct {

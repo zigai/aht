@@ -10,7 +10,7 @@ import (
 
 func (s *parser) decoder(source Source, t *transcript, buffer *fileIssueBuffer) *native.Decoder {
 	return &native.Decoder{
-		Conversation: &t.match.Conversation,
+		Conversation: (*native.Conversation)(&t.match.Conversation),
 		Recognized:   &t.recognized,
 		Emit: func(_ context.Context, role, body, id string, line int, at time.Time) {
 			s.capture(t, role, body, id, line, at)
