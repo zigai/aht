@@ -14,7 +14,7 @@ import (
 const (
 	copilotHookFileName      = "aht.json"
 	copilotIntegrationSource = "copilot-hook"
-	integrationVersion       = 15
+	integrationVersion       = 16
 )
 
 type copilotHarness struct{ harness.BaseAdapter }
@@ -128,8 +128,6 @@ func copilotHookConfig(binary string) map[string]any {
 		{Event: "postToolUse", Transition: harness.HookActivityRunning},
 		{Event: "postToolUseFailure", Transition: harness.HookActivityRunning},
 		{Event: "preCompact", Transition: harness.HookActivityRunning},
-		{Event: "subagentStart", Transition: harness.HookActivityRunning},
-		{Event: "subagentStop", Transition: harness.HookActivityIdle},
 		{Event: "agentStop", Transition: harness.HookActivityIdle},
 		{Event: "sessionEnd", Transition: harness.HookPresenceGone},
 	}

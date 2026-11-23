@@ -188,3 +188,18 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 		})
 	}
 }
+
+func TestCopilotHookConfigOmitsSubagentEvents(t *testing.T) {
+	t.Parallel()
+
+	hooks, ok := copilotHookConfig("aht")["hooks"].(map[string][]any)
+	if !ok {
+		t.Fatal("expected copilot hooks map")
+	}
+
+	for _, event := range []string{"subagentStart", "subagentStop"} {
+		if _, exists := hooks[event]; exists {
+			t.Fatalf("copilot hooks unexpectedly registered %s", event)
+		}
+	}
+}
