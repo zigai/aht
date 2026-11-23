@@ -39,6 +39,17 @@ const (
 	CodeNotFound            = "not_found"
 	CodeObservationConflict = "observation_conflict"
 	CodeProcessEnded        = "process_ended"
+	CodeHarnessRequired     = "harness_required"
+	CodeInvalidObservation  = "invalid_observation"
+	CodeUnknownHarness      = "unknown_harness"
+	CodeObservationIdentity = "observation_identity"
+	CodeUnknownPresence     = "unknown_presence"
+	CodeUnknownActivity     = "unknown_activity"
+	CodeUnsupportedGroupBy  = "unsupported_group_by"
+	CodeCorruptStore        = "corrupt_store"
+	CodeJournalTooLarge     = "journal_too_large"
+	CodeStoreTooLarge       = "store_too_large"
+	CodeStoreClosed         = "store_closed"
 	CodeCanceled            = "canceled"
 	CodeOperationFailed     = "operation_failed"
 	CodeInvalidJSON         = "invalid_json"
@@ -62,11 +73,30 @@ var (
 var classifiedCodes = []struct {
 	code string
 	err  error
+	// wrapped names sentinels the registry always wraps around err, so the
+	// remote error matches them too.
+	wrapped []error
 }{
-	{code: CodeBusy, err: ErrBusy},
-	{code: CodeNotFound, err: registry.ErrSessionNotFound},
-	{code: CodeObservationConflict, err: registry.ErrObservationConflict},
-	{code: CodeProcessEnded, err: registry.ErrProcessEnded},
+	{code: CodeBusy, err: ErrBusy, wrapped: nil},
+	{code: CodeNotFound, err: registry.ErrSessionNotFound, wrapped: nil},
+	{code: CodeObservationConflict, err: registry.ErrObservationConflict, wrapped: nil},
+	{code: CodeProcessEnded, err: registry.ErrProcessEnded, wrapped: nil},
+	// The first match wins, so this precedes the invalid observation it wraps.
+	{
+		code:    CodeHarnessRequired,
+		err:     registry.ErrHarnessRequired,
+		wrapped: []error{registry.ErrInvalidObservation},
+	},
+	{code: CodeInvalidObservation, err: registry.ErrInvalidObservation, wrapped: nil},
+	{code: CodeUnknownHarness, err: registry.ErrUnknownHarness, wrapped: nil},
+	{code: CodeObservationIdentity, err: registry.ErrObservationIdentity, wrapped: nil},
+	{code: CodeUnknownPresence, err: registry.ErrUnknownPresence, wrapped: nil},
+	{code: CodeUnknownActivity, err: registry.ErrUnknownActivity, wrapped: nil},
+	{code: CodeUnsupportedGroupBy, err: registry.ErrUnsupportedGroupBy, wrapped: nil},
+	{code: CodeCorruptStore, err: registry.ErrCorruptStore, wrapped: nil},
+	{code: CodeJournalTooLarge, err: registry.ErrJournalTooLarge, wrapped: nil},
+	{code: CodeStoreTooLarge, err: registry.ErrStoreTooLarge, wrapped: nil},
+	{code: CodeStoreClosed, err: registry.ErrStoreClosed, wrapped: nil},
 }
 
 // Request is one broker RPC. Subscribe keeps the connection open after the

@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -44,6 +45,42 @@ func TestAutoRegistryErrorsSurviveBrokerShutdown(t *testing.T) {
 	assertRegistryFailures(t, c, accepted, observation, true)
 	stop()
 	assertRegistryFailures(t, c, accepted, observation, false)
+}
+
+func TestBrokerErrorCodesKeepRegistrySentinels(t *testing.T) {
+	t.Parallel()
+
+	for _, sentinel := range []error{
+		broker.ErrBusy,
+		registry.ErrSessionNotFound,
+		registry.ErrObservationConflict,
+		registry.ErrProcessEnded,
+		registry.ErrInvalidObservation,
+		registry.ErrUnknownHarness,
+		registry.ErrHarnessRequired,
+		registry.ErrObservationIdentity,
+		registry.ErrUnknownPresence,
+		registry.ErrUnknownActivity,
+		registry.ErrUnsupportedGroupBy,
+		registry.ErrCorruptStore,
+		registry.ErrStoreTooLarge,
+		registry.ErrJournalTooLarge,
+		registry.ErrStoreClosed,
+	} {
+		t.Run(sentinel.Error(), func(t *testing.T) {
+			t.Parallel()
+
+			code := broker.ErrorCode(fmt.Errorf("operation: %w", sentinel))
+			if code == broker.CodeOperationFailed {
+				t.Fatalf("ErrorCode(%v) is unclassified", sentinel)
+			}
+
+			remote := &broker.RemoteError{Code: code, Message: sentinel.Error()}
+			if !errors.Is(remote, sentinel) {
+				t.Fatalf("remote error with code %q does not match %v", code, sentinel)
+			}
+		})
+	}
 }
 
 func errorContractBroker(
@@ -168,6 +205,12 @@ func assertRegistryFailures(
 	late.SetProcess(&process)
 	_, err = c.Observe(t.Context(), late)
 	assertRegistryError(t, err, registry.ErrProcessEnded, "process_ended", online)
+
+	missingHarness := runningObservation("missing-harness")
+	missingHarness.Harness = ""
+	_, err = c.Observe(t.Context(), missingHarness)
+	assertRegistryError(t, err, registry.ErrHarnessRequired, "harness_required", online)
+	assertRegistryError(t, err, registry.ErrInvalidObservation, "harness_required", online)
 
 	current, err := c.Get(t.Context(), accepted.ID)
 	if err != nil {

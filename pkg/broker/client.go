@@ -516,9 +516,15 @@ func (e *RemoteError) Error() string {
 // Unwrap classifies recognized broker and registry failures without changing the wire error.
 func (e *RemoteError) Unwrap() error {
 	for _, classified := range classifiedCodes {
-		if classified.code == e.Code {
+		if classified.code != e.Code {
+			continue
+		}
+
+		if len(classified.wrapped) == 0 {
 			return classified.err
 		}
+
+		return errors.Join(append([]error{classified.err}, classified.wrapped...)...)
 	}
 
 	return nil
