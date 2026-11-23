@@ -731,3 +731,76 @@ func TestListingMatchedOnlyByPIDKeepsSessionID(t *testing.T) {
 		)
 	}
 }
+
+func TestResumeReportWithoutProcessPreservesProvisionalProcessSession(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	oldProcess := reducerProcess(210)
+	process := reducerProcess(211)
+	harness := registry.Harness("primary")
+	subject := registry.ObservationIdentity{SessionID: "resumed-without-process"}
+	idle := registry.ActivityIdle
+	start := registry.NativeLifecycleStart
+	end := registry.NativeLifecycleEnd
+	resume := registry.NativeLifecycleResume
+	state := applyObservations(t, registry.State{Sessions: map[string]registry.Session{}}, base,
+		registry.Observation{
+			Harness: harness,
+			At:      base,
+			Subject: subject,
+			Evidence: &registry.Report{
+				Event: "session_start", Lifecycle: &start, Activity: &idle, Process: &oldProcess,
+			},
+		},
+		registry.Observation{
+			Harness: harness,
+			At:      base.Add(time.Second),
+			Subject: subject,
+			Evidence: &registry.Report{
+				Event: "session_end", Lifecycle: &end, Process: &oldProcess,
+			},
+		},
+		registry.Observation{
+			Harness:  harness,
+			At:       base.Add(2 * time.Second),
+			Evidence: &registry.Sighting{Process: process, Present: true},
+		},
+	)
+	resumedAt := base.Add(3 * time.Second)
+	state = applyObservations(t, state, resumedAt, registry.Observation{
+		Harness: harness,
+		At:      resumedAt,
+		Subject: subject,
+		Evidence: &registry.Report{
+			Event:     "session_start",
+			Lifecycle: &resume,
+			Activity:  &idle,
+		},
+	})
+
+	if len(state.Sessions) != 2 {
+		t.Fatalf(
+			"sessions = %d, want provisional process session and resumed session",
+			len(state.Sessions),
+		)
+	}
+
+	provisional := sessionWithProcess(t, state, process.PID)
+	if provisional.SessionID != "" {
+		t.Fatalf("provisional session unexpectedly claimed %q", provisional.SessionID)
+	}
+
+	for _, session := range state.Sessions {
+		if session.SessionID == subject.SessionID {
+			if session.Incarnation.State != registry.IncarnationStarting ||
+				!session.Incarnation.TransitionAt.Equal(resumedAt) {
+				t.Fatalf("native session did not resume: %+v", session.Incarnation)
+			}
+
+			return
+		}
+	}
+
+	t.Fatal("resumed session was lost")
+}

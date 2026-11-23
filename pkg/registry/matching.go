@@ -18,12 +18,13 @@ func reconcileResumedProcessSession(
 	session *Session,
 	observation Observation,
 ) {
+	process := observation.ProcessIdentity()
+	if process == nil || !process.Complete() {
+		return
+	}
+
 	for id, provisional := range sessions {
-		if id == session.ID || provisional.Harness != session.Harness ||
-			provisional.IdentityState != IdentityProvisional ||
-			provisional.Observations.Native != nil ||
-			provisional.Process == nil ||
-			!provisional.Process.Equal(*observation.ProcessIdentity()) {
+		if !isMatchingProvisionalProcess(session, id, provisional, *process) {
 			continue
 		}
 		// Carry location and process evidence, not the provisional activity or
@@ -44,6 +45,20 @@ func reconcileResumedProcessSession(
 
 		delete(sessions, id)
 	}
+}
+
+func isMatchingProvisionalProcess(
+	session *Session,
+	id string,
+	provisional Session,
+	process ProcessIdentity,
+) bool {
+	return id != session.ID &&
+		provisional.Harness == session.Harness &&
+		provisional.IdentityState == IdentityProvisional &&
+		provisional.Observations.Native == nil &&
+		provisional.Process != nil &&
+		provisional.Process.Equal(process)
 }
 
 func (r Reducer) retireConflictingProcessSessions(
