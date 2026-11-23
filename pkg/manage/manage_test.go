@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zigai/aht/v2/internal/install"
-
 	"github.com/zigai/aht/v2/pkg/manage"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -87,8 +85,8 @@ func assertMissingStatus(t *testing.T, mgr *manage.Manager, pluginPath string, s
 		t.Errorf("status.Harness = %s, want %s", status.Harness, registry.Harness("claude"))
 	}
 
-	if status.Status != install.ArtifactMissing {
-		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactMissing)
+	if status.Status != manage.ArtifactMissing {
+		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactMissing)
 	}
 
 	if !slices.Contains(status.Paths, pluginPath) {
@@ -114,8 +112,8 @@ func assertForeignStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatalf("IntegrationStatus(Claude) foreign error = %v", err)
 	}
 
-	if status.Status != install.ArtifactForeign {
-		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactForeign)
+	if status.Status != manage.ArtifactForeign {
+		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactForeign)
 	}
 }
 
@@ -144,8 +142,8 @@ func assertCurrentStatus(t *testing.T, mgr *manage.Manager, shimPath string) {
 		t.Fatalf("IntegrationStatus(Claude) current error = %v", err)
 	}
 
-	if status.Status != install.ArtifactCurrent {
-		t.Errorf("status.Status = %s, want %s", status.Status, install.ArtifactCurrent)
+	if status.Status != manage.ArtifactCurrent {
+		t.Errorf("status.Status = %s, want %s", status.Status, manage.ArtifactCurrent)
 	}
 }
 

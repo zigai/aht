@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"errors"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,16 +17,19 @@ func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {
 	)
 
 	command := &cobra.Command{
-		Use:           "upgrade",
-		Short:         "Refresh installed integrations while preserving native settings",
-		Args:          cobra.NoArgs,
+		Use:   "upgrade [agent]",
+		Short: "Refresh installed integrations while preserving native settings",
+		Args: func(cmd *cobra.Command, args []string) error {
+			return exitCode(cobra.MaximumNArgs(1)(cmd, args), exitCodeUsage)
+		},
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			results, err := app.manager(binary).UpgradeIntegrations(
-				cmd.Context(),
-				manage.IntegrationOptions{DryRun: dryRun},
-			)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			results, err := app.upgradeIntegrations(cmd.Context(), args, binary, dryRun)
+
+			if _, usage := errors.AsType[*exitCoderError](err); usage {
+				return err
+			}
 
 			var writeErr error
 			if app.outputJSON {
@@ -46,4 +51,25 @@ func (app *application) newIntegrationsUpgradeCommand() *cobra.Command {
 		BoolVarP(&dryRun, "dry-run", "n", false, "preview integration upgrades without writing")
 
 	return command
+}
+
+func (app *application) upgradeIntegrations(
+	ctx context.Context,
+	args []string,
+	binary string,
+	dryRun bool,
+) ([]manage.IntegrationResult, error) {
+	manager := app.manager(binary)
+	opts := manage.UpgradeOptions{DryRun: dryRun}
+
+	if len(args) == 0 || strings.EqualFold(args[0], "all") {
+		return manager.UpgradeIntegrations(ctx, opts)
+	}
+
+	harnesses, err := selectedHarnesses(args, false)
+	if err != nil {
+		return nil, exitCode(err, exitCodeUsage)
+	}
+
+	return manager.UpgradeIntegration(ctx, harnesses[0], opts)
 }

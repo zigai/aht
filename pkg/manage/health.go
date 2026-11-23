@@ -39,9 +39,24 @@ var (
 
 type HealthStatus string
 
+type ObserverHealth struct {
+	PID                          int           `json:"pid"`
+	Interval                     time.Duration `json:"interval"`
+	GracePeriod                  time.Duration `json:"grace_period"`
+	StartedAt                    time.Time     `json:"started_at"`
+	LastAttemptAt                time.Time     `json:"last_attempt_at"`
+	LastSuccessAt                time.Time     `json:"last_success_at"`
+	LastEnumerationErrorCategory string        `json:"last_enumeration_error_category,omitempty"`
+	LastEnumerationError         string        `json:"last_enumeration_error,omitempty"`
+	Cycles                       int64         `json:"cycles"`
+	Observations                 int64         `json:"observations"`
+	Sessions                     int64         `json:"sessions"`
+	Degraded                     bool          `json:"degraded"`
+}
+
 // TrackerHealth is the tracker's health file plus its evaluated freshness.
 type TrackerHealth struct {
-	observer.Health
+	ObserverHealth
 
 	Fresh   bool          `json:"fresh"`
 	Age     time.Duration `json:"age"`
@@ -81,8 +96,7 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 	raw, err := observer.ReadHealth(path)
 	if errors.Is(err, os.ErrNotExist) {
 		health.Status = HealthStatusMissing
-		health.Message = "tracker health is missing; run aht manage tracker run " +
-			"--once or aht manage tracker enable"
+		health.Message = ErrHealthMissing.Error()
 
 		return health, fmt.Errorf("%w: %s", ErrHealthMissing, path)
 	}
@@ -94,7 +108,7 @@ func ReadTrackerHealth(path string, now time.Time, maxAge time.Duration) (Tracke
 		return health, fmt.Errorf("%w: %s: %w", ErrHealthCorrupt, path, err)
 	}
 
-	health.Health = raw
+	health.ObserverHealth = ObserverHealth(raw)
 
 	return evaluateTrackerHealthFreshness(health, now, maxAge)
 }

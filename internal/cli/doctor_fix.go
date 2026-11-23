@@ -15,25 +15,19 @@ func (app *application) doctorFixCommand(fix *manage.DoctorFix) string {
 	case manage.DoctorActionRefreshHistory:
 		return "aht manage history refresh"
 	case manage.DoctorActionResetStore:
-		target := doctorFixPath(fix.Target)
-		if target == "" {
-			return ""
-		}
-
-		return "aht --store " + target + " manage state reset --force"
+		return doctorPathCommand("aht --store ", fix.Target, " manage state reset --force")
 	case manage.DoctorActionEnableTracker:
 		return app.doctorTrackerCommand("enable")
 	case manage.DoctorActionInspectTracker:
 		return app.doctorTrackerCommand("status")
 	case manage.DoctorActionRemoveHealth:
-		target := doctorFixPath(fix.Target)
-		if target == "" {
-			return ""
-		}
-
-		return "rm " + target
+		return doctorPathCommand("rm ", fix.Target, "")
 	case manage.DoctorActionReplaceIntegration:
 		return "aht manage integrations install " + harness.ShellQuote(fix.Target) + " --force"
+	case manage.DoctorActionInitConfig:
+		return doctorPathCommand("aht --config ", fix.Target, " manage config init")
+	case manage.DoctorActionUpgradeIntegration:
+		return "aht manage integrations upgrade " + harness.ShellQuote(fix.Target)
 	case manage.DoctorActionUpgrade:
 		return "aht manage upgrade"
 	case "":
@@ -41,6 +35,15 @@ func (app *application) doctorFixCommand(fix *manage.DoctorFix) string {
 	default:
 		panic("unknown doctor action: " + fix.Action)
 	}
+}
+
+func doctorPathCommand(prefix string, path string, suffix string) string {
+	target := doctorFixPath(path)
+	if target == "" {
+		return ""
+	}
+
+	return prefix + target + suffix
 }
 
 func (app *application) doctorTrackerCommand(action string) string {

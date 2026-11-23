@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/zigai/aht/v2/internal/install"
-
 	"github.com/zigai/aht/v2/pkg/broker"
 	"github.com/zigai/aht/v2/pkg/client"
 	"github.com/zigai/aht/v2/pkg/harness"
@@ -57,12 +55,12 @@ const (
 	HarnessLocationScopeGlobal      HarnessLocationScope = harness.LocationScopeGlobal
 	HarnessLocationScopeProject     HarnessLocationScope = harness.LocationScopeProject
 
-	ArtifactMissing  ArtifactStatus = install.ArtifactMissing
-	ArtifactCurrent  ArtifactStatus = install.ArtifactCurrent
-	ArtifactStale    ArtifactStatus = install.ArtifactStale
-	ArtifactForeign  ArtifactStatus = install.ArtifactForeign
-	ArtifactPartial  ArtifactStatus = install.ArtifactPartial
-	ArtifactDisabled ArtifactStatus = install.ArtifactDisabled
+	ArtifactMissing  ArtifactState = manage.ArtifactMissing
+	ArtifactCurrent  ArtifactState = manage.ArtifactCurrent
+	ArtifactStale    ArtifactState = manage.ArtifactStale
+	ArtifactForeign  ArtifactState = manage.ArtifactForeign
+	ArtifactPartial  ArtifactState = manage.ArtifactPartial
+	ArtifactDisabled ArtifactState = manage.ArtifactDisabled
 
 	HealthStatusHealthy  HealthStatus = manage.HealthStatusHealthy
 	HealthStatusDegraded HealthStatus = manage.HealthStatusDegraded
@@ -85,6 +83,8 @@ const (
 	DoctorActionRemoveHealth       = manage.DoctorActionRemoveHealth
 	DoctorActionReplaceIntegration = manage.DoctorActionReplaceIntegration
 	DoctorActionUpgrade            = manage.DoctorActionUpgrade
+	DoctorActionUpgradeIntegration = manage.DoctorActionUpgradeIntegration
+	DoctorActionInitConfig         = manage.DoctorActionInitConfig
 )
 
 var (
@@ -237,6 +237,8 @@ type (
 
 	TrackerHealth = manage.TrackerHealth
 
+	ObserverHealth = manage.ObserverHealth
+
 	HealthStatus = manage.HealthStatus
 
 	DoctorStatus = manage.DoctorStatus
@@ -270,12 +272,16 @@ type (
 
 	IntegrationOptions = manage.IntegrationOptions
 
+	UpgradeOptions = manage.UpgradeOptions
+
 	IntegrationResult = manage.IntegrationResult
 
-	IntegrationStatus = install.IntegrationStatus
+	IntegrationStatus = manage.IntegrationStatus
 
 	// ArtifactStatus describes the ownership and freshness of a managed integration artifact.
-	ArtifactStatus = install.ArtifactStatus
+	ArtifactStatus = manage.ArtifactStatus
+
+	ArtifactState = manage.ArtifactState
 
 	TrackerOptions = manage.TrackerOptions
 

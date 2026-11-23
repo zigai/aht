@@ -20,7 +20,7 @@ import (
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
 	"github.com/zigai/aht/v2/pkg/mux"
-	"github.com/zigai/aht/v2/pkg/tmux"
+	"github.com/zigai/aht/v2/pkg/mux/drivers"
 )
 
 const (
@@ -37,14 +37,6 @@ var (
 	errUnknownStopMethod   = errors.New("unknown stop method")
 	errNoPaneInterrupt     = errors.New("multiplexer cannot interrupt a pane")
 	errTerminalRequired    = errors.New("confirmation requires a terminal")
-
-	paneStoppers = map[registry.MultiplexerKind]paneStopper{
-		registry.MultiplexerTmux: {
-			method:      "tmux-interrupt",
-			validate:    validateTmuxStopTarget,
-			interrupter: tmux.NewDriver(),
-		},
-	}
 )
 
 var (
@@ -92,12 +84,6 @@ type stopTarget struct {
 	ServerIdentity string
 	//exhaustruct:optional
 	PID int
-}
-
-type paneStopper struct {
-	method      string
-	validate    func(context.Context, registry.Session) (stopTargetValidation, error)
-	interrupter mux.Interrupter
 }
 
 type manageStopAllResult struct {
@@ -155,12 +141,14 @@ func (defaultSessionStopSignaler) ValidateStopTarget(
 		return revalidateProcess(ctx, s)
 	}
 
-	stopper, ok := paneStoppers[t.Kind]
-	if !ok || stopper.method != t.Method {
+	driver, _ := drivers.Find(t.Kind)
+
+	_, canInterrupt := driver.(mux.Interrupter)
+	if !canInterrupt || paneStopMethod(t.Kind) != t.Method {
 		return stopTargetValidation{}, fmt.Errorf("%w: %q", errUnknownStopMethod, t.Method)
 	}
 
-	return stopper.validate(ctx, s)
+	return validatePaneStopTarget(ctx, s, driver)
 }
 
 func (defaultSessionStopSignaler) SendMultiplexerInterrupt(
@@ -168,12 +156,14 @@ func (defaultSessionStopSignaler) SendMultiplexerInterrupt(
 	kind registry.MultiplexerKind,
 	serverIdentity string, paneID string,
 ) error {
-	stopper, ok := paneStoppers[kind]
+	driver, _ := drivers.Find(kind)
+
+	interrupter, ok := driver.(mux.Interrupter)
 	if !ok {
 		return fmt.Errorf("%w: %q", errNoPaneInterrupt, kind)
 	}
 
-	if err := stopper.interrupter.SendInterrupt(ctx, serverIdentity, paneID); err != nil {
+	if err := interrupter.SendInterrupt(ctx, serverIdentity, paneID); err != nil {
 		return fmt.Errorf("send multiplexer interrupt: %w", err)
 	}
 
@@ -357,21 +347,25 @@ func runManageStopSessions(
 	return r, nil
 }
 
-func validateTmuxStopTarget(ctx context.Context, s registry.Session) (stopTargetValidation, error) {
-	panes, e := tmux.ListPanes(ctx)
-	if e != nil {
-		return stopTargetValidation{}, fmt.Errorf("list tmux panes: %w", e)
+func validatePaneStopTarget(
+	ctx context.Context,
+	s registry.Session,
+	driver mux.Driver,
+) (stopTargetValidation, error) {
+	panes, err := driver.ListPanes(ctx, nil)
+	if err != nil {
+		return stopTargetValidation{}, fmt.Errorf("list %s panes: %w", driver.Kind(), err)
 	}
 
-	v := tmuxStopTargetValidation(s, panes)
+	v := paneStopTargetValidation(s, panes)
 	if !v.OK {
 		return v, nil
 	}
 
-	return revalidateTmuxForegroundProcess(ctx, s)
+	return revalidatePaneForegroundProcess(ctx, s)
 }
 
-func revalidateTmuxForegroundProcess(
+func revalidatePaneForegroundProcess(
 	ctx context.Context,
 	s registry.Session,
 ) (stopTargetValidation, error) {
@@ -399,7 +393,7 @@ func revalidateTmuxForegroundProcess(
 	return stopTargetValidation{OK: true}, nil
 }
 
-func tmuxStopTargetValidation(session registry.Session, panes []tmux.Pane) stopTargetValidation {
+func paneStopTargetValidation(session registry.Session, panes []mux.Pane) stopTargetValidation {
 	if session.Process != nil && !session.Process.Foreground {
 		return stopTargetValidation{OK: false, Reason: "tracked process is not in foreground"}
 	}
@@ -413,16 +407,16 @@ func tmuxStopTargetValidation(session registry.Session, panes []tmux.Pane) stopT
 
 		paneIDFound = true
 
-		if tmuxTargetMatchesSession(session.Location, p.Location) {
+		if paneTargetMatchesSession(session.Location, p.Location) {
 			return stopTargetValidation{OK: true}
 		}
 	}
 
 	if paneIDFound {
-		return stopTargetValidation{OK: false, Reason: "tmux pane identity changed"}
+		return stopTargetValidation{OK: false, Reason: "multiplexer pane identity changed"}
 	}
 
-	return stopTargetValidation{OK: false, Reason: "tmux pane no longer exists"}
+	return stopTargetValidation{OK: false, Reason: "multiplexer pane no longer exists"}
 }
 
 func revalidateProcess(ctx context.Context, s registry.Session) (stopTargetValidation, error) {
@@ -454,7 +448,7 @@ func stopProcessValidation(
 	return stopTargetValidation{OK: true}
 }
 
-func tmuxTargetMatchesSession(a registry.Location, b registry.Location) bool {
+func paneTargetMatchesSession(a registry.Location, b registry.Location) bool {
 	if a.ServerID == "" || b.ServerID == "" || a.ServerID != b.ServerID {
 		return false
 	}
@@ -493,11 +487,16 @@ func tmuxTargetMatchesSession(a registry.Location, b registry.Location) bool {
 	return true
 }
 
+func paneStopMethod(kind registry.MultiplexerKind) string {
+	return string(kind) + "-interrupt"
+}
+
 func stopTargetForSession(s registry.Session) (stopTarget, bool) {
-	if stopper, ok := paneStoppers[s.Location.Kind]; ok &&
+	driver, _ := drivers.Find(s.Location.Kind)
+	if _, canInterrupt := driver.(mux.Interrupter); canInterrupt &&
 		s.Location.PaneID != "" && s.Location.ServerID != "" {
 		return stopTarget{
-			Method:         stopper.method,
+			Method:         paneStopMethod(s.Location.Kind),
 			Target:         s.Location.PaneID,
 			Kind:           s.Location.Kind,
 			ServerIdentity: s.Location.ServerID,

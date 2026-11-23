@@ -18,7 +18,7 @@ import (
 
 var (
 	// ErrPaneNotLive indicates that a terminal multiplexer pane is not available for inspection.
-	ErrPaneNotLive = errors.New("tmux pane is not live")
+	ErrPaneNotLive = errors.New("multiplexer pane is not live")
 
 	// ErrUnsupportedMultiplexer indicates that the session multiplexer kind does not support screen capture.
 	ErrUnsupportedMultiplexer = errors.New("unsupported multiplexer kind")
@@ -128,9 +128,9 @@ func ExplainSession(
 	populateStoredScreenDecision(&result, session)
 
 	if !opts.LiveScreen {
-		if session.Decision() != nil {
-			result.SelectedAuthority = string(session.Decision().Authority)
-			result.FallbackReason = ""
+		if decision := session.Decision(); decision != nil {
+			result.SelectedAuthority = string(decision.Authority)
+			result.FallbackReason = decision.FallbackReason
 		}
 
 		if strings.TrimSpace(session.Location.PaneID) == "" {

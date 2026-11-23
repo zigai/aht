@@ -50,10 +50,10 @@ func TestDoctorHealthFollowsTrackerService(t *testing.T) {
 		},
 		{name: "corrupt", service: DoctorStatusOK, health: "nope{", want: DoctorStatusFail},
 		{
-			name:    "service unknown",
+			name:    "service skipped",
 			service: DoctorStatusSkip,
 			health:  `{"interval":300000000,"last_success_at":"2020-01-01T00:00:00Z"}`,
-			want:    DoctorStatusWarn,
+			want:    DoctorStatusSkip,
 		},
 	}
 	for _, test := range tests {

@@ -45,6 +45,7 @@ type listOptions struct {
 	projectSubtree     bool
 	summary            bool
 	absoluteTime       bool
+	timeFormat         string
 	absoluteSet        bool
 	sortSet            bool
 	desc               bool
@@ -124,7 +125,7 @@ func configureSessionFilterFlags(f *pflag.FlagSet, opts *listOptions) {
 		&opts.activity,
 		"activity",
 		"",
-		"filter by activity `<val>`: running, waiting, idle, unknown",
+		"filter by activity `<val>`: running, waiting, idle, failed, interrupted, unknown",
 	)
 	f.StringVar(&opts.tmuxSession, "tmux-session", "", "filter by tmux session `<name>`")
 	f.StringVar(
@@ -169,13 +170,20 @@ func applyListConfig(opts *listOptions, cmd *cobra.Command, cfg config.Config) {
 	opts.descSet = f.Changed("desc")
 
 	opts.groupBySet = f.Changed("group-by")
-	if !f.Changed("absolute-time") {
-		if (cfg.UI.AbsoluteTime != nil && *cfg.UI.AbsoluteTime) ||
-			cfg.UI.TimeFormat == "absolute" || cfg.UI.TimeFormat == "iso8601" {
-			opts.absoluteTime = true
-		}
-	} else {
-		opts.absoluteSet = f.Changed("absolute-time")
+	opts.absoluteSet = f.Changed("absolute-time")
+	opts.timeFormat = listTimeFormat(*opts, cfg.UI)
+}
+
+func listTimeFormat(opts listOptions, cfg config.UIConfig) string {
+	switch {
+	case opts.absoluteSet && opts.absoluteTime:
+		return "absolute"
+	case opts.absoluteSet:
+		return "relative"
+	case cfg.TimeFormat != "iso8601" && cfg.AbsoluteTime != nil && *cfg.AbsoluteTime:
+		return "absolute"
+	default:
+		return cfg.TimeFormat
 	}
 }
 
@@ -321,7 +329,7 @@ func (app *application) runListSessions(
 				s.Location,
 			),
 			formatHumanPath(s.CWD),
-			formatUpdatedAt(s.UpdatedAt, now, opts.absoluteTime),
+			formatUpdatedAt(s.UpdatedAt, now, opts.timeFormat),
 		})
 	}
 

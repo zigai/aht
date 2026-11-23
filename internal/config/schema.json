@@ -101,10 +101,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "AbsoluteTime enables absolute timestamps when TimeFormat is relative."
         },
         "time_format": {
-          "type": "string"
+          "type": "string",
+          "description": "TimeFormat is relative, absolute (UTC), or iso8601 (RFC3339)."
         }
       },
       "additionalProperties": false,

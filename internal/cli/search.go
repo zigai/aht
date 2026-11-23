@@ -139,7 +139,11 @@ func (app *application) newSearchCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.ArbitraryArgs,
-		PreRunE: func(_ *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if app.outputJSON && cmd.Flags().Changed("format") {
+				return exitCode(errFormatJSONConflict, exitCodeUsage)
+			}
+
 			options.query.Terms = args
 
 			var err error
@@ -1037,7 +1041,7 @@ func (app *application) writeSearchMatchTTY(match history.Match, verbose bool) e
 
 	if !c.UpdatedAt.IsZero() {
 		right.WriteString(
-			"  \x1b[2m" + formatUpdatedAt(c.UpdatedAt, time.Now().UTC(), false) + styleReset,
+			"  \x1b[2m" + formatUpdatedAt(c.UpdatedAt, time.Now().UTC(), "relative") + styleReset,
 		)
 	}
 
@@ -1269,7 +1273,7 @@ func (app *application) writeSearchList(matches []history.Match) error {
 			[]string{
 				string(c.Harness),
 				sanitizeHumanText(c.SessionID),
-				formatUpdatedAt(c.UpdatedAt, now, false),
+				formatUpdatedAt(c.UpdatedAt, now, "relative"),
 				strconv.Itoa(c.Messages),
 				title,
 				formatHumanPath(c.CWD),

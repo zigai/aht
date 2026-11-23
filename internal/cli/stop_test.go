@@ -16,8 +16,8 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
 	"github.com/zigai/aht/v2/internal/processinfo"
+	"github.com/zigai/aht/v2/pkg/mux"
 	"github.com/zigai/aht/v2/pkg/registry"
-	"github.com/zigai/aht/v2/pkg/tmux"
 )
 
 func TestStopRevalidatesInterpretedHarness(t *testing.T) {
@@ -422,7 +422,7 @@ func TestTmuxStopTargetValidationChecksEveryServer(t *testing.T) {
 		},
 	}
 
-	panes := []tmux.Pane{
+	panes := []mux.Pane{
 		{
 			Location: registry.Location{
 				Kind:     registry.MultiplexerTmux,
@@ -440,7 +440,7 @@ func TestTmuxStopTargetValidationChecksEveryServer(t *testing.T) {
 			},
 		},
 	}
-	if validation := tmuxStopTargetValidation(session, panes); !validation.OK {
+	if validation := paneStopTargetValidation(session, panes); !validation.OK {
 		t.Fatalf("matching pane on later server was rejected: %#v", validation)
 	}
 }
@@ -452,7 +452,7 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 		Location: registry.Location{Kind: registry.MultiplexerTmux, PaneID: "%1", PanePID: 42},
 	}
 
-	panes := []tmux.Pane{
+	panes := []mux.Pane{
 		{
 			Location: registry.Location{
 				Kind:     registry.MultiplexerTmux,
@@ -462,7 +462,7 @@ func TestTmuxStopTargetRejectsMissingStoredServerIdentity(t *testing.T) {
 			},
 		},
 	}
-	if validation := tmuxStopTargetValidation(session, panes); validation.OK {
+	if validation := paneStopTargetValidation(session, panes); validation.OK {
 		t.Fatalf("missing stored server identity approved a custom-server pane: %#v", validation)
 	}
 
@@ -534,7 +534,7 @@ func TestTmuxStopTargetRejectsBackgroundAgent(t *testing.T) {
 		t.Fatalf("unexpected target: %#v", target)
 	}
 
-	result := tmuxStopTargetValidation(session, []tmux.Pane{{Location: loc, PanePID: 200}})
+	result := paneStopTargetValidation(session, []mux.Pane{{Location: loc}})
 	if result.OK {
 		t.Fatal(
 			"unchanged shell pane accepted tmux interrupt even though tracked agent was not foreground",

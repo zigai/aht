@@ -112,8 +112,10 @@ type UIConfig struct {
 	DefaultPresence string `json:"default_presence,omitempty" toml:"default_presence"`
 	Sort            string `json:"sort,omitempty"             toml:"sort"`
 	SortDesc        *bool  `json:"sort_desc,omitempty"        toml:"sort_desc"`
-	AbsoluteTime    *bool  `json:"absolute_time,omitempty"    toml:"absolute_time"`
-	TimeFormat      string `json:"time_format,omitempty"      toml:"time_format"`
+	// AbsoluteTime enables absolute timestamps when TimeFormat is relative.
+	AbsoluteTime *bool `json:"absolute_time,omitempty" toml:"absolute_time"`
+	// TimeFormat is relative, absolute (UTC), or iso8601 (RFC3339).
+	TimeFormat string `json:"time_format,omitempty" toml:"time_format"`
 }
 
 // RetentionConfig controls how long the tracker keeps gone-session tombstones.
@@ -279,16 +281,17 @@ func DefaultConfigTemplate() string {
 # Default session presence filter: "live", "gone", "unknown", or "all"
 default_presence = "all"
 
-# Sort sessions by: "updated", "created", "harness", "presence", "activity", "cwd", "id", "multiplexer", "tmux"
+# Sort sessions by: "updated", "created", "harness", "presence", "presence-changed", "activity", "activity-changed",
+# "cwd", "id", "multiplexer", "tmux"
 sort = "updated"
 
 # Sort in descending order
 sort_desc = false
 
-# Display timestamps in absolute format rather than relative
+# Use absolute timestamps when time_format is relative
 absolute_time = false
 
-# Timestamp display format: "relative", "absolute", or "iso8601"
+# Timestamp format: "relative", "absolute" (UTC), or "iso8601" (RFC3339)
 time_format = "relative"
 
 [retention]

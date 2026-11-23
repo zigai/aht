@@ -165,10 +165,6 @@ func historyRefreshArgs() []string {
 }
 
 func startDetachedHistoryCommand(command *exec.Cmd) error {
-	environment := command.Environ()
-	environment = append(environment, processinfo.ChildRoleEnv+"=history-refresh")
-
-	command.Env = environment
 	if err := detachHistoryCommand(command); err != nil {
 		return err
 	}
@@ -229,6 +225,8 @@ func runHistoryCommand(
 }
 
 func startHistoryCommand(command *exec.Cmd) error {
+	command.Env = append(command.Environ(), processinfo.ChildRoleEnv+"=history-refresh")
+
 	started := make(chan struct{})
 
 	var startErr error

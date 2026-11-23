@@ -15,13 +15,11 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/internal/install"
 )
 
 var (
 	errAllWithAgents          = errors.New("all cannot be combined with agent names")
 	errAgentRequired          = errors.New("at least one agent or all is required")
-	errIntegrationStatusFail  = errors.New("one or more integrations could not be inspected")
 	errTargetBinaryNeedsShim  = errors.New("--target-binary requires --shim")
 	errTargetBinaryWithAll    = errors.New("--target-binary cannot be used with all")
 	errInstallHarnessRequired = errors.New("install requires at least one harness or 'all'")
@@ -211,49 +209,37 @@ func (app *application) runIntegrationsStatus(
 ) error {
 	harnesses, err := selectedHarnesses(args, true)
 	if err != nil {
+		return exitCode(err, exitCodeUsage)
+	}
+
+	results, err := inspectIntegrationStatuses(ctx, harnesses, manager)
+	if err != nil {
 		return err
 	}
 
-	results, failed := inspectIntegrationStatuses(ctx, harnesses, manager)
-	if err := app.writeIntegrationStatuses(results); err != nil {
-		return err
-	}
-
-	if failed {
-		return errIntegrationStatusFail
-	}
-
-	return nil
+	return app.writeIntegrationStatuses(results)
 }
 
 func inspectIntegrationStatuses(
 	ctx context.Context,
 	harnesses []registry.Harness,
 	manager *manage.Manager,
-) ([]install.IntegrationStatus, bool) {
-	results := make([]install.IntegrationStatus, 0, len(harnesses))
-	failed := false
+) ([]manage.IntegrationStatus, error) {
+	results := make([]manage.IntegrationStatus, 0, len(harnesses))
 
 	for _, harnessID := range harnesses {
 		status, err := manager.IntegrationStatus(ctx, harnessID)
 		if err != nil {
-			failed = true
-			status = install.IntegrationStatus{
-				Harness:  harnessID,
-				Status:   install.ArtifactForeign,
-				Paths:    nil,
-				Message:  err.Error(),
-				NextStep: "",
-			}
+			return nil, err
 		}
 
 		results = append(results, status)
 	}
 
-	return results, failed
+	return results, nil
 }
 
-func (app *application) writeIntegrationStatuses(results []install.IntegrationStatus) error {
+func (app *application) writeIntegrationStatuses(results []manage.IntegrationStatus) error {
 	const (
 		integrationStatusAgentWidth   = 12
 		integrationStatusStateWidth   = 10

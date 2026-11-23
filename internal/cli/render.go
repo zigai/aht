@@ -513,12 +513,15 @@ func allocateColumnPair(
 	return sessionWidth + sessionAdd, cwdWidth + cwdAdd
 }
 
-func formatUpdatedAt(t time.Time, now time.Time, absolute bool) string {
+func formatUpdatedAt(t time.Time, now time.Time, format string) string {
 	if t.IsZero() {
 		return "-"
 	}
 
-	if absolute {
+	switch format {
+	case "absolute":
+		return t.UTC().Format(time.DateTime)
+	case "iso8601":
 		return t.Format(time.RFC3339)
 	}
 

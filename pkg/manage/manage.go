@@ -19,6 +19,15 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
+const (
+	ArtifactMissing  ArtifactState = "missing"
+	ArtifactCurrent  ArtifactState = "current"
+	ArtifactStale    ArtifactState = "stale"
+	ArtifactForeign  ArtifactState = "foreign"
+	ArtifactPartial  ArtifactState = "partial"
+	ArtifactDisabled ArtifactState = "disabled"
+)
+
 var (
 	ErrForeignTracker = errors.New("tracker service definition is not owned by aht")
 	ErrConfig         = errors.New("invalid aht configuration")
@@ -57,6 +66,23 @@ type IntegrationOptions struct {
 	DryRun       bool
 	Force        bool
 	UseShim      bool
+}
+
+type UpgradeOptions struct {
+	DryRun bool
+}
+
+// ArtifactState describes the ownership and freshness of an integration artifact.
+type ArtifactState string
+
+type ArtifactStatus = ArtifactState
+
+type IntegrationStatus struct {
+	Harness  registry.Harness `json:"harness"`
+	Status   ArtifactStatus   `json:"status"`
+	Paths    []string         `json:"paths"`
+	Message  string           `json:"message"`
+	NextStep string           `json:"next_step,omitempty"`
 }
 
 // IntegrationResult describes the effect of installing or removing one integration.
@@ -161,36 +187,50 @@ func (m *Manager) RemoveIntegration(
 // settings. Harnesses without an installed integration are skipped.
 func (m *Manager) UpgradeIntegrations(
 	ctx context.Context,
-	opts IntegrationOptions,
+	opts UpgradeOptions,
 ) ([]IntegrationResult, error) {
 	results, err := install.Upgrade(ctx, m.config.Binary, opts.DryRun)
-
-	converted := make([]IntegrationResult, 0, len(results))
-	for _, result := range results {
-		converted = append(converted, integrationResult(result))
-	}
-
 	if err != nil {
-		return converted, fmt.Errorf("upgrading integrations: %w", err)
+		return integrationResults(results), fmt.Errorf("upgrading integrations: %w", err)
 	}
 
-	return converted, nil
+	return integrationResults(results), nil
+}
+
+// UpgradeIntegration refreshes the installed integration for one harness.
+func (m *Manager) UpgradeIntegration(
+	ctx context.Context,
+	harness registry.Harness,
+	opts UpgradeOptions,
+) ([]IntegrationResult, error) {
+	results, err := install.UpgradeHarness(ctx, harness, m.config.Binary, opts.DryRun)
+	if err != nil {
+		return integrationResults(results), fmt.Errorf("upgrading %s integration: %w", harness, err)
+	}
+
+	return integrationResults(results), nil
 }
 
 func (m *Manager) IntegrationStatus(
 	ctx context.Context,
 	harness registry.Harness,
-) (install.IntegrationStatus, error) {
+) (IntegrationStatus, error) {
 	status, err := install.Inspect(ctx, harness, m.config.Binary)
 	if err != nil {
-		return install.IntegrationStatus{}, fmt.Errorf(
+		return IntegrationStatus{}, fmt.Errorf(
 			"inspecting %s integration: %w",
 			harness,
 			err,
 		)
 	}
 
-	return status, nil
+	return IntegrationStatus{
+		Harness:  status.Harness,
+		Status:   ArtifactState(status.Status),
+		Paths:    status.Paths,
+		Message:  status.Message,
+		NextStep: status.NextStep,
+	}, nil
 }
 
 // EnableTracker installs, updates, and starts background agent-session tracking.
@@ -276,6 +316,8 @@ func (m *Manager) serviceOptions(opts TrackerOptions) (service.Options, error) {
 		Interval:    interval,
 		GracePeriod: grace,
 		DryRun:      opts.DryRun,
+		ConfigPath:  m.config.ConfigPath,
+		NoConfig:    m.config.NoConfig,
 	}, nil
 }
 
@@ -310,6 +352,15 @@ func (m *Manager) readConfigWithMetadata() (config.Config, *strata.Metadata, str
 	}
 
 	return cfg, meta, resolved, nil
+}
+
+func integrationResults(results []install.Result) []IntegrationResult {
+	converted := make([]IntegrationResult, 0, len(results))
+	for _, result := range results {
+		converted = append(converted, integrationResult(result))
+	}
+
+	return converted
 }
 
 func integrationResult(result install.Result) IntegrationResult {

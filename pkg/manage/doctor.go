@@ -34,6 +34,8 @@ const (
 	DoctorActionRemoveHealth       DoctorAction = "remove_health"
 	DoctorActionReplaceIntegration DoctorAction = "replace_integration"
 	DoctorActionUpgrade            DoctorAction = "upgrade"
+	DoctorActionUpgradeIntegration DoctorAction = "upgrade_integration"
+	DoctorActionInitConfig         DoctorAction = "init_config"
 	DoctorStatusOK                 DoctorStatus = "ok"
 
 	// DoctorStatusInfo reports a neutral fact, such as an optional component that is absent.
@@ -360,7 +362,8 @@ func (m *Manager) checkService(
 
 func (m *Manager) checkHealth(maxAge time.Duration, serviceCheck DoctorCheck) DoctorCheck {
 	check := newDoctorCheck(doctorGroupTracker, "health")
-	if serviceCheck.Status == DoctorStatusWarn || serviceCheck.Status == DoctorStatusFail {
+	if serviceCheck.Status == DoctorStatusWarn || serviceCheck.Status == DoctorStatusFail ||
+		serviceCheck.Status == DoctorStatusSkip {
 		return skipDoctorCheck(check, doctorCheckService)
 	}
 
@@ -430,20 +433,20 @@ func (m *Manager) checkIntegrations(
 		}
 
 		switch status.Status {
-		case install.ArtifactCurrent:
+		case ArtifactCurrent:
 			check.Status, check.Message = DoctorStatusOK, "Current"
-		case install.ArtifactMissing:
+		case ArtifactMissing:
 			if !includeAll {
 				continue
 			}
 
 			check.Status, check.Message = DoctorStatusInfo, "Not installed"
-		case install.ArtifactStale, install.ArtifactPartial:
+		case ArtifactStale, ArtifactPartial:
 			m.describeStaleIntegration(ctx, &check, status, copies)
-		case install.ArtifactDisabled:
+		case ArtifactDisabled:
 			check.Status, check.Message = DoctorStatusWarn, sentence(status.Message)
 			check.Fix = manualFix(sentence(status.NextStep))
-		case install.ArtifactForeign:
+		case ArtifactForeign:
 			check.Status, check.Message = DoctorStatusFail, sentence(status.Message)
 			check.Fix = &DoctorFix{
 				Action: DoctorActionReplaceIntegration, Target: string(id),
@@ -461,7 +464,7 @@ func (m *Manager) checkIntegrations(
 func (m *Manager) describeStaleIntegration(
 	ctx context.Context,
 	check *DoctorCheck,
-	status install.IntegrationStatus,
+	status IntegrationStatus,
 	copies []executableCopy,
 ) {
 	self := resolvedExecutable(m.config.Binary)
@@ -483,13 +486,13 @@ func (m *Manager) describeStaleIntegration(
 
 	check.Status, check.Message = DoctorStatusWarn, sentence(status.Message)
 	check.Fix = &DoctorFix{
-		Action:    DoctorActionUpgrade,
-		Manual:    sentence(status.NextStep),
+		Action:    DoctorActionUpgradeIntegration,
+		Target:    string(status.Harness),
+		Manual:    "",
 		Automatic: true,
 	}
-	binary := m.config.Binary
 	check.repair = func(ctx context.Context) (string, error) {
-		results, err := install.UpgradeHarness(ctx, status.Harness, binary, false)
+		results, err := m.UpgradeIntegration(ctx, status.Harness, UpgradeOptions{DryRun: false})
 
 		messages := make([]string, 0, len(results))
 		for _, result := range results {
@@ -525,8 +528,8 @@ func manualFix(manual string) *DoctorFix {
 func (m *Manager) checkConfigFile() (DoctorCheck, configState) {
 	check := newDoctorCheck(doctorGroupConfig, "file")
 	if m.config.NoConfig {
-		check.Status, check.Message = DoctorStatusSkip, "--no-config"
-		return check, configState{cfg: config.Defaults(), ready: false, files: nil, err: nil}
+		check.Status, check.Message = DoctorStatusSkip, "Configuration files are disabled; using defaults"
+		return check, configState{cfg: config.Defaults(), ready: true, files: nil, err: nil}
 	}
 
 	cfg, meta, resolved, err := m.loadConfigWithMetadata()
@@ -578,13 +581,12 @@ func describeConfigError(check *DoctorCheck, explicit string, resolved string, e
 	switch {
 	case errors.Is(err, config.ErrConfigNotFound):
 		check.Message = target + " does not exist"
-		check.Fix = manualFix(
-			"Point --config or " +
-				config.ConfigEnv +
-				" at an existing file, or create it with: aht --config " +
-				target +
-				" manage config init",
-		)
+		check.Fix = &DoctorFix{
+			Action:    DoctorActionInitConfig,
+			Target:    target,
+			Manual:    "Select an existing config file, or create this one",
+			Automatic: false,
+		}
 	case errors.Is(err, config.ErrConfigIsDirectory):
 		check.Message = target + " is a directory"
 		check.Fix = manualFix("Point --config or " + config.ConfigEnv + " at a TOML file")

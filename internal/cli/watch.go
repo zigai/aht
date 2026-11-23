@@ -42,8 +42,8 @@ const (
 )
 
 var (
-	errWatchFormatJSONConflict = errors.New("--format cannot be used with --json")
-	errInvalidWatchFormat      = errors.New("invalid watch format")
+	errFormatJSONConflict = errors.New("--format cannot be used with --json")
+	errInvalidWatchFormat = errors.New("invalid watch format")
 )
 
 //exhaustruct:optional
@@ -106,7 +106,7 @@ func (app *application) prepareWatch(opts watchOptions) (watchOptions, error) {
 	opts = normalizeWatchOptions(opts)
 	if app.outputJSON {
 		if opts.formatSet {
-			return opts, errWatchFormatJSONConflict
+			return opts, errFormatJSONConflict
 		}
 
 		opts.format = watchFormatJSON
@@ -505,7 +505,7 @@ func (app *application) newWatchCommand() *cobra.Command {
 
 			filter, err := buildFilter(options)
 			if err != nil {
-				return err
+				return exitCode(err, exitCodeUsage)
 			}
 
 			prepared, err = app.prepareWatch(watchOptions{
@@ -514,8 +514,11 @@ func (app *application) newWatchCommand() *cobra.Command {
 				format:     watchFormat,
 				formatSet:  cmd.Flags().Changed("format"),
 			})
+			if err != nil {
+				return exitCode(err, exitCodeUsage)
+			}
 
-			return err
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return app.runWatch(cmd.Context(), prepared)

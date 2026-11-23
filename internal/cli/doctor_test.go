@@ -72,9 +72,9 @@ func TestDoctorTrackerRepairPreservesContext(t *testing.T) {
 			case "file", "environment":
 				want = append(want, "--config", configPath, "manage", "tracker", "enable")
 			case "disabled":
-				want = append(want, "--no-config", "manage", "tracker", "status")
+				want = append(want, "--no-config", "manage", "tracker", "enable")
 			case "stdin":
-				want = append(want, "--config", "-", "manage", "tracker", "enable")
+				want = append(want, "--config", "-", "manage", "tracker", "status")
 
 				if !strings.Contains(fix.Command, "< saved-config.toml") ||
 					!strings.Contains(fix.Manual, "TOML") {

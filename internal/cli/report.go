@@ -11,8 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zigai/aht/v2/internal/harness/catalog"
-
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
@@ -83,7 +81,7 @@ func (app *application) newReportCommand() *cobra.Command {
 		&options.Activity,
 		"activity",
 		options.Activity,
-		"reported activity hint: `<val>` (running, waiting, idle, unknown)",
+		"reported activity hint: `<val>` (running, waiting, idle, failed, interrupted, unknown)",
 	)
 	f.StringVar(
 		&options.Lifecycle,
@@ -263,8 +261,8 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 
 		authoritative = "no"
 
-		policy := (catalog.Rules{}).Policy(session.Harness)
-		if policy.Authority == registry.AuthorityHook && !terminalDecides(session) {
+		decision := session.Decision()
+		if decision != nil && decision.Authority == registry.AuthorityHook {
 			authoritative = "yes"
 		}
 	}
@@ -289,10 +287,4 @@ func (app *application) writeReportResult(session registry.Session, quiet bool) 
 			},
 		},
 	)
-}
-
-func terminalDecides(session registry.Session) bool {
-	decision := session.Decision()
-
-	return decision != nil && decision.Authority == registry.AuthorityTerminal
 }

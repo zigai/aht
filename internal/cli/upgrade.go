@@ -32,7 +32,7 @@ func (app *application) newUpgradeCommand() *cobra.Command {
 
 			integrations, integrationErr := manager.UpgradeIntegrations(
 				cmd.Context(),
-				manage.IntegrationOptions{DryRun: dryRun},
+				manage.UpgradeOptions{DryRun: dryRun},
 			)
 			tracker, trackerErr := manager.UpgradeTracker(
 				cmd.Context(),

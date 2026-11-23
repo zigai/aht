@@ -816,6 +816,16 @@ func TestSearchCLIUsageErrorsShowCorrectedUsage(t *testing.T) {
 			expected: []string{`invalid --source "pi=": expected agent=path`},
 		},
 		{
+			name:     "JSON with field output",
+			args:     []string{"search", "--json", "--format", "resume"},
+			expected: []string{"--format cannot be used with --json"},
+		},
+		{
+			name:     "JSON stream with empty format flag",
+			args:     []string{"search", "--json", "--format=", "--stream"},
+			expected: []string{"--format cannot be used with --json"},
+		},
+		{
 			name:     "conflicting harness selection",
 			args:     []string{"search", "refresh", "--harness", "codex", "--source", "pi=" + path},
 			expected: []string{"conflicting --harness and --source harnesses", `--source "pi=`, "aht search --help"},
