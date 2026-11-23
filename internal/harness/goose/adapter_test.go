@@ -1,7 +1,9 @@
 package goose
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -211,5 +213,111 @@ func TestSessionTitlesIgnoreWorkingDirectoryWithoutHome(t *testing.T) {
 				t.Fatalf("SessionTitles without a home = %q, %v, want one empty title", titles, err)
 			}
 		})
+	}
+}
+
+func TestGooseTranscriptQuerySupportsLegacyAndMixedTitleSchemas(t *testing.T) {
+	t.Parallel()
+
+	const (
+		messagesSchema = `CREATE TABLE messages (id INTEGER, session_id TEXT, role TEXT, ` +
+			`content_json TEXT, created_timestamp TEXT);`
+		insertMessage = `INSERT INTO messages VALUES ` +
+			`(1, 's1', 'user', '[{"type":"text","text":"hello"}]', '2026-01-01');`
+	)
+
+	tests := []struct {
+		name      string
+		schemaSQL string
+		insertSQL string
+		wantTitle string
+	}{
+		{
+			name: "description only schema",
+			schemaSQL: `CREATE TABLE sessions (id TEXT, description TEXT, working_dir TEXT, ` +
+				`created_at TEXT, updated_at TEXT);` + messagesSchema,
+			insertSQL: `INSERT INTO sessions VALUES ('s1', 'Legacy title', '/work', '2026-01-01', '2026-01-01');` +
+				insertMessage,
+			wantTitle: "Legacy title",
+		},
+		{
+			name: "name and description schema falls back to description when name is empty",
+			schemaSQL: `CREATE TABLE sessions (id TEXT, name TEXT, description TEXT, working_dir TEXT, ` +
+				`created_at TEXT, updated_at TEXT);` + messagesSchema,
+			insertSQL: `INSERT INTO sessions VALUES ` +
+				`('s1', '', 'Fallback title', '/work', '2026-01-01', '2026-01-01');` +
+				insertMessage,
+			wantTitle: "Fallback title",
+		},
+		{
+			name: "name and description schema prefers non-empty name",
+			schemaSQL: `CREATE TABLE sessions (id TEXT, name TEXT, description TEXT, working_dir TEXT, ` +
+				`created_at TEXT, updated_at TEXT);` + messagesSchema,
+			insertSQL: `INSERT INTO sessions VALUES ` +
+				`('s1', 'Named title', 'Fallback title', '/work', '2026-01-01', '2026-01-01');` +
+				insertMessage,
+			wantTitle: "Named title",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			testharness.PlantDatabase(t, dir, test.schemaSQL, test.insertSQL, "sessions.db")
+
+			db, err := sql.Open("sqlite", filepath.Join(dir, "sessions.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			defer func() { _ = db.Close() }()
+
+			query, _, err := transcriptQuery(t.Context(), db)
+			if err != nil {
+				t.Fatalf("transcriptQuery returned error: %v", err)
+			}
+
+			var sessionID, title, cwd, created, updated, msgID, msgOrder, role, body, ts string
+			if err := db.QueryRowContext(t.Context(), query).Scan(
+				&sessionID, &title, &cwd, &created, &updated,
+				&msgID, &msgOrder, &role, &body, &ts,
+			); err != nil {
+				t.Fatalf("executing transcript query %q: %v", query, err)
+			}
+
+			if title != test.wantTitle {
+				t.Fatalf("title = %q, want %q", title, test.wantTitle)
+			}
+		})
+	}
+}
+
+func TestGooseTranscriptQueryRejectsUnsupportedTitleSchema(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	testharness.PlantDatabase(
+		t,
+		dir,
+		"CREATE TABLE sessions (id TEXT, title TEXT, working_dir TEXT, created_at TEXT, updated_at TEXT);",
+		"INSERT INTO sessions VALUES ('s1', 'Unknown title column', '/work', '2026-01-01', '2026-01-01');",
+		"sessions.db",
+	)
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = db.Close() }()
+
+	if _, _, err := New().Transcript().
+		Query(t.Context(), db); !errors.Is(
+		err,
+		errGooseSessionColumnsUnsupported,
+	) {
+		t.Fatalf("transcript query error = %v, want %v", err, errGooseSessionColumnsUnsupported)
 	}
 }
