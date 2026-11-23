@@ -20,6 +20,8 @@ const (
 	darwinPSFieldCount = 5
 	darwinPIDSysctl    = "kern.proc.pid"
 	darwinUIDSysctl    = "kern.proc.uid"
+	// SZOMB from <sys/proc.h>: the process exited and awaits reaping.
+	darwinZombieState = 5
 )
 
 var (
@@ -116,6 +118,11 @@ func Find(ctx context.Context, pid int) (Process, bool, error) {
 		nil,
 		nil,
 	); err != nil {
+		// ps finds no row for a process that exits after the kernel lookup.
+		if darwinProcessExited(pid, process.StartIdentity) {
+			return zero, false, nil
+		}
+
 		return zero, false, err
 	}
 
@@ -157,6 +164,22 @@ func CommandName(ctx context.Context, pid int) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func darwinProcessExited(pid int, startIdentity string) bool {
+	kinfo, err := unix.SysctlKinfoProc(darwinPIDSysctl, pid)
+	if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EIO) {
+		return true
+	}
+
+	if err != nil || kinfo == nil {
+		return false
+	}
+
+	identity, _ := darwinProcessStartIdentity(*kinfo)
+
+	return int(kinfo.Proc.P_pid) != pid || kinfo.Proc.P_stat == darwinZombieState ||
+		identity != startIdentity
 }
 
 func enrichDarwinInventory(
