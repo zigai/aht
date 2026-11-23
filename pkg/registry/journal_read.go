@@ -10,10 +10,28 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"time"
 )
 
+type pendingCommand struct {
+	entry journalEntry
+	//exhaustruct:optional
+	result journalResult
+	//exhaustruct:optional
+	candidate snapshot
+	//exhaustruct:optional
+	journaled bool
+	// unjournaled marks changes that replaying the journal does not reproduce.
+	//exhaustruct:optional
+	unjournaled bool
+	//exhaustruct:optional
+	cleared int
+	//exhaustruct:optional
+	baseRevision uint64
+}
+
 func (s *FileStore) load(ctx context.Context) (snapshot, error) {
-	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
+	if _, err := registryFSFor(s.path).Lstat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
 		return newSnapshot(), nil
 	}
 
@@ -30,7 +48,7 @@ func (s *FileStore) load(ctx context.Context) (snapshot, error) {
 // stored sessions. It takes the store lock only when the lock file exists;
 // writers create that file before their first write.
 func (s *FileStore) Verify(ctx context.Context) (int, error) {
-	if _, err := os.Stat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
+	if _, err := registryFSFor(s.path).Lstat(filepath.Dir(s.path)); errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
 
@@ -65,7 +83,23 @@ func (s *FileStore) loadLocked(ctx context.Context, lock *storeLock) (snapshot, 
 	return snap, closeStoreLock(lock, validateSnapshot(snap))
 }
 
-func (s *MemoryStore) lockCurrent(ctx context.Context) error {
+func (s *MemoryStore) lockCurrent(ctx context.Context) (func(), error) {
+	s.mu.RLock()
+
+	if s.owner != nil && s.filesUnchangedLocked() && s.detailsCurrentLocked() {
+		return s.mu.RUnlock, nil
+	}
+
+	s.mu.RUnlock()
+
+	if err := s.lockCurrentExclusive(ctx); err != nil {
+		return nil, err
+	}
+
+	return s.mu.Unlock, nil
+}
+
+func (s *MemoryStore) lockCurrentExclusive(ctx context.Context) error {
 	for {
 		s.mu.Lock()
 		if s.owner == nil {
@@ -343,21 +377,29 @@ func readJournalFrom(path string, offset int64) ([]byte, error) {
 // journalWrittenLocked records that the whole journal is applied, which holds
 // after this owner appends to it or replaces it under the store lock.
 func (s *MemoryStore) journalWrittenLocked() error {
-	path := journalPath(s.path)
+	position, err := writtenJournalPosition(s.path)
+	if err != nil {
+		return err
+	}
+
+	s.journal = position
+
+	return nil
+}
+
+func writtenJournalPosition(path string) (journalPosition, error) {
+	path = journalPath(path)
 
 	info, err := registryFSFor(path).Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		s.journal = journalPosition{info: nil, offset: 0}
-		return nil
+		return journalPosition{info: nil, offset: 0}, nil
 	}
 
 	if err != nil {
-		return fmt.Errorf("stating journal: %w", err)
+		return journalPosition{}, fmt.Errorf("stating journal: %w", err)
 	}
 
-	s.journal = journalPosition{info: info, offset: info.Size()}
-
-	return nil
+	return journalPosition{info: info, offset: info.Size()}, nil
 }
 
 func (s *MemoryStore) checkpointLocked(snap snapshot) error {
@@ -395,119 +437,168 @@ func (s *MemoryStore) command(ctx context.Context, entry journalEntry) (journalR
 
 	s.mu.Lock()
 
-	var (
-		result  journalResult
-		written journalWrite
-	)
-
-	if s.owner == nil {
-		err = ErrStoreClosed
-	} else {
-		result, written, err = s.commandLocked(ctx, entry)
-	}
+	pending, err := s.prepareCommandLocked(ctx, entry)
 	s.mu.Unlock()
 
-	err = errors.Join(err, written.sync())
+	// Readers see the state before this command until its files are synced.
+	var position journalPosition
+	if err == nil {
+		position, err = s.writeCommand(ctx, &pending)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return result, s.unlockFilesLocked(lock, err)
+	if err == nil {
+		err = s.commitCommandLocked(&pending, position)
+	}
+
+	return pending.result, s.unlockFilesLocked(lock, err)
 }
 
-func (s *MemoryStore) commandLocked(
+func (s *MemoryStore) prepareCommandLocked(
 	ctx context.Context,
 	entry journalEntry,
-) (journalResult, journalWrite, error) {
+) (pendingCommand, error) {
+	pending := pendingCommand{entry: entry}
+
+	if s.owner == nil {
+		return pending, ErrStoreClosed
+	}
+
+	// Reset must still clear a journal that does not apply, counting what
+	// memory holds instead.
+	if err := s.consumeJournalLocked(ctx); err != nil && !entry.Reset {
+		return pending, err
+	}
+
+	pending.entry.ReceivedAt = s.now().UTC()
+	pending.baseRevision = s.storageRevision
+
 	if entry.Reset {
-		result, err := s.resetLocked(ctx)
-		return result, journalWrite{}, err
+		pending.entry.Sequence = s.snapshot.JournalSequence
+		pending.cleared = len(s.snapshot.Sessions)
+
+		return pending, nil
 	}
 
-	if err := s.consumeJournalLocked(ctx); err != nil {
-		return journalResult{}, journalWrite{}, err
-	}
+	err := s.reduceCommandLocked(ctx, &pending)
 
+	return pending, err
+}
+
+func (s *MemoryStore) reduceCommandLocked(ctx context.Context, pending *pendingCommand) error {
 	candidate := cloneRegistrySnapshotForMutation(s.snapshot)
-	entry.Sequence = candidate.JournalSequence + 1
-	entry.ReceivedAt = s.now().UTC()
+	pending.entry.Sequence = candidate.JournalSequence + 1
 
-	result, err := s.reducer.applyJournalEntry(ctx, &candidate, entry)
+	result, err := s.reducer.applyJournalEntry(ctx, &candidate, pending.entry)
 	if err != nil {
-		return journalResult{}, journalWrite{}, err
+		return err
 	}
 
 	if err := validateSnapshot(candidate); err != nil {
-		return journalResult{}, journalWrite{}, err
+		return err
 	}
 
 	if err := validateNativePayloadChanges(s.snapshot, candidate); err != nil {
-		return journalResult{}, journalWrite{}, err
+		return err
 	}
 
 	if err := ctx.Err(); err != nil {
-		return journalResult{}, journalWrite{}, fmt.Errorf("committing registry command: %w", err)
+		return fmt.Errorf("committing registry command: %w", err)
 	}
 
-	var written journalWrite
-
-	if journalWorthy(entry, result) ||
-		!maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses) {
-		written, err = s.appendJournalLocked(entry)
-		if err != nil {
-			return journalResult{}, written, err
-		}
-	} else {
+	pending.journaled = journalWorthy(pending.entry, result) ||
+		!maps.Equal(candidate.EndedProcesses, s.snapshot.EndedProcesses)
+	if !pending.journaled {
 		// Evidence-only refreshes are re-derived after a restart. Keeping the
 		// sequence unchanged leaves the next journaled entry contiguous for
 		// fallback writers that fold the on-disk snapshot and journal.
 		candidate.JournalSequence = s.snapshot.JournalSequence
 	}
 
-	if expireTombstones(&candidate, entry.ReceivedAt, s.tombstoneTTL) > 0 {
+	if expireTombstones(&candidate, pending.entry.ReceivedAt, s.tombstoneTTL) > 0 {
 		result.changes = stateChanges(
 			State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
 			State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
 		)
-		s.acceptUnjournaledLocked(candidate, result.changes)
-
-		return result, written, nil
+		pending.unjournaled = true
 	}
 
-	s.acceptSnapshotLocked(candidate, result.changes)
+	pending.result = result
+	pending.candidate = candidate
 
-	return result, written, nil
+	return nil
 }
 
-func (s *MemoryStore) resetLocked(ctx context.Context) (journalResult, error) {
-	candidate, result, err := resetJournalSnapshot(
-		ctx,
-		s.path,
-		s.now().UTC(),
-		s.snapshot.JournalSequence,
-		len(s.snapshot.Sessions),
-	)
-	if err != nil {
-		return journalResult{}, err
+func (s *MemoryStore) writeCommand(
+	ctx context.Context,
+	pending *pendingCommand,
+) (journalPosition, error) {
+	if pending.entry.Reset {
+		candidate, result, err := resetJournalSnapshot(
+			ctx,
+			s.path,
+			pending.entry.ReceivedAt,
+			pending.entry.Sequence,
+			pending.cleared,
+		)
+		pending.candidate = candidate
+		pending.result = result
+
+		return journalPosition{info: nil, offset: 0}, err
 	}
 
-	result.changes = stateChanges(
-		State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt},
-		State{Sessions: candidate.Sessions, UpdatedAt: candidate.UpdatedAt},
-	)
-	s.acceptSnapshotLocked(candidate, result.changes)
-	s.journal = journalPosition{info: nil, offset: 0}
+	if !pending.journaled {
+		return journalPosition{info: nil, offset: 0}, nil
+	}
 
-	return result, nil
+	written, err := writeJournalEntry(s.path, pending.entry)
+	if err != nil {
+		return journalPosition{}, err
+	}
+
+	position, err := writtenJournalPosition(s.path)
+	if err != nil {
+		return journalPosition{}, errors.Join(err, written.close())
+	}
+
+	return position, written.sync()
 }
 
-func (s *MemoryStore) appendJournalLocked(entry journalEntry) (journalWrite, error) {
-	written, err := writeJournalEntry(s.path, entry)
-	if err != nil {
-		return journalWrite{}, err
+func (s *MemoryStore) commitCommandLocked(pending *pendingCommand, position journalPosition) error {
+	previous := State{Sessions: s.snapshot.Sessions, UpdatedAt: s.snapshot.UpdatedAt}
+
+	switch {
+	case pending.entry.Reset:
+		pending.result.changes = stateChanges(
+			previous,
+			State{Sessions: pending.candidate.Sessions, UpdatedAt: pending.candidate.UpdatedAt},
+		)
+		s.acceptSnapshotLocked(pending.candidate, pending.result.changes)
+		// The reset wrote a checkpoint of the candidate, so nothing is left to persist.
+		s.persistedRevision = s.storageRevision
+		s.persistedAt = time.Now()
+
+		return s.checkpointWrittenLocked(pending.candidate.JournalSequence)
+	case pending.journaled:
+		s.journal = position
 	}
 
-	return written, s.journalWrittenLocked()
+	refreshed := s.storageRevision != pending.baseRevision
+	if pending.unjournaled {
+		s.acceptUnjournaledLocked(pending.candidate, pending.result.changes)
+	} else {
+		s.acceptSnapshotLocked(pending.candidate, pending.result.changes)
+	}
+
+	// Readers may have refreshed expired details while the files synced; the
+	// candidate predates that refresh.
+	if refreshed {
+		s.refreshDetailsLocked()
+	}
+
+	return nil
 }
 
 // journalWorthy reports whether losing entry in an owner crash would matter:

@@ -387,6 +387,63 @@ func TestMemoryStoreResetClearsLiveState(t *testing.T) {
 	}
 }
 
+func TestResetCountsJournaledSessions(t *testing.T) {
+	t.Parallel()
+
+	for _, resetter := range []string{"owner", "journal"} {
+		t.Run(resetter, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "state.json")
+
+			owner, err := OpenMemoryStore(path, fixtureRules{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Cleanup(func() { _ = owner.Close() })
+
+			if _, err := owner.Observe(t.Context(), liveReport("checkpointed")); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := owner.Flush(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			// A fallback writer appends to the journal while the owner runs.
+			external := NewJournal(path, fixtureRules{})
+			if _, err := external.Observe(t.Context(), liveReport("journaled")); err != nil {
+				t.Fatal(err)
+			}
+
+			var result ResetResult
+			if resetter == "owner" {
+				result, err = owner.Reset(t.Context())
+			} else {
+				result, err = external.Reset(t.Context())
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if result.Cleared != 2 {
+				t.Fatalf("Reset cleared %d sessions, want 2", result.Cleared)
+			}
+
+			state, err := owner.State(t.Context(), Filter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(state.Sessions) != 0 {
+				t.Fatalf("State after reset = %v, want none", nativeSessionIDs(state.Sessions))
+			}
+		})
+	}
+}
+
 func TestMemoryStoreFollowsJournalReplacedByReset(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -693,14 +750,16 @@ func TestMemoryStoreStateDoesNotWaitForCommandSync(t *testing.T) {
 
 	store, gate := openSyncGatedStore(t)
 
-	for _, sessionID := range []string{"first", "second"} {
-		want := map[string]bool{"first": true}
-		want[sessionID] = true
+	// A reader during the sync sees only state that is already durable.
+	committed := map[string]bool{}
 
-		requireStateDuringEachSync(t, store, gate, want, func() error {
+	for _, sessionID := range []string{"first", "second"} {
+		requireStateDuringEachSync(t, store, gate, maps.Clone(committed), func() error {
 			_, err := store.Observe(t.Context(), liveReport(sessionID))
 			return err
 		})
+
+		committed[sessionID] = true
 	}
 }
 
@@ -797,23 +856,16 @@ func requireStateAfterExternalWrite(
 			t.Fatal(result.err)
 		}
 
-		got := nativeSessionIDs(result.state.Sessions)
-		if operationID != "" {
-			if !got[operationID] {
-				continue
-			}
-
-			want[operationID] = true
-		}
-
-		if !maps.Equal(got, want) {
+		// The operation's own change is not durable while the reader runs, so
+		// the reader sees the external writes and nothing else.
+		if got := nativeSessionIDs(result.state.Sessions); !maps.Equal(got, want) {
 			t.Fatalf("State after external write = %v, want %v", got, want)
 		}
 
-		return
+		if operationID != "" {
+			want[operationID] = true
+		}
 	}
-
-	t.Fatal("operation never took the file locks before the reader")
 }
 
 func finishGatedOperation(t *testing.T, gate *syncGateFS, done chan error) {
@@ -912,6 +964,67 @@ func TestMemoryStoreStateSeesExternalJournalWrites(t *testing.T) {
 		if got := nativeSessionIDs(state.Sessions); !maps.Equal(got, want) {
 			t.Fatalf("State %s = %v, want %v", step.sessionID, got, want)
 		}
+	}
+}
+
+func TestMemoryStoreCommandSyncFailureLeavesMemoryUnchanged(t *testing.T) {
+	t.Parallel()
+
+	store, gate := openSyncGatedStore(t)
+	if _, err := store.Observe(t.Context(), liveReport("committed")); err != nil {
+		t.Fatal(err)
+	}
+
+	requireMemory := func(when string) {
+		t.Helper()
+
+		store.mu.RLock()
+		defer store.mu.RUnlock()
+
+		if _, ok := store.snapshot.Sessions[sessionIDForObservation(liveReport("committed"))]; !ok {
+			t.Fatalf("memory lost the committed session %s", when)
+		}
+
+		if _, ok := store.snapshot.Sessions[sessionIDForObservation(liveReport("unsynced"))]; ok {
+			t.Fatalf("memory holds the unsynced session %s", when)
+		}
+	}
+
+	revision := store.Revision()
+
+	store.mu.RLock()
+	changed := store.stateChanged
+	store.mu.RUnlock()
+
+	gate.armed.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := store.Observe(t.Context(), liveReport("unsynced"))
+		done <- err
+	}()
+
+	<-gate.entered
+	gate.armed.Store(false)
+	requireMemory("during the sync")
+
+	gate.release <- errInjectedSync
+
+	if err := <-done; !errors.Is(err, errInjectedSync) {
+		t.Fatalf("Observe error = %v, want injected sync failure", err)
+	}
+
+	requireMemory("after the failed sync")
+
+	if got := store.Revision(); got != revision {
+		t.Fatalf("Revision = %d after failed sync, want %d", got, revision)
+	}
+
+	select {
+	case <-changed:
+		t.Fatal("failed sync woke state subscribers")
+	default:
 	}
 }
 

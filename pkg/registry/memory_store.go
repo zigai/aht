@@ -233,7 +233,10 @@ func (s *MemoryStore) Observe(ctx context.Context, observation Observation) (Ses
 		return Session{}, ErrSessionNotFound
 	}
 
-	return cloneSessionValue(session), nil
+	session = cloneSessionValue(session)
+	session.SchemaVersion = storeSchemaVersion
+
+	return session, nil
 }
 
 // ObserveBatch atomically reduces observations into memory and notifies state
@@ -280,16 +283,18 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Session, error) {
 		return Session{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	if err := s.lockCurrent(ctx); err != nil {
+	unlock, err := s.lockCurrent(ctx)
+	if err != nil {
 		return Session{}, err
 	}
 
 	session, ok := s.snapshot.Sessions[id]
+
+	unlock()
+
 	if !ok {
-		s.mu.Unlock()
 		return Session{}, ErrSessionNotFound
 	}
-	s.mu.Unlock()
 
 	session = cloneSessionValue(session)
 	session.SchemaVersion = storeSchemaVersion
@@ -341,8 +346,8 @@ func (s *MemoryStore) GC(ctx context.Context, deleteAfter time.Duration) (GCResu
 }
 
 func (s *MemoryStore) Revision() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return s.revision
 }
@@ -353,12 +358,14 @@ func (s *MemoryStore) State(ctx context.Context, filter Filter) (StateSnapshot, 
 		return StateSnapshot{}, fmt.Errorf("checking context: %w", err)
 	}
 
-	if err := s.lockCurrent(ctx); err != nil {
+	unlock, err := s.lockCurrent(ctx)
+	if err != nil {
 		return StateSnapshot{}, err
 	}
 
 	state := s.stateLocked(filter)
-	s.mu.Unlock()
+
+	unlock()
 
 	return state, nil
 }
@@ -374,19 +381,22 @@ func (s *MemoryStore) WaitForRevision(
 			return StateSnapshot{}, fmt.Errorf("waiting for registry revision: %w", err)
 		}
 
-		if err := s.lockCurrent(ctx); err != nil {
+		unlock, err := s.lockCurrent(ctx)
+		if err != nil {
 			return StateSnapshot{}, err
 		}
 
 		if s.revision > after {
 			state := s.stateLocked(filter)
-			s.mu.Unlock()
+
+			unlock()
 
 			return state, nil
 		}
 
 		changed := s.stateChanged
-		s.mu.Unlock()
+
+		unlock()
 
 		select {
 		case <-ctx.Done():
@@ -418,7 +428,7 @@ func (s *MemoryStore) Reset(ctx context.Context) (ResetResult, error) {
 		return ResetResult{}, err
 	}
 
-	return result.reset, s.Flush(ctx)
+	return result.reset, nil
 }
 
 // RunPersistence writes consumer-visible changes as durable atomic snapshots

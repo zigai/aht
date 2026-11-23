@@ -236,6 +236,20 @@ func validStateDetail(detail *StateDetail, activity *Activity) bool {
 	return false
 }
 
+func (s *MemoryStore) detailsCurrentLocked() bool {
+	now := s.now().UTC()
+	for _, stored := range s.snapshot.Sessions {
+		session := stored
+		session.resolveDetail(s.reducer.rules.Policy(session.Harness), now)
+
+		if !reflect.DeepEqual(stored.Detail, session.Detail) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (s *MemoryStore) refreshDetailsLocked() {
 	var (
 		candidate snapshot

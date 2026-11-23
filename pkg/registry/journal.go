@@ -152,7 +152,9 @@ func (s *Journal) transact(ctx context.Context, entry journalEntry) (journalResu
 
 func (s *Journal) transactLocked(ctx context.Context, entry journalEntry) (journalResult, error) {
 	if entry.Reset {
-		_, result, err := resetJournalSnapshot(ctx, s.path, entry.ReceivedAt, 0, -1)
+		cleared := s.resetCleared(ctx)
+		_, result, err := resetJournalSnapshot(ctx, s.path, entry.ReceivedAt, 0, cleared)
+
 		return result, err
 	}
 
@@ -199,6 +201,26 @@ func (s *Journal) transactLocked(ctx context.Context, entry journalEntry) (journ
 	}
 
 	return result, nil
+}
+
+func (s *Journal) resetCleared(ctx context.Context) int {
+	snap, err := s.loadSnapshot()
+	if err != nil {
+		// Reset must still clear a store that does not load; -1 counts the
+		// sessions the snapshot header lists.
+		return -1
+	}
+
+	entries, err := readJournal(s.path)
+	if err != nil {
+		return -1
+	}
+
+	if err := s.reducer.foldJournal(ctx, &snap, entries); err != nil {
+		return -1
+	}
+
+	return len(snap.Sessions)
 }
 
 func (r Reducer) applyJournalEntry(
@@ -351,6 +373,14 @@ func writeJournalEntry(path string, entry journalEntry) (journalWrite, error) {
 	}
 
 	return written, nil
+}
+
+func (w journalWrite) close() error {
+	if err := w.file.Close(); err != nil {
+		return fmt.Errorf("closing journal: %w", err)
+	}
+
+	return nil
 }
 
 func (w journalWrite) sync() error {
