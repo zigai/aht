@@ -431,7 +431,7 @@ func TestMultiplexerObservationRetiresDifferentHarnessWithoutProcessIdentity(t *
 				ServerID:    "/other/socket",
 				SessionName: "work",
 			},
-			replace: true,
+			replace: false,
 		},
 	}
 	for _, test := range tests {
