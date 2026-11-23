@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/zigai/aht/v2/internal/config"
 
 	"github.com/zigai/aht/v2/internal/harness/catalog"
-	"github.com/zigai/aht/v2/internal/pathmatch"
 
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -349,17 +347,26 @@ func applyConfigFilter(
 		return sessions
 	}
 
-	ignored := configuredIgnoreHarnesses(filter.IgnoreHarnesses, []registry.Harness{explicit})
+	exclusions := configSessionExclusions(filter, explicit)
 
 	result := make([]registry.Session, 0, len(sessions))
-	for _, s := range sessions {
-		if slices.Contains(ignored, s.Harness) ||
-			pathmatch.MatchAny(filter.IgnorePaths, s.CWD, s.ProjectRoot) {
-			continue
+	for _, session := range sessions {
+		if exclusions == nil || !exclusions.Excludes(session) {
+			result = append(result, session)
 		}
-
-		result = append(result, s)
 	}
 
 	return result
+}
+
+func configSessionExclusions(
+	filter config.FilterConfig,
+	explicit registry.Harness,
+) *registry.SessionExclusions {
+	ignored := configuredIgnoreHarnesses(filter.IgnoreHarnesses, []registry.Harness{explicit})
+	if len(ignored) == 0 && len(filter.IgnorePaths) == 0 {
+		return nil
+	}
+
+	return &registry.SessionExclusions{Harnesses: ignored, Paths: filter.IgnorePaths}
 }

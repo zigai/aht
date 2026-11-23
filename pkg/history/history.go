@@ -15,8 +15,8 @@ import (
 
 	native "github.com/zigai/aht/v2/internal/harness/transcript"
 
-	"github.com/zigai/aht/v2/internal/pathmatch"
 	"github.com/zigai/aht/v2/pkg/harness"
+	"github.com/zigai/aht/v2/pkg/pathmatch"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 

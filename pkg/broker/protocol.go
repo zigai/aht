@@ -14,15 +14,16 @@ const (
 	// ProtocolVersion is the current newline-delimited JSON protocol version.
 	ProtocolVersion = 2
 
-	MethodPing         = "ping"
-	MethodObserve      = "observe"
-	MethodObserveBatch = "observe_batch"
-	MethodList         = "list"
-	MethodGet          = "get"
-	MethodSummary      = "summary"
-	MethodGC           = "gc"
-	MethodSubscribe    = "subscribe"
-	MethodReset        = "reset"
+	MethodPing            = "ping"
+	MethodObserve         = "observe"
+	MethodObserveBatch    = "observe_batch"
+	MethodList            = "list"
+	MethodGet             = "get"
+	MethodSummary         = "summary"
+	MethodFilteredSummary = "filtered_summary"
+	MethodGC              = "gc"
+	MethodSubscribe       = "subscribe"
+	MethodReset           = "reset"
 )
 
 const (

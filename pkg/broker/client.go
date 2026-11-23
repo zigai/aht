@@ -140,7 +140,13 @@ func (c *Client) SummaryWithOptions(
 		return nil, fmt.Errorf("%w: %q", registry.ErrUnsupportedGroupBy, opts.GroupBy)
 	}
 
-	request := newRequest(MethodSummary)
+	method := MethodSummary
+	if opts.Exclusions != nil {
+		// An older broker must reject the request rather than ignore the exclusions.
+		method = MethodFilteredSummary
+	}
+
+	request := newRequest(method)
 	request.Filter = filter.NormalizePaths()
 	request.SummaryOptions = opts
 

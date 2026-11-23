@@ -17,10 +17,12 @@ func (app *application) runListSummary(
 ) error {
 	groupBy := registry.SummaryGroupBy(opts.groupBy)
 
-	s, e := app.registryStore().
-		SummaryWithOptions(ctx, f, registry.SummaryOptions{GroupBy: groupBy})
-	if e != nil {
-		return e
+	s, err := app.registryStore().SummaryWithOptions(ctx, f, registry.SummaryOptions{
+		GroupBy:    groupBy,
+		Exclusions: configSessionExclusions(app.cfg.Filter, f.Harness),
+	})
+	if err != nil {
+		return err
 	}
 
 	if app.outputJSON {

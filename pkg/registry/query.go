@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zigai/aht/v2/pkg/pathmatch"
 )
 
 // SessionCWD returns the best available working directory for session.
@@ -104,6 +106,11 @@ func (filter Filter) NormalizePaths() Filter {
 	filter.CWD = CanonicalPath(filter.CWD)
 
 	return filter
+}
+
+func (exclusions SessionExclusions) Excludes(session Session) bool {
+	return slices.Contains(exclusions.Harnesses, session.Harness) ||
+		pathmatch.MatchAny(exclusions.Paths, session.CWD, session.ProjectRoot)
 }
 
 // FilterSessions returns sessions matching filter in deterministic sort order.

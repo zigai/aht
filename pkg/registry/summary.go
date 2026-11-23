@@ -32,6 +32,10 @@ func SummariesWithOptions(sessions []Session, opts SummaryOptions) []Summary {
 	order := make([]summaryGroupKey, 0)
 
 	for _, session := range sessions {
+		if opts.Exclusions != nil && opts.Exclusions.Excludes(session) {
+			continue
+		}
+
 		key, label, keyStr := sessionGroupKey(session, groupBy)
 
 		summary := byKey[key]

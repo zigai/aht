@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -368,4 +370,73 @@ func (r summaryFixtureRules) Policy(id registry.Harness) registry.Policy {
 	policy.Authority = registry.AuthorityHook
 
 	return policy
+}
+
+func TestListSummaryAppliesConfigFilters(t *testing.T) {
+	t.Parallel()
+
+	storePath, ctx := setupSummaryTableFixture(t)
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	configTOML := "[filter]\nignore_harnesses = [\"omp\"]\nignore_paths = [\"/home/bob/*\"]\n"
+
+	if err := os.WriteFile(configPath, []byte(configTOML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := runTestCLI(
+		ctx,
+		[]string{
+			"--store", storePath,
+			"--config", configPath,
+			"--json",
+			"list", "--summary", "--group-by", "project",
+		},
+		&stdout,
+		&stderr,
+	); err != nil {
+		t.Fatalf("project summary with config filter failed: %v", err)
+	}
+
+	var projectSummaries []registry.Summary
+	if err := json.Unmarshal(stdout.Bytes(), &projectSummaries); err != nil {
+		t.Fatalf("decode project summaries: %v", err)
+	}
+
+	wantProjects := map[string]int{"/home/alice/service": 1, "/home/carol/app": 1}
+	gotProjects := make(map[string]int, len(projectSummaries))
+
+	for _, summary := range projectSummaries {
+		gotProjects[summary.ProjectRoot] += summary.Total
+	}
+
+	if len(projectSummaries) != len(wantProjects) || !maps.Equal(gotProjects, wantProjects) {
+		t.Fatalf("project totals = %v, want %v", gotProjects, wantProjects)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := runTestCLI(
+		ctx,
+		[]string{
+			"--store", storePath,
+			"--config", configPath,
+			"--json",
+			"list", "--summary", "--group-by", "harness", "--harness", "omp",
+		},
+		&stdout,
+		&stderr,
+	); err != nil {
+		t.Fatalf("explicit harness summary failed: %v", err)
+	}
+
+	var harnessSummaries []registry.Summary
+	if err := json.Unmarshal(stdout.Bytes(), &harnessSummaries); err != nil {
+		t.Fatalf("decode harness summaries: %v", err)
+	}
+
+	if len(harnessSummaries) != 1 || harnessSummaries[0].Harness != registry.Harness("omp") {
+		t.Fatalf("explicit --harness omp summaries = %+v, want omp", harnessSummaries)
+	}
 }

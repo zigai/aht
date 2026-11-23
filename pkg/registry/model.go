@@ -236,6 +236,13 @@ type SummaryGroupBy string
 
 type SummaryOptions struct {
 	GroupBy SummaryGroupBy `json:"group_by,omitempty"`
+	//exhaustruct:optional
+	Exclusions *SessionExclusions `json:"exclusions,omitempty"`
+}
+
+type SessionExclusions struct {
+	Harnesses []Harness `json:"harnesses,omitempty"`
+	Paths     []string  `json:"paths,omitempty"`
 }
 
 type Summary struct {

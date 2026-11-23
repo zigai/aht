@@ -789,6 +789,21 @@ func TestServerSummaryGroupingAndParity(t *testing.T) {
 		assertBrokerParity(t, groupBy, brokerSummaries, memSummaries)
 	}
 
+	filtered, err := client.SummaryWithOptions(ctx, registry.Filter{}, registry.SummaryOptions{
+		GroupBy: registry.SummaryGroupByProject,
+		Exclusions: &registry.SessionExclusions{
+			Harnesses: nil,
+			Paths:     []string{"/repo/one"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(filtered) != 1 || filtered[0].ProjectRoot != "/repo/two" || filtered[0].Total != 1 {
+		t.Fatalf("filtered broker summary = %+v, want one session for /repo/two", filtered)
+	}
+
 	// Test default Summary call (without options) defaults to multiplexer session
 	defaultSum, err := client.Summary(ctx, registry.Filter{})
 	if err != nil {

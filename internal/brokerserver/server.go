@@ -221,6 +221,7 @@ func validateRequest(request broker.Request) error {
 		broker.MethodList,
 		broker.MethodGet,
 		broker.MethodSummary,
+		broker.MethodFilteredSummary,
 		broker.MethodGC,
 		broker.MethodSubscribe,
 		broker.MethodReset:
@@ -271,7 +272,7 @@ func (s *Server) execute(ctx context.Context, request broker.Request) broker.Res
 
 		session, err = s.store.Get(ctx, request.SessionID)
 		response.Session = &session
-	case broker.MethodSummary:
+	case broker.MethodSummary, broker.MethodFilteredSummary:
 		response.Summaries, err = s.store.SummaryWithOptions(
 			ctx,
 			request.Filter,
