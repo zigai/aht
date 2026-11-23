@@ -565,6 +565,54 @@ func TestDoctorRepairCommandAbsolutizesRelativeStorePath(t *testing.T) {
 	}
 }
 
+func TestDoctorFixExitsNonZeroWhenRepairFails(t *testing.T) {
+	store := prepareDoctorEnvironment(t)
+	home := filepath.Dir(store)
+	binDir := filepath.Join(home, "bin")
+
+	for _, executable := range []string{"systemctl", "launchctl"} {
+		script := "#!/bin/sh\necho 'service manager offline' >&2\nexit 1\n"
+		if err := os.WriteFile(
+			filepath.Join(binDir, executable),
+			[]byte(script),
+			0o700,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+
+	code := executeCLI(
+		t.Context(),
+		[]string{"--store", store, "--json", "doctor", "--fix", "--yes"},
+		nil,
+		&stdout,
+		&stderr,
+	)
+	if code == 0 {
+		t.Fatalf(
+			"doctor --fix --yes exited 0 despite failed repair:\nstdout:\n%s\nstderr:\n%s",
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+
+	report := decodeDoctorReport(t, stdout.String())
+	sawFailedFix := false
+
+	for _, fix := range report.Fixes {
+		if strings.HasPrefix(fix.Result, "failed") {
+			sawFailedFix = true
+			break
+		}
+	}
+
+	if !sawFailedFix {
+		t.Fatalf("expected at least one failed fix in doctor report: %+v", report.Fixes)
+	}
+}
+
 func TestEnvironmentErrorsPointToDoctor(t *testing.T) {
 	path := prepareDoctorEnvironment(t)
 	if err := os.WriteFile(

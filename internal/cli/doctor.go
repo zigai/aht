@@ -135,11 +135,18 @@ func (app *application) newDoctorCommand() *cobra.Command {
 			opts := manage.DoctorOptions{IncludeAll: verbose, MaxHealthAge: 0}
 			result := manager.Doctor(cmd.Context(), opts)
 
-			var fixes []doctorFixResult
+			var (
+				fixes     []doctorFixResult
+				fixFailed bool
+			)
 
 			if fix {
 				var err error
-				if fixes, err = app.applyDoctorFixes(cmd.Context(), result, yes); err != nil {
+				if fixes, fixFailed, err = app.applyDoctorFixes(
+					cmd.Context(),
+					result,
+					yes,
+				); err != nil {
 					return err
 				}
 
@@ -159,7 +166,7 @@ func (app *application) newDoctorCommand() *cobra.Command {
 				)
 			}
 
-			if result.Failed() {
+			if result.Failed() || fixFailed {
 				return exitCode(errSilentDoctorFailure, exitCodeGeneral)
 			}
 
@@ -178,8 +185,11 @@ func (app *application) applyDoctorFixes(
 	ctx context.Context,
 	result manage.DoctorResult,
 	yes bool,
-) ([]doctorFixResult, error) {
-	var fixes []doctorFixResult
+) ([]doctorFixResult, bool, error) {
+	var (
+		fixes     []doctorFixResult
+		fixFailed bool
+	)
 
 	for _, check := range result.Checks {
 		if !hasAutomaticFix(check) {
@@ -195,7 +205,7 @@ func (app *application) applyDoctorFixes(
 				"--yes",
 			)
 			if err != nil {
-				return fixes, err
+				return fixes, fixFailed, err
 			}
 
 			if !confirmed {
@@ -215,6 +225,7 @@ func (app *application) applyDoctorFixes(
 		message, err := check.Repair(ctx)
 		switch {
 		case err != nil:
+			fixFailed = true
 			outcome = "failed: " + err.Error()
 		case message != "":
 			outcome = "applied: " + message
@@ -224,7 +235,7 @@ func (app *application) applyDoctorFixes(
 		fixes = append(fixes, doctorFixResult{ID: check.ID, Action: action, Result: outcome})
 	}
 
-	return fixes, nil
+	return fixes, fixFailed, nil
 }
 
 func (app *application) newDoctorReport(
