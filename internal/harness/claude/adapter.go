@@ -113,14 +113,6 @@ func (adapter claudeHarness) InstallPlan(binary string) (harness.InstallPlan, er
 	}, nil
 }
 
-func (claudeHarness) ResumeCommand(sessionID string, _ string) []string {
-	if sessionID == "" {
-		return nil
-	}
-
-	return []string{claudeCommand, harness.ResumeFlag, sessionID}
-}
-
 func (claudeHarness) PayloadCompatible(rawPayload json.RawMessage) bool {
 	return harness.PayloadValidator[harness.CommandHookPayload]()(rawPayload)
 }
