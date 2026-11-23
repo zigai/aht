@@ -558,22 +558,8 @@ func runCopilotPermission(t *testing.T, host *isolatedHost, env []string, allow 
 		host.command(t, env, "--headless", "--stdio", "--no-auto-update", "--no-auto-login"),
 		true,
 	)
-	created := wire.call(
-		t,
-		2,
-		"session.create",
-		map[string]any{
-			"model":                 fakeModel,
-			"workingDirectory":      host.launched.Work,
-			"requestPermission":     true,
-			"enableConfigDiscovery": true,
-			"provider": map[string]any{
-				"type":    "openai",
-				"baseUrl": host.provider.URL() + "/v1",
-				"apiKey":  fakeAPIKey,
-			},
-		},
-	)
+	protocol := copilotProtocolVersion(t, wire)
+	created := wire.call(t, 2, "session.create", copilotSessionOptions(host, protocol))
 	sessionID := cliString(t, cliField(t, created, "sessionId"))
 	wire.send(
 		t,
@@ -605,6 +591,53 @@ func runCopilotPermission(t *testing.T, host *isolatedHost, env []string, allow 
 	}
 
 	process.wait(t)
+}
+
+// Copilot protocol 4 replaced the session-wide provider option with named
+// inference providers and provider-qualified models.
+const copilotNamedInferenceProtocol = 4
+
+func copilotProtocolVersion(t *testing.T, wire *cliPermissionWire) int {
+	t.Helper()
+
+	var version int
+	if err := json.Unmarshal(
+		cliField(t, wire.call(t, 1, "ping", map[string]any{}), "protocolVersion"),
+		&version,
+	); err != nil {
+		t.Fatalf("decoding Copilot protocol version: %v", err)
+	}
+
+	return version
+}
+
+func copilotSessionOptions(host *isolatedHost, protocol int) map[string]any {
+	options := map[string]any{
+		"model":                 fakeModel,
+		"workingDirectory":      host.launched.Work,
+		"requestPermission":     true,
+		"enableConfigDiscovery": true,
+	}
+	provider := map[string]any{
+		"type":    "openai",
+		"baseUrl": host.provider.URL() + "/v1",
+		"apiKey":  fakeAPIKey,
+	}
+
+	if protocol < copilotNamedInferenceProtocol {
+		options["provider"] = provider
+
+		return options
+	}
+
+	provider["name"] = fakeModel
+	options["model"] = fakeModel + "/" + fakeModel
+	options["inference"] = map[string]any{
+		"providers": []any{provider},
+		"models":    []any{map[string]any{"id": fakeModel, "provider": fakeModel}},
+	}
+
+	return options
 }
 
 type copilotPermissionTurn struct {
