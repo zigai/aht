@@ -140,7 +140,7 @@ func (input incarnationInput) retires() bool { return input.retire }
 
 func (input incarnationInput) replacementRejected() bool {
 	return input.different &&
-		(input.previousProcess() || input.end || input.kind == EvidenceReading ||
+		((input.previousProcess() && !input.terminal) || input.end || input.kind == EvidenceReading ||
 			input.kind == EvidencePlacement || input.absent || input.at.Before(input.current.EvidenceAt))
 }
 

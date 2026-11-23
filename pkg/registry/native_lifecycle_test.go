@@ -1261,3 +1261,66 @@ func TestProcessExitEndsSessionAfterFutureDatedReport(t *testing.T) {
 			session.Presence(), registry.ActivityValue(session.Activity()))
 	}
 }
+
+func TestSurvivingProcessReclaimsSessionAfterDuplicateResumeExits(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	original, duplicate := reducerProcess(100), reducerProcess(200)
+	state := registry.State{Sessions: map[string]registry.Session{}}
+
+	state = applyObservations(
+		t,
+		state,
+		base,
+		nativeReport("shared", base, &original, registry.ActivityIdle),
+	)
+
+	resumed := base.Add(time.Minute)
+	resume := nativeReport("shared", resumed, &duplicate, registry.ActivityIdle)
+	lifecycle := registry.NativeLifecycleResume
+	resume.Report().Lifecycle = &lifecycle
+	state = applyObservations(t, state, resumed, resume)
+
+	during := resumed.Add(time.Minute)
+	state = applyObservations(
+		t,
+		state,
+		during,
+		processSighting(during, original, true),
+		nativeReport("shared", during, &original, registry.ActivityRunning),
+	)
+
+	if session := sessionWithID(t, state, "shared"); session.Process == nil ||
+		!session.Process.Equal(duplicate) {
+		t.Fatalf(
+			"session moved back to the original while the duplicate runs: %#v",
+			session.Process,
+		)
+	}
+
+	exited := during.Add(time.Minute)
+	state = applyObservations(t, state, exited, processSighting(exited, duplicate, false))
+
+	after := exited.Add(time.Minute)
+	state = applyObservations(
+		t,
+		state,
+		after,
+		nativeReport("shared", after, &original, registry.ActivityRunning),
+	)
+
+	live := 0
+
+	for _, session := range state.Sessions {
+		if session.Presence() == registry.PresenceLive {
+			live++
+		}
+	}
+
+	session := sessionWithProcess(t, state, original.PID)
+	if live != 1 || session.SessionID != "shared" ||
+		session.Activity() == nil || *session.Activity() != registry.ActivityRunning {
+		t.Fatalf("sessions after the duplicate exited = %s", describeSessions(state))
+	}
+}
