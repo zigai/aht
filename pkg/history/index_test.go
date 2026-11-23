@@ -2264,3 +2264,43 @@ func requireDatabaseActivityTimes(t *testing.T, catalog history.Catalog) {
 		}
 	}
 }
+
+func TestIndexedSearchHandlesLargeExcerptRequests(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	var body strings.Builder
+	body.WriteString(`{"type":"session","id":"many","cwd":"/work"}` + "\n")
+
+	const totalParts = 520
+	for index := range totalParts {
+		fmt.Fprintf(
+			&body,
+			`{"type":"message","id":"m%d","message":{"role":"user","content":"batch-token %d"}}`+"\n",
+			index,
+			index,
+		)
+	}
+
+	writeHistory(t, root, "many.jsonl", body.String())
+
+	catalog := history.Catalog{
+		Sources:   []history.Source{{Harness: registry.Harness("pi"), Path: root}},
+		IndexPath: filepath.Join(t.TempDir(), "history.sqlite"),
+	}
+
+	result := requireIndexedMatches(
+		t,
+		catalog,
+		history.Query{Terms: []string{"batch-token"}, Excerpts: 40000},
+		1,
+	)
+	if result.IndexUnavailable {
+		t.Fatal("indexed search fell back instead of using the index")
+	}
+
+	if got := len(result.Matches[0].Excerpts); got != totalParts {
+		t.Fatalf("excerpts = %d, want %d", got, totalParts)
+	}
+}

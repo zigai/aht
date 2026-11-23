@@ -96,11 +96,9 @@ func (index *historyIndex) prepareQuery(ctx context.Context, s *queryPlan) (err 
 		return index.failure(fmt.Errorf("prepare indexed conversations: %w", err))
 	}
 
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", max(s.query.Excerpts, 1)), ",")
-
 	index.queries.parts, err = index.conn.PrepareContext(
 		ctx,
-		"SELECT id,role,body,message_id,line,timestamp FROM parts WHERE id IN ("+placeholders+")",
+		"SELECT id,role,body,message_id,line,timestamp FROM parts WHERE id IN (SELECT value FROM json_each(?))",
 	)
 	if err != nil {
 		return index.failure(fmt.Errorf("prepare indexed text: %w", err))
@@ -146,11 +144,15 @@ func (index *historyIndex) findParts(ctx context.Context, s *queryPlan, fileID i
 	for conversation, parts := range found {
 		slices.Sort(parts)
 		parts = slices.Compact(parts)
-		ids := make([]int64, s.query.Excerpts)
-		copy(ids, parts)
+
+		count := len(parts)
+		if count > s.query.Excerpts {
+			parts = parts[:s.query.Excerpts]
+		}
+
 		index.plans[conversation] = &indexedMatches{
-			count: len(parts),
-			ids:   ids,
+			count: count,
+			ids:   slices.Clone(parts),
 			hits:  hits[conversation],
 		}
 	}
@@ -409,7 +411,7 @@ func (index *historyIndex) matches(
 		}
 	}
 
-	conversations, err := index.foldGroup(ctx, group)
+	conversations, err := index.foldGroup(ctx, s, group)
 	if err != nil {
 		return err
 	}
@@ -444,6 +446,7 @@ func (index *historyIndex) groupCandidate(
 // conversations.
 func (index *historyIndex) foldGroup(
 	ctx context.Context,
+	s *queryPlan,
 	group []groupFile,
 ) ([]indexedConversation, error) {
 	fresh := slices.ContainsFunc(group, func(member groupFile) bool { return member.changed })
@@ -468,7 +471,11 @@ func (index *historyIndex) foldGroup(
 				continue
 			}
 
-			index.plans[owner] = foldPlan(index.plans[owner], index.plans[child.id])
+			index.plans[owner] = foldPlan(
+				index.plans[owner],
+				index.plans[child.id],
+				s.query.Excerpts,
+			)
 			index.excluded[owner] = index.excluded[owner] || index.excluded[child.id]
 		}
 	}
@@ -489,7 +496,7 @@ func ownerConversation(conversations []indexedConversation, sessionID string) in
 // foldPlan adds a child conversation's plan to its owner's. Excerpt parts keep
 // the owner's first, then the child's, like a direct scan reading the files in
 // that order.
-func foldPlan(owner *indexedMatches, child *indexedMatches) *indexedMatches {
+func foldPlan(owner *indexedMatches, child *indexedMatches, excerpts int) *indexedMatches {
 	if child == nil {
 		return owner
 	}
@@ -497,26 +504,15 @@ func foldPlan(owner *indexedMatches, child *indexedMatches) *indexedMatches {
 	if owner == nil {
 		owner = &indexedMatches{
 			count: 0,
-			ids:   make([]int64, len(child.ids)),
+			ids:   nil,
 			hits:  make([]bool, len(child.hits)),
 		}
 	}
 
 	owner.conversationHits.absorb(child.conversationHits)
 
-	used := slices.Index(owner.ids, 0)
-	if used < 0 {
-		return owner
-	}
-
-	for _, id := range child.ids {
-		if id == 0 || used == len(owner.ids) {
-			break
-		}
-
-		owner.ids[used] = id
-		used++
-	}
+	room := min(excerpts-len(owner.ids), len(child.ids))
+	owner.ids = append(owner.ids, child.ids[:room]...)
 
 	return owner
 }
@@ -665,12 +661,16 @@ func (index *historyIndex) eachPartText(
 	ids []int64,
 	visit func(int64, Excerpt),
 ) (err error) {
-	args := make([]any, len(ids))
-	for i, part := range ids {
-		args[i] = part
+	if len(ids) == 0 {
+		return nil
 	}
 
-	rows, err := index.queries.parts.QueryContext(ctx, args...)
+	arg, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("encode indexed text ids: %w", err)
+	}
+
+	rows, err := index.queries.parts.QueryContext(ctx, string(arg))
 	if err != nil {
 		return index.failure(fmt.Errorf("query indexed text: %w", err))
 	}
