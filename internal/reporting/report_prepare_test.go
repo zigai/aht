@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -817,5 +818,87 @@ func TestPrepareReportStoresClaudePostToolUseWithoutToolContent(t *testing.T) {
 
 	if _, ok := stored["tool_response"]; ok {
 		t.Fatal("tool_response was stored")
+	}
+}
+
+func TestPrepareReportPreservesExplicitAttributesOverPayloadDefaults(t *testing.T) {
+	t.Parallel()
+
+	payload := `{"session_id":"claude-attr","cwd":"/work",` +
+		`"hook_event_name":"PreToolUse","tool_name":"Bash"}`
+
+	prepared, err := Prepare(
+		strings.NewReader(payload),
+		Options{
+			Harness:    "claude",
+			Activity:   "running",
+			Event:      "PreToolUse",
+			Attributes: []string{"claude_tool_name=custom", "extra=value"},
+			RawStdin:   true,
+		},
+		Runtime{DefaultObservedAt: time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	attrs := prepared.Observation.Report().Attributes
+	if attrs["claude_tool_name"] != "custom" || attrs["extra"] != "value" {
+		t.Fatalf("attributes = %#v, want explicit claude_tool_name=custom preserved", attrs)
+	}
+}
+
+func TestPrepareReportPrefersExplicitCWDForProjectRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	explicitRepo := filepath.Join(root, "explicit-repo")
+	payloadRepo := filepath.Join(root, "payload-repo")
+
+	for _, repo := range []string{explicitRepo, payloadRepo} {
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	payload := `{"session_id":"claude-cwd","cwd":` + strconv.Quote(payloadRepo) +
+		`,"hook_event_name":"Stop"}`
+
+	explicit, err := Prepare(
+		strings.NewReader(payload),
+		Options{
+			Harness:  "claude",
+			Activity: "idle",
+			CWD:      explicitRepo,
+			CWDAuto:  false,
+			RawStdin: true,
+		},
+		Runtime{DefaultObservedAt: time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := explicit.Observation.Listing().ProjectRoot; got != explicitRepo {
+		t.Fatalf("explicit --cwd ProjectRoot = %q, want %q", got, explicitRepo)
+	}
+
+	automatic, err := Prepare(
+		strings.NewReader(payload),
+		Options{
+			Harness:  "claude",
+			Activity: "idle",
+			CWD:      explicitRepo,
+			CWDAuto:  true,
+			RawStdin: true,
+		},
+		Runtime{DefaultObservedAt: time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := automatic.Observation.Listing().ProjectRoot; got != payloadRepo {
+		t.Fatalf("auto CWD ProjectRoot = %q, want payload repo %q", got, payloadRepo)
 	}
 }

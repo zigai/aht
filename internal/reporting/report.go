@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -140,7 +139,13 @@ func Prepare(
 		return Result{}, fmt.Errorf("derive payload defaults: %w", err)
 	}
 
-	opts.ProjectRoot = resolveReportProjectRoot(harnessID, opts.ProjectRoot, defaults, opts.CWD)
+	opts.ProjectRoot = resolveReportProjectRoot(
+		harnessID,
+		opts.ProjectRoot,
+		defaults,
+		opts.CWD,
+		opts.CWDAuto,
+	)
 	applyPayloadDefaults(&opts, attrs, defaults)
 
 	teardown, err := catalog.TeardownPayload(harnessID, opts.Event, defaultsPayload)
@@ -701,7 +706,12 @@ func applyPayloadDefaults(opts *Options, a map[string]string, d harness.PayloadD
 	}
 
 	applyCWDDefault(opts, d.CWD)
-	maps.Copy(a, d.Attributes)
+
+	for key, value := range d.Attributes {
+		if _, exists := a[key]; !exists {
+			a[key] = value
+		}
+	}
 }
 
 func applyReportRuntimeDefaults(opts *Options) {
@@ -723,6 +733,7 @@ func resolveReportProjectRoot(
 	projectRoot string,
 	payload harness.PayloadDefaults,
 	cwd string,
+	cwdAuto bool,
 ) string {
 	if projectRoot != "" {
 		return projectRoot
@@ -734,6 +745,10 @@ func resolveReportProjectRoot(
 
 	if payload.ProjectRoot != "" {
 		return payload.ProjectRoot
+	}
+
+	if !cwdAuto && cwd != "" {
+		return findProjectRoot(cwd)
 	}
 
 	if root := findProjectRoot(payload.CWD); root != "" {
