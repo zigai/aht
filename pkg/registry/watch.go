@@ -263,11 +263,29 @@ func addFileStoreWatchPaths(watcher *fsnotify.Watcher, directory string) error {
 		_ = watcher.Add(root)
 	}
 
-	if err := watcher.Add(directory); err != nil {
-		return fmt.Errorf("watching store directory: %w", err)
-	}
+	return addDirectoryWatch(watcher, directory)
+}
 
-	return nil
+// The kqueue backend lists a directory's entries when it adds the watch and
+// fails if one disappears during the listing. Listing again sees the change.
+func addDirectoryWatch(watcher *fsnotify.Watcher, directory string) error {
+	for {
+		err := watcher.Add(directory)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("watching store directory: %w", err)
+		}
+
+		if _, statErr := os.Stat(directory); statErr != nil {
+			return fmt.Errorf("watching store directory: %w", err)
+		}
+
+		// A failed listing leaves the directory registered without its entries.
+		_ = watcher.Remove(directory)
+	}
 }
 
 func (watch *fileStoreWatch) ensureDirectoryWatch() error {
@@ -284,11 +302,7 @@ func (watch *fileStoreWatch) ensureDirectoryWatch() error {
 		return fmt.Errorf("%w: %s", errWatchParentNotDirectory, watch.directory)
 	}
 
-	if err := watch.watcher.Add(watch.directory); err != nil {
-		return fmt.Errorf("watching store directory: %w", err)
-	}
-
-	return nil
+	return addDirectoryWatch(watch.watcher, watch.directory)
 }
 
 func fileStoreWatchTarget(path string) (string, string, error) {
