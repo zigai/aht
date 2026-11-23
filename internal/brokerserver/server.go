@@ -101,11 +101,11 @@ func (s *Server) Serve(ctx context.Context) error {
 		return errSocketPathEmpty
 	}
 
-	listener, err := listenLocal(ctx, s.socketPath)
+	listener, boundInfo, err := listenLocal(ctx, s.socketPath)
 	if err != nil {
 		return err
 	}
-	defer cleanupLocal(s.socketPath, listener)
+	defer cleanupLocal(s.socketPath, listener, boundInfo)
 
 	return s.serve(ctx, listener)
 }

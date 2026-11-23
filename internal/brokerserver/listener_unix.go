@@ -13,9 +13,9 @@ import (
 
 const staleSocketProbeTimeout = 100 * time.Millisecond
 
-func listenLocal(ctx context.Context, path string) (net.Listener, error) {
+func listenLocal(ctx context.Context, path string) (net.Listener, os.FileInfo, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("creating broker directory: %w", err)
+		return nil, nil, fmt.Errorf("creating broker directory: %w", err)
 	}
 
 	listener, err := new(net.ListenConfig).Listen(ctx, "unix", path)
@@ -27,11 +27,11 @@ func listenLocal(ctx context.Context, path string) (net.Listener, error) {
 
 		if dialErr == nil {
 			_ = connection.Close()
-			return nil, ErrAlreadyRunning
+			return nil, nil, ErrAlreadyRunning
 		}
 
 		if !errors.Is(dialErr, syscall.ECONNREFUSED) {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"%w: existing broker socket probe failed: %w",
 				ErrAlreadyRunning,
 				dialErr,
@@ -39,24 +39,36 @@ func listenLocal(ctx context.Context, path string) (net.Listener, error) {
 		}
 
 		if removeErr := removeStaleSocket(path); removeErr != nil {
-			return nil, removeErr
+			return nil, nil, removeErr
 		}
 
 		listener, err = new(net.ListenConfig).Listen(ctx, "unix", path)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("listening on broker socket %s: %w", path, err)
+		return nil, nil, fmt.Errorf("listening on broker socket %s: %w", path, err)
+	}
+
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(false)
 	}
 
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(path)
 
-		return nil, fmt.Errorf("setting broker socket permissions: %w", err)
+		return nil, nil, fmt.Errorf("setting broker socket permissions: %w", err)
 	}
 
-	return listener, nil
+	boundInfo, err := os.Lstat(path)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(path)
+
+		return nil, nil, fmt.Errorf("inspecting bound broker socket: %w", err)
+	}
+
+	return listener, boundInfo, nil
 }
 
 func removeStaleSocket(path string) error {
@@ -80,7 +92,15 @@ func removeStaleSocket(path string) error {
 	return nil
 }
 
-func cleanupLocal(path string, listener net.Listener) {
+func cleanupLocal(path string, listener net.Listener, boundInfo os.FileInfo) {
 	_ = listener.Close()
-	_ = os.Remove(path)
+
+	if boundInfo == nil {
+		return
+	}
+
+	current, err := os.Lstat(path)
+	if err == nil && os.SameFile(boundInfo, current) {
+		_ = os.Remove(path)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -91,5 +92,73 @@ func TestAcceptFailureStopsActiveSubscriptions(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("server returned with subscription connection still active")
+	}
+}
+
+func TestShutdownDoesNotRemoveReplacementSocket(t *testing.T) {
+	path := shortStatePath(t)
+	socketPath := broker.SocketPath(path)
+
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	server := New(Options{Store: store, SocketPath: socketPath})
+	done := make(chan error, 1)
+
+	go func() {
+		done <- server.Serve(ctx)
+	}()
+
+	client := broker.NewClient(socketPath)
+	deadline := time.Now().Add(2 * time.Second)
+
+	for {
+		if _, err := client.List(t.Context(), registry.Filter{}); err == nil {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatal("broker did not become ready")
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := os.Remove(socketPath); err != nil {
+		t.Fatal(err)
+	}
+
+	var listenConfig net.ListenConfig
+
+	replacement, err := listenConfig.Listen(t.Context(), "unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_ = replacement.Close()
+		_ = os.Remove(socketPath)
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not exit after cancellation")
+	}
+
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatalf("original broker shutdown removed replacement socket: %v", err)
 	}
 }

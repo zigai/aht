@@ -882,7 +882,7 @@ func TestListenerFullBacklogDoesNotDeleteLiveSocket(t *testing.T) {
 
 	defer func() { _ = conn.Close() }()
 
-	replacement, err := listenLocal(context.Background(), path)
+	replacement, _, err := listenLocal(context.Background(), path)
 	if replacement != nil {
 		defer func() { _ = replacement.Close() }()
 
