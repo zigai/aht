@@ -37,6 +37,9 @@ func clinePlan(
 				model.APIKey,
 				modelFlag,
 				model.Model,
+				// A prompt without an explicit mode runs in yolo mode since
+				// Cline 3.0.75, which demands a submit_and_exit tool call.
+				"--act",
 				"--auto-approve",
 				"true",
 				prompt,
