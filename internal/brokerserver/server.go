@@ -23,6 +23,8 @@ const (
 	scannerInitialBytes   = 4 << 10
 	handshakeTimeout      = 5 * time.Second
 	writeTimeout          = 2 * time.Second
+	busyWriteTimeout      = 250 * time.Millisecond
+	maxBusyRejections     = 16
 	heartbeatInterval     = 15 * time.Second
 )
 
@@ -36,9 +38,8 @@ var (
 	errRequestIDRequired   = errors.New("broker request id is required")
 	errUnknownMethod       = errors.New("unknown broker method")
 	errObservationRequired = errors.New("observe requires observation")
-	errBatchRequired       = errors.New("observe_batch requires observations")
 	errBatchTooLarge       = errors.New("observe_batch has too many observations")
-	errSessionIDRequired   = errors.New("get requires session_id")
+	errRequestTooLarge     = errors.New("broker request exceeds frame limit")
 	errPathNotSocket       = errors.New("broker path is not a socket")
 	errResponseTooLarge    = errors.New("broker response exceeds frame limit")
 )
@@ -132,6 +133,7 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 	}
 
 	semaphore := make(chan struct{}, s.maxConnections)
+	rejections := make(chan struct{}, maxBusyRejections)
 
 	for {
 		connection, acceptErr := listener.Accept()
@@ -157,14 +159,38 @@ func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 				s.handleConnection(ctx, connection)
 			})
 		default:
-			cleanup := cancelclose.OnCancel(ctx, connection)
-			_ = s.writeResponse(connection, errorResponse("", broker.CodeBusy, broker.ErrBusy))
-
-			cleanup()
+			s.rejectBusy(ctx, &connections, rejections, connection)
 		}
 	}
 
 	return nil
+}
+
+func (s *Server) rejectBusy(
+	ctx context.Context,
+	connections *sync.WaitGroup,
+	rejections chan struct{},
+	connection net.Conn,
+) {
+	select {
+	case rejections <- struct{}{}:
+	default:
+		// Rejections are saturated too, so the close is the only answer.
+		_ = connection.Close()
+
+		return
+	}
+
+	connections.Go(func() {
+		defer func() { <-rejections }()
+		defer cancelclose.OnCancel(ctx, connection)()
+
+		_ = writeResponseWithin(
+			connection,
+			errorResponse("", broker.CodeBusy, broker.ErrBusy),
+			min(s.writeTimeout, busyWriteTimeout),
+		)
+	})
 }
 
 func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
@@ -178,6 +204,17 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	scanner.Buffer(make([]byte, scannerInitialBytes), maxRequestBytes)
 
 	if !scanner.Scan() {
+		if errors.Is(scanner.Err(), bufio.ErrTooLong) {
+			_ = s.writeResponse(
+				connection,
+				errorResponse(
+					"",
+					broker.CodeInvalidRequest,
+					fmt.Errorf("%w: maximum %d bytes", errRequestTooLarge, maxRequestBytes),
+				),
+			)
+		}
+
 		return
 	}
 
@@ -233,18 +270,9 @@ func validateRequest(request broker.Request) error {
 		return errObservationRequired
 	}
 
-	if request.Method == broker.MethodObserveBatch {
-		if len(request.Observations) == 0 {
-			return errBatchRequired
-		}
-
-		if len(request.Observations) > maxBatchObservations {
-			return fmt.Errorf("%w: maximum %d", errBatchTooLarge, maxBatchObservations)
-		}
-	}
-
-	if request.Method == broker.MethodGet && request.SessionID == "" {
-		return errSessionIDRequired
+	if request.Method == broker.MethodObserveBatch &&
+		len(request.Observations) > maxBatchObservations {
+		return fmt.Errorf("%w: maximum %d", errBatchTooLarge, maxBatchObservations)
 	}
 
 	return nil
@@ -402,6 +430,14 @@ func operationErrorResponse(id string, err error) broker.Response {
 }
 
 func (s *Server) writeResponse(connection net.Conn, response broker.Response) error {
+	return writeResponseWithin(connection, response, s.writeTimeout)
+}
+
+func writeResponseWithin(
+	connection net.Conn,
+	response broker.Response,
+	timeout time.Duration,
+) error {
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return fmt.Errorf("encoding broker response: %w", err)
@@ -416,7 +452,7 @@ func (s *Server) writeResponse(connection net.Conn, response broker.Response) er
 		}
 	}
 
-	if err := connection.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
+	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return fmt.Errorf("setting broker write deadline: %w", err)
 	}
 

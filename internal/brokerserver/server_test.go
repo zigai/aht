@@ -971,3 +971,102 @@ func TestServerFreesClosedSubscriberSlot(t *testing.T) {
 		<-ticker.C
 	}
 }
+
+func TestServerMatchesStoreForEmptyRequests(t *testing.T) {
+	fixture := startBrokerAdversityFixture(t)
+	defer stopBrokerAdversityFixture(t, fixture)
+
+	client := broker.NewClient(broker.SocketPath(fixture.path))
+
+	sessions, err := client.ObserveBatch(t.Context(), nil)
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("empty ObserveBatch = %v, %v; want no sessions and no error", sessions, err)
+	}
+
+	if _, err := client.Get(t.Context(), ""); !errors.Is(err, registry.ErrSessionNotFound) {
+		t.Fatalf("Get with empty id error = %v, want %v", err, registry.ErrSessionNotFound)
+	}
+}
+
+func TestServerRejectsOversizedRequest(t *testing.T) {
+	fixture := startBrokerAdversityFixture(t)
+	defer stopBrokerAdversityFixture(t, fixture)
+
+	connection := dialRawBroker(t, fixture.path)
+	defer func() { _ = connection.Close() }()
+
+	if err := connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The server stops reading at the limit, so the rest of the write fails.
+	go func() { _, _ = connection.Write(make([]byte, maxRequestBytes+1)) }()
+
+	var response broker.Response
+	if err := json.NewDecoder(connection).Decode(&response); err != nil {
+		t.Fatalf("decode broker response: %v", err)
+	}
+
+	if response.Error == nil || response.Error.Code != broker.CodeInvalidRequest ||
+		!strings.Contains(response.Error.Message, "exceeds frame limit") {
+		t.Fatalf("response = %#v, want invalid_request for an oversized frame", response)
+	}
+}
+
+func TestServerBusyRejectionDoesNotBlockAccept(t *testing.T) {
+	path := shortStatePath(t)
+
+	store, err := registry.OpenMemoryStore(path, catalog.Rules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = store.Close() }()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	listener := newTestPipeListener()
+	server := New(
+		Options{Store: store, SocketPath: path, MaxConnections: 1, WriteTimeout: time.Minute},
+	)
+	done := make(chan error, 1)
+
+	go func() { done <- server.serve(ctx, listener) }()
+
+	defer func() {
+		cancel()
+
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+
+	// The first connection holds the only slot while it waits for a request.
+	held, heldServer := net.Pipe()
+	defer func() { _ = held.Close() }()
+
+	listener.push(heldServer)
+
+	// The second is rejected but never reads, so its busy reply cannot finish.
+	stalled, stalledServer := net.Pipe()
+	defer func() { _ = stalled.Close() }()
+
+	listener.push(stalledServer)
+
+	rejected, rejectedServer := net.Pipe()
+	defer func() { _ = rejected.Close() }()
+
+	listener.push(rejectedServer)
+
+	if err := rejected.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	var response broker.Response
+	if err := json.NewDecoder(rejected).Decode(&response); err != nil {
+		t.Fatalf("busy reply behind a stalled client: %v", err)
+	}
+
+	if response.Error == nil || response.Error.Code != broker.CodeBusy {
+		t.Fatalf("response = %#v, want busy", response)
+	}
+}
