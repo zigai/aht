@@ -627,3 +627,83 @@ func TestJournalResetRecoversUnreadableJournal(t *testing.T) {
 		})
 	}
 }
+
+func TestJournalReplayMatchesMemoryFoldForMixedAbsentAndNativeBatch(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.json")
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	process := retentionProcess(311)
+
+	memory, err := OpenMemoryStore(path, fixtureRules{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = memory.Close() })
+
+	memory.setNowForTest(func() time.Time { return base })
+
+	if _, err := memory.Observe(ctx, Observation{
+		Harness:  harnessPrimary,
+		At:       base,
+		Evidence: &Sighting{Process: process, Present: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := NativeLifecycleStart
+	idle := ActivityIdle
+
+	if _, err := memory.ObserveBatch(ctx, []Observation{
+		{
+			Harness:  harnessPrimary,
+			At:       base.Add(time.Second),
+			Evidence: &Sighting{Process: process, Present: false},
+		},
+		{
+			Harness: harnessPrimary,
+			At:      base.Add(2 * time.Second),
+			Subject: ObservationIdentity{SessionID: "late-start"},
+			Evidence: &Report{
+				Event:     "session_start",
+				Lifecycle: &start,
+				Activity:  &idle,
+				Process:   &process,
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	inMemory, err := memory.List(ctx, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := NewFileStore(path, fixtureRules{}).List(ctx, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(inMemory) != len(replayed) {
+		t.Fatalf(
+			"replayed sessions = %d, want %d to match in-memory fold",
+			len(replayed),
+			len(inMemory),
+		)
+	}
+
+	for index := range inMemory {
+		if inMemory[index].ID != replayed[index].ID ||
+			inMemory[index].Presence() != replayed[index].Presence() {
+			t.Fatalf(
+				"replayed session[%d] = %+v, want %+v",
+				index,
+				replayed[index],
+				inMemory[index],
+			)
+		}
+	}
+}

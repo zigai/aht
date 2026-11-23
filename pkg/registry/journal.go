@@ -602,6 +602,8 @@ func (r Reducer) replayObservations(
 		candidate = next
 	}
 
+	removeGoneProcessOnlySessions(&candidate)
+
 	return candidate, rejected, nil
 }
 
@@ -612,10 +614,13 @@ func (r Reducer) replayObservation(
 	observation Observation,
 ) (snapshot, []error, error) {
 	next := cloneRegistrySnapshotForMutation(candidate)
-	single := entry
 
-	single.Observations = []Observation{observation}
-	if _, err := r.applyJournalEntry(ctx, &next, single); err != nil {
+	if _, _, err := r.applyObservationBatch(
+		ctx,
+		&next,
+		[]Observation{observation},
+		entry.ReceivedAt,
+	); err != nil {
 		if errors.Is(err, ErrObservationConflict) || errors.Is(err, ErrInvalidObservation) ||
 			errors.Is(err, ErrUnknownHarness) {
 			return candidate, []error{err}, nil
@@ -624,6 +629,7 @@ func (r Reducer) replayObservation(
 		return snapshot{}, nil, err
 	}
 
+	next.JournalSequence = entry.Sequence
 	dropped := next.dropped
 	next.dropped = nil
 
