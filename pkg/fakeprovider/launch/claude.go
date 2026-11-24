@@ -23,6 +23,11 @@ func claudePlan(
 				Role:   "system",
 				Prefix: "You are naming a coding session so the user can pick it out of a long list of sessions.",
 			},
+			{
+				Role:     "user",
+				Prefix:   "<session>",
+				Contains: "Write the title in the predominant language",
+			},
 		},
 		Executable: "claude",
 		Protocol:   ProtocolAnthropicMessages,

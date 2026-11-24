@@ -14,7 +14,7 @@ import (
 const (
 	claudeCommand           = "claude"
 	claudeIntegrationSource = "claude-hook"
-	integrationVersion      = 16
+	integrationVersion      = 17
 )
 
 type claudeHarness struct{ harness.BaseAdapter }
@@ -30,9 +30,10 @@ func New() claudeHarness {
 			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
 			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
 		},
-		ScreenManifest:   screenManifest,
-		PayloadOmissions: []string{"tool_input", "tool_response"},
-		ExclusiveProcess: true, CatalogCreates: true,
+		ScreenManifest:       screenManifest,
+		PayloadOmissions:     []string{"tool_input", "tool_response"},
+		ExclusiveProcess:     true,
+		CatalogCreates:       true,
 		RetainNativeActivity: true,
 		ID:                   registry.Harness("claude"),
 		Aliases:              []string{"claude-code", "claude_code"},
@@ -150,6 +151,11 @@ func (claudeHarness) PayloadDefaults(payload map[string]any) (harness.PayloadDef
 		attributes,
 		"claude_session_end_reason",
 		harness.PayloadString(payload, "reason"),
+	)
+	harness.AddAttributeString(
+		attributes,
+		"claude_tool_name",
+		harness.PayloadString(payload, "tool_name"),
 	)
 
 	return harness.PayloadDefaults{

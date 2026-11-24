@@ -30,7 +30,17 @@ state = "idle"
 priority = 100
 region = "bottom:12"
 all = ["❯"]
-any = ["? for shortcuts", "Claude Code", "shift+tab to cycle"]
+any = [
+    "? for shortcuts",
+    "Claude Code",
+    "shift+tab to cycle",
+    "manual mode on",
+    "auto mode on",
+    "accept edits on",
+    "plan mode on",
+    "bypass permissions on",
+    "don't ask on",
+]
 none = ["esc to interrupt"]
 
 [[rules]]

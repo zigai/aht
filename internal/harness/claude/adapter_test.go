@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zigai/aht/v2/internal/agentstate"
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/claude"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -42,6 +44,20 @@ func TestPayloadDefaults(t *testing.T) {
 			wantEvent:  "SessionStart",
 			wantAttr:   "claude_model",
 			wantAttrKV: "claude-sonnet-4-6",
+		},
+		{
+			name:    "claude permission request tool name",
+			harness: registry.Harness("claude"),
+			payload: `{"session_id":"claude-session","transcript_path":"/tmp/` +
+				`claude.jsonl","cwd":"/tmp","hook_event_name":"PermissionRequest",` +
+				`"tool_name":"AskUserQuestion"}`,
+			wantID:     "claude-session",
+			wantPath:   "/tmp/claude.jsonl",
+			wantCWD:    "/tmp",
+			wantRoot:   "",
+			wantEvent:  "PermissionRequest",
+			wantAttr:   "claude_tool_name",
+			wantAttrKV: "AskUserQuestion",
 		},
 	}
 
@@ -200,6 +216,20 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 		want       *registry.ActivityDetail
 	}{
 		{"claude", "PermissionRequest", registry.ActivityWaiting, nil, new(registry.ActivityDetailPermission)},
+		{
+			"claude",
+			"PermissionRequest",
+			registry.ActivityWaiting,
+			map[string]string{"claude_tool_name": "Bash"},
+			new(registry.ActivityDetailPermission),
+		},
+		{
+			"claude",
+			"PermissionRequest",
+			registry.ActivityWaiting,
+			map[string]string{"claude_tool_name": "AskUserQuestion"},
+			new(registry.ActivityDetailQuestion),
+		},
 		{"claude", "Elicitation", registry.ActivityWaiting, nil, new(registry.ActivityDetailQuestion)},
 		{
 			"claude",
@@ -211,6 +241,24 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 			new(
 				registry.ActivityDetailPermission,
 			),
+		},
+		{
+			"claude",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"claude_notification_type": "elicitation_dialog",
+			},
+			new(registry.ActivityDetailQuestion),
+		},
+		{
+			"claude",
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{
+				"claude_notification_type": "elicitation_url_dialog",
+			},
+			new(registry.ActivityDetailQuestion),
 		},
 		{
 			"claude",
@@ -266,6 +314,146 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 			)
 			if !reflect.DeepEqual(observation.Report().Detail, test.want) {
 				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
+			}
+		})
+	}
+}
+
+func TestPluginHooksReportPermissionDeniedRunningAndMatchElicitations(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+
+	plan, err := claude.New().InstallPlan("/usr/local/bin/aht")
+	if err != nil {
+		t.Fatalf("InstallPlan: %v", err)
+	}
+
+	var moduleSource string
+
+	for _, action := range plan.Actions {
+		pluginAction, ok := action.(harness.PluginDirectoryAction)
+		if !ok {
+			continue
+		}
+
+		for _, file := range pluginAction.Plan.Files {
+			if strings.HasSuffix(file.Name, "/hooks/register.ts") {
+				moduleSource = file.Content
+			}
+		}
+	}
+
+	if moduleSource == "" {
+		t.Fatal("rendered plugin module missing from install plan")
+	}
+
+	var commands []struct {
+		Event   string   `json:"event"`
+		Matcher string   `json:"matcher"`
+		Args    []string `json:"args"`
+	}
+
+	for line := range strings.Lines(moduleSource) {
+		encoded, ok := strings.CutPrefix(strings.TrimSpace(line), "const commands: Command[] = ")
+		if !ok {
+			continue
+		}
+
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(encoded, ";")), &commands); err != nil {
+			t.Fatalf("decode commands: %v", err)
+		}
+
+		break
+	}
+
+	if len(commands) == 0 {
+		t.Fatal("no commands encoded in rendered plugin module")
+	}
+
+	foundDenied := false
+	foundNotification := false
+
+	for _, command := range commands {
+		switch command.Event {
+		case "PermissionDenied":
+			foundDenied = true
+
+			if !slices.Contains(command.Args, "running") {
+				t.Fatalf("PermissionDenied args = %v, want running activity", command.Args)
+			}
+		case "Notification":
+			foundNotification = true
+
+			wantMatcher := "permission_prompt|elicitation_dialog|elicitation_url_dialog"
+			if command.Matcher != wantMatcher {
+				t.Fatalf("Notification matcher = %q, want %q", command.Matcher, wantMatcher)
+			}
+
+			if !slices.Contains(command.Args, "waiting") {
+				t.Fatalf("Notification args = %v, want waiting activity", command.Args)
+			}
+		}
+	}
+
+	if !foundDenied {
+		t.Fatal("PermissionDenied hook missing from plugin commands")
+	}
+
+	if !foundNotification {
+		t.Fatal("Notification hook missing from plugin commands")
+	}
+}
+
+func TestScreenManifestClassifiesStockModeFooters(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := (agentstate.Loader{ConfigDir: t.TempDir()}).Load(registry.Harness("claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		screen string
+		want   registry.Activity
+		rule   string
+	}{
+		{
+			name:   "post escape manual mode footer",
+			screen: "❯ \n⏸ manual mode on",
+			want:   registry.ActivityIdle,
+			rule:   "input_prompt",
+		},
+		{
+			name:   "auto mode footer",
+			screen: "❯ \n⏵ auto mode on",
+			want:   registry.ActivityIdle,
+			rule:   "input_prompt",
+		},
+		{
+			name:   "accept edits footer",
+			screen: "❯ \n⏵ accept edits on",
+			want:   registry.ActivityIdle,
+			rule:   "input_prompt",
+		},
+		{
+			name:   "plan mode footer",
+			screen: "❯ \n⏸ plan mode on",
+			want:   registry.ActivityIdle,
+			rule:   "input_prompt",
+		},
+		{
+			name:   "running with manual mode footer still running",
+			screen: "Thinking… esc to interrupt\n❯ \n⏸ manual mode on",
+			want:   registry.ActivityRunning,
+			rule:   "working_interruptible",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			decision := manifest.Evaluate(agentstate.NormalizeSnapshot(test.screen, "claude"))
+			if decision.Activity != test.want || decision.RuleID != test.rule {
+				t.Fatalf("decision = %#v, want %s (%s)", decision, test.want, test.rule)
 			}
 		})
 	}

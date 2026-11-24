@@ -242,6 +242,21 @@ func TestClaudePluginReportsMainSessionActivity(t *testing.T) {
 	requireManualPostCompactIdle(t, hooks, "manual")
 	requireOnlyManualPreCompactRunning(t, hooks)
 
+	if !slices.ContainsFunc(commands, func(command claudeModuleCommand) bool {
+		return command.Event == "PermissionDenied" &&
+			slices.Contains(command.Args, "running") &&
+			!slices.Contains(command.Args, "idle")
+	}) {
+		t.Fatalf("PermissionDenied does not report running: %#v", commands)
+	}
+
+	if !slices.ContainsFunc(commands, func(command claudeModuleCommand) bool {
+		return command.Event == "Notification" &&
+			command.Matcher == "permission_prompt|elicitation_dialog|elicitation_url_dialog"
+	}) {
+		t.Fatalf("Notification matcher does not cover elicitation dialogs: %#v", commands)
+	}
+
 	for _, command := range commands {
 		report := len(command.Args) > 0 && command.Args[0] == "report"
 		if report && !slices.Contains(command.Args, "--raw-stdin") {

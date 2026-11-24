@@ -41,10 +41,12 @@ var reportHooks = []harness.CommandHook{
 	{Event: "PermissionRequest", Transition: harness.HookActivityWaiting},
 	{Event: "Elicitation", Transition: harness.HookActivityWaiting},
 	{Event: "ElicitationResult", Transition: harness.HookActivityRunning},
-	{Event: "PermissionDenied", Transition: harness.HookActivityIdle},
+	// Auto mode and hook denials fire mid-turn while the model continues
+	// handling the denial until Stop.
+	{Event: "PermissionDenied", Transition: harness.HookActivityRunning},
 	{
 		Event:      "Notification",
-		Matcher:    "permission_prompt",
+		Matcher:    "permission_prompt|elicitation_dialog|elicitation_url_dialog",
 		Transition: harness.HookActivityWaiting,
 	},
 	// SubagentStart and SubagentStop describe child agents, including

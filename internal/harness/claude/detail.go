@@ -16,13 +16,13 @@ func (claudeHarness) ActivityDetail(
 		}
 	}
 
-	return hookActivityDetail(event, activity, attributes["claude_notification_type"])
+	return hookActivityDetail(event, activity, attributes)
 }
 
 func hookActivityDetail(
 	event string,
 	activity registry.Activity,
-	notification string,
+	attributes map[string]string,
 ) *registry.ActivityDetail {
 	if activity != registry.ActivityWaiting {
 		return nil
@@ -30,11 +30,15 @@ func hookActivityDetail(
 
 	switch event {
 	case "PermissionRequest":
+		if attributes["claude_tool_name"] == "AskUserQuestion" {
+			return new(registry.ActivityDetailQuestion)
+		}
+
 		return new(registry.ActivityDetailPermission)
 	case "Elicitation":
 		return new(registry.ActivityDetailQuestion)
 	case "Notification":
-		switch notification {
+		switch attributes["claude_notification_type"] {
 		case "permission_prompt":
 			return new(registry.ActivityDetailPermission)
 		case "elicitation_dialog", "elicitation_url_dialog":
