@@ -25,6 +25,10 @@ func structuredSchema(value map[string]any) (map[string]any, bool) {
 		return object(object(format["json_schema"])["schema"]), true
 	}
 
+	if schema := object(object(value["generationConfig"])["responseJsonSchema"]); schema != nil {
+		return schema, true
+	}
+
 	return nil, false
 }
 

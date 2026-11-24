@@ -19,6 +19,9 @@ func protocolOf(path string) (Protocol, bool) {
 	switch {
 	case strings.HasSuffix(path, "/messages"):
 		return ProtocolAnthropicMessages, true
+	case strings.HasSuffix(path, ":generateContent"),
+		strings.HasSuffix(path, ":streamGenerateContent"):
+		return ProtocolGemini, true
 	case strings.HasSuffix(path, "/chat/completions"):
 		return ProtocolOpenAIChat, true
 	case strings.HasSuffix(path, "/responses"):
@@ -54,8 +57,8 @@ func newRequest(
 		Protocol:    protocol,
 		Method:      method,
 		Path:        path,
-		Model:       stringOf(value["model"]),
-		Stream:      value["stream"] == true,
+		Model:       modelOf(protocol, path, value),
+		Stream:      isStreaming(protocol, path, value),
 		Tools:       toolNames(value),
 		UserText:    userText(protocol, value),
 		ToolResults: toolResults(protocol, value),
@@ -66,10 +69,39 @@ func newRequest(
 	}
 }
 
+func modelOf(protocol Protocol, path string, value map[string]any) string {
+	if model := stringOf(value["model"]); model != "" {
+		return model
+	}
+
+	if protocol != ProtocolGemini {
+		return ""
+	}
+
+	_, after, ok := strings.Cut(path, "/models/")
+	if !ok {
+		return ""
+	}
+
+	model, _, _ := strings.Cut(after, ":")
+
+	return model
+}
+
+func isStreaming(protocol Protocol, path string, value map[string]any) bool {
+	if protocol == ProtocolGemini {
+		return strings.HasSuffix(path, ":streamGenerateContent")
+	}
+
+	return value["stream"] == true
+}
+
 func messagesOf(protocol Protocol, value map[string]any) []map[string]any {
 	switch protocol {
 	case ProtocolAnthropicMessages, ProtocolOpenAIChat:
 		return objects(value["messages"])
+	case ProtocolGemini:
+		return objects(value["contents"])
 	case ProtocolOpenAIResponses:
 		var items []map[string]any
 		if text, isString := value["input"].(string); isString {
@@ -87,17 +119,35 @@ func messagesOf(protocol Protocol, value map[string]any) []map[string]any {
 func userText(protocol Protocol, value map[string]any) string {
 	messages := messagesOf(protocol, value)
 	for _, message := range slices.Backward(messages) {
-		if message["role"] != "user" || hasToolResultPart(message) {
+		if message["role"] != "user" || hasToolResultPart(protocol, message) {
 			continue
 		}
 
-		return contentText(message["content"])
+		return contentText(messageContent(protocol, message))
 	}
 
 	return ""
 }
 
-func hasToolResultPart(message map[string]any) bool {
+func messageContent(protocol Protocol, message map[string]any) any {
+	if protocol == ProtocolGemini {
+		return message["parts"]
+	}
+
+	return message["content"]
+}
+
+func hasToolResultPart(protocol Protocol, message map[string]any) bool {
+	if protocol == ProtocolGemini {
+		for _, part := range objects(message["parts"]) {
+			if object(part["functionResponse"]) != nil {
+				return true
+			}
+		}
+
+		return false
+	}
+
 	for _, part := range objects(message["content"]) {
 		if part[typeKey] == "tool_result" {
 			return true
@@ -153,6 +203,8 @@ func toolResultsIn(protocol Protocol, message map[string]any) []ToolResult {
 		}
 
 		return results
+	case ProtocolGemini:
+		return geminiToolResults(message)
 	case ProtocolOpenAIChat:
 		return chatToolResults(message)
 	case ProtocolOpenAIResponses:
@@ -166,6 +218,28 @@ func toolResultsIn(protocol Protocol, message map[string]any) []ToolResult {
 	}
 
 	return nil
+}
+
+func geminiToolResults(message map[string]any) []ToolResult {
+	parts := objects(message["parts"])
+
+	results := make([]ToolResult, 0, len(parts))
+	for _, part := range parts {
+		response := object(part["functionResponse"])
+		if response == nil {
+			continue
+		}
+
+		results = append(
+			results,
+			ToolResult{
+				CallID: stringOf(response["id"]),
+				Output: leafText(response["response"]),
+			},
+		)
+	}
+
+	return results
 }
 
 func toolCallIDs(protocol Protocol, value map[string]any) []string {
@@ -184,6 +258,20 @@ func toolCallIDs(protocol Protocol, value map[string]any) []string {
 			if part[typeKey] == "tool_use" {
 				ids = append(ids, stringOf(part["id"]))
 			}
+		}
+
+		ids = append(ids, geminiCallIDs(message)...)
+	}
+
+	return ids
+}
+
+func geminiCallIDs(message map[string]any) []string {
+	var ids []string
+
+	for _, part := range objects(message["parts"]) {
+		if id := stringOf(object(part["functionCall"])["id"]); id != "" {
+			ids = append(ids, id)
 		}
 	}
 
@@ -237,6 +325,12 @@ func toolNames(value map[string]any) []string {
 
 		if name := stringOf(object(tool["function"])["name"]); name != "" {
 			names = append(names, name)
+		}
+
+		for _, decl := range objects(tool["functionDeclarations"]) {
+			if name := stringOf(decl["name"]); name != "" {
+				names = append(names, name)
+			}
 		}
 	}
 

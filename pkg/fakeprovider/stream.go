@@ -163,6 +163,8 @@ func streamEvents(protocol Protocol, model string, reply Reply) ([]sseEvent, err
 	switch protocol {
 	case ProtocolAnthropicMessages:
 		anthropicStream(&out, model, reply, calls)
+	case ProtocolGemini:
+		geminiStream(&out, reply, calls)
 	case ProtocolOpenAIChat:
 		chatStream(&out, model, reply, calls)
 	case ProtocolOpenAIResponses:
@@ -350,6 +352,11 @@ func responsesStream(out *eventWriter, model string, reply Reply, calls []callJS
 		},
 		false,
 	)
+}
+
+func geminiStream(out *eventWriter, reply Reply, calls []callJSON) {
+	out.add("", newGeminiResponse(geminiParts(reply, calls), "", nil), true)
+	out.add("", newGeminiResponse([]any{}, "STOP", defaultGeminiUsage()), false)
 }
 
 func writeEvent(w io.Writer, event sseEvent) bool {

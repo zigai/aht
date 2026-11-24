@@ -7,6 +7,7 @@ import (
 
 const (
 	ProtocolAnthropicMessages Protocol = "anthropic-messages"
+	ProtocolGemini            Protocol = "gemini"
 	ProtocolOpenAIChat        Protocol = "openai-chat"
 	ProtocolOpenAIResponses   Protocol = "openai-responses"
 )

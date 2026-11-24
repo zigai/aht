@@ -5,6 +5,7 @@ import "github.com/zigai/aht/v2/pkg/registry"
 const modelFlag = "--model"
 
 var plans = map[registry.Harness]func(Paths, Model) (Plan, error){
+	registry.Harness("agy"):       agyPlan,
 	registry.Harness("claude"):    claudePlan,
 	registry.Harness("codex"):     codexPlan,
 	registry.Harness("cline"):     clinePlan,

@@ -59,6 +59,7 @@ func newSDKConversation(
 		return newChatConversation(server.URL(), prompt, tool)
 	case fakeprovider.ProtocolOpenAIResponses:
 		return newResponsesConversation(server.URL(), prompt, tool)
+	case fakeprovider.ProtocolGemini:
 	}
 
 	panic("unknown protocol " + protocol)
@@ -468,9 +469,15 @@ type sdkClientCase struct {
 	stream   bool
 }
 
+var sdkProtocols = []fakeprovider.Protocol{
+	fakeprovider.ProtocolAnthropicMessages,
+	fakeprovider.ProtocolOpenAIChat,
+	fakeprovider.ProtocolOpenAIResponses,
+}
+
 func sdkClientCases() []sdkClientCase {
-	cases := make([]sdkClientCase, 0, 2*len(protocols))
-	for _, protocol := range protocols {
+	cases := make([]sdkClientCase, 0, 2*len(sdkProtocols))
+	for _, protocol := range sdkProtocols {
 		cases = append(cases,
 			sdkClientCase{name: string(protocol) + "/complete", protocol: protocol, stream: false},
 			sdkClientCase{name: string(protocol) + "/stream", protocol: protocol, stream: true},
@@ -658,7 +665,7 @@ func TestSDKStreamsDeliverContentBeforeMidStreamHoldRelease(t *testing.T) {
 		return fakeprovider.Reply{Text: "held reply", HoldMidStream: true}, nil
 	})
 
-	for _, protocol := range protocols {
+	for _, protocol := range sdkProtocols {
 		t.Run(string(protocol), func(t *testing.T) {
 			server := startServer(t, fakeprovider.Options{Script: script})
 

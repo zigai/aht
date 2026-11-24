@@ -82,6 +82,94 @@ func TestChatStreamIsDataOnlyAndEndsWithDone(t *testing.T) {
 	}
 }
 
+func TestGeminiStreamIsDataOnlyAndSupportsMidStreamHold(t *testing.T) {
+	t.Run("complete stream", func(t *testing.T) {
+		server := startServer(t, fakeprovider.Options{})
+
+		status, stream := postJSON(
+			t,
+			server.URL()+"/v1beta/models/fake:streamGenerateContent?alt=sse",
+			`{"contents":[{"role":"user","parts":[{"text":"hi gemini"}]}]}`,
+		)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, stream)
+		}
+
+		if strings.Contains(stream, "event: ") || strings.Contains(stream, "[DONE]") {
+			t.Fatalf("gemini stream has unexpected markers:\n%s", stream)
+		}
+
+		if !strings.Contains(stream, `"text":"hi gemini"`) ||
+			!strings.Contains(stream, `"finishReason":"STOP"`) ||
+			!strings.Contains(stream, `"usageMetadata"`) {
+			t.Fatalf("gemini stream missing expected chunks:\n%s", stream)
+		}
+	})
+
+	t.Run("mid-stream hold", func(t *testing.T) {
+		script := fakeprovider.ScriptFunc(func(fakeprovider.Request) (fakeprovider.Reply, error) {
+			return fakeprovider.Reply{
+				Text:          "held gemini",
+				HoldMidStream: true,
+			}, nil
+		})
+		server := startServer(t, fakeprovider.Options{Script: script})
+
+		response := startStream(
+			t,
+			t.Context(),
+			server.URL()+"/v1beta/models/fake:streamGenerateContent?alt=sse",
+			`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
+		)
+		defer func() { _ = response.Body.Close() }()
+
+		scanner := bufio.NewScanner(response.Body)
+		if !scanLineContaining(scanner, `"text":"held gemini"`) {
+			t.Fatal("first content chunk was not delivered before hold")
+		}
+
+		hold := receiveHold(t, server)
+		if hold.Stage != fakeprovider.StageMidStream {
+			t.Fatalf("hold stage = %q, want mid-stream", hold.Stage)
+		}
+
+		hold.Release()
+
+		if !scanLineContaining(scanner, `"finishReason":"STOP"`) {
+			t.Fatal("final chunk was not delivered after release")
+		}
+
+		requests := closeAndRequests(t, server)
+		if len(requests) != 1 || requests[0].Outcome != fakeprovider.OutcomeCompleted {
+			t.Fatalf("requests = %+v, want one completed", requests)
+		}
+	})
+
+	t.Run("disconnect mid-stream", func(t *testing.T) {
+		script := fakeprovider.ScriptFunc(func(fakeprovider.Request) (fakeprovider.Reply, error) {
+			return fakeprovider.Reply{
+				Text:       "partial gemini",
+				Disconnect: true,
+			}, nil
+		})
+		server := startServer(t, fakeprovider.Options{Script: script})
+
+		_, data, err := send(
+			t.Context(),
+			http.MethodPost,
+			server.URL()+"/v1beta/models/fake:streamGenerateContent?alt=sse",
+			`{"contents":[]}`,
+		)
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("stream error = %v, want unexpected EOF", err)
+		}
+
+		if !strings.Contains(data, "partial gemini") || strings.Contains(data, "STOP") {
+			t.Fatalf("stream = %q, want first chunk without final STOP chunk", data)
+		}
+	})
+}
+
 func TestMultipleToolCallsEncodeInEveryShape(t *testing.T) {
 	calls := []fakeprovider.ToolCall{
 		{ID: "call_a", Name: toolName, Arguments: map[string]any{"q": "one"}},
@@ -116,7 +204,7 @@ func TestMultipleToolCallsEncodeInEveryShape(t *testing.T) {
 
 			_, stream := postJSON(
 				t,
-				server.URL()+pathFor(protocol),
+				server.URL()+streamPathFor(protocol),
 				firstRequestBody(protocol, true),
 			)
 			first := strings.Index(stream, "call_a")
@@ -137,6 +225,15 @@ func callIDs(t *testing.T, protocol fakeprovider.Protocol, body string) []string
 	t.Helper()
 
 	var value struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					FunctionCall *struct {
+						ID string `json:"id"`
+					} `json:"functionCall"` //nolint:tagliatelle // Gemini API wire field.
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
 		Content []struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
@@ -164,6 +261,14 @@ func callIDs(t *testing.T, protocol fakeprovider.Protocol, body string) []string
 		for _, block := range value.Content {
 			if block.Type == "tool_use" {
 				ids = append(ids, block.ID)
+			}
+		}
+	case fakeprovider.ProtocolGemini:
+		if len(value.Candidates) > 0 {
+			for _, part := range value.Candidates[0].Content.Parts {
+				if part.FunctionCall != nil {
+					ids = append(ids, part.FunctionCall.ID)
+				}
 			}
 		}
 	case fakeprovider.ProtocolOpenAIChat:

@@ -13,16 +13,22 @@ const toolName = "lookup"
 
 var protocols = []fakeprovider.Protocol{
 	fakeprovider.ProtocolAnthropicMessages,
+	fakeprovider.ProtocolGemini,
 	fakeprovider.ProtocolOpenAIChat,
 	fakeprovider.ProtocolOpenAIResponses,
 }
 
 func toolDeclaration(protocol fakeprovider.Protocol) string {
-	if protocol == fakeprovider.ProtocolOpenAIChat {
+	switch protocol {
+	case fakeprovider.ProtocolGemini:
+		return fmt.Sprintf(`{"functionDeclarations":[{"name":%q}]}`, toolName)
+	case fakeprovider.ProtocolOpenAIChat:
 		return fmt.Sprintf(`{"type":"function","function":{"name":%q}}`, toolName)
+	case fakeprovider.ProtocolAnthropicMessages, fakeprovider.ProtocolOpenAIResponses:
+		return fmt.Sprintf(`{"type":"function","name":%q}`, toolName)
 	}
 
-	return fmt.Sprintf(`{"type":"function","name":%q}`, toolName)
+	panic("unknown protocol " + string(protocol))
 }
 
 func toolResultBody(protocol fakeprovider.Protocol, callID string, result string) string {
@@ -31,6 +37,14 @@ func toolResultBody(protocol fakeprovider.Protocol, callID string, result string
 		return fmt.Sprintf(
 			`{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":%q}]}]}`,
 			callID,
+			result,
+		)
+	case fakeprovider.ProtocolGemini:
+		return fmt.Sprintf(
+			`{"contents":[{"role":"user","parts":[{"functionResponse":`+
+				`{"id":%q,"name":%q,"response":{"output":%q}}}]}]}`,
+			callID,
+			toolName,
 			result,
 		)
 	case fakeprovider.ProtocolOpenAIChat:
@@ -69,8 +83,13 @@ func TestEchoRepliesWithUserTextForEveryProtocol(t *testing.T) {
 			server := startServer(t, fakeprovider.Options{})
 
 			body := `{"messages":[{"role":"user","content":"echo-7"}]}`
-			if protocol == fakeprovider.ProtocolOpenAIResponses {
+
+			switch protocol {
+			case fakeprovider.ProtocolGemini:
+				body = `{"contents":[{"role":"user","parts":[{"text":"echo-7"}]}]}`
+			case fakeprovider.ProtocolOpenAIResponses:
 				body = `{"input":"echo-7"}`
+			case fakeprovider.ProtocolAnthropicMessages, fakeprovider.ProtocolOpenAIChat:
 			}
 
 			status, data := postJSON(t, server.URL()+pathFor(protocol), body)

@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"net/http"
 )
 
 const usageTotalTokens = 2
@@ -147,6 +148,56 @@ type errorDetail struct {
 	Message string `json:"message"`
 }
 
+//nolint:tagliatelle // Gemini API uses camelCase wire fields.
+type geminiResponse struct {
+	Candidates    []geminiCandidate    `json:"candidates"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+}
+
+//nolint:tagliatelle // Gemini API uses camelCase wire fields.
+type geminiCandidate struct {
+	Content      geminiContent `json:"content"`
+	FinishReason string        `json:"finishReason,omitempty"`
+	Index        int           `json:"index"`
+}
+
+type geminiContent struct {
+	Role  string `json:"role"`
+	Parts []any  `json:"parts"`
+}
+
+type geminiTextPart struct {
+	Text string `json:"text"`
+}
+
+//nolint:tagliatelle // Gemini API uses camelCase wire fields.
+type geminiFunctionCallPart struct {
+	FunctionCall geminiFunctionCall `json:"functionCall"`
+}
+
+type geminiFunctionCall struct {
+	ID   string         `json:"id,omitempty"`
+	Name string         `json:"name"`
+	Args jsontext.Value `json:"args"`
+}
+
+//nolint:tagliatelle // Gemini API uses camelCase wire fields.
+type geminiUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+}
+
+type geminiError struct {
+	Error geminiErrorDetail `json:"error"`
+}
+
+type geminiErrorDetail struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Status  string `json:"status"`
+}
+
 func encodeCalls(calls []ToolCall) ([]callJSON, error) {
 	encoded := make([]callJSON, 0, len(calls))
 	for _, call := range calls {
@@ -180,6 +231,8 @@ func completeBody(protocol Protocol, model string, reply Reply) ([]byte, error) 
 			anthropicContent(reply, calls),
 			new(anthropicStopReason(calls)),
 		)
+	case ProtocolGemini:
+		body = newGeminiResponse(geminiParts(reply, calls), "STOP", defaultGeminiUsage())
 	case ProtocolOpenAIChat:
 		body = newChatCompletion(model, reply, calls)
 	case ProtocolOpenAIResponses:
@@ -337,17 +390,35 @@ func newFunctionItem(call callJSON) functionItem {
 	}
 }
 
-func errorBody(protocol Protocol, message string) ([]byte, error) {
+func errorBody(protocol Protocol, status int, message string) ([]byte, error) {
 	var body any
 
 	switch protocol {
 	case ProtocolAnthropicMessages:
+		errType := "api_error"
+		if status == http.StatusBadRequest {
+			errType = "invalid_request_error"
+		}
+
 		body = anthropicError{
 			Type:  "error",
-			Error: errorDetail{Type: "api_error", Message: message},
+			Error: errorDetail{Type: errType, Message: message},
+		}
+	case ProtocolGemini:
+		body = geminiError{
+			Error: geminiErrorDetail{
+				Code:    status,
+				Message: message,
+				Status:  geminiErrorStatus(status),
+			},
 		}
 	case ProtocolOpenAIChat, ProtocolOpenAIResponses:
-		body = openAIError{Error: errorDetail{Type: "server_error", Message: message}}
+		errType := "server_error"
+		if status == http.StatusBadRequest {
+			errType = "invalid_request_error"
+		}
+
+		body = openAIError{Error: errorDetail{Type: errType, Message: message}}
 	}
 
 	data, err := json.Marshal(body)
@@ -356,4 +427,72 @@ func errorBody(protocol Protocol, message string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func newGeminiResponse(
+	parts []any,
+	finishReason string,
+	usage *geminiUsageMetadata,
+) geminiResponse {
+	return geminiResponse{
+		Candidates: []geminiCandidate{
+			{
+				Content:      geminiContent{Role: "model", Parts: parts},
+				FinishReason: finishReason,
+				Index:        0,
+			},
+		},
+		UsageMetadata: usage,
+	}
+}
+
+func geminiParts(reply Reply, calls []callJSON) []any {
+	parts := make([]any, 0, len(calls)+1)
+	if includesText(reply) {
+		parts = append(parts, geminiTextPart{Text: reply.Text})
+	}
+
+	for _, call := range calls {
+		parts = append(
+			parts,
+			geminiFunctionCallPart{
+				FunctionCall: geminiFunctionCall{
+					ID:   call.ID,
+					Name: call.Name,
+					Args: call.Arguments,
+				},
+			},
+		)
+	}
+
+	return parts
+}
+
+func defaultGeminiUsage() *geminiUsageMetadata {
+	return &geminiUsageMetadata{
+		PromptTokenCount:     1,
+		CandidatesTokenCount: 1,
+		TotalTokenCount:      usageTotalTokens,
+	}
+}
+
+func geminiErrorStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		return "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		return "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusTooManyRequests:
+		return "RESOURCE_EXHAUSTED"
+	case http.StatusServiceUnavailable:
+		return "UNAVAILABLE"
+	case http.StatusGatewayTimeout:
+		return "DEADLINE_EXCEEDED"
+	default:
+		return "INTERNAL"
+	}
 }

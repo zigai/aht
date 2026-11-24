@@ -71,6 +71,11 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string, hold bo
 
 	aht, nativeEvents := stageOracle(t, oracle)
 
+	discoveryEndpoint, discoveryEnv := discoveryEnvironment(t, contract)
+	if endpoint == "" {
+		endpoint = discoveryEndpoint
+	}
+
 	launched, err := launch.Open(t.Context(), launch.Options{
 		Harness:    contract.ID,
 		Root:       filepath.Join(t.TempDir(), "root"),
@@ -79,7 +84,7 @@ func newIsolatedHost(t *testing.T, contract hostContract, oracle string, hold bo
 		APIKey:     fakeAPIKey,
 		AHT:        aht,
 		Executable: contract.Executable,
-		Env:        discoveryEnvironment(t, contract),
+		Env:        discoveryEnv,
 	})
 	if err != nil {
 		t.Fatalf("launch %s: %v", contract.ID, err)

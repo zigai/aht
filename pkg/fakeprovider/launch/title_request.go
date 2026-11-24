@@ -17,11 +17,8 @@ type TitleRequest struct {
 func (plan Plan) TitleRequest(value map[string]any) bool {
 	for _, rule := range plan.TitleRequests {
 		if rule.Tool != "" {
-			for _, item := range requestObjects(value["tools"]) {
-				function, _ := item["function"].(map[string]any)
-				if item["name"] == rule.Tool || function["name"] == rule.Tool {
-					return true
-				}
+			if hasRequestTool(value, rule.Tool) {
+				return true
 			}
 
 			continue
@@ -39,12 +36,35 @@ func (plan Plan) TitleRequest(value map[string]any) bool {
 	return false
 }
 
+func hasRequestTool(value map[string]any, name string) bool {
+	for _, item := range requestObjects(value["tools"]) {
+		function, _ := item["function"].(map[string]any)
+		if item["name"] == name || function["name"] == name {
+			return true
+		}
+
+		for _, decl := range requestObjects(item["functionDeclarations"]) {
+			if decl["name"] == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func requestPrompts(value map[string]any, role string) []string {
 	var prompts []string
 
 	if role == "system" {
 		for _, field := range []string{"system", "instructions"} {
 			if text := requestText(value[field]); text != "" {
+				prompts = append(prompts, text)
+			}
+		}
+
+		if instruction, ok := value["systemInstruction"].(map[string]any); ok {
+			if text := requestText(instruction["parts"]); text != "" {
 				prompts = append(prompts, text)
 			}
 		}
@@ -57,15 +77,28 @@ func requestPrompts(value map[string]any, role string) []string {
 	}
 
 	for _, field := range []string{"messages", "input"} {
-		for _, item := range requestObjects(value[field]) {
-			if item["role"] == role {
-				text := requestText(item["content"])
-				if role == "user" {
-					prompts = []string{text}
-				} else {
-					prompts = append(prompts, text)
-				}
-			}
+		prompts = appendRolePrompts(prompts, requestObjects(value[field]), role, "content")
+	}
+
+	return appendRolePrompts(prompts, requestObjects(value["contents"]), role, "parts")
+}
+
+func appendRolePrompts(
+	prompts []string,
+	items []map[string]any,
+	role string,
+	contentKey string,
+) []string {
+	for _, item := range items {
+		if item["role"] != role {
+			continue
+		}
+
+		text := requestText(item[contentKey])
+		if role == "user" {
+			prompts = []string{text}
+		} else {
+			prompts = append(prompts, text)
 		}
 	}
 

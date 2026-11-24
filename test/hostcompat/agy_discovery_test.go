@@ -11,11 +11,11 @@ import (
 	"github.com/zigai/aht/v2/pkg/registry"
 )
 
-func discoveryEnvironment(t *testing.T, contract hostContract) []string {
+func discoveryEnvironment(t *testing.T, contract hostContract) (string, []string) {
 	t.Helper()
 
 	if contract.ID != registry.Harness("agy") {
-		return nil
+		return "", nil
 	}
 
 	provider := httptest.NewServer(
@@ -30,7 +30,10 @@ func discoveryEnvironment(t *testing.T, contract hostContract) []string {
 	)
 	t.Cleanup(provider.Close)
 
-	return []string{"GEMINI_API_KEY=aht-local-provider", "GOOGLE_GEMINI_BASE_URL=" + provider.URL}
+	return provider.URL, []string{
+		"GEMINI_API_KEY=aht-local-provider",
+		"GOOGLE_GEMINI_BASE_URL=" + provider.URL,
+	}
 }
 
 func prepareAgyHookInspection(t *testing.T, host *isolatedHost) {

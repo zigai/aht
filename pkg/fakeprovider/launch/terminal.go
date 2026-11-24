@@ -46,7 +46,26 @@ func (h *Harness) StartTerminal(
 		return nil, fmt.Errorf("resolve env: %w", err)
 	}
 
-	argv := append([]string{envPath, "-i"}, h.Env...)
+	paneEnv := make([]string, 0, len(h.Env))
+	for _, entry := range h.Env {
+		if strings.HasPrefix(entry, "TERM=") {
+			continue
+		}
+
+		paneEnv = append(paneEnv, entry)
+	}
+
+	argv := append(
+		[]string{
+			"/bin/sh",
+			"-c",
+			`env="$1"; shift; exec "$env" -i TERM="$TERM" TERM_PROGRAM="$TERM_PROGRAM" ` +
+				`TERM_PROGRAM_VERSION="$TERM_PROGRAM_VERSION" TMUX="$TMUX" TMUX_PANE="$TMUX_PANE" "$@"`,
+			"aht-terminal",
+			envPath,
+		},
+		paneEnv...,
+	)
 	argv = append(argv, h.Executable)
 	argv = append(argv, args...)
 

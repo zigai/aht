@@ -83,6 +83,8 @@ func pathFor(protocol fakeprovider.Protocol) string {
 	switch protocol {
 	case fakeprovider.ProtocolAnthropicMessages:
 		return "/v1/messages"
+	case fakeprovider.ProtocolGemini:
+		return "/v1beta/models/fake:generateContent"
 	case fakeprovider.ProtocolOpenAIChat:
 		return "/v1/chat/completions"
 	case fakeprovider.ProtocolOpenAIResponses:
@@ -92,10 +94,25 @@ func pathFor(protocol fakeprovider.Protocol) string {
 	panic("unknown protocol " + string(protocol))
 }
 
+func streamPathFor(protocol fakeprovider.Protocol) string {
+	if protocol == fakeprovider.ProtocolGemini {
+		return "/v1beta/models/fake:streamGenerateContent?alt=sse"
+	}
+
+	return pathFor(protocol)
+}
+
 func replyText(t *testing.T, protocol fakeprovider.Protocol, body string) string {
 	t.Helper()
 
 	var value struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
@@ -118,6 +135,10 @@ func replyText(t *testing.T, protocol fakeprovider.Protocol, body string) string
 	case fakeprovider.ProtocolAnthropicMessages:
 		if len(value.Content) > 0 {
 			return value.Content[0].Text
+		}
+	case fakeprovider.ProtocolGemini:
+		if len(value.Candidates) > 0 && len(value.Candidates[0].Content.Parts) > 0 {
+			return value.Candidates[0].Content.Parts[0].Text
 		}
 	case fakeprovider.ProtocolOpenAIChat:
 		if len(value.Choices) > 0 {
@@ -200,6 +221,13 @@ func TestProbesAreAnsweredWithoutRecording(t *testing.T) {
 			path:   "/v1/messages/count_tokens",
 			body:   `{}`,
 			want:   `"input_tokens":1`,
+		},
+		{
+			name:   "gemini count tokens",
+			method: http.MethodPost,
+			path:   "/v1beta/models/fake:countTokens",
+			body:   `{}`,
+			want:   `"totalTokens":1`,
 		},
 	}
 	for _, probe := range probes {
@@ -407,6 +435,14 @@ func TestStructuredSideReplies(t *testing.T) {
 				`"properties":{"name":{"type":"string"}}}}}}`,
 			want: `{"name":"Fake session"}`,
 		},
+		{
+			name:     "gemini structured output fills required string fields",
+			protocol: fakeprovider.ProtocolGemini,
+			body: `{"operation":"name","contents":[],"generationConfig":{"responseJsonSchema":` +
+				`{"type":"object","properties":{"title":{"type":"string"},` +
+				`"count":{"type":"integer"}},"required":["title","count"]}}}`,
+			want: `{"title":"Fake session"}`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -594,6 +630,7 @@ func TestReplyErrorIsProviderShapedAndNotAProviderFailure(t *testing.T) {
 
 	for _, protocol := range []fakeprovider.Protocol{
 		fakeprovider.ProtocolAnthropicMessages,
+		fakeprovider.ProtocolGemini,
 		fakeprovider.ProtocolOpenAIChat,
 		fakeprovider.ProtocolOpenAIResponses,
 	} {
@@ -611,6 +648,12 @@ func TestReplyErrorIsProviderShapedAndNotAProviderFailure(t *testing.T) {
 
 			if !strings.Contains(data, "slow down") {
 				t.Fatalf("body = %s, want the scripted message", data)
+			}
+
+			if protocol == fakeprovider.ProtocolGemini &&
+				(!strings.Contains(data, `"RESOURCE_EXHAUSTED"`) ||
+					!strings.Contains(data, `"code":429`)) {
+				t.Fatalf("gemini error body = %s, want code 429 and RESOURCE_EXHAUSTED", data)
 			}
 
 			if err := server.Err(); err != nil {

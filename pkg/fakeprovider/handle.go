@@ -62,32 +62,60 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveProbe(w http.ResponseWriter, r *http.Request) bool {
-	path := r.URL.Path
-	switch {
-	case r.Method == http.MethodHead, r.Method == http.MethodGet && path == "/":
+	if r.Method == http.MethodHead || (r.Method == http.MethodGet && r.URL.Path == "/") {
 		w.WriteHeader(http.StatusOK)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/models"):
-		s.answerJSON(
-			w,
-			map[string]any{
-				"object": "list",
-				"data":   []any{map[string]any{"id": s.model, "object": "model"}},
-			},
-		)
-	case r.Method == http.MethodGet && strings.Contains(path, "/models/"):
-		s.answerJSON(w, map[string]any{"id": s.model, "object": "model"})
-	case r.Method == http.MethodPost && path == "/api/show":
-		s.answerJSON(
-			w,
-			map[string]any{"model_info": map[string]any{}, "capabilities": []string{"tools"}},
-		)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/messages/count_tokens"):
-		s.answerJSON(w, map[string]any{"input_tokens": 1})
-	default:
+		return true
+	}
+
+	response, ok := s.probeResponse(r.Method, r.URL.Path)
+	if !ok {
 		return false
 	}
 
+	s.answerJSON(w, response)
+
 	return true
+}
+
+func (s *Server) probeResponse(method string, path string) (any, bool) {
+	switch method {
+	case http.MethodGet:
+		return s.getProbeResponse(path)
+	case http.MethodPost:
+		return s.postProbeResponse(path)
+	default:
+		return nil, false
+	}
+}
+
+func (s *Server) getProbeResponse(path string) (any, bool) {
+	switch {
+	case strings.HasSuffix(path, "/models"):
+		return map[string]any{
+			"object": "list",
+			"data":   []any{map[string]any{"id": s.model, "object": "model"}},
+		}, true
+	case strings.Contains(path, "/models/"):
+		return map[string]any{"id": s.model, "object": "model"}, true
+	default:
+		return nil, false
+	}
+}
+
+func (s *Server) postProbeResponse(path string) (any, bool) {
+	switch {
+	case path == "/api/show":
+		return map[string]any{
+			"model_info":   map[string]any{},
+			"capabilities": []string{"tools"},
+		}, true
+	case strings.HasSuffix(path, "/messages/count_tokens"):
+		return map[string]any{"input_tokens": 1}, true
+	case strings.HasSuffix(path, ":countTokens"):
+		return map[string]any{"totalTokens": 1}, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *Server) answerJSON(w http.ResponseWriter, value any) {
@@ -98,6 +126,7 @@ func (s *Server) answerJSON(w http.ResponseWriter, value any) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	//nolint:gosec // G705: probe responses are static JSON served as application/json, not HTML.
 	_, _ = w.Write(data)
 }
 
@@ -188,7 +217,7 @@ func (s *Server) writeReply(
 	holdMidStream func() bool,
 ) (Outcome, error) {
 	if reply.Error != nil {
-		body, err := errorBody(request.Protocol, reply.Error.Message)
+		body, err := errorBody(request.Protocol, reply.Error.Status, reply.Error.Message)
 		if err != nil {
 			return OutcomeRejected, err
 		}
