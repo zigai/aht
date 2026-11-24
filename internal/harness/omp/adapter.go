@@ -15,7 +15,7 @@ const (
 	ompIntegrationID       = "omp"
 	ompIntegrationSourceID = "omp-extension"
 	ompSessionFlag         = "--session"
-	integrationVersion     = 21
+	integrationVersion     = 22
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -39,10 +39,11 @@ func New() ompHarness {
 		Env: harness.EnvKeys{
 			Config: []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"},
 		},
-		ExclusiveProcess: true,
-		ID:               registry.Harness("omp"),
-		Aliases:          []string{"ohmypi", "oh-my-pi", "oh_my_pi"},
-		ProcessNames:     []string{"omp", "ohmypi", "oh-my-pi"},
+		ExclusiveProcess:     true,
+		RetainNativeActivity: true,
+		ID:                   registry.Harness("omp"),
+		Aliases:              []string{"ohmypi", "oh-my-pi", "oh_my_pi"},
+		ProcessNames:         []string{"omp", "ohmypi", "oh-my-pi"},
 		Capabilities: harness.Capabilities{
 			SessionStart:      true,
 			SessionEnd:        true,

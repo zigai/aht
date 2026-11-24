@@ -83,7 +83,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 		PID:           1001,
 		PPID:          1,
 		StartIdentity: "boot:1001",
-		Executable:    "omp",
+		Executable:    "opencode",
 		Foreground:    true,
 		TTY:           "/dev/pts/1",
 	}
@@ -91,7 +91,7 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 
 	session := registry.Session{
 		ID:      "s-fallback",
-		Harness: registry.Harness("omp"),
+		Harness: registry.Harness("opencode"),
 		Process: &process,
 		Location: registry.Location{
 			Kind:    registry.MultiplexerTmux,
@@ -100,11 +100,11 @@ func TestExplainFallbackToScreenAuthority(t *testing.T) {
 		},
 		Observations: registry.Observations{
 			Native: &registry.NativeObservation{
-				Event:      "agent_start",
+				Event:      "session.status",
 				Activity:   &running,
 				Process:    process,
 				ObservedAt: now.Add(-35 * time.Second), // Stale (exceeds 30s lease)
-				Reporter:   registry.Reporter{Integration: "omp-extension"},
+				Reporter:   registry.Reporter{Integration: "opencode-plugin"},
 			},
 		},
 		Liveness: registry.NewLiveness(

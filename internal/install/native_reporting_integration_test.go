@@ -373,18 +373,33 @@ func capturedReportSequence(t *testing.T, args []string) int64 {
 
 func TestOmpRetryAndContinuationRemainRunning(t *testing.T) {
 	for _, test := range []struct {
-		name  string
-		event string
+		name   string
+		events string
+		want   string
 	}{
-		{name: "retryable", event: `{"type":"agent_end","messages":[{"role":"assistant",` +
-			`"stopReason":"error","errorMessage":"503 service ` +
-			`unavailable"}]}`},
-		{name: "continuing", event: `{"type":"agent_end","willContinue":true,"messages":[]}`},
+		{
+			name: "retryable",
+			events: `[{"type":"auto_retry_start","attempt":1,"errorMessage":"503 service unavailable"},` +
+				`{"type":"agent_end","willContinue":true,"messages":[{"role":"assistant",` +
+				`"stopReason":"error","errorMessage":"503 service unavailable"}]}]`,
+			want: "running",
+		},
+		{
+			name:   "continuing",
+			events: `[{"type":"agent_end","willContinue":true,"messages":[]}]`,
+			want:   "running",
+		},
+		{
+			name: "exhausted_or_unretried",
+			events: `[{"type":"agent_end","messages":[{"role":"assistant",` +
+				`"stopReason":"error","errorMessage":"503 service unavailable"}]}]`,
+			want: "failed",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			capture := captureBinary(t)
 			t.Setenv("AHT_CAPTURE", capture.path)
-			t.Setenv("AHT_TEST_EVENT", test.event)
+			t.Setenv("AHT_TEST_EVENTS", test.events)
 			module := generatedArtifactContent(t, registry.Harness("omp"), "aht-state.ts")
 			runNodeRuntime(
 				t,
@@ -400,12 +415,24 @@ func TestOmpRetryAndContinuationRemainRunning(t *testing.T) {
 			}
 
 			invocations := parseCapturedInvocations(string(data))
-			if len(invocations) != 3 ||
+			if test.want == "running" {
+				if len(invocations) != 3 ||
+					!matchInvocation(
+						invocations[1],
+						[]string{"--activity", "running", "--session-id", "retry-session"},
+					) {
+					t.Fatalf("retry/continuation reported a terminal state: %v", invocations)
+				}
+
+				return
+			}
+
+			if len(invocations) < 4 ||
 				!matchInvocation(
-					invocations[1],
-					[]string{"--activity", "running", "--session-id", "retry-session"},
+					invocations[2],
+					[]string{"--activity", "failed", "--session-id", "retry-session"},
 				) {
-				t.Fatalf("retry/continuation reported a terminal state: %v", invocations)
+				t.Fatalf("unretried error did not report failed: %v", invocations)
 			}
 		})
 	}

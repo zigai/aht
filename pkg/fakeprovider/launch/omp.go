@@ -32,7 +32,13 @@ func ompPlan(
 	return Plan{
 		TitleRequests: []TitleRequest{
 			{Role: "system", Prefix: "You name coding-agent sessions."},
+			{Role: "system", Prefix: "You head coding-agent session titles with a small card."},
+			{
+				Role:     "system",
+				Contains: "Output only the title wrapped in `<title>` and `</title>` tags",
+			},
 			{Role: "user", Prefix: "<title-request>", Suffix: "</title-request>"},
+			{Role: "user", Prefix: "<composer-prediction>", Suffix: "</composer-prediction>"},
 		},
 		Executable: "omp",
 		Protocol:   ProtocolOpenAIChat,

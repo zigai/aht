@@ -227,7 +227,7 @@ func TestObserverTracksOmpScreenStateTransitions(t *testing.T) {
 func TestObserverRecordsUnknownWhenStaleIntegrationHasNoTmuxPane(t *testing.T) {
 	t.Parallel()
 	store := registry.NewJournal(filepath.Join(t.TempDir(), "state.json"), adapters.Rules{})
-	process, pane := detectionProcessPane(197, "omp")
+	process, pane := detectionProcessPane(197, "opencode")
 	identity := observerProcessIdentity(process)
 	presence := registry.PresenceLive
 	idle := registry.ActivityIdle
@@ -236,12 +236,12 @@ func TestObserverRecordsUnknownWhenStaleIntegrationHasNoTmuxPane(t *testing.T) {
 	_, err := store.Observe(
 		context.Background(),
 		registry.Observation{
-			Harness: registry.Harness("omp"),
+			Harness: registry.Harness("opencode"),
 			At:      now.Add(-registry.IntegrationActivityLease - time.Second),
-			Subject: registry.ObservationIdentity{SessionID: "stale-omp"},
+			Subject: registry.ObservationIdentity{SessionID: "stale-opencode"},
 			Evidence: &registry.Report{
-				Reporter: registry.Reporter{Integration: "omp-extension"},
-				Event:    "agent_end",
+				Reporter: registry.Reporter{Integration: "opencode-plugin"},
+				Event:    "session.idle",
 				Claim:    &presence,
 				Activity: &idle,
 				Process:  identity,

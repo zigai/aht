@@ -7,5 +7,7 @@ const ctx = {
 };
 hooks.get("session_start")({ type: "session_start" }, ctx);
 hooks.get("agent_start")({ type: "agent_start" }, ctx);
-hooks.get("agent_end")(JSON.parse(process.env.AHT_TEST_EVENT), ctx);
+for (const event of JSON.parse(process.env.AHT_TEST_EVENTS)) {
+  hooks.get(event.type)(event, ctx);
+}
 await hooks.get("session_shutdown")({ type: "session_shutdown" }, ctx);
