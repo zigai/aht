@@ -89,12 +89,12 @@ func (s *Session) resolveDetail(policy Policy, now time.Time) {
 		return
 	}
 
-	evidence, support := s.selectedDetail(policy, *activity, decision.Authority)
+	evidence, support, detailAuthority := s.selectedDetail(policy, *activity, decision.Authority)
 
 	detail := StateDetail{
 		Value:      "",
 		Quality:    DetailQualityMissing,
-		Authority:  decision.Authority,
+		Authority:  detailAuthority,
 		ObservedAt: time.Time{},
 	}
 	if !support.Supports(*activity) {
@@ -108,7 +108,7 @@ func (s *Session) resolveDetail(policy Policy, now time.Time) {
 	if evidence != nil && evidence.Value.ValidFor(*activity) {
 		detail.Value, detail.ObservedAt, detail.Quality = evidence.Value, evidence.ObservedAt, DetailQualityCurrent
 		// A terminal record is the program's standing state, so it does not age.
-		if decision.Authority != AuthorityTerminal &&
+		if detailAuthority != AuthorityTerminal &&
 			invalidHookTimeReason(evidence.ObservedAt, now) != "" {
 			detail.Quality = DetailQualityStale
 		}
@@ -121,31 +121,64 @@ func (s Session) selectedDetail(
 	policy Policy,
 	activity Activity,
 	authority Authority,
-) (*DetailEvidence, DetailSupport) {
+) (*DetailEvidence, DetailSupport, Authority) {
 	switch authority {
 	case AuthorityHook:
-		return s.matchingNativeDetail(policy), policy.Details.Native
-	case AuthorityScreen, AuthorityTerminal:
-		support := policy.Details.Screen
-		if authority == AuthorityTerminal {
-			support = DetailSupport{Permission: true, Question: true, UsageLimit: false}
-		}
-
-		screen := s.Observations.Screen
-		if screen != nil && screen.Process.Equal(*s.Process) && screen.Activity == activity &&
-			screen.Detail != "" {
-			return &DetailEvidence{
-				Value:      screen.Detail,
-				ObservedAt: screen.ObservedAt,
-			}, support
-		}
-
-		return nil, support
+		return s.matchingNativeDetail(policy), policy.Details.Native, AuthorityHook
+	case AuthorityScreen:
+		return s.matchingScreenDetail(activity), policy.Details.Screen, AuthorityScreen
+	case AuthorityTerminal:
+		return s.terminalDetail(policy, activity)
 	case AuthorityProcess:
-		return nil, DetailSupport{}
+		return nil, DetailSupport{}, AuthorityProcess
 	}
 
-	return nil, DetailSupport{}
+	return nil, DetailSupport{}, authority
+}
+
+func (s Session) terminalDetail(
+	policy Policy,
+	activity Activity,
+) (*DetailEvidence, DetailSupport, Authority) {
+	support := DetailSupport{Permission: true, Question: true, UsageLimit: false}
+	screen := s.matchingScreenDetail(activity)
+
+	if activity == ActivityFailed && (screen == nil || screen.Value == ActivityDetailGeneral) {
+		if native := s.finerNativeFailureDetail(policy); native != nil {
+			return native, policy.Details.Native, AuthorityHook
+		}
+	}
+
+	return screen, support, AuthorityTerminal
+}
+
+func (s Session) matchingScreenDetail(activity Activity) *DetailEvidence {
+	screen := s.Observations.Screen
+	if screen == nil || !screen.Process.Equal(*s.Process) || screen.Activity != activity ||
+		screen.Detail == "" {
+		return nil
+	}
+
+	return &DetailEvidence{Value: screen.Detail, ObservedAt: screen.ObservedAt}
+}
+
+func (s Session) finerNativeFailureDetail(policy Policy) *DetailEvidence {
+	if policy.Reporter == "" {
+		return nil
+	}
+
+	native := s.Observations.Native
+	if native == nil || native.Activity == nil || *native.Activity != ActivityFailed {
+		return nil
+	}
+
+	evidence := s.matchingNativeDetail(policy)
+	if evidence == nil || evidence.Value == "" || evidence.Value == ActivityDetailGeneral ||
+		!evidence.Value.ValidFor(ActivityFailed) {
+		return nil
+	}
+
+	return evidence
 }
 
 func (s Session) matchingNativeDetail(policy Policy) *DetailEvidence {

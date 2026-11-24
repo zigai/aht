@@ -53,22 +53,16 @@ func programStatusReading(
 ) (registry.Observation, bool, bool) {
 	var unchanged registry.Observation
 
+	activity, detail, ok := trustedProgramStatus(session.Harness, pane)
+	if !ok {
+		observation, cleared := clearedProgramStatusReading(session, identity, at)
+		return observation, cleared, cleared
+	}
+
 	stored := session.Observations.Screen
 	if stored != nil &&
 		(stored.Authority != registry.AuthorityTerminal || !stored.Process.Equal(*identity)) {
 		stored = nil
-	}
-
-	activity, detail, ok := trustedProgramStatus(session.Harness, pane)
-	if !ok {
-		if stored == nil || stored.Activity == registry.ActivityUnknown {
-			return unchanged, false, false
-		}
-
-		return terminalReading(
-			session.Harness, identity, at,
-			registry.ActivityUnknown, "", programStatusClearedReason,
-		), true, true
 	}
 
 	// An unchanged record is not sent again, so a quiet session writes nothing.
@@ -80,6 +74,24 @@ func programStatusReading(
 	return terminalReading(
 		session.Harness, identity, at, activity, detail, programStatusReason,
 	), true, true
+}
+
+func clearedProgramStatusReading(
+	session registry.Session,
+	identity *registry.ProcessIdentity,
+	at time.Time,
+) (registry.Observation, bool) {
+	stored := session.Observations.Screen
+	if stored == nil || stored.Authority != registry.AuthorityTerminal ||
+		stored.Activity == registry.ActivityUnknown || !stored.Process.Equal(*identity) {
+		var unchanged registry.Observation
+		return unchanged, false
+	}
+
+	return terminalReading(
+		session.Harness, identity, at,
+		registry.ActivityUnknown, "", programStatusClearedReason,
+	), true
 }
 
 func trustedProgramStatus(

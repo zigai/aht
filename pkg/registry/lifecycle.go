@@ -425,8 +425,8 @@ func (m lifecycleMachine) reading(policy Policy, at time.Time) {
 	}
 
 	if screen.Authority == AuthorityTerminal && authority == AuthorityHook {
-		// A held turn outranks the record, so the hook's last report is the
-		// state again.
+		// A held turn or native interruption outranks a resting record, so the
+		// hook's last report is the state again.
 		if native, _, ok := matchingHookObservation(*m.session, policy); ok {
 			m.hookActivity(native.Event, at)
 		}

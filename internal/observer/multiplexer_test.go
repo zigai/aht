@@ -863,3 +863,208 @@ func TestCommandCWDFallbackRequiresUniquePane(t *testing.T) {
 		t.Fatal("ambiguous command/cwd fallback correlated a pane")
 	}
 }
+
+func TestObserverClearsProgramStatusWhenProcessLeavesPane(t *testing.T) {
+	t.Parallel()
+
+	for _, disableScreen := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disableScreen=%t", disableScreen), func(t *testing.T) {
+			t.Parallel()
+
+			store := registry.NewJournal(
+				filepath.Join(t.TempDir(), "sessions.json"),
+				adapters.Rules{},
+			)
+			process := programStatusProcess()
+			located := true
+			now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+			observer := New(Options{
+				Store:                   store,
+				DisableScreenInspection: disableScreen,
+				ProcessList: func(context.Context) ([]processinfo.Process, error) {
+					return []processinfo.Process{process}, nil
+				},
+				PaneList: func(context.Context) ([]mux.Pane, error) {
+					if !located {
+						return nil, nil
+					}
+
+					return []mux.Pane{
+						programStatusPane(
+							"/tmp/tmux.sock",
+							"/dev/pts/7",
+							42,
+							mux.ProgramStateWorking,
+						),
+					}, nil
+				},
+				ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+					return mux.ScreenSnapshot{}, nil
+				},
+				CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+				Now:         func() time.Time { return now },
+			})
+
+			cycle := func() registry.Session {
+				t.Helper()
+
+				now = now.Add(time.Second)
+
+				if _, err := observer.RunOnce(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+
+				sessions, err := store.List(t.Context(), registry.Filter{})
+				if err != nil || len(sessions) != 1 {
+					t.Fatalf("sessions = %#v, %v", sessions, err)
+				}
+
+				return sessions[0]
+			}
+
+			first := cycle()
+			if first.Activity() == nil || *first.Activity() != registry.ActivityRunning ||
+				first.Decision() == nil || first.Decision().Authority != registry.AuthorityTerminal {
+				t.Fatalf("located state = %v by %#v, want running by terminal",
+					first.Activity(), first.Decision())
+			}
+
+			located = false
+
+			unlocated := cycle()
+			if !unlocated.Location.Empty() {
+				t.Fatalf("location = %#v, want empty", unlocated.Location)
+			}
+
+			if unlocated.Observations.Screen == nil ||
+				unlocated.Observations.Screen.Authority != registry.AuthorityTerminal ||
+				unlocated.Observations.Screen.Activity != registry.ActivityUnknown ||
+				unlocated.Observations.Screen.Reason != programStatusClearedReason {
+				t.Fatalf(
+					"screen observation after leaving pane = %#v, want cleared terminal record",
+					unlocated.Observations.Screen,
+				)
+			}
+
+			if unlocated.Activity() == nil || *unlocated.Activity() != registry.ActivityUnknown {
+				t.Fatalf("unlocated activity = %v, want unknown", unlocated.Activity())
+			}
+
+			now = now.Add(time.Second)
+			idle, live := registry.ActivityIdle, registry.PresenceLive
+
+			afterHook, err := store.Observe(t.Context(), registry.Observation{
+				Harness: "claude",
+				At:      now,
+				Subject: registry.ObservationIdentity{SessionID: "unlocated-hook"},
+				Evidence: &registry.Report{
+					Reporter: registry.Reporter{
+						Integration: (adapters.Rules{}).Policy("claude").Reporter,
+					},
+					Event:    "Stop",
+					Claim:    &live,
+					Activity: &idle,
+					Process:  processIdentity(process),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if afterHook.Activity() == nil || *afterHook.Activity() != registry.ActivityIdle ||
+				afterHook.Decision() == nil || afterHook.Decision().Authority != registry.AuthorityHook {
+				t.Fatalf("after fresh hook = %v by %#v, want idle by hook",
+					afterHook.Activity(), afterHook.Decision())
+			}
+		})
+	}
+}
+
+func TestObserverPreservesInterruptedHookAcrossRestingProgramStatus(t *testing.T) {
+	t.Parallel()
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
+	process := programStatusProcess()
+	state := mux.ProgramStateWorking
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	observer := New(Options{
+		Store: store,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return []processinfo.Process{process}, nil
+		},
+		PaneList: func(context.Context) ([]mux.Pane, error) {
+			return []mux.Pane{
+				programStatusPane("/tmp/tmux.sock", "/dev/pts/7", 42, state),
+			}, nil
+		},
+		ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+			return mux.ScreenSnapshot{}, nil
+		},
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		Now:         func() time.Time { return now },
+	})
+
+	cycle := func() registry.Session {
+		t.Helper()
+
+		now = now.Add(time.Second)
+
+		if _, err := observer.RunOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		sessions, err := store.List(t.Context(), registry.Filter{})
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("sessions = %#v, %v", sessions, err)
+		}
+
+		return sessions[0]
+	}
+
+	cycle()
+
+	now = now.Add(time.Second)
+
+	interrupted, live := registry.ActivityInterrupted, registry.PresenceLive
+	if _, err := store.Observe(t.Context(), registry.Observation{
+		Harness: "claude",
+		At:      now,
+		Subject: registry.ObservationIdentity{SessionID: "interrupted-pane"},
+		Evidence: &registry.Report{
+			Reporter: registry.Reporter{
+				Integration: (adapters.Rules{}).Policy("claude").Reporter,
+			},
+			Event:    "Stop",
+			Claim:    &live,
+			Activity: &interrupted,
+			Process:  processIdentity(process),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	state = mux.ProgramStateIdle
+
+	firstIdle := cycle()
+	if firstIdle.Activity() == nil || *firstIdle.Activity() != registry.ActivityInterrupted ||
+		firstIdle.Decision() == nil || firstIdle.Decision().Authority != registry.AuthorityHook {
+		t.Fatalf("resting record over interrupted hook = %v by %#v, want interrupted by hook",
+			firstIdle.Activity(), firstIdle.Decision())
+	}
+
+	secondIdle := cycle()
+	if !secondIdle.Observations.Screen.ObservedAt.Equal(firstIdle.Observations.Screen.ObservedAt) {
+		t.Fatal("unchanged resting record under interrupted hook was written again")
+	}
+
+	state = mux.ProgramStateWorking
+
+	resumed := cycle()
+	if resumed.Activity() == nil || *resumed.Activity() != registry.ActivityRunning ||
+		resumed.Decision() == nil || resumed.Decision().Authority != registry.AuthorityTerminal {
+		t.Fatalf("working record after interruption = %v by %#v, want running by terminal",
+			resumed.Activity(), resumed.Decision())
+	}
+}

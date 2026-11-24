@@ -1106,3 +1106,217 @@ func TestIncarnationTransitionInvariants(t *testing.T) {
 		t.Fatalf("uncovered incarnation situations: %v", missing)
 	}
 }
+
+func TestTerminalAuthorityInterruptionAndDetailInvariants(t *testing.T) {
+	t.Parallel()
+
+	coverage := core.NewCoverage()
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	process := ProcessIdentity{PID: 950, StartIdentity: "boot:950", Executable: "agent"}
+
+	makeRules := func(retain bool) Rules {
+		policy := detailPolicy(AuthorityHook)
+		policy.RetainNativeActivity = retain
+		policy.ScreenFallback = true
+
+		return detailRules{policy: policy}
+	}
+
+	for _, situation := range []string{
+		"interrupted before resting terminal",
+		"resting terminal before interrupted",
+		"newer terminal transition supersedes interrupted",
+		"stale interrupted yields to resting terminal",
+		"retained interrupted holds resting terminal",
+		"terminal error preserves native usage limit",
+		"native usage limit enriches terminal error",
+	} {
+		t.Run(situation, func(t *testing.T) {
+			rules := makeRules(situation == "retained interrupted holds resting terminal")
+			reducer := NewReducer(rules)
+			state := State{Sessions: map[string]Session{}}
+
+			apply := func(at time.Time, evidence Evidence) Session {
+				t.Helper()
+
+				before := state
+				observation := Observation{
+					Harness:  harnessCatalog,
+					At:       at,
+					Subject:  ObservationIdentity{SessionID: "terminal-inv"},
+					Evidence: evidence,
+				}
+
+				var err error
+
+				state, _, err = reducer.Apply(state, []Observation{observation}, at)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if err := checkInvariantSessions(mapSessions(state.Sessions)); err != nil {
+					t.Fatal(err)
+				}
+
+				for id, prior := range before.Sessions {
+					if current, ok := state.Sessions[id]; ok {
+						projected := projectInvariantSessions([]Session{prior, current})
+						if err := core.Transition(projected[0], projected[1], core.Event{
+							Process:   core.ProcessKey(process.PID, process.StartIdentity),
+							Harness:   string(harnessCatalog),
+							SessionID: "terminal-inv",
+							At:        at,
+						}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+
+				session := mapSessions(state.Sessions)[0]
+
+				authority, _ := ActivityAuthority(session, rules.Policy(session.Harness), at)
+				if decision := session.Decision(); decision == nil ||
+					decision.Authority != authority {
+					t.Fatalf("at %s decision = %v, authority = %s", at, decision, authority)
+				}
+
+				return session
+			}
+
+			hook := func(activity Activity, detail *ActivityDetail) Evidence {
+				return &Report{
+					Reporter: Reporter{Integration: "native"},
+					Event:    "agent_settled",
+					Claim:    new(PresenceLive),
+					Activity: new(activity),
+					Detail:   detail,
+					Process:  &process,
+				}
+			}
+			terminal := func(at time.Time, activity Activity, detail ActivityDetail) Evidence {
+				return (*Reading)(&ScreenObservation{
+					Activity:   activity,
+					Detail:     detail,
+					Authority:  AuthorityTerminal,
+					Reason:     "program_status",
+					Process:    process,
+					ObservedAt: at,
+				})
+			}
+
+			apply(base, hook(ActivityRunning, nil))
+			apply(base.Add(time.Second), terminal(base.Add(time.Second), ActivityRunning, ""))
+
+			switch situation {
+			case "interrupted before resting terminal":
+				apply(base.Add(2*time.Second), hook(ActivityInterrupted, nil))
+
+				got := apply(
+					base.Add(3*time.Second),
+					terminal(base.Add(3*time.Second), ActivityIdle, ""),
+				)
+				if ActivityValue(got.Activity()) != ActivityInterrupted ||
+					got.Decision().Authority != AuthorityHook {
+					t.Fatalf(
+						"got %v by %v, want interrupted by hook",
+						got.Activity(),
+						got.Decision(),
+					)
+				}
+			case "resting terminal before interrupted":
+				apply(base.Add(2*time.Second), terminal(base.Add(2*time.Second), ActivityIdle, ""))
+
+				got := apply(base.Add(3*time.Second), hook(ActivityInterrupted, nil))
+				if ActivityValue(got.Activity()) != ActivityInterrupted ||
+					got.Decision().Authority != AuthorityHook {
+					t.Fatalf(
+						"got %v by %v, want interrupted by hook",
+						got.Activity(),
+						got.Decision(),
+					)
+				}
+			case "newer terminal transition supersedes interrupted":
+				apply(base.Add(2*time.Second), hook(ActivityInterrupted, nil))
+				apply(base.Add(3*time.Second), terminal(base.Add(3*time.Second), ActivityIdle, ""))
+				apply(
+					base.Add(4*time.Second),
+					terminal(base.Add(4*time.Second), ActivityRunning, ""),
+				)
+
+				got := apply(
+					base.Add(5*time.Second),
+					terminal(base.Add(5*time.Second), ActivityIdle, ""),
+				)
+				if ActivityValue(got.Activity()) != ActivityIdle ||
+					got.Decision().Authority != AuthorityTerminal {
+					t.Fatalf("got %v by %v, want idle by terminal", got.Activity(), got.Decision())
+				}
+			case "stale interrupted yields to resting terminal":
+				apply(base.Add(2*time.Second), hook(ActivityInterrupted, nil))
+				late := base.Add(2*time.Second + IntegrationActivityLease + time.Second)
+
+				got := apply(late, terminal(late, ActivityIdle, ""))
+				if ActivityValue(got.Activity()) != ActivityIdle ||
+					got.Decision().Authority != AuthorityTerminal {
+					t.Fatalf("got %v by %v, want idle by terminal", got.Activity(), got.Decision())
+				}
+			case "retained interrupted holds resting terminal":
+				apply(base.Add(2*time.Second), hook(ActivityInterrupted, nil))
+				late := base.Add(2*time.Second + IntegrationActivityLease + time.Second)
+
+				got := apply(late, terminal(late, ActivityIdle, ""))
+				if ActivityValue(got.Activity()) != ActivityInterrupted ||
+					got.Decision().Authority != AuthorityHook {
+					t.Fatalf(
+						"got %v by %v, want interrupted by hook",
+						got.Activity(),
+						got.Decision(),
+					)
+				}
+			case "terminal error preserves native usage limit":
+				apply(base.Add(2*time.Second), hook(ActivityFailed, new(ActivityDetailUsageLimit)))
+
+				got := apply(
+					base.Add(3*time.Second),
+					terminal(base.Add(3*time.Second), ActivityFailed, ActivityDetailGeneral),
+				)
+				if ActivityValue(got.Activity()) != ActivityFailed ||
+					got.Detail == nil || got.Detail.Value != ActivityDetailUsageLimit ||
+					got.Detail.Authority != AuthorityHook {
+					t.Fatalf("got %v detail %#v, want failed with hook usage_limit",
+						got.Activity(), got.Detail)
+				}
+			case "native usage limit enriches terminal error":
+				apply(
+					base.Add(2*time.Second),
+					terminal(base.Add(2*time.Second), ActivityFailed, ActivityDetailGeneral),
+				)
+
+				got := apply(
+					base.Add(3*time.Second),
+					hook(ActivityFailed, new(ActivityDetailUsageLimit)),
+				)
+				if ActivityValue(got.Activity()) != ActivityFailed ||
+					got.Detail == nil || got.Detail.Value != ActivityDetailUsageLimit ||
+					got.Detail.Authority != AuthorityHook {
+					t.Fatalf("got %v detail %#v, want failed with hook usage_limit",
+						got.Activity(), got.Detail)
+				}
+			}
+
+			coverage.Hit(situation)
+		})
+	}
+
+	if missing := coverage.Missing(
+		"interrupted before resting terminal",
+		"resting terminal before interrupted",
+		"newer terminal transition supersedes interrupted",
+		"stale interrupted yields to resting terminal",
+		"retained interrupted holds resting terminal",
+		"terminal error preserves native usage limit",
+		"native usage limit enriches terminal error",
+	); len(missing) > 0 {
+		t.Fatalf("uncovered terminal authority situations: %v", missing)
+	}
+}

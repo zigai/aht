@@ -34,7 +34,7 @@ func EvaluateHook(session Session, policy Policy, now time.Time) HookEvaluation 
 
 func ActivityAuthority(session Session, policy Policy, now time.Time) (Authority, string) {
 	if reading := terminalReading(session); reading != nil &&
-		!hookHoldsTurn(session, policy, *reading, now) {
+		!hookOutranksTerminal(session, policy, *reading, now) {
 		return AuthorityTerminal, reading.Reason
 	}
 
@@ -73,7 +73,7 @@ func terminalReading(session Session) *ScreenObservation {
 	return reading
 }
 
-func hookHoldsTurn(
+func hookOutranksTerminal(
 	session Session,
 	policy Policy,
 	reading ScreenObservation,
@@ -84,14 +84,33 @@ func hookHoldsTurn(
 	}
 
 	native, _, ok := matchingHookObservation(session, policy)
-	if !ok || *native.Activity != ActivityRunning ||
-		!slices.Contains(policy.HeldTurnEvents, native.Event) {
+	if !ok || !hookFreshForTerminal(native.ObservedAt, policy, now) {
 		return false
 	}
 
-	reason := invalidHookTimeReason(native.ObservedAt, now)
+	if *native.Activity == ActivityRunning &&
+		slices.Contains(policy.HeldTurnEvents, native.Event) {
+		return true
+	}
+
+	return hookPreservesInterrupted(session, *native)
+}
+
+func hookFreshForTerminal(observedAt time.Time, policy Policy, now time.Time) bool {
+	reason := invalidHookTimeReason(observedAt, now)
 
 	return reason == "" || policy.RetainNativeActivity && reason == hookReportStale
+}
+
+func hookPreservesInterrupted(session Session, native NativeObservation) bool {
+	if *native.Activity != ActivityInterrupted {
+		return false
+	}
+
+	decision := session.Decision()
+
+	return decision == nil || decision.Authority != AuthorityTerminal ||
+		!decision.ObservedAt.After(native.ObservedAt)
 }
 
 func matchingHookObservation(

@@ -407,6 +407,50 @@ func TestTerminalRecordAndHookReportOrder(t *testing.T) {
 			authority: AuthorityTerminal,
 		},
 		{
+			name: "a native interruption outranks the resting record that follows it",
+			steps: []step{
+				terminal(ActivityRunning),
+				hook("agent_settled", ActivityInterrupted),
+				terminal(ActivityIdle),
+			},
+			activity:  ActivityInterrupted,
+			authority: AuthorityHook,
+		},
+		{
+			name: "a native interruption outranks the resting record that came first",
+			steps: []step{
+				terminal(ActivityRunning),
+				terminal(ActivityIdle),
+				hook("agent_settled", ActivityInterrupted),
+			},
+			activity:  ActivityInterrupted,
+			authority: AuthorityHook,
+		},
+		{
+			name: "a newer terminal turn supersedes an earlier native interruption",
+			steps: []step{
+				terminal(ActivityRunning),
+				hook("agent_settled", ActivityInterrupted),
+				terminal(ActivityIdle),
+				terminal(ActivityRunning),
+				terminal(ActivityIdle),
+			},
+			activity:  ActivityIdle,
+			authority: AuthorityTerminal,
+		},
+		{
+			name: "a native interruption that lost its lease yields to a resting record",
+			steps: []step{
+				hook("agent_settled", ActivityInterrupted),
+				{
+					event: "", terminal: true, activity: ActivityIdle, detail: "",
+					after: IntegrationActivityLease + time.Second,
+				},
+			},
+			activity:  ActivityIdle,
+			authority: AuthorityTerminal,
+		},
+		{
 			name: "a cleared record returns the state to the last hook report",
 			steps: []step{
 				terminal(ActivityRunning), hook("tool_end", ActivityIdle), terminal(ActivityUnknown),

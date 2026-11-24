@@ -504,3 +504,211 @@ func TestDetailTimestampRequiresMatchingEvidenceAndCannotFollowReport(t *testing
 		}
 	}
 }
+
+func TestTerminalFailurePreservesNativeUsageLimitDetail(t *testing.T) {
+	t.Parallel()
+
+	for _, terminalDetail := range []ActivityDetail{"", ActivityDetailGeneral} {
+		for _, order := range []string{"hook-first", "terminal-first"} {
+			name := order + "/terminal-" + string(terminalDetail)
+			if terminalDetail == "" {
+				name = order + "/terminal-empty"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+				clock := at
+				store := NewJournal(
+					t.TempDir()+"/state.json",
+					detailRules{policy: detailPolicy(AuthorityHook)},
+				)
+				store.setNowForTest(func() time.Time { return clock })
+
+				process := ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
+				terminalFailure := func(when time.Time) Observation {
+					return Observation{
+						Harness: harnessCatalog,
+						At:      when,
+						Subject: ObservationIdentity{SessionID: "detail-session"},
+						Evidence: (*Reading)(&ScreenObservation{
+							Activity:   ActivityFailed,
+							Detail:     terminalDetail,
+							Authority:  AuthorityTerminal,
+							Reason:     "program_status",
+							Process:    process,
+							ObservedAt: when,
+						}),
+					}
+				}
+				nativeLimit := func(when time.Time) Observation {
+					return detailReport(when, new(ActivityFailed), new(ActivityDetailUsageLimit))
+				}
+
+				var (
+					session  Session
+					err      error
+					nativeAt time.Time
+				)
+
+				if order == "hook-first" {
+					nativeAt = at
+					if _, err = store.Observe(t.Context(), nativeLimit(at)); err != nil {
+						t.Fatal(err)
+					}
+
+					clock = at.Add(time.Second)
+					session, err = store.Observe(t.Context(), terminalFailure(clock))
+				} else {
+					if _, err = store.Observe(t.Context(), terminalFailure(at)); err != nil {
+						t.Fatal(err)
+					}
+
+					clock = at.Add(time.Second)
+					nativeAt = clock
+					session, err = store.Observe(t.Context(), nativeLimit(clock))
+				}
+
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if session.Activity() == nil || *session.Activity() != ActivityFailed ||
+					session.Decision() == nil || session.Decision().Authority != AuthorityTerminal {
+					t.Fatalf("activity = %v by %#v, want failed by terminal",
+						session.Activity(), session.Decision())
+				}
+
+				requireDetail(t, session, ActivityDetailUsageLimit, DetailQualityCurrent, nativeAt)
+
+				if session.Detail.Authority != AuthorityHook {
+					t.Fatalf("detail authority = %s, want hook", session.Detail.Authority)
+				}
+
+				clock = nativeAt.Add(IntegrationActivityLease + time.Second)
+
+				aged, err := store.Get(t.Context(), session.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				requireDetail(t, aged, ActivityDetailUsageLimit, DetailQualityStale, nativeAt)
+
+				clock = clock.Add(time.Second)
+				if _, err = store.Observe(
+					t.Context(),
+					detailReport(clock, new(ActivityRunning), nil),
+				); err != nil {
+					t.Fatal(err)
+				}
+
+				clock = clock.Add(time.Second)
+
+				general, err := store.Observe(t.Context(), terminalFailure(clock))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				wantQuality, wantAt := DetailQualityMissing, time.Time{}
+				if terminalDetail == ActivityDetailGeneral {
+					wantQuality, wantAt = DetailQualityCurrent, clock
+				}
+
+				requireDetail(t, general, ActivityDetailGeneral, wantQuality, wantAt)
+
+				if general.Detail.Authority != AuthorityTerminal {
+					t.Fatalf("after recovery detail authority = %s, want terminal",
+						general.Detail.Authority)
+				}
+			})
+		}
+	}
+}
+
+func TestTerminalFailureIgnoresForeignNativeUsageLimitAndScreenIsolates(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	process := ProcessIdentity{PID: 42, StartIdentity: "boot:42"}
+
+	t.Run("foreign reporter does not enrich terminal failure", func(t *testing.T) {
+		t.Parallel()
+
+		store := NewJournal(
+			t.TempDir()+"/state.json",
+			detailRules{policy: detailPolicy(AuthorityHook)},
+		)
+		store.setNowForTest(func() time.Time { return at.Add(time.Second) })
+
+		foreign := detailReport(at, new(ActivityFailed), new(ActivityDetailUsageLimit))
+
+		foreign.Report().Reporter.Integration = "foreign"
+		if _, err := store.Observe(t.Context(), foreign); err != nil {
+			t.Fatal(err)
+		}
+
+		session, err := store.Observe(t.Context(), Observation{
+			Harness: harnessCatalog,
+			At:      at.Add(time.Second),
+			Subject: ObservationIdentity{SessionID: "detail-session"},
+			Evidence: (*Reading)(&ScreenObservation{
+				Activity:   ActivityFailed,
+				Detail:     ActivityDetailGeneral,
+				Authority:  AuthorityTerminal,
+				Reason:     "program_status",
+				Process:    process,
+				ObservedAt: at.Add(time.Second),
+			}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		requireDetail(t, session, ActivityDetailGeneral, DetailQualityCurrent, at.Add(time.Second))
+
+		if session.Detail.Authority != AuthorityTerminal {
+			t.Fatalf("detail authority = %s, want terminal", session.Detail.Authority)
+		}
+	})
+
+	t.Run("screen authority failure does not inherit native usage limit", func(t *testing.T) {
+		t.Parallel()
+
+		store := NewJournal(
+			t.TempDir()+"/state.json",
+			detailRules{policy: detailPolicy(AuthorityScreen)},
+		)
+		store.setNowForTest(func() time.Time { return at.Add(time.Second) })
+
+		if _, err := store.Observe(
+			t.Context(),
+			detailReport(at, new(ActivityFailed), new(ActivityDetailUsageLimit)),
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		session, err := store.Observe(t.Context(), Observation{
+			Harness: harnessCatalog,
+			At:      at.Add(time.Second),
+			Subject: ObservationIdentity{SessionID: "detail-session"},
+			Evidence: (*Reading)(&ScreenObservation{
+				Activity:   ActivityFailed,
+				Detail:     "",
+				Authority:  AuthorityScreen,
+				Reason:     "manifest_rule",
+				Process:    process,
+				ObservedAt: at.Add(time.Second),
+			}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		requireDetail(t, session, ActivityDetailGeneral, DetailQualityMissing, time.Time{})
+
+		if session.Detail.Authority != AuthorityScreen {
+			t.Fatalf("detail authority = %s, want screen", session.Detail.Authority)
+		}
+	})
+}

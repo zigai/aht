@@ -559,9 +559,7 @@ func (o *Observer) runCycle(ctx context.Context) (Result, error) {
 			observations,
 			observationsForUnlocatedProcesses(
 				o.manifestLoader,
-				knownSessions,
-				processByPID,
-				harnessByPID,
+				inventory,
 				locationPIDs,
 				at,
 				!o.disableScreenInspection,
@@ -1239,30 +1237,36 @@ func hasAncestorHarness(
 
 func observationsForUnlocatedProcesses(
 	manifestLoader agentstate.Loader,
-	sessions []registry.Session,
-	processByPID map[int]processinfo.Process,
-	harnessByPID map[int]registry.Harness,
+	inventory cycleInventory,
 	locationPIDs map[int]bool,
 	at time.Time,
 	inspectScreen bool,
 ) []registry.Observation {
-	observations := make([]registry.Observation, 0, len(harnessByPID))
-	for pid, harnessID := range harnessByPID {
+	observations := make([]registry.Observation, 0, len(inventory.harnessByPID))
+	for pid, harnessID := range inventory.harnessByPID {
 		if locationPIDs[pid] {
 			continue
 		}
 		// harnessByPID is a filtered subset of processByPID from the same cycle snapshot.
-		process := processByPID[pid]
+		process := inventory.processByPID[pid]
+		identity := processIdentity(process)
 
 		var emptyLocation registry.Location
 
 		observations = append(
 			observations,
 			processObservation(harnessID, at, &registry.Placement{
-				Process:  *processIdentity(process),
+				Process:  *identity,
 				Location: emptyLocation,
 			}),
 		)
+
+		session := sessionForProcess(inventory.knownSessions, harnessID, identity)
+		if cleared, ok := clearedProgramStatusReading(session, identity, inventory.panesAt); ok {
+			observations = append(observations, cleared)
+
+			continue
+		}
 
 		if !inspectScreen {
 			continue
@@ -1270,7 +1274,7 @@ func observationsForUnlocatedProcesses(
 
 		if screenObservation, detected := unavailableScreenState(
 			manifestLoader,
-			sessions,
+			inventory.knownSessions,
 			harnessID,
 			process,
 			at,
