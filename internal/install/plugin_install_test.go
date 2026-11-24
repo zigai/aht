@@ -506,7 +506,14 @@ func requireAgyPluginHooks(t *testing.T, dir string) {
 	requireTestHookEvents(
 		t,
 		pluginHooks,
-		[]string{"PreInvocation", "PostInvocation", "PreToolUse", "PostToolUse", hookEventStop},
+		[]string{
+			hookEventSessionStart,
+			"PreInvocation",
+			"PostInvocation",
+			"PreToolUse",
+			"PostToolUse",
+			hookEventStop,
+		},
 	)
 }
 

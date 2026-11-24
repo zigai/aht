@@ -23,7 +23,7 @@ const (
 	agyImportComponent             = "hooks"
 	agyHookSource                  = "agy-hook"
 	agyHookAdditionalAttributeKeys = 3
-	integrationVersion             = 12
+	integrationVersion             = 13
 )
 
 type agyHarness struct{ harness.BaseAdapter }
@@ -41,6 +41,7 @@ func New() agyHarness {
 			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
 			Screen: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
 		},
+		PayloadOmissions: []string{"lastUserInput"},
 		ExclusiveProcess: true,
 		ID:               registry.Harness("agy"),
 		Aliases: []string{
@@ -52,12 +53,14 @@ func New() agyHarness {
 		},
 		ProcessNames: []string{"agy", "antigravity-cli"},
 		Capabilities: harness.Capabilities{
+			SessionStart:      true,
 			RunningIdle:       true,
 			WaitingPermission: true,
 		},
 		IntegrationVersion: integrationVersion,
 		IntegrationSource:  agyHookSource,
 		StateAuthority:     registry.AuthorityHook,
+		ProgramStatusApp:   "antigravity",
 	})}
 }
 
@@ -156,6 +159,7 @@ func agyHookConfig(binary string, id registry.Harness) map[string]any {
 
 	return map[string]any{
 		agyPluginName: map[string]any{
+			"SessionStart":   []any{handler("SessionStart")},
 			"PreInvocation":  []any{handler("PreInvocation")},
 			"PostInvocation": []any{handler("PostInvocation")},
 			"PreToolUse":     []any{toolGroup("PreToolUse")},
@@ -195,7 +199,7 @@ func agyGeminiDir() string {
 func agyPayloadDefaults(payload map[string]any) harness.PayloadDefaults {
 	workspacePath := harness.FirstArrayString(payload, "workspacePaths", "workspace_paths")
 	toolCWD := harness.NestedString(payload, "toolCall", "args", "Cwd")
-	cwd := cmp.Or(toolCWD, workspacePath)
+	cwd := cmp.Or(harness.PayloadString(payload, "cwd"), toolCWD, workspacePath)
 
 	attributes := make(map[string]string)
 	harness.AddAttributeString(
@@ -270,7 +274,7 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 			Attributes:  defaults.Attributes,
 		},
 		Evidence: &registry.Report{
-			Lifecycle: nil,
+			Lifecycle: agyHookLifecycle(invocation.Event),
 
 			Reporter: registry.Reporter{
 				Sequence:     nil,
@@ -287,7 +291,7 @@ func agyHookReport(invocation harness.HookInvocation) (registry.Observation, boo
 			),
 			DetailObservedAt: nil,
 
-			Claim:    nil,
+			Claim:    new(registry.PresenceLive),
 			Process:  nil,
 			Location: nil,
 
@@ -313,10 +317,20 @@ func agyResumeCommand(sessionID string) []string {
 	return []string{agyCommand, "--conversation", sessionID}
 }
 
+func agyHookLifecycle(event string) *registry.NativeLifecycle {
+	if event == "SessionStart" {
+		return new(registry.NativeLifecycleStart)
+	}
+
+	return nil
+}
+
 func agyActivityForHook(event string, payload map[string]any) *registry.Activity {
 	var activity registry.Activity
 
 	switch event {
+	case "SessionStart":
+		activity = registry.ActivityIdle
 	case "PreInvocation", "PostInvocation":
 		activity = registry.ActivityRunning
 	case "PreToolUse":
@@ -332,16 +346,31 @@ func agyActivityForHook(event string, payload map[string]any) *registry.Activity
 
 		activity = registry.ActivityRunning
 	case "Stop":
-		if harness.PayloadBool(payload, "fullyIdle", "fully_idle") {
-			activity = registry.ActivityIdle
-		} else {
-			activity = registry.ActivityRunning
-		}
+		activity = agyStopActivity(payload)
 	default:
 		return nil
 	}
 
 	return &activity
+}
+
+func agyStopActivity(payload map[string]any) registry.Activity {
+	if !harness.PayloadBool(payload, "fullyIdle", "fully_idle") {
+		return registry.ActivityRunning
+	}
+
+	reason := strings.ToUpper(
+		harness.PayloadStringAny(payload, "terminationReason", "termination_reason"),
+	)
+	if reason == "USER_CANCELED" || reason == "USER_CANCELLED" {
+		return registry.ActivityInterrupted
+	}
+
+	if reason == "ERROR" || harness.PayloadString(payload, "error") != "" {
+		return registry.ActivityFailed
+	}
+
+	return registry.ActivityIdle
 }
 
 func agyHookResponse(event string) map[string]any {

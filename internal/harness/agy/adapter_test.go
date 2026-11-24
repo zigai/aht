@@ -9,6 +9,7 @@ import (
 
 	"github.com/zigai/aht/v2/internal/harness"
 	"github.com/zigai/aht/v2/internal/harness/adapters"
+	"github.com/zigai/aht/v2/internal/harness/agy"
 	"github.com/zigai/aht/v2/internal/testharness"
 	"github.com/zigai/aht/v2/pkg/registry"
 )
@@ -42,6 +43,35 @@ func TestPayloadDefaults(t *testing.T) {
 			wantEvent:  "PreToolUse",
 			wantAttr:   "agy_tool_name",
 			wantAttrKV: "run_command",
+		},
+		{
+			name:    "agy prefers top-level cwd",
+			harness: registry.Harness("agy"),
+			payload: `{"conversationId":"agy-session","transcriptPath":"/repo/` +
+				`.gemini/antigravity/transcript.jsonl","cwd":"/repo/work",` +
+				`"workspacePaths":["/repo"],"hookEventName":"PreToolUse",` +
+				`"toolCall":{"name":"run_command","args":{"Cwd":"/repo/subdir"}}}`,
+			wantID:     "agy-session",
+			wantPath:   "/repo/.gemini/antigravity/transcript.jsonl",
+			wantCWD:    "/repo/work",
+			wantRoot:   "/repo",
+			wantEvent:  "PreToolUse",
+			wantAttr:   "agy_hook_event",
+			wantAttrKV: "PreToolUse",
+		},
+		{
+			name:    "agy falls back to workspace path",
+			harness: registry.Harness("agy"),
+			payload: `{"conversationId":"agy-session","transcriptPath":"/repo/` +
+				`.gemini/antigravity/transcript.jsonl","workspacePaths":["/` +
+				`repo"],"hookEventName":"SessionStart"}`,
+			wantID:     "agy-session",
+			wantPath:   "/repo/.gemini/antigravity/transcript.jsonl",
+			wantCWD:    "/repo",
+			wantRoot:   "/repo",
+			wantEvent:  "SessionStart",
+			wantAttr:   "agy_hook_event",
+			wantAttrKV: "SessionStart",
 		},
 	}
 
@@ -108,19 +138,35 @@ func TestPayloadCompatible(t *testing.T) {
 }
 
 type agyHookTestCase struct {
-	name         string
-	event        string
-	payload      map[string]any
-	parentArgs   []string
-	wantReport   bool
-	wantActivity registry.Activity
-	wantResponse map[string]any
+	name          string
+	event         string
+	payload       map[string]any
+	parentArgs    []string
+	wantReport    bool
+	wantActivity  registry.Activity
+	wantLifecycle *registry.NativeLifecycle
+	wantResponse  map[string]any
 }
 
 func TestHandleHookAgy(t *testing.T) {
 	t.Parallel()
 
 	tests := []agyHookTestCase{
+		{
+			name:  "session start reports idle with start lifecycle",
+			event: "SessionStart",
+			payload: map[string]any{
+				"conversationId": "agy-session",
+				"transcriptPath": "/repo/.gemini/antigravity/transcript.jsonl",
+				"cwd":            "/repo/work",
+				"workspacePaths": []any{"/repo"},
+			},
+			parentArgs:    nil,
+			wantReport:    true,
+			wantActivity:  registry.ActivityIdle,
+			wantLifecycle: new(registry.NativeLifecycleStart),
+			wantResponse:  map[string]any{},
+		},
 		{
 			name:  "pre invocation reports running",
 			event: "PreInvocation",
@@ -179,6 +225,96 @@ func TestHandleHookAgy(t *testing.T) {
 			parentArgs:   []string{"agy", "--print", "hello"},
 			wantReport:   true,
 			wantActivity: registry.ActivityIdle,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "fully idle stop with error termination reason reports failed",
+			event: "Stop",
+			payload: map[string]any{
+				"conversationId":    "agy-session",
+				"transcriptPath":    "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspacePaths":    []any{"/repo"},
+				"terminationReason": "ERROR",
+				"fullyIdle":         true,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityFailed,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "fully idle stop with error string reports failed",
+			event: "Stop",
+			payload: map[string]any{
+				"conversationId": "agy-session",
+				"transcriptPath": "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspacePaths": []any{"/repo"},
+				"error":          "provider failed",
+				"fullyIdle":      true,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityFailed,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "fully idle stop with snake case error reason reports failed",
+			event: "Stop",
+			payload: map[string]any{
+				"conversation_id":    "agy-session",
+				"transcript_path":    "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspace_paths":    []any{"/repo"},
+				"termination_reason": "error",
+				"fully_idle":         true,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityFailed,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "fully idle stop with user canceled reports interrupted",
+			event: "Stop",
+			payload: map[string]any{
+				"conversationId":    "agy-session",
+				"transcriptPath":    "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspacePaths":    []any{"/repo"},
+				"terminationReason": "USER_CANCELED",
+				"fullyIdle":         true,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityInterrupted,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "fully idle stop with user cancelled reports interrupted",
+			event: "Stop",
+			payload: map[string]any{
+				"conversationId":    "agy-session",
+				"transcriptPath":    "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspacePaths":    []any{"/repo"},
+				"terminationReason": "user_cancelled",
+				"fullyIdle":         true,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityInterrupted,
+			wantResponse: map[string]any{},
+		},
+		{
+			name:  "non-idle stop stays running even with error reason",
+			event: "Stop",
+			payload: map[string]any{
+				"conversationId":    "agy-session",
+				"transcriptPath":    "/repo/.gemini/antigravity/transcript.jsonl",
+				"workspacePaths":    []any{"/repo"},
+				"terminationReason": "ERROR",
+				"fullyIdle":         false,
+			},
+			parentArgs:   nil,
+			wantReport:   true,
+			wantActivity: registry.ActivityRunning,
 			wantResponse: map[string]any{},
 		},
 		{
@@ -244,6 +380,15 @@ func assertAgyHookResult(t *testing.T, test agyHookTestCase) {
 				test.wantActivity,
 				*result.Report.ActivityClaim(),
 			)
+		}
+
+		report := result.Report.Report()
+		if report == nil || report.Claim == nil || *report.Claim != registry.PresenceLive {
+			t.Fatalf("expected live presence claim, got %#v", report)
+		}
+
+		if !reflect.DeepEqual(report.Lifecycle, test.wantLifecycle) {
+			t.Fatalf("expected lifecycle %#v, got %#v", test.wantLifecycle, report.Lifecycle)
 		}
 	}
 }
@@ -315,5 +460,63 @@ func TestNativeDetailsUseExplicitPromptSignals(t *testing.T) {
 				t.Fatalf("detail = %v, want %v", observation.Report().Detail, test.want)
 			}
 		})
+	}
+}
+
+func TestAgyDefinitionAndHookConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	adapter := agy.New()
+	definition := adapter.Definition()
+
+	if definition.ProgramStatusApp != "antigravity" {
+		t.Fatalf("ProgramStatusApp = %q, want %q", definition.ProgramStatusApp, "antigravity")
+	}
+
+	if !slices.Equal(definition.PayloadOmissions, []string{"lastUserInput"}) {
+		t.Fatalf("PayloadOmissions = %v, want [lastUserInput]", definition.PayloadOmissions)
+	}
+
+	if !definition.Capabilities.SessionStart {
+		t.Fatal("expected Capabilities.SessionStart to be true")
+	}
+
+	plan, err := adapter.InstallPlan("/usr/local/bin/aht")
+	if err != nil {
+		t.Fatalf("InstallPlan error: %v", err)
+	}
+
+	pluginAction, ok := plan.Actions[0].(harness.PluginDirectoryAction)
+	if !ok {
+		t.Fatalf("expected PluginDirectoryAction, got %T", plan.Actions[0])
+	}
+
+	var hooksConfig map[string]any
+
+	for _, file := range pluginAction.Plan.Files {
+		if file.Name == "hooks.json" {
+			hooksConfig, _ = file.JSONContent.(map[string]any)
+			break
+		}
+	}
+
+	pluginHooks, ok := hooksConfig["aht-state"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing aht-state hooks map: %#v", hooksConfig)
+	}
+
+	sessionStart, ok := pluginHooks["SessionStart"].([]any)
+	if !ok || len(sessionStart) != 1 {
+		t.Fatalf("expected single SessionStart handler, got %#v", pluginHooks["SessionStart"])
+	}
+
+	entry, ok := sessionStart[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected SessionStart handler object, got %T", sessionStart[0])
+	}
+
+	wantCmd := harness.NativeHookCommand("/usr/local/bin/aht", definition.ID, "SessionStart")
+	if entry["type"] != harness.HookTypeCommand || entry["command"] != wantCmd {
+		t.Fatalf("unexpected SessionStart handler: %#v", entry)
 	}
 }
