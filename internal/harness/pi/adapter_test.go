@@ -176,3 +176,235 @@ func TestLocationsFollowEnvironmentOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestActivityDetail(t *testing.T) {
+	t.Parallel()
+
+	adapter := New()
+
+	tests := []struct {
+		name       string
+		event      string
+		activity   registry.Activity
+		attributes map[string]string
+		want       *registry.ActivityDetail
+	}{
+		{
+			name:       "confirm prompt maps to permission",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "confirm"},
+			want:       new(registry.ActivityDetailPermission),
+		},
+		{
+			name:       "select prompt maps to question",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "select"},
+			want:       new(registry.ActivityDetailQuestion),
+		},
+		{
+			name:       "input prompt maps to question",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "input"},
+			want:       new(registry.ActivityDetailQuestion),
+		},
+		{
+			name:       "editor prompt maps to question",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "editor"},
+			want:       new(registry.ActivityDetailQuestion),
+		},
+		{
+			name:       "custom prompt leaves detail unset",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "custom"},
+			want:       nil,
+		},
+		{
+			name:       "missing prompt kind leaves detail unset",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityWaiting,
+			attributes: nil,
+			want:       nil,
+		},
+		{
+			name:       "non-waiting activity ignores prompt kind",
+			event:      "ui_prompt_start",
+			activity:   registry.ActivityIdle,
+			attributes: map[string]string{"pi_prompt_kind": "confirm"},
+			want:       nil,
+		},
+		{
+			name:       "other event ignores prompt kind",
+			event:      "ui_prompt_end",
+			activity:   registry.ActivityWaiting,
+			attributes: map[string]string{"pi_prompt_kind": "confirm"},
+			want:       nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := adapter.ActivityDetail(test.event, test.activity, test.attributes)
+			if test.want == nil {
+				if got != nil {
+					t.Fatalf("ActivityDetail() = %q, want nil", *got)
+				}
+
+				return
+			}
+
+			if got == nil || *got != *test.want {
+				t.Fatalf("ActivityDetail() = %v, want %q", got, *test.want)
+			}
+		})
+	}
+}
+
+func TestUIPromptEndRestoresRestingActivity(t *testing.T) {
+	t.Parallel()
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to exercise the generated extension")
+	}
+
+	dir := t.TempDir()
+	capture := filepath.Join(dir, "reports")
+	reporter := filepath.Join(dir, "reporter")
+	script := "#!" + node + "\nrequire('node:fs').appendFileSync(process.env.AHT_CAPTURE, " +
+		"JSON.stringify(process.argv.slice(2))+'\\n');\n"
+
+	if err := os.WriteFile(reporter, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	module := harness.RenderScriptTemplate(piExtensionTemplate, reporter, New().Definition())
+	if err := os.WriteFile(filepath.Join(dir, "extension.ts"), []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	driver := `import extension from "./extension.ts";
+const handlers = new Map();
+extension({ on: (name, handler) => handlers.set(name, handler) });
+let idle = true;
+const ctx = {
+  cwd: "/work",
+  mode: "tui",
+  isIdle: () => idle,
+  sessionManager: { getSessionId: () => "native-session" },
+};
+const fire = (event) => handlers.get(event.type)(event, ctx);
+
+fire({ type: "session_start", reason: "startup" });
+idle = false;
+fire({ type: "agent_start" });
+fire({ type: "agent_end", messages: [{ role: "assistant", stopReason: "error" }] });
+idle = true;
+fire({ type: "agent_settled", aborted: false });
+fire({ type: "ui_prompt_start", kind: "confirm" });
+fire({ type: "ui_prompt_end", kind: "confirm" });
+
+idle = false;
+fire({ type: "agent_start" });
+fire({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
+idle = true;
+fire({ type: "agent_settled", aborted: true });
+fire({ type: "ui_prompt_start", kind: "select" });
+fire({ type: "ui_prompt_end", kind: "select" });
+
+fire({ type: "session_tree" });
+fire({ type: "ui_prompt_start", kind: "input" });
+fire({ type: "ui_prompt_end", kind: "input" });
+
+idle = false;
+fire({ type: "before_agent_start" });
+fire({ type: "ui_prompt_start", kind: "editor" });
+fire({ type: "ui_prompt_end", kind: "editor" });
+
+await fire({ type: "session_shutdown" });
+process.exit(0);
+`
+
+	driverPath := filepath.Join(dir, "driver.mjs")
+	if err := os.WriteFile(driverPath, []byte(driver), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.CommandContext(t.Context(), node, "--experimental-strip-types", driverPath)
+
+	command.Env = append(os.Environ(), "AHT_CAPTURE="+capture)
+
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("extension ui_prompt flow: %v\n%s", err, output)
+	}
+
+	data, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type capturedReport struct {
+		event      string
+		activity   string
+		presence   string
+		promptKind string
+	}
+
+	var got []capturedReport
+
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		var args []string
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatal(err)
+		}
+
+		var report capturedReport
+
+		for index := 0; index+1 < len(args); index++ {
+			switch args[index] {
+			case "--event":
+				report.event = args[index+1]
+			case "--activity":
+				report.activity = args[index+1]
+			case "--presence":
+				report.presence = args[index+1]
+			case "--attribute":
+				if kind, ok := strings.CutPrefix(args[index+1], "pi_prompt_kind="); ok {
+					report.promptKind = kind
+				}
+			}
+		}
+
+		got = append(got, report)
+	}
+
+	want := []capturedReport{
+		{event: "session_start", activity: "idle"},
+		{event: "agent_start", activity: "running"},
+		{event: "agent_settled", activity: "failed"},
+		{event: "ui_prompt_start", activity: "waiting", promptKind: "confirm"},
+		{event: "ui_prompt_end", activity: "failed", promptKind: "confirm"},
+		{event: "agent_start", activity: "running"},
+		{event: "agent_settled", activity: "interrupted"},
+		{event: "ui_prompt_start", activity: "waiting", promptKind: "select"},
+		{event: "ui_prompt_end", activity: "interrupted", promptKind: "select"},
+		{event: "session_tree", activity: "idle"},
+		{event: "ui_prompt_start", activity: "waiting", promptKind: "input"},
+		{event: "ui_prompt_end", activity: "idle", promptKind: "input"},
+		{event: "before_agent_start", activity: "running"},
+		{event: "ui_prompt_start", activity: "waiting", promptKind: "editor"},
+		{event: "ui_prompt_end", activity: "running", promptKind: "editor"},
+		{event: "session_shutdown", presence: "gone"},
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("captured reports =\n%#v\nwant\n%#v", got, want)
+	}
+}

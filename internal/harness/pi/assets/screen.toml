@@ -56,6 +56,19 @@ regex_none = [
 ]
 
 [[rules]]
+id = "default_input_prompt"
+state = "idle"
+priority = 105
+region = "bottom:12"
+regex_any = [
+    '(?m)^\s*(?:(?:↑|↓|R|W)[0-9]+(?:\.[0-9]+)?[kKmM]?\s+)*(?:CH[0-9]+\.[0-9]+%\s+)?(?:\$[0-9]+\.[0-9]+(?:\s+\(sub\))?\s+)?(?:[0-9]+\.[0-9]+%|\?)/[0-9]+(?:\.[0-9]+)?[kKmM]?(?:\s+\(auto\))?(?:\s+•\s+xp)?(?:\s{2,}\S.*)?\s*$',
+]
+none = ["esc to interrupt", "ctrl+c to interrupt"]
+regex_none = [
+    '(?m)^\s*\S?\s*Working\.\.\.\s+\((?:[0-9]+h\s*)?(?:[0-9]+m\s*)?[0-9]+(?:\.[0-9]+)?s\)(?:\s.*)?$',
+]
+
+[[rules]]
 id = "custom_input_prompt"
 state = "idle"
 priority = 110

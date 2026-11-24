@@ -14,7 +14,7 @@ const (
 	piExtensionName       = "aht-state.ts"
 	piIntegrationSourceID = "pi-extension"
 	piSessionFlag         = "--session"
-	integrationVersion    = 22
+	integrationVersion    = 23
 )
 
 //go:embed assets/aht-state.ts.tmpl
@@ -31,7 +31,7 @@ func New() piHarness {
 			Family:    harness.DistributionFamilyTreeExtension,
 		},
 		DetailCapabilities: registry.DetailCapabilities{
-			Native: registry.DetailSupport{Permission: false, Question: false, UsageLimit: false},
+			Native: registry.DetailSupport{Permission: true, Question: true, UsageLimit: false},
 			Screen: registry.DetailSupport{Permission: true, Question: true, UsageLimit: true},
 		},
 		ScreenManifest:   screenManifest,

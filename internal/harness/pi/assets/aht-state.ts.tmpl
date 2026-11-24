@@ -212,6 +212,7 @@ let currentSessionPath: string | undefined;
 let currentCwd: string | undefined;
 
 let lastTurnActivity: string | undefined;
+let settledActivity: string | undefined;
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
 function startHeartbeat(ctx?: ExtensionContext): void {
@@ -340,17 +341,30 @@ export default function (pi: ExtensionAPI, timeouts = defaultReportTimeouts) {
     stopHeartbeat();
     shutdownDeadline = undefined;
     lastTurnActivity = undefined;
+    settledActivity = undefined;
     report("idle", ctx, event);
   });
 
+  for (const eventName of ["session_switch", "session_branch", "session_tree"]) {
+    on(eventName, (event: NativeEvent, ctx: ExtensionContext) => {
+      stopHeartbeat();
+      shutdownDeadline = undefined;
+      lastTurnActivity = undefined;
+      settledActivity = undefined;
+      report("idle", ctx, event);
+    });
+  }
+
   on("before_agent_start", (event: NativeEvent, ctx: ExtensionContext) => {
     lastTurnActivity = undefined;
+    settledActivity = undefined;
     report("running", ctx, event);
     startHeartbeat(ctx);
   });
 
   on("agent_start", (event: NativeEvent, ctx: ExtensionContext) => {
     lastTurnActivity = undefined;
+    settledActivity = undefined;
     report("running", ctx, event);
     startHeartbeat(ctx);
   });
@@ -362,19 +376,21 @@ export default function (pi: ExtensionAPI, timeouts = defaultReportTimeouts) {
   on("ui_prompt_end", (event: NativeEvent, ctx: ExtensionContext) => {
     if (ctx.isIdle?.()) {
       stopHeartbeat();
-    } else {
-      startHeartbeat(ctx);
+      report(settledActivity ?? "idle", ctx, event);
+      return;
     }
-    report(ctx.isIdle?.() ? "idle" : "running", ctx, event);
+    startHeartbeat(ctx);
+    report("running", ctx, event);
   });
 
   on("agent_settled", (event: NativeEvent, ctx: ExtensionContext) => {
     stopHeartbeat();
-    if (lastTurnActivity === "interrupted" || lastTurnActivity === "failed") {
-      report(lastTurnActivity, ctx, event);
-      return;
-    }
-    report(resolveActivity(event), ctx, event);
+    const activity =
+      lastTurnActivity === "interrupted" || lastTurnActivity === "failed"
+        ? lastTurnActivity
+        : resolveActivity(event);
+    settledActivity = activity;
+    report(activity, ctx, event);
   });
 
   // Retries, compaction, queued messages, and continuations requested by other
