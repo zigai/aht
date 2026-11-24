@@ -520,3 +520,100 @@ func TestAgyDefinitionAndHookConfig(t *testing.T) {
 		t.Fatalf("unexpected SessionStart handler: %#v", entry)
 	}
 }
+
+func TestHandledHookEventsAreInstalled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	adapter := agy.New()
+
+	plan, err := adapter.InstallPlan("aht")
+	if err != nil {
+		t.Fatalf("InstallPlan: %v", err)
+	}
+
+	var hooksConfig map[string]any
+
+	for _, action := range plan.Actions {
+		pluginAction, ok := action.(harness.PluginDirectoryAction)
+		if !ok {
+			continue
+		}
+
+		for _, file := range pluginAction.Plan.Files {
+			if file.Name == "hooks.json" {
+				hooksConfig, _ = file.JSONContent.(map[string]any)
+				break
+			}
+		}
+	}
+
+	pluginHooks, ok := hooksConfig["aht-state"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing aht-state hooks map in hooks.json: %#v", hooksConfig)
+	}
+
+	installed := make([]string, 0, len(pluginHooks))
+	for event := range pluginHooks {
+		installed = append(installed, event)
+	}
+
+	slices.Sort(installed)
+
+	wantEvents := []string{
+		"PostInvocation",
+		"PostToolUse",
+		"PreInvocation",
+		"PreToolUse",
+		"SessionStart",
+		"Stop",
+	}
+	if !slices.Equal(installed, wantEvents) {
+		t.Fatalf("installed hook events = %v, want %v", installed, wantEvents)
+	}
+
+	payload := map[string]any{
+		"conversationId": "agy-session",
+		"workspacePaths": []any{"/repo"},
+		"toolCall":       map[string]any{"name": "run_command"},
+		"fullyIdle":      true,
+	}
+
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	for _, event := range installed {
+		result, handleErr := adapter.HandleHook(t.Context(), harness.HookInvocation{
+			Event:      event,
+			RawPayload: rawPayload,
+			Payload:    payload,
+		})
+		if handleErr != nil {
+			t.Fatalf("HandleHook(%q) error: %v", event, handleErr)
+		}
+
+		if !result.ReportOK || result.Report.Report() == nil ||
+			result.Report.ActivityClaim() == nil {
+			t.Fatalf(
+				"HandleHook(%q) did not produce a valid report: ReportOK=%t report=%#v",
+				event,
+				result.ReportOK,
+				result.Report,
+			)
+		}
+	}
+
+	unhandled, err := adapter.HandleHook(t.Context(), harness.HookInvocation{
+		Event:      "UnregisteredHookEvent",
+		RawPayload: rawPayload,
+		Payload:    payload,
+	})
+	if err != nil {
+		t.Fatalf("HandleHook(unregistered) error: %v", err)
+	}
+
+	if unhandled.ReportOK {
+		t.Fatalf("HandleHook(unregistered) unexpectedly reported: %#v", unhandled.Report)
+	}
+}

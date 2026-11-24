@@ -451,3 +451,240 @@ func TestActivityUsesDeclaredAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestProgramStatusAdaptersHaveDistinctApps(t *testing.T) {
+	t.Parallel()
+
+	seen := make(map[string]registry.Harness)
+
+	for _, adapter := range All() {
+		def := adapter.Definition()
+		if def.ProgramStatusApp == "" {
+			continue
+		}
+
+		normalized := strings.ToLower(strings.TrimSpace(def.ProgramStatusApp))
+		if normalized == "" || def.ProgramStatusApp != normalized {
+			t.Errorf(
+				"%s: ProgramStatusApp = %q, want trimmed lowercase non-empty name",
+				def.ID,
+				def.ProgramStatusApp,
+			)
+		}
+
+		if existing, duplicate := seen[def.ProgramStatusApp]; duplicate {
+			t.Errorf(
+				"%s and %s share ProgramStatusApp %q",
+				existing,
+				def.ID,
+				def.ProgramStatusApp,
+			)
+
+			continue
+		}
+
+		seen[def.ProgramStatusApp] = def.ID
+	}
+
+	if len(seen) == 0 {
+		t.Fatal("expected at least one adapter declaring ProgramStatusApp")
+	}
+}
+
+func TestProgramStatusAdaptersPreserveHookRefinements(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	later := base.Add(time.Second)
+
+	tested := 0
+	testedUsageLimit := 0
+
+	for _, adapter := range All() {
+		def := adapter.Definition()
+		if def.ProgramStatusApp == "" || def.StateAuthority != registry.AuthorityHook {
+			continue
+		}
+
+		tested++
+
+		if def.DetailCapabilities.Native.UsageLimit {
+			testedUsageLimit++
+		}
+
+		t.Run(string(def.ID), func(t *testing.T) {
+			t.Parallel()
+
+			process := registry.ProcessIdentity{
+				PID:           123,
+				StartIdentity: "boot:123",
+				Executable:    def.ProcessNames[0],
+			}
+			nativeObs := func(
+				at time.Time,
+				event string,
+				activity registry.Activity,
+				detail *registry.ActivityDetail,
+			) registry.Observation {
+				return registry.Observation{
+					Harness: def.ID,
+					At:      at,
+					Subject: registry.ObservationIdentity{SessionID: "native-session"},
+					Evidence: &registry.Report{
+						Reporter: registry.Reporter{Integration: def.IntegrationSource},
+						Event:    event,
+						Claim:    new(registry.PresenceLive),
+						Activity: &activity,
+						Detail:   detail,
+						Process:  &process,
+					},
+				}
+			}
+			terminalObs := func(
+				at time.Time,
+				activity registry.Activity,
+				detail registry.ActivityDetail,
+			) registry.Observation {
+				return registry.Observation{
+					Harness: def.ID,
+					At:      at,
+					Evidence: (*registry.Reading)(&registry.ScreenObservation{
+						Activity:   activity,
+						Detail:     detail,
+						Authority:  registry.AuthorityTerminal,
+						Reason:     "program_status",
+						Process:    process,
+						ObservedAt: at,
+					}),
+				}
+			}
+			singleSession := func(
+				t *testing.T,
+				observations []registry.Observation,
+			) registry.Session {
+				t.Helper()
+
+				state, _, err := registry.NewReducer(Rules{}).
+					Apply(registry.State{}, observations, later)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if len(state.Sessions) != 1 {
+					t.Fatalf("session count = %d, want 1", len(state.Sessions))
+				}
+
+				for _, session := range state.Sessions {
+					return session
+				}
+
+				t.Fatal("unreachable")
+
+				return registry.Session{}
+			}
+
+			for _, order := range []struct {
+				name         string
+				observations []registry.Observation
+			}{
+				{
+					name: "interrupted_then_terminal_idle",
+					observations: []registry.Observation{
+						nativeObs(base, "Stop", registry.ActivityInterrupted, nil),
+						terminalObs(later, registry.ActivityIdle, ""),
+					},
+				},
+				{
+					name: "terminal_idle_then_interrupted",
+					observations: []registry.Observation{
+						terminalObs(base, registry.ActivityIdle, ""),
+						nativeObs(later, "Stop", registry.ActivityInterrupted, nil),
+					},
+				},
+			} {
+				t.Run(order.name, func(t *testing.T) {
+					t.Parallel()
+
+					session := singleSession(t, order.observations)
+					if session.Activity() == nil ||
+						*session.Activity() != registry.ActivityInterrupted ||
+						session.Decision() == nil ||
+						session.Decision().Authority != registry.AuthorityHook {
+						t.Fatalf(
+							"activity = %v by %#v, want interrupted by hook",
+							session.Activity(),
+							session.Decision(),
+						)
+					}
+				})
+			}
+
+			if !def.DetailCapabilities.Native.UsageLimit {
+				return
+			}
+
+			for _, order := range []struct {
+				name         string
+				observations []registry.Observation
+			}{
+				{
+					name: "usage_limit_then_terminal_failed",
+					observations: []registry.Observation{
+						nativeObs(
+							base,
+							"StopFailure",
+							registry.ActivityFailed,
+							new(registry.ActivityDetailUsageLimit),
+						),
+						terminalObs(later, registry.ActivityFailed, registry.ActivityDetailGeneral),
+					},
+				},
+				{
+					name: "terminal_failed_then_usage_limit",
+					observations: []registry.Observation{
+						terminalObs(base, registry.ActivityFailed, registry.ActivityDetailGeneral),
+						nativeObs(
+							later,
+							"StopFailure",
+							registry.ActivityFailed,
+							new(registry.ActivityDetailUsageLimit),
+						),
+					},
+				},
+			} {
+				t.Run(order.name, func(t *testing.T) {
+					t.Parallel()
+
+					session := singleSession(t, order.observations)
+					if session.Activity() == nil ||
+						*session.Activity() != registry.ActivityFailed ||
+						session.Decision() == nil ||
+						session.Decision().Authority != registry.AuthorityTerminal {
+						t.Fatalf(
+							"activity = %v by %#v, want failed by terminal",
+							session.Activity(),
+							session.Decision(),
+						)
+					}
+
+					if session.Detail == nil ||
+						session.Detail.Value != registry.ActivityDetailUsageLimit ||
+						session.Detail.Authority != registry.AuthorityHook {
+						t.Fatalf(
+							"detail = %#v, want usage_limit by hook",
+							session.Detail,
+						)
+					}
+				})
+			}
+		})
+	}
+
+	if tested == 0 {
+		t.Fatal("expected at least one hook-authority adapter with ProgramStatusApp")
+	}
+
+	if testedUsageLimit == 0 {
+		t.Fatal("expected at least one ProgramStatusApp adapter with native UsageLimit support")
+	}
+}

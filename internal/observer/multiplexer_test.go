@@ -1068,3 +1068,167 @@ func TestObserverPreservesInterruptedHookAcrossRestingProgramStatus(t *testing.T
 			resumed.Activity(), resumed.Decision())
 	}
 }
+
+func TestObserverPreservesNativeUsageLimitAcrossTerminalError(t *testing.T) {
+	t.Parallel()
+
+	var (
+		harnessID  registry.Harness
+		programApp string
+		processCmd string
+		reporter   string
+	)
+
+	for _, adapter := range adapters.All() {
+		def := adapter.Definition()
+		if def.ProgramStatusApp != "" && def.DetailCapabilities.Native.UsageLimit &&
+			len(def.ProcessNames) > 0 {
+			harnessID = def.ID
+			programApp = def.ProgramStatusApp
+			processCmd = def.ProcessNames[0]
+			reporter = def.IntegrationSource
+
+			break
+		}
+	}
+
+	if harnessID == "" {
+		t.Fatal("expected an adapter with ProgramStatusApp and native UsageLimit support")
+	}
+
+	store := registry.NewJournal(filepath.Join(t.TempDir(), "sessions.json"), adapters.Rules{})
+	process := processinfo.Process{
+		PID:            42,
+		PPID:           40,
+		ProcessGroupID: 42,
+		StartIdentity:  "boot:42",
+		Executable:     "/usr/bin/" + processCmd,
+		CWD:            "/repo",
+		TTY:            "/dev/pts/7",
+		Foreground:     true,
+	}
+	pane := mux.Pane{
+		Location: registry.Location{
+			Kind:            registry.MultiplexerTmux,
+			ServerID:        "/tmp/tmux.sock",
+			SessionName:     "work",
+			PaneID:          "%7",
+			PaneCurrentPath: "/repo",
+			PanePID:         42,
+			PaneTTY:         "/dev/pts/7",
+		},
+		Processes: []mux.ProcessRef{
+			{PID: 42, ProcessGroupID: 42, Command: processCmd, CWD: "/repo"},
+		},
+		ProcessTTY: "/dev/pts/7",
+		Program: &mux.ProgramStatus{
+			App:   programApp,
+			State: mux.ProgramStateError,
+			Kind:  "",
+		},
+	}
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	observer := New(Options{
+		Store: store,
+		ProcessList: func(context.Context) ([]processinfo.Process, error) {
+			return []processinfo.Process{process}, nil
+		},
+		PaneList: func(context.Context) ([]mux.Pane, error) {
+			return []mux.Pane{pane}, nil
+		},
+		ScreenCapture: func(context.Context, mux.Pane) (mux.ScreenSnapshot, error) {
+			return mux.ScreenSnapshot{}, nil
+		},
+		CatalogList: func(context.Context) ([]CatalogEntry, error) { return nil, nil },
+		Now:         func() time.Time { return now },
+	})
+
+	failed, live := registry.ActivityFailed, registry.PresenceLive
+	usageLimit := registry.ActivityDetailUsageLimit
+
+	if _, err := store.Observe(t.Context(), registry.Observation{
+		Harness: harnessID,
+		At:      now,
+		Subject: registry.ObservationIdentity{SessionID: "usage-limit-pane"},
+		Evidence: &registry.Report{
+			Reporter: registry.Reporter{Integration: reporter},
+			Event:    "StopFailure",
+			Claim:    &live,
+			Activity: &failed,
+			Detail:   &usageLimit,
+			Process:  processIdentity(process),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(time.Second)
+
+	firstResult, err := observer.RunOnce(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if firstResult.Observations != 3 {
+		t.Fatalf(
+			"first cycle Observations = %d, want 3 (sighting, placement, terminal)",
+			firstResult.Observations,
+		)
+	}
+
+	sessions, err := store.List(t.Context(), registry.Filter{})
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, %v", sessions, err)
+	}
+
+	session := sessions[0]
+	if session.Activity() == nil || *session.Activity() != registry.ActivityFailed ||
+		session.Decision() == nil || session.Decision().Authority != registry.AuthorityTerminal {
+		t.Fatalf(
+			"activity = %v by %#v, want failed by terminal",
+			session.Activity(),
+			session.Decision(),
+		)
+	}
+
+	if session.Detail == nil || session.Detail.Value != registry.ActivityDetailUsageLimit ||
+		session.Detail.Authority != registry.AuthorityHook {
+		t.Fatalf("detail = %#v, want usage_limit by hook", session.Detail)
+	}
+
+	now = now.Add(time.Second)
+
+	secondResult, err := observer.RunOnce(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if secondResult.Observations != firstResult.Observations-1 {
+		t.Fatalf(
+			"second cycle Observations = %d, want %d (no redundant terminal reading)",
+			secondResult.Observations,
+			firstResult.Observations-1,
+		)
+	}
+
+	sessions, err = store.List(t.Context(), registry.Filter{})
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions after second cycle = %#v, %v", sessions, err)
+	}
+
+	second := sessions[0]
+	if second.Observations.Screen == nil ||
+		!second.Observations.Screen.ObservedAt.Equal(session.Observations.Screen.ObservedAt) {
+		t.Fatalf(
+			"unchanged error record was written again: first=%v second=%v",
+			session.Observations.Screen.ObservedAt,
+			second.Observations.Screen,
+		)
+	}
+
+	if second.Detail == nil || second.Detail.Value != registry.ActivityDetailUsageLimit ||
+		second.Detail.Authority != registry.AuthorityHook {
+		t.Fatalf("detail after second cycle = %#v, want usage_limit by hook", second.Detail)
+	}
+}

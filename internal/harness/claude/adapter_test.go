@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -456,5 +457,102 @@ func TestScreenManifestClassifiesStockModeFooters(t *testing.T) {
 				t.Fatalf("decision = %#v, want %s (%s)", decision, test.want, test.rule)
 			}
 		})
+	}
+}
+
+func TestNotificationDetailTypesAreSubscribed(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+
+	adapter := claude.New()
+
+	plan, err := adapter.InstallPlan("aht")
+	if err != nil {
+		t.Fatalf("InstallPlan: %v", err)
+	}
+
+	var moduleSource string
+
+	for _, action := range plan.Actions {
+		pluginAction, ok := action.(harness.PluginDirectoryAction)
+		if !ok {
+			continue
+		}
+
+		for _, file := range pluginAction.Plan.Files {
+			if strings.HasSuffix(file.Name, "/hooks/register.ts") {
+				moduleSource = file.Content
+			}
+		}
+	}
+
+	if moduleSource == "" {
+		t.Fatal("rendered plugin module missing from install plan")
+	}
+
+	var commands []struct {
+		Event   string   `json:"event"`
+		Matcher string   `json:"matcher"`
+		Args    []string `json:"args"`
+	}
+
+	for line := range strings.Lines(moduleSource) {
+		encoded, ok := strings.CutPrefix(strings.TrimSpace(line), "const commands: Command[] = ")
+		if !ok {
+			continue
+		}
+
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(encoded, ";")), &commands); err != nil {
+			t.Fatalf("decode commands: %v", err)
+		}
+
+		break
+	}
+
+	var matchers []*regexp.Regexp
+
+	for _, command := range commands {
+		if command.Event != "Notification" {
+			continue
+		}
+
+		pattern := command.Matcher
+		if pattern == "" {
+			pattern = ".*"
+		}
+
+		compiled, compileErr := regexp.Compile(pattern)
+		if compileErr != nil {
+			t.Fatalf("compile Notification matcher %q: %v", command.Matcher, compileErr)
+		}
+
+		matchers = append(matchers, compiled)
+	}
+
+	if len(matchers) == 0 {
+		t.Fatal("no Notification hook matchers registered in plugin")
+	}
+
+	detailTypes := []string{
+		"permission_prompt",
+		"elicitation_dialog",
+		"elicitation_url_dialog",
+	}
+
+	for _, kind := range detailTypes {
+		detail := adapter.ActivityDetail(
+			"Notification",
+			registry.ActivityWaiting,
+			map[string]string{"claude_notification_type": kind},
+		)
+		if detail == nil {
+			t.Fatalf("ActivityDetail(Notification, waiting, %q) = nil, want non-nil", kind)
+		}
+
+		matched := slices.ContainsFunc(matchers, func(matcher *regexp.Regexp) bool {
+			return matcher.MatchString(kind)
+		})
+		if !matched {
+			t.Errorf("Notification detail type %q is not matched by any registered hook", kind)
+		}
 	}
 }
