@@ -3,27 +3,32 @@ package pathmatch
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
-// Match reports whether a path matches an AHT ignore path, subtree, or glob.
+const doubleStar = "**"
+
+// Match reports whether path or one of its ancestor directories matches
+// pattern. Pattern segments are [filepath.Match] globs, "**" matches zero or
+// more segments, and a trailing "/*" also matches the directory itself.
 func Match(path string, pattern string) bool {
 	if pattern == "" || path == "" {
 		return false
 	}
 
-	cleanPath := filepath.Clean(path)
+	pathSegments := segments(path)
 
-	cleanPattern := filepath.Clean(pattern)
-	if cleanPath == cleanPattern {
-		return true
+	// reachable[j] holds whether the pattern consumed so far can end right
+	// before path segment j.
+	reachable := make([]bool, len(pathSegments)+1)
+	reachable[0] = true
+
+	for _, patternSegment := range trimTrailingStar(segments(pattern)) {
+		reachable = advance(reachable, patternSegment, pathSegments)
 	}
 
-	if matchGlobPattern(cleanPath, cleanPattern, pattern) {
-		return true
-	}
-
-	return matchPrefixOrWildcard(cleanPath, pattern)
+	return slices.Contains(reachable, true)
 }
 
 func MatchAny(patterns []string, paths ...string) bool {
@@ -38,34 +43,53 @@ func MatchAny(patterns []string, paths ...string) bool {
 	return false
 }
 
-func matchGlobPattern(cleanPath string, cleanPattern string, pattern string) bool {
-	if matched, err := filepath.Match(pattern, cleanPath); err == nil && matched {
-		return true
+func segments(path string) []string {
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if cleaned == "/" {
+		return []string{""}
 	}
 
-	if matched, err := filepath.Match(cleanPattern, cleanPath); err == nil && matched {
-		return true
-	}
-
-	return false
+	return strings.Split(cleaned, "/")
 }
 
-func matchPrefixOrWildcard(cleanPath string, pattern string) bool {
-	trimmed := strings.TrimSuffix(strings.TrimSuffix(pattern, "/*"), "/")
-	if cleanPath == trimmed || strings.HasPrefix(cleanPath, trimmed+string(filepath.Separator)) {
-		return true
+func trimTrailingStar(patternSegments []string) []string {
+	if last := len(patternSegments) - 1; last > 0 && patternSegments[last] == "*" {
+		return patternSegments[:last]
 	}
 
-	if strings.Contains(pattern, "**") {
-		sub := strings.Trim(strings.Trim(pattern, "*"), string(filepath.Separator))
-		if sub != "" &&
-			(strings.Contains(cleanPath, string(filepath.Separator)+sub+string(filepath.Separator)) ||
-				strings.HasSuffix(cleanPath, string(filepath.Separator)+sub) ||
-				strings.HasPrefix(cleanPath, sub+string(filepath.Separator)) ||
-				cleanPath == sub) {
-			return true
+	return patternSegments
+}
+
+func advance(reachable []bool, patternSegment string, pathSegments []string) []bool {
+	next := make([]bool, len(reachable))
+
+	for j, ok := range reachable {
+		switch {
+		case !ok:
+		case patternSegment == doubleStar:
+			for k := j; k < len(next) && !next[k]; k++ {
+				next[k] = true
+			}
+		case j < len(pathSegments) && matchSegment(patternSegment, pathSegments[j]):
+			next[j+1] = true
 		}
 	}
 
-	return false
+	return next
+}
+
+func matchSegment(pattern string, segment string) bool {
+	if pattern == segment {
+		return true
+	}
+
+	// The empty root segment of an absolute path must not let a relative
+	// pattern such as "*/foo" match "/foo".
+	if segment == "" {
+		return false
+	}
+
+	matched, err := filepath.Match(pattern, segment)
+
+	return err == nil && matched
 }
