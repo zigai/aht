@@ -335,6 +335,74 @@ func TestInstallShimRejectsManagedShimTarget(t *testing.T) {
 	}
 }
 
+func TestInstallShimWritesAbsoluteTargetForRelativePaths(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		path   string
+		target string
+		binary string
+	}{
+		{name: "current directory PATH entry", path: ".", binary: "opencode"},
+		{name: "relative PATH entry", path: "bin", binary: filepath.Join("bin", "opencode")},
+		{
+			name:   "relative target binary",
+			path:   "",
+			target: "./bin/opencode",
+			binary: filepath.Join("bin", "opencode"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(registry.StateDirEnv, t.TempDir())
+
+			workDir := t.TempDir()
+			t.Chdir(workDir)
+			t.Setenv("PATH", tc.path)
+
+			realPath := filepath.Join(workDir, tc.binary)
+			if err := os.MkdirAll(filepath.Dir(realPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := writeExecutableTestFile(realPath, []byte("#!/bin/sh\n")); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := Run(t.Context(), Options{
+				Harness:      registry.Harness("opencode"),
+				Binary:       defaultBinary,
+				TargetBinary: tc.target,
+				DryRun:       true,
+				UseShim:      true,
+			})
+			if err != nil {
+				t.Fatalf("Run returned error: %v", err)
+			}
+
+			want := "\nharness_bin=" + harness.ShellQuote(realPath) + "\n"
+			if !strings.Contains(result.Snippet, want) {
+				t.Fatalf("shim target is not %q, got snippet: %s", realPath, result.Snippet)
+			}
+		})
+	}
+}
+
+func TestInstallShimRejectsRelativeManagedShimTarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(registry.StateDirEnv, dir)
+	t.Chdir(dir)
+
+	_, err := Run(t.Context(), Options{
+		Harness:      registry.Harness("opencode"),
+		Binary:       defaultBinary,
+		TargetBinary: filepath.Join(".", "shims", "opencode"),
+		DryRun:       true,
+		UseShim:      true,
+	})
+	if !errors.Is(err, errRecursiveShimTarget) {
+		t.Fatalf("expected errRecursiveShimTarget, got %v", err)
+	}
+}
+
 func writeExecutableTestFile(path string, data []byte) error {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing executable test file: %w", err)

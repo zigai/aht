@@ -168,11 +168,16 @@ func resolveShimTarget(
 	shimPath string,
 ) (string, error) {
 	if target != "" {
-		if pathInDir(target, shimDir) || samePath(target, shimPath) {
-			return "", fmt.Errorf("%w: %s", errRecursiveShimTarget, target)
+		absolute, err := absolutePath(target)
+		if err != nil {
+			return "", err
 		}
 
-		return target, nil
+		if pathInDir(absolute, shimDir) || samePath(absolute, shimPath) {
+			return "", fmt.Errorf("%w: %s", errRecursiveShimTarget, absolute)
+		}
+
+		return absolute, nil
 	}
 
 	found, err := lookPathExcludingShimDir(harnessID, shimDir)
@@ -190,7 +195,7 @@ func resolveShimTarget(
 func lookPathExcludingShimDir(file string, shimDir string) (string, error) {
 	if strings.ContainsAny(file, `/\`) {
 		if isExecutable(file) {
-			return file, nil
+			return absolutePath(file)
 		}
 
 		return "", os.ErrNotExist
@@ -203,11 +208,20 @@ func lookPathExcludingShimDir(file string, shimDir string) (string, error) {
 
 		candidate := filepath.Join(dir, file)
 		if isExecutable(candidate) {
-			return candidate, nil
+			return absolutePath(candidate)
 		}
 	}
 
 	return "", os.ErrNotExist
+}
+
+func absolutePath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", path, err)
+	}
+
+	return absolute, nil
 }
 
 func isExecutable(path string) bool {
