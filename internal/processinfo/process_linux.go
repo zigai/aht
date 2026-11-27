@@ -3,6 +3,7 @@
 package processinfo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -354,20 +355,13 @@ func isLinuxTTY(path string) bool {
 }
 
 func splitLinuxArgs(data []byte) []string {
-	raw := strings.Split(string(data), "\x00")
-
-	args := make([]string, 0, len(raw))
-	for _, arg := range raw {
-		if arg != "" {
-			args = append(args, arg)
-		}
-	}
-
-	if len(args) == 0 {
+	// setproctitle pads the rewritten argv area with trailing NUL bytes.
+	trimmed := bytes.TrimRight(data, "\x00")
+	if len(trimmed) == 0 {
 		return nil
 	}
 
-	return args
+	return strings.Split(string(trimmed), "\x00")
 }
 
 func listLinuxProcessEntries(

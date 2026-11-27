@@ -50,6 +50,56 @@ func TestLinuxEnvironmentKeepsFirstRequestedValues(t *testing.T) {
 	}
 }
 
+func TestSplitLinuxArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data []byte
+		want []string
+	}{
+		{
+			name: "interior empty argument",
+			data: []byte("tool\x00--flag\x00\x00value\x00"),
+			want: []string{"tool", "--flag", "", "value"},
+		},
+		{
+			name: "consecutive interior empty arguments",
+			data: []byte("tool\x00\x00\x00value\x00"),
+			want: []string{"tool", "", "", "value"},
+		},
+		{
+			name: "leading empty argument",
+			data: []byte("\x00value\x00"),
+			want: []string{"", "value"},
+		},
+		{
+			name: "setproctitle padding",
+			data: []byte("ssh: mux\x00\x00\x00\x00"),
+			want: []string{"ssh: mux"},
+		},
+		{name: "nil buffer", data: nil, want: nil},
+		{name: "empty buffer", data: []byte{}, want: nil},
+		{name: "only NUL bytes", data: []byte("\x00\x00"), want: nil},
+		{
+			name: "missing trailing NUL",
+			data: []byte("tool\x00arg"),
+			want: []string{"tool", "arg"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := splitLinuxArgs(tt.data)
+			if !slices.Equal(got, tt.want) || (got == nil) != (tt.want == nil) {
+				t.Fatalf("splitLinuxArgs(%q) = %#v, want %#v", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReadLinuxProcessReadsEnvironmentOnlyWhenRequested(t *testing.T) {
 	t.Parallel()
 
