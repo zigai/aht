@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 var (
 	errBinaryNotFound = errors.New("binary not found")
 	errSessionBroken  = errors.New("session is broken")
+	errSocketTooLong  = errors.New("socket path exceeds the Zellij limit")
 )
 
 const (
@@ -261,6 +263,7 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	}, zellij.CaptureOptions{
 		SocketDir:      socketDir,
 		SessionInfoDir: t.TempDir(),
+		Now:            func() time.Time { return testNow },
 		Run: func(ctx context.Context, args ...string) (string, error) {
 			got = append([]string(nil), args...)
 
@@ -299,6 +302,193 @@ func TestCapturePaneTargetsNativePaneAndBoundsOutput(t *testing.T) {
 	wantText := strings.Join(lines[1:], "\n")
 	if snapshot.Text != wantText || snapshot.Title != "Codex" {
 		t.Fatalf("snapshot text = %q, want %q; title = %q", snapshot.Text, wantText, snapshot.Title)
+	}
+}
+
+func TestCapturePaneNeverConnectsToStartingSession(t *testing.T) {
+	t.Parallel()
+	socketDir := shortSocketDir(t)
+	starting := startSessionServer(t, socketDir, "boot", testNow.Add(-time.Second))
+
+	_, err := zellij.CapturePaneWithOptions(context.Background(), mux.Pane{
+		Location: registry.Location{
+			Kind:        registry.MultiplexerZellij,
+			SessionName: "boot",
+			PaneID:      "terminal_1",
+		},
+	}, zellij.CaptureOptions{
+		SocketDir:      socketDir,
+		SessionInfoDir: t.TempDir(),
+		Now:            func() time.Time { return testNow },
+		Run: func(context.Context, ...string) (string, error) {
+			t.Error("capture ran a zellij command against a starting session")
+
+			return "", nil
+		},
+	})
+	if !errors.Is(err, zellij.ErrSessionGone) {
+		t.Fatalf("err = %v, want %v", err, zellij.ErrSessionGone)
+	}
+
+	if probes := starting.probeCount(t); probes != 0 {
+		t.Fatalf("starting session received %d connections, want 0", probes)
+	}
+}
+
+// Zellij rejects socket paths that leave no room for sun_path's NUL byte.
+const maxZellijSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
+
+// longSessionName returns a session name whose socket path in socketDir has the
+// longest length Zellij accepts.
+func longSessionName(socketDir string) string {
+	return strings.Repeat("s", maxZellijSocketPath-len(filepath.Join(socketDir, contractDir))-1)
+}
+
+// connectingRunner wraps run so each command also connects to the targeted
+// session through its scoped socket path, as Zellij would.
+func connectingRunner(run zellij.CommandRunner) zellij.CommandRunner {
+	return func(ctx context.Context, args ...string) (string, error) {
+		path := filepath.Join(zellij.SocketDir(ctx), contractDir, args[1])
+		if len(path) > maxZellijSocketPath {
+			return "", fmt.Errorf("%w: %q has %d bytes", errSocketTooLong, path, len(path))
+		}
+
+		var dialer net.Dialer
+
+		conn, err := dialer.DialContext(ctx, "unix", path)
+		if err != nil {
+			return "", fmt.Errorf("connect to scoped session socket: %w", err)
+		}
+
+		if err := conn.Close(); err != nil {
+			return "", fmt.Errorf("close scoped session socket: %w", err)
+		}
+
+		return run(ctx, args...)
+	}
+}
+
+func TestSessionAtSocketPathLimitStaysReachable(t *testing.T) {
+	t.Parallel()
+	socketDir, infoDir := shortSocketDir(t), t.TempDir()
+	name := longSessionName(socketDir)
+	startSessionServer(t, socketDir, name, testNow.Add(-time.Hour))
+	starting := startSessionServer(t, socketDir, "boot", testNow.Add(-time.Second))
+
+	var calls []scopedCall
+
+	run := connectingRunner(scopedRunner(&calls, map[string]string{name: paneListJSON}, nil))
+
+	panes, err := zellij.ListPanesWithOptions(context.Background(), zellij.ListOptions{
+		Run:            run,
+		SocketDir:      socketDir,
+		SessionInfoDir: infoDir,
+		Now:            func() time.Time { return testNow },
+	})
+	if err != nil || len(panes) != 1 {
+		t.Fatalf("panes = %#v, %v", panes, err)
+	}
+
+	captureOpts := zellij.CaptureOptions{
+		Run:            run,
+		SocketDir:      socketDir,
+		SessionInfoDir: infoDir,
+		Now:            func() time.Time { return testNow },
+	}
+	if _, err := zellij.CapturePaneWithOptions(
+		context.Background(),
+		panes[0],
+		captureOpts,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("calls = %#v, want a list and a capture", calls)
+	}
+
+	for _, call := range calls {
+		if !reflect.DeepEqual(call.sessions, []string{name}) {
+			t.Fatalf("zellij command saw sessions %v, want only %q", call.sessions, name)
+		}
+	}
+
+	if probes := starting.probeCount(t); probes != 0 {
+		t.Fatalf("starting session received %d connections, want 0", probes)
+	}
+}
+
+// When no scope directory can hold the session socket within the path limit,
+// commands run in the shared socket directory only while no other session is
+// starting.
+func TestUnscopableSessionWaitsForStartingSessions(t *testing.T) {
+	tests := []struct {
+		name        string
+		siblingAge  time.Duration
+		wantErr     error
+		wantVisible bool
+	}{
+		{name: "established sibling", siblingAge: time.Hour, wantErr: nil, wantVisible: true},
+		{
+			name:        "starting sibling",
+			siblingAge:  time.Second,
+			wantErr:     zellij.ErrSessionStarting,
+			wantVisible: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := shortSocketDir(t)
+			infoDir := filepath.Join(root, "info")
+
+			// A one-byte directory name leaves its parent too little room
+			// for a scope, and TMPDIR points at the socket directory itself.
+			socketDir := filepath.Join(root, "s")
+			if err := os.Mkdir(socketDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			t.Setenv("TMPDIR", socketDir)
+
+			name := longSessionName(socketDir)
+			startSessionServer(t, socketDir, name, testNow.Add(-time.Hour))
+			sibling := startSessionServer(t, socketDir, "boot", testNow.Add(-test.siblingAge))
+
+			var calls []scopedCall
+
+			_, err := zellij.CapturePaneWithOptions(context.Background(), mux.Pane{
+				Location: registry.Location{
+					Kind:        registry.MultiplexerZellij,
+					SessionName: name,
+					PaneID:      "terminal_1",
+				},
+			}, zellij.CaptureOptions{
+				Run:            connectingRunner(scopedRunner(&calls, nil, nil)),
+				SocketDir:      socketDir,
+				SessionInfoDir: infoDir,
+				Now:            func() time.Time { return testNow },
+			})
+			if !errors.Is(err, test.wantErr) || (test.wantErr == nil) != (err == nil) {
+				t.Fatalf("err = %v, want %v", err, test.wantErr)
+			}
+
+			if !test.wantVisible {
+				if len(calls) != 0 {
+					t.Fatalf("calls = %#v, want none", calls)
+				}
+
+				if probes := sibling.probeCount(t); probes != 0 {
+					t.Fatalf("starting session received %d connections, want 0", probes)
+				}
+
+				return
+			}
+
+			want := []string{"boot", name}
+			if len(calls) != 1 || !reflect.DeepEqual(calls[0].sessions, want) {
+				t.Fatalf("calls = %#v, want one command seeing %v", calls, want)
+			}
+		})
 	}
 }
 
@@ -374,7 +564,12 @@ func TestSessionsNamedByIDReportAndCaptureTheirName(t *testing.T) {
 	if _, err := zellij.CapturePaneWithOptions(
 		context.Background(),
 		panes[0],
-		zellij.CaptureOptions{Run: run, SocketDir: socketDir, SessionInfoDir: infoDir},
+		zellij.CaptureOptions{
+			Run:            run,
+			SocketDir:      socketDir,
+			SessionInfoDir: infoDir,
+			Now:            func() time.Time { return testNow },
+		},
 	); err != nil {
 		t.Fatal(err)
 	}

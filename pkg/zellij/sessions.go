@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,10 +29,21 @@ const (
 	// roughly 20ms, and about 120ms with the CPUs oversubscribed threefold.
 	startupGrace = 10 * time.Second
 
-	scopePrefix = "a"
+	scopePrefix   = "a"
+	scopeNameBase = 36
+
+	// maxUnixSocketPath is the longest socket path Zellij accepts: sun_path
+	// less the terminating NUL byte.
+	//
+	//nolint:exhaustruct_v5 // reads only the array length
+	maxUnixSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
 )
 
-var errSessionGone = errors.New("zellij session is gone")
+var (
+	errSessionGone     = errors.New("zellij session is gone")
+	errSessionStarting = errors.New("zellij session is starting")
+	errScopeTooLong    = errors.New("zellij session scope exceeds the socket path limit")
+)
 
 type sessionSocket struct {
 	name    string
@@ -146,20 +158,24 @@ func sessionName(sessionInfoDir string, id string) string {
 	return name
 }
 
-// sessionSocketID returns the socket name of the session called name.
-func sessionSocketID(socketDir string, sessionInfoDir string, name string) (string, error) {
+// findSessionSocket returns the socket of the session called name.
+func findSessionSocket(
+	socketDir string,
+	sessionInfoDir string,
+	name string,
+) (sessionSocket, error) {
 	sockets, err := listSessionSockets(socketDir)
 	if err != nil {
-		return "", err
+		return sessionSocket{}, err
 	}
 
 	for _, socket := range sockets {
 		if socket.name == name || sessionName(sessionInfoDir, socket.name) == name {
-			return socket.name, nil
+			return socket, nil
 		}
 	}
 
-	return "", fmt.Errorf("%w: %q", errSessionGone, name)
+	return sessionSocket{}, fmt.Errorf("%w: %q", errSessionGone, name)
 }
 
 // ready reports whether the session server has finished initializing.
@@ -201,40 +217,144 @@ func (s sessionSocket) alive(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// runInSession runs run with a socket directory that holds only the given
-// session's socket. Every Zellij command, including list-sessions and
+// runInSession runs a zellij command with a socket directory that holds only
+// the given session's socket. Every Zellij command, including list-sessions and
 // --session <name> action, connects to every socket in its socket directory,
 // so a shared directory would expose sessions that are still starting.
-func runInSession(
+func (opts ListOptions) runInSession(
 	ctx context.Context,
-	run CommandRunner,
-	socketDir string,
 	session string,
 	args ...string,
 ) (string, error) {
-	scope, err := os.MkdirTemp(socketDir, scopePrefix)
+	scope, err := opts.scopeSession(session)
 	if err != nil {
-		return "", fmt.Errorf("create zellij session scope: %w", err)
+		return "", err
 	}
+
+	if scope == "" {
+		return opts.Run(context.WithValue(ctx, socketDirKey{}, opts.SocketDir), args...)
+	}
+
 	defer os.RemoveAll( //nolint:errcheck // the scope holds only a hard link and an empty directory
 		scope,
 	)
 
-	scoped := filepath.Join(scope, contractDir)
-	if err := os.Mkdir(scoped, 0o700); err != nil {
-		return "", fmt.Errorf("create zellij session scope: %w", err)
+	return opts.Run(context.WithValue(ctx, socketDirKey{}, scope), args...)
+}
+
+// scopeSession links the session socket into a new scope directory and
+// returns it. The linked socket path must stay within maxUnixSocketPath, and
+// the hard link within the socket's file system, so the scope goes in the
+// socket directory, its parent, or the temporary directory, whichever fits
+// first. When none fits, it returns "" so the command runs in the shared
+// socket directory, which it allows only while no other session is starting.
+func (opts ListOptions) scopeSession(session string) (string, error) {
+	source := filepath.Join(opts.SocketDir, contractDir, session)
+
+	var scopeErrors []error
+
+	for _, parent := range scopeParents(opts.SocketDir) {
+		scope, err := linkScope(parent, source, session)
+		if err == nil {
+			return scope, nil
+		}
+
+		if errors.Is(err, errSessionGone) {
+			return "", err
+		}
+
+		scopeErrors = append(scopeErrors, err)
 	}
 
-	if err := os.Link(
-		filepath.Join(socketDir, contractDir, session),
-		filepath.Join(scoped, session),
-	); err != nil {
+	if _, err := os.Lstat(source); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("%w: %q", errSessionGone, session)
 		}
 
-		return "", fmt.Errorf("link zellij session %q socket: %w", session, err)
+		return "", fmt.Errorf("stat zellij session %q socket: %w", session, err)
 	}
 
-	return run(context.WithValue(ctx, socketDirKey{}, scope), args...)
+	if err := opts.othersReady(session); err != nil {
+		return "", fmt.Errorf(
+			"scope zellij session %q: %w",
+			session,
+			errors.Join(append(scopeErrors, err)...),
+		)
+	}
+
+	return "", nil
+}
+
+func scopeParents(socketDir string) []string {
+	var parents []string
+
+	for _, dir := range []string{socketDir, filepath.Dir(socketDir), os.TempDir()} {
+		dir = filepath.Clean(dir)
+		if !slices.Contains(parents, dir) {
+			parents = append(parents, dir)
+		}
+	}
+
+	return parents
+}
+
+// linkScope creates the shortest free scope directory in parent, so the linked
+// socket path fits whenever any scope in parent can.
+func linkScope(parent string, source string, session string) (string, error) {
+	for index := 0; ; index++ {
+		scope := filepath.Join(parent, scopePrefix+strconv.FormatInt(int64(index), scopeNameBase))
+		if len(filepath.Join(scope, contractDir, session)) > maxUnixSocketPath {
+			return "", fmt.Errorf("%w: %q", errScopeTooLong, parent)
+		}
+
+		err := os.Mkdir(scope, 0o700)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+
+		if err != nil {
+			return "", fmt.Errorf("create zellij session scope: %w", err)
+		}
+
+		if err := linkSocket(scope, source, session); err != nil {
+			_ = os.RemoveAll(scope)
+
+			return "", err
+		}
+
+		return scope, nil
+	}
+}
+
+func linkSocket(scope string, source string, session string) error {
+	scoped := filepath.Join(scope, contractDir)
+	if err := os.Mkdir(scoped, 0o700); err != nil {
+		return fmt.Errorf("create zellij session scope: %w", err)
+	}
+
+	if err := os.Link(source, filepath.Join(scoped, session)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %q", errSessionGone, session)
+		}
+
+		return fmt.Errorf("link zellij session %q socket: %w", session, err)
+	}
+
+	return nil
+}
+
+func (opts ListOptions) othersReady(session string) error {
+	sockets, err := listSessionSockets(opts.SocketDir)
+	if err != nil {
+		return err
+	}
+
+	now := opts.Now()
+	for _, socket := range sockets {
+		if socket.name != session && !socket.ready(opts.SessionInfoDir, now) {
+			return fmt.Errorf("%w: %q", errSessionStarting, socket.name)
+		}
+	}
+
+	return nil
 }

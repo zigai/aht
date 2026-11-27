@@ -40,10 +40,13 @@ type ListOptions struct {
 	Now            func() time.Time
 }
 
+// CaptureOptions configures [CapturePaneWithOptions]. Empty fields resolve
+// like the matching [ListOptions] fields.
 type CaptureOptions struct {
 	Run            CommandRunner
 	SocketDir      string
 	SessionInfoDir string
+	Now            func() time.Time
 }
 
 type paneRecord struct {
@@ -157,10 +160,8 @@ func ListPanesWithOptions(ctx context.Context, opts ListOptions) ([]mux.Pane, er
 			continue
 		}
 
-		output, listErr := runInSession(
+		output, listErr := opts.runInSession(
 			ctx,
-			opts.Run,
-			opts.SocketDir,
 			socket.name,
 			"--session",
 			socket.name,
@@ -202,7 +203,7 @@ func CapturePane(ctx context.Context, pane mux.Pane) (mux.ScreenSnapshot, error)
 	return CapturePaneWithOptions(
 		ctx,
 		pane,
-		CaptureOptions{Run: nil, SocketDir: "", SessionInfoDir: ""},
+		CaptureOptions{Run: nil, SocketDir: "", SessionInfoDir: "", Now: nil},
 	)
 }
 
@@ -221,33 +222,39 @@ func CapturePaneWithOptions(
 		run = runZellij
 	}
 
-	socketDir := opts.SocketDir
-	if socketDir == "" {
-		socketDir = defaultSocketDir()
-	}
-
-	sessionInfoDir := opts.SessionInfoDir
-	if sessionInfoDir == "" {
-		dir, err := defaultSessionInfoDir()
-		if err != nil {
-			return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
-		}
-
-		sessionInfoDir = dir
-	}
-
-	id, err := sessionSocketID(socketDir, sessionInfoDir, pane.Location.SessionName)
+	resolved, err := ListOptions{
+		Run:            run,
+		LookPath:       nil,
+		SocketDir:      opts.SocketDir,
+		SessionInfoDir: opts.SessionInfoDir,
+		Now:            opts.Now,
+	}.withDefaults()
 	if err != nil {
 		return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
 	}
 
-	text, err := runInSession(
+	socket, err := findSessionSocket(
+		resolved.SocketDir,
+		resolved.SessionInfoDir,
+		pane.Location.SessionName,
+	)
+	if err != nil {
+		return mux.ScreenSnapshot{}, fmt.Errorf("capture zellij pane: %w", err)
+	}
+
+	if !socket.ready(resolved.SessionInfoDir, resolved.Now()) {
+		return mux.ScreenSnapshot{}, fmt.Errorf(
+			"capture zellij pane: %w: %q",
+			errSessionGone,
+			pane.Location.SessionName,
+		)
+	}
+
+	text, err := resolved.runInSession(
 		ctx,
-		run,
-		socketDir,
-		id,
+		socket.name,
 		"--session",
-		id,
+		socket.name,
 		"action",
 		"dump-screen",
 		"--pane-id",
