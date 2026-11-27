@@ -209,12 +209,16 @@ func CapturePaneWithOptions(
 	return mux.ScreenSnapshot{Text: output, Title: pane.Title}, nil
 }
 
-func (n herdrNamedItem) Key() string {
-	return cmp.Or(n.WsID, n.TabID, n.ID)
-}
-
 func (n herdrNamedItem) DisplayName() string {
 	return cmp.Or(n.Label, n.Name, n.Title)
+}
+
+func (n herdrNamedItem) workspaceKey() string {
+	return cmp.Or(n.WsID, n.ID)
+}
+
+func (n herdrNamedItem) tabKey() string {
+	return cmp.Or(n.TabID, n.ID)
 }
 
 func listSessionPanes(
@@ -362,11 +366,11 @@ func parseListSessions(output string) ([]herdrSessionItem, bool) {
 	return sessions, true
 }
 
-func snapshotNames(items []herdrNamedItem) map[string]string {
+func snapshotNames(items []herdrNamedItem, key func(herdrNamedItem) string) map[string]string {
 	names := make(map[string]string, len(items))
 	for _, item := range items {
-		if key := item.Key(); key != "" {
-			names[key] = item.DisplayName()
+		if id := key(item); id != "" {
+			names[id] = item.DisplayName()
 		}
 	}
 
@@ -395,8 +399,8 @@ func parseSnapshot(session herdrSessionItem, output string) ([]mux.Pane, error) 
 		}
 	}
 
-	workspaceNames := snapshotNames(data.Workspaces)
-	tabNames := snapshotNames(data.Tabs)
+	workspaceNames := snapshotNames(data.Workspaces, herdrNamedItem.workspaceKey)
+	tabNames := snapshotNames(data.Tabs, herdrNamedItem.tabKey)
 
 	panes := make([]mux.Pane, 0, len(data.Panes))
 	for _, item := range data.Panes {

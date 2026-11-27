@@ -63,7 +63,7 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 			return `{"sessions":[{"name":"work","socket_path":"/tmp/herdr.sock"}]}`, nil
 		case "api snapshot":
 			return `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1",` +
-				`"label":"repo"}],"tabs":[{"tab_id":"w1:t1",` +
+				`"label":"repo"}],"tabs":[{"tab_id":"w1:t1","workspace_id":"w1",` +
 				`"label":"agents"}],"panes":[{"pane_id":"w1:p1",` +
 				`"workspace_id":"w1","tab_id":"w1:t1","foreground_cwd":"/` +
 				`repo","terminal_title_stripped":"Codex"}],` +
@@ -122,6 +122,54 @@ func TestListPanesUsesSnapshotProcessInfoAndSemanticState(t *testing.T) {
 		calls[1].env["HERDR_SOCKET_PATH"] != "/tmp/herdr.sock" ||
 		calls[2].env["HERDR_SOCKET_PATH"] != "/tmp/herdr.sock" {
 		t.Fatalf("calls = %#v", calls)
+	}
+}
+
+func TestListPanesNamesTabsSharingAWorkspace(t *testing.T) {
+	t.Parallel()
+
+	run := func(_ context.Context, _ map[string]string, args ...string) (string, error) {
+		command := strings.Join(args, " ")
+		switch {
+		case command == "session list --json":
+			return `{"sessions":[{"name":"work","socket_path":"/tmp/herdr.sock"}]}`, nil
+		case command == "api snapshot":
+			return `{"result":{"snapshot":{` +
+				`"workspaces":[{"workspace_id":"w1","label":"repo"},{"id":"w2","name":"docs"}],` +
+				`"tabs":[` +
+				`{"tab_id":"w1:t1","workspace_id":"w1","label":"agents"},` +
+				`{"tab_id":"w1:t2","workspace_id":"w1","name":"logs"},` +
+				`{"id":"w2:t1","workspace_id":"w2","title":"notes"}],` +
+				`"panes":[` +
+				`{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1"},` +
+				`{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t2"},` +
+				`{"pane_id":"w2:p1","workspace_id":"w2","tab_id":"w2:t1"}]}}}`, nil
+		case strings.HasPrefix(command, "pane process-info --pane "):
+			return `{"result":{"process_info":{"shell_pid":40}}}`, nil
+		default:
+			return "", errUnexpectedCommand
+		}
+	}
+
+	panes, err := herdr.ListPanesWithOptions(context.Background(), herdr.ListOptions{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type names struct{ workspace, tab string }
+
+	got := make(map[string]names, len(panes))
+	for _, pane := range panes {
+		got[pane.Location.PaneID] = names{pane.Location.WorkspaceName, pane.Location.TabName}
+	}
+
+	want := map[string]names{
+		"w1:p1": {"repo", "agents"},
+		"w1:p2": {"repo", "logs"},
+		"w2:p1": {"docs", "notes"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pane names = %#v, want %#v", got, want)
 	}
 }
 
