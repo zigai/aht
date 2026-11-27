@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"cmp"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,16 +13,19 @@ const artifactCaptureGroups = 2
 
 var (
 	artifactVersionPattern = regexp.MustCompile(
-		`(?i)(?:aht[_-]?integration[_-]?version\s*[=:]|--reporter-version)\s*["']?([0-9]+)`,
-	)
-	artifactSourcePattern = regexp.MustCompile(
-		`(?i)(?:aht[_-]?integration\s*[=:]|--reporter\s)`,
+		`(?i)AHT_INTEGRATION_VERSION\s*=\s*["']?([0-9]+)`,
 	)
 	artifactIDPattern = regexp.MustCompile(
 		`(?i)AHT_INTEGRATION_ID\s*=\s*["']?([a-z0-9_-]+)`,
 	)
 	artifactSourceNamePattern = regexp.MustCompile(
 		`(?i)AHT_SOURCE\s*=\s*["']?([a-z0-9_-]+)`,
+	)
+	// Report commands carry --reporter-version before --reporter, and legacy
+	// commands carry aht_integration_version before aht_integration.
+	reporterMetadataPattern = regexp.MustCompile(
+		`(?i)(?:(--reporter-version|--reporter)(?:=|\s+)|` +
+			`(aht[_-]?integration[_-]?version|aht[_-]?integration)\s*[=:]\s*)["']?([a-z0-9_.-]+)`,
 	)
 )
 
@@ -58,11 +62,12 @@ func (identity ArtifactIdentity) Marker(prefix string) string {
 	return builder.String()
 }
 
-// ParseArtifactIdentity reads the identity recorded in generated content. It
-// reports false when the content carries neither the managed marker nor
-// reporter metadata.
+// ParseArtifactIdentity reads the identity recorded in content that carries
+// ManagedMarker. Without marker lines for the version or source, it uses the
+// first report command in the content. It reports false when the content lacks
+// ManagedMarker.
 func ParseArtifactIdentity(content string) (ArtifactIdentity, bool) {
-	if !strings.Contains(content, ManagedMarker) && !artifactSourcePattern.MatchString(content) {
+	if !strings.Contains(content, ManagedMarker) {
 		return ArtifactIdentity{}, false
 	}
 
@@ -74,9 +79,7 @@ func ParseArtifactIdentity(content string) (ArtifactIdentity, bool) {
 	if match := artifactVersionPattern.FindStringSubmatch(content); len(
 		match,
 	) == artifactCaptureGroups {
-		if version, err := strconv.Atoi(match[1]); err == nil {
-			identity.Version = version
-		}
+		identity.Version = artifactVersion(match[1])
 	}
 
 	if match := artifactSourceNamePattern.FindStringSubmatch(content); len(
@@ -85,5 +88,46 @@ func ParseArtifactIdentity(content string) (ArtifactIdentity, bool) {
 		identity.Source = match[1]
 	}
 
+	if reporters := ParseReporterIdentities(content); len(reporters) > 0 {
+		identity.Version = cmp.Or(identity.Version, reporters[0].Version)
+		identity.Source = cmp.Or(identity.Source, reporters[0].Source)
+	}
+
 	return identity, true
+}
+
+// ParseReporterIdentities returns the source and version of each report
+// command in content that names its reporter, in order. Version is zero for a
+// command without a reporter version.
+func ParseReporterIdentities(content string) []ArtifactIdentity {
+	var (
+		reporters []ArtifactIdentity
+		version   int
+	)
+
+	for _, match := range reporterMetadataPattern.FindAllStringSubmatch(content, -1) {
+		key := strings.ToLower(match[1] + match[2])
+		if strings.HasSuffix(key, "version") {
+			version = artifactVersion(match[3])
+			continue
+		}
+
+		reporters = append(reporters, ArtifactIdentity{
+			ID:      "",
+			Version: version,
+			Source:  strings.ToLower(match[3]),
+		})
+		version = 0
+	}
+
+	return reporters
+}
+
+func artifactVersion(value string) int {
+	version, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+
+	return version
 }

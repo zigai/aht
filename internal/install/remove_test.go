@@ -613,3 +613,36 @@ func TestInspectDetectsAndInstallRepairsMissingPluginImport(t *testing.T) {
 		t.Fatalf("repaired import status = %+v, %v", status, err)
 	}
 }
+
+func TestRemoveRefusesUnmarkedFileWithReporterFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+	t.Setenv(registry.StateDirEnv, t.TempDir())
+
+	path := filepath.Join(dir, "extensions", piExtensionName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "#!/bin/sh\nexec aht report session-start --reporter mine\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := Inspect(t.Context(), registry.Harness("pi"), testInstallBinary)
+	if err != nil || status.Status != ArtifactForeign {
+		t.Fatalf("unmarked reporter file status = %+v, %v", status, err)
+	}
+
+	if _, err := Remove(
+		t.Context(),
+		Options{Harness: registry.Harness("pi"), Binary: testInstallBinary},
+	); !errors.Is(err, errForeignFile) {
+		t.Fatalf("removal error = %v, want errForeignFile", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != content {
+		t.Fatalf("user file changed: %q, %v", data, err)
+	}
+}

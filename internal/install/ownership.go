@@ -23,11 +23,11 @@ const (
 type ArtifactStatus string
 
 // classifyArtifact inspects an artifact generated for harnessID without
-// modifying it. A directory is classified by its marker file. Content that
-// records another integration is foreign.
+// modifying it. A directory is classified by its marker file. Content without
+// the managed marker, or that records another integration, is foreign.
 func classifyArtifact(path string, harnessID registry.Harness) (ArtifactStatus, error) {
 	return classifyArtifactWith(path, func(content string) ArtifactStatus {
-		return classifyArtifactContent(content, harnessID)
+		return classifyOwnedArtifactContent(content, harnessID)
 	})
 }
 
@@ -74,20 +74,69 @@ func classifyExpectedIdentity(content string, expected harness.ArtifactIdentity)
 	return ArtifactCurrent
 }
 
-func classifyArtifactContent(content string, harnessID registry.Harness) ArtifactStatus {
-	identity, managed := harness.ParseArtifactIdentity(content)
-	if !managed {
+func classifyOwnedArtifactContent(content string, harnessID registry.Harness) ArtifactStatus {
+	adapter, ok := adapters.Find(harnessID)
+	if !ok {
 		return ArtifactForeign
 	}
 
-	if identity.ID != "" {
-		owner, err := adapters.Parse(identity.ID)
-		if err != nil || owner != harnessID {
-			return ArtifactForeign
+	identity, managed := harness.ParseArtifactIdentity(content)
+	if !managed || !ownedBy(identity, adapter.Definition()) {
+		return ArtifactForeign
+	}
+
+	return versionStatus(identity.Version, adapter.Definition())
+}
+
+// classifyArtifactContent classifies a shared config file, which identifies
+// generated hooks by the managed marker or, when it cannot hold the marker, by
+// their reporter source. Every generated hook for harnessID must be current.
+func classifyArtifactContent(content string, harnessID registry.Harness) ArtifactStatus {
+	adapter, ok := adapters.Find(harnessID)
+	if !ok {
+		return ArtifactForeign
+	}
+
+	definition := adapter.Definition()
+
+	var versions []int
+	if identity, managed := harness.ParseArtifactIdentity(content); managed &&
+		ownedBy(identity, definition) {
+		versions = append(versions, identity.Version)
+	}
+
+	for _, reporter := range harness.ParseReporterIdentities(content) {
+		if reporter.Source == definition.IntegrationSource {
+			versions = append(versions, reporter.Version)
 		}
 	}
 
-	if identity.Version != adapters.IntegrationVersionFor(harnessID) {
+	if len(versions) == 0 {
+		return ArtifactForeign
+	}
+
+	for _, version := range versions {
+		if versionStatus(version, definition) == ArtifactStale {
+			return ArtifactStale
+		}
+	}
+
+	return ArtifactCurrent
+}
+
+func ownedBy(identity harness.ArtifactIdentity, definition harness.Definition) bool {
+	if identity.ID != "" {
+		owner, err := adapters.Parse(identity.ID)
+		if err != nil || owner != definition.ID {
+			return false
+		}
+	}
+
+	return identity.Source == "" || identity.Source == definition.IntegrationSource
+}
+
+func versionStatus(version int, definition harness.Definition) ArtifactStatus {
+	if version != definition.IntegrationVersion {
 		return ArtifactStale
 	}
 
